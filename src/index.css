@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400..700;1,400..700&family=Merriweather:ital,wght@0,300..900;1,300..900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --text-xs: var(--fs-body-small, 12px);
+  --text-sm: var(--fs-body, 14px);
+  --text-base: var(--fs-body, 16px);
+  --text-lg: var(--fs-subtitle, 18px);
+  --text-xl: var(--fs-subtitle, 20px);
+  --text-2xl: var(--fs-title, 24px);
+  --text-3xl: var(--fs-title, 30px);
+}
+
+.form-input-styled {
+  background-color: #f8fafc; /* bg-slate-50 */
+  color: #0f172a; /* text-slate-900 */
+  border: 1px solid #e2e8f0; /* border-slate-200 */
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem; /* text-xs */
+  outline: none;
+  transition: all 0.2s;
+}
+
+.dark .form-input-styled {
+  background-color: #1e293b; /* bg-slate-800 */
+  color: #ffffff !important; /* text-white */
+  border-color: #334155; /* border-slate-700 */
+}
+
+.form-input-styled:focus {
+  border-color: #6366f1; /* border-indigo-500 */
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+/* Ensure calendar icons and interactive details are white in dark mode */
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+.dark input[type="time"]::-webkit-calendar-picker-indicator,
+.dark input::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(100%) contrast(100%) !important;
+}
+
+.dark input {
+  color-scheme: dark !important;
+}

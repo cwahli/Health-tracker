@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Connection test document
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // User profile and subcollections
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /foodLogs/{foodLogId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /biomarkerHistory/{historyId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /actions/{actionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /dailyBenefits/{benefitId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /metadata/{metadataId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /reports/{reportId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+  }
+}

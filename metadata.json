@@ -1,0 +1,6 @@
+{
+  "name": "Biomarker and Nutrient Tracker",
+  "description": "An Android Material-styled application for tracking health biomarkers, food nutrients, and receiving personalized health recommendations based on LLM analysis.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
