@@ -48,6 +48,20 @@ function MapUpdater({ center, zoom }: { center: [number, number], zoom: number }
   return null;
 }
 
+// Helper function to calculate distance using Haversine formula
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): string {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * 
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c; // Distance in km
+  return distance.toFixed(1);
+}
+
 export function InteractivePlacesMap({ 
   ideas, 
   title, 
@@ -142,17 +156,29 @@ export function InteractivePlacesMap({
     ? [activePlace.lat, activePlace.lng] 
     : defaultCenter;
 
+  const hasMapLocations = ideas.some(idea => idea.lat && idea.lng);
+
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-xl w-full max-w-full min-w-0 flex flex-col z-10">
       {/* Header */}
-      <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center gap-2">
-        <Compass className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-        <h4 className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight font-display">
-          What to Eat Near You — {neighborhood}
-        </h4>
-      </div>
+      {hasMapLocations ? (
+        <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center gap-2">
+          <Compass className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+          <h4 className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight font-display">
+            What to Eat Near You — {neighborhood}
+          </h4>
+        </div>
+      ) : (
+        <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center gap-2">
+          <Compass className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+          <h4 className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight font-display">
+            Healthy Meal Ideas
+          </h4>
+        </div>
+      )}
 
       {/* Map Sandbox Container */}
+      {hasMapLocations && (
       <div className="relative h-[300px] w-full bg-slate-100 dark:bg-slate-950 overflow-hidden group">
         <MapContainer center={activeCenter} zoom={14} style={{ height: '100%', width: '100%', zIndex: 1 }}>
           <TileLayer
@@ -171,7 +197,7 @@ export function InteractivePlacesMap({
             if (idea.lat && idea.lng) {
               return (
                 <Marker 
-                  key={idea.id} 
+                  key={idx} 
                   position={[idea.lat, idea.lng]} 
                   icon={idx === activeIndex ? activeIcon : defaultIcon}
                   eventHandlers={{
@@ -200,7 +226,7 @@ export function InteractivePlacesMap({
                 <span className="font-bold text-xs truncate block text-white tracking-tight">
                   {activePlace.placeName || "Healthy Venue"}
                 </span>
-                {activePlace.locationLink && (
+                {activePlace.locationLink ? (
                   <a 
                     href={activePlace.locationLink} 
                     target="_blank" 
@@ -209,6 +235,27 @@ export function InteractivePlacesMap({
                     title="Open in Google Maps"
                   >
                     <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : (activePlace.lat && activePlace.lng) && (
+                  <a 
+                    href={`https://www.google.com/maps/search/?api=1&query=${activePlace.lat},${activePlace.lng}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-white/60 hover:text-white flex-shrink-0"
+                    title="Open in Google Maps"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {activePlace.menuLink && (
+                  <a 
+                    href={activePlace.menuLink} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="ml-1.5 text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-2 py-0.5 rounded transition-colors flex items-center gap-0.5"
+                    title="Visit Information / Menu Link"
+                  >
+                    Info
                   </a>
                 )}
               </div>
@@ -224,6 +271,17 @@ export function InteractivePlacesMap({
                   <>
                     <span className="text-slate-400">•</span>
                     <span className="text-emerald-400 truncate max-w-[80px]">{activePlace.openingHours}</span>
+                  </>
+                )}
+                {(userLocation && activePlace.lat && activePlace.lng) ? (
+                  <>
+                    <span className="text-slate-400">•</span>
+                    <span className="text-slate-300">{calculateDistance(userLocation[0], userLocation[1], activePlace.lat, activePlace.lng)} km</span>
+                  </>
+                ) : activePlace.distanceKm !== undefined && (
+                  <>
+                    <span className="text-slate-400">•</span>
+                    <span className="text-slate-300">{activePlace.distanceKm} km</span>
                   </>
                 )}
               </div>
@@ -252,6 +310,7 @@ export function InteractivePlacesMap({
           </div>
         </div>
       </div>
+      )}
 
       {/* Structured Food Suggestions and Selection controls */}
       <div className="p-4 space-y-4">
@@ -285,13 +344,26 @@ export function InteractivePlacesMap({
                           onClick={() => setActiveIndex(idx)}
                           className="font-bold text-xs text-slate-800 dark:text-slate-200 text-left hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer"
                         >
-                          {idea.name} <span className="text-[10px] font-normal text-slate-400">@ {idea.placeName}</span>
+                          {idea.name} {idea.placeName && <span className="text-[10px] font-normal text-slate-400">@ {idea.placeName}</span>}
                         </button>
-                        {idea.estimatedBudget && (
-                          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap bg-emerald-50 dark:bg-emerald-950/30 px-1.5 py-0.5 rounded">
-                            {idea.estimatedBudget}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {idea.menuLink && (
+                            <a 
+                              href={idea.menuLink} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-[10px] bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-2 py-0.5 rounded text-indigo-600 dark:text-indigo-400 font-bold transition-colors truncate max-w-[80px]"
+                              title="More Information"
+                            >
+                              Info
+                            </a>
+                          )}
+                          {idea.estimatedBudget && (
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded flex-shrink-0">
+                              {idea.estimatedBudget}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
                         {idea.benefitExplanation}
@@ -303,7 +375,11 @@ export function InteractivePlacesMap({
                             <Clock className="w-3 h-3" /> {idea.openingHours}
                           </span>
                         )}
-                        {idea.distanceKm !== undefined && (
+                        {(userLocation && idea.lat && idea.lng) ? (
+                          <span className="bg-slate-200/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded text-[9px] font-semibold border border-slate-300/30">
+                            {calculateDistance(userLocation[0], userLocation[1], idea.lat, idea.lng)} km away
+                          </span>
+                        ) : idea.distanceKm !== undefined && (
                           <span className="bg-slate-200/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded text-[9px] font-semibold border border-slate-300/30">
                             {idea.distanceKm} km away
                           </span>

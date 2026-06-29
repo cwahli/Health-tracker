@@ -117,12 +117,22 @@ export default function LogChat({
 
   const [loggedMessageIds, setLoggedMessageIds] = useState<string[]>([]);
   const [showPastDiscussion, setShowPastDiscussion] = useState(false);
+  const [sessionStartTime, setSessionStartTime] = useState<number>(Date.now());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       setMessages(prev => {
         const lastMsg = prev[prev.length - 1];
+        if (lastMsg) {
+          const msSinceLast = Date.now() - new Date(lastMsg.timestamp).getTime();
+          if (msSinceLast > 5 * 60 * 1000) {
+            setSessionStartTime(Date.now());
+          }
+        } else {
+          setSessionStartTime(Date.now());
+        }
+
         if (lastMsg && !lastMsg.id.startsWith('welcome_')) {
           return [...prev, {
             id: `welcome_${type}_${Date.now()}`,
@@ -142,23 +152,22 @@ export default function LogChat({
   }, [isOpen, type]);
 
   useEffect(() => {
-    if (isOpen && type === 'food_idea') {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition((position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          setUserLocation({ lat, lng });
-          
-          const isIndo = lat >= -11 && lat <= 6 && lng >= 95 && lng <= 141;
-          const savedCurrency = localStorage.getItem('food_currency');
-          if (!savedCurrency && isIndo) {
-            setCurrency('IDR');
-            setBudget('100000');
-          }
-        }, (err) => {
-          console.warn("Could not get location:", err);
-        });
-      }
+    // Eagerly fetch user location on component mount or whenever chat is active
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setUserLocation({ lat, lng });
+        
+        const isIndo = lat >= -11 && lat <= 6 && lng >= 95 && lng <= 141;
+        const savedCurrency = localStorage.getItem('food_currency');
+        if (!savedCurrency && isIndo) {
+          setCurrency('IDR');
+          setBudget('100000');
+        }
+      }, (err) => {
+        console.warn("Could not get location:", err);
+      });
     }
   }, [isOpen, type]);
 
@@ -294,6 +303,23 @@ export default function LogChat({
     const textToSend = typeof overrideText === 'string' ? overrideText : inputText;
     if (!textToSend && selectedImages.length === 0) return;
 
+    // Eagerly wait for geolocation if doing food ideas and it's not resolved yet
+    let loc = userLocation;
+    if (type === 'food_idea' && !loc) {
+      if (navigator.geolocation) {
+        try {
+          console.log("[Geolocation] Awaiting geolocation resolution before food-idea request...");
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000 });
+          });
+          loc = { lat: position.coords.latitude, lng: position.coords.longitude };
+          setUserLocation(loc);
+        } catch (err) {
+          console.warn("[Geolocation] Could not await location during handleSend:", err);
+        }
+      }
+    }
+
     const userMsg: ChatMessage = {
       id: `msg_${Date.now()}`,
       role: 'user',
@@ -324,11 +350,14 @@ export default function LogChat({
         image: tempImages[0] || null,
         images: tempImages.length > 0 ? tempImages : null,
         imageDates: tempDates.length > 0 ? tempDates : null,
-        history: messages.map(m => {
+        history: messages.filter(m => new Date(m.timestamp).getTime() >= sessionStartTime && !m.id.startsWith('welcome_')).slice(-10).map(m => {
           let extra = "";
           if (m.role === 'assistant') {
             if (m.pendingBiomarkers) extra += `\n[Extracted Biomarkers: ${JSON.stringify(m.pendingBiomarkers)}]`;
-            if (m.pendingFoodLog) extra += `\n[Extracted Food: ${JSON.stringify(m.pendingFoodLog)}]`;
+            if (m.pendingFoodLog) {
+               // Only include a lightweight summary to avoid blowing up the token quota
+               extra += `\n[Extracted Food: ${m.pendingFoodLog.name}, ${m.pendingFoodLog.quantity}, ${m.pendingFoodLog.nutrients?.calories || 0} kcal. (Full nutrient data omitted for brevity)]`;
+            }
             if (m.pendingDate) extra += `\n[Extracted Date: ${m.pendingDate}]`;
             if (m.pendingProfile) extra += `\n[Extracted Profile: ${JSON.stringify(m.pendingProfile)}]`;
           }
@@ -349,17 +378,17 @@ export default function LogChat({
           sodiumTarget: remainingAllowance.sodiumTarget,
         };
       } else if (type === 'food_idea') {
-        bodyData.location = userLocation;
+        bodyData.location = loc;
         bodyData.recentMeals = foodLogs.slice(-20).map(f => f.name);
         bodyData.budget = budget;
         bodyData.currency = currency;
         bodyData.maxDistance = maxDistance;
         
         // Fetch real places from Overpass API (client-side bypasses container blocks)
-        if (userLocation) {
+        if (loc) {
           try {
             const radius = Math.min(Number(maxDistance) * 1000, 5000);
-            const overpassQuery = `[out:json];(node["amenity"~"restaurant|cafe|fast_food|food_court"](around:${radius},${userLocation.lat},${userLocation.lng}););out 30;`;
+            const overpassQuery = `[out:json];(node["amenity"~"restaurant|cafe|fast_food|food_court"](around:${radius},${loc.lat},${loc.lng}););out 30;`;
             const overpassRes = await fetch("https://overpass-api.de/api/interpreter", {
               method: "POST",
               headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -436,12 +465,13 @@ export default function LogChat({
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err: any) {
       console.error(err);
+      const isQuota = err.message?.includes("429") || err.message?.includes("quota") || err.message?.includes("RESOURCE_EXHAUSTED");
       setMessages(prev => [
         ...prev,
         {
           id: `msg_err_${Date.now()}`,
           role: 'assistant',
-          content: `Error running analysis with selected engine: ${err.message || 'Server connection timed out.'}`,
+          content: isQuota ? `You have exceeded your Gemini API quota limit. Please check your billing or try again later.` : `Error running analysis: ${err.message || 'Server connection timed out.'}`,
           timestamp: new Date().toISOString()
         }
       ]);
@@ -883,6 +913,7 @@ export default function LogChat({
                 </div>
               );
             } else {
+              if (msg.content === 'Surprise me') return null;
               return (
                 <div
                   key={msg.id}

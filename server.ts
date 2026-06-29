@@ -601,9 +601,18 @@ Ensure you estimate values for ALL 30 nutrients listed when foodData is provided
       ? `*(Note: Your Gemini API key has exceeded its quota/rate limits. I have estimated the nutritional data using offline heuristics so you can still log this meal!)*\n\nI have estimated the breakdown for **${foodName}**:`
       : `*(Note: Gemini connection timed out. Showing offline estimated breakdown!)*\n\nI have estimated the breakdown for **${foodName}**:`;
 
+    const userTimezone = req.body.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let localDateStr;
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: userTimezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+      localDateStr = formatter.format(new Date());
+    } catch(e) {
+      localDateStr = new Date().toISOString().split("T")[0];
+    }
+
     const fallbackFoodLog = {
       name: foodName,
-      date: new Date().toISOString().split("T")[0],
+      date: localDateStr,
       composition: "Estimated based on your description",
       weightGrams: 200,
       quantity: "1 serving",
@@ -1332,22 +1341,24 @@ ${nearbyCtx}
 Current User Input: "${message}"
 
 CRITICAL SYSTEM REQUIREMENTS FOR VERACITY & LOGICAL ACCURACY:
-1. STRICT PHYSICAL VENUE VERIFICATION: You MUST use the Google Search Grounding tool to actively search for, verify, and validate the existence of every single restaurant, cafe, or store you suggest. Under no circumstances are you allowed to hallucinate, guess, or make up restaurant names, branches, or addresses. Only recommend specific, real, active physical venues whose names and physical addresses are 100% verified and findable on Google Maps. If I provided a list of nearby REAL restaurants, you MUST pick from that list!
-2. STRICT GEOGRAPHIC RADIUS ENFORCEMENT: The user is physically located at coordinates: ${location ? `${location.lat}, ${location.lng}` : 'unknown'} (Address: ${resolvedAddressText || 'unknown'}). Every suggested restaurant MUST be located within exactly ${maxDistanceValue} km of this specific location! Calculate the straight-line physical distance accurately. If a venue is further than ${maxDistanceValue} km (such as in another district or city), you are STRICTLY FORBIDDEN from suggesting it. Keep in mind that 0.01 degrees of latitude/longitude is roughly 1.1 km. So the coordinates of your suggestions must be very close to the user's coordinates!
-3. GEOGRAPHIC CONTEXT FOR SEARCH GROUNDING: Since you are using Google Search Grounding, format your search queries explicitly using the resolved address/neighborhood: "${resolvedAddressText || 'near lat/lng ' + location?.lat + ',' + location?.lng}". For example, search for: "healthy restaurants near [neighborhood/city name]" to verify real active physical places nearby. Do NOT search globally!
-4. MAPS LINK PRECISION: Format the "locationLink" EXACTLY as: "https://www.google.com/maps/search/?api=1&query=EncodedRestaurantName+EncodedAddress". You MUST encode both the precise verified restaurant name AND its verified street address in the query parameter to ensure Google Maps highlights the exact business.
+1. VENUE SELECTION FROM PROVIDED LIST: You MUST ONLY select restaurants from the provided list of nearby REAL restaurants if it is provided. Do NOT invent or search for other restaurants. Use EXACTLY the lat and lng coordinates from the list. Do not modify the coordinates.
+2. STRICT GEOGRAPHIC RADIUS ENFORCEMENT: If you must suggest a venue not on the list, it MUST be located within exactly ${maxDistanceValue} km of the user's location. Do not hallucinate coordinates.
+3. SEARCH GROUNDING CONTEXT: Use Google Search Grounding ONLY to verify the selected restaurant's hours, reviews, or social media pages. Do not use it to find random new restaurants far away.
+4. MAPS LINK PRECISION: Format the "locationLink" EXACTLY as: "https://www.google.com/maps/search/?api=1&query=EncodedRestaurantName&query_place_id=PlaceID". You MUST use Google Search Grounding to find the exact Google Maps Place ID for the restaurant and include it in the URL so it opens the exact address page. NEVER use generic search queries or coordinates for "locationLink" if a Place ID is retrievable! If you cannot find the Place ID, use "https://www.google.com/maps/search/?api=1&query=EncodedRestaurantName+EncodedAddress" with both the restaurant name and exact street address to open the address page correctly.
 5. STRICT OPENING HOURS ENFORCEMENT: The user's current local time is ${userLocalTime}. You MUST capture the exact opening and closing time and add it to the result for the recommended place in the 'openingHours' field. You MUST use Google Search Grounding to actively search for the opening hours of the specific restaurant you recommend. Never use '--' unless you genuinely cannot find it online. You should only recommend places that are STILL OPEN 1 HOUR from the current local time!
-6. ZERO-FIND FALLBACK: If your search does not find any verified, existing physical restaurants within the requested ${maxDistanceValue} km radius of the user's coordinates, you MUST suggest a generic healthy dish that they can make at home or order anywhere, and clearly explain in your conversational response that no verified venues were found within ${maxDistanceValue} km of their location. Never make up a fake restaurant!
+6. REFERENCE LINK: For the 'menuLink' field, you MUST provide a direct, high-quality, real web link to the restaurant's actual official website, Instagram/Facebook page, TripAdvisor page, Yelp page, or specific Google Maps business page. DO NOT use generic Google Search query pages (like 'google.com/search?q=...') or generic placeholders, as this is unacceptable. Use Google Search Grounding to locate their actual website or profile!
+7. ZERO-FIND FALLBACK & STRICT RADIUS: If no verified physical restaurants are found within the exact ${maxDistanceValue} km radius of the user's coordinates, YOU MUST NOT SUGGEST ANY PLACES. In this case, you MUST only suggest generic healthy dishes to cook at home (do not include placeName, address, lat, lng, locationLink, menuLink, or distanceKm). Clearly explain in your text response that no verified venues were found within ${maxDistanceValue} km, and suggest increasing the search radius. NEVER hallucinate places far away or fake coordinates.
 
 Include a short conversational response (text), and a list of between 3 and 5 distinct, diverse structured food ideas (ideas) that meet the constraints. Under no circumstances should you return only 1 idea.
 Each idea should have:
-- name: string (Specific dish name)
-- placeName: string (The verified, real-world restaurant or store name, e.g. "Ikan Bakar Cianjur" or "Sweetgreen")
-- address: string (The verified, exact physical street address, e.g. "Jl. Batu Tulis No.39, RT.3/RW.2, Kebon Kelapa, Gambir, Central Jakarta City, Jakarta 10120")
-- lat: number (REQUIRED. The latitude of the suggested place. If picking from the provided list, use the exact latitude. Otherwise, use your best estimation or the user's latitude + a small offset so it appears on the map.)
-- lng: number (REQUIRED. The longitude of the suggested place. If picking from the provided list, use the exact longitude. Otherwise, use your best estimation or the user's longitude + a small offset so it appears on the map.)
-- locationLink: string (Google Maps Search URL)
-- distanceKm: number (The straight-line physical distance in km, e.g., 1.4. This MUST be less than or equal to ${maxDistanceValue} km!)
+- name: string (A general, common healthy food category they serve, e.g. "Grilled Chicken Salad" or "Sushi". DO NOT hallucinate exact menu items unless verified.)
+- placeName: string (Optional. The verified, real-world restaurant name. Omit if suggesting a home-cooked meal.)
+- address: string (Optional. The verified, exact physical street address.)
+- lat: number (Optional. The latitude of the suggested place. Omit if no place is found within the radius.)
+- lng: number (Optional. The longitude of the suggested place. Omit if no place is found within the radius.)
+- locationLink: string (Optional. Google Maps Search URL)
+- menuLink: string (Optional. A URL to ANY relevant webpage about the restaurant, such as Google Maps, Yelp, Instagram, or their website. DO NOT use recipe search links!)
+- distanceKm: number (Optional. The straight-line physical distance in km. This MUST be strictly <= ${maxDistanceValue} km! Omit if home-cooked.)
 - estimatedBudget: string (The estimated price of this suggested dish, formatted nicely with the currency symbol, e.g., "Rp 45,000" or "£3.50". This MUST be within the maximum budget of ${budgetValue} ${currencyValue}!)
 - dishImageUrl: string (A valid, beautiful, and relevant Unsplash food image URL showing this specific type of dish, e.g., "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80" for a salad, or a suitable search query image URL from Unsplash.)
 - benefitExplanation: string (Why this is good for the user's profile)
@@ -1364,7 +1375,8 @@ Respond with a structured JSON format matching this schema exactly:
       "address": "123 Main St, City, State",
       "lat": -6.2088,
       "lng": 106.8456,
-      "locationLink": "https://www.google.com/maps/search/?api=1&query=...",
+      "locationLink": "https://www.google.com/maps/search/?api=1&query=HokBen&query_place_id=ChIJKZ1Uh-P1aS4R61b3Rsx8mSU",
+      "menuLink": "https://www.hokben.co.id/",
       "distanceKm": 1.2,
       "estimatedBudget": "Rp 45,000",
       "dishImageUrl": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80",
@@ -1414,6 +1426,7 @@ Respond with a structured JSON format matching this schema exactly:
         placeName: "Local Healthy Kitchen & Grill",
         address: "Nearby health-centric restaurant",
         locationLink: "https://www.google.com/maps/search/?api=1&query=Healthy+Restaurant+Near+Me",
+        menuLink: "https://www.google.com/search?q=Healthy+Restaurant+Near+Me+Menu",
         distanceKm: 0.8,
         estimatedBudget: req.body?.userProfile && req.body?.userProfile.ethnicity === "Asian" ? "Rp 65,000" : "£8.50",
         dishImageUrl: "https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=600&q=80",
@@ -1426,6 +1439,7 @@ Respond with a structured JSON format matching this schema exactly:
         placeName: "Sweetgreen or local Salad Bar",
         address: "Nearby fresh produce bistro",
         locationLink: "https://www.google.com/maps/search/?api=1&query=Salad+Bar+Near+Me",
+        menuLink: "https://www.google.com/search?q=Salad+Bar+Near+Me+Menu",
         distanceKm: 1.2,
         estimatedBudget: req.body?.userProfile && req.body?.userProfile.ethnicity === "Asian" ? "Rp 45,000" : "£6.90",
         dishImageUrl: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=600&q=80",
@@ -1438,6 +1452,7 @@ Respond with a structured JSON format matching this schema exactly:
         placeName: "Local Japanese or Asian Bistro",
         address: "Nearby fresh Asian diner",
         locationLink: "https://www.google.com/maps/search/?api=1&query=Japanese+Diner+Near+Me",
+        menuLink: "https://www.google.com/search?q=Japanese+Diner+Near+Me+Menu",
         distanceKm: 1.5,
         estimatedBudget: req.body?.userProfile && req.body?.userProfile.ethnicity === "Asian" ? "Rp 35,000" : "£5.50",
         dishImageUrl: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=600&q=80",

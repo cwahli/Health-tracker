@@ -152,6 +152,7 @@ export interface FoodIdea {
   lat?: number;
   lng?: number;
   locationLink?: string;
+  menuLink?: string;
   benefitExplanation: string;
   tags: string[];
   distanceKm?: number;

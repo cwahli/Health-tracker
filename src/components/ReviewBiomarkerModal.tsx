@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ChatMessage, UserProfile, BiomarkerLog } from '../types';
 import { translations } from '../utils/translations';
-import { X, Send, Sparkles, Loader, ChevronDown } from 'lucide-react';
+import { X, Send, Sparkles, Loader, ChevronDown, ChevronUp } from 'lucide-react';
 import { biomarkerDefinitions, getBiomarkerStatus, getBiomarkerColor } from '../utils/biomarkers';
 import LLMSelector from './LLMSelector';
 
@@ -41,6 +41,7 @@ export default function ReviewBiomarkerModal({
   const [inputText, setInputText] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isEngineSelectorOpen, setIsEngineSelectorOpen] = useState(false);
+  const [showDataUsed, setShowDataUsed] = useState(false);
   const [hasLoadedPrevious, setHasLoadedPrevious] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -234,20 +235,37 @@ export default function ReviewBiomarkerModal({
           </div>
         )}
 
-        {/* Info panel */}
-        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800/60 flex flex-wrap gap-x-6 gap-y-2 text-xs font-medium text-slate-600 dark:text-slate-300">
-          <div><strong className="text-slate-800 dark:text-slate-200">Biomarker:</strong> {def.name} ({def.key})</div>
-          <div><strong className="text-slate-800 dark:text-slate-200">Current:</strong> {currentValue} {def.unit}</div>
-          <div><strong className="text-slate-800 dark:text-slate-200">Range:</strong> {def.normalRange}</div>
-          <div><strong className="text-slate-800 dark:text-slate-200">User Profile:</strong> Age {profile.age || 'N/A'} • {profile.gender || 'N/A'} • {(() => {
-            if (profile.weight && profile.height) {
-              const heightInMeters = Number(profile.height) / 100;
-              const bmi = Number(profile.weight) / (heightInMeters * heightInMeters);
-              return `BMI: ${bmi.toFixed(1)}`;
-            }
-            return "BMI: N/A";
-          })()} • {profile.ethnicity || 'N/A'}</div>
-          <div className="w-full mt-1 pt-1.5 border-t border-slate-150 dark:border-slate-800/40"><strong className="text-slate-800 dark:text-slate-200">Description:</strong> {descriptionText}</div>
+        {/* Expandable Data Used by Agent Block */}
+        <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800/60 bg-white dark:bg-slate-900">
+          <button
+            type="button"
+            onClick={() => setShowDataUsed(!showDataUsed)}
+            className="w-full flex items-center justify-between text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold cursor-pointer transition-colors py-1.5"
+          >
+            <span className="flex items-center gap-1.5 text-xs font-semibold font-sans text-slate-600 dark:text-slate-300">
+              Data used by agent
+            </span>
+            <div className="flex items-center text-slate-400 dark:text-slate-500">
+              {showDataUsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </div>
+          </button>
+          
+          {showDataUsed && (
+            <div className="mt-2 pt-3 pb-2 border-t border-slate-100 dark:border-slate-800/40 flex flex-wrap gap-x-6 gap-y-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/30 p-3 rounded-xl">
+              <div><strong className="text-slate-800 dark:text-slate-200">Biomarker:</strong> {def.name} ({def.key})</div>
+              <div><strong className="text-slate-800 dark:text-slate-200">Current:</strong> {currentValue} {def.unit}</div>
+              <div><strong className="text-slate-800 dark:text-slate-200">Range:</strong> {def.normalRange}</div>
+              <div><strong className="text-slate-800 dark:text-slate-200">User Profile:</strong> Age {profile.age || 'N/A'} • {profile.gender || 'N/A'} • {(() => {
+                if (profile.weight && profile.height) {
+                  const heightInMeters = Number(profile.height) / 100;
+                  const bmi = Number(profile.weight) / (heightInMeters * heightInMeters);
+                  return `BMI: ${bmi.toFixed(1)}`;
+                }
+                return "BMI: N/A";
+              })()} • {profile.ethnicity || 'N/A'}</div>
+              <div className="w-full mt-1 pt-1.5 border-t border-slate-150 dark:border-slate-800/40"><strong className="text-slate-800 dark:text-slate-200">Description:</strong> {descriptionText}</div>
+            </div>
+          )}
         </div>
 
         {/* Chat Area */}

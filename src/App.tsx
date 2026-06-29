@@ -982,6 +982,51 @@ export default function App() {
     }
   }, [profile?.weight, profile?.height, biomarkerHistory.length, biomarkers.bmi]);
 
+  // Auto-restore missing food images from chat history
+  useEffect(() => {
+    if (foodLogs.length === 0) return;
+    try {
+      const rawChat = sessionStorage.getItem('chat_messages_food');
+      if (rawChat) {
+        const messages = JSON.parse(rawChat);
+        let updated = false;
+        let updateCount = 0;
+        const newFoodLogs = foodLogs.map(log => {
+          if (!log.imageUrl && (!log.imageUrls || log.imageUrls.length === 0)) {
+            let msg = messages.find((m: any) => m.pendingFoodLog?.id === log.id);
+            if (!msg) {
+               msg = messages.find((m: any) => m.pendingFoodLog?.name === log.name && m.pendingFoodLog?.date === log.date);
+            }
+            if (msg && msg.pendingFoodLog && (msg.pendingFoodLog.imageUrl || msg.pendingFoodLog.imageUrls)) {
+              updated = true;
+              updateCount++;
+              return {
+                ...log,
+                imageUrl: msg.pendingFoodLog.imageUrl || msg.pendingFoodLog.imageUrls?.[0],
+                imageUrls: msg.pendingFoodLog.imageUrls || (msg.pendingFoodLog.imageUrl ? [msg.pendingFoodLog.imageUrl] : [])
+              };
+            }
+          }
+          return log;
+        });
+
+        if (updated) {
+          console.log(`Restoring ${updateCount} lost images from chat history`);
+          setFoodLogs(newFoodLogs);
+          // Fire individual saves for the newly restored logs to ensure cloud sync catches them
+          newFoodLogs.forEach(f => {
+            const oldLog = foodLogs.find(old => old.id === f.id);
+            if (!oldLog?.imageUrl && f.imageUrl) {
+               saveAndSync(profile, newFoodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'foodLog', targetId: f.id });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to auto-restore images:", e);
+    }
+  }, [foodLogs.length]);
+
   // Save changes to local storage and sync to Server cloud database
   const saveAndSync = async (
     currProfile: UserProfile | null,
@@ -1103,20 +1148,10 @@ export default function App() {
           .then(() => completeInteraction(pId, true, JSON.stringify(currProfile).length))
           .catch(err => completeInteraction(pId, false, 0, err.message));
         
-        const foodPromises = currFoods.map(f => {
-          const itemTrackId = logInteraction('upload', `users/${uid}/foodLogs/${f.id}`, f);
-          return setDoc(doc(db, 'users', uid, 'foodLogs', f.id), cleanData(f))
-            .then(() => completeInteraction(itemTrackId, true, JSON.stringify(f).length))
-            .catch(err => completeInteraction(itemTrackId, false, 0, err.message));
-        });
-
-        const bioPromises = currBioHistory.map(b => {
-          const itemTrackId = logInteraction('upload', `users/${uid}/biomarkerHistory/${b.id}`, b);
-          return setDoc(doc(db, 'users', uid, 'biomarkerHistory', b.id), cleanData(b))
-            .then(() => completeInteraction(itemTrackId, true, JSON.stringify(b).length))
-            .catch(err => completeInteraction(itemTrackId, false, 0, err.message));
-        });
-
+        // DANGEROUS: Do NOT mass-overwrite foodLogs and biomarkerHistory here.
+        // They are synced granularly via specificUpdate. Mass overwriting from local state
+        // risks permanently deleting images/fields if the local React state was stale.
+        
         const dashboardPromise = setDoc(doc(db, 'users', uid, 'metadata', 'dashboard'), {
           actions: currActions.map(cleanData),
           dailyBenefits: currBenefits.map(cleanData),
@@ -1134,8 +1169,6 @@ export default function App() {
         // Await these promises so data is not lost on reload
         await Promise.all([
           profilePromise,
-          ...foodPromises,
-          ...bioPromises,
           dashboardPromise,
           reportPromise
         ]).catch(err => console.warn('Background sync warning:', err));

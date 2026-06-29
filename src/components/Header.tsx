@@ -762,6 +762,14 @@ export default function Header({
                 <ShieldCheck className="w-5 h-5 text-indigo-600" />
                 <div>
                   <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Live Database Operations</h2>
+                  <span className="text-xs font-normal text-slate-400 block mt-0.5">
+                    {(() => {
+                      const buildTime = 1782726464000; // June 29, 2026 00:07:44 GMT-0700
+                      const diffMs = Math.max(0, now - buildTime);
+                      const diffMins = Math.floor(diffMs / 60000);
+                      return diffMins < 1 ? 'last published just now' : `last published ${diffMins} min ago`;
+                    })()}
+                  </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
