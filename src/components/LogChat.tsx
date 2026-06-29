@@ -1,15 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, FoodLog, UserProfile, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
-import { X, Send, Image, Camera, MessageSquare, Sparkles, Plus, ChevronDown, ChevronUp, Loader, MapPin } from 'lucide-react';
+import { X, Send, Image, Camera, MessageSquare, Sparkles, Plus, ChevronDown, ChevronUp, Loader, MapPin, Trash2 } from 'lucide-react';
 import { nutrientDefinitions } from '../utils/nutrition';
 import { biomarkerDefinitions, getBiomarkerStatus, isAsianEthnicity, getBiomarkerStatusLabel } from '../utils/biomarkers';
 import LLMSelector from './LLMSelector';
 import { compressMultipleImages } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone } from '../utils/dateUtils';
 import ImageSlider from './ImageSlider';
+import FullScreenLogViewer from './FullScreenLogViewer';
 import { InteractivePlacesMap } from './InteractivePlacesMap';
 import exifr from 'exifr';
+import { auth } from '../firebase';
 
 interface LogChatProps {
   type: 'food' | 'medical' | 'food_idea';
@@ -26,6 +28,16 @@ interface LogChatProps {
   report?: any;
 }
 
+const getSessionId = (): string => {
+  if (typeof window === 'undefined') return 'global';
+  let id = sessionStorage.getItem('app_session_id');
+  if (!id) {
+    id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    sessionStorage.setItem('app_session_id', id);
+  }
+  return id;
+};
+
 export default function LogChat({ 
   type, 
   profile, 
@@ -41,6 +53,62 @@ export default function LogChat({
   report
 }: LogChatProps) {
   const [showDataUsed, setShowDataUsed] = useState(false);
+  const [showFullScreenConv, setShowFullScreenConv] = useState(false);
+  const [isSendingLogs, setIsSendingLogs] = useState(false);
+  const [logsSendStatus, setLogsSendStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+  const handleSendLogToAdmin = async () => {
+    setIsSendingLogs(true);
+    setLogsSendStatus('idle');
+    try {
+      const logsText = messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
+      const sessionId = auth.currentUser?.uid || 'anonymous';
+      
+      const res = await fetch('/api/gemini/send-logs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-ID': sessionId
+        },
+        body: JSON.stringify({ logsText })
+      });
+      
+      if (res.ok) {
+        setLogsSendStatus('success');
+        
+        // Native mailto link fallback
+        const subject = encodeURIComponent(`Healthy App Food Chat Logs - User ${sessionId}`);
+        const body = encodeURIComponent(`Hello Admin,\n\nHere is the compiled food log history for user ${sessionId}:\n\n${logsText}`);
+        window.open(`mailto:cwah.liu@gmail.com?subject=${subject}&body=${body}`, '_blank');
+      } else {
+        setLogsSendStatus('error');
+      }
+    } catch (err) {
+      console.error("Error sending logs:", err);
+      setLogsSendStatus('error');
+    } finally {
+      setIsSendingLogs(false);
+      setTimeout(() => setLogsSendStatus('idle'), 4000);
+    }
+  };
+
+  const [lastSentPayload, setLastSentPayload] = useState<any>(() => {
+    try {
+      const saved = sessionStorage.getItem(`last_sent_payload_${type}`);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (lastSentPayload) {
+      sessionStorage.setItem(`last_sent_payload_${type}`, JSON.stringify(lastSentPayload));
+    } else {
+      sessionStorage.removeItem(`last_sent_payload_${type}`);
+    }
+  }, [lastSentPayload, type]);
+
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const saved = sessionStorage.getItem(`chat_messages_${type}`);
     if (saved) {
@@ -119,6 +187,29 @@ export default function LogChat({
   const [showPastDiscussion, setShowPastDiscussion] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState<number>(Date.now());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const handleDeleteMessagePair = (messageId: string) => {
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.id === messageId);
+      if (idx === -1) return prev;
+      const msgToDelete = prev[idx];
+      const newMsgs = [...prev];
+      if (msgToDelete.role === 'user') {
+        if (idx + 1 < newMsgs.length && newMsgs[idx + 1].role === 'assistant') {
+          newMsgs.splice(idx, 2);
+        } else {
+          newMsgs.splice(idx, 1);
+        }
+      } else if (msgToDelete.role === 'assistant') {
+        if (idx - 1 >= 0 && newMsgs[idx - 1].role === 'user') {
+          newMsgs.splice(idx - 1, 2);
+        } else {
+          newMsgs.splice(idx, 1);
+        }
+      }
+      return newMsgs;
+    });
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -214,8 +305,10 @@ export default function LogChat({
 
     const parseTarget = (val: any, fallback: number) => {
       if (val === null || val === undefined) return fallback;
-      const clean = String(val).replace(/,/g, '').replace(/[^\d]/g, '');
-      const parsed = parseInt(clean, 10);
+      const cleanStr = String(val).replace(/,/g, '');
+      const matches = cleanStr.match(/\d+(\.\d+)?/g);
+      if (!matches || matches.length === 0) return fallback;
+      const parsed = parseFloat(matches[0]);
       return isNaN(parsed) ? fallback : parsed;
     };
 
@@ -346,6 +439,7 @@ export default function LogChat({
       else endpoint = '/api/gemini/medical-analyze';
 
       const bodyData: any = {
+        userId: auth.currentUser?.uid || null,
         message: userMsg.content,
         image: tempImages[0] || null,
         images: tempImages.length > 0 ? tempImages : null,
@@ -416,9 +510,22 @@ export default function LogChat({
         bodyData.existingBiomarkers = biomarkers ? Object.keys(biomarkers) : [];
       }
 
+      // Save display-friendly payload for debug mode
+      const displayPayload = { ...bodyData };
+      if (displayPayload.image && typeof displayPayload.image === 'string') {
+        displayPayload.image = displayPayload.image.substring(0, 100) + "... [truncated base64]";
+      }
+      if (displayPayload.images && Array.isArray(displayPayload.images)) {
+        displayPayload.images = displayPayload.images.map((img: any) => typeof img === 'string' ? img.substring(0, 100) + "... [truncated base64]" : img);
+      }
+      setLastSentPayload(displayPayload);
+
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Session-ID': getSessionId()
+        },
         body: JSON.stringify(bodyData)
       });
 
@@ -548,18 +655,6 @@ export default function LogChat({
                 </div>
               </button>
               
-              {loggedMessageIds.length > 0 && (
-                <div className="flex items-center justify-center mt-2 pt-1 border-t border-slate-100 dark:border-slate-800/10">
-                   <button
-                      type="button"
-                      onClick={() => setShowPastDiscussion(!showPastDiscussion)}
-                      className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <span>{showPastDiscussion ? "Hide past discussion" : "View past discussion"}</span>
-                    </button>
-                </div>
-              )}
-              
               {showDataUsed && (
                 <div className="mt-2.5 pt-2.5 border-t border-slate-200/50 dark:border-slate-800/50 space-y-3.5 text-slate-600 dark:text-slate-300 font-sans leading-normal">
                   {/* Profile Stats */}
@@ -684,6 +779,44 @@ export default function LogChat({
                       </div>
                     </div>
                   </div>
+
+                  {/* Conversation Log History */}
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-100/50 dark:bg-slate-950/20 p-3 mt-3 space-y-2 text-left">
+                    <div className="flex items-center justify-between">
+                      <span className="text-indigo-650 dark:text-indigo-400 font-bold block text-[10px] uppercase tracking-wider">
+                        📡 Real-Time Full Agent Request Payload & Log
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const logTxt = lastSentPayload ? JSON.stringify(lastSentPayload, null, 2) : messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
+                          navigator.clipboard.writeText(logTxt);
+                        }}
+                        className="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 rounded text-[10px] font-bold text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                      >
+                        Copy Log
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowFullScreenConv(true)}
+                      className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <span>🔍 View Log</span>
+                    </button>
+
+                    <FullScreenLogViewer
+                      isOpen={showFullScreenConv}
+                      onClose={() => setShowFullScreenConv(false)}
+                      title="Full Agent Request Payload & Log"
+                      logsText={lastSentPayload ? JSON.stringify(lastSentPayload, null, 2) : messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n')}
+                      onSendToAdmin={handleSendLogToAdmin}
+                      isSendingLogs={isSendingLogs}
+                      logsSendStatus={logsSendStatus}
+                      onClearLogs={() => setMessages([])}
+                      eventsCount={messages.length}
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -721,8 +854,18 @@ export default function LogChat({
                   return (
                 <div
                   key={msg.id}
-                  className="w-full space-y-2.5 px-1 min-w-0"
+                  className="w-full space-y-2.5 px-1 min-w-0 relative group"
                 >
+                  {!msg.id.startsWith('welcome_') && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMessagePair(msg.id)}
+                      className="absolute right-2 top-0 p-1 text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors z-20 cursor-pointer opacity-0 group-hover:opacity-100"
+                      title="Delete conversation step"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <div className="w-full leading-relaxed font-size-body text-slate-850 dark:text-slate-100 font-medium break-words overflow-x-hidden bg-transparent border-none shadow-none">
                     {msg.imageUrls && msg.imageUrls.length > 0 ? (
                       <div className="mb-2 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700/30 max-w-full">
@@ -736,13 +879,20 @@ export default function LogChat({
                     <p className="whitespace-pre-line break-words">{msg.content}</p>
                     {msg.id.startsWith('welcome_') && type === 'food_idea' && (
                       <div className="mt-3">
-                        <button
-                          type="button"
-                          onClick={() => handleSend('Surprise me')}
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-indigo-600/10 flex items-center gap-1.5 animate-pulse"
-                        >
-                          Surprise Me
-                        </button>
+                        {isAnalyzing ? (
+                          <div className="inline-flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50/50 dark:bg-indigo-950/20 px-3 py-2 border border-indigo-150 dark:border-indigo-900/30 rounded-xl">
+                            <Loader className="w-3.5 h-3.5 animate-spin" />
+                            <span>Generating Ideas...</span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSend('Surprise me')}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-indigo-600/10 flex items-center gap-1.5 animate-pulse"
+                          >
+                            Surprise Me
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -785,10 +935,58 @@ export default function LogChat({
 
                       <div className="text-xs space-y-2 text-slate-600 dark:text-slate-300 font-medium">
                         <p><strong>{t.composition}:</strong> {msg.pendingFoodLog.composition}</p>
-                        <p className="text-indigo-600 dark:text-indigo-400"><strong>{t.benefits}:</strong> {msg.pendingFoodLog.benefits}</p>
-                        {msg.pendingFoodLog.risks && <p className="text-rose-600 dark:text-rose-400"><strong>{t.risks}:</strong> {msg.pendingFoodLog.risks}</p>}
+                        <p className="text-slate-700 dark:text-slate-200"><strong>{t.benefits}:</strong> {msg.pendingFoodLog.benefits}</p>
+                        {msg.pendingFoodLog.risks && <p className="text-slate-700 dark:text-slate-200"><strong>{t.risks}:</strong> {msg.pendingFoodLog.risks}</p>}
                         <p><strong>{t.impact}:</strong> {msg.pendingFoodLog.healthImpact}</p>
                       </div>
+
+                      {/* Individual Items Contribution Breakdown Table */}
+                      {msg.pendingFoodLog.itemsBreakdown && msg.pendingFoodLog.itemsBreakdown.length > 0 && (
+                        <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/30 dark:bg-slate-900/10">
+                          <div className="px-3 py-1.5 bg-slate-100/70 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                              📊 Components Contribution Table
+                            </span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-[11px]">
+                              <thead>
+                                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-100/30 dark:bg-slate-800/30 text-slate-500 dark:text-slate-400 font-semibold">
+                                  <th className="p-2">Item Name</th>
+                                  <th className="p-2 text-right">Weight</th>
+                                  <th className="p-2 text-right">Calories</th>
+                                  <th className="p-2 text-right">Sat Fat</th>
+                                  <th className="p-2 text-right">Sodium</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {msg.pendingFoodLog.itemsBreakdown.map((item, itemIdx) => (
+                                  <tr 
+                                    key={itemIdx} 
+                                    className="border-b last:border-b-0 border-slate-100 dark:border-slate-800/40 text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-850/20 transition-colors"
+                                  >
+                                    <td className="p-2 font-semibold truncate max-w-[120px]" title={item.name}>
+                                      {item.name}
+                                    </td>
+                                    <td className="p-2 text-right font-mono text-slate-500">
+                                      {item.weightGrams}g
+                                    </td>
+                                    <td className="p-2 text-right font-mono text-amber-600 dark:text-amber-400">
+                                      {item.calories} kcal
+                                    </td>
+                                    <td className="p-2 text-right font-mono text-orange-600 dark:text-orange-400">
+                                      {item.saturatedFat}g
+                                    </td>
+                                    <td className="p-2 text-right font-mono text-teal-600 dark:text-teal-400">
+                                      {item.sodium}mg
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Top Nutrients Badge */}
                       <div className="flex flex-wrap items-center gap-2">
@@ -920,7 +1118,15 @@ export default function LogChat({
                   className="flex gap-3 max-w-[85%] w-full min-w-0 ml-auto flex-row-reverse"
                 >
                   <div className="space-y-2 flex-1 min-w-0 max-w-full">
-                    <div className="rounded-2xl px-3.5 py-2.5 leading-relaxed font-size-body shadow-sm font-medium break-words overflow-x-hidden bg-indigo-600 text-white">
+                    <div className="relative group rounded-2xl px-3.5 py-2.5 leading-relaxed font-size-body shadow-sm font-medium break-words overflow-x-hidden bg-indigo-600 text-white">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMessagePair(msg.id)}
+                        className="absolute right-2 top-2 p-1 text-indigo-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors z-20 cursor-pointer opacity-0 group-hover:opacity-100"
+                        title="Delete conversation step"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                       {msg.imageUrls && msg.imageUrls.length > 0 ? (
                         <div className="mb-2 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700/30 max-w-full">
                           <ImageSlider images={msg.imageUrls} altText="Attached meal pictures" />

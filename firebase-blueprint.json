@@ -16,6 +16,19 @@
       },
       "required": ["email", "nickname"]
     },
+    "UserMeal": {
+      "title": "UserMeal",
+      "description": "User's current active logged meal state",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "name": { "type": "string" },
+        "composition": { "type": "string" },
+        "itemsBreakdown": { "type": "array" },
+        "nutrients": { "type": "object" }
+      },
+      "required": ["date", "name", "composition", "itemsBreakdown", "nutrients"]
+    },
     "FoodLog": {
       "title": "FoodLog",
       "description": "Logged food entry",
@@ -93,6 +106,10 @@
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "UserProfile configurations"
+    },
+    "/user_meals/{userId}": {
+      "schema": "UserMeal",
+      "description": "User current active meal state to keep trace of modifications"
     },
     "/users/{userId}/foodLogs/{foodLogId}": {
       "schema": "FoodLog",

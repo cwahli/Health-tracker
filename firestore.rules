@@ -20,6 +20,11 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // Current active meal logs
+    match /user_meals/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
     // User profile and subcollections
     match /users/{userId} {
       allow read, write: if isOwner(userId);

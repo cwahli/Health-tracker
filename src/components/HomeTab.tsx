@@ -1,7 +1,7 @@
 import React from 'react';
 import { UserProfile, FoodLog, HealthAction, DailyBenefit, RecommendationReport, BiomarkerLog, ChatMessage, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
-import { CheckCircle2, Circle, AlertCircle, Heart, ChevronDown, ChevronUp, Calendar, MapPin, Search, Sparkles, Trash2, RefreshCw, Clock } from 'lucide-react';
+import { CheckCircle2, Circle, AlertCircle, Heart, ChevronDown, ChevronUp, Calendar, MapPin, Search, Sparkles, Trash2, RefreshCw, Clock, Settings, X } from 'lucide-react';
 import { getBiomarkerStatus, getBiomarkerColor, getBiomarkerStatusLabel, biomarkerDefinitions, isAsianEthnicity } from '../utils/biomarkers';
 import { getCurrentDateInTimezone } from '../utils/dateUtils';
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
@@ -70,6 +70,39 @@ export default function HomeTab({
   const [healthApiStatus, setHealthApiStatus] = React.useState<string>("Success (No API payload cached)");
   const [lastApiPayload, setLastApiPayload] = React.useState<any>(null);
   const [userLocation, setUserLocation] = React.useState<{ lat: number; lng: number } | null>(null);
+
+  // Rolling target configurations and persistent states
+  const [rollingEnabled, setRollingEnabled] = React.useState<boolean>(() => {
+    return localStorage.getItem('rollingTargetEnabled') === 'true';
+  });
+  const [rollingDays, setRollingDays] = React.useState<number>(() => {
+    const saved = localStorage.getItem('rollingDays');
+    return saved ? parseInt(saved, 10) : 7;
+  });
+  const [rollingAllowance, setRollingAllowance] = React.useState<number>(() => {
+    const saved = localStorage.getItem('rollingAllowance');
+    return saved ? parseInt(saved, 10) : 20;
+  });
+  const [viewTimeframe, setViewTimeframe] = React.useState<string>(() => {
+    return localStorage.getItem('targetViewTimeframe') || '1';
+  });
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    localStorage.setItem('targetViewTimeframe', viewTimeframe);
+  }, [viewTimeframe]);
+
+  React.useEffect(() => {
+    localStorage.setItem('rollingTargetEnabled', String(rollingEnabled));
+  }, [rollingEnabled]);
+
+  React.useEffect(() => {
+    localStorage.setItem('rollingDays', String(rollingDays));
+  }, [rollingDays]);
+
+  React.useEffect(() => {
+    localStorage.setItem('rollingAllowance', String(rollingAllowance));
+  }, [rollingAllowance]);
 
   React.useEffect(() => {
     if (navigator.geolocation) {
@@ -209,6 +242,52 @@ export default function HomeTab({
     return acc;
   }, {} as { [key: string]: number });
 
+  // Compute consumption totals/averages based on selected viewTimeframe
+  const timeframeTotals = React.useMemo(() => {
+    const days = parseInt(viewTimeframe, 10);
+    if (days <= 1) {
+      return todaysTotals;
+    }
+    
+    const totals: { [key: string]: number } = {};
+    
+    const parts = todayStr.split('-');
+    const todayDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    
+    const targetDates = new Set<string>();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(todayDate);
+      d.setDate(todayDate.getDate() - i);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      targetDates.add(`${yyyy}-${mm}-${dd}`);
+    }
+    
+    const foodsInRange = foodLogs.filter(f => targetDates.has(f.date));
+    
+    foodsInRange.forEach(f => {
+      if (f.nutrients) {
+        Object.keys(f.nutrients).forEach(k => {
+          const val = Number(f.nutrients[k]) || 0;
+          totals[k] = (totals[k] || 0) + val;
+        });
+      }
+    });
+    
+    const averages: { [key: string]: number } = {};
+    Object.keys(totals).forEach(k => {
+      const avg = totals[k] / days;
+      if (avg >= 10) {
+        averages[k] = Math.round(avg);
+      } else {
+        averages[k] = Math.round(avg * 10) / 10;
+      }
+    });
+    
+    return averages;
+  }, [viewTimeframe, todaysTotals, foodLogs, todayStr]);
+
   const toggleAction = (id: string) => {
     setActions(actions.map(act => act.id === id ? { ...act, completed: !act.completed } : act));
   };
@@ -225,20 +304,122 @@ export default function HomeTab({
   // Target values (Default or from report)
   const parseTarget = (val: any, fallback: number) => {
     if (val === null || val === undefined) return fallback;
-    const clean = String(val).replace(/,/g, '').replace(/[^\d]/g, '');
-    const parsed = parseInt(clean, 10);
+    const cleanStr = String(val).replace(/,/g, '');
+    const matches = cleanStr.match(/\d+(\.\d+)?/g);
+    if (!matches || matches.length === 0) return fallback;
+    const parsed = parseFloat(matches[0]);
     return isNaN(parsed) ? fallback : parsed;
   };
 
+  const fallbackUnits: { [key: string]: string } = {
+    calories: 'kcal',
+    protein: 'g',
+    totalFat: 'g',
+    saturatedFat: 'g',
+    unsaturatedFat: 'g',
+    omega3: 'g',
+    carbohydrates: 'g',
+    addedSugar: 'g',
+    totalFibre: 'g',
+    solubleFibre: 'g',
+    sodium: 'mg',
+    potassium: 'mg',
+    magnesium: 'mg',
+    calcium: 'mg',
+    iron: 'mg',
+    zinc: 'mg',
+    selenium: 'mcg',
+    iodine: 'mcg',
+    phosphorus: 'mg',
+    vitaminD: 'IU',
+    vitaminB12: 'mcg',
+    folate: 'mcg',
+    vitaminC: 'mg',
+    vitaminE: 'mg',
+    vitaminK: 'mcg',
+    vitaminA: 'mcg',
+    vitaminB6: 'mg',
+    thiamine: 'mg',
+    riboflavin: 'mg',
+    niacin: 'mg',
+    steps: 'steps'
+  };
+
+  const parseUnit = (val: any, fallbackUnit: string) => {
+    if (val === null || val === undefined) return fallbackUnit;
+    const valStr = String(val).trim();
+    const unitMatch = valStr.match(/(kcal|mcg|mg|g|IU|steps)/i);
+    return unitMatch ? unitMatch[0] : fallbackUnit;
+  };
+
+  const getDecimalPlaces = (num: number): number => {
+    const str = String(num);
+    const dotIndex = str.indexOf('.');
+    return dotIndex === -1 ? 0 : str.length - dotIndex - 1;
+  };
+
+  const getAdjustedTarget = React.useCallback((key: string, baseTarget: number): number => {
+    if (!rollingEnabled) return baseTarget;
+    
+    const numPrevDays = rollingDays - 1;
+    if (numPrevDays <= 0) return baseTarget;
+
+    let totalPrevIntake = 0;
+    
+    for (let d = 1; d <= numPrevDays; d++) {
+      const parts = todayStr.split('-');
+      const todayDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      const prevDate = new Date(todayDate);
+      prevDate.setDate(todayDate.getDate() - d);
+      
+      const yyyy = prevDate.getFullYear();
+      const mm = String(prevDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(prevDate.getDate()).padStart(2, '0');
+      const targetDateStr = `${yyyy}-${mm}-${dd}`;
+      
+      const dayFoods = foodLogs.filter(f => f.date === targetDateStr);
+      if (dayFoods.length > 0) {
+        const dayTotal = dayFoods.reduce((acc, curr) => {
+          return acc + (Number(curr.nutrients?.[key]) || 0);
+        }, 0);
+        totalPrevIntake += dayTotal;
+      } else {
+        // If no logs, assume they consumed exactly the target (deficit contribution is 0)
+        totalPrevIntake += baseTarget;
+      }
+    }
+
+    const totalPrevTarget = numPrevDays * baseTarget;
+    const deficit = totalPrevTarget - totalPrevIntake;
+    
+    const maxAdjustment = baseTarget * (rollingAllowance / 100);
+    const adjustment = Math.max(-maxAdjustment, Math.min(maxAdjustment, deficit));
+    const adjustedValue = baseTarget + adjustment;
+    
+    const decimals = getDecimalPlaces(baseTarget);
+    const factor = Math.pow(10, decimals);
+    return Math.ceil(adjustedValue * factor) / factor;
+  }, [rollingEnabled, rollingDays, rollingAllowance, todayStr, foodLogs]);
+
+  const baseCaloriesTarget = report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.calories, 1700) : 1800;
+  const baseSatFatTarget = report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.saturatedFat, 15) : 15;
+  const baseSodiumTarget = report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.sodium, 1200) : 1200;
+  const baseProteinTarget = report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.protein, 90) : 90;
+
+  const formatValue = (val: number) => {
+    if (val >= 10) return Math.round(val);
+    return Number(val.toFixed(1));
+  };
+
   const activeTargets = {
-    calories: Number(todaysTotals.calories || 0),
-    caloriesTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.calories, 1700) : 1800,
-    satFat: Number(todaysTotals.saturatedFat || 0),
-    satFatTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.saturatedFat, 15) : 15,
-    sodium: Number(todaysTotals.sodium || 0),
-    sodiumTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.sodium, 1200) : 1200,
-    protein: Number(todaysTotals.protein || 0),
-    proteinTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.protein, 90) : 90,
+    calories: formatValue(Number(timeframeTotals.calories || 0)),
+    caloriesTarget: getAdjustedTarget('calories', baseCaloriesTarget),
+    satFat: formatValue(Number(timeframeTotals.saturatedFat || 0)),
+    satFatTarget: getAdjustedTarget('saturatedFat', baseSatFatTarget),
+    sodium: formatValue(Number(timeframeTotals.sodium || 0)),
+    sodiumTarget: getAdjustedTarget('sodium', baseSodiumTarget),
+    protein: formatValue(Number(timeframeTotals.protein || 0)),
+    proteinTarget: getAdjustedTarget('protein', baseProteinTarget),
   };
 
   // Compliance calculations (Last 7 days/30 days mock score + live factor)
@@ -296,6 +477,38 @@ export default function HomeTab({
   const [lastActiveDayTimestamp, setLastActiveDayTimestamp] = React.useState<string | null>(() => {
     return localStorage.getItem('lastActiveDayTimestamp');
   });
+
+  const currentStepsValue = React.useMemo(() => {
+    const days = parseInt(viewTimeframe, 10);
+    if (days <= 1) {
+      return googleSteps || 0;
+    }
+    const historyStr = localStorage.getItem('googleStepsHistory');
+    if (historyStr) {
+      try {
+        const history: { date: string; value: number }[] = JSON.parse(historyStr);
+        const parts = todayStr.split('-');
+        const todayDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        const targetDates = new Set<string>();
+        for (let i = 0; i < days; i++) {
+          const d = new Date(todayDate);
+          d.setDate(todayDate.getDate() - i);
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          targetDates.add(`${yyyy}-${mm}-${dd}`);
+        }
+        const matches = history.filter(h => targetDates.has(h.date));
+        if (matches.length > 0) {
+          const total = matches.reduce((sum, h) => sum + h.value, 0);
+          return Math.round(total / days);
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    return googleStepsAverage || 0;
+  }, [viewTimeframe, googleSteps, googleStepsAverage, todayStr]);
 
   React.useEffect(() => {
     const handleGoogleUpdate = () => {
@@ -383,7 +596,7 @@ export default function HomeTab({
             <div className="flex justify-between text-xs font-semibold">
               <span className="text-slate-700 dark:text-slate-300">Saturated Fat Limit</span>
               <span className={`font-mono ${activeTargets.satFat > activeTargets.satFatTarget ? 'text-rose-500 font-bold' : 'text-slate-500'}`}>
-                {activeTargets.satFat.toFixed(1)}g / {activeTargets.satFatTarget}g
+                {activeTargets.satFat}g / {activeTargets.satFatTarget}g
               </span>
             </div>
             <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
@@ -421,17 +634,17 @@ export default function HomeTab({
                   </span>
                 )}
               </span>
-              <span className={`font-mono ${googleSteps !== null && googleSteps >= (parseTarget(report?.dailyNutrientTargets?.steps, 3000)) ? 'text-emerald-500 font-bold' : 'text-slate-500'}`}>
-                {googleSteps || 0} / {parseTarget(report?.dailyNutrientTargets?.steps, 3000)} steps
+              <span className={`font-mono ${currentStepsValue >= (parseTarget(report?.dailyNutrientTargets?.steps, 3000)) ? 'text-emerald-500 font-bold' : 'text-slate-500'}`}>
+                {currentStepsValue} / {parseTarget(report?.dailyNutrientTargets?.steps, 3000)} steps
               </span>
             </div>
             <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
               <div 
-                className={`h-full rounded-full transition-all duration-500 ${googleSteps !== null && googleSteps >= (parseTarget(report?.dailyNutrientTargets?.steps, 3000)) ? 'bg-emerald-500' : 'bg-indigo-600'}`} 
-                style={{ width: `${Math.min(100, ((googleSteps || 0) / (parseTarget(report?.dailyNutrientTargets?.steps, 3000))) * 100)}%` }}
+                className={`h-full rounded-full transition-all duration-500 ${currentStepsValue >= (parseTarget(report?.dailyNutrientTargets?.steps, 3000)) ? 'bg-emerald-500' : 'bg-indigo-600'}`} 
+                style={{ width: `${Math.min(100, (currentStepsValue / (parseTarget(report?.dailyNutrientTargets?.steps, 3000))) * 100)}%` }}
               />
             </div>
-            {googleSteps === 0 && lastActiveDaySteps && (
+            {currentStepsValue === 0 && lastActiveDaySteps && (
               <p className="text-[10px] text-slate-400 italic">
                 Today: 0 steps. Last active day: {lastActiveDaySteps.toLocaleString()} steps ({lastActiveDayTimestamp})
               </p>
@@ -442,22 +655,66 @@ export default function HomeTab({
         {/* Expandable Targets Section */}
         {report && (
           <div>
-            <button
-              onClick={() => setShowAllTargets(!showAllTargets)}
-              className="w-full pt-2 flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-indigo-600 font-semibold border-t border-slate-100 dark:border-slate-800/30 mt-3 cursor-pointer"
-            >
-              <span>{showAllTargets ? 'Show Less Targets' : 'Expand Less Important Targets'}</span>
-              {showAllTargets ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/30 mt-3">
+              <button
+                onClick={() => setShowAllTargets(!showAllTargets)}
+                className="flex items-center gap-1 text-xs text-slate-400 hover:text-indigo-600 font-semibold cursor-pointer"
+              >
+                <span>{showAllTargets ? 'Show Less Targets' : 'Expand Less Important Targets'}</span>
+                {showAllTargets ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+              
+              <button
+                onClick={() => setIsSettingsModalOpen(true)}
+                className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 font-semibold cursor-pointer"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Settings</span>
+              </button>
+            </div>
 
             {showAllTargets && (
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-mono py-2 bg-slate-50 dark:bg-slate-900/40 rounded-2xl px-3 animation-slide-down">
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs py-2 bg-slate-50 dark:bg-slate-900/40 rounded-2xl px-2.5 animation-slide-down">
                 {Object.entries(report?.dailyNutrientTargets || {}).map(([key, val]) => {
-                  if (['calories', 'saturatedFat', 'sodium'].includes(key)) return null;
+                  if (['calories', 'saturatedFat', 'sodium', 'steps'].includes(key)) return null;
+                  
+                  const baseTarget = parseTarget(val, 0);
+                  const unit = parseUnit(val, fallbackUnits[key] || 'g');
+                  const actual = Number(timeframeTotals[key] || 0);
+                  const adjustedTarget = getAdjustedTarget(key, baseTarget);
+                  
+                  const pct = adjustedTarget > 0 ? (actual / adjustedTarget) * 100 : 0;
+                  
+                  // Decide if this nutrient is a limit or a requirement
+                  // Limits: addedSugar, saturatedFat, sodium, totalFat
+                  const isLimit = ['addedSugar', 'saturatedFat', 'sodium', 'totalFat'].includes(key);
+                  const isOver = actual > adjustedTarget;
+                  
+                  let barColor = 'bg-indigo-600';
+                  if (isLimit) {
+                    barColor = isOver ? 'bg-rose-500' : 'bg-emerald-500';
+                  } else {
+                    barColor = actual >= adjustedTarget ? 'bg-emerald-500' : 'bg-indigo-600';
+                  }
+
+                  const formattedActual = formatValue(actual);
+
                   return (
-                    <div key={key} className="flex flex-col py-1 border-b border-slate-100 dark:border-slate-800/30">
-                      <span className="text-[10px] text-slate-400 capitalize">{key.replace(/([A-Z])/g, ' $1')}</span>
-                      <span className="font-semibold text-slate-700 dark:text-slate-200">{val}</span>
+                    <div key={key} className="flex flex-col p-2.5 bg-white dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800/60 rounded-2xl space-y-1 shadow-sm">
+                      <div className="flex justify-between items-start text-[10px] leading-tight">
+                        <span className="text-slate-500 dark:text-slate-400 font-bold capitalize truncate max-w-[80px]">
+                          {key.replace(/([A-Z])/g, ' $1').trim()}
+                        </span>
+                        <span className="text-slate-400 dark:text-slate-500 font-semibold font-mono text-[9px] whitespace-nowrap">
+                          {formattedActual}/{adjustedTarget}{unit}
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                          style={{ width: `${Math.min(100, pct)}%` }}
+                        />
+                      </div>
                     </div>
                   );
                 })}
@@ -466,6 +723,128 @@ export default function HomeTab({
           </div>
         )}
       </div>
+
+      {/* Settings Modal */}
+      {isSettingsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
+            {/* Header */}
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800/50">
+              <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm flex items-center gap-2">
+                <Settings className="w-4 h-4 text-indigo-600" />
+                Target Budget Settings
+              </h3>
+              <button
+                onClick={() => setIsSettingsModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Explanation card */}
+            <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-500/10 rounded-2xl text-xs text-indigo-950 dark:text-indigo-200/90 leading-relaxed space-y-1">
+              <span className="font-bold block text-indigo-900 dark:text-indigo-300">How Rolling Budget Works</span>
+              <p>
+                Adjusts your target today based on your previous days' averages. Over-consuming reduces today's allowance, while under-consuming increases it, up to your authorized limit.
+              </p>
+            </div>
+
+            {/* Form Fields */}
+            <div className="space-y-4">
+              {/* Toggle */}
+              <div className="flex items-center justify-between p-1">
+                <div className="space-y-0.5">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Enable Rolling Target</span>
+                  <p className="text-[10px] text-slate-400">Adapt targets dynamically based on history</p>
+                </div>
+                <button
+                  onClick={() => setRollingEnabled(!rollingEnabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+                    rollingEnabled ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-800'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      rollingEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {rollingEnabled && (
+                <>
+                  {/* Rolling Days */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold text-slate-850 dark:text-slate-250">
+                      <span>Rolling Timeframe</span>
+                      <span className="text-indigo-650 dark:text-indigo-400 font-mono">{rollingDays} Days</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="2"
+                      max="30"
+                      value={rollingDays}
+                      onChange={(e) => setRollingDays(parseInt(e.target.value))}
+                      className="w-full accent-indigo-600 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-slate-400">Uses the last {rollingDays - 1} logged days to calibrate today's target.</p>
+                  </div>
+
+                  {/* Authorization Limit % */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold text-slate-850 dark:text-slate-250">
+                      <span>Maximum Adjustment Limit</span>
+                      <span className="text-indigo-650 dark:text-indigo-400 font-mono">{rollingAllowance}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="5"
+                      max="100"
+                      step="5"
+                      value={rollingAllowance}
+                      onChange={(e) => setRollingAllowance(parseInt(e.target.value))}
+                      className="w-full accent-indigo-600 cursor-pointer"
+                    />
+                    <p className="text-[9px] text-slate-400">Cap the target fluctuation to a maximum of ±{rollingAllowance}% of the base budget.</p>
+                  </div>
+                </>
+              )}
+
+              {/* View Timeframe Selection */}
+              <div className="space-y-1.5 border-t border-slate-100 dark:border-slate-800/50 pt-3">
+                <div className="flex justify-between text-xs font-bold text-slate-850 dark:text-slate-250">
+                  <span>Display View Timeframe</span>
+                  <span className="text-indigo-650 dark:text-indigo-400 font-mono">
+                    {viewTimeframe === '1' ? 'Today' : `Last ${viewTimeframe} Days`}
+                  </span>
+                </div>
+                <select
+                  value={viewTimeframe}
+                  onChange={(e) => setViewTimeframe(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950/45 border border-slate-150 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
+                >
+                  <option value="1">Last 1 day (Today)</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="14">Last 14 days</option>
+                  <option value="30">Last 30 days</option>
+                </select>
+                <p className="text-[9px] text-slate-400">Average daily intake across the selected timeframe compared to your adjusted budget.</p>
+              </div>
+            </div>
+
+            {/* Footer / Actions */}
+            <div className="pt-2">
+              <button
+                onClick={() => setIsSettingsModalOpen(false)}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs transition-colors cursor-pointer"
+              >
+                Save Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Food Ideas Section */}
       <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-4">

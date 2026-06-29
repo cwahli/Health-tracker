@@ -79,6 +79,14 @@ export interface NutrientBreakdown {
   niacin: number;          // mg
 }
 
+export interface FoodItemBreakdown {
+  name: string;
+  weightGrams: number;
+  calories: number;
+  saturatedFat: number;
+  sodium: number;
+}
+
 export interface FoodLog {
   id: string;
   date: string; // ISO string or YYYY-MM-DD
@@ -93,6 +101,7 @@ export interface FoodLog {
   nutrients: NutrientBreakdown;
   imageUrl?: string;
   imageUrls?: string[];
+  itemsBreakdown?: FoodItemBreakdown[];
 }
 
 export interface BiomarkerValue {

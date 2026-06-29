@@ -25,8 +25,10 @@ export default function TrendsTab({
 
   const parseTarget = (val: any, fallback: number) => {
     if (val === null || val === undefined) return fallback;
-    const clean = String(val).replace(/,/g, '').replace(/[^\d]/g, '');
-    const parsed = parseInt(clean, 10);
+    const cleanStr = String(val).replace(/,/g, '');
+    const matches = cleanStr.match(/\d+(\.\d+)?/g);
+    if (!matches || matches.length === 0) return fallback;
+    const parsed = parseFloat(matches[0]);
     return isNaN(parsed) ? fallback : parsed;
   };
 

@@ -5,6 +5,7 @@ import { Eye, EyeOff, CloudLightning, CloudCheck, RefreshCw, LogOut, Check, Shie
 import { db, auth } from '../firebase';
 import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import GoogleHealthIntegration from './GoogleHealthIntegration';
+import FullScreenLogViewer from './FullScreenLogViewer';
 
 const ColorPickerField = ({ label, value, onChange }: { label: string, value: string, onChange: (v: string) => void }) => (
   <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-150 dark:border-slate-800 gap-2">
@@ -64,6 +65,16 @@ interface HeaderProps {
   activeTab?: string;
 }
 
+const getSessionId = (): string => {
+  if (typeof window === 'undefined') return 'global';
+  let id = sessionStorage.getItem('app_session_id');
+  if (!id) {
+    id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    sessionStorage.setItem('app_session_id', id);
+  }
+  return id;
+};
+
 export default function Header({
   profile,
   setProfile,
@@ -92,10 +103,115 @@ export default function Header({
   const [now, setNow] = useState(Date.now());
   const t = translations[profile.language] || translations.en;
 
+  const [debugMode, setDebugMode] = useState(() => localStorage.getItem('agent_debug_mode') === 'true');
+  const [debugLogs, setDebugLogs] = useState<{ timestamp: string, message: string }[]>([]);
+  const [serverStartTime, setServerStartTime] = useState<number | null>(null);
+  const [isSendingLogs, setIsSendingLogs] = useState(false);
+  const [logsSendStatus, setLogsSendStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [showFullScreenDebugLogs, setShowFullScreenDebugLogs] = useState(false);
+
+  const handleToggleDebugMode = (enabled: boolean) => {
+    setDebugMode(enabled);
+    localStorage.setItem('agent_debug_mode', enabled ? 'true' : 'false');
+  };
+
+  const handleClearDebugLogs = async () => {
+    try {
+      const res = await fetch('/api/gemini/clear-debug-logs', { 
+        method: 'POST',
+        headers: {
+          'X-Session-ID': getSessionId()
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDebugLogs(data.logs || []);
+      }
+    } catch (err) {
+      console.error("Error clearing debug logs:", err);
+    }
+  };
+
+  const handleSendLogToAdmin = async () => {
+    setIsSendingLogs(true);
+    setLogsSendStatus('idle');
+    try {
+      const logsText = debugLogs.map(l => `[${l.timestamp}] ${l.message}`).join('\n');
+      const sessionId = getSessionId();
+      
+      const res = await fetch('/api/gemini/send-logs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-ID': sessionId
+        },
+        body: JSON.stringify({ logsText })
+      });
+      
+      if (res.ok) {
+        setLogsSendStatus('success');
+        
+        // Native mailto link fallback
+        const subject = encodeURIComponent(`Healthy App Debug Logs - Session ${sessionId}`);
+        const body = encodeURIComponent(`Hello Admin,\n\nHere is the compiled log history for session ${sessionId}:\n\n${logsText}`);
+        window.open(`mailto:cwah.liu@gmail.com?subject=${subject}&body=${body}`, '_blank');
+      } else {
+        setLogsSendStatus('error');
+      }
+    } catch (err) {
+      console.error("Error sending logs:", err);
+      setLogsSendStatus('error');
+    } finally {
+      setIsSendingLogs(false);
+      setTimeout(() => setLogsSendStatus('idle'), 4000);
+    }
+  };
+
+  // Fetch real server start time
+  useEffect(() => {
+    fetch('/api/status')
+      .then(r => r.json())
+      .then(d => {
+        if (d && typeof d.startTime === 'number') {
+          setServerStartTime(d.startTime);
+        }
+      })
+      .catch(e => console.error("Error fetching status:", e));
+  }, []);
+
   useEffect(() => {
     let interval: any;
     if (showDbInteractionsOverlay) {
       interval = setInterval(() => setNow(Date.now()), 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [showDbInteractionsOverlay]);
+
+  useEffect(() => {
+    let interval: any;
+    if (showDbInteractionsOverlay) {
+      const fetchLogs = async () => {
+        try {
+          const res = await fetch('/api/gemini/debug-logs', {
+            headers: {
+              'X-Session-ID': getSessionId()
+            }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.logs)) {
+              setDebugLogs(data.logs);
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching debug logs:", err);
+        }
+      };
+      
+      fetchLogs(); // initial fetch
+      interval = setInterval(fetchLogs, 1500); // poll every 1.5s
     }
     return () => {
       if (interval) clearInterval(interval);
@@ -134,8 +250,9 @@ export default function Header({
   };
 
   return (
-    <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800/80 px-6 py-4 sticky top-0 z-40 shadow-sm transition-colors duration-200">
-      <div className="max-w-md mx-auto flex items-center justify-between gap-3">
+    <>
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800/80 px-6 py-4 sticky top-0 z-40 shadow-sm transition-colors duration-200">
+        <div className="max-w-md mx-auto flex items-center justify-between gap-3">
         {/* Profile Info Row */}
         <div className="flex items-center gap-4 flex-1 min-w-0">
           <button 
@@ -187,6 +304,7 @@ export default function Header({
           </button>
         </div>
       </div>
+    </header>
 
       {/* Editing Dialog Slide-down for Profile Parameters */}
       {isEditing && (
@@ -754,8 +872,8 @@ export default function Header({
 
       {/* Database Interactions Live Sync Overlay */}
       {showDbInteractionsOverlay && (
-        <div id="db-interactions-overlay" className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh] animation-fade-in text-slate-850 dark:text-slate-100">
+        <div id="db-interactions-overlay" className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl w-full max-w-xl overflow-hidden flex flex-col max-h-[80vh] animation-fade-in text-slate-850 dark:text-slate-100">
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -764,7 +882,7 @@ export default function Header({
                   <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Live Database Operations</h2>
                   <span className="text-xs font-normal text-slate-400 block mt-0.5">
                     {(() => {
-                      const buildTime = 1782726464000; // June 29, 2026 00:07:44 GMT-0700
+                      const buildTime = serverStartTime || 1782721085000;
                       const diffMs = Math.max(0, now - buildTime);
                       const diffMins = Math.floor(diffMs / 60000);
                       return diffMins < 1 ? 'last published just now' : `last published ${diffMins} min ago`;
@@ -879,6 +997,63 @@ export default function Header({
                 </div>
               </div>
 
+              {/* AI Agent Live thinking / Debug Logs section */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/40 border border-slate-150 dark:border-slate-800 rounded-2xl mt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <span className="block text-[10px] font-bold text-slate-400 dark:text-slate-550 uppercase tracking-wider">
+                      🔬 AI Agent Live thinking Process
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                      View real-time LLM API handshakes & timeouts
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer select-none">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={debugMode}
+                      onChange={(e) => handleToggleDebugMode(e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-750 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+
+                {debugMode && (
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span>{debugLogs.length} events logged in this session</span>
+                      <button 
+                        onClick={handleClearDebugLogs}
+                        className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 rounded-xl text-[10px] font-bold text-slate-600 dark:text-slate-300 transition-colors"
+                      >
+                        Clear Logs
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowFullScreenDebugLogs(true)}
+                      className="w-full py-3 bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:scale-[1.01]"
+                    >
+                      <span>🔍 Open Full-Screen Diagnostic Log Viewer</span>
+                    </button>
+
+                    <FullScreenLogViewer
+                      isOpen={showFullScreenDebugLogs}
+                      onClose={() => setShowFullScreenDebugLogs(false)}
+                      title="AI Agent Diagnostic Log History"
+                      logsText={debugLogs.map(l => `[${l.timestamp}] ${l.message}`).join('\n')}
+                      onSendToAdmin={handleSendLogToAdmin}
+                      isSendingLogs={isSendingLogs}
+                      logsSendStatus={logsSendStatus}
+                      onClearLogs={handleClearDebugLogs}
+                      eventsCount={debugLogs.length}
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* List of transactions */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -969,6 +1144,6 @@ export default function Header({
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 }
