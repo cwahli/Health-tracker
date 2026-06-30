@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { UserProfile, BiomarkerLog, ChatMessage } from '../types';
 import { translations } from '../utils/translations';
 import { ShieldAlert, ClipboardList, Trash2, ChevronDown, ChevronUp, LineChart as LineChartIcon, BrainCircuit, AlertCircle } from 'lucide-react';
-import { biomarkerDefinitions, getBiomarkerStatus, getBiomarkerColor, getBiomarkerStatusLabel, BiomarkerDefinition, isAsianEthnicity } from '../utils/biomarkers';
+import { biomarkerDefinitions, getBiomarkerStatus, getBiomarkerColor, getBiomarkerStatusLabel, BiomarkerDefinition, isAsianEthnicity, getPhysiologicalBucket } from '../utils/biomarkers';
 import ReviewBiomarkerModal from './ReviewBiomarkerModal';
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
 import CombineBiomarkersModal from './CombineBiomarkersModal';
@@ -14,7 +14,7 @@ interface MedicalHistoryTabProps {
   hideSensitive: boolean;
   onDeleteBiomarkerLog: (id: string) => void;
   onEditBiomarkerLog: (id: string, key: string, value: string | number, newDate?: string) => void;
-  onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string) => void;
+  onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string, entries?: { date: string | null; biomarkers: { [key: string]: number | string } }[]) => void;
   onCombineBiomarkers?: (
     targetKey: string,
     targetDef: { name: string; unit: string; normalRange: string; description: string },
@@ -49,7 +49,7 @@ export default function MedicalHistoryTab({
   onDismissBmiAlert,
 }: MedicalHistoryTabProps) {
   const t = translations[profile.language] || translations.en;
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'lipids' | 'glucose' | 'kidney' | 'blood' | 'inflammation' | 'hormones' | 'other'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'metabolic' | 'hepatic' | 'renal' | 'hematology' | 'biometrics' | 'other'>('all');
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
@@ -61,11 +61,11 @@ export default function MedicalHistoryTab({
 
   const categories = [
     { id: 'all', label: 'All Markers' },
-    { id: 'lipids', label: 'Lipid Panel' },
-    { id: 'glucose', label: 'Glycemic Controls' },
-    { id: 'kidney', label: 'Kidney Health' },
-    { id: 'blood', label: 'Blood Counts' },
-    { id: 'inflammation', label: 'Inflammation & Vitamins' },
+    { id: 'metabolic', label: 'Metabolic' },
+    { id: 'hepatic', label: 'Hepatic' },
+    { id: 'renal', label: 'Renal' },
+    { id: 'hematology', label: 'Hematology' },
+    { id: 'biometrics', label: 'Biometrics' },
     { id: 'other', label: 'Other' }
   ];
 
@@ -160,12 +160,7 @@ export default function MedicalHistoryTab({
   const filteredBiomarkers = useMemo(() => {
     let filtered = allDefinitions.filter(def => {
       if (selectedCategory === 'all') return true;
-      if (selectedCategory === 'lipids') return def.category === 'lipids';
-      if (selectedCategory === 'glucose') return def.category === 'blood_sugar';
-      if (selectedCategory === 'kidney') return def.category === 'kidneys';
-      if (selectedCategory === 'blood') return def.category === 'hematology';
-      if (selectedCategory === 'inflammation') return def.category === 'inflammation' || def.category === 'vitamins';
-      return def.category === selectedCategory;
+      return getPhysiologicalBucket(def.category, def.key) === selectedCategory;
     });
 
     // Sort by importance: critical > high/low > normal > unknown > no data
@@ -174,7 +169,7 @@ export default function MedicalHistoryTab({
       if (val === undefined) return -1;
       
       const def = allDefinitions.find(d => d.key === key);
-      const status = getBiomarkerStatus(key, Number(val), def?.normalRange);
+      const status = getBiomarkerStatus(key, val, def?.normalRange);
       
       if (status === 'critical') return 4;
       if (status === 'high' || status === 'low') return 3;
@@ -231,7 +226,7 @@ export default function MedicalHistoryTab({
           {filteredBiomarkers.map((def) => {
             const val = biomarkers[def.key];
             const hasVal = val !== undefined;
-            const status = hasVal ? getBiomarkerStatus(def.key, Number(val), def.normalRange) : 'unknown';
+            const status = hasVal ? getBiomarkerStatus(def.key, val, def.normalRange) : 'unknown';
             const colorClass = getBiomarkerColor(status);
             const isExpanded = expandedKey === def.key;
 

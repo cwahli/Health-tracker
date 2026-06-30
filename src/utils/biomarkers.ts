@@ -462,4 +462,27 @@ export const hasBmiPendingAlert = (profile: UserProfile, dismissedAlerts: { [key
   return !dismissedAlerts[fingerprint];
 };
 
+export function getPhysiologicalBucket(category: string, key?: string): 'metabolic' | 'hepatic' | 'renal' | 'hematology' | 'biometrics' | 'other' {
+  const cat = (category || '').toLowerCase();
+  const k = (key || '').toLowerCase();
+  
+  if (k === 'bmi' || k === 'weight' || k === 'height' || k.includes('waist') || k.includes('circumference') || k.includes('biometric')) {
+    return 'biometrics';
+  }
+  if (cat === 'blood_sugar' || cat === 'lipids' || cat === 'metabolic' || k === 'hba1c' || k === 'fasting_glucose' || k === 'total_cholesterol' || k === 'ldl' || k === 'hdl' || k === 'triglycerides' || k === 'apob') {
+    return 'metabolic';
+  }
+  if (cat === 'liver' || cat === 'hepatic' || k === 'alt' || k === 'ast' || k === 'alp' || k === 'bilirubin') {
+    return 'hepatic';
+  }
+  if (cat === 'kidneys' || cat === 'renal' || k === 'creatinine' || k === 'egfr' || k === 'urea' || k === 'uric_acid' || k === 'albumin') {
+    return 'renal';
+  }
+  if (cat === 'hematology' || k === 'wbc' || k === 'rbc' || k === 'hemoglobin' || k === 'haemoglobin' || k === 'platelets' || k === 'hematocrit') {
+    return 'hematology';
+  }
+  return 'other';
+}
+
+
 

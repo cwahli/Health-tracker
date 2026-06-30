@@ -44,6 +44,18 @@ export interface UserProfile {
     }
   };
   lastUpdatedAt?: number;
+  agentTriageSummary?: string;       // Agent 1 summary
+  agentDiagnosticSummary?: string;   // Agent 2 summary
+  agentContextualizerSummary?: string;// Agent 3 summary
+  agentInterventionSummary?: string; // Agent 4 summary
+  agentLiteratureSummary?: string;   // Agent 5 summary
+  agent2TimelineProjections?: {
+    year2: string;
+    year5: string;
+    year10: string;
+  };
+  agent2GapTasks?: string[];
+  agent4Projections?: string[];
 }
 
 export interface NutrientBreakdown {
@@ -191,8 +203,23 @@ export interface ChatMessage {
   pendingFoodLog?: Partial<FoodLog>;
   pendingFoodIdeas?: FoodIdea[];
   pendingBiomarkers?: { [key: string]: number | string };
+  pendingBiomarkerEntries?: { date: string | null; biomarkers: { [key: string]: number | string } }[];
   pendingProfile?: Partial<UserProfile>;
   pendingDate?: string;
+  mode?: 'new_log' | 'discussion' | 'modify' | 'plan' | 'extract_chunk';
+  status?: 'completed' | 'needs_continuation' | 'waiting_for_user';
+  planningDetails?: {
+    estimatedTotalMetrics: number | null;
+    batchesRequired: number | null;
+    maxMetricsPerBatch: number;
+  };
+  lastProcessedItem?: string | null;
+  modificationCommand?: {
+    action: 'update_biomarker' | 'update_profile' | 'remove_biomarker';
+    keyName: string;
+    newValue?: string | number;
+    date?: string;
+  }[];
   pendingCustomBiomarkerDefs?: {
     [key: string]: {
       name: string;
@@ -209,6 +236,8 @@ export interface ChatMessage {
     description: string;
     benefitRisk: string;
   };
+  agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | null;
+  agentResult?: any;
 }
 
 export interface DbInteraction {

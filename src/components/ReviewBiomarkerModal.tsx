@@ -83,7 +83,7 @@ export default function ReviewBiomarkerModal({
   }, [profile.customBiomarkers]);
 
   const def = allDefinitions.find(d => d.key === biomarkerKey);
-  const status = getBiomarkerStatus(biomarkerKey, Number(currentValue), def?.normalRange || '');
+  const status = getBiomarkerStatus(biomarkerKey, currentValue, def?.normalRange || '');
   const descriptionText = def ? (def.descriptions[profile.language] || def.descriptions.en) : '';
 
   useEffect(() => {
@@ -381,7 +381,7 @@ export default function ReviewBiomarkerModal({
                 <div className="mt-2 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/30 rounded-xl p-3 max-w-[85%] w-full flex items-center justify-between">
                   <div>
                     <span className="block text-[10px] text-indigo-500 font-bold uppercase tracking-wide">Proposed Update</span>
-                    <span className="text-sm font-bold text-indigo-700 dark:text-indigo-300">{msg.pendingBiomarkers[biomarkerKey]} {def.unit}</span>
+                    <span className="text-sm font-bold text-indigo-700 dark:text-indigo-300">{msg.pendingBiomarkers[biomarkerKey]} {String(msg.pendingBiomarkers[biomarkerKey]).includes(def.unit) ? '' : def.unit}</span>
                   </div>
                   <div className="flex gap-2">
                     <button

@@ -691,23 +691,13 @@ app.post("/api/sync/load", (req, res) => {
 // Gemini Food Analyze Endpoint
 app.post("/api/gemini/food-analyze", async (req, res) => {
   try {
-    const { message, image, images, imageDates, history, userProfile, engine, biomarkersNeedingImprovement, remainingAllowance, userId } = req.body;
+    const { message, image, images, imageDates, history, userProfile, engine, biomarkersNeedingImprovement, remainingAllowance, userId, activeMeal } = req.body;
 
-    // 1. Intercept prompt & read current active state from Firestore
-    let activeMeal: any = null;
-    if (userId && db) {
-      try {
-        const docRef = db.collection("user_meals").doc(userId);
-        const docSnap = await docRef.get();
-        if (docSnap.exists) {
-          activeMeal = docSnap.data();
-          addDebugLog(`[Firestore] Loaded active meal for user ${userId}: ${activeMeal.name}`);
-        } else {
-          addDebugLog(`[Firestore] No active meal found for user ${userId}`);
-        }
-      } catch (err: any) {
-        addDebugLog(`[Firestore Read Error] Failed to read active meal: ${err.message || err}`);
-      }
+    // 1. Intercept prompt & read current active state from Request Body (passed from client)
+    if (activeMeal) {
+      addDebugLog(`[Client State] Received active meal: ${activeMeal.name}`);
+    } else {
+      addDebugLog(`[Client State] No active meal received.`);
     }
 
     // Check if key is mock
@@ -780,11 +770,7 @@ app.post("/api/gemini/food-analyze", async (req, res) => {
           }
         }
 
-        if (userId && db) {
-          try {
-            await db.collection("user_meals").doc(userId).set(activeMeal);
-          } catch(e) {}
-        }
+        // We removed offline mock write to user_meals to avoid permission issues
 
         return res.json({
           text: `[Simulated Offline Mod] Modifying active meal: **${activeMeal.name}** to new weights/items. Recalculated all 30 sub-nutrients mathematically offline to save tokens and ensure precision.`,
@@ -821,12 +807,6 @@ app.post("/api/gemini/food-analyze", async (req, res) => {
         }
       };
 
-      if (userId && db) {
-        try {
-          await db.collection("user_meals").doc(userId).set(mockNewLog);
-        } catch(e) {}
-      }
-
       return res.json({
         text: "Please note: GEMINI_API_KEY is not configured in the Secrets manager. Simulated Avocado Salmon Toast saved to your Firestore active state:",
         data: mockNewLog
@@ -856,8 +836,16 @@ app.post("/api/gemini/food-analyze", async (req, res) => {
         `- Ethnicity: ${userProfile.ethnicity || 'Unknown'}\n`;
     }
 
+    const userTimezone = req.body.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let localDateStr;
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: userTimezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+      localDateStr = formatter.format(new Date());
+    } catch(e) {
+      localDateStr = new Date().toISOString().split("T")[0];
+    }
     const localTime = new Date().toLocaleTimeString();
-    const timeCtx = `\nCURRENT TIME CONTEXT: ${localTime}\n`;
+    const timeCtx = `\nCURRENT TIME CONTEXT: ${localDateStr} ${localTime}\nCRITICAL INSTRUCTION: You MUST use "${localDateStr}" in the "date" field of "foodData" unless the user explicitly provides a different date in the chat.\n`;
 
     let imageCtx = "";
     if (imagePayloads && imagePayloads.length > 0) {
@@ -962,15 +950,19 @@ Current User Input: "${message}"`;
       responseMimeType: "application/json"
     });
 
-    const firstBrace = textOutput.indexOf("{");
-    const lastBrace = textOutput.lastIndexOf("}");
-    let cleanJson = textOutput;
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      cleanJson = textOutput.substring(firstBrace, lastBrace + 1);
-    } else {
-      cleanJson = cleanJson.trim().replace(/^```json/, "").replace(/```$/, "").trim();
+    let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
+    let rawParsed;
+    try {
+      rawParsed = JSON.parse(cleanJson);
+    } catch (parseErr: any) {
+      const firstBrace = cleanJson.indexOf("{");
+      const lastBrace = cleanJson.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        rawParsed = JSON.parse(cleanJson.substring(firstBrace, lastBrace + 1));
+      } else {
+        throw parseErr;
+      }
     }
-    const rawParsed = JSON.parse(cleanJson);
 
     const mode = rawParsed.mode || "new_log";
 
@@ -1042,16 +1034,6 @@ Current User Input: "${message}"`;
             sodium: parsedData.nutrients.sodium
           }
         ];
-      }
-
-      // 1 Firestore Write to save new active state
-      if (userId && db) {
-        try {
-          await db.collection("user_meals").doc(userId).set(parsedData);
-          addDebugLog(`[Firestore] Saved new active meal to user_meals/${userId}`);
-        } catch (err: any) {
-          addDebugLog(`[Firestore Write Error]: ${err.message || err}`);
-        }
       }
 
       return res.json({
@@ -1195,16 +1177,6 @@ Current User Input: "${message}"`;
         }
       }
 
-      // Write newly calculated meal back to Firestore
-      if (userId && db) {
-        try {
-          await db.collection("user_meals").doc(userId).set(activeMeal);
-          addDebugLog(`[Firestore] Saved modified active meal back to user_meals/${userId}`);
-        } catch (err: any) {
-          addDebugLog(`[Firestore Write Error]: ${err.message || err}`);
-        }
-      }
-
       return res.json({
         text: rawParsed.message || "I have recalculated your meal's metrics with precision based on your instructions.",
         data: activeMeal
@@ -1292,7 +1264,362 @@ Current User Input: "${message}"`;
 // Gemini Medical/Biomarkers Analyze Endpoint
 app.post("/api/gemini/medical-analyze", async (req, res) => {
   try {
-    const { message, image, images, imageDates, history, userProfile, engine, existingBiomarkers } = req.body;
+    const { 
+      message, 
+      image, 
+      images, 
+      imageDates, 
+      history, 
+      userProfile, 
+      engine, 
+      existingBiomarkers, 
+      agentType, 
+      biomarkerHistory, 
+      biomarkers, 
+      recentMeals 
+    } = req.body;
+
+    if (agentType) {
+      let systemInstruction = "";
+      let mockData: any = {};
+
+      if (agentType === "agent1") {
+        systemInstruction = `You are a Clinical Data Preparation AI (Clinical Triage Agent). Your job is to clean, deduplicate, and organize raw medical history data (including blood test results, biometrics like BMI or waist size, and recent logs) into a structured JSON format.
+
+=== CRITICAL CLINICAL DIRECTIVES ===
+1. SAME-DATE DEDUPLICATION: Often, the exact same biomarker is logged multiple times on the exact same date under slightly different names (e.g., "Serum ALT" and "ALT level" on 2026-06-05). You MUST silently merge same-day duplicates. Keep only ONE entry for that specific date using the standard clinical name and exact numeric value.
+2. PRESERVE HISTORICAL RECORDS: Do NOT merge entries from DIFFERENT dates. If the user has a "Total Cholesterol" reading in 2024 and another in 2026, preserve both so downstream agents can see the historical trend.
+3. PHYSIOLOGICAL BUCKETS: Categorize every marker into one of: 'Metabolic', 'Hepatic', 'Renal', 'Hematology', 'Biometrics', 'Other'.
+4. STRICT JSON OUTPUT SCHEMA:
+{
+  "message": "A conversational reply summarizing your cleaning/organization findings (e.g., 'I analyzed the medical history, identified 12 biomarkers, merged 2 duplicate same-day entries on 2026-06-05, and grouped them into standard physiological buckets.')",
+  "entriesCount": number, // Total number of unique biomarker logs parsed across dates
+  "suggestedChanges": [
+    {
+      "date": "YYYY-MM-DD",
+      "biomarker": "string",
+      "action": "merge" | "keep" | "delete",
+      "value": "string or number",
+      "reason": "Reason for suggestion"
+    }
+  ],
+  "buckets": [
+    {
+      "systemName": "Metabolic" | "Hepatic" | "Renal" | "Hematology" | "Biometrics" | "Other",
+      "biomarkers": [
+        {
+          "name": "string",
+          "history": [
+            { "date": "YYYY-MM-DD", "value": "number or string", "unit": "string" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+Return ONLY raw JSON. Do not include markdown wraps or code blocks.`;
+
+        mockData = {
+          message: "I have cleaned and deduplicated your raw biomarker data, merging same-day duplicates and grouping them into standard physiological buckets.",
+          entriesCount: 15,
+          suggestedChanges: [
+            {
+              date: "2026-06-05",
+              biomarker: "alt",
+              action: "merge",
+              value: 41,
+              reason: "Merged duplicate 'Serum ALT' and 'ALT' on 2026-06-05."
+            }
+          ],
+          buckets: [
+            {
+              systemName: "Metabolic",
+              biomarkers: [
+                { name: "HbA1c", history: [{ date: "2026-06-05", value: 40, unit: "mmol/mol" }] }
+              ]
+            }
+          ]
+        };
+      } else if (agentType === "agent2") {
+        systemInstruction = `You are an expert Clinical Pathologist and Prognostics AI (Diagnostic & Prognostic Agent). Analyze the provided biomarker history in the context of the user's specific demographics.
+
+USER PROFILE:
+- Age: ${userProfile?.age || 'Not provided'}
+- Gender: ${userProfile?.gender || 'Not provided'}
+- Ethnicity: ${userProfile?.ethnicity || 'Not provided'}
+- Blood Type: ${userProfile?.bloodType || 'Not provided'}
+
+BIOMARKER HISTORY PROVIDED:
+${JSON.stringify(biomarkerHistory || [])}
+
+RECENT MEALS (Dish Names Only):
+${JSON.stringify(recentMeals || [])}
+
+=== CLINICAL DIRECTIVES ===
+1. FAIR ASSESSMENT: Do not invent pathology. If the user's biomarkers are healthy, state clearly that their systems are highly optimized. Only flag authentic, clinically significant risks based on demographic thresholds (e.g. lower BMI risk limits for South Asian/East Asian ethnicities).
+2. TIMELINE PROJECTIONS:
+   - If healthy: Project maintenance of vitality and low metabolic disease risk over 2, 5, and 10 years.
+   - If at risk: Project the logical biological and clinical progression over 2, 5, and 10 years if no dietary or lifestyle changes are made (e.g., progression from high fasting glucose/HbA1c to Type 2 Diabetes and chronic kidney disease).
+3. GAP ANALYSIS: Identify critical missing information. If everything is covered, state "No additional testing required." If there are risks or questions, recommend exactly 1-2 advanced confirmation tests (e.g., Fasting Insulin, ApoB, Cystatin-C) to verify the gap.
+4. STRICT JSON OUTPUT SCHEMA:
+{
+  "message": "Conversational diagnostic and prognostic summary tailored to this user profile.",
+  "primaryDiagnosis": "Primary systemic health assessment summary.",
+  "timelineProjections": {
+    "year2": "2-Year Projection details",
+    "year5": "5-Year Projection details",
+    "year10": "10-Year Projection details"
+  },
+  "recommendedTests": [
+    {
+      "testName": "Fasting Insulin",
+      "reason": "To confirm glucose sensitivity and check insulin resistance."
+    }
+  ]
+}
+Return ONLY raw JSON.`;
+
+        mockData = {
+          message: "Based on your clinical markers, your metabolic markers are mostly healthy, but fasting glucose is slightly elevated relative to optimal ranges for your demographic.",
+          primaryDiagnosis: "Slightly elevated glycemic markers; cardiovascular and renal health are highly optimized.",
+          timelineProjections: {
+            year2: "Maintaining current metabolic profiles; slight progression in glycemic metrics if diet remains unadjusted.",
+            year5: "Mild risk of insulin resistance progression; cardiovascular health remains solid.",
+            year10: "Metabolic risk increases by 5% if glycemic spikes are not managed."
+          },
+          recommendedTests: [
+            {
+              testName: "Fasting Insulin",
+              reason: "To rule out insulin resistance in light of borderline-high glucose."
+            }
+          ]
+        };
+      } else if (agentType === "agent3") {
+        systemInstruction = `You are a Clinical Education AI (Biomarker Contextualizer). Your job is to generate highly personalized educational content, adjusted normal reference ranges, and specific risk explanations based on the user's demographics and previous diagnostic assessment.
+
+USER PROFILE:
+- Age: ${userProfile?.age || 'Not provided'}
+- Gender: ${userProfile?.gender || 'Not provided'}
+- Ethnicity: ${userProfile?.ethnicity || 'Not provided'}
+
+BIOMARKERS:
+${JSON.stringify(biomarkers || {})}
+
+DIAGNOSTIC SUMMARY:
+${req.body.agentDiagnosticSummary || 'Optimized or no major pathologies flagged.'}
+
+=== DIRECTIVES ===
+1. DEMOGRAPHICALLY ADJUSTED NORMAL RANGES: For every provided clinical metric, provide a profile-adjusted normal range. Explain why this reference range was adjusted for their age, gender, or ethnicity (e.g. muscle mass and creatinine, age-related eGFR, ethnic-specific lipid targets).
+2. EDUCATIONAL DESCRIPTIONS: Write a clear 2-sentence description of what each biomarker is and its physiological role.
+3. SPECIFIC RISK CONTEXT: For any marker identified as at-risk or abnormal, write a personalized 3-4 sentence explanation of *why* this specific value is critical or dangerous for *this specific user profile*.
+4. STRICT JSON OUTPUT SCHEMA:
+{
+  "message": "Conversational summary of your educational and reference range adjustments.",
+  "contextualizedBiomarkers": [
+    {
+      "name": "hba1c",
+      "userValue": 40,
+      "profileAdjustedNormalRange": "20 - 42 mmol/mol",
+      "description": "HbA1c measures the percentage of blood sugar attached to hemoglobin. It represents your average blood glucose levels over the past 2 to 3 months.",
+      "status": "Healthy" | "At Risk",
+      "specificRiskContext": "For a patient of your demographic group, keeping HbA1c below 42 mmol/mol is optimal to prevent vascular damage and glycemic stress."
+    }
+  ]
+}
+Return ONLY raw JSON.`;
+
+        mockData = {
+          message: "I have calibrated the reference ranges for your biomarkers to your precise age, gender, and ethnicity, providing demographic-specific educational contexts.",
+          contextualizedBiomarkers: [
+            {
+              name: "hba1c",
+              userValue: 40,
+              profileAdjustedNormalRange: "20 - 42 mmol/mol",
+              description: "HbA1c measures the percentage of blood sugar attached to hemoglobin. It represents your average blood glucose levels over the past 2 to 3 months.",
+              status: "Healthy",
+              specificRiskContext: "Your HbA1c is in the excellent, optimal zone for your demographic group."
+            }
+          ]
+        };
+      } else if (agentType === "agent4") {
+        systemInstruction = `You are a Precision Medicine & Lifestyle Coaching AI (Precision Intervention Agent). Translate the user's clinical biomarkers and risk assessment into a strict, trackable daily protocol.
+
+USER PROFILE:
+- Age: ${userProfile?.age || 'Not provided'}
+- Weight: ${userProfile?.weight || 'Not provided'} kg
+- Height: ${userProfile?.height || 'Not provided'} cm
+- Gender: ${userProfile?.gender || 'Not provided'}
+
+BIOMARKERS:
+${JSON.stringify(biomarkers || {})}
+
+DIAGNOSTIC BACKGROUND:
+${req.body.agentDiagnosticSummary || 'Mainly healthy'}
+
+=== DIRECTIVES ===
+1. NUTRITION TARGETS: Generate strict daily targets for the app tracker. If a metabolic or hepatic risk was flagged, customize macronutrient/micronutrient limits mathematically (e.g. limiting saturated fats, increasing total fiber, targeting custom calories).
+2. ACTIVITY HABITS: Provide 2-3 highly specific daily habits (e.g., '7,500 steps', '30 minutes Zone 2 cardio', 'Limit screen time after 10 PM').
+3. MATHEMATICAL PROJECTIONS: Provide biological time-to-goal estimates based on the math of physiology.
+   - Example: 'Maintaining a 400 kcal daily deficit will lead to a 5 kg weight reduction to reach your optimal BMI of 22.5 in roughly 12 weeks.'
+   - Example: 'By adhering to less than 15g saturated fat daily, you can expect an LDL-C reduction of 15% in approximately 8-12 weeks.'
+4. STRICT JSON OUTPUT SCHEMA:
+{
+  "message": "Conversational explanation of your precision lifestyle design.",
+  "nutrientTargets": {
+    "calories": "1850",
+    "protein": "110",
+    "carbs": "220",
+    "fat": "50",
+    "saturatedFat": "15",
+    "totalFibre": "30",
+    "sodium": "1800",
+    "sugar": "25"
+  },
+  "activityChecklist": [
+    {
+      "habit": "Walk 8,000 steps daily",
+      "target": "8000 steps",
+      "type": "steps"
+    },
+    {
+      "habit": "Zone 2 aerobic exercise",
+      "target": "30 minutes",
+      "type": "cardio"
+    }
+  ],
+  "projections": [
+    "Adhering to this saturated fat limit will likely lower LDL-C by 10-15% within 12 weeks.",
+    "The daily fiber target will assist in glycemic stabilization, projecting a slight HbA1c drop of 1-2 mmol/mol over 3 months."
+  ]
+}
+Return ONLY raw JSON.`;
+
+        mockData = {
+          message: "I have created a high-precision, clinically aligned dietary and movement plan with mathematical timeline projections.",
+          nutrientTargets: {
+            calories: "1900",
+            protein: "105",
+            carbs: "210",
+            fat: "55",
+            saturatedFat: "14",
+            totalFibre: "32",
+            sodium: "1700",
+            sugar: "22"
+          },
+          activityChecklist: [
+            { habit: "Walk 7,500 steps daily", target: "7500 steps", type: "steps" },
+            { habit: "30 mins Zone 2 cardio", target: "30 minutes", type: "cardio" }
+          ],
+          projections: [
+            "Adhering to this fat threshold will lower LDL-C by ~12% in 8-12 weeks.",
+            "A 32g daily fiber intake stabilizes postprandial glucose, projecting metabolic efficiency in 4 weeks."
+          ]
+        };
+      } else if (agentType === "agent5") {
+        systemInstruction = `You are a Medical Literature Research AI (Medical Literature Agent). Summarize the latest peer-reviewed scientific consensus, clinical debates, and clinical trials relevant to this user's profile and biological risk markers.
+
+USER PROFILE:
+- Age: ${userProfile?.age || 'Not provided'}
+- Gender: ${userProfile?.gender || 'Not provided'}
+- Ethnicity: ${userProfile?.ethnicity || 'Not provided'}
+
+BIOMARKERS:
+${JSON.stringify(biomarkers || {})}
+
+IDENTIFIED DIAGNOSTICS:
+${req.body.agentDiagnosticSummary || 'Healthy baseline'}
+
+=== DIRECTIVES ===
+1. HIGHLIGHT SCHOLARLY TOPICS: Detail emerging consensus or debates (e.g. ApoB vs LDL-C tracking, cardiovascular risk algorithms like QRISK3 vs SCORE2, or dietary fiber's interaction with the gut microbiome).
+2. NO PRESCRIPTIONS: Present findings as a literature synthesis, citing primary medical guidelines (e.g. AHA, ESC, ADA, KDIGO).
+3. DETAILED BULLETS: Provide 3-4 distinct scholarly insights. Each insight must contain a bold title, a comprehensive summary paragraph, and a relevant citation/link (like a Pubmed search URL or medical association guideline URL).
+4. STRICT JSON OUTPUT SCHEMA:
+{
+  "message": "Conversational summary of your medical literature scan.",
+  "insights": [
+    {
+      "title": "ApoB as the Superior Predictor of Atherogenic Risk",
+      "summary": "Recent European Society of Cardiology (ESC) consensus guidelines highlight Apolipoprotein B (ApoB) as a more accurate indicator of total atherogenic particle concentration than standard LDL-C, particularly in individuals with borderline-high fasting glucose or metabolic syndrome.",
+      "link": "https://pubmed.ncbi.nlm.nih.gov/31475137/"
+    }
+  ]
+}
+Return ONLY raw JSON.`;
+
+        mockData = {
+          message: "I scanned the latest clinical literature databases (PubMed, Cochrane Library) and summarized three key consensus insights relevant to your metabolic and cardiovascular profile.",
+          insights: [
+            {
+              title: "ApoB as the Superior Predictor of Atherogenic Risk",
+              summary: "Recent European Society of Cardiology (ESC) consensus guidelines highlight Apolipoprotein B (ApoB) as a more accurate indicator of total atherogenic particle concentration than standard LDL-C, particularly in individuals with borderline-high fasting glucose or metabolic syndrome.",
+              link: "https://pubmed.ncbi.nlm.nih.gov/31475137/"
+            },
+            {
+              title: "Glycemic Stability and Preventive Cardiology Guidelines",
+              summary: "The American Diabetes Association (ADA) 2026 standards highlight early lifestyle intervention at borderline HbA1c thresholds, demonstrating a 58% reduction in the 10-year transition rate to formal insulin deficiency through physical activity and fiber loading.",
+              link: "https://pubmed.ncbi.nlm.nih.gov/34922236/"
+            }
+          ]
+        };
+      }
+
+      let textOutput = "";
+      if (process.env.GEMINI_API_KEY === undefined) {
+        textOutput = JSON.stringify(mockData);
+      } else {
+        let historyText = "";
+        if (history && history.length > 0) {
+          historyText = "Chat History:\n" + history.map((h: any) => `${h.role}: ${h.content}`).join("\n") + "\n\n";
+        }
+        
+        let imagePayload = null;
+        let imagesPayload: { mimeType: string, data: string }[] | undefined = undefined;
+        if (images && images.length > 0) {
+          imagesPayload = images.map((img: string) => {
+            const mimeType = img.split(";")[0].split(":")[1] || "image/jpeg";
+            const base64Data = img.split(",")[1];
+            return { mimeType, data: base64Data };
+          });
+          imagePayload = imagesPayload[0];
+        } else if (image) {
+          const mimeType = image.split(";")[0].split(":")[1] || "image/jpeg";
+          const base64Data = image.split(",")[1];
+          imagePayload = { mimeType, data: base64Data };
+        }
+
+        const imageCtx = imageDates && imageDates.length > 0 ? `The attached images were taken on these dates: ${imageDates.join(", ")}.` : "";
+        const promptText = `Chat History:\n${historyText}\n${imageCtx}\nUser message: "${message}"`;
+
+        textOutput = await callUnifiedLLM({
+          modelId: engine || "gemini-2.5-flash",
+          systemInstruction,
+          promptText,
+          imagePayload,
+          imagePayloads: imagesPayload,
+          responseMimeType: "application/json"
+        });
+      }
+
+      let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
+      let parsedData;
+      try {
+        parsedData = JSON.parse(cleanJson);
+      } catch (parseErr: any) {
+        const firstBrace = cleanJson.indexOf("{");
+        const lastBrace = cleanJson.lastIndexOf("}");
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          parsedData = JSON.parse(cleanJson.substring(firstBrace, lastBrace + 1));
+        } else {
+          throw parseErr;
+        }
+      }
+
+      return res.json({
+        text: parsedData.message || 'Analysis generated.',
+        agentType,
+        ...parsedData
+      });
+    }
 
     if (process.env.GEMINI_API_KEY === undefined) {
       return res.json({
@@ -1343,110 +1670,141 @@ app.post("/api/gemini/medical-analyze", async (req, res) => {
 
     const imageCtx = imageDates && imageDates.length > 0 ? `The attached images were taken on these dates: ${imageDates.join(", ")}.` : "";
 
-    const promptText = `${profileContext}
+    const existingKeys = existingBiomarkers && existingBiomarkers.length > 0 ? existingBiomarkers : [];
     
-    ${historyText}Analyze this medical query and extract any health biomarkers mentioned or visible in the document.
-    ${imageCtx}
-    User message: "${message}"
-    
-    You must extract any personal profile information if the user explicitly provides it in the Chat History or current message.
-    CRITICAL RULES:
-    1. The output JSON must represent the CUMULATIVE extracted information from the ENTIRE chat history and current message (but ONLY things the user actually typed or uploaded).
-    2. DO NOT output profile fields from the "Current User Profile" section in the JSON unless the user explicitly provided them during this chat session.
-    3. If the user corrects or updates a previously extracted biomarker value, date, or profile info in their current message, prioritize their updated value.
-    4. CRITICAL METRIC & UNIT CONSISTENCY:
-       - Always prefer the International Standard (mmol/L) for lipids (LDL, HDL, Total Cholesterol, Triglycerides) and blood sugar (Fasting Glucose) by default.
-       - If the report or input uses mmol/L, DO NOT extract it under standard keys that hardcode mg/dL if that would cause an impossible value mismatch. Instead, create a custom definition in 'customBiomarkerDefs' with the key (e.g., 'ldl' or 'total_cholesterol' can be customized by adding them to customBiomarkerDefs), unit as 'mmol/L', custom 'normalRange' (e.g., 'under 3.0 mmol/L' for ldl, 'under 5.2 mmol/L' for total_cholesterol, 'over 1.0 mmol/L' for hdl), and the correct numeric value.
-       - Ensure that the value and the normal range are ALWAYS consistent and use the exact same unit. Never mix them up!
-       - Double-check that the extracted numeric value is mathematically and medically realistic for the unit specified (e.g., Fasting Glucose of 5.5 mmol/L is realistic, whereas 5.5 mg/dL is impossible; 95 mg/dL is realistic, whereas 95 mmol/L is impossible). If you detect a mix-up, perform the correct conversion (e.g., mg/dL = mmol/L * 18 for glucose, or mg/dL = mmol/L * 38.67 for cholesterol) and output accurate, consistent metrics.
-    
-    Look for:
-    - age (number, in years)
-    - weight (number, in kg)
-    - height (number, in cm)
-    - ethnicity (string, e.g. "Caucasian", "Asian", "Hispanic", "African American", etc.)
-    - bloodType (string, e.g. "A+", "O-", "AB+", "B-")
-    - gender (string, e.g. "Male", "Female", "Other")
-    
-    Look for values and map them semantically to the following standard keys if they refer to the same biomarker (even if the wording is slightly different, e.g. "Total Chol" -> "total_cholesterol", "Serum Creatinine" -> "creatinine"):
-    - hba1c (%)
-    - fasting_glucose (mg/dL)
-    - fasting_insulin (uIU/mL)
-    - ldl (mg/dL)
-    - apob (mg/dL)
-    - total_cholesterol (mg/dL)
-    - hdl (mg/dL)
-    - triglycerides (mg/dL)
-    - egfr (mL/min/1.73m²)
-    - creatinine (mg/dL)
-    - bun (mg/dL)
-    - hgb (g/dL)
-    - rbc (M/uL)
-    - wbc (K/uL)
-    - platelets (K/uL)
-    - hscrp (mg/L)
-    - testosterone (ng/dL)
-    - vitamin_d (ng/mL)
-    - vitamin_b12 (pg/mL)
-    
-    ${existingBiomarkers && existingBiomarkers.length > 0 ? `Additionally, the user ALREADY has data for the following custom biomarker keys: ${JSON.stringify(existingBiomarkers)}. If any new extracted biomarker matches these semantically, please use the EXACT existing key string rather than creating a new variation.` : ''}
-    
-    If the biomarker does not match ANY of the standard keys or existing keys above, create a new snake_case key (e.g. "serum_albumin", "ast_level", "calcium").
-    
-    If you create ANY new custom keys, you MUST also provide a definition for it in a 'customBiomarkerDefs' object. The definition should include: 'name' (string), 'unit' (string), 'normalRange' (string, e.g. "3.5 - 5.0" or "< 100", use "Unknown" if not known), and 'description' (string, explaining what it is and what specifically happens if the profile goes outside the normal range; do not use generic text like 'Keeping this within normal range minimizes risk...').
+    let resumeCtx = "";
+    if (req.body.lastProcessedItem) {
+      resumeCtx = `\nPREVIOUS EXTRACTION STATE:\nYou previously stopped at: "${req.body.lastProcessedItem}".\nYou MUST start your next extraction chunk immediately AFTER this item in the user's data.\n`;
+    }
 
-    Respond strictly with a JSON object in this format:
+    const promptText = `Chat History:\n${historyText}\n${imageCtx}\nUser message: "${message}"${resumeCtx}`;
+
+    const systemInstruction = `You are an expert clinical laboratory data extraction agent. You extract blood biomarker numbers and personal profile data with extreme accuracy. Your response must be an exact single JSON object matching the requested structure. Never add markdown formatting or wrappers like \`\`\`json.
+
+CURRENT USER PROFILE:
+- Age: ${userProfile?.age || 'Not provided'}
+- Weight: ${userProfile?.weight || 'Not provided'} kg
+- Height: ${userProfile?.height || 'Not provided'} cm
+- Ethnicity: ${userProfile?.ethnicity || 'Not provided'}
+- Blood Type: ${userProfile?.bloodType || 'Not provided'}
+- Gender: ${userProfile?.gender || 'Not provided'}
+
+EXISTING DATABASE KEYS ALREADY IN USE: 
+[${existingKeys.join(', ')}]
+
+=== CRITICAL MEDICAL DATA EXTRACTION DIRECTIVE ===
+1. STRICT VERBATIM VALUES: You must extract the exact NUMERIC VALUE provided in the source text. NEVER convert international units to US units (e.g., if the text says 6.5 mmol/L, output exactly 6.5). DO NOT do math.
+2. HANDLING UNITS & NEW KEYS: You MUST ALWAYS append the exact unit from the document to your snake_case key (e.g., "total_cholesterol_mmol_l", "wbc_10_9_l") UNLESS the biomarker semantically matches a key in "EXISTING DATABASE KEYS ALREADY IN USE" AND the unit matches exactly. If the unit differs from an existing key or you don't know the existing key's unit, create a NEW key with the unit appended. DO NOT use generic keys like "total_cholesterol" without a unit appended.
+3. CUSTOM DEFINITIONS: Any time you create a new key, you MUST define it in the 'customBiomarkerDefs' object.
+4. PRESERVE SCALES: If a score is presented as a fraction (e.g., "8 /12"), convert it to the decimal or numerator if the schema requires a number, but note the scale in the customBiomarkerDefs description.
+
+=== MODE ROUTING DIRECTIVE (CRITICAL FOR LONG DATA) ===
+You operate in distinct modes based on the user's input:
+
+MODE A: PLAN_EXTRACTION (Triggered when user uploads new data)
+- DO NOT extract the data into the 'entries' array yet.
+- Scan the text and estimate the total number of individual biomarker results.
+- Calculate batches required. The MAXIMUM limit is 50 metrics per batch.
+- Set "mode": "plan", "status": "waiting_for_user". Tell the user the plan and ask to proceed.
+
+MODE B: EXTRACT_CHUNK (Triggered when user says "Proceed" or "Continue" after a plan)
+- Extract data, but STOP exactly when you hit 50 metrics.
+- To avoid losing your place, note the EXACT name and date of the last test extracted in the 'lastProcessedItem' field. On the next turn, you will start immediately AFTER this item.
+- Set "mode": "extract_chunk".
+- If more metrics remain in the document, set "status": "needs_continuation". If you have extracted the very last metric, set "status": "completed".
+
+MODE C: DISCUSSION / MODIFY (Triggered if the user asks a question, corrects a mistake midway, or updates profile info)
+- Answer the question or output a modificationCommand array (e.g., changing weight, removing a mistaken log).
+- DO NOT extract new chunk data in this mode.
+- CRITICAL: If the document is not fully extracted yet, you MUST preserve the "status" as "needs_continuation" and pass the exact same "lastProcessedItem" back in your JSON so you don't lose your place for the next turn.
+
+=== JSON SCHEMA STRICT REQUIREMENT ===
+Respond ONLY with a structured JSON format matching this schema exactly. 
+{
+  "mode": "plan" | "extract_chunk" | "discussion" | "modify",
+  "status": "completed" | "needs_continuation" | "waiting_for_user",
+  "message": "Conversational reply.",
+  
+  "planningDetails": {
+    "estimatedTotalMetrics": number | null,
+    "batchesRequired": number | null,
+    "maxMetricsPerBatch": 50
+  },
+  
+  "lastProcessedItem": "String: The Date and Test Name of the last item extracted (e.g., '05-Jun-2026 HbA1c'). Preserve this if chatting midway. Leave null if in plan mode.",
+  
+  "modificationCommand": [
     {
-      "summary": "Short 2-sentence human summary of what you extracted. If the date of the biomarkers is missing from the image and the user didn't mention it, explicitly ask the user for the date of these results so they can be logged accurately.",
-      "date": "YYYY-MM-DD string, extracted from the lab report image or user text. Use imageDates if relevant. Leave null if absolutely unknown.",
+      "action": "update_biomarker" | "update_profile" | "remove_biomarker",
+      "keyName": "Literal name of the key (e.g., 'weight', 'ldl', 'serum_sodium_mmol_l')",
+      "newValue": "The new numeric value or string",
+      "date": "YYYY-MM-DD (Only required if updating a biomarker)"
+    }
+  ],
+  "profileUpdates": {
+     "age": 0, "weight": 0, "height": 0, "ethnicity": "string", "bloodType": "string", "gender": "string"
+  },
+  "entries": [
+    {
+      "date": "YYYY-MM-DD string",
       "biomarkers": {
-        "ldl": 145,
-        "hba1c": 5.8,
-        "serum_albumin": 4.1
-      },
-      "customBiomarkerDefs": {
-        "serum_albumin": {
-          "name": "Serum Albumin",
-          "unit": "g/dL",
-          "normalRange": "3.4 - 5.4",
-          "description": "A protein made by the liver. Low levels can indicate kidney disease or liver disease, causing fluid retention and swelling."
-        }
-      },
-      "profile": {
-        "age": 38,
-        "weight": 50,
-        "height": 160,
-        "ethnicity": "Asian",
-        "bloodType": "B+",
-        "gender": "Female"
+        "ldl": 4.3,
+        "serum_sodium_mmol_l": 143
       }
     }
-    For the "profile" and "biomarkers" objects, only include keys that were found. The value should be appropriate for the type.`;
+  ],
+  "customBiomarkerDefs": {
+    "new_custom_key_mmol_l": {
+      "name": "Human Readable Name",
+      "unit": "Exact unit from text",
+      "normalRange": "Extracted range, or 'Unknown'",
+      "description": "Short medical explanation."
+    }
+  }
+}
+Note: If mode is not "extract_chunk", leave 'entries' and 'customBiomarkerDefs' as null. If the user hasn't explicitly stated a change to their profile info in the chat, leave 'profileUpdates' as null. Return ONLY raw JSON without markdown.`;
 
     const textOutput = await callUnifiedLLM({
       modelId: engine || "gemini-2.5-flash",
-      systemInstruction: "You are an expert clinical laboratory data extraction agent. You extract blood biomarker numbers and personal profile data with extreme accuracy. Return ONLY the single raw JSON string.",
+      systemInstruction,
       promptText,
       imagePayload,
       imagePayloads: imagesPayload,
       responseMimeType: "application/json"
     });
 
-    const firstBrace = textOutput.indexOf("{");
-    const lastBrace = textOutput.lastIndexOf("}");
-    let cleanJson = textOutput;
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      cleanJson = textOutput.substring(firstBrace, lastBrace + 1);
-    } else {
-      cleanJson = cleanJson.trim().replace(/^```json/, "").replace(/```$/, "").trim();
+    let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
+    let parsedData;
+    try {
+      parsedData = JSON.parse(cleanJson);
+    } catch (parseErr: any) {
+      const firstBrace = cleanJson.indexOf("{");
+      const lastBrace = cleanJson.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        parsedData = JSON.parse(cleanJson.substring(firstBrace, lastBrace + 1));
+      } else {
+        throw parseErr;
+      }
     }
-    const parsedData = JSON.parse(cleanJson);
+
+    // Backward compatibility: If the AI returns old single date format, map it to entries
+    let finalEntries = parsedData.entries || [];
+    if (finalEntries.length === 0 && parsedData.biomarkers && Object.keys(parsedData.biomarkers).length > 0) {
+      finalEntries = [{
+        date: parsedData.date || null,
+        biomarkers: parsedData.biomarkers
+      }];
+    }
 
     res.json({
-      text: parsedData.summary,
-      date: parsedData.date || null,
-      biomarkers: parsedData.biomarkers || {},
-      profile: parsedData.profile || {},
+      text: parsedData.message || parsedData.summary || 'Extraction generated.',
+      mode: parsedData.mode || 'new_log',
+      status: parsedData.status,
+      planningDetails: parsedData.planningDetails,
+      lastProcessedItem: parsedData.lastProcessedItem,
+      modificationCommand: parsedData.modificationCommand || [],
+      entries: finalEntries,
+      profile: parsedData.profileUpdates || parsedData.profile || {},
       customBiomarkerDefs: parsedData.customBiomarkerDefs || {}
     });
   } catch (error: any) {
@@ -1828,15 +2186,19 @@ app.post("/api/gemini/insight-analyze", async (req, res) => {
       responseMimeType: "application/json"
     });
 
-    const firstBrace = textOutput.indexOf("{");
-    const lastBrace = textOutput.lastIndexOf("}");
-    let cleanJson = textOutput;
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      cleanJson = textOutput.substring(firstBrace, lastBrace + 1);
-    } else {
-      cleanJson = cleanJson.trim().replace(/^```json/, "").replace(/```$/, "").trim();
+    let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
+    let parsedData;
+    try {
+      parsedData = JSON.parse(cleanJson);
+    } catch (parseErr: any) {
+      const firstBrace = cleanJson.indexOf("{");
+      const lastBrace = cleanJson.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        parsedData = JSON.parse(cleanJson.substring(firstBrace, lastBrace + 1));
+      } else {
+        throw parseErr;
+      }
     }
-    const parsedData = JSON.parse(cleanJson);
 
     res.json(parsedData);
   } catch (error: any) {
@@ -2047,13 +2409,19 @@ Respond with a structured JSON format matching this schema exactly:
       enablePlaceIdTool: !!process.env.GOOGLE_MAPS_API_KEY
     });
 
-    const firstBrace = textOutput.indexOf("{");
-    const lastBrace = textOutput.lastIndexOf("}");
-    let cleanJson = textOutput;
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      cleanJson = textOutput.substring(firstBrace, lastBrace + 1);
+    let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
+    let parsedData;
+    try {
+      parsedData = JSON.parse(cleanJson);
+    } catch (parseErr: any) {
+      const firstBrace = cleanJson.indexOf("{");
+      const lastBrace = cleanJson.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        parsedData = JSON.parse(cleanJson.substring(firstBrace, lastBrace + 1));
+      } else {
+        throw parseErr;
+      }
     }
-    const parsedData = JSON.parse(cleanJson);
 
     if (parsedData.ideas && Array.isArray(parsedData.ideas)) {
       parsedData.ideas = parsedData.ideas.map((idea: any) => ({

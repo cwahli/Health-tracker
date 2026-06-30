@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Copy, Send, Check, AlertTriangle } from 'lucide-react';
 
 interface FullScreenLogViewerProps {
@@ -38,7 +39,7 @@ export default function FullScreenLogViewer({
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[9999] bg-slate-950 flex flex-col animate-fade-in w-full h-full text-slate-200">
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-800/60 flex items-center justify-between bg-slate-950">
@@ -135,5 +136,5 @@ export default function FullScreenLogViewer({
         </div>
       </div>
     </div>
-  );
+  , document.body);
 }

@@ -81,9 +81,9 @@ export default function TrendsTab({
       if (selectedMetric === 'calories') value = totalCalories;
       if (selectedMetric === 'saturatedFat') value = totalSatFat;
       if (selectedMetric === 'protein') value = totalProtein;
-      if (selectedMetric === 'ldl') value = Number(ldlVal || 0);
-      if (selectedMetric === 'hba1c') value = Number(hba1cVal || 0);
-      if (selectedMetric === 'egfr') value = Number(egfrVal || 0);
+      if (selectedMetric === 'ldl') value = typeof ldlVal === 'string' ? parseFloat(ldlVal) : Number(ldlVal || 0);
+      if (selectedMetric === 'hba1c') value = typeof hba1cVal === 'string' ? parseFloat(hba1cVal) : Number(hba1cVal || 0);
+      if (selectedMetric === 'egfr') value = typeof egfrVal === 'string' ? parseFloat(egfrVal) : Number(egfrVal || 0);
       if (selectedMetric === 'steps') {
         const today = new Date().toISOString().split('T')[0];
         if (dateStr === today) {

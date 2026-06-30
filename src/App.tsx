@@ -344,6 +344,7 @@ export default function App() {
   // Chat window visibility modals
   const [isFoodChatOpen, setIsFoodChatOpen] = useState(false);
   const [isMedicalChatOpen, setIsMedicalChatOpen] = useState(false);
+  const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEditingFoodLog, setIsEditingFoodLog] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -587,7 +588,7 @@ export default function App() {
         });
 
         setProfile(mergedProfile);
-        // setFoodLogs(mergedFoods); // Omitted because it's managed by onSnapshot
+        setFoodLogs(mergedFoods);
         setBiomarkerHistory(mergedBioHistory);
         setActions(mergedActions);
         setDailyBenefits(mergedBenefits);
@@ -621,7 +622,7 @@ export default function App() {
         // Cloud doc is empty, but we have local data! Cloud save probably failed earlier.
         // Let's assume local is the source of truth and restore it.
         setProfile(localProfile);
-        // setFoodLogs(localFoods); // Omitted because it's managed by onSnapshot
+        setFoodLogs(localFoods);
         setBiomarkerHistory(localBioHistory);
         setActions(localActions);
         setDailyBenefits(localBenefits);
@@ -757,7 +758,7 @@ export default function App() {
       // Fallback to local storage if DB fails
       if (parsedLocal) {
         if (parsedLocal.profile) setProfile(parsedLocal.profile);
-        // We omit setFoodLogs here since foodLogs is natively managed by onSnapshot and localStorage stores it as empty []
+        if (parsedLocal.foodLogs) setFoodLogs(parsedLocal.foodLogs);
         if (parsedLocal.biomarkers) setBiomarkers(parsedLocal.biomarkers);
         if (parsedLocal.biomarkerHistory) setBiomarkerHistory(parsedLocal.biomarkerHistory);
         if (parsedLocal.actions) setActions(parsedLocal.actions);
@@ -801,14 +802,38 @@ export default function App() {
           unsubs.push(onSnapshot(
             collection(db, 'users', user.uid, 'foodLogs'),
             (snap) => {
-              setFoodLogs(snap.docs.map(d => d.data() as FoodLog));
+              const cloudFoods = snap.docs.map(d => d.data() as FoodLog);
+              setFoodLogs(prevFoods => {
+                const merged = [...cloudFoods];
+                prevFoods.forEach(localFood => {
+                  if (localFood && localFood.id) {
+                    const exists = merged.some(f => f.id === localFood.id);
+                    if (!exists && (localFood.id.startsWith('food_') || localFood.id.startsWith('food_manual_'))) {
+                      merged.push(localFood);
+                    }
+                  }
+                });
+                return merged;
+              });
             },
             (error) => {
               console.warn("Firestore onSnapshot error (likely quota):", error);
               // Fallback to reading from local IndexedDB cache if quota exceeded
               getDocsFromCache(collection(db, 'users', user.uid, 'foodLogs'))
                 .then(cacheSnap => {
-                  setFoodLogs(cacheSnap.docs.map(d => d.data() as FoodLog));
+                  const cloudFoods = cacheSnap.docs.map(d => d.data() as FoodLog);
+                  setFoodLogs(prevFoods => {
+                    const merged = [...cloudFoods];
+                    prevFoods.forEach(localFood => {
+                      if (localFood && localFood.id) {
+                        const exists = merged.some(f => f.id === localFood.id);
+                        if (!exists && (localFood.id.startsWith('food_') || localFood.id.startsWith('food_manual_'))) {
+                          merged.push(localFood);
+                        }
+                      }
+                    });
+                    return merged;
+                  });
                 })
                 .catch(cacheErr => {
                   console.warn("Failed to read from cache after snapshot error:", cacheErr);
@@ -862,7 +887,8 @@ export default function App() {
               if (parsedLocal.profile && (parsedLocal.profile.email === user.email || !user.email)) {
                 hasLocal = true;
                 if (parsedLocal.profile) setProfile(parsedLocal.profile);
-                // We omit setFoodLogs and setBiomarkerHistory here since they are natively managed by onSnapshot
+                if (parsedLocal.foodLogs) setFoodLogs(parsedLocal.foodLogs);
+                if (parsedLocal.biomarkerHistory) setBiomarkerHistory(parsedLocal.biomarkerHistory);
                 if (parsedLocal.biomarkers) setBiomarkers(parsedLocal.biomarkers);
                 if (parsedLocal.actions) setActions(parsedLocal.actions);
                 if (parsedLocal.dailyBenefits) setDailyBenefits(parsedLocal.dailyBenefits);
@@ -993,10 +1019,7 @@ export default function App() {
         let updateCount = 0;
         const newFoodLogs = foodLogs.map(log => {
           if (!log.imageUrl && (!log.imageUrls || log.imageUrls.length === 0)) {
-            let msg = messages.find((m: any) => m.pendingFoodLog?.id === log.id);
-            if (!msg) {
-               msg = messages.find((m: any) => m.pendingFoodLog?.name === log.name && m.pendingFoodLog?.date === log.date);
-            }
+            const msg = messages.find((m: any) => m.pendingFoodLog?.id === log.id);
             if (msg && msg.pendingFoodLog && (msg.pendingFoodLog.imageUrl || msg.pendingFoodLog.imageUrls)) {
               updated = true;
               updateCount++;
@@ -1275,7 +1298,13 @@ export default function App() {
     return { updatedHistory, updatedBiomarkers, changed: weightChanged || heightChanged || hasNoBmi };
   };
 
-  const handleLogMedical = async (extractedBiomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string) => {
+  const handleLogMedical = async (
+    extractedBiomarkers: { [key: string]: number | string }, 
+    profileUpdates?: Partial<UserProfile>, 
+    date?: string, 
+    entries?: { date: string | null; biomarkers: { [key: string]: number | string } }[],
+    modificationCommand?: { action: 'update_biomarker' | 'update_profile' | 'remove_biomarker'; keyName: string; newValue?: string | number; date?: string }[]
+  ) => {
     let currentProfile = profile;
     let updatedHistory = [...biomarkerHistory];
     let updatedBiomarkers = { ...biomarkers };
@@ -1296,8 +1325,14 @@ export default function App() {
         const rawName = def.name || rawKey;
         const cleaned = cleanName(rawName);
 
+        const normalizeUnit = (u: string) => (u || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
         // Check standard match
-        const stdMatch = biomarkerDefinitions.find(d => d.name.toLowerCase() === cleaned.toLowerCase() || d.key.toLowerCase() === cleaned.toLowerCase() || cleanName(d.name).toLowerCase() === cleaned.toLowerCase());
+        const stdMatch = biomarkerDefinitions.find(d => {
+          const nameMatch = d.name.toLowerCase() === cleaned.toLowerCase() || d.key.toLowerCase() === cleaned.toLowerCase() || cleanName(d.name).toLowerCase() === cleaned.toLowerCase();
+          const unitMatch = !def.unit || !d.unit || normalizeUnit(d.unit) === normalizeUnit(def.unit);
+          return nameMatch && unitMatch;
+        });
         if (stdMatch) {
           keyMapping[rawKey] = stdMatch.key;
           return; // Map to standard key, drop custom def
@@ -1322,7 +1357,14 @@ export default function App() {
 
         // Create new safe key
         const safeKey = cleaned.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-        const targetKey = safeKey || rawKey;
+        let targetKey = safeKey || rawKey;
+        
+        // If targetKey collides with a standard key (which means it failed the unit match above), make it unique
+        const isStandard = biomarkerDefinitions.some(d => d.key === targetKey);
+        if (isStandard) {
+          targetKey = `${targetKey}_${normalizeUnit(def.unit || 'custom')}`;
+        }
+        
         keyMapping[rawKey] = targetKey;
         nextCustomDefs[targetKey] = {
           ...def,
@@ -1336,44 +1378,112 @@ export default function App() {
       };
     }
 
-    // Standardize extracted keys
-    const mappedExtracted: { [key: string]: number | string } = {};
-    Object.entries(finalExtracted).forEach(([rawKey, val]) => {
-      // Ignore age, height, weight from extracted biomarkers
-      if (rawKey === 'weight' || rawKey === 'height' || rawKey === 'age') return;
+    const entriesToProcess = entries && entries.length > 0
+      ? entries
+      : [{ date: date || null, biomarkers: finalExtracted }];
 
-      if (biomarkerDefinitions.some(d => d.key === rawKey)) {
-        mappedExtracted[rawKey] = val;
-        return;
-      }
-      if (keyMapping[rawKey]) {
-        mappedExtracted[keyMapping[rawKey]] = val;
-        return;
-      }
+    let hasNewBiomarkers = false;
+    let targetId: string | undefined = undefined;
 
-      // Check name match directly
-      const cleaned = cleanName(rawKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '));
-      const stdMatch = biomarkerDefinitions.find(d => d.name.toLowerCase() === cleaned.toLowerCase() || cleanName(d.name).toLowerCase() === cleaned.toLowerCase());
-      if (stdMatch) {
-        mappedExtracted[stdMatch.key] = val;
-        return;
+    if (modificationCommand && modificationCommand.length > 0) {
+      let madeChanges = false;
+      modificationCommand.forEach(cmd => {
+        if (cmd.action === 'update_biomarker' && cmd.keyName) {
+          const targetDate = cmd.date || getCurrentDateInTimezone(profile?.timezone);
+          const logIdx = updatedHistory.findIndex(h => h.date === targetDate);
+          if (logIdx >= 0 && cmd.newValue !== undefined) {
+            updatedHistory[logIdx].biomarkers = {
+              ...updatedHistory[logIdx].biomarkers,
+              [cmd.keyName]: cmd.newValue
+            };
+            madeChanges = true;
+            hasNewBiomarkers = true;
+          }
+        } else if (cmd.action === 'remove_biomarker' && cmd.keyName) {
+          const targetDate = cmd.date || getCurrentDateInTimezone(profile?.timezone);
+          const logIdx = updatedHistory.findIndex(h => h.date === targetDate);
+          if (logIdx >= 0 && updatedHistory[logIdx].biomarkers[cmd.keyName] !== undefined) {
+            const newBiomarkers = { ...updatedHistory[logIdx].biomarkers };
+            delete newBiomarkers[cmd.keyName];
+            updatedHistory[logIdx].biomarkers = newBiomarkers;
+            madeChanges = true;
+            hasNewBiomarkers = true;
+          }
+        } else if (cmd.action === 'update_profile' && cmd.keyName && cmd.newValue !== undefined) {
+          if (!finalProfileUpdates) finalProfileUpdates = {};
+          (finalProfileUpdates as any)[cmd.keyName] = cmd.newValue;
+          madeChanges = true;
+        }
+      });
+      // If we only processed modification commands and no normal entries, we can skip the standard entry loop.
+      if (madeChanges && entriesToProcess.length === 1 && Object.keys(entriesToProcess[0].biomarkers || {}).length === 0) {
+        entriesToProcess.length = 0; // Skip
       }
+    }
 
-      const existingCustoms = { ...(profile?.customBiomarkers || {}) };
-      const custMatchKey = Object.keys(existingCustoms).find(k => cleanName(existingCustoms[k]?.name || '').toLowerCase() === cleaned.toLowerCase());
-      if (custMatchKey) {
-        mappedExtracted[custMatchKey] = val;
-        return;
+    entriesToProcess.forEach(entry => {
+      // Standardize extracted keys
+      const mappedExtracted: { [key: string]: number | string } = {};
+      Object.entries(entry.biomarkers || {}).forEach(([rawKey, val]) => {
+        // Ignore age, height, weight from extracted biomarkers
+        if (rawKey === 'weight' || rawKey === 'height' || rawKey === 'age') return;
+
+        if (biomarkerDefinitions.some(d => d.key === rawKey)) {
+          mappedExtracted[rawKey] = val;
+          return;
+        }
+        if (keyMapping[rawKey]) {
+          mappedExtracted[keyMapping[rawKey]] = val;
+          return;
+        }
+
+        // Check name match directly
+        const cleaned = cleanName(rawKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '));
+        const stdMatch = biomarkerDefinitions.find(d => d.name.toLowerCase() === cleaned.toLowerCase() || cleanName(d.name).toLowerCase() === cleaned.toLowerCase());
+        if (stdMatch) {
+          mappedExtracted[stdMatch.key] = val;
+          return;
+        }
+
+        const existingCustoms = { ...(profile?.customBiomarkers || {}) };
+        const custMatchKey = Object.keys(existingCustoms).find(k => cleanName(existingCustoms[k]?.name || '').toLowerCase() === cleaned.toLowerCase());
+        if (custMatchKey) {
+          mappedExtracted[custMatchKey] = val;
+          return;
+        }
+
+        const safeKey = cleaned.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+        const finalKey = safeKey || rawKey;
+        mappedExtracted[finalKey] = val;
+      });
+
+      if (Object.keys(mappedExtracted).length > 0) {
+        hasNewBiomarkers = true;
+        const recordDate = entry.date || getCurrentDateInTimezone(profile?.timezone);
+        const existingLogIndex = updatedHistory.findIndex(h => h.date === recordDate);
+        if (existingLogIndex >= 0) {
+          // Merge with existing log for this date
+          updatedHistory[existingLogIndex] = {
+            ...updatedHistory[existingLogIndex],
+            biomarkers: { ...updatedHistory[existingLogIndex].biomarkers, ...mappedExtracted }
+          };
+          targetId = updatedHistory[existingLogIndex].id;
+        } else {
+          const datedLog: BiomarkerLog = {
+            id: `med_log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            date: recordDate,
+            biomarkers: mappedExtracted
+          };
+          updatedHistory.push(datedLog);
+          targetId = datedLog.id;
+        }
       }
-
-      const safeKey = cleaned.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-      const finalKey = safeKey || rawKey;
-      mappedExtracted[finalKey] = val;
     });
 
-    finalExtracted = mappedExtracted;
-
     if (finalProfileUpdates && Object.keys(finalProfileUpdates).length > 0) {
+      if (typeof finalProfileUpdates.age === 'string') finalProfileUpdates.age = parseFloat(finalProfileUpdates.age) || finalProfileUpdates.age;
+      if (typeof finalProfileUpdates.weight === 'string') finalProfileUpdates.weight = parseFloat(finalProfileUpdates.weight) || finalProfileUpdates.weight;
+      if (typeof finalProfileUpdates.height === 'string') finalProfileUpdates.height = parseFloat(finalProfileUpdates.height) || finalProfileUpdates.height;
       const nextProfile = { ...profile, ...finalProfileUpdates };
       const bmiRes = logBmiIfProfileWeightHeightChanged(profile, nextProfile, updatedHistory, updatedBiomarkers);
       currentProfile = nextProfile;
@@ -1384,28 +1494,7 @@ export default function App() {
       setBiomarkers(updatedBiomarkers);
     }
 
-    if (finalExtracted && Object.keys(finalExtracted).length > 0) {
-      const recordDate = date || getCurrentDateInTimezone(profile?.timezone);
-      let targetId = '';
-      
-      const existingLogIndex = updatedHistory.findIndex(h => h.date === recordDate);
-      if (existingLogIndex >= 0) {
-        // Merge with existing log for this date to prevent double counting
-        updatedHistory[existingLogIndex] = {
-          ...updatedHistory[existingLogIndex],
-          biomarkers: { ...updatedHistory[existingLogIndex].biomarkers, ...finalExtracted }
-        };
-        targetId = updatedHistory[existingLogIndex].id;
-      } else {
-        const datedLog: BiomarkerLog = {
-          id: `med_log_${Date.now()}`,
-          date: recordDate,
-          biomarkers: finalExtracted
-        };
-        updatedHistory.push(datedLog);
-        targetId = datedLog.id;
-      }
-      
+    if (hasNewBiomarkers) {
       // Sort history by date descending
       updatedHistory.sort((a, b) => b.date.localeCompare(a.date));
 
@@ -1808,6 +1897,10 @@ export default function App() {
             onEditBiomarkerLog={handleEditBiomarkerLog}
             onDeleteBiomarkerLog={handleDeleteBiomarkerLog}
             onLogMedical={handleLogMedical}
+            onOpenAgentChat={(agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5') => {
+              setActiveAgentType(agentType);
+              setIsMedicalChatOpen(true);
+            }}
             hideSensitive={hideSensitive}
             selectedModelId={selectedModelId}
             onChangeModelId={setSelectedModelId}
@@ -1923,9 +2016,38 @@ export default function App() {
         isOpen={isMedicalChatOpen}
         selectedModelId={selectedModelId}
         onChangeModelId={setSelectedModelId}
-        onClose={() => setIsMedicalChatOpen(false)}
+        onClose={() => {
+          setIsMedicalChatOpen(false);
+          setActiveAgentType(null);
+        }}
         onLogMedical={handleLogMedical}
         biomarkers={biomarkers}
+        biomarkerHistory={biomarkerHistory}
+        foodLogs={foodLogs}
+        report={report}
+        agentType={activeAgentType}
+        onAgentFinish={async (agentType, agentResult) => {
+          const updatedProfile = { ...profile };
+          if (agentType === 'agent1') {
+            updatedProfile.agentTriageSummary = agentResult.message;
+          } else if (agentType === 'agent2') {
+            updatedProfile.agentDiagnosticSummary = agentResult.primaryDiagnosis;
+            updatedProfile.agent2TimelineProjections = agentResult.timelineProjections;
+            updatedProfile.agent2GapTasks = agentResult.recommendedTests?.map((t: any) => `${t.testName}: ${t.reason}`);
+          } else if (agentType === 'agent3') {
+            updatedProfile.agentContextualizerSummary = agentResult.message;
+          } else if (agentType === 'agent4') {
+            updatedProfile.agentInterventionSummary = agentResult.message;
+            updatedProfile.agent4Projections = agentResult.projections;
+          } else if (agentType === 'agent5') {
+            updatedProfile.agentLiteratureSummary = agentResult.message;
+          }
+          
+          setProfile(updatedProfile);
+          await saveAndSync(updatedProfile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report);
+          
+          setActiveAgentType(null);
+        }}
       />
 
     </div>

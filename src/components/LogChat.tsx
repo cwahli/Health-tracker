@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, FoodLog, UserProfile, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
-import { X, Send, Image, Camera, MessageSquare, Sparkles, Plus, ChevronDown, ChevronUp, Loader, MapPin, Trash2 } from 'lucide-react';
+import { X, Send, Image, Camera, MessageSquare, Sparkles, Plus, ChevronDown, ChevronUp, Loader, MapPin, Trash2, Check } from 'lucide-react';
 import { nutrientDefinitions } from '../utils/nutrition';
 import { biomarkerDefinitions, getBiomarkerStatus, isAsianEthnicity, getBiomarkerStatusLabel } from '../utils/biomarkers';
 import LLMSelector from './LLMSelector';
@@ -22,10 +22,19 @@ interface LogChatProps {
   onClose: () => void;
   onLogFood?: (food: FoodLog) => void;
   onLogFoodIdeas?: (ideas: FoodIdea[]) => void;
-  onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string) => void;
+  onLogMedical?: (
+    biomarkers: { [key: string]: number | string }, 
+    profileUpdates?: Partial<UserProfile>, 
+    date?: string, 
+    entries?: { date: string | null; biomarkers: { [key: string]: number | string } }[],
+    modificationCommand?: { action: 'update_biomarker' | 'update_profile' | 'remove_biomarker'; keyName: string; newValue?: string | number; date?: string }[]
+  ) => void;
   biomarkers?: { [key: string]: number | string };
   foodLogs?: FoodLog[];
   report?: any;
+  agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | null;
+  biomarkerHistory?: any[];
+  onAgentFinish?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5', agentResult: any) => Promise<void>;
 }
 
 const getSessionId = (): string => {
@@ -50,7 +59,10 @@ export default function LogChat({
   onLogMedical, 
   biomarkers,
   foodLogs,
-  report
+  report,
+  agentType = null,
+  biomarkerHistory = [],
+  onAgentFinish
 }: LogChatProps) {
   const [showDataUsed, setShowDataUsed] = useState(false);
   const [showFullScreenConv, setShowFullScreenConv] = useState(false);
@@ -274,7 +286,7 @@ export default function LogChat({
       const unit = customDef?.unit || def?.unit || '';
       const name = customDef?.name || def?.name || key;
       
-      const status = getBiomarkerStatus(key, Number(val), normalRange);
+      const status = getBiomarkerStatus(key, val, normalRange);
       if (status === 'high' || status === 'low' || status === 'critical') {
         list.push({
           key,
@@ -462,6 +474,10 @@ export default function LogChat({
       };
 
       if (type === 'food') {
+        const lastFoodLog = [...messages].reverse().find(m => m.pendingFoodLog)?.pendingFoodLog;
+        if (lastFoodLog) {
+          bodyData.activeMeal = lastFoodLog;
+        }
         bodyData.biomarkersNeedingImprovement = outOfRangeBiomarkers.map(b => `${b.name} is ${getBiomarkerStatusLabel(b.key, b.status).toUpperCase()} (${b.value} ${b.unit}, normal range: ${b.normalRange})`);
         bodyData.remainingAllowance = {
           calories: remainingAllowance.calories,
@@ -508,6 +524,17 @@ export default function LogChat({
         }
       } else if (type === 'medical') {
         bodyData.existingBiomarkers = biomarkers ? Object.keys(biomarkers) : [];
+        const lastMsg = [...messages].reverse().find(m => m.lastProcessedItem !== undefined);
+        if (lastMsg && lastMsg.lastProcessedItem) {
+          bodyData.lastProcessedItem = lastMsg.lastProcessedItem;
+        }
+        if (agentType) {
+          bodyData.agentType = agentType;
+          bodyData.biomarkerHistory = biomarkerHistory || [];
+          bodyData.biomarkers = biomarkers || {};
+          bodyData.recentMeals = foodLogs ? foodLogs.slice(-20).map(f => f.name) : [];
+          bodyData.agentDiagnosticSummary = profile?.agentDiagnosticSummary || '';
+        }
       }
 
       // Save display-friendly payload for debug mode
@@ -546,8 +573,8 @@ export default function LogChat({
             ...resData.data,
             date: resData.data.date || lastFoodLog?.date || getCurrentDateInTimezone(profile?.timezone),
             id: `food_${Date.now()}`,
-            imageUrl: tempImages[0] || lastFoodLog?.imageUrl || undefined,
-            imageUrls: tempImages.length > 0 ? tempImages : (lastFoodLog?.imageUrls || undefined)
+            imageUrl: tempImages.length > 0 ? tempImages[0] : resData.data.imageUrl,
+            imageUrls: tempImages.length > 0 ? tempImages : resData.data.imageUrls
           };
         }
       } else if (type === 'food_idea') {
@@ -555,18 +582,30 @@ export default function LogChat({
           assistantMsg.pendingFoodIdeas = resData.ideas;
         }
       } else {
-        assistantMsg.pendingBiomarkers = resData.biomarkers;
-        assistantMsg.pendingDate = resData.date;
-        
-        // Merge custom biomarker definitions into profile if any
-        let mergedProfile = { ...resData.profile };
-        if (resData.customBiomarkerDefs && Object.keys(resData.customBiomarkerDefs).length > 0) {
-          mergedProfile.customBiomarkers = {
-            ...(profile?.customBiomarkers || {}),
-            ...resData.customBiomarkerDefs
-          };
+        if (agentType) {
+          assistantMsg.agentType = agentType;
+          assistantMsg.agentResult = resData;
+        } else {
+          assistantMsg.mode = resData.mode;
+          assistantMsg.status = resData.status;
+          assistantMsg.planningDetails = resData.planningDetails;
+          assistantMsg.lastProcessedItem = resData.lastProcessedItem;
+          assistantMsg.modificationCommand = resData.modificationCommand;
+          assistantMsg.pendingBiomarkerEntries = resData.entries || [];
+          // Legacy fallback
+          assistantMsg.pendingBiomarkers = resData.biomarkers;
+          assistantMsg.pendingDate = resData.date;
+          
+          // Merge custom biomarker definitions into profile if any
+          let mergedProfile = { ...resData.profile };
+          if (resData.customBiomarkerDefs && Object.keys(resData.customBiomarkerDefs).length > 0) {
+            mergedProfile.customBiomarkers = {
+              ...(profile?.customBiomarkers || {}),
+              ...resData.customBiomarkerDefs
+            };
+          }
+          assistantMsg.pendingProfile = mergedProfile;
         }
-        assistantMsg.pendingProfile = mergedProfile;
       }
 
       setMessages(prev => [...prev, assistantMsg]);
@@ -613,13 +652,15 @@ export default function LogChat({
             </div>
           </div>
           
-          <button 
-            id="close-food-chat-btn"
-            onClick={onClose} 
-            className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button 
+              id="close-food-chat-btn"
+              onClick={onClose} 
+              className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Expandable Model Selector Dropdown */}
@@ -640,7 +681,7 @@ export default function LogChat({
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50 dark:bg-slate-900/20">
           
           {/* Data used by agent inline block */}
-          {(type === 'food' || type === 'food_idea') && (
+          {(type === 'food' || type === 'food_idea' || type === 'medical') && (
             <div className="bg-slate-50 dark:bg-slate-900/55 rounded-xl px-4 py-2.5 mb-4 border border-slate-100 dark:border-slate-800/20">
               <button
                 type="button"
@@ -734,51 +775,55 @@ export default function LogChat({
                   )}
 
                   {/* Warning Biomarkers */}
-                  <div>
-                    <span className="text-slate-400 dark:text-slate-500 font-bold block font-size-xs uppercase tracking-wider mb-1.5">Important Biomarkers Needing Improvement</span>
-                    {outOfRangeBiomarkers.length > 0 ? (
-                      <div className="space-y-1">
-                        {outOfRangeBiomarkers.map(b => (
-                          <div key={b.key} className="flex items-center justify-between font-size-xs font-mono bg-rose-50/50 dark:bg-rose-950/10 border border-rose-100 dark:border-rose-950/30 px-2 py-1 rounded-lg">
-                            <span className="font-sans font-bold text-slate-700 dark:text-slate-300">{b.name}</span>
-                            <span className="text-rose-600 dark:text-rose-450 font-black">
-                              {b.value} {b.unit} ({getBiomarkerStatusLabel(b.key, b.status).toUpperCase()})
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-slate-450 dark:text-slate-500 italic font-size-xs">All active biomarkers are within normal reference ranges.</span>
-                    )}
-                  </div>
+                  {(type === 'food' || type === 'food_idea') && (
+                    <div>
+                      <span className="text-slate-400 dark:text-slate-500 font-bold block font-size-xs uppercase tracking-wider mb-1.5">Important Biomarkers Needing Improvement</span>
+                      {outOfRangeBiomarkers.length > 0 ? (
+                        <div className="space-y-1">
+                          {outOfRangeBiomarkers.map(b => (
+                            <div key={b.key} className="flex items-center justify-between font-size-xs font-mono bg-rose-50/50 dark:bg-rose-950/10 border border-rose-100 dark:border-rose-950/30 px-2 py-1 rounded-lg">
+                              <span className="font-sans font-bold text-slate-700 dark:text-slate-300">{b.name}</span>
+                              <span className="text-rose-600 dark:text-rose-450 font-black">
+                                {b.value} {b.unit} ({getBiomarkerStatusLabel(b.key, b.status).toUpperCase()})
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-slate-450 dark:text-slate-500 italic font-size-xs">All active biomarkers are within normal reference ranges.</span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Remaining Daily Allowances */}
-                  <div>
-                    <span className="text-slate-400 dark:text-slate-500 font-bold block font-size-xs uppercase tracking-wider mb-1.5">Today's Remaining Nutrition Allowance</span>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="text-center bg-slate-100/60 dark:bg-slate-950/30 border border-slate-150 dark:border-slate-800/40 p-2 rounded-lg">
-                        <span className="text-slate-400 font-size-xs block uppercase font-bold tracking-wider mb-0.5">Calories</span>
-                        <span className="font-mono font-size-xs font-bold text-slate-800 dark:text-slate-200">
-                          {remainingAllowance.calories} <span className="font-size-xs text-slate-400">kcal</span>
-                        </span>
-                        <span className="font-size-xs text-slate-400 dark:text-slate-500 block mt-0.5">/ {remainingAllowance.caloriesTarget} target</span>
-                      </div>
-                      <div className="text-center bg-slate-100/60 dark:bg-slate-950/30 border border-slate-150 dark:border-slate-800/40 p-2 rounded-lg">
-                        <span className="text-slate-400 font-size-xs block uppercase font-bold tracking-wider mb-0.5">Sat. Fat</span>
-                        <span className={`font-mono font-size-xs font-bold ${remainingAllowance.saturatedFat === 0 ? 'text-rose-500' : 'text-slate-800 dark:text-slate-200'}`}>
-                          {remainingAllowance.saturatedFat.toFixed(1)} <span className="font-size-xs text-slate-400">g</span>
-                        </span>
-                        <span className="font-size-xs text-slate-400 dark:text-slate-500 block mt-0.5">/ {remainingAllowance.saturatedFatTarget}g max</span>
-                      </div>
-                      <div className="text-center bg-slate-100/60 dark:bg-slate-950/30 border border-slate-150 dark:border-slate-800/40 p-2 rounded-lg">
-                        <span className="text-slate-400 font-size-xs block uppercase font-bold tracking-wider mb-0.5">Sodium</span>
-                        <span className={`font-mono font-size-xs font-bold ${remainingAllowance.sodium === 0 ? 'text-rose-500' : 'text-slate-800 dark:text-slate-200'}`}>
-                          {remainingAllowance.sodium} <span className="font-size-xs text-slate-400">mg</span>
-                        </span>
-                        <span className="font-size-xs text-slate-400 dark:text-slate-500 block mt-0.5">/ {remainingAllowance.sodiumTarget}mg max</span>
+                  {(type === 'food' || type === 'food_idea') && (
+                    <div>
+                      <span className="text-slate-400 dark:text-slate-500 font-bold block font-size-xs uppercase tracking-wider mb-1.5">Today's Remaining Nutrition Allowance</span>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="text-center bg-slate-100/60 dark:bg-slate-950/30 border border-slate-150 dark:border-slate-800/40 p-2 rounded-lg">
+                          <span className="text-slate-400 font-size-xs block uppercase font-bold tracking-wider mb-0.5">Calories</span>
+                          <span className="font-mono font-size-xs font-bold text-slate-800 dark:text-slate-200">
+                            {remainingAllowance.calories} <span className="font-size-xs text-slate-400">kcal</span>
+                          </span>
+                          <span className="font-size-xs text-slate-400 dark:text-slate-500 block mt-0.5">/ {remainingAllowance.caloriesTarget} target</span>
+                        </div>
+                        <div className="text-center bg-slate-100/60 dark:bg-slate-950/30 border border-slate-150 dark:border-slate-800/40 p-2 rounded-lg">
+                          <span className="text-slate-400 font-size-xs block uppercase font-bold tracking-wider mb-0.5">Sat. Fat</span>
+                          <span className={`font-mono font-size-xs font-bold ${remainingAllowance.saturatedFat === 0 ? 'text-rose-500' : 'text-slate-800 dark:text-slate-200'}`}>
+                            {remainingAllowance.saturatedFat.toFixed(1)} <span className="font-size-xs text-slate-400">g</span>
+                          </span>
+                          <span className="font-size-xs text-slate-400 dark:text-slate-500 block mt-0.5">/ {remainingAllowance.saturatedFatTarget}g max</span>
+                        </div>
+                        <div className="text-center bg-slate-100/60 dark:bg-slate-950/30 border border-slate-150 dark:border-slate-800/40 p-2 rounded-lg">
+                          <span className="text-slate-400 font-size-xs block uppercase font-bold tracking-wider mb-0.5">Sodium</span>
+                          <span className={`font-mono font-size-xs font-bold ${remainingAllowance.sodium === 0 ? 'text-rose-500' : 'text-slate-800 dark:text-slate-200'}`}>
+                            {remainingAllowance.sodium} <span className="font-size-xs text-slate-400">mg</span>
+                          </span>
+                          <span className="font-size-xs text-slate-400 dark:text-slate-500 block mt-0.5">/ {remainingAllowance.sodiumTarget}mg max</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Conversation Log History */}
                   <div className="border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-100/50 dark:bg-slate-950/20 p-3 mt-3 space-y-2 text-left">
@@ -789,7 +834,10 @@ export default function LogChat({
                       <button
                         type="button"
                         onClick={() => {
-                          const logTxt = lastSentPayload ? JSON.stringify(lastSentPayload, null, 2) : messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
+                          let logTxt = lastSentPayload ? JSON.stringify(lastSentPayload, null, 2) : messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
+                          if (type === 'medical') {
+                            logTxt = `=== PAYLOAD ===\n` + logTxt;
+                          }
                           navigator.clipboard.writeText(logTxt);
                         }}
                         className="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 rounded text-[10px] font-bold text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
@@ -809,11 +857,21 @@ export default function LogChat({
                       isOpen={showFullScreenConv}
                       onClose={() => setShowFullScreenConv(false)}
                       title="Full Agent Request Payload & Log"
-                      logsText={lastSentPayload ? JSON.stringify(lastSentPayload, null, 2) : messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n')}
+                      logsText={(() => {
+                        let logTxt = lastSentPayload ? JSON.stringify(lastSentPayload, null, 2) : messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
+                        if (type === 'medical') {
+                          logTxt = `=== PAYLOAD ===\n` + logTxt;
+                        }
+                        return logTxt;
+                      })()}
                       onSendToAdmin={handleSendLogToAdmin}
                       isSendingLogs={isSendingLogs}
                       logsSendStatus={logsSendStatus}
-                      onClearLogs={() => setMessages([])}
+                      onClearLogs={() => {
+                        setMessages([]);
+                        setLastSentPayload(null);
+                        sessionStorage.removeItem(`last_sent_payload_${type}`);
+                      }}
                       eventsCount={messages.length}
                     />
                   </div>
@@ -830,17 +888,27 @@ export default function LogChat({
 
             return (
               <>
-                {hasPastMessages && (
-                  <div className="flex justify-center mb-4 mt-2">
-                    <button
+                {(hasPastMessages || messages.length > 1) && (
+                  <div className="flex justify-center items-center gap-2 mb-4 mt-2">
+                    {hasPastMessages && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPastDiscussion(!showPastDiscussion)}
+                        className="px-4 py-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline flex items-center gap-1.5 cursor-pointer bg-slate-100/50 dark:bg-slate-950/20 rounded-xl border border-slate-200/50 dark:border-slate-800/40"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>
+                          {showPastDiscussion ? "Hide past discussion" : `View past discussion (${pastCount})`}
+                        </span>
+                      </button>
+                    )}
+                    <button 
                       type="button"
-                      onClick={() => setShowPastDiscussion(!showPastDiscussion)}
-                      className="px-4 py-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline flex items-center gap-1.5 cursor-pointer bg-slate-100/50 dark:bg-slate-950/20 rounded-xl border border-slate-200/50 dark:border-slate-800/40"
+                      onClick={() => setMessages([messages[0]])}
+                      className="p-1.5 rounded-xl bg-slate-100/50 dark:bg-slate-950/20 border border-slate-200/50 dark:border-slate-800/40 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 hover:border-rose-200 dark:hover:border-rose-800/50 transition-colors"
+                      title="Clear chat history"
                     >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span>
-                        {showPastDiscussion ? "Hide past discussion" : `View past discussion (${pastCount})`}
-                      </span>
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 )}
@@ -860,7 +928,7 @@ export default function LogChat({
                     <button
                       type="button"
                       onClick={() => handleDeleteMessagePair(msg.id)}
-                      className="absolute right-2 top-0 p-1 text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors z-20 cursor-pointer opacity-0 group-hover:opacity-100"
+                      className="absolute right-2 top-0 p-1 text-slate-300 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors z-20 cursor-pointer sm:opacity-0 sm:group-hover:opacity-100 opacity-100"
                       title="Delete conversation step"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -1046,66 +1114,287 @@ export default function LogChat({
                     </div>
                   )}
 
-                  {/* Render extracted Pending Medical info */}
-                  {type === 'medical' && !loggedMessageIds.includes(msg.id) && ((msg.pendingBiomarkers && Object.keys(msg.pendingBiomarkers).length > 0) || (msg.pendingProfile && Object.keys(msg.pendingProfile).length > 0)) && (
-                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-md space-y-3 animation-fade-in w-full max-w-full min-w-0 overflow-hidden">
-                      <div className="border-b border-slate-100 dark:border-slate-800/50 pb-2">
+                  {/* Render Agent Result Blocks */}
+                  {msg.agentType && msg.agentResult && !loggedMessageIds.includes(msg.id) && (
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-md space-y-4 animation-fade-in w-full max-w-full min-w-0 overflow-hidden">
+                      <div className="flex items-center gap-1.5 pb-2 border-b border-slate-100 dark:border-slate-800/50">
+                        <Sparkles className="w-4 h-4 text-indigo-600" />
                         <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs tracking-wider uppercase font-display">
-                          Extracted Information
+                          {msg.agentType === 'agent1' && 'Clinical Triage Organizer'}
+                          {msg.agentType === 'agent2' && 'Prognostic Diagnostics Assessment'}
+                          {msg.agentType === 'agent3' && 'Personalized Reference Ranges'}
+                          {msg.agentType === 'agent4' && 'Lifestyle Precision Intervention'}
+                          {msg.agentType === 'agent5' && 'Medical Literature Consensus'}
                         </h4>
                       </div>
 
-                      <div className="space-y-1">
-                        {msg.pendingDate && (
-                          <div className="flex items-center justify-between py-1 border-b border-slate-50 dark:border-slate-800/20 text-xs">
-                            <span className="text-slate-600 dark:text-slate-400 font-medium">Record Date</span>
-                            <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{msg.pendingDate}</span>
+                      {/* Content details based on Agent type */}
+                      {msg.agentType === 'agent1' && msg.agentResult.suggestedChanges && (
+                        <div className="space-y-2">
+                          <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Identified duplicates & categorizations:</span>
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                            {msg.agentResult.suggestedChanges.map((change: any, cidx: number) => (
+                              <div key={cidx} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 text-xs">
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${change.action === 'merge' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600' : 'bg-slate-150 text-slate-655'}`}>
+                                  {change.action}
+                                </span>
+                                <div>
+                                  <p className="font-semibold text-slate-800 dark:text-slate-200">
+                                    {String(change.biomarker || '').toUpperCase()} on {change.date} &rarr; value {change.value}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500 font-medium leading-normal mt-0.5">{change.reason}</p>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        )}
-                        {msg.pendingProfile && Object.entries(msg.pendingProfile)
-                          .filter(([key, val]) => typeof val !== 'object' && key !== 'customBiomarkers')
-                          .map(([key, val]) => (
-                          <div key={key} className="flex items-center justify-between py-1 border-b border-slate-50 dark:border-slate-800/20 text-xs">
-                            <span className="text-slate-600 dark:text-slate-400 font-medium capitalize">
-                              {key}
-                            </span>
-                            <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                              {String(val)}
-                            </span>
-                          </div>
-                        ))}
-                        {msg.pendingBiomarkers && Object.entries(msg.pendingBiomarkers).map(([key, val]) => {
-                          const def = biomarkerDefinitions.find(d => d.key === key);
-                          const customDef = msg.pendingProfile?.customBiomarkers?.[key] || profile?.customBiomarkers?.[key];
-                          const name = def?.name || customDef?.name || key;
-                          const unit = def?.unit || customDef?.unit || '';
-                          return (
-                            <div key={key} className="flex items-center justify-between py-1 border-b border-slate-50 dark:border-slate-800/20 text-xs">
-                              <span className="text-slate-600 dark:text-slate-400 font-medium">
-                                {name}
-                              </span>
-                              <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                                {val} {unit}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
+                        </div>
+                      )}
 
-                      {/* Log Action Button */}
+                      {msg.agentType === 'agent2' && (
+                        <div className="space-y-3">
+                          {msg.agentResult.primaryDiagnosis && (
+                            <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
+                              <span className="text-[9px] font-bold text-slate-400 block mb-0.5">PRIMARY SYSTEM DIAGNOSIS</span>
+                              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-normal">{msg.agentResult.primaryDiagnosis}</p>
+                            </div>
+                          )}
+
+                          {msg.agentResult.recommendedTests && msg.agentResult.recommendedTests.length > 0 && (
+                            <div className="space-y-1.5">
+                              <span className="text-[9px] font-mono font-bold text-rose-500 block">PROPOSED LAB CONFIRMATIONS (GAP ANALYSIS)</span>
+                              {msg.agentResult.recommendedTests.map((test: any, tidx: number) => (
+                                <div key={tidx} className="p-2 bg-rose-50/20 dark:bg-rose-950/10 rounded-xl border border-rose-100/30 text-xs">
+                                  <p className="font-semibold text-rose-900 dark:text-rose-300">{test.testName}</p>
+                                  <p className="text-[10px] text-rose-700/80 dark:text-rose-450/80 leading-normal mt-0.5">{test.reason}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent3' && msg.agentResult.contextualizedBiomarkers && (
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                          <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Demographic Range Calibrations:</span>
+                          <div className="space-y-2">
+                            {msg.agentResult.contextualizedBiomarkers.map((bio: any, bidx: number) => (
+                              <div key={bidx} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-150/50 dark:border-slate-800 text-xs space-y-1">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-bold text-slate-800 dark:text-slate-200 uppercase">{bio.name}</span>
+                                  <span className="font-mono text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-full text-[10px]">
+                                    normal: {bio.profileAdjustedNormalRange}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">{bio.description}</p>
+                                {bio.specificRiskContext && (
+                                  <p className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold leading-normal pt-1 border-t border-slate-100 dark:border-slate-800/40">{bio.specificRiskContext}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent4' && (
+                        <div className="space-y-3">
+                          {msg.agentResult.nutrientTargets && (
+                            <div>
+                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Calibrated Daily Allowances:</span>
+                              <div className="grid grid-cols-4 gap-1.5 mt-1 text-center font-mono text-[10px]">
+                                <div className="p-1 bg-slate-50 dark:bg-slate-900 border border-slate-150 rounded-lg">
+                                  <span className="block text-[8px] text-slate-400">Calories</span>
+                                  <strong className="text-slate-800 dark:text-slate-200">{msg.agentResult.nutrientTargets.calories} kcal</strong>
+                                </div>
+                                <div className="p-1 bg-slate-50 dark:bg-slate-900 border border-slate-150 rounded-lg">
+                                  <span className="block text-[8px] text-slate-400">Sat. Fat</span>
+                                  <strong className="text-slate-800 dark:text-slate-200">{msg.agentResult.nutrientTargets.saturatedFat}g</strong>
+                                </div>
+                                <div className="p-1 bg-slate-50 dark:bg-slate-900 border border-slate-150 rounded-lg">
+                                  <span className="block text-[8px] text-slate-400">Fibre</span>
+                                  <strong className="text-slate-800 dark:text-slate-200">{msg.agentResult.nutrientTargets.totalFibre}g</strong>
+                                </div>
+                                <div className="p-1 bg-slate-50 dark:bg-slate-900 border border-slate-150 rounded-lg">
+                                  <span className="block text-[8px] text-slate-400">Protein</span>
+                                  <strong className="text-slate-800 dark:text-slate-200">{msg.agentResult.nutrientTargets.protein}g</strong>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {msg.agentResult.projections && msg.agentResult.projections.length > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-[9px] font-mono font-bold text-indigo-600 block">PHYSIOLOGICAL PROJECTIONS</span>
+                              <div className="p-2.5 bg-indigo-50/20 dark:bg-indigo-950/10 rounded-xl border border-indigo-100/30 text-[10px] text-indigo-850 dark:text-indigo-300 font-medium space-y-1">
+                                {msg.agentResult.projections.map((p: string, pidx: number) => (
+                                  <p key={pidx}>&bull; {p}</p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent5' && msg.agentResult.insights && (
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                          <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Scholarly Consensus Articles:</span>
+                          <div className="space-y-2">
+                            {msg.agentResult.insights.map((ins: any, iidx: number) => (
+                              <div key={iidx} className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-150 rounded-xl text-xs space-y-1">
+                                <h5 className="font-bold text-slate-900 dark:text-slate-100">{ins.title}</h5>
+                                <p className="text-[10px] text-slate-500 leading-normal font-medium">{ins.summary}</p>
+                                {ins.link && (
+                                  <a href={ins.link} target="_blank" rel="noreferrer" className="text-[9px] text-indigo-600 font-bold block hover:underline">
+                                    Primary Source &rarr;
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Confirm Button */}
                       <button
-                        onClick={() => {
-                          if (onLogMedical) {
-                            onLogMedical(msg.pendingBiomarkers || {}, msg.pendingProfile || {}, msg.pendingDate);
+                        type="button"
+                        onClick={async () => {
+                          if (onAgentFinish) {
+                            await onAgentFinish(msg.agentType!, msg.agentResult);
                             setLoggedMessageIds(prev => [...prev, msg.id]);
                             onClose();
                           }
                         }}
                         className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                       >
-                        <Plus className="w-4 h-4" />
-                        Add to my profile
+                        <Check className="w-4 h-4" />
+                        Apply & Save Agent Findings
                       </button>
+                    </div>
+                  )}
+
+                  {/* Render extracted Pending Medical info */}
+                  {type === 'medical' && !loggedMessageIds.includes(msg.id) && (((msg.pendingBiomarkerEntries && msg.pendingBiomarkerEntries.length > 0) || (msg.pendingBiomarkers && Object.keys(msg.pendingBiomarkers).length > 0)) || (msg.pendingProfile && Object.keys(msg.pendingProfile).length > 0) || (msg.mode === 'modify' && msg.modificationCommand && msg.modificationCommand.length > 0)) && (
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-md space-y-3 animation-fade-in w-full max-w-full min-w-0 overflow-hidden">
+                      <div className="border-b border-slate-100 dark:border-slate-800/50 pb-2">
+                        <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs tracking-wider uppercase font-display">
+                          {msg.mode === 'modify' ? 'Proposed Modifications' : 'Extracted Information'}
+                        </h4>
+                      </div>
+
+                      <div className="space-y-4">
+                        {msg.mode === 'modify' && msg.modificationCommand && msg.modificationCommand.length > 0 ? (
+                          <div className="space-y-1">
+                            {msg.modificationCommand.map((cmd, idx) => (
+                              <div key={idx} className="flex items-center justify-between py-1 border-b border-slate-50 dark:border-slate-800/20 text-xs px-2">
+                                <span className="text-slate-600 dark:text-slate-400 font-medium">
+                                  {cmd.action === 'remove_biomarker' ? 'Remove' : 'Update'} {cmd.keyName} {cmd.date ? `(${cmd.date})` : ''}
+                                </span>
+                                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                                  {cmd.action === 'remove_biomarker' ? 'DELETED' : cmd.newValue}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <>
+                            {msg.pendingProfile && Object.entries(msg.pendingProfile).filter(([k, v]) => typeof v !== 'object' && k !== 'customBiomarkers').length > 0 && (
+                              <div className="space-y-1">
+                                <h5 className="text-[10px] uppercase font-bold text-slate-500 mb-1">Profile Updates</h5>
+                                {Object.entries(msg.pendingProfile)
+                                  .filter(([key, val]) => typeof val !== 'object' && key !== 'customBiomarkers')
+                                  .map(([key, val]) => (
+                                  <div key={key} className="flex items-center justify-between py-1 border-b border-slate-50 dark:border-slate-800/20 text-xs">
+                                    <span className="text-slate-600 dark:text-slate-400 font-medium capitalize">
+                                      {key}
+                                    </span>
+                                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                                      {String(val)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {msg.mode === 'plan' && msg.planningDetails && (
+                              <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800/30">
+                                <h5 className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400 mb-2">Extraction Plan</h5>
+                                <div className="space-y-1.5 text-xs text-blue-800 dark:text-blue-200">
+                                  <div className="flex justify-between">
+                                    <span>Estimated Metrics:</span>
+                                    <span className="font-mono font-bold">{msg.planningDetails.estimatedTotalMetrics || 'Unknown'}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Batches Required:</span>
+                                    <span className="font-mono font-bold">{msg.planningDetails.batchesRequired || 'Unknown'}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Max Per Batch:</span>
+                                    <span className="font-mono font-bold">{msg.planningDetails.maxMetricsPerBatch}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {(msg.pendingBiomarkerEntries && msg.pendingBiomarkerEntries.length > 0 ? msg.pendingBiomarkerEntries : (msg.pendingBiomarkers && Object.keys(msg.pendingBiomarkers).length > 0 ? [{ date: msg.pendingDate || null, biomarkers: msg.pendingBiomarkers }] : [])).map((entry, idx) => (
+                              <div key={idx} className="space-y-1">
+                                <div className="flex items-center justify-between py-1 bg-slate-50 dark:bg-slate-800/50 px-2 rounded-md mb-2">
+                                  <span className="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase">Record Date</span>
+                                  <span className="font-mono font-bold text-slate-700 dark:text-slate-300 text-xs">{entry.date || 'Unknown Date'}</span>
+                                </div>
+                                {Object.entries(entry.biomarkers).map(([key, val]) => {
+                                  const def = biomarkerDefinitions.find(d => d.key === key);
+                                  const customDef = msg.pendingProfile?.customBiomarkers?.[key] || profile?.customBiomarkers?.[key];
+                                  const name = def?.name || customDef?.name || key;
+                                  const unit = def?.unit || customDef?.unit || '';
+                                  return (
+                                    <div key={key} className="flex items-center justify-between py-1 border-b border-slate-50 dark:border-slate-800/20 text-xs px-2">
+                                      <span className="text-slate-600 dark:text-slate-400 font-medium">
+                                        {name}
+                                      </span>
+                                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                                        {val} {String(val).includes(unit) ? '' : unit}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+
+                      {msg.mode !== 'plan' && msg.mode !== 'discussion' && (
+                        <div className="pt-2 space-y-2">
+                          <button
+                            onClick={() => {
+                              if (onLogMedical) {
+                                onLogMedical(msg.pendingBiomarkers || {}, msg.pendingProfile || {}, msg.pendingDate, msg.pendingBiomarkerEntries, msg.modificationCommand);
+                                setLoggedMessageIds(prev => [...prev, msg.id]);
+                                if (msg.status === 'needs_continuation') {
+                                  handleSend("Proceed with extraction.");
+                                } else {
+                                  onClose();
+                                }
+                              }
+                            }}
+                            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                            {msg.mode === 'modify' ? 'Apply modifications' : msg.status === 'needs_continuation' ? 'Save and continue to next batch' : 'Save extracted data'}
+                          </button>
+                          
+                          <button
+                            onClick={() => {
+                              setLoggedMessageIds(prev => [...prev, msg.id]);
+                              if (msg.status === 'needs_continuation') {
+                                handleSend("Cancel extraction.");
+                              }
+                            }}
+                            className="w-full py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { UserProfile, FoodLog, HealthAction, DailyBenefit, RecommendationReport, BiomarkerLog, ChatMessage, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
-import { CheckCircle2, Circle, AlertCircle, Heart, ChevronDown, ChevronUp, Calendar, MapPin, Search, Sparkles, Trash2, RefreshCw, Clock, Settings, X } from 'lucide-react';
+import { CheckCircle2, Circle, AlertCircle, Heart, ChevronDown, ChevronUp, Calendar, MapPin, Search, Sparkles, Trash2, RefreshCw, Clock, Settings, X, TrendingUp, Activity } from 'lucide-react';
 import { getBiomarkerStatus, getBiomarkerColor, getBiomarkerStatusLabel, biomarkerDefinitions, isAsianEthnicity } from '../utils/biomarkers';
 import { getCurrentDateInTimezone } from '../utils/dateUtils';
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
@@ -23,7 +23,8 @@ interface HomeTabProps {
   onNavigateToTab: (tab: 'home' | 'insights' | 'food' | 'medical' | 'trends') => void;
   onEditBiomarkerLog: (id: string, key: string, value: string | number, newDate?: string) => void;
   onDeleteBiomarkerLog: (id: string) => void;
-  onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string) => void;
+  onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string, entries?: { date: string | null; biomarkers: { [key: string]: number | string } }[]) => void;
+  onOpenAgentChat?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5') => void;
   hideSensitive: boolean;
   selectedModelId: string;
   onChangeModelId: (id: string) => void;
@@ -53,6 +54,7 @@ export default function HomeTab({
   onEditBiomarkerLog,
   onDeleteBiomarkerLog,
   onLogMedical,
+  onOpenAgentChat,
   hideSensitive,
   selectedModelId,
   onChangeModelId,
@@ -204,7 +206,7 @@ export default function HomeTab({
       .map(([key, val]) => {
         const def = allDefinitions.find(d => d.key === key);
         if (!def) return null;
-        const status = getBiomarkerStatus(key, Number(val), def.normalRange);
+        const status = getBiomarkerStatus(key, val as string | number, def.normalRange);
         return {
           key,
           value: val,
@@ -407,8 +409,8 @@ export default function HomeTab({
   const baseProteinTarget = report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.protein, 90) : 90;
 
   const formatValue = (val: number) => {
-    if (val >= 10) return Math.round(val);
-    return Number(val.toFixed(1));
+    if (val >= 10) return Math.ceil(val);
+    return Math.ceil(val * 10) / 10;
   };
 
   const activeTargets = {
@@ -1062,6 +1064,138 @@ export default function HomeTab({
           </div>
         </div>
       )}
+
+      {/* Multi-Agent Clinical Diagnostics & Analysis Sections */}
+      <div id="agent-diagnostics-dashboard" className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-[32px] p-6 shadow-sm space-y-6">
+        <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800/50">
+          <Sparkles className="w-5 h-5 text-indigo-600" />
+          <h3 className="font-bold text-slate-950 dark:text-slate-100 text-sm flex items-center gap-2">
+            AI Multi-Agent Diagnostics
+          </h3>
+        </div>
+
+        {/* Agent 1: Clinical Triage Organizer */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">1</span>
+              Clinical Triage Organizer
+            </h4>
+            <button
+              onClick={() => onOpenAgentChat?.('agent1')}
+              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+            >
+              Chat & Run
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Cleans, deduplicates, and organizes raw medical history data into structured physiological buckets.</p>
+          {profile.agentTriageSummary && (
+            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20">
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentTriageSummary}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Agent 2: Prognostic Diagnostics Assessment */}
+        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">2</span>
+              Prognostic Diagnostics
+            </h4>
+            <button
+              onClick={() => onOpenAgentChat?.('agent2')}
+              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+            >
+              Chat & Run
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Analyzes biomarker history to project timeline risks (2, 5, 10 years) and identifies testing gaps.</p>
+          {profile.agentDiagnosticSummary && (
+            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20 space-y-2">
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentDiagnosticSummary}</p>
+              {profile.agent2TimelineProjections && (
+                <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-600 dark:text-slate-400">
+                  <span className="font-medium bg-slate-200/50 dark:bg-slate-800 px-1.5 py-0.5 rounded">2Y: {profile.agent2TimelineProjections.year2.substring(0,30)}...</span>
+                  <span className="font-medium bg-slate-200/50 dark:bg-slate-800 px-1.5 py-0.5 rounded">5Y: {profile.agent2TimelineProjections.year5.substring(0,30)}...</span>
+                  <span className="font-medium bg-slate-200/50 dark:bg-slate-800 px-1.5 py-0.5 rounded">10Y: {profile.agent2TimelineProjections.year10.substring(0,30)}...</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Agent 3: Personalized Reference Ranges */}
+        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">3</span>
+              Personalized Reference Ranges
+            </h4>
+            <button
+              onClick={() => onOpenAgentChat?.('agent3')}
+              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+            >
+              Chat & Run
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Calibrates normal biomarker reference ranges and physiological context to your exact demographics.</p>
+          {profile.agentContextualizerSummary && (
+            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20">
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentContextualizerSummary}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Agent 4: Lifestyle Precision Intervention */}
+        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">4</span>
+              Lifestyle Precision Intervention
+            </h4>
+            <button
+              onClick={() => onOpenAgentChat?.('agent4')}
+              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+            >
+              Chat & Run
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Translates diagnostic risk into strict, mathematically projected dietary and movement targets.</p>
+          {profile.agentInterventionSummary && (
+            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20 space-y-2">
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentInterventionSummary}</p>
+              {profile.agent4Projections && profile.agent4Projections.length > 0 && (
+                <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-2 space-y-1 pl-2 border-l-2 border-indigo-200 dark:border-indigo-800">
+                  {profile.agent4Projections.map((p, i) => <p key={i}>&bull; {p}</p>)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Agent 5: Medical Literature Consensus */}
+        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">5</span>
+              Medical Literature Consensus
+            </h4>
+            <button
+              onClick={() => onOpenAgentChat?.('agent5')}
+              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+            >
+              Chat & Run
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Scans PubMed and clinical trials to bring recent scientific debate and consensus on your specific health context.</p>
+          {profile.agentLiteratureSummary && (
+            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20">
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentLiteratureSummary}</p>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Clinical Action Steps checklist */}
       <div id="actions-checklist-section" className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-[32px] p-6 shadow-sm space-y-4">

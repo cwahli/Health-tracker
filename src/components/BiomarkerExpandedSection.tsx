@@ -47,7 +47,7 @@ export const BiomarkerExpandedSection: React.FC<BiomarkerExpandedSectionProps> =
     .filter(h => h.biomarkers[def.key] !== undefined)
     .map(h => ({
       date: h.date,
-      value: Number(h.biomarkers[def.key]),
+      value: typeof h.biomarkers[def.key] === 'string' ? parseFloat(h.biomarkers[def.key] as string) : Number(h.biomarkers[def.key]),
       originalVal: h.biomarkers[def.key],
       logId: h.id
     }))

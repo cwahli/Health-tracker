@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { UserProfile, DbInteraction, QuotaData, FoodLog } from '../types';
 import { translations } from '../utils/translations';
 import { Eye, EyeOff, CloudLightning, CloudCheck, RefreshCw, LogOut, Check, ShieldCheck } from 'lucide-react';
@@ -307,7 +308,7 @@ export default function Header({
     </header>
 
       {/* Editing Dialog Slide-down for Profile Parameters */}
-      {isEditing && (
+      {isEditing && createPortal((
         <div id="profile-edit-modal" className="fixed inset-0 z-[100] bg-white dark:bg-slate-900 sm:bg-slate-900/60 sm:backdrop-blur-sm flex items-center justify-center sm:p-4 overflow-hidden">
           <div className="w-full h-full sm:h-auto sm:max-h-[90vh] flex flex-col bg-white dark:bg-slate-900 sm:border border-slate-200 dark:border-slate-800 sm:rounded-3xl sm:shadow-xl max-w-lg animation-fade-in text-slate-800 dark:text-slate-100 overflow-hidden">
             {/* Header */}
@@ -542,10 +543,10 @@ export default function Header({
         </div>
       </div>
     </div>
-  )}
+  ), document.body)}
 
       {/* Dedicated full-screen or elegant modal Theme Customizer Screen */}
-      {showThemeScreen && (
+      {showThemeScreen && createPortal((
         <div id="theme-customizer-screen" className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] animation-fade-in text-slate-800 dark:text-slate-100">
             {/* Header */}
@@ -868,10 +869,10 @@ export default function Header({
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* Database Interactions Live Sync Overlay */}
-      {showDbInteractionsOverlay && (
+      {showDbInteractionsOverlay && createPortal((
         <div id="db-interactions-overlay" className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl w-full max-w-xl overflow-hidden flex flex-col max-h-[80vh] animation-fade-in text-slate-850 dark:text-slate-100">
             {/* Header */}
@@ -1143,7 +1144,7 @@ export default function Header({
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
     </>
   );
 }
