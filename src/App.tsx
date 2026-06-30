@@ -2030,6 +2030,62 @@ export default function App() {
           const updatedProfile = { ...profile };
           if (agentType === 'agent1') {
             updatedProfile.agentTriageSummary = agentResult.message;
+            
+            // Merge extracted buckets into biomarkerHistory
+            if (agentResult.buckets && Array.isArray(agentResult.buckets)) {
+              let currentHistory = [...biomarkerHistory];
+              
+              agentResult.buckets.forEach((bucket: any) => {
+                if (bucket.biomarkers && Array.isArray(bucket.biomarkers)) {
+                  bucket.biomarkers.forEach((bio: any) => {
+                    const bioName = bio.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                    
+                    if (bio.history && Array.isArray(bio.history)) {
+                      bio.history.forEach((entry: any) => {
+                        const date = entry.date;
+                        const val = entry.value;
+                        const unit = entry.unit;
+                        
+                        let existingLogIndex = currentHistory.findIndex(h => h.date === date);
+                        if (existingLogIndex >= 0) {
+                          currentHistory[existingLogIndex].biomarkers[bioName] = val;
+                        } else {
+                          currentHistory.push({
+                            id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                            date: date,
+                            biomarkers: { [bioName]: val },
+                            note: "Extracted by Clinical Triage Agent"
+                          });
+                        }
+                        
+                        // Also save standard unit definitions in profile if needed
+                        if (!updatedProfile.customBiomarkers) {
+                          updatedProfile.customBiomarkers = {};
+                        }
+                        if (!updatedProfile.customBiomarkers[bioName]) {
+                          updatedProfile.customBiomarkers[bioName] = {
+                            name: bio.name,
+                            unit: unit
+                          };
+                        }
+                      });
+                    }
+                  });
+                }
+              });
+              
+              currentHistory.sort((a, b) => b.date.localeCompare(a.date));
+              setBiomarkerHistory(currentHistory);
+              
+              // Recompute latest biomarkers
+              const recomputedBiomarkers: { [key: string]: number | string } = {};
+              [...currentHistory].sort((a, b) => a.date.localeCompare(b.date)).forEach(log => {
+                Object.entries(log.biomarkers).forEach(([k, v]) => {
+                  recomputedBiomarkers[k] = v as string | number;
+                });
+              });
+              setBiomarkers(recomputedBiomarkers);
+            }
           } else if (agentType === 'agent2') {
             updatedProfile.agentDiagnosticSummary = agentResult.primaryDiagnosis;
             updatedProfile.agent2TimelineProjections = agentResult.timelineProjections;

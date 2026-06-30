@@ -104,9 +104,12 @@ export default function LogChat({
     }
   };
 
+  const payloadStorageKey = agentType ? `last_sent_payload_${type}_${agentType}` : `last_sent_payload_${type}`;
+  const chatStorageKey = agentType ? `chat_messages_${type}_${agentType}` : `chat_messages_${type}`;
+
   const [lastSentPayload, setLastSentPayload] = useState<any>(() => {
     try {
-      const saved = sessionStorage.getItem(`last_sent_payload_${type}`);
+      const saved = sessionStorage.getItem(payloadStorageKey);
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -115,14 +118,14 @@ export default function LogChat({
 
   useEffect(() => {
     if (lastSentPayload) {
-      sessionStorage.setItem(`last_sent_payload_${type}`, JSON.stringify(lastSentPayload));
+      sessionStorage.setItem(payloadStorageKey, JSON.stringify(lastSentPayload));
     } else {
-      sessionStorage.removeItem(`last_sent_payload_${type}`);
+      sessionStorage.removeItem(payloadStorageKey);
     }
-  }, [lastSentPayload, type]);
+  }, [lastSentPayload, payloadStorageKey]);
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const saved = sessionStorage.getItem(`chat_messages_${type}`);
+    const saved = sessionStorage.getItem(chatStorageKey);
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -138,15 +141,77 @@ export default function LogChat({
           ? 'Hello! Tell me or upload a photo of what you are planning to eat, and I will analyze its health benefits, risk factors, and full 30 nutrient breakdown based on your profile.'
           : type === 'food_idea'
             ? 'Hello! Do you have any specific food preferences or cravings today?'
-            : 'Hello! I can help you parse blood report photos, medical test charts, or manual body logs. Let me know what information you would like to enter today.',
+            : agentType === 'agent1'
+              ? 'Hello! I am the Clinical Triage Organizer. I can help clean, deduplicate, and organize your raw medical history data.'
+              : agentType === 'agent2'
+                ? 'Hello! I am the Prognostic Diagnostics agent. I can analyze your biomarker history to project timeline risks and identify testing gaps.'
+                : agentType === 'agent3'
+                  ? 'Hello! I am the Personalized Reference Ranges agent. I can calibrate normal biomarker reference ranges to your exact demographics.'
+                  : agentType === 'agent4'
+                    ? 'Hello! I am the Lifestyle Precision Intervention agent. I can translate your diagnostic risk into strict dietary and movement targets.'
+                    : agentType === 'agent5'
+                      ? 'Hello! I am the Medical Literature Consensus agent. I can scan PubMed and clinical trials to bring recent scientific debate to your context.'
+                      : 'Hello! I can help you parse blood report photos, medical test charts, or manual body logs. Let me know what information you would like to enter today.',
         timestamp: new Date().toISOString()
       }
     ];
   });
 
   useEffect(() => {
-    sessionStorage.setItem(`chat_messages_${type}`, JSON.stringify(messages));
-  }, [messages, type]);
+    sessionStorage.setItem(chatStorageKey, JSON.stringify(messages));
+  }, [messages, chatStorageKey]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    // For agents, always start fresh on open.
+    if (agentType) {
+      setLastSentPayload(null);
+      setMessages([
+        {
+          id: `welcome_${type}_${agentType}_${Date.now()}`,
+          role: 'assistant',
+          content: agentType === 'agent1'
+            ? "Hello! I am the Clinical Triage Organizer. I can help clean, deduplicate, and organize your raw medical history data into structured physiological buckets before we run analytics.\n\nLet me know what information you would like to enter today."
+            : agentType === 'agent2'
+              ? 'Hello! I am the Prognostic Diagnostics agent. I can analyze your biomarker history to project timeline risks and identify testing gaps.'
+              : agentType === 'agent3'
+                ? 'Hello! I am the Personalized Reference Ranges agent. I can calibrate normal biomarker reference ranges to your exact demographics.'
+                : agentType === 'agent4'
+                  ? 'Hello! I am the Lifestyle Precision Intervention agent. I can translate your diagnostic risk into strict dietary and movement targets.'
+                  : agentType === 'agent5'
+                    ? 'Hello! I am the Medical Literature Consensus agent. I can scan PubMed and clinical trials to bring recent scientific debate to your context.'
+                    : 'Hello! Let me know what you want to do.'
+        }
+      ]);
+      return;
+    }
+
+    const savedPayload = sessionStorage.getItem(payloadStorageKey);
+    setLastSentPayload(savedPayload ? JSON.parse(savedPayload) : null);
+
+    const savedMessages = sessionStorage.getItem(chatStorageKey);
+    if (savedMessages) {
+      try {
+        setMessages(JSON.parse(savedMessages));
+      } catch (e) {
+        console.error("Failed to parse saved messages:", e);
+      }
+    } else {
+      setMessages([
+        {
+          id: `welcome_${type}_default`,
+          role: 'assistant',
+          content: type === 'food' 
+            ? 'Hello! Tell me or upload a photo of what you are planning to eat, and I will analyze its health benefits, risk factors, and full 30 nutrient breakdown based on your profile.'
+            : type === 'food_idea'
+              ? 'Hello! Do you have any specific food preferences or cravings today?'
+              : 'Hello! I can help you parse blood report photos, medical test charts, or manual body logs. Let me know what information you would like to enter today.',
+          timestamp: new Date().toISOString()
+        }
+      ]);
+    }
+  }, [isOpen, type, agentType, chatStorageKey, payloadStorageKey]);
 
   const [inputText, setInputText] = useState('');
   const [budget, setBudget] = useState(() => localStorage.getItem('food_budget') || '');
@@ -450,18 +515,31 @@ export default function LogChat({
       else if (type === 'food_idea') endpoint = '/api/gemini/food-idea';
       else endpoint = '/api/gemini/medical-analyze';
 
+      const lightProfile = profile ? { ...profile } as any : null;
+      if (lightProfile) {
+        delete lightProfile.fontSizeTitle;
+        delete lightProfile.fontSizeSubtitle;
+        delete lightProfile.fontSizeSubtitleSmall;
+        delete lightProfile.fontSizeBodySmall;
+        delete lightProfile.fontSizeXS;
+        delete lightProfile.fontSizeKeyMetric;
+        delete lightProfile.fontSizeDescription;
+        delete lightProfile.photoUrl;
+        delete lightProfile.timezone;
+        delete lightProfile.language;
+      }
+
       const bodyData: any = {
-        userId: auth.currentUser?.uid || null,
+        userId: auth.currentUser?.uid || undefined,
         message: userMsg.content,
-        image: tempImages[0] || null,
-        images: tempImages.length > 0 ? tempImages : null,
-        imageDates: tempDates.length > 0 ? tempDates : null,
+        image: tempImages[0] || undefined,
+        images: tempImages.length > 0 ? tempImages : undefined,
+        imageDates: tempDates.length > 0 ? tempDates : undefined,
         history: messages.filter(m => new Date(m.timestamp).getTime() >= sessionStartTime && !m.id.startsWith('welcome_')).slice(-10).map(m => {
           let extra = "";
           if (m.role === 'assistant') {
             if (m.pendingBiomarkers) extra += `\n[Extracted Biomarkers: ${JSON.stringify(m.pendingBiomarkers)}]`;
             if (m.pendingFoodLog) {
-               // Only include a lightweight summary to avoid blowing up the token quota
                extra += `\n[Extracted Food: ${m.pendingFoodLog.name}, ${m.pendingFoodLog.quantity}, ${m.pendingFoodLog.nutrients?.calories || 0} kcal. (Full nutrient data omitted for brevity)]`;
             }
             if (m.pendingDate) extra += `\n[Extracted Date: ${m.pendingDate}]`;
@@ -469,9 +547,14 @@ export default function LogChat({
           }
           return { role: m.role, content: m.content + extra };
         }),
-        userProfile: profile,
+        userProfile: lightProfile,
         engine: selectedModelId
       };
+      
+      // Clean up undefined fields
+      Object.keys(bodyData).forEach(key => {
+        if (bodyData[key] === undefined) delete bodyData[key];
+      });
 
       if (type === 'food') {
         const lastFoodLog = [...messages].reverse().find(m => m.pendingFoodLog)?.pendingFoodLog;
@@ -529,7 +612,7 @@ export default function LogChat({
           bodyData.lastProcessedItem = lastMsg.lastProcessedItem;
         }
         if (agentType) {
-          bodyData.agentType = agentType;
+          bodyData.agentType = agentType === 'agent1' ? 'agent1_step1' : agentType;
           bodyData.biomarkerHistory = biomarkerHistory || [];
           bodyData.biomarkers = biomarkers || {};
           bodyData.recentMeals = foodLogs ? foodLogs.slice(-20).map(f => f.name) : [];
@@ -626,6 +709,70 @@ export default function LogChat({
     }
   };
 
+  const handleAgent1Step = async (step: 'agent1_step2' | 'agent1_step3', msg: any) => {
+    setIsAnalyzing(true);
+    try {
+      const bodyData: any = {
+        agentType: step,
+        extractedYaml: msg.agentResult?.extractedYaml || msg.extractedYaml,
+        bucketMapping: msg.agentResult?.bucketMapping ? JSON.stringify(msg.agentResult.bucketMapping) : msg.bucketMapping ? JSON.stringify(msg.bucketMapping) : undefined,
+        message: "Continue processing",
+        engine: selectedModelId
+      };
+
+      // To grab yaml and mapping correctly from previous messages
+      if (!bodyData.extractedYaml) {
+         const yamlMsg = [...messages].reverse().find(m => m.agentResult?.extractedYaml || m.extractedYaml);
+         bodyData.extractedYaml = yamlMsg?.agentResult?.extractedYaml || yamlMsg?.extractedYaml;
+      }
+      if (step === 'agent1_step3' && !bodyData.bucketMapping) {
+         const mapMsg = [...messages].reverse().find(m => m.agentResult?.bucketMapping || m.bucketMapping);
+         bodyData.bucketMapping = JSON.stringify(mapMsg?.agentResult?.bucketMapping || mapMsg?.bucketMapping);
+      }
+
+      const displayPayload = { ...bodyData };
+      setLastSentPayload(displayPayload);
+
+      const response = await fetch('/api/gemini/medical-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyData)
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Server returned ${response.status}: ${errText}`);
+      }
+
+      const resData = await response.json();
+      
+      const assistantMsg: ChatMessage & { agentTypeStep?: string } = {
+        id: `msg_agent1_${step}_${Date.now()}`,
+        role: 'assistant',
+        content: resData.text || 'Processing...',
+        timestamp: new Date().toISOString(),
+        agentType: 'agent1',
+        agentResult: resData,
+        agentTypeStep: step
+      };
+
+      setMessages(prev => [...prev, assistantMsg]);
+    } catch (err: any) {
+      console.error(err);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `msg_err_${Date.now()}`,
+          role: 'assistant',
+          content: `Error during processing step: ${err.message}`,
+          timestamp: new Date().toISOString()
+        }
+      ]);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex flex-col justify-end sm:justify-center p-0 sm:p-4 animation-fade-in font-sans">
       <div id="food-chat-container" className="w-full max-w-md mx-auto bg-white dark:bg-slate-900 rounded-t-[32px] sm:rounded-[32px] h-[90vh] sm:h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800/80 transition-colors duration-200">
@@ -637,7 +784,23 @@ export default function LogChat({
               <Sparkles className="w-5 h-5 animate-pulse" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-slate-950 dark:text-slate-100 font-display">{type === 'food' ? t.addFood : type === 'food_idea' ? 'Food ideas' : t.addMedical}</h2>
+              <h2 className="text-sm font-bold text-slate-950 dark:text-slate-100 font-display">
+                {type === 'food' 
+                  ? t.addFood 
+                  : type === 'food_idea' 
+                    ? 'Food ideas' 
+                    : agentType === 'agent1' 
+                      ? 'Clinical Triage Organizer' 
+                      : agentType === 'agent2' 
+                        ? 'Prognostic Diagnostics Assessment' 
+                        : agentType === 'agent3' 
+                          ? 'Personalized Reference Ranges' 
+                          : agentType === 'agent4' 
+                            ? 'Lifestyle Precision Intervention' 
+                            : agentType === 'agent5' 
+                              ? 'Medical Literature Consensus' 
+                              : t.addMedical}
+              </h2>
               <button
                 type="button"
                 onClick={() => setIsEngineSelectorOpen(!isEngineSelectorOpen)}
@@ -772,6 +935,34 @@ export default function LogChat({
                         </span>
                       </div>
                     </>
+                  )}
+
+                  {agentType && (
+                    <div className="space-y-2">
+                      <div className="bg-slate-100/50 dark:bg-slate-950/20 p-2 rounded-xl border border-slate-150 dark:border-slate-800/30 font-size-xs">
+                        <span className="text-slate-400 dark:text-slate-500 font-bold block font-size-xs uppercase tracking-wider mb-0.5">Biomarker History Logs</span>
+                        <span className="font-bold text-slate-700 dark:text-slate-200">
+                          {biomarkerHistory?.length || 0} historic logs
+                        </span>
+                      </div>
+                      <div className="bg-slate-100/50 dark:bg-slate-950/20 p-2 rounded-xl border border-slate-150 dark:border-slate-800/30 font-size-xs">
+                        <span className="text-slate-400 dark:text-slate-500 font-bold block font-size-xs uppercase tracking-wider mb-1.5">Checked Biomarker Values</span>
+                        {biomarkers && Object.keys(biomarkers).length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5 mt-1 max-h-32 overflow-y-auto">
+                            {Object.entries(biomarkers).map(([key, value]) => {
+                              const def = (profile?.customBiomarkers && profile.customBiomarkers[key]) || biomarkerDefinitions[key] || { name: key, unit: '' };
+                              return (
+                                <span key={key} className="px-2 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded text-[10px] font-mono text-slate-700 dark:text-slate-300">
+                                  {def.name}: <strong className="text-indigo-600 dark:text-indigo-400">{value}</strong> <span className="text-slate-400">{def.unit}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-slate-450 dark:text-slate-500 italic font-size-xs block mt-1">No biomarker data available.</span>
+                        )}
+                      </div>
+                    </div>
                   )}
 
                   {/* Warning Biomarkers */}
@@ -947,20 +1138,26 @@ export default function LogChat({
                     <p className="whitespace-pre-line break-words">{msg.content}</p>
                     {msg.id.startsWith('welcome_') && type === 'food_idea' && (
                       <div className="mt-3">
-                        {isAnalyzing ? (
-                          <div className="inline-flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50/50 dark:bg-indigo-950/20 px-3 py-2 border border-indigo-150 dark:border-indigo-900/30 rounded-xl">
-                            <Loader className="w-3.5 h-3.5 animate-spin" />
-                            <span>Generating Ideas...</span>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleSend('Surprise me')}
-                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-indigo-600/10 flex items-center gap-1.5 animate-pulse"
-                          >
-                            Surprise Me
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleSend('Surprise me')}
+                          disabled={isAnalyzing}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+                        >
+                          Surprise Me
+                        </button>
+                      </div>
+                    )}
+                    {msg.id.startsWith('welcome_') && agentType && (
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => handleSend('Start')}
+                          disabled={isAnalyzing}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+                        >
+                          Let's start
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1129,24 +1326,69 @@ export default function LogChat({
                       </div>
 
                       {/* Content details based on Agent type */}
-                      {msg.agentType === 'agent1' && msg.agentResult.suggestedChanges && (
-                        <div className="space-y-2">
-                          <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Identified duplicates & categorizations:</span>
-                          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                            {msg.agentResult.suggestedChanges.map((change: any, cidx: number) => (
-                              <div key={cidx} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 text-xs">
-                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${change.action === 'merge' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600' : 'bg-slate-150 text-slate-655'}`}>
-                                  {change.action}
-                                </span>
-                                <div>
-                                  <p className="font-semibold text-slate-800 dark:text-slate-200">
-                                    {String(change.biomarker || '').toUpperCase()} on {change.date} &rarr; value {change.value}
-                                  </p>
-                                  <p className="text-[10px] text-slate-500 font-medium leading-normal mt-0.5">{change.reason}</p>
-                                </div>
+                      {msg.agentType === 'agent1' && (
+                        <div className="space-y-3">
+                          {msg.agentTypeStep === 'agent1_step1' && (
+                            <div className="space-y-2">
+                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Step 1: Extracted YAML Data</span>
+                              <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">
+                                {msg.agentResult.extractedYaml || msg.extractedYaml}
+                              </pre>
+                              {!msg.agentResult.completedStep && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    msg.agentResult.completedStep = true;
+                                    handleAgent1Step('agent1_step2', msg);
+                                  }}
+                                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer mt-2"
+                                >
+                                  Continue to Map Data
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {msg.agentTypeStep === 'agent1_step2' && (
+                            <div className="space-y-2">
+                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Step 2: Category Mapping</span>
+                              <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">
+                                {JSON.stringify(msg.agentResult.bucketMapping || msg.bucketMapping, null, 2)}
+                              </pre>
+                              {!msg.agentResult.completedStep && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    msg.agentResult.completedStep = true;
+                                    handleAgent1Step('agent1_step3', msg);
+                                  }}
+                                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer mt-2"
+                                >
+                                  Assemble JSON
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {(msg.agentTypeStep === 'agent1_step3' || !msg.agentTypeStep) && (
+                            <div className="space-y-2">
+                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Step 3: Processed Categories</span>
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                {(msg.agentResult.buckets || []).map((bucket: any, cidx: number) => (
+                                  <div key={cidx} className="flex flex-col gap-1 p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 text-xs">
+                                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">{bucket.systemName}</span>
+                                    <div className="flex flex-wrap gap-1">
+                                      {bucket.biomarkers?.map((b: any, bidx: number) => (
+                                        <span key={bidx} className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-800 text-[9px] font-semibold rounded-md">
+                                          {b.name} ({b.history?.length || 0})
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1254,20 +1496,22 @@ export default function LogChat({
                       )}
 
                       {/* Confirm Button */}
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (onAgentFinish) {
-                            await onAgentFinish(msg.agentType!, msg.agentResult);
-                            setLoggedMessageIds(prev => [...prev, msg.id]);
-                            onClose();
-                          }
-                        }}
-                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                      >
-                        <Check className="w-4 h-4" />
-                        Apply & Save Agent Findings
-                      </button>
+                      {(msg.agentType !== 'agent1' || msg.agentTypeStep === 'agent1_step3' || !msg.agentTypeStep) && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (onAgentFinish) {
+                              await onAgentFinish(msg.agentType!, msg.agentResult);
+                              setLoggedMessageIds(prev => [...prev, msg.id]);
+                              onClose();
+                            }
+                          }}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Check className="w-4 h-4" />
+                          Apply & Save Agent Findings
+                        </button>
+                      )}
                     </div>
                   )}
 

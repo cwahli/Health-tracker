@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { encode as toonEncode } from "@toon-format/toon";
 import { AsyncLocalStorage } from "async_hooks";
 import { Firestore } from "@google-cloud/firestore";
 
@@ -1283,63 +1284,59 @@ app.post("/api/gemini/medical-analyze", async (req, res) => {
       let systemInstruction = "";
       let mockData: any = {};
 
-      if (agentType === "agent1") {
-        systemInstruction = `You are a Clinical Data Preparation AI (Clinical Triage Agent). Your job is to clean, deduplicate, and organize raw medical history data (including blood test results, biometrics like BMI or waist size, and recent logs) into a structured JSON format.
-
-=== CRITICAL CLINICAL DIRECTIVES ===
-1. SAME-DATE DEDUPLICATION: Often, the exact same biomarker is logged multiple times on the exact same date under slightly different names (e.g., "Serum ALT" and "ALT level" on 2026-06-05). You MUST silently merge same-day duplicates. Keep only ONE entry for that specific date using the standard clinical name and exact numeric value.
-2. PRESERVE HISTORICAL RECORDS: Do NOT merge entries from DIFFERENT dates. If the user has a "Total Cholesterol" reading in 2024 and another in 2026, preserve both so downstream agents can see the historical trend.
-3. PHYSIOLOGICAL BUCKETS: Categorize every marker into one of: 'Metabolic', 'Hepatic', 'Renal', 'Hematology', 'Biometrics', 'Other'.
-4. STRICT JSON OUTPUT SCHEMA:
+      if (agentType === "agent1_step1") {
+        systemInstruction = `You are a clinical data parser. Your ONLY job is to extract biomarker readings from the provided raw text and output them as a flat YAML array.
+Rules:
+Extract EVERY single biomarker. Do not skip any.
+If the exact same biomarker is logged multiple times on the SAME DATE under slightly different names (e.g., 'Serum ALT' and 'ALT level'), merge them into a single entry using the most standard clinical name.
+Preserve historical entries from different dates.
+Output ONLY valid YAML. No markdown formatting, no explanations.
+Target YAML Schema:
+- biomarker: string
+  date: YYYY-MM-DD
+  value: number
+  unit: string`;
+        mockData = {};
+      } else if (agentType === "agent1_step2") {
+        systemInstruction = `You are an expert Clinical Ontologist. I will provide you with a YAML list of a patient's extracted medical logs.
+Your task is to identify all the UNIQUE biomarker names present in this list and assign each one to exactly ONE of the following buckets: 'Metabolic', 'Hepatic', 'Renal', 'Hematology', 'Biometrics', or 'Other'.
+Output your response as a simple JSON key-value dictionary where the key is the biomarker name and the value is the assigned bucket. Do not include any other text.
+Example Output:
 {
-  "message": "A conversational reply summarizing your cleaning/organization findings (e.g., 'I analyzed the medical history, identified 12 biomarkers, merged 2 duplicate same-day entries on 2026-06-05, and grouped them into standard physiological buckets.')",
-  "entriesCount": number, // Total number of unique biomarker logs parsed across dates
-  "suggestedChanges": [
-    {
-      "date": "YYYY-MM-DD",
-      "biomarker": "string",
-      "action": "merge" | "keep" | "delete",
-      "value": "string or number",
-      "reason": "Reason for suggestion"
-    }
-  ],
+  "Serum ALT": "Hepatic",
+  "Body Weight": "Biometrics",
+  "Haemoglobin Estimation": "Hematology"
+}`;
+        mockData = {};
+      } else if (agentType === "agent1_step3") {
+        systemInstruction = `You are a strict JSON formatter. I will provide you with two things:
+Extracted Data: A flat YAML array of historical patient data.
+Bucket Mapping: A JSON dictionary mapping each biomarker to a physiological bucket.
+Your task is to assemble this data into the strict nested JSON schema provided below.
+Rules:
+You must include EVERY entry from the Extracted Data. Do not drop a single marker or date.
+Use the Bucket Mapping to place each marker into the correct 'systemName' array.
+If a marker has readings on multiple dates, nest all dates under the 'history' array for that specific marker.
+Do not output anything except the raw, final JSON.
+Target Schema:
+{
+  "message": "Data successfully processed and categorized.",
+  "entriesCount": number, // Total unique entries processed
   "buckets": [
     {
-      "systemName": "Metabolic" | "Hepatic" | "Renal" | "Hematology" | "Biometrics" | "Other",
+      "systemName": "Bucket Name",
       "biomarkers": [
         {
-          "name": "string",
+          "name": "Biomarker Name",
           "history": [
-            { "date": "YYYY-MM-DD", "value": "number or string", "unit": "string" }
+            { "date": "YYYY-MM-DD", "value": number, "unit": "string" }
           ]
         }
       ]
     }
   ]
-}
-Return ONLY raw JSON. Do not include markdown wraps or code blocks.`;
-
-        mockData = {
-          message: "I have cleaned and deduplicated your raw biomarker data, merging same-day duplicates and grouping them into standard physiological buckets.",
-          entriesCount: 15,
-          suggestedChanges: [
-            {
-              date: "2026-06-05",
-              biomarker: "alt",
-              action: "merge",
-              value: 41,
-              reason: "Merged duplicate 'Serum ALT' and 'ALT' on 2026-06-05."
-            }
-          ],
-          buckets: [
-            {
-              systemName: "Metabolic",
-              biomarkers: [
-                { name: "HbA1c", history: [{ date: "2026-06-05", value: 40, unit: "mmol/mol" }] }
-              ]
-            }
-          ]
-        };
+}`;
+        mockData = {};
       } else if (agentType === "agent2") {
         systemInstruction = `You are an expert Clinical Pathologist and Prognostics AI (Diagnostic & Prognostic Agent). Analyze the provided biomarker history in the context of the user's specific demographics.
 
@@ -1588,15 +1585,131 @@ Return ONLY raw JSON.`;
         }
 
         const imageCtx = imageDates && imageDates.length > 0 ? `The attached images were taken on these dates: ${imageDates.join(", ")}.` : "";
-        const promptText = `Chat History:\n${historyText}\n${imageCtx}\nUser message: "${message}"`;
+        
+        const cleanProfile: any = {
+          age: userProfile?.age,
+          gender: userProfile?.gender,
+          ethnicity: userProfile?.ethnicity,
+          bloodType: userProfile?.bloodType,
+          weight: userProfile?.weight,
+          height: userProfile?.height
+        };
+        
+        // Strip undefined and null values
+        Object.keys(cleanProfile).forEach(key => {
+          if (cleanProfile[key] === undefined || cleanProfile[key] === null) {
+            delete cleanProfile[key];
+          }
+        });
 
-        textOutput = await callUnifiedLLM({
-          modelId: engine || "gemini-2.5-flash",
-          systemInstruction,
-          promptText,
-          imagePayload,
-          imagePayloads: imagesPayload,
-          responseMimeType: "application/json"
+        const slimBiomarkers: any = {};
+        if (userProfile?.customBiomarkers) {
+          Object.keys(userProfile.customBiomarkers).forEach((k: string) => {
+            slimBiomarkers[k] = { 
+              name: userProfile.customBiomarkers[k].name, 
+              unit: userProfile.customBiomarkers[k].unit 
+            };
+          });
+        }
+        
+        const cleanedPayload = {
+          userProfile: cleanProfile,
+          biomarkerDefinitions: slimBiomarkers,
+          biomarkerHistory: biomarkerHistory || []
+        };
+
+        let dataContext = "";
+        if (agentType === "agent1_step1") {
+          dataContext = `\n\nUSER RAW DATA:\n${message}\n`;
+        } else if (agentType === "agent1_step2") {
+          dataContext = `\n\nEXTRACTED YAML DATA:\n${req.body.extractedYaml}\n`;
+        } else if (agentType === "agent1_step3") {
+          dataContext = `\n\nEXTRACTED YAML DATA:\n${req.body.extractedYaml}\n\nBUCKET MAPPING JSON:\n${req.body.bucketMapping}\n`;
+        } else {
+          const toonData = toonEncode(cleanedPayload);
+          dataContext = `\n\nUSER MEDICAL DATA (in TOON format):\n${toonData}\n`;
+        }
+
+        let promptText = `Chat History:\n${historyText}\n${imageCtx}\nUser message: "${message}"${dataContext}`;
+
+        let isYaml = agentType === "agent1_step1";
+        
+        let maxRetries = agentType === "agent1_step3" ? 3 : 1;
+        let attempt = 0;
+        let success = false;
+        
+        while (attempt < maxRetries && !success) {
+          attempt++;
+          textOutput = await callUnifiedLLM({
+            modelId: engine || "gemini-2.5-flash",
+            systemInstruction,
+            promptText,
+            imagePayload,
+            imagePayloads: imagesPayload,
+            responseMimeType: isYaml ? "text/plain" : "application/json"
+          });
+          
+          if (agentType === "agent1_step3") {
+            try {
+              let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
+              const firstBrace = cleanJson.indexOf("{");
+              const lastBrace = cleanJson.lastIndexOf("}");
+              if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+              }
+              const parsed = JSON.parse(cleanJson);
+              
+              const expectedCount = (req.body.extractedYaml.match(/- biomarker:/g) || []).length;
+              let actualCount = 0;
+              if (parsed.buckets && Array.isArray(parsed.buckets)) {
+                parsed.buckets.forEach((b: any) => {
+                  if (b.biomarkers && Array.isArray(b.biomarkers)) {
+                    b.biomarkers.forEach((m: any) => {
+                      if (m.history && Array.isArray(m.history)) {
+                        actualCount += m.history.length;
+                      }
+                    });
+                  }
+                });
+              }
+              
+              if (actualCount === expectedCount || attempt === maxRetries) {
+                success = true;
+                textOutput = cleanJson;
+              } else {
+                console.log(`Agent 3 retry ${attempt}: Expected ${expectedCount} entries, got ${actualCount}`);
+                promptText += `\n\nERROR: You missed some entries. I expected ${expectedCount} historical log entries based on the YAML, but you only outputted ${actualCount}. You MUST include EVERY single entry from the YAML. Do not summarize or skip any.`;
+              }
+            } catch (err) {
+              console.error("Agent 3 parse error:", err);
+              if (attempt === maxRetries) success = true; // just let it fail naturally below
+            }
+          } else {
+            success = true;
+          }
+        }
+      }
+
+      if (agentType === "agent1_step1") {
+        let cleanYaml = textOutput.replace(/```(?:yaml)?/gi, "").trim();
+        return res.json({
+          text: "I have extracted the biomarkers. Please review the YAML output.",
+          agentType,
+          extractedYaml: cleanYaml
+        });
+      }
+
+      if (agentType === "agent1_step2") {
+        let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
+        const firstBrace = cleanJson.indexOf("{");
+        const lastBrace = cleanJson.lastIndexOf("}");
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+        }
+        return res.json({
+          text: "I have categorized the biomarkers. Please review the mapping.",
+          agentType,
+          bucketMapping: JSON.parse(cleanJson)
         });
       }
 
