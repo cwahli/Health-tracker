@@ -418,16 +418,18 @@ async function callUnifiedLLM({
 
   // Map choices to appropriate Google SDK model IDs
   let targetGeminiModel = "gemini-3.5-flash";
-  if (normalizedModelId.includes("antigravity")) {
-    targetGeminiModel = "gemini-3.5-flash";
-  } else if (normalizedModelId.includes("pro") || normalizedModelId.includes("3.1")) {
-    targetGeminiModel = "gemini-3.5-flash";
-  } else if (normalizedModelId.includes("3.5-flash")) {
+  if (normalizedModelId.includes("deep-research") || normalizedModelId.includes("pro")) {
+    targetGeminiModel = "gemini-3.1-pro-preview";
+  } else if (normalizedModelId.includes("3.1-flash-lite")) {
+    targetGeminiModel = "gemini-3.1-flash-lite";
+  } else if (normalizedModelId.includes("3.1-flash") || normalizedModelId.includes("3.5-flash")) {
     targetGeminiModel = "gemini-3.5-flash";
   } else if (normalizedModelId.includes("2.5-flash-lite")) {
     targetGeminiModel = "gemini-2.5-flash-lite";
   } else if (normalizedModelId.includes("2.5-flash")) {
     targetGeminiModel = "gemini-2.5-flash";
+  } else if (normalizedModelId === "gemini-2.5") {
+    targetGeminiModel = "gemini-2.5-pro";
   } else if (normalizedModelId.includes("3-flash") || normalizedModelId.includes("3.0-flash")) {
     targetGeminiModel = "gemini-3.0-flash";
   }
@@ -727,7 +729,7 @@ async function callUnifiedLLM({
     }
   }
   } catch (err: any) {
-    if (modelId !== "gemini-2.5-flash" && modelId !== "gemini-2.5-flash-lite") {
+    if (modelId !== "gemini-2.5-flash-lite" && modelId !== "gemini-2.5-flash") {
       addDebugLog(`[UnifiedLLM-Recovery] Error during primary execution of model "${modelId}": ${err.message || err}. Retrying with highly stable fallback gemini-2.5-flash...`);
       return callUnifiedLLM({
         modelId: "gemini-2.5-flash",
@@ -1386,7 +1388,7 @@ app.post("/api/gemini/medical-analyze", async (req, res) => {
       let systemInstruction = "";
       let mockData: any = {};
 
-      if (agentType === "agent1_step1") {
+      if (agentType === "agent1") {
         systemInstruction = `You are a clinical data parser and conversational health assistant (Step 1: Clinical Triage).
 Your tasks:
 1. Parse raw health reports/text and extract biomarker readings into a flat YAML array.
@@ -1421,7 +1423,7 @@ Rules for handling user inputs:
 
 Make sure your entire output is valid JSON, containing "text", "extractedYaml", "hasMoreMarkers", and "remainingText".`;
         mockData = {};
-      } else if (agentType === "agent1_step2") {
+      } else if (agentType === "agent2") {
         systemInstruction = `You are an expert Clinical Ontologist and conversational health assistant (Step 2: Category Mapping).
 Your tasks:
 1. Identify all unique biomarkers in the YAML list and categorize them by associating:
@@ -1431,7 +1433,7 @@ Your tasks:
 2. Handle conversational questions, updates, requests to go back, or requests to continue/submit from the user.
 
 You MUST respond with a JSON object containing the following keys:
-- "text": A friendly, clinical-grade conversational response to the user. If this is the initial mapping, write: "I have categorized the biomarkers. Please review the mapping."
+- "text": A friendly, clinical-grade conversational response to the user. You MUST include a breakdown of what remains the same and what change from the complete list you are suggesting. You must also include a count of the total biomarkers mapped.
 - "bucketMapping": A key-value dictionary where the key is the biomarker name and the value is the assigned categorization object containing "riskCategories", "standardMedicalGrouping", and "potentialMedicalConditions".
 
 Example "bucketMapping" structure:
@@ -1449,14 +1451,14 @@ Example "bucketMapping" structure:
 }
 
 Rules for handling user inputs:
-- INITIAL mapping: Categorize each biomarker into the detailed fields above and return the dictionary in "bucketMapping", and set "text" to "I have categorized the biomarkers. Please review the mapping."
-- UPDATE DATA: If the user requests to change a category mapping (e.g., "Move glucose to Metabolic"), perform the update on the "bucketMapping" dictionary and return the updated dictionary, explaining the change in "text".
+- INITIAL mapping: Categorize each biomarker into the detailed fields above and return the dictionary in "bucketMapping", and set "text" to include the breakdown of what remains the same, what changes you are suggesting, and the total count.
+- UPDATE DATA: If the user requests to change a category mapping (e.g., "Move glucose to Metabolic"), perform the update on the "bucketMapping" dictionary and return the updated dictionary, explaining the change and updating the counts/breakdown in "text".
 - START A CONVERSATION: If the user asks a clinical or general question (e.g., "Why is ALT under Hepatic?"), answer the question clearly in "text" and return the unmodified dictionary in "bucketMapping".
 - GO BACK / CONTINUE / SUBMIT: If the user asks to go back to Step 1 or proceed/continue/submit, explain in "text" how to proceed (they can click "Assemble Data" to continue, or click "Go Back" if needed).
 
 Make sure your entire output is valid JSON, containing "text" and "bucketMapping".`;
         mockData = {};
-      } else if (agentType === "agent1_step3") {
+      } else if (agentType === "agent3") {
         systemInstruction = `You are a clinical data coordinator and conversational health assistant (Step 3: Data Assembly).
 Your tasks:
 1. Assemble the flat YAML biomarker logs and the bucket mapping dictionary into a structured physiological nested JSON.
@@ -1493,7 +1495,7 @@ Rules for handling user inputs:
 
 Make sure your entire output is valid JSON, containing "text", "entriesCount", and "buckets".`;
         mockData = {};
-      } else if (agentType === "agent2") {
+      } else if (agentType === "agent4") {
         systemInstruction = `You are an advanced Clinical Classification, Prognostic, and Risk Triage Engine.
 You will receive an intermediate YAML payload containing a user profile and a cleaned list of biomarkers. You may also receive conversational follow-ups or corrections from the user.
 Your objective is to dynamically group EVERY biomarker into logical clinical conditions, calculate prognostic timelines, and output a strict, zero-data-loss JSON payload.
@@ -1622,7 +1624,7 @@ Ensure the 'prioritizedConditions' array is sorted descending by risk (ELEVATED 
             }
           ]
         };
-      } else if (agentType === "agent3") {
+      } else if (agentType === "agent5") {
         systemInstruction = `You are a Clinical Education AI (Biomarker Contextualizer). Your job is to generate highly personalized educational content, adjusted normal reference ranges, and specific risk explanations based on the user's demographics and previous diagnostic assessment.
 
 USER PROFILE:
@@ -1672,7 +1674,7 @@ Return ONLY raw JSON.`;
             }
           ]
         };
-      } else if (agentType === "agent4") {
+      } else if (agentType === "agent6") {
         systemInstruction = `You are a Precision Medicine & Lifestyle Coaching AI (Precision Intervention Agent). Translate the user's clinical biomarkers and risk assessment into a strict, trackable daily protocol.
 
 USER PROFILE:
@@ -1750,7 +1752,7 @@ Return ONLY raw JSON.`;
             "A 32g daily fiber intake stabilizes postprandial glucose, projecting metabolic efficiency in 4 weeks."
           ]
         };
-      } else if (agentType === "agent5") {
+      } else if (agentType === "agent7") {
         systemInstruction = `You are a Medical Literature Research AI (Medical Literature Agent). Summarize the latest peer-reviewed scientific consensus, clinical debates, and clinical trials relevant to this user's profile and biological risk markers.
 
 USER PROFILE:
@@ -2974,6 +2976,9 @@ app.post('/api/health-connect/refresh', async (req, res) => {
 
     const data = await response.json();
     if (!response.ok) {
+      if (response.status === 401 || response.status === 400) {
+         return res.status(response.status).json(data);
+      }
       throw new Error(JSON.stringify(data));
     }
     
@@ -3087,7 +3092,11 @@ app.post('/api/health-connect/steps', async (req, res) => {
     }
 
     if (!response.ok) {
-      throw new Error(JSON.stringify(data));
+      const errMessage = JSON.stringify(data);
+      if (response.status === 401 || response.status === 400 || errMessage.includes('invalid_token') || errMessage.includes('401')) {
+        return res.status(401).json({ error: errMessage });
+      }
+      throw new Error(errMessage);
     }
 
     // Parse the steps day-by-day (each bucket represents 1 day)

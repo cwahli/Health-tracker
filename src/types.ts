@@ -1,3 +1,10 @@
+export interface AgentAnalysis {
+  id: string;
+  agentType: string;
+  date: string;
+  result: any;
+}
+
 export interface UserProfile {
   nickname: string;
   photoUrl: string;
@@ -52,6 +59,7 @@ export interface UserProfile {
   agentContextualizerSummary?: string;// Agent 3 summary
   agentInterventionSummary?: string; // Agent 4 summary
   agentLiteratureSummary?: string;   // Agent 5 summary
+  agentAnalyses?: AgentAnalysis[];
   agent2TimelineProjections?: {
     year2: string;
     year5: string;
@@ -239,7 +247,7 @@ export interface ChatMessage {
     description: string;
     benefitRisk: string;
   };
-  agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | null;
+  agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7' | null;
   agentTypeStep?: string;
   extractedYaml?: string;
   bucketMapping?: any;

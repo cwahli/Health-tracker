@@ -36,35 +36,22 @@ Your tasks:
 2. Carefully analyze the standard reference range versus the user's age, gender, and ethnicity.
 3. Formulate precise proposals to update, convert, or correct the logged value and reference range, strictly respecting unit scales (e.g., preventing mmol/L vs. mg/dL conversions and unit mix-ups).`
   },
-  agent1_step1: {
-    title: "Clinical Triage Parser (Step 1: Data Extraction)",
+  agent1: {
+    title: "Clinical Data Parser (Agent 1)",
     subtitle: "Parses raw unstructured clinical text, images, or PDFs into standardized YAML schema.",
     icon: Terminal,
-    instruction: `You are a clinical data parser and conversational health assistant (Step 1: Clinical Triage).
+    instruction: `You are an expert clinical laboratory data extraction agent. You extract blood biomarker numbers and personal profile data with extreme accuracy. Your response must be an exact single JSON object matching the requested structure. Never add markdown formatting or wrappers like \`\`\`json.
 
-Your tasks:
-1. Parse raw health reports/text and extract biomarker readings into a flat YAML array.
-2. Handle conversational questions, updates, requests to go back, or requests to continue/submit from the user.
-
-CHUNKED PROCESSING RULE (Max 50):
-If the user's raw data/text contains more than 50 biomarker readings, you MUST split the processing into chunks:
-- Extract ONLY the first 50 biomarker entries in this chunk.
-- Set "hasMoreMarkers" to true in your JSON response.
-- Copy any remaining unparsed report text/context into "remainingText" in your JSON response.
-- In "text", friendly inform the user that you have extracted the first 50 biomarkers and ask if they would like to continue.
-- If there are 50 or fewer biomarkers, or if you are processing the final chunk of remaining text and finishing, set "hasMoreMarkers" to false and "remainingText" to "".
-
-YAML Schema for "extractedYaml" field (must be a single string containing valid YAML):
-- biomarker: string
-  date: YYYY-MM-DD
-  value: number
-  unit: string`
+=== CRITICAL MEDICAL DATA EXTRACTION DIRECTIVE ===
+1. STRICT VERBATIM VALUES: You must extract the exact NUMERIC VALUE provided in the source text. NEVER convert international units to US units (e.g., if the text says 6.5 mmol/L, output exactly 6.5). DO NOT do math.
+2. HANDLING UNITS & NEW KEYS: You MUST ALWAYS append the exact unit from the document to your snake_case key.
+3. CUSTOM DEFINITIONS: Any time you create a new key, you MUST define it in the 'customBiomarkerDefs' object.`
   },
-  agent1_step2: {
-    title: "Clinical Ontologist (Step 2: Category Mapping)",
+  agent2: {
+    title: "Clinical Ontologist (Agent 2)",
     subtitle: "Maps clean biomarkers to established medical risk groupings, ontologies, and condition taxonomies.",
     icon: BrainCircuit,
-    instruction: `You are an expert Clinical Ontologist and conversational health assistant (Step 2: Category Mapping).
+    instruction: `You are an expert Clinical Ontologist and conversational health assistant (Medical Ontology Mapping).
 
 Your tasks:
 1. Identify all unique biomarkers in the YAML list and categorize them by associating:
@@ -72,19 +59,19 @@ Your tasks:
    - "standardMedicalGrouping": The main medical division.
    - "potentialMedicalConditions": Broad diagnostic associations.`
   },
-  agent1_step3: {
-    title: "Clinical Data Coordinator (Step 3: Consolidated Clinical Biomarker Log)",
+  agent3: {
+    title: "Clinical Data Coordinator (Agent 3)",
     subtitle: "Assembles clinical buckets with complete chronological historical trends and system rationales.",
     icon: Terminal,
-    instruction: `You are a clinical data coordinator and conversational health assistant (Step 3: Data Assembly).
+    instruction: `You are a clinical data coordinator and conversational health assistant (Data Assembly).
 
 Your tasks:
 1. Group every extracted biomarker log entry into their assigned clinical buckets based on the mapping.
 2. Calculate longitudinal trends or status states (e.g. HIGH, LOW, NORMAL) using established clinical reference ranges.
 3. Formulate a cohesive clinical explanation for why each biomarker is placed under its respective clinical system.`
   },
-  agent2: {
-    title: "Clinical Classification, Prognostic, and Risk Triage Engine (Agent 2)",
+  agent4: {
+    title: "Clinical Classification, Prognostic, and Risk Triage Engine (Agent 4)",
     subtitle: "Sorts risk tiers, models multi-year prognostic timelines, and runs zero-data-loss integrity checks.",
     icon: ShieldAlert,
     instruction: `You are an advanced Clinical Classification, Prognostic, and Risk Triage Engine.
@@ -97,8 +84,8 @@ Your objective is to dynamically group EVERY biomarker into logical clinical con
 4. FAIR ASSESSMENT: Do not invent pathology.
 5. PROGNOSTIC TIMELINES: Project progression over 2, 5, and 10 years.`
   },
-  agent3: {
-    title: "Clinical Education AI / Biomarker Contextualizer (Agent 3)",
+  agent5: {
+    title: "Clinical Education AI / Biomarker Contextualizer (Agent 5)",
     subtitle: "Calibrates normal biomarker ranges and risk warnings to user's exact age, gender, and ethnicity.",
     icon: BookOpen,
     instruction: `You are a Clinical Education AI (Biomarker Contextualizer). Your job is to generate highly personalized educational content, adjusted normal reference ranges, and specific risk explanations based on the user's demographics and previous diagnostic assessment.
@@ -109,8 +96,8 @@ Your objective is to dynamically group EVERY biomarker into logical clinical con
 3. SPECIFIC RISK CONTEXT: For any marker identified as at-risk, write a personalized 3-4 sentence explanation of why this specific value is critical or dangerous for this specific user demographic profile.
 4. ZERO DATA LOSS INVENTORY RULE: Ensure every single biomarker submitted is calibrated and accounted for under "contextualizedBiomarkers" without omissions.`
   },
-  agent4: {
-    title: "Precision Medicine & Lifestyle Coaching AI (Agent 4)",
+  agent6: {
+    title: "Precision Medicine & Lifestyle Coaching AI (Agent 6)",
     subtitle: "Translates biological risk levels into trackable dietary goals, step counts, and cardiac habits.",
     icon: BrainCircuit,
     instruction: `You are a Precision Medicine & Lifestyle Coaching AI (Precision Intervention Agent). Translate the user's clinical biomarkers and risk assessment into a strict, trackable daily protocol.
@@ -121,8 +108,8 @@ Your objective is to dynamically group EVERY biomarker into logical clinical con
 2. ACTIVITY HABITS: Provide 2-3 highly specific daily habits.
 3. MATHEMATICAL PROJECTIONS: Provide biological time-to-goal estimates based on metabolic/physiological math (e.g. weight reduction timelines, lipid improvement periods).`
   },
-  agent5: {
-    title: "Medical Literature Research AI (Agent 5)",
+  agent7: {
+    title: "Medical Literature Research AI (Agent 7)",
     subtitle: "Retrieves scholarly guideline citations (AHA, ESC, ADA, KDIGO) and latest academic trials.",
     icon: BookOpen,
     instruction: `You are a Medical Literature Research AI (Medical Literature Agent). Summarize the latest peer-reviewed scientific consensus, clinical debates, and clinical trials relevant to this user's profile and biological risk markers.
@@ -143,11 +130,8 @@ export default function FullScreenInstructionViewer({
 
   if (!isOpen) return null;
 
-  // Resolve steps/variations of agent1
+  // Map the agent type
   let resolvedKey = agentType;
-  if (agentType === 'agent1') {
-    resolvedKey = 'agent1_step1';
-  }
 
   const agentData = AGENT_INSTRUCTIONS[resolvedKey] || {
     title: "AI Agent System Instructions",

@@ -344,7 +344,7 @@ export default function App() {
   // Chat window visibility modals
   const [isFoodChatOpen, setIsFoodChatOpen] = useState(false);
   const [isMedicalChatOpen, setIsMedicalChatOpen] = useState(false);
-  const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | null>(null);
+  const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7' | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEditingFoodLog, setIsEditingFoodLog] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -1915,6 +1915,7 @@ export default function App() {
             profile={profile}
             foodLogs={foodLogs}
             biomarkers={biomarkers}
+            biomarkerHistory={biomarkerHistory}
             report={report}
             draftReport={draftReport}
             onAcceptReport={handleAcceptReport}
@@ -1925,9 +1926,19 @@ export default function App() {
             isGenerating={isGenerating}
             onNavigateToTab={setActiveTab}
             onOpenMedicalChat={() => setIsMedicalChatOpen(true)}
-            onOpenAgentChat={(agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5') => {
+            onOpenAgentChat={(agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7') => {
               setActiveAgentType(agentType);
               setIsMedicalChatOpen(true);
+            }}
+            onDeleteAnalysis={async (id) => {
+              if (profile.agentAnalyses) {
+                const updatedProfile = {
+                  ...profile,
+                  agentAnalyses: profile.agentAnalyses.filter(a => a.id !== id)
+                };
+                setProfile(updatedProfile);
+                await saveAndSync(updatedProfile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report);
+              }
             }}
           />
         )}
@@ -2030,64 +2041,80 @@ export default function App() {
         foodLogs={foodLogs}
         report={report}
         agentType={activeAgentType}
+        onAgentAnalysisSaved={async (agentType, agentResult) => {
+          const updatedProfile = { ...profile };
+          if (!updatedProfile.agentAnalyses) {
+            updatedProfile.agentAnalyses = [];
+          }
+          updatedProfile.agentAnalyses.push({
+            id: `analysis_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            agentType: agentType,
+            date: new Date().toISOString(),
+            result: agentResult
+          });
+          setProfile(updatedProfile);
+          await saveAndSync(updatedProfile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report);
+        }}
         onAgentFinish={async (agentType, agentResult) => {
           const updatedProfile = { ...profile };
+          
+          let currentHistory = [...biomarkerHistory];
+
           if (agentType === 'agent1') {
-            updatedProfile.agentTriageSummary = agentResult.message;
+            updatedProfile.agentTriageSummary = "Data extraction completed.";
             
-            // Merge extracted buckets into biomarkerHistory
-            if (agentResult.buckets && Array.isArray(agentResult.buckets)) {
-              let currentHistory = [...biomarkerHistory];
+            // Parse extractedYaml and merge into biomarkerHistory
+            const yamlText = agentResult.extractedYaml || agentResult;
+            if (typeof yamlText === 'string') {
+              const lines = yamlText.split('\n');
+              let currentEntry: any = {};
+              const entries: any[] = [];
               
-              agentResult.buckets.forEach((bucket: any) => {
-                if (bucket.biomarkers && Array.isArray(bucket.biomarkers)) {
-                  bucket.biomarkers.forEach((bio: any) => {
-                    const bioName = bio.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-                    
-                    if (bio.history && Array.isArray(bio.history)) {
-                      bio.history.forEach((entry: any) => {
-                        const date = entry.date;
-                        const val = entry.value;
-                        const unit = entry.unit;
-                        
-                        let existingLogIndex = currentHistory.findIndex(h => h.date === date);
-                        if (existingLogIndex >= 0) {
-                          currentHistory[existingLogIndex].biomarkers[bioName] = val;
-                        } else {
-                          currentHistory.push({
-                            id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                            date: date,
-                            biomarkers: { [bioName]: val },
-                            note: "Extracted by Clinical Triage Agent"
-                          });
-                        }
-                        
-                        // Also save standard unit definitions in profile if needed
-                        if (!updatedProfile.customBiomarkers) {
-                          updatedProfile.customBiomarkers = {};
-                        }
-                        const existingDef = updatedProfile.customBiomarkers[bioName] || {
-                          name: bio.name,
-                          unit: unit || '',
-                          normalRange: bio.normalRange || 'Unknown',
-                          description: bio.description || ''
-                        };
-                        updatedProfile.customBiomarkers[bioName] = {
-                          ...existingDef,
-                          riskCategories: bio.riskCategories || existingDef.riskCategories,
-                          standardMedicalGrouping: bio.standardMedicalGrouping || existingDef.standardMedicalGrouping,
-                          potentialMedicalConditions: bio.potentialMedicalConditions || existingDef.potentialMedicalConditions
-                        };
-                      });
-                    }
+              for (let line of lines) {
+                line = line.trim();
+                if (line.startsWith('-') || line.startsWith('biomarker:')) {
+                  if (currentEntry.biomarker) entries.push(currentEntry);
+                  currentEntry = {};
+                }
+                const bioMatch = line.match(/(?:-\s+)?biomarker:\s*(.*)/i);
+                if (bioMatch) { currentEntry.biomarker = bioMatch[1].replace(/['"]/g, '').trim(); continue; }
+                const dateMatch = line.match(/date:\s*([\d-]+)/i);
+                if (dateMatch) { currentEntry.date = dateMatch[1].trim(); continue; }
+                const valMatch = line.match(/value:\s*([\d.]+)/i);
+                if (valMatch) { currentEntry.value = parseFloat(valMatch[1]); continue; }
+                const unitMatch = line.match(/unit:\s*(.*)/i);
+                if (unitMatch) { currentEntry.unit = unitMatch[1].replace(/['"]/g, '').trim(); continue; }
+              }
+              if (currentEntry.biomarker) entries.push(currentEntry);
+              
+              entries.forEach(entry => {
+                const bioName = entry.biomarker.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                let existingLogIndex = currentHistory.findIndex(h => h.date === entry.date);
+                if (existingLogIndex >= 0) {
+                  currentHistory[existingLogIndex].biomarkers[bioName] = entry.value;
+                } else {
+                  currentHistory.push({
+                    id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                    date: entry.date,
+                    biomarkers: { [bioName]: entry.value },
+                    note: "Extracted by Clinical Data Parser"
                   });
+                }
+                
+                if (!updatedProfile.customBiomarkers) updatedProfile.customBiomarkers = {};
+                if (!updatedProfile.customBiomarkers[bioName]) {
+                  updatedProfile.customBiomarkers[bioName] = {
+                    name: entry.biomarker,
+                    unit: entry.unit || '',
+                    normalRange: 'Unknown',
+                    description: ''
+                  };
                 }
               });
               
               currentHistory.sort((a, b) => b.date.localeCompare(a.date));
               setBiomarkerHistory(currentHistory);
               
-              // Recompute latest biomarkers
               const recomputedBiomarkers: { [key: string]: number | string } = {};
               [...currentHistory].sort((a, b) => a.date.localeCompare(b.date)).forEach(log => {
                 Object.entries(log.biomarkers).forEach(([k, v]) => {
@@ -2097,20 +2124,42 @@ export default function App() {
               setBiomarkers(recomputedBiomarkers);
             }
           } else if (agentType === 'agent2') {
+             // Agent 2: Clinical Ontologist (Mapping)
+             updatedProfile.agentTriageSummary = "Biomarker categories mapped.";
+             const mapping = agentResult.bucketMapping || agentResult;
+             if (mapping && typeof mapping === 'object') {
+               if (!updatedProfile.customBiomarkers) updatedProfile.customBiomarkers = {};
+               Object.entries(mapping).forEach(([bioName, mapData]: [string, any]) => {
+                 const key = bioName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                 const existingDef = updatedProfile.customBiomarkers![key] || {
+                   name: bioName, unit: '', normalRange: 'Unknown', description: ''
+                 };
+                 updatedProfile.customBiomarkers![key] = {
+                   ...existingDef,
+                   riskCategories: mapData.riskCategories || existingDef.riskCategories,
+                   standardMedicalGrouping: mapData.standardMedicalGrouping || existingDef.standardMedicalGrouping,
+                   potentialMedicalConditions: mapData.potentialMedicalConditions || existingDef.potentialMedicalConditions
+                 };
+               });
+             }
+          } else if (agentType === 'agent3') {
+             // Agent 3: Clinical Data Coordinator (Assembly)
+             updatedProfile.agentTriageSummary = agentResult.text || "Data assembled into buckets.";
+          } else if (agentType === 'agent4') {
             updatedProfile.agentDiagnosticSummary = agentResult.primaryDiagnosis;
             updatedProfile.agent2TimelineProjections = agentResult.timelineProjections;
             updatedProfile.agent2GapTasks = agentResult.recommendedTests?.map((t: any) => `${t.testName}: ${t.reason}`);
-          } else if (agentType === 'agent3') {
+          } else if (agentType === 'agent5') {
             updatedProfile.agentContextualizerSummary = agentResult.message;
-          } else if (agentType === 'agent4') {
+          } else if (agentType === 'agent6') {
             updatedProfile.agentInterventionSummary = agentResult.message;
             updatedProfile.agent4Projections = agentResult.projections;
-          } else if (agentType === 'agent5') {
+          } else if (agentType === 'agent7') {
             updatedProfile.agentLiteratureSummary = agentResult.message;
           }
           
           setProfile(updatedProfile);
-          await saveAndSync(updatedProfile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report);
+          await saveAndSync(updatedProfile, foodLogs, biomarkers, currentHistory, actions, dailyBenefits, report);
           
           setActiveAgentType(null);
         }}

@@ -3,14 +3,16 @@ import { UserProfile, FoodLog, RecommendationReport } from '../types';
 import { translations } from '../utils/translations';
 import { 
   Brain, Sparkles, AlertCircle, TrendingDown, BookOpen, Clock, Heart, 
-  CheckCircle, HelpCircle, Loader, ShieldCheck, Database, Check, X, ArrowRight, Activity, Send 
+  CheckCircle, HelpCircle, Loader, ShieldCheck, Database, Check, X, ArrowRight, Activity, Send, ChevronDown, ChevronUp, Trash2 
 } from 'lucide-react';
 import LLMSelector from './LLMSelector';
+import { Agent5View, Agent6View, Agent7View } from './AgentResultViews';
 
 interface InsightsTabProps {
   profile: UserProfile;
   foodLogs: FoodLog[];
   biomarkers: { [key: string]: number | string };
+  biomarkerHistory?: any[];
   report: RecommendationReport | null;
   draftReport: RecommendationReport | null;
   onAcceptReport: (report: RecommendationReport) => Promise<void>;
@@ -21,7 +23,8 @@ interface InsightsTabProps {
   isGenerating: boolean;
   onNavigateToTab?: (tab: string) => void;
   onOpenMedicalChat?: () => void;
-  onOpenAgentChat?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5') => void;
+  onOpenAgentChat?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7') => void;
+  onDeleteAnalysis?: (id: string) => Promise<void>;
 }
 
 export default function InsightsTab({
@@ -38,13 +41,299 @@ export default function InsightsTab({
   isGenerating,
   onNavigateToTab,
   onOpenMedicalChat,
-  onOpenAgentChat
+  onOpenAgentChat,
+  onDeleteAnalysis,
+  biomarkerHistory
 }: InsightsTabProps) {
   const t = translations[profile.language] || translations.en;
   const [isApplying, setIsApplying] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [refinementText, setRefinementText] = useState("");
   const [chatHistory, setChatHistory] = useState<any[]>([]);
+  const [expandedAgentHistory, setExpandedAgentHistory] = useState<Record<string, boolean>>({});
+
+  const toggleAgentHistory = (agentType: string) => {
+    setExpandedAgentHistory(prev => ({ ...prev, [agentType]: !prev[agentType] }));
+  };
+
+  const renderAgentHistory = (agentType: string) => {
+    const history = (profile.agentAnalyses || []).filter(a => a.agentType === agentType).sort((a, b) => b.date.localeCompare(a.date));
+    if (history.length === 0) return null;
+    
+    const isExpanded = expandedAgentHistory[agentType];
+    const latest = history[0];
+    
+    const dateObj = new Date(latest.date);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - dateObj.getTime());
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const timeStr = diffDays > 0 ? `${diffDays} days ago` : 'today';
+
+    return (
+      <div className="mt-3">
+        <button 
+          onClick={() => toggleAgentHistory(agentType)}
+          className="text-[11px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
+        >
+          {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          Last analysis on {dateObj.toLocaleDateString()} ({timeStr})
+        </button>
+        {isExpanded && (
+          <div className="mt-2 space-y-2">
+            {history.map(item => (
+              <div key={item.id} className="p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-xl relative group">
+                <p className="text-base font-bold text-slate-400 mb-1">{new Date(item.date).toLocaleString()}</p>
+                {agentType === 'agent2' && item.result && (item.result.bucketMapping || item.result.text) ? (
+                  <div className="space-y-2 mt-2">
+                    {item.result.text && (
+                      <p className="text-[10px] text-slate-700 dark:text-slate-300 mb-2">{item.result.text}</p>
+                    )}
+                    {(item.result.bucketMapping || Object.keys(item.result).length > 0) && (
+                      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
+                        <table className="w-full text-[10px] text-left">
+                          <thead className="bg-slate-100 dark:bg-slate-900 sticky top-0">
+                            <tr>
+                              <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
+                              <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Medical Grouping</th>
+                              <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Risk Categories</th>
+                              <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {(() => {
+                              const mapping = item.result?.bucketMapping || (typeof item.result === 'object' && item.result !== null ? item.result : {});
+                              const entries = Object.entries(mapping).filter(([k, v]) => k !== 'text' && typeof v === 'object' && v !== null);
+                              return entries.map(([bioName, mapData]: [string, any], idx) => {
+                                const key = bioName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                                const existingDef = profile?.customBiomarkers?.[key];
+                                const newGroup = mapData.standardMedicalGrouping || 'Other';
+                                const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
+                                const isGroupChanged = existingDef && newGroup !== oldGroup;
+                                const newCategories = (mapData.riskCategories || []).join(', ');
+                                const oldCategories = (existingDef?.riskCategories || []).join(', ');
+                                const isCategoryChanged = existingDef && newCategories !== oldCategories;
+                                const isChanged = isGroupChanged || isCategoryChanged;
+                                const isNew = !existingDef;
+
+                                return (
+                                  <tr key={idx} className={isChanged ? "bg-amber-50/50 dark:bg-amber-900/10" : isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
+                                    <td className="px-2 py-1.5 font-medium text-slate-900 dark:text-slate-200">{bioName}</td>
+                                    <td className="px-2 py-1.5">
+                                      {isGroupChanged ? (
+                                        <div className="flex flex-col gap-0.5">
+                                          <span className="text-amber-600 dark:text-amber-400 font-bold">{newGroup}</span>
+                                          <span className="text-[8px] text-slate-400 line-through">{oldGroup}</span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-600 dark:text-slate-400">{newGroup}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      {isCategoryChanged ? (
+                                        <div className="flex flex-col gap-0.5">
+                                          <span className="text-amber-600 dark:text-amber-400 font-bold">{newCategories}</span>
+                                          <span className="text-[8px] text-slate-400 line-through">{oldCategories || 'None'}</span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-600 dark:text-slate-400">{newCategories || 'None'}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right">
+                                      {isNew ? (
+                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New</span>
+                                      ) : isChanged ? (
+                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
+                                      ) : (
+                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ) : agentType === 'agent4' && item.result && item.result.prioritizedConditions ? (
+                  <div className="space-y-2 mt-2">
+                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
+                      <table className="w-full text-[10px] text-left">
+                        <thead className="bg-slate-100 dark:bg-slate-900 sticky top-0">
+                          <tr>
+                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
+                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Agent Condition</th>
+                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {(() => {
+                            const conditions = Array.isArray(item.result.prioritizedConditions) ? item.result.prioritizedConditions : [];
+                            return conditions.flatMap((cond: any) => {
+                              return (Array.isArray(cond.biomarkers) ? cond.biomarkers : []).map((b: any, idx: number) => {
+                                const key = (b.key || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+                                const existingDef = profile?.customBiomarkers?.[key];
+                                const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
+                                const isGroupChanged = existingDef && cond.conditionName && cond.conditionName !== oldGroup;
+                                const isNew = !existingDef;
+                                return (
+                                  <tr key={`${cond.conditionName}-${idx}`} className={isGroupChanged ? "bg-amber-50/50 dark:bg-amber-900/10" : isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
+                                    <td className="px-2 py-1.5 font-medium text-slate-900 dark:text-slate-200">{b.name || b.key}</td>
+                                    <td className="px-2 py-1.5">
+                                      {isGroupChanged ? (
+                                        <div className="flex flex-col gap-0.5">
+                                          <span className="text-amber-600 dark:text-amber-400 font-bold">{cond.conditionName}</span>
+                                          <span className="text-[8px] text-slate-400 line-through">{oldGroup}</span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-600 dark:text-slate-400">{cond.conditionName}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right">
+                                      {isNew ? (
+                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New</span>
+                                      ) : isGroupChanged ? (
+                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
+                                      ) : (
+                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            });
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                    {item.result.summary?.primaryDiagnosis && (
+                      <p className="text-[10px] text-slate-700 dark:text-slate-300 mt-2"><span className="font-bold">Diagnosis:</span> {item.result.summary.primaryDiagnosis}</p>
+                    )}
+                  </div>
+                ) : agentType === 'agent3' && item.result && (item.result.buckets || Array.isArray(item.result)) ? (
+                  <div className="space-y-2 mt-2">
+                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
+                      <table className="w-full text-[10px] text-left">
+                        <thead className="bg-slate-100 dark:bg-slate-900 sticky top-0">
+                          <tr>
+                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
+                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Bucket</th>
+                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Total Readings</th>
+                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {(() => {
+                            const buckets = Array.isArray(item.result.buckets) ? item.result.buckets : (Array.isArray(item.result) ? item.result : []);
+                            const allBiomarkers = buckets.flatMap((bucket: any) => {
+                              return (bucket.biomarkers || []).map((b: any) => {
+                                const key = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+                                const existingDef = profile?.customBiomarkers?.[key];
+                                const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
+                                const isGroupChanged = existingDef && bucket.systemName && bucket.systemName !== oldGroup;
+                                const isNew = !existingDef;
+                                
+                                let hasNewReadings = false;
+                                if (Array.isArray(b.history) && b.history.length > 0) {
+                                  if (!existingDef) {
+                                    hasNewReadings = true;
+                                  } else {
+                                    const existingDates = (biomarkerHistory || []).filter((h: any) => h.biomarkers[key] !== undefined).map((h: any) => h.date);
+                                    const newDates = b.history.filter((h: any) => h && h.date && !existingDates.includes(h.date));
+                                    if (newDates.length > 0) {
+                                      hasNewReadings = true;
+                                    }
+                                  }
+                                }
+                                
+                                const isChanged = isGroupChanged || hasNewReadings;
+                                const statusSort = isNew ? 0 : (isChanged ? 1 : 2);
+                                
+                                return {
+                                  name: b.name,
+                                  key,
+                                  newGroup: bucket.systemName,
+                                  oldGroup,
+                                  isGroupChanged,
+                                  isNew,
+                                  hasNewReadings,
+                                  isChanged,
+                                  statusSort,
+                                  totalReadings: b.history?.length || 0
+                                };
+                              });
+                            });
+                            
+                            allBiomarkers.sort((a: any, b: any) => a.statusSort - b.statusSort);
+                            
+                            return allBiomarkers.map((b: any, idx: number) => (
+                              <tr key={`${b.key}-${idx}`} className={b.isChanged && !b.isNew ? "bg-amber-50/50 dark:bg-amber-900/10" : b.isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
+                                <td className="px-2 py-1.5 font-medium text-slate-900 dark:text-slate-200">{b.name}</td>
+                                <td className="px-2 py-1.5">
+                                  {b.isGroupChanged ? (
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-amber-600 dark:text-amber-400 font-bold">{b.newGroup}</span>
+                                      <span className="text-[8px] text-slate-400 line-through">{b.oldGroup}</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-600 dark:text-slate-400">{b.newGroup}</span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-1.5 text-slate-600 dark:text-slate-400">
+                                  {b.totalReadings}
+                                </td>
+                                <td className="px-2 py-1.5 text-right flex flex-col items-end gap-1">
+                                  {b.isNew ? (
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New Biomarker</span>
+                                  ) : b.isChanged ? (
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
+                                  ) : (
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
+                                  )}
+                                  {b.hasNewReadings && !b.isNew && (
+                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 uppercase tracking-wider">New Readings</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ));
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : agentType === 'agent5' ? (
+                  <div className="mt-2">
+                    <Agent5View rawResult={item.result} />
+                  </div>
+                ) : agentType === 'agent6' ? (
+                  <div className="mt-2">
+                    <Agent6View rawResult={item.result} />
+                  </div>
+                ) : agentType === 'agent7' ? (
+                  <div className="mt-2">
+                    <Agent7View rawResult={item.result} />
+                  </div>
+                ) : (
+                  <div className={`text-[10px] text-slate-700 dark:text-slate-300 font-mono overflow-auto ${agentType === 'agent1' ? 'max-h-96' : 'max-h-32'}`}>
+                    <pre>{typeof item.result === 'string' ? item.result : (() => { try { return JSON.stringify(item.result, null, 2); } catch (e) { return String(item.result); } })()}</pre>
+                  </div>
+                )}
+                {onDeleteAnalysis && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDeleteAnalysis(item.id); }}
+                    className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const handleRefine = () => {
     if (!refinementText.trim() || isGenerating) return;
@@ -327,12 +616,12 @@ export default function InsightsTab({
           </h3>
         </div>
 
-        {/* Agent 1: Clinical Triage Organizer */}
+        {/* Agent 1: Clinical Data Parser */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
               <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">1</span>
-              Clinical Triage Organizer
+              Clinical Data Parser
             </h4>
             <button
               onClick={() => onOpenAgentChat?.('agent1')}
@@ -341,23 +630,60 @@ export default function InsightsTab({
               Chat & Run
             </button>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Cleans, deduplicates, and organizes raw medical history data into structured physiological buckets.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Extracts biomarkers and readings from raw text or reports into a structured flat format.</p>
           {profile.agentTriageSummary && (
             <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20">
               <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentTriageSummary}</p>
             </div>
           )}
+          {renderAgentHistory('agent1')}
         </div>
 
-        {/* Agent 2: Prognostic Diagnostics Assessment */}
+        {/* Agent 2: Clinical Ontologist */}
         <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
               <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">2</span>
-              Prognostic Diagnostics
+              Clinical Ontologist
             </h4>
             <button
               onClick={() => onOpenAgentChat?.('agent2')}
+              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
+            >
+              Chat & Run
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Maps extracted biomarkers to clinical conditions and physiological risk categories.</p>
+          {renderAgentHistory('agent2')}
+        </div>
+
+        {/* Agent 3: Clinical Data Coordinator */}
+        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">3</span>
+              Clinical Data Coordinator
+            </h4>
+            <button
+              onClick={() => onOpenAgentChat?.('agent3')}
+              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
+            >
+              Chat & Run
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Assembles and structures mapped data into clean physiological buckets.</p>
+          {renderAgentHistory('agent3')}
+        </div>
+
+        {/* Agent 4: Prognostic Diagnostics Assessment */}
+        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">4</span>
+              Prognostic Diagnostics
+            </h4>
+            <button
+              onClick={() => onOpenAgentChat?.('agent4')}
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
             >
               Chat & Run
@@ -376,17 +702,18 @@ export default function InsightsTab({
               )}
             </div>
           )}
+          {renderAgentHistory('agent4')}
         </div>
 
-        {/* Agent 3: Personalized Reference Ranges */}
+        {/* Agent 5: Personalized Reference Ranges */}
         <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">3</span>
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">5</span>
               Personalized Reference Ranges
             </h4>
             <button
-              onClick={() => onOpenAgentChat?.('agent3')}
+              onClick={() => onOpenAgentChat?.('agent5')}
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
             >
               Chat & Run
@@ -398,17 +725,18 @@ export default function InsightsTab({
               <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentContextualizerSummary}</p>
             </div>
           )}
+          {renderAgentHistory('agent5')}
         </div>
 
-        {/* Agent 4: Lifestyle Precision Intervention */}
+        {/* Agent 6: Lifestyle Precision Intervention */}
         <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">4</span>
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">6</span>
               Lifestyle Precision Intervention
             </h4>
             <button
-              onClick={() => onOpenAgentChat?.('agent4')}
+              onClick={() => onOpenAgentChat?.('agent6')}
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
             >
               Chat & Run
@@ -425,17 +753,18 @@ export default function InsightsTab({
               )}
             </div>
           )}
+          {renderAgentHistory('agent6')}
         </div>
 
-        {/* Agent 5: Medical Literature Consensus */}
+        {/* Agent 7: Medical Literature Consensus */}
         <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">5</span>
+              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">7</span>
               Medical Literature Consensus
             </h4>
             <button
-              onClick={() => onOpenAgentChat?.('agent5')}
+              onClick={() => onOpenAgentChat?.('agent7')}
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
             >
               Chat & Run
@@ -447,6 +776,7 @@ export default function InsightsTab({
               <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentLiteratureSummary}</p>
             </div>
           )}
+          {renderAgentHistory('agent7')}
         </div>
       </div>
 

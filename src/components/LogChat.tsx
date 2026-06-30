@@ -14,6 +14,7 @@ import FullScreenInstructionViewer from './FullScreenInstructionViewer';
 import { InteractivePlacesMap } from './InteractivePlacesMap';
 import exifr from 'exifr';
 import { auth } from '../firebase';
+import { Agent5View, Agent6View, Agent7View } from './AgentResultViews';
 
 interface BiomarkerEntry {
   biomarker: string;
@@ -292,9 +293,10 @@ interface LogChatProps {
   biomarkers?: { [key: string]: number | string };
   foodLogs?: FoodLog[];
   report?: any;
-  agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | null;
+  agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7' | null;
   biomarkerHistory?: any[];
-  onAgentFinish?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5', agentResult: any) => Promise<void>;
+  onAgentFinish?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7', agentResult: any) => Promise<void>;
+  onAgentAnalysisSaved?: (agentType: string, agentResult: any) => Promise<void>;
 }
 
 const getSessionId = (): string => {
@@ -322,7 +324,8 @@ export default function LogChat({
   report,
   agentType = null,
   biomarkerHistory = [],
-  onAgentFinish
+  onAgentFinish,
+  onAgentAnalysisSaved
 }: LogChatProps) {
   const [showDataUsed, setShowDataUsed] = useState(false);
   const [showFullScreenConv, setShowFullScreenConv] = useState(false);
@@ -406,16 +409,20 @@ export default function LogChat({
           : type === 'food_idea'
             ? 'Hello! Do you have any specific food preferences or cravings today?'
             : agentType === 'agent1'
-              ? 'Hello! I am the Clinical Triage Organizer. I can help clean, deduplicate, and organize your raw medical history data.'
+              ? 'Hello! I am the Clinical Data Parser. I extract biomarkers and readings from raw text or reports into a structured format.'
               : agentType === 'agent2'
-                ? 'Hello! I am the Prognostic Diagnostics agent. I can analyze your biomarker history to project timeline risks and identify testing gaps.'
+                ? 'Hello! I am the Clinical Ontologist. I map extracted biomarkers to clinical conditions and physiological risk categories.'
                 : agentType === 'agent3'
-                  ? 'Hello! I am the Personalized Reference Ranges agent. I can calibrate normal biomarker reference ranges to your exact demographics.'
+                  ? 'Hello! I am the Clinical Data Coordinator. I assemble mapped data into clean physiological buckets.'
                   : agentType === 'agent4'
-                    ? 'Hello! I am the Lifestyle Precision Intervention agent. I can translate your diagnostic risk into strict dietary and movement targets.'
+                    ? 'Hello! I am the Prognostic Diagnostics Assessment agent. I analyze your biomarker history to project timeline risks and identify testing gaps.'
                     : agentType === 'agent5'
-                      ? 'Hello! I am the Medical Literature Consensus agent. I can scan PubMed and clinical trials to bring recent scientific debate to your context.'
-                      : 'Hello! I can help you parse blood report photos, medical test charts, or manual body logs. Let me know what information you would like to enter today.',
+                      ? 'Hello! I am the Personalized Reference Ranges agent. I calibrate normal biomarker reference ranges to your exact demographics.'
+                      : agentType === 'agent6'
+                        ? 'Hello! I am the Lifestyle Precision Intervention agent. I translate diagnostic risk into strict dietary and movement targets.'
+                        : agentType === 'agent7'
+                          ? 'Hello! I am the Medical Literature Consensus agent. I scan PubMed and clinical trials to bring recent scientific debate to your context.'
+                          : 'Hello! I can help you parse blood report photos, medical test charts, or manual body logs. Let me know what information you would like to enter today.',
         timestamp: new Date().toISOString()
       }
     ];
@@ -452,16 +459,20 @@ export default function LogChat({
           id: `welcome_${type}_${agentType}_${Date.now()}`,
           role: 'assistant',
           content: agentType === 'agent1'
-            ? "Hello! I am the Clinical Triage Organizer. I can help clean, deduplicate, and organize your raw medical history data into structured physiological buckets before we run analytics.\n\nLet me know what information you would like to enter today."
+            ? 'Hello! I am the Clinical Data Parser. I extract biomarkers and readings from raw text or reports into a structured format.'
             : agentType === 'agent2'
-              ? 'Hello! I am the Prognostic Diagnostics agent. I can analyze your biomarker history to project timeline risks and identify testing gaps.'
+              ? 'Hello! I am the Clinical Ontologist. I map extracted biomarkers to clinical conditions and physiological risk categories.'
               : agentType === 'agent3'
-                ? 'Hello! I am the Personalized Reference Ranges agent. I can calibrate normal biomarker reference ranges to your exact demographics.'
+                ? 'Hello! I am the Clinical Data Coordinator. I assemble mapped data into clean physiological buckets.'
                 : agentType === 'agent4'
-                  ? 'Hello! I am the Lifestyle Precision Intervention agent. I can translate your diagnostic risk into strict dietary and movement targets.'
+                  ? 'Hello! I am the Prognostic Diagnostics Assessment agent. I analyze your biomarker history to project timeline risks and identify testing gaps.'
                   : agentType === 'agent5'
-                    ? 'Hello! I am the Medical Literature Consensus agent. I can scan PubMed and clinical trials to bring recent scientific debate to your context.'
-                    : 'Hello! Let me know what you want to do.'
+                    ? 'Hello! I am the Personalized Reference Ranges agent. I calibrate normal biomarker reference ranges to your exact demographics.'
+                    : agentType === 'agent6'
+                      ? 'Hello! I am the Lifestyle Precision Intervention agent. I translate diagnostic risk into strict dietary and movement targets.'
+                      : agentType === 'agent7'
+                        ? 'Hello! I am the Medical Literature Consensus agent. I scan PubMed and clinical trials to bring recent scientific debate to your context.'
+                        : 'Hello! Let me know what you want to do.'
         }
       ]);
     } else {
@@ -957,6 +968,9 @@ export default function LogChat({
           if (agentType === 'agent1') {
             assistantMsg.agentTypeStep = resData.agentType || 'agent1_step1';
           }
+          if (onAgentAnalysisSaved) {
+            await onAgentAnalysisSaved(agentType, resData);
+          }
         } else {
           assistantMsg.mode = resData.mode;
           assistantMsg.status = resData.status;
@@ -1141,16 +1155,20 @@ export default function LogChat({
                   : type === 'food_idea' 
                     ? 'Food ideas' 
                     : agentType === 'agent1' 
-                      ? 'Clinical Triage Organizer' 
+                      ? 'Clinical Data Parser' 
                       : agentType === 'agent2' 
-                        ? 'Prognostic Diagnostics Assessment' 
+                        ? 'Clinical Ontologist' 
                         : agentType === 'agent3' 
-                          ? 'Personalized Reference Ranges' 
+                          ? 'Clinical Data Coordinator' 
                           : agentType === 'agent4' 
-                            ? 'Lifestyle Precision Intervention' 
+                            ? 'Prognostic Diagnostics Assessment' 
                             : agentType === 'agent5' 
-                              ? 'Medical Literature Consensus' 
-                              : t.addMedical}
+                              ? 'Personalized Reference Ranges' 
+                              : agentType === 'agent6' 
+                                ? 'Lifestyle Precision Intervention' 
+                                : agentType === 'agent7' 
+                                  ? 'Medical Literature Consensus' 
+                                  : t.addMedical}
               </h2>
               <button
                 type="button"
@@ -1209,6 +1227,22 @@ export default function LogChat({
               
               {showDataUsed && (
                 <div className="mt-2.5 pt-2.5 border-t border-slate-200/50 dark:border-slate-800/50 space-y-3.5 text-slate-600 dark:text-slate-300 font-sans leading-normal">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let targetAgent = 'agent1';
+                      if (type === 'food') targetAgent = 'food';
+                      else if (type === 'food_idea') targetAgent = 'food_idea';
+                      else {
+                        const lastMsgWithStep = [...messages].reverse().find(m => m.agentTypeStep || m.agentType);
+                        targetAgent = lastMsgWithStep?.agentType || agentType || 'agent1';
+                      }
+                      setActiveInstructionAgentType(targetAgent);
+                    }}
+                    className="w-full py-2 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800/30 text-indigo-700 dark:text-indigo-400 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm mb-3"
+                  >
+                    <span>ℹ️ View Programmed Agent Instructions</span>
+                  </button>
                   {/* Profile Stats */}
                   <div className="grid grid-cols-2 gap-2.5 font-size-xs bg-slate-100/50 dark:bg-slate-950/20 p-2 rounded-xl border border-slate-150 dark:border-slate-800/30">
                     <div>
@@ -1392,24 +1426,6 @@ export default function LogChat({
                       <span>🔍 View Log</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        let targetAgent = 'agent1_step1';
-                        if (type === 'food') targetAgent = 'food';
-                        else if (type === 'food_idea') targetAgent = 'food_idea';
-                        else {
-                          // Find latest agent step in messages
-                          const lastMsgWithStep = [...messages].reverse().find(m => m.agentTypeStep || m.agentType);
-                          targetAgent = lastMsgWithStep?.agentTypeStep || lastMsgWithStep?.agentType || 'agent1_step1';
-                        }
-                        setActiveInstructionAgentType(targetAgent);
-                      }}
-                      className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 hover:text-white dark:hover:text-white border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm animate-fade-in"
-                    >
-                      <span>ℹ️ View Programmed Agent Instructions</span>
-                    </button>
-
                     <FullScreenLogViewer
                       isOpen={showFullScreenConv}
                       onClose={() => setShowFullScreenConv(false)}
@@ -1521,85 +1537,25 @@ export default function LogChat({
                           <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                           <div className="space-y-1">
                             <h5 className="text-xs font-bold text-amber-700 dark:text-amber-400">
-                              Resilient Offline Recovery Mode
+                              Service Unavailable
                             </h5>
                             <p className="text-[11px] text-slate-600 dark:text-slate-400 font-medium leading-relaxed font-sans">
-                              The AI Service is currently experiencing transient spikes in demand. You can seamlessly bypass this error and proceed using our high-fidelity, deterministic offline mapping & data assembly engine.
+                              The AI Service is currently experiencing transient spikes in demand. You can seamlessly bypass this error and proceed to the next agent.
                             </p>
                           </div>
                         </div>
                         
                         <div className="flex flex-col sm:flex-row gap-2 font-sans">
-                          {msg.errorStep === 'agent1_step2' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const yamlMsg = [...messages].reverse().find(m => m.agentResult?.extractedYaml || m.extractedYaml);
-                                const yaml = yamlMsg?.agentResult?.extractedYaml || yamlMsg?.extractedYaml;
-                                if (!yaml) return;
-                                
-                                const offlineMapping: Record<string, any> = {};
-                                const parsed = parseYamlOffline(yaml);
-                                parsed.forEach(p => {
-                                  if (p.biomarker) {
-                                    offlineMapping[p.biomarker] = getOfflineCategorization(p.biomarker);
-                                  }
-                                });
-                                
-                                const fallbackResultMsg: ChatMessage = {
-                                  id: `msg_agent1_agent1_step2_fallback_${Date.now()}`,
-                                  role: 'assistant',
-                                  content: "I have successfully resolved the connection error by engaging our local Clinical Ontologist fallback engine. All unique biomarkers have been categorized and mapped. Please review and continue to assembly below!",
-                                  timestamp: new Date().toISOString(),
-                                  agentType: 'agent1',
-                                  agentResult: {
-                                    text: "Biomarkers successfully categorized offline.",
-                                    bucketMapping: offlineMapping,
-                                    completedStep: false
-                                  },
-                                  agentTypeStep: 'agent1_step2'
-                                };
-                                
-                                setMessages(prev => [...prev, fallbackResultMsg]);
-                              }}
-                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                            >
-                              <ShieldAlert className="w-3.5 h-3.5" />
-                              Bypass & Map Offline
-                            </button>
-                          )}
-                          
-                          {msg.errorStep === 'agent1_step3' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const yamlMsg = [...messages].reverse().find(m => m.agentResult?.extractedYaml || m.extractedYaml);
-                                const yaml = yamlMsg?.agentResult?.extractedYaml || yamlMsg?.extractedYaml;
-                                const mapMsg = [...messages].reverse().find(m => m.agentResult?.bucketMapping || m.bucketMapping);
-                                const mapping = mapMsg?.agentResult?.bucketMapping || mapMsg?.bucketMapping || {};
-                                
-                                if (!yaml) return;
-                                
-                                const assembled = performOfflineDataAssembly(yaml, mapping);
-                                
-                                const fallbackResultMsg: ChatMessage = {
-                                  id: `msg_agent1_agent1_step3_fallback_${Date.now()}`,
-                                  role: 'assistant',
-                                  content: "Data successfully assembled offline! All physiological buckets are prepared. You can now apply and save findings to move to the other clinical analysis agents.",
-                                  timestamp: new Date().toISOString(),
-                                  agentType: 'agent1',
-                                  agentResult: assembled,
-                                  agentTypeStep: 'agent1_step3'
-                                };
-                                
-                                setMessages(prev => [...prev, fallbackResultMsg]);
-                              }}
-                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                            >
-                              <ShieldAlert className="w-3.5 h-3.5" />
-                              Bypass & Assemble Offline
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                            }}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <ShieldAlert className="w-3.5 h-3.5" />
+                            Skip to Next Agent
+                          </button>
                         </div>
                       </div>
                     )}
@@ -1785,18 +1741,20 @@ export default function LogChat({
                         <div className="flex items-center gap-1.5">
                           <Sparkles className="w-4 h-4 text-indigo-600" />
                           <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs tracking-wider uppercase font-display">
-                            {msg.agentType === 'agent1' && 'Clinical Triage Organizer'}
-                            {msg.agentType === 'agent2' && 'Prognostic Diagnostics Assessment'}
-                            {msg.agentType === 'agent3' && 'Personalized Reference Ranges'}
-                            {msg.agentType === 'agent4' && 'Lifestyle Precision Intervention'}
-                            {msg.agentType === 'agent5' && 'Medical Literature Consensus'}
+                            {msg.agentType === 'agent1' && 'Clinical Data Parser'}
+                            {msg.agentType === 'agent2' && 'Clinical Ontologist'}
+                            {msg.agentType === 'agent3' && 'Clinical Data Coordinator'}
+                            {msg.agentType === 'agent4' && 'Prognostic Diagnostics Assessment'}
+                            {msg.agentType === 'agent5' && 'Personalized Reference Ranges'}
+                            {msg.agentType === 'agent6' && 'Lifestyle Precision Intervention'}
+                            {msg.agentType === 'agent7' && 'Medical Literature Consensus'}
                           </h4>
                         </div>
                         <button
                           type="button"
                           onClick={() => {
-                            const resolvedAgentType = msg.agentTypeStep || msg.agentType;
-                            setActiveInstructionAgentType(resolvedAgentType);
+                            const resolvedAgentType = msg.agentType;
+                            setActiveInstructionAgentType(resolvedAgentType || 'agent1');
                           }}
                           className="text-[9px] font-mono font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
                         >
@@ -1805,613 +1763,276 @@ export default function LogChat({
                       </div>
 
                       {/* Content details based on Agent type */}
-                      {msg.agentType === 'agent1' && (
+                      {msg.agentType === 'agent1' && msg.agentResult && (
                         <div className="space-y-3">
-                          {msg.agentTypeStep === 'agent1_step1' && (
-                            <div className="space-y-2">
-                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Step 1: Extracted data</span>
-                              <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">
-                                {msg.agentResult.extractedYaml || msg.extractedYaml}
-                              </pre>
-                              {!msg.agentResult.completedStep && (
-                                msg.agentResult.hasMoreMarkers ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleContinueExtractionChunk(msg);
-                                    }}
-                                    className="w-full py-2 bg-amber-650 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer mt-2"
-                                  >
-                                    Continue Extracting Remaining Biomarkers
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      msg.agentResult.completedStep = true;
-                                      handleAgent1Step('agent1_step2', msg);
-                                    }}
-                                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer mt-2"
-                                  >
-                                    Continue to Map Data
-                                  </button>
-                                )
-                              )}
-                            </div>
-                          )}
-
-                          {msg.agentTypeStep === 'agent1_step2' && (
-                            <div className="space-y-2">
-                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Step 2: Category Mapping</span>
-                              <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">
-                                {JSON.stringify(msg.agentResult.bucketMapping || msg.bucketMapping, null, 2)}
-                              </pre>
-                              {!msg.agentResult.completedStep && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    msg.agentResult.completedStep = true;
-                                    handleAgent1Step('agent1_step3', msg);
-                                  }}
-                                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer mt-2"
-                                >
-                                  Assemble Data
-                                </button>
-                              )}
-                            </div>
-                          )}
-
-                          {(msg.agentTypeStep === 'agent1_step3' || !msg.agentTypeStep) && (
-                            <div className="space-y-2">
-                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Processed Categories</span>
-                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                                {(msg.agentResult.buckets || []).map((bucket: any, cidx: number) => (
-                                  <div key={cidx} className="flex flex-col gap-1 p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 text-xs">
-                                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">{bucket.systemName}</span>
-                                    <div className="flex flex-wrap gap-1">
-                                      {bucket.biomarkers?.map((b: any, bidx: number) => (
-                                        <span key={bidx} className="px-1.5 py-0.5 bg-slate-600 dark:bg-slate-700 text-white text-[9px] font-semibold rounded-md">
-                                          {b.name} ({b.history?.length || 0})
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Dynamic Triage Organizer Audit verification */}
-                          {(() => {
-                            let list1: string[] = [];
-                            let list2: string[] = [];
-
-                            if (msg.agentTypeStep === 'agent1_step1') {
-                              // Find user's text message
-                              const msgIdx = messages.findIndex(m => m.id === msg.id);
-                              const precedingUserMsg = msgIdx !== -1 
-                                ? [...messages.slice(0, msgIdx)].reverse().find(m => m.role === 'user')
-                                : null;
-                              const userText = precedingUserMsg?.content || '';
-                              list1 = detectBiomarkersInText(userText);
-                              
-                              const yamlStr = msg.agentResult?.extractedYaml || msg.extractedYaml || '';
-                              list2 = extractBiomarkerKeysFromYaml(yamlStr);
-                            } else if (msg.agentTypeStep === 'agent1_step2') {
-                              const yamlMsg = [...messages].reverse().find(m => m.agentType === 'agent1' && (m.agentResult?.extractedYaml || m.extractedYaml));
-                              const yamlStr = yamlMsg?.agentResult?.extractedYaml || yamlMsg?.extractedYaml || '';
-                              list1 = extractBiomarkerKeysFromYaml(yamlStr);
-                              
-                              const mapping = msg.agentResult?.bucketMapping || msg.bucketMapping || {};
-                              list2 = Object.keys(mapping);
-                            } else if (msg.agentTypeStep === 'agent1_step3' || !msg.agentTypeStep) {
-                              const yamlMsg = [...messages].reverse().find(m => m.agentType === 'agent1' && (m.agentResult?.extractedYaml || m.extractedYaml));
-                              const yamlStr = yamlMsg?.agentResult?.extractedYaml || yamlMsg?.extractedYaml || '';
-                              list1 = extractBiomarkerKeysFromYaml(yamlStr);
-
-                              const buckets = msg.agentResult?.buckets || [];
-                              const temp: string[] = [];
-                              buckets.forEach((b: any) => {
-                                b.biomarkers?.forEach((bio: any) => {
-                                  if (bio && bio.name) temp.push(bio.name);
-                                });
-                              });
-                              list2 = temp;
-                            }
-
-                            if (list1.length === 0) return null;
-
-                            const isMatch = (a: string, b: string) => {
-                              const cleanA = a.toLowerCase().replace(/[^a-z0-9]/g, '');
-                              const cleanB = b.toLowerCase().replace(/[^a-z0-9]/g, '');
-                              return cleanA.includes(cleanB) || cleanB.includes(cleanA);
-                            };
-                            const difference = list1.filter(k1 => !list2.some(k2 => isMatch(k1, k2)));
-                            const isPerfect = difference.length === 0;
-                            const isExpanded = !!expandedAudits[msg.id];
-
-                            return (
-                              <div className="mt-3.5 border border-slate-150 dark:border-slate-800/80 rounded-xl overflow-hidden shadow-xs bg-slate-50/50 dark:bg-slate-900/40">
-                                <button
-                                  type="button"
-                                  onClick={() => setExpandedAudits(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
-                                  className="w-full flex items-center justify-between p-3 bg-slate-100/65 dark:bg-slate-900 hover:bg-slate-150/70 dark:hover:bg-slate-850 transition-all text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer border-b border-slate-150 dark:border-slate-800/60"
-                                >
-                                  <span className="flex items-center gap-2">
-                                    {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-400 dark:text-slate-500" />}
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Clinical Coverage & Data Integrity Audit</span>
-                                  </span>
-                                  <span className={`px-2 py-0.5 rounded-full text-[8px] font-mono font-bold uppercase tracking-wide ${
-                                    isPerfect ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400'
-                                  }`}>
-                                    {isPerfect ? '✓ Zero Loss' : '⚠️ Discrepancy'}
-                                  </span>
-                                </button>
-                                
-                                {isExpanded && (
-                                  <div className={`p-3.5 text-xs space-y-2.5 transition-all ${
-                                    isPerfect 
-                                      ? 'bg-emerald-500/5 text-emerald-850 dark:text-emerald-300' 
-                                      : 'bg-amber-500/5 text-amber-850 dark:text-amber-300'
-                                  }`}>
-                                    <div className="text-[11px] leading-relaxed text-slate-750 dark:text-slate-350">
-                                      <span className="font-bold">{list1.length} biomarker{list1.length !== 1 ? 's' : ''} sent</span> (input from the website not from the agent), then <span className="font-bold">{list2.length} biomarker{list2.length !== 1 ? 's' : ''} received</span>.
-                                    </div>
-
-                                    {/* Stats Grid */}
-                                    <div className="grid grid-cols-3 gap-2 text-center text-slate-700 dark:text-slate-350 font-sans font-medium">
-                                      <div className="bg-white/60 dark:bg-slate-950/50 p-2 rounded-lg border border-slate-150 dark:border-slate-800">
-                                        <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Sent</p>
-                                        <p className="text-xs font-extrabold font-mono text-indigo-600 dark:text-indigo-400 mt-0.5">{list1.length}</p>
-                                      </div>
-                                      <div className="bg-white/60 dark:bg-slate-950/50 p-2 rounded-lg border border-slate-150 dark:border-slate-800">
-                                        <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Received</p>
-                                        <p className="text-xs font-extrabold font-mono text-indigo-600 dark:text-indigo-400 mt-0.5">{list2.length}</p>
-                                      </div>
-                                      <div className="bg-white/60 dark:bg-slate-950/50 p-2 rounded-lg border border-slate-150 dark:border-slate-800">
-                                        <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Difference</p>
-                                        <p className={`text-xs font-extrabold font-mono mt-0.5 ${difference.length > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-emerald-500 dark:text-emerald-400'}`}>{difference.length}</p>
-                                      </div>
-                                    </div>
-
-                                    {difference.length > 0 ? (
-                                      <div className="text-[10px] leading-normal text-slate-650 dark:text-slate-400 border-t border-slate-150 dark:border-slate-800 pt-2.5">
-                                        <strong className="text-amber-700 dark:text-amber-400 font-semibold block mb-1">Omitted from System Analysis (Verification):</strong>
-                                        <div className="flex flex-wrap gap-1">
-                                          {difference.map((key) => (
-                                            <span key={key} className="font-mono text-[9px] font-bold bg-amber-500/10 dark:bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-600 dark:text-amber-400">
-                                              {key}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <p className="text-[10px] leading-normal text-emerald-650 dark:text-emerald-400 font-medium border-t border-slate-150 dark:border-slate-800 pt-2.5">
-                                        ✓ Perfect 100% data integrity. All extracted biomarkers were successfully mapped and accounted for in the systemic prognostic analysis.
-                                      </p>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
-
-                      {msg.agentType === 'agent2' && (
-                        <div className="space-y-4">
-                          {/* Primary Diagnosis */}
-                          {(msg.agentResult.summary?.primaryDiagnosis || msg.agentResult.primaryDiagnosis) && (
-                            <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-150/60 dark:border-slate-800">
-                              <span className="text-[9px] font-bold text-slate-400 block mb-0.5 uppercase tracking-wider">Primary System Diagnosis</span>
-                              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-normal">
-                                {msg.agentResult.summary?.primaryDiagnosis || msg.agentResult.primaryDiagnosis}
-                              </p>
-                            </div>
-                          )}
-
-                          {/* Timeline Projections */}
-                          {(() => {
-                            const timeline = msg.agentResult.summary?.timelineProjections || msg.agentResult.timelineProjections;
-                            if (!timeline) return null;
-                            return (
-                              <div className="space-y-3 p-3.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-150/60 dark:border-slate-800">
-                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Prognostic Timeline Projections</span>
-                                <div className="relative pl-5 border-l border-slate-200 dark:border-slate-800 space-y-4">
-                                  {timeline.year2 && (
-                                    <div className="relative">
-                                      <div className="absolute -left-[24.5px] top-1.5 w-2 h-2 rounded-full bg-indigo-500 ring-4 ring-white dark:ring-slate-900" />
-                                      <h4 className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">2-Year Outlook</h4>
-                                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-normal mt-0.5">{timeline.year2}</p>
-                                    </div>
-                                  )}
-                                  {timeline.year5 && (
-                                    <div className="relative">
-                                      <div className="absolute -left-[24.5px] top-1.5 w-2 h-2 rounded-full bg-violet-500 ring-4 ring-white dark:ring-slate-900" />
-                                      <h4 className="text-[11px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wide">5-Year Outlook</h4>
-                                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-normal mt-0.5">{timeline.year5}</p>
-                                    </div>
-                                  )}
-                                  {timeline.year10 && (
-                                    <div className="relative">
-                                      <div className="absolute -left-[24.5px] top-1.5 w-2 h-2 rounded-full bg-purple-500 ring-4 ring-white dark:ring-slate-900" />
-                                      <h4 className="text-[11px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wide">10-Year Outlook</h4>
-                                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-normal mt-0.5">{timeline.year10}</p>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })()}
-
-                          {/* Gap analysis: received vs output metrics */}
-                          {(() => {
-                            // Find flat YAML list message
-                            const yamlMsg = [...messages].reverse().find(m => m.extractedYaml || m.agentResult?.extractedYaml);
-                            const yamlStr = yamlMsg?.agentResult?.extractedYaml || yamlMsg?.extractedYaml || '';
-                            const list1 = extractBiomarkerKeysFromYaml(yamlStr);
-
-                            const prioritizedConditions = msg.agentResult.prioritizedConditions || [];
-                            const list2 = extractBiomarkerKeysFromPrioritizedConditions(prioritizedConditions);
-                            const difference = list1.filter(k1 => !list2.some(k2 => k2.toLowerCase() === k1.toLowerCase()));
-
-                            if (list1.length > 0) {
-                              const isPerfect = difference.length === 0;
-                              return (
-                                <div className={`p-3.5 rounded-xl border text-xs space-y-2.5 transition-all ${
-                                  isPerfect 
-                                    ? 'bg-emerald-500/10 dark:bg-emerald-500/5 border-emerald-500/20 text-emerald-850 dark:text-emerald-300' 
-                                    : 'bg-amber-500/10 dark:bg-amber-500/5 border-amber-500/20 text-amber-850 dark:text-amber-300'
-                                }`}>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-bold uppercase tracking-wider block">Clinical Coverage & Data Integrity Audit</span>
-                                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-mono font-bold uppercase tracking-wide ${
-                                      isPerfect ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400'
-                                    }`}>
-                                      {isPerfect ? '✓ Zero Loss' : '⚠️ Discrepancy'}
-                                    </span>
-                                  </div>
-                                  
-                                  {/* Stats Grid */}
-                                  <div className="grid grid-cols-3 gap-2 text-center text-slate-700 dark:text-slate-350">
-                                    <div className="bg-white/60 dark:bg-slate-900/40 p-2 rounded-lg border border-slate-100 dark:border-slate-800/40">
-                                      <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Metrics Submitted</p>
-                                      <p className="text-sm font-extrabold font-mono text-indigo-600 dark:text-indigo-400 mt-0.5">{list1.length}</p>
-                                    </div>
-                                    <div className="bg-white/60 dark:bg-slate-900/40 p-2 rounded-lg border border-slate-100 dark:border-slate-800/40">
-                                      <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Metrics Processed</p>
-                                      <p className="text-sm font-extrabold font-mono text-indigo-600 dark:text-indigo-400 mt-0.5">{list2.length}</p>
-                                    </div>
-                                    <div className="bg-white/60 dark:bg-slate-900/40 p-2 rounded-lg border border-slate-100 dark:border-slate-800/40">
-                                      <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Difference</p>
-                                      <p className={`text-sm font-extrabold font-mono mt-0.5 ${difference.length > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-emerald-500 dark:text-emerald-400'}`}>{difference.length}</p>
-                                    </div>
-                                  </div>
-
-                                  {/* Discrepancy details */}
-                                  {difference.length > 0 ? (
-                                    <div className="text-[10px] leading-normal text-slate-600 dark:text-slate-400">
-                                      <strong className="text-amber-700 dark:text-amber-400 font-semibold">Omitted from System Analysis:</strong>
-                                      <div className="mt-1 flex flex-wrap gap-1">
-                                        {difference.map((key) => (
-                                          <span key={key} className="font-mono text-[9px] font-bold bg-amber-500/10 dark:bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-600 dark:text-amber-400">
-                                            {key}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <p className="text-[10px] leading-normal text-emerald-600 dark:text-emerald-400 font-medium">
-                                      ✓ Perfect 100% data integrity. All extracted biomarkers were successfully mapped and accounted for in the systemic prognostic analysis.
-                                    </p>
-                                  )}
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-
-                          {/* Proposed Lab Confirmations */}
-                          {msg.agentResult.recommendedTests && msg.agentResult.recommendedTests.length > 0 && (
-                            <div className="space-y-1.5">
-                              <span className="text-[9px] font-mono font-bold text-rose-500 dark:text-rose-400 block uppercase tracking-wider">Proposed Lab Confirmations</span>
-                              {msg.agentResult.recommendedTests.map((test: any, tidx: number) => (
-                                <div key={tidx} className="p-2.5 bg-rose-50 dark:bg-rose-950/30 rounded-xl border border-rose-100 dark:border-rose-900/30 text-xs">
-                                  <p className="font-bold text-slate-900 dark:text-white">{test.testName}</p>
-                                  <p className="text-[10px] text-slate-600 dark:text-slate-350 leading-normal mt-0.5">{test.reason}</p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Structured Biomarkers Table Trigger Button */}
-                          {(() => {
-                            const prioritizedConditions = msg.agentResult.prioritizedConditions || [];
-                            const tableRows: Array<{system: string, biomarker: string, result: string, status: string, insight: string}> = [];
-                            
-                            prioritizedConditions.forEach((cond: any) => {
-                              if (cond.biomarkers && Array.isArray(cond.biomarkers)) {
-                                cond.biomarkers.forEach((m: any) => {
-                                  // Real-time or historical trend insight
-                                  let trendInsight = "";
-                                  const keyLogs = biomarkerHistory.filter(h => h.biomarkers[m.key] !== undefined);
-                                  if (keyLogs.length > 1) {
-                                    const sortedLogs = [...keyLogs].sort((a, b) => a.date.localeCompare(b.date));
-                                    const firstVal = sortedLogs[0].biomarkers[m.key];
-                                    const lastVal = sortedLogs[sortedLogs.length - 1].biomarkers[m.key];
-                                    const diff = lastVal - firstVal;
-                                    const pct = firstVal !== 0 ? ((diff / firstVal) * 100).toFixed(0) : "0";
-                                    trendInsight = `Trend: ${diff > 0 ? '▲' : '▼'} ${Math.abs(Number(pct))}% (${firstVal} → ${lastVal})`;
-                                  } else {
-                                    trendInsight = cond.clinicalRationale || "Stable or optimal level";
-                                  }
-
-                                  tableRows.push({
-                                    system: cond.conditionName || 'Other',
-                                    biomarker: m.name || m.key,
-                                    result: `${m.currentValue !== undefined ? m.currentValue : 'Unset'} ${m.unit || ''}`.trim(),
-                                    status: (m.status || 'NORMAL').toUpperCase(),
-                                    insight: trendInsight
-                                  });
-                                });
-                              } else if (cond.biomarkerKeys && Array.isArray(cond.biomarkerKeys)) {
-                                cond.biomarkerKeys.forEach((key: string) => {
-                                  const def = biomarkerDefinitions.find((d: any) => d.key === key);
-                                  const val = biomarkers?.[key] !== undefined ? biomarkers[key] : (key === 'weight' ? profile?.weight : (key === 'height' ? profile?.height : undefined));
-                                  const hasVal = val !== undefined && val !== '';
-                                  const status = hasVal ? getBiomarkerStatus(key, Number(val), def?.normalRange) : 'NORMAL';
-                                  
-                                  tableRows.push({
-                                    system: cond.condition || 'Other',
-                                    biomarker: def?.name || key,
-                                    result: hasVal ? `${val} ${def?.unit || ''}`.trim() : 'Unset',
-                                    status: status.toUpperCase(),
-                                    insight: cond.recommendations || "Monitor regularly"
-                                  });
-                                });
-                              }
-                            });
-
-                            if (tableRows.length === 0) return null;
-
-                            return (
-                              <div className="mt-3">
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveModalTableRows(tableRows)}
-                                  className="w-full py-2.5 px-3.5 bg-indigo-50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900/30 rounded-xl flex items-center justify-between text-xs font-semibold text-indigo-600 dark:text-indigo-400 transition-colors cursor-pointer group shadow-sm"
-                                >
-                                  <span className="flex items-center gap-2">
-                                    <Table className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
-                                    <span>Consolidated Biomarker Log</span>
-                                  </span>
-                                  <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full group-hover:scale-105 transition-transform">
-                                    {tableRows.length} Indicators • View ↗
-                                  </span>
-                                </button>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
-
-                      {msg.agentType === 'agent3' && msg.agentResult.contextualizedBiomarkers && (
-                        <div className="space-y-3">
-                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                            <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Demographic Range Calibrations:</span>
-                            <div className="space-y-2">
-                              {msg.agentResult.contextualizedBiomarkers.map((bio: any, bidx: number) => (
-                                <div key={bidx} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-150/50 dark:border-slate-800 text-xs space-y-1">
-                                  <div className="flex justify-between items-center">
-                                    <span className="font-bold text-slate-800 dark:text-slate-200 uppercase">{bio.name}</span>
-                                    <span className="font-mono text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-full text-[10px]">
-                                      normal: {bio.profileAdjustedNormalRange}
-                                    </span>
-                                  </div>
-                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal font-medium">{bio.description}</p>
-                                  {bio.specificRiskContext && (
-                                    <p className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold leading-normal pt-1 border-t border-slate-100 dark:border-slate-800/40">{bio.specificRiskContext}</p>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Consolidated Table Trigger for Reference Ranges */}
-                          <div className="pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const tableRows: any[] = [];
-                                (msg.agentResult.contextualizedBiomarkers || []).forEach((bio: any) => {
-                                  const key = bio.name?.toLowerCase().replace(/\s+/g, '_') || '';
-                                  const val = biomarkers?.[key] !== undefined ? biomarkers[key] : (key === 'weight' ? profile?.weight : (key === 'height' ? profile?.height : undefined));
-                                  const hasVal = val !== undefined && val !== '';
-                                  
-                                  tableRows.push({
-                                    biomarker: bio.name || bio.key || '',
-                                    result: hasVal ? `${val}` : 'Unset',
-                                    status: (bio.status || 'Healthy').toUpperCase(),
-                                    refRange: bio.profileAdjustedNormalRange || 'N/A',
-                                    insight: `${bio.description || ''}\n\n${bio.specificRiskContext || ''}`.trim()
-                                  });
-                                });
-                                setActiveModalTitle('Demographically Calibrated Reference Ranges');
-                                setActiveModalTableRows(tableRows);
-                              }}
-                              className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold border border-indigo-200/40 dark:border-indigo-800 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                            >
-                              <Table className="w-4 h-4" />
-                              View Consolidated Ranges Table
-                            </button>
-                          </div>
-
-                          {/* Demographically Adjusted Data Integrity Audit */}
-                          {(() => {
-                            const yamlMsg = [...messages].reverse().find(m => m.extractedYaml || m.agentResult?.extractedYaml);
-                            const yamlStr = yamlMsg?.agentResult?.extractedYaml || yamlMsg?.extractedYaml || '';
-                            const list1 = extractBiomarkerKeysFromYaml(yamlStr);
-
-                            const contextualized = msg.agentResult.contextualizedBiomarkers || [];
-                            const list2 = contextualized.map((b: any) => (b.name || b.key || '').toLowerCase());
-                            const difference = list1.filter(k1 => !list2.some(k2 => k2.toLowerCase() === k1.toLowerCase() || k1.toLowerCase().includes(k2.toLowerCase()) || k2.toLowerCase().includes(k1.toLowerCase())));
-
-                            if (list1.length > 0) {
-                              const isPerfect = difference.length === 0;
-                              const isExpanded = !!expandedAudits[msg.id];
-                              return (
-                                <div className="border border-slate-150 dark:border-slate-800/80 rounded-xl overflow-hidden shadow-xs bg-slate-50/50 dark:bg-slate-900/40">
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedAudits(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
-                                    className="w-full flex items-center justify-between p-3 bg-slate-100/65 dark:bg-slate-900 hover:bg-slate-150/70 dark:hover:bg-slate-850 transition-all text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer border-b border-slate-150 dark:border-slate-800/60"
-                                  >
-                                    <span className="flex items-center gap-2">
-                                      {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-400 dark:text-slate-500" />}
-                                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 font-mono">Reference Range Data Integrity Audit</span>
-                                    </span>
-                                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-mono font-bold uppercase tracking-wide ${
-                                      isPerfect ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400'
-                                    }`}>
-                                      {isPerfect ? '✓ Zero Loss' : '⚠️ Discrepancy'}
-                                    </span>
-                                  </button>
-                                  
-                                  {isExpanded && (
-                                    <div className={`p-3.5 text-xs space-y-2.5 transition-all ${
-                                      isPerfect 
-                                        ? 'bg-emerald-500/5 text-emerald-850 dark:text-emerald-300' 
-                                        : 'bg-amber-500/5 text-amber-850 dark:text-amber-300'
-                                    }`}>
-                                      <div className="text-[11px] leading-relaxed text-slate-755 dark:text-slate-350">
-                                        <span className="font-bold">{list1.length} biomarker{list1.length !== 1 ? 's' : ''} sent</span> (input from the website not from the agent), then <span className="font-bold">{list2.length} biomarker{list2.length !== 1 ? 's' : ''} calibrated</span>.
-                                      </div>
-
-                                      {/* Stats Grid */}
-                                      <div className="grid grid-cols-3 gap-2 text-center text-slate-700 dark:text-slate-350 font-sans font-medium">
-                                        <div className="bg-white/60 dark:bg-slate-950/50 p-2 rounded-lg border border-slate-150 dark:border-slate-800">
-                                          <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Sent</p>
-                                          <p className="text-xs font-extrabold font-mono text-indigo-600 dark:text-indigo-400 mt-0.5">{list1.length}</p>
-                                        </div>
-                                        <div className="bg-white/60 dark:bg-slate-950/50 p-2 rounded-lg border border-slate-150 dark:border-slate-800">
-                                          <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Calibrated</p>
-                                          <p className="text-xs font-extrabold font-mono text-indigo-600 dark:text-indigo-400 mt-0.5">{list2.length}</p>
-                                        </div>
-                                        <div className="bg-white/60 dark:bg-slate-950/50 p-2 rounded-lg border border-slate-150 dark:border-slate-800">
-                                          <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Difference</p>
-                                          <p className={`text-xs font-extrabold font-mono mt-0.5 ${difference.length > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-emerald-500 dark:text-emerald-400'}`}>{difference.length}</p>
-                                        </div>
-                                      </div>
-
-                                      {difference.length > 0 ? (
-                                        <div className="text-[10px] leading-normal text-slate-650 dark:text-slate-400 border-t border-slate-150 dark:border-slate-800 pt-2.5">
-                                          <strong className="text-amber-700 dark:text-amber-400 font-semibold block mb-1">Omitted from Calibration (Verification):</strong>
-                                          <div className="flex flex-wrap gap-1">
-                                            {difference.map((key) => (
-                                              <span key={key} className="font-mono text-[9px] font-bold bg-amber-500/10 dark:bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-600 dark:text-amber-400">
-                                                {key}
-                                              </span>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <p className="text-[10px] leading-normal text-emerald-655 dark:text-emerald-400 font-medium border-t border-slate-150 dark:border-slate-800 pt-2.5">
-                                          ✓ Perfect 100% data integrity. All extracted biomarkers were successfully calibrated and demographically mapped.
-                                        </p>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                      )}
-
-                      {msg.agentType === 'agent4' && (
-                        <div className="space-y-3">
-                          {msg.agentResult.nutrientTargets && (
-                            <div className="space-y-2">
-                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Calibrated Daily Allowances:</span>
-                              
-                              {/* Cards Grid */}
-                              <div className="grid grid-cols-4 gap-1.5 text-center font-mono text-[10px]">
-                                {['calories', 'saturatedFat', 'totalFibre', 'protein'].map((nutKey) => {
-                                  const rawNut = msg.agentResult.nutrientTargets[nutKey];
-                                  const isObj = rawNut && typeof rawNut === 'object';
-                                  const val = isObj ? rawNut.value : rawNut;
-                                  const unit = isObj ? rawNut.unit : (nutKey === 'calories' ? 'kcal' : 'g');
-                                  const label = nutKey === 'calories' ? 'Calories' : nutKey === 'saturatedFat' ? 'Sat. Fat' : nutKey === 'totalFibre' ? 'Fibre' : 'Protein';
-                                  return (
-                                    <div key={nutKey} className="p-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-lg shadow-xs">
-                                      <span className="block text-[8px] text-slate-400 font-sans font-bold">{label}</span>
-                                      <strong className="text-slate-800 dark:text-slate-200">{val || '—'} <span className="text-[8px] text-slate-500 font-normal">{unit}</span></strong>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-
-                              {/* Detailed Explanations for Recommended Allowances */}
-                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 pt-1.5 border-t border-slate-100 dark:border-slate-800/40">
-                                <span className="text-[9px] font-mono font-bold text-slate-400 block uppercase">Allowances Clinical Rationale:</span>
-                                {Object.entries(msg.agentResult.nutrientTargets).map(([nutKey, rawNut]: any) => {
-                                  const isObj = rawNut && typeof rawNut === 'object';
-                                  if (!isObj || !rawNut.reason) return null;
-                                  
-                                  const label = nutKey === 'calories' ? 'Calories' : nutKey === 'saturatedFat' ? 'Saturated Fat' : nutKey === 'totalFibre' ? 'Total Fibre' : nutKey === 'protein' ? 'Protein' : nutKey === 'carbs' ? 'Carbohydrates' : nutKey === 'fat' ? 'Total Fat' : nutKey === 'sodium' ? 'Sodium' : nutKey === 'sugar' ? 'Simple Sugar' : nutKey;
-                                  return (
-                                    <div key={nutKey} className="p-2 bg-slate-50/50 dark:bg-slate-900/60 rounded-lg border border-slate-150/40 dark:border-slate-800/40 text-[10px] space-y-1">
-                                      <div className="flex justify-between items-center font-bold">
-                                        <span className="text-slate-800 dark:text-slate-200 capitalize font-sans">{label}</span>
-                                        {rawNut.duration && (
-                                          <span className="font-mono text-indigo-600 dark:text-indigo-400 text-[8px] bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded-md">
-                                            Duration: {rawNut.duration}
-                                          </span>
-                                        )}
-                                      </div>
-                                      <p className="text-slate-500 dark:text-slate-400 leading-normal font-medium">{rawNut.reason}</p>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-
-                          {msg.agentResult.projections && msg.agentResult.projections.length > 0 && (
-                            <div className="space-y-1">
-                              <span className="text-[9px] font-mono font-bold text-indigo-600 block">PHYSIOLOGICAL PROJECTIONS</span>
-                              <div className="p-2.5 bg-indigo-50/20 dark:bg-indigo-950/10 rounded-xl border border-indigo-100/30 text-[10px] text-indigo-850 dark:text-indigo-300 font-medium space-y-1">
-                                {msg.agentResult.projections.map((p: string, pidx: number) => (
-                                  <p key={pidx}>&bull; {p}</p>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {msg.agentType === 'agent5' && msg.agentResult.insights && (
-                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                          <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Scholarly Consensus Articles:</span>
                           <div className="space-y-2">
-                            {msg.agentResult.insights.map((ins: any, iidx: number) => (
-                              <div key={iidx} className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-150 rounded-xl text-xs space-y-1">
-                                <h5 className="font-bold text-slate-900 dark:text-slate-100">{ins.title}</h5>
-                                <p className="text-[10px] text-slate-500 leading-normal font-medium">{ins.summary}</p>
-                                {ins.link && (
-                                  <a href={ins.link} target="_blank" rel="noreferrer" className="text-[9px] text-indigo-600 font-bold block hover:underline">
-                                    Primary Source &rarr;
-                                  </a>
-                                )}
-                              </div>
-                            ))}
+                            <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Extracted data</span>
+                            <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] max-h-96 overflow-y-auto whitespace-pre-wrap font-mono">
+                              {msg.agentResult.extractedYaml || msg.extractedYaml || (typeof msg.agentResult === 'string' ? msg.agentResult : JSON.stringify(msg.agentResult, null, 2))}
+                            </pre>
                           </div>
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent2' && msg.agentResult && (
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Category Mapping</span>
+                              {(() => {
+                                const mapping = msg.agentResult.bucketMapping || msg.bucketMapping || (typeof msg.agentResult === 'object' && msg.agentResult !== null ? msg.agentResult : {});
+                                const count = Object.keys(mapping).filter(k => k !== 'text').length;
+                                return <span className="text-[9px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded-full">{count} mapped</span>;
+                              })()}
+                            </div>
+                            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
+                              <table className="w-full text-[10px] text-left">
+                                <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
+                                  <tr>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Medical Grouping</th>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Risk Categories</th>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                  {(() => {
+                                    const mapping = msg.agentResult.bucketMapping || msg.bucketMapping || (typeof msg.agentResult === 'object' && msg.agentResult !== null ? msg.agentResult : {});
+                                    const entries = Object.entries(mapping).filter(([k, v]) => k !== 'text' && typeof v === 'object' && v !== null);
+                                    return entries.map(([bioName, mapData]: [string, any], idx) => {
+                                      const key = bioName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                                      const existingDef = profile?.customBiomarkers?.[key];
+                                      const newGroup = mapData.standardMedicalGrouping || 'Other';
+                                      const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
+                                      const isGroupChanged = existingDef && newGroup !== oldGroup;
+                                      const newCategories = (mapData.riskCategories || []).join(', ');
+                                      const oldCategories = (existingDef?.riskCategories || []).join(', ');
+                                      const isCategoryChanged = existingDef && newCategories !== oldCategories;
+                                      const isChanged = isGroupChanged || isCategoryChanged;
+                                      const isNew = !existingDef;
+
+                                      return (
+                                        <tr key={idx} className={isChanged ? "bg-amber-50/50 dark:bg-amber-900/10" : isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
+                                          <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-200">{bioName}</td>
+                                          <td className="px-3 py-2">
+                                            {isGroupChanged ? (
+                                              <div className="flex flex-col gap-0.5">
+                                                <span className="text-amber-600 dark:text-amber-400 font-bold">{newGroup}</span>
+                                                <span className="text-[8px] text-slate-400 line-through">{oldGroup}</span>
+                                              </div>
+                                            ) : (
+                                              <span className="text-slate-600 dark:text-slate-400">{newGroup}</span>
+                                            )}
+                                          </td>
+                                          <td className="px-3 py-2">
+                                            {isCategoryChanged ? (
+                                              <div className="flex flex-col gap-0.5">
+                                                <span className="text-amber-600 dark:text-amber-400 font-bold">{newCategories}</span>
+                                                <span className="text-[8px] text-slate-400 line-through">{oldCategories || 'None'}</span>
+                                              </div>
+                                            ) : (
+                                              <span className="text-slate-600 dark:text-slate-400">{newCategories || 'None'}</span>
+                                            )}
+                                          </td>
+                                          <td className="px-3 py-2 text-right">
+                                            {isNew ? (
+                                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New</span>
+                                            ) : isChanged ? (
+                                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
+                                            ) : (
+                                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    });
+                                  })()}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent3' && msg.agentResult && (
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Processed Categories</span>
+                            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
+                              <table className="w-full text-[10px] text-left">
+                                <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
+                                  <tr>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Bucket</th>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Total Readings</th>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                  {(() => {
+                                    const buckets = Array.isArray(msg.agentResult.buckets) ? msg.agentResult.buckets : (Array.isArray(msg.agentResult) ? msg.agentResult : []);
+                                    const allBiomarkers = buckets.flatMap((bucket: any) => {
+                                      return (bucket.biomarkers || []).map((b: any) => {
+                                        const key = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+                                        const existingDef = profile?.customBiomarkers?.[key];
+                                        const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
+                                        const isGroupChanged = existingDef && bucket.systemName && bucket.systemName !== oldGroup;
+                                        const isNew = !existingDef;
+                                        
+                                        let hasNewReadings = false;
+                                        if (Array.isArray(b.history) && b.history.length > 0) {
+                                          if (!existingDef) {
+                                            hasNewReadings = true;
+                                          } else {
+                                            const existingDates = (biomarkerHistory || []).filter((h: any) => h.biomarkers[key] !== undefined).map((h: any) => h.date);
+                                            const newDates = b.history.filter((h: any) => h && h.date && !existingDates.includes(h.date));
+                                            if (newDates.length > 0) {
+                                              hasNewReadings = true;
+                                            }
+                                          }
+                                        }
+                                        
+                                        const isChanged = isGroupChanged || hasNewReadings;
+                                        const statusSort = isNew ? 0 : (isChanged ? 1 : 2);
+                                        
+                                        return {
+                                          name: b.name,
+                                          key,
+                                          newGroup: bucket.systemName,
+                                          oldGroup,
+                                          isGroupChanged,
+                                          isNew,
+                                          hasNewReadings,
+                                          isChanged,
+                                          statusSort,
+                                          totalReadings: b.history?.length || 0
+                                        };
+                                      });
+                                    });
+                                    
+                                    allBiomarkers.sort((a: any, b: any) => a.statusSort - b.statusSort);
+                                    
+                                    return allBiomarkers.map((b: any, idx: number) => (
+                                      <tr key={`${b.key}-${idx}`} className={b.isChanged && !b.isNew ? "bg-amber-50/50 dark:bg-amber-900/10" : b.isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
+                                        <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-200">{b.name}</td>
+                                        <td className="px-3 py-2">
+                                          {b.isGroupChanged ? (
+                                            <div className="flex flex-col gap-0.5">
+                                              <span className="text-amber-600 dark:text-amber-400 font-bold">{b.newGroup}</span>
+                                              <span className="text-[8px] text-slate-400 line-through">{b.oldGroup}</span>
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-600 dark:text-slate-400">{b.newGroup}</span>
+                                          )}
+                                        </td>
+                                        <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
+                                          {b.totalReadings}
+                                        </td>
+                                        <td className="px-3 py-2 text-right flex flex-col items-end gap-1">
+                                          {b.isNew ? (
+                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New Biomarker</span>
+                                          ) : b.isChanged ? (
+                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
+                                          ) : (
+                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
+                                          )}
+                                          {b.hasNewReadings && !b.isNew && (
+                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 uppercase tracking-wider">New Readings</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ));
+                                  })()}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent4' && msg.agentResult && (
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Prognostic Diagnostics & Grouping</span>
+                            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
+                              <table className="w-full text-[10px] text-left">
+                                <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
+                                  <tr>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Agent Condition</th>
+                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                  {(() => {
+                                    const result = msg.agentResult;
+                                    const conditions = Array.isArray(result.prioritizedConditions) ? result.prioritizedConditions : [];
+                                    return conditions.flatMap((cond: any) => {
+                                      return (Array.isArray(cond.biomarkers) ? cond.biomarkers : []).map((b: any, idx: number) => {
+                                        const key = (b.key || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+                                        const existingDef = profile?.customBiomarkers?.[key];
+                                        const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
+                                        const isGroupChanged = existingDef && cond.conditionName && cond.conditionName !== oldGroup;
+                                        const isNew = !existingDef;
+                                        return (
+                                          <tr key={`${cond.conditionName}-${idx}`} className={isGroupChanged ? "bg-amber-50/50 dark:bg-amber-900/10" : isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
+                                            <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-200">{b.name || b.key}</td>
+                                            <td className="px-3 py-2">
+                                              {isGroupChanged ? (
+                                                <div className="flex flex-col gap-0.5">
+                                                  <span className="text-amber-600 dark:text-amber-400 font-bold">{cond.conditionName}</span>
+                                                  <span className="text-[8px] text-slate-400 line-through">{oldGroup}</span>
+                                                </div>
+                                              ) : (
+                                                <span className="text-slate-600 dark:text-slate-400">{cond.conditionName}</span>
+                                              )}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              {isNew ? (
+                                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New</span>
+                                              ) : isGroupChanged ? (
+                                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
+                                              ) : (
+                                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      });
+                                    });
+                                  })()}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div className="text-[10px] space-y-1">
+                              {msg.agentResult.summary?.primaryDiagnosis && (
+                                <p className="text-slate-700 dark:text-slate-300"><span className="font-bold">Diagnosis:</span> {msg.agentResult.summary.primaryDiagnosis}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent5' && msg.agentResult && (
+                        <div className="space-y-2">
+                          <Agent5View rawResult={msg.agentResult} />
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent6' && msg.agentResult && (
+                        <div className="space-y-2">
+                          <Agent6View rawResult={msg.agentResult} />
+                        </div>
+                      )}
+
+                      {msg.agentType === 'agent7' && msg.agentResult && (
+                        <div className="space-y-2">
+                          <Agent7View rawResult={msg.agentResult} />
                         </div>
                       )}
 
                       {/* Confirm Button */}
-                      {(msg.agentType !== 'agent1' || msg.agentTypeStep === 'agent1_step3' || !msg.agentTypeStep) && (
+                      {msg.agentResult && (msg.agentType !== 'agent1' || msg.agentTypeStep === 'agent1_step3' || !msg.agentTypeStep) && (
                         <button
                           type="button"
                           onClick={async () => {
@@ -2421,7 +2042,7 @@ export default function LogChat({
                               onClose();
                             }
                           }}
-                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer mt-3"
                         >
                           <Check className="w-4 h-4" />
                           Apply & Save Agent Findings
