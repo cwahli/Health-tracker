@@ -3,8 +3,60 @@ import path from "path";
 import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { encode as toonEncode } from "@toon-format/toon";
 import { AsyncLocalStorage } from "async_hooks";
+
+// Simple and robust custom JS object-to-YAML stringifier
+function jsToYaml(val: any, indent: number = 0): string {
+  const spaces = " ".repeat(indent);
+  if (val === null) return "null";
+  if (val === undefined) return "null";
+  if (typeof val === "string") {
+    if (val.includes("\n")) {
+      return "|\n" + val.split("\n").map(line => spaces + "  " + line).join("\n");
+    }
+    if (val.includes(":") || val.includes("#") || val.startsWith("-")) {
+      return `"${val.replace(/"/g, '\\"')}"`;
+    }
+    return val;
+  }
+  if (typeof val === "number" || typeof val === "boolean") {
+    return String(val);
+  }
+  if (Array.isArray(val)) {
+    if (val.length === 0) return "[]";
+    let out = "";
+    for (const item of val) {
+      if (typeof item === "object" && item !== null) {
+        const inner = jsToYaml(item, indent + 2);
+        const lines = inner.split("\n");
+        out += `\n${spaces}- ${lines[0].trim()}`;
+        if (lines.length > 1) {
+          out += "\n" + lines.slice(1).join("\n");
+        }
+      } else {
+        out += `\n${spaces}- ${jsToYaml(item, indent + 2)}`;
+      }
+    }
+    return out;
+  }
+  if (typeof val === "object") {
+    const keys = Object.keys(val);
+    if (keys.length === 0) return "{}";
+    let out = "";
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const v = val[k];
+      const prefix = i === 0 && indent > 0 ? "" : spaces;
+      if (typeof v === "object" && v !== null) {
+        out += `${prefix}${k}:${Array.isArray(v) ? "" : "\n"}${jsToYaml(v, indent + (Array.isArray(v) ? 0 : 2))}\n`;
+      } else {
+        out += `${prefix}${k}: ${jsToYaml(v, indent + 2)}\n`;
+      }
+    }
+    return out.trim();
+  }
+  return String(val);
+}
 import { Firestore } from "@google-cloud/firestore";
 
 dotenv.config();
@@ -143,6 +195,39 @@ async function fetchGoogleMapsPlaceId(businessName: string, latitude: string | n
   }
 }
 
+function robustParseJson(cleanJson: string): any {
+  cleanJson = cleanJson.replace(/```(?:json)?/gi, "").trim();
+  try {
+    return JSON.parse(cleanJson);
+  } catch (parseErr) {
+    const firstBrace = cleanJson.indexOf("{");
+    const lastBrace = cleanJson.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      let lastIdx = lastBrace;
+      while (lastIdx > firstBrace) {
+        try {
+          return JSON.parse(cleanJson.substring(firstBrace, lastIdx + 1));
+        } catch (e) {
+          lastIdx = cleanJson.lastIndexOf("}", lastIdx - 1);
+        }
+      }
+    }
+    const firstBracket = cleanJson.indexOf("[");
+    const lastBracket = cleanJson.lastIndexOf("]");
+    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+      let lastIdx = lastBracket;
+      while (lastIdx > firstBracket) {
+        try {
+          return JSON.parse(cleanJson.substring(firstBracket, lastIdx + 1));
+        } catch (e) {
+          lastIdx = cleanJson.lastIndexOf("]", lastIdx - 1);
+        }
+      }
+    }
+    throw parseErr;
+  }
+}
+
 // Unified Multi-Provider LLM Router with automatic fallbacks & simulation modes
 async function callUnifiedLLM({
   modelId,
@@ -163,8 +248,9 @@ async function callUnifiedLLM({
   googleSearch?: boolean;
   enablePlaceIdTool?: boolean;
 }) {
-  const isJson = responseMimeType === "application/json";
-  const normalizedModelId = (modelId || "gemini-2.5-flash").toLowerCase();
+  try {
+    const isJson = responseMimeType === "application/json";
+    const normalizedModelId = (modelId || "gemini-2.5-flash").toLowerCase();
 
   // 1. Anthropic Claude Models
   if (normalizedModelId.includes("claude-")) {
@@ -331,13 +417,13 @@ async function callUnifiedLLM({
   const ai = getGeminiClient();
 
   // Map choices to appropriate Google SDK model IDs
-  let targetGeminiModel = "gemini-3.1-flash-lite";
-  if (normalizedModelId.includes("pro")) {
-    targetGeminiModel = "gemini-3.1-pro-preview";
+  let targetGeminiModel = "gemini-3.5-flash";
+  if (normalizedModelId.includes("antigravity")) {
+    targetGeminiModel = "gemini-3.5-flash";
+  } else if (normalizedModelId.includes("pro") || normalizedModelId.includes("3.1")) {
+    targetGeminiModel = "gemini-3.5-flash";
   } else if (normalizedModelId.includes("3.5-flash")) {
     targetGeminiModel = "gemini-3.5-flash";
-  } else if (normalizedModelId.includes("3.1-flash-lite")) {
-    targetGeminiModel = "gemini-3.1-flash-lite";
   } else if (normalizedModelId.includes("2.5-flash-lite")) {
     targetGeminiModel = "gemini-2.5-flash-lite";
   } else if (normalizedModelId.includes("2.5-flash")) {
@@ -639,6 +725,22 @@ async function callUnifiedLLM({
     } else {
       throw err;
     }
+  }
+  } catch (err: any) {
+    if (modelId !== "gemini-2.5-flash" && modelId !== "gemini-2.5-flash-lite") {
+      addDebugLog(`[UnifiedLLM-Recovery] Error during primary execution of model "${modelId}": ${err.message || err}. Retrying with highly stable fallback gemini-2.5-flash...`);
+      return callUnifiedLLM({
+        modelId: "gemini-2.5-flash",
+        systemInstruction,
+        promptText,
+        imagePayload,
+        imagePayloads,
+        responseMimeType,
+        googleSearch,
+        enablePlaceIdTool
+      });
+    }
+    throw err;
   }
 }
 
@@ -1290,9 +1392,19 @@ Your tasks:
 1. Parse raw health reports/text and extract biomarker readings into a flat YAML array.
 2. Handle conversational questions, updates, requests to go back, or requests to continue/submit from the user.
 
+CHUNKED PROCESSING RULE (Max 50):
+If the user's raw data/text contains more than 50 biomarker readings, you MUST split the processing into chunks:
+- Extract ONLY the first 50 biomarker entries in this chunk.
+- Set "hasMoreMarkers" to true in your JSON response.
+- Copy any remaining unparsed report text/context into "remainingText" in your JSON response.
+- In "text", friendly inform the user that you have extracted the first 50 biomarkers and ask if they would like to continue.
+- If there are 50 or fewer biomarkers, or if you are processing the final chunk of remaining text and finishing, set "hasMoreMarkers" to false and "remainingText" to "".
+
 You MUST respond with a JSON object containing the following keys:
-- "text": A friendly, clinical-grade conversational response to the user. If this is the initial extraction, write: "I have extracted the biomarkers. Please review the output."
+- "text": A friendly, clinical-grade conversational response to the user.
 - "extractedYaml": The flat YAML array representing the current state of extracted biomarkers.
+- "hasMoreMarkers": boolean (true if there are more than 50 biomarkers and you chunked them, false otherwise).
+- "remainingText": string (the remaining unparsed raw report text for the next chunk, or empty string if done).
 
 YAML Schema for "extractedYaml" field (must be a single string containing valid YAML):
 - biomarker: string
@@ -1301,12 +1413,13 @@ YAML Schema for "extractedYaml" field (must be a single string containing valid 
   unit: string
 
 Rules for handling user inputs:
-- INITIAL/RAW DATA extraction: If the user provided a health report, extract ALL biomarkers. Do not skip any. If multiple readings of the same marker on the same date exist under slightly different names, merge them. Output the flat YAML in "extractedYaml", and set "text" to "I have extracted the biomarkers. Please review the output."
+- INITIAL/RAW DATA extraction: If the user provided a health report, extract biomarkers. If there are more than 50, extract ONLY the first 50 entries and apply the chunking rule. If multiple readings of the same marker on the same date exist under slightly different names, merge them. Output the flat YAML in "extractedYaml", and set "text" to "I have extracted the first 50 biomarkers. There are more biomarkers left in your report. Would you like to continue?"
+- CONTINUE EXTRACTING: If the user requests to "continue", "continue extracting", or similar, and you have unparsed text or previous YAML, take the previous "extractedYaml" and append/extract the next chunk of up to 50 biomarkers from the "remainingText". Set "hasMoreMarkers" and "remainingText" accordingly.
 - UPDATE DATA: If the user asks to edit, add, or delete a biomarker or value (e.g., "Change ALT on 2026-06-01 to 45"), perform that update on the YAML and return the updated "extractedYaml" string, explaining the change in "text".
 - START A CONVERSATION: If the user asks general or clinical questions about the biomarkers or their values (e.g., "What does ALT mean?"), answer the question in "text" with precise clinical detail, and return the unmodified YAML in "extractedYaml".
 - GO BACK / CONTINUE / SUBMIT: If the user asks to go back or continue, explain the current step in "text" (we are currently on Step 1: Data Extraction. They can click "Continue to Map Data" when ready, or we can discuss/update the extracted readings first).
 
-Make sure your entire output is valid JSON, containing "text" and "extractedYaml".`;
+Make sure your entire output is valid JSON, containing "text", "extractedYaml", "hasMoreMarkers", and "remainingText".`;
         mockData = {};
       } else if (agentType === "agent1_step2") {
         systemInstruction = `You are an expert Clinical Ontologist and conversational health assistant (Step 2: Category Mapping).
@@ -1381,52 +1494,127 @@ Rules for handling user inputs:
 Make sure your entire output is valid JSON, containing "text", "entriesCount", and "buckets".`;
         mockData = {};
       } else if (agentType === "agent2") {
-        systemInstruction = `You are an expert Clinical Pathologist and Prognostics AI (Diagnostic & Prognostic Agent). Analyze the provided biomarker history in the context of the user's specific demographics.
+        systemInstruction = `You are an advanced Clinical Classification, Prognostic, and Risk Triage Engine.
+You will receive an intermediate YAML payload containing a user profile and a cleaned list of biomarkers. You may also receive conversational follow-ups or corrections from the user.
+Your objective is to dynamically group EVERY biomarker into logical clinical conditions, calculate prognostic timelines, and output a strict, zero-data-loss JSON payload.
 
-USER PROFILE:
-- Age: ${userProfile?.age || 'Not provided'}
-- Gender: ${userProfile?.gender || 'Not provided'}
-- Ethnicity: ${userProfile?.ethnicity || 'Not provided'}
-- Blood Type: ${userProfile?.bloodType || 'Not provided'}
+=== CRITICAL DIRECTIVES ===
+CONVERSATION & CORRECTIONS:
+If the user provides a correction (e.g., "My weight is 61kg" or "You missed the marker 'mean_corpuscular_volume'"), you MUST prioritize this new instruction, override previous assumptions, and completely regenerate the JSON payload to fix the error.
 
-BIOMARKER HISTORY PROVIDED:
-${JSON.stringify(biomarkerHistory || [])}
+INVENTORY PARITY RULE (Zero Data Loss):
+You must count the total number of unique biomarkers in the incoming YAML.
+Your final JSON output MUST contain exactly that same number of unique biomarkers. You are strictly forbidden from omitting, summarizing, or dropping any biomarker key.
+Record the incoming count in audit.metricsReceived and your final output count in audit.metricsProcessed.
 
-RECENT MEALS (Dish Names Only):
-${JSON.stringify(recentMeals || [])}
+SEMANTIC TAXONOMY ANCHORS (Dynamic Grouping):
+Do not rely on a hardcoded dictionary. Group biomarkers dynamically into conditions:
+- Cardiovascular/Lipid: Contains 'cholesterol', 'ldl', 'hdl', 'triglycerides', 'qrisk', 'lipid'.
+- Renal/Metabolic/Electrolyte: Contains 'egfr', 'creatinine', 'sodium', 'potassium', 'calcium', 'phosphate', 'hba1c', 'bmi', 'weight'.
+- Hepatic/Liver: Contains 'alt', 'ast', 'bilirubin', 'phosphatase', 'albumin', 'globulin', 'protein'.
+- Hematology/Immune: Contains 'cell', 'count', 'haemoglobin', 'haematocrit', 'volume', 'platelet', 'neutrophil', 'lymphocyte', 'monocyte', 'eosinophil', 'basophil'.
+- Screening/Other: Any marker that does not fit the above (e.g., 'psa', 'audit').
 
-=== CLINICAL DIRECTIVES ===
-1. FAIR ASSESSMENT: Do not invent pathology. If the user's biomarkers are healthy, state clearly that their systems are highly optimized. Only flag authentic, clinically significant risks based on demographic thresholds (e.g. lower BMI risk limits for South Asian/East Asian ethnicities).
-2. TIMELINE PROJECTIONS:
-   - If healthy: Project maintenance of vitality and low metabolic disease risk over 2, 5, and 10 years.
-   - If at risk: Project the logical biological and clinical progression over 2, 5, and 10 years if no dietary or lifestyle changes are made (e.g., progression from high fasting glucose/HbA1c to Type 2 Diabetes and chronic kidney disease).
-3. GAP ANALYSIS: Identify critical missing information. If everything is covered, state "No additional testing required." If there are risks or questions, recommend exactly 1-2 advanced confirmation tests (e.g., Fasting Insulin, ApoB, Cystatin-C) to verify the gap.
-4. STRICT JSON OUTPUT SCHEMA:
+FAIR ASSESSMENT & DEMOGRAPHIC RISK:
+Do not invent pathology. If the user's systems are healthy, state clearly they are highly optimized.
+Apply demographic thresholds explicitly. Example: For South/East Asian ethnicities, a BMI >= 23.0 kg/m² must be flagged as ELEVATED/MONITOR.
+If a condition block contains even one marker flagged as ELEVATED or MONITOR, the entire block's 'aggregateRisk' inherits that severity tier.
+
+PROGNOSTIC TIMELINES & GAP ANALYSIS:
+If healthy: Project maintenance of vitality and low metabolic risk over 2, 5, and 10 years.
+If at risk: Project the logical biological progression over 2, 5, and 10 years if no lifestyle changes are made (e.g., progression toward metabolic syndrome).
+Recommend exactly advanced confirmation tests (e.g., Fasting Insulin, ApoB, Cystatin-C) to verify gaps in the data, or state "No additional testing required" if perfect.
+
+=== STRICT JSON OUTPUT SCHEMA ===
 {
-  "message": "Conversational diagnostic and prognostic summary tailored to this user profile.",
-  "primaryDiagnosis": "Primary systemic health assessment summary.",
-  "timelineProjections": {
-    "year2": "2-Year Projection details",
-    "year5": "5-Year Projection details",
-    "year10": "10-Year Projection details"
+  "audit": {
+    "metricsReceived": number,
+    "metricsProcessed": number
   },
+  "summary": {
+    "primaryDiagnosis": "Conversational summary of systemic health and demographic context.",
+    "timelineProjections": {
+      "year2": "String",
+      "year5": "String",
+      "year10": "String"
+    }
+  },
+  "prioritizedConditions": [
+    {
+      "conditionName": "String (e.g., Cardiovascular Health)",
+      "aggregateRisk": "ELEVATED | MONITOR | OPTIMAL",
+      "clinicalRationale": "1-sentence explanation of why this risk tier was assigned.",
+      "biomarkers": [
+        {
+          "key": "String (original key)",
+          "name": "String (clean name)",
+          "currentValue": number,
+          "unit": "String",
+          "status": "HIGH | LOW | NORMAL"
+        }
+      ]
+    }
+  ],
   "recommendedTests": [
     {
-      "testName": "Fasting Insulin",
-      "reason": "To confirm glucose sensitivity and check insulin resistance."
+      "testName": "String",
+      "reason": "String"
     }
   ]
 }
-Return ONLY raw JSON.`;
+
+Ensure the 'prioritizedConditions' array is sorted descending by risk (ELEVATED first, OPTIMAL last). Return ONLY raw JSON. No markdown wrappers.`;
 
         mockData = {
-          message: "Based on your clinical markers, your metabolic markers are mostly healthy, but fasting glucose is slightly elevated relative to optimal ranges for your demographic.",
-          primaryDiagnosis: "Slightly elevated glycemic markers; cardiovascular and renal health are highly optimized.",
-          timelineProjections: {
-            year2: "Maintaining current metabolic profiles; slight progression in glycemic metrics if diet remains unadjusted.",
-            year5: "Mild risk of insulin resistance progression; cardiovascular health remains solid.",
-            year10: "Metabolic risk increases by 5% if glycemic spikes are not managed."
+          audit: {
+            metricsReceived: 3,
+            metricsProcessed: 3
           },
+          summary: {
+            primaryDiagnosis: "Slightly elevated glycemic markers; cardiovascular and renal health are highly optimized.",
+            timelineProjections: {
+              year2: "Maintaining current metabolic profiles; slight progression in glycemic metrics if diet remains unadjusted.",
+              year5: "Mild risk of insulin resistance progression; cardiovascular health remains solid.",
+              year10: "Metabolic risk increases by 5% if glycemic spikes are not managed."
+            }
+          },
+          prioritizedConditions: [
+            {
+              conditionName: "Renal/Metabolic/Electrolyte",
+              aggregateRisk: "ELEVATED",
+              clinicalRationale: "Fasting glucose is slightly elevated relative to optimal ranges.",
+              biomarkers: [
+                {
+                  key: "glucose",
+                  name: "Fasting Glucose",
+                  currentValue: 5.8,
+                  unit: "mmol/L",
+                  status: "HIGH"
+                },
+                {
+                  key: "hba1c",
+                  name: "HbA1c",
+                  currentValue: 37,
+                  unit: "mmol/mol",
+                  status: "NORMAL"
+                }
+              ]
+            },
+            {
+              conditionName: "Cardiovascular/Lipid",
+              aggregateRisk: "OPTIMAL",
+              clinicalRationale: "Cardiovascular markers are currently in optimal reference ranges.",
+              biomarkers: [
+                {
+                  key: "ldl",
+                  name: "LDL Cholesterol",
+                  currentValue: 2.1,
+                  unit: "mmol/L",
+                  status: "NORMAL"
+                }
+              ]
+            }
+          ],
           recommendedTests: [
             {
               testName: "Fasting Insulin",
@@ -1449,10 +1637,13 @@ DIAGNOSTIC SUMMARY:
 ${req.body.agentDiagnosticSummary || 'Optimized or no major pathologies flagged.'}
 
 === DIRECTIVES ===
-1. DEMOGRAPHICALLY ADJUSTED NORMAL RANGES: For every provided clinical metric, provide a profile-adjusted normal range. Explain why this reference range was adjusted for their age, gender, or ethnicity (e.g. muscle mass and creatinine, age-related eGFR, ethnic-specific lipid targets).
-2. EDUCATIONAL DESCRIPTIONS: Write a clear 2-sentence description of what each biomarker is and its physiological role.
-3. SPECIFIC RISK CONTEXT: For any marker identified as at-risk or abnormal, write a personalized 3-4 sentence explanation of *why* this specific value is critical or dangerous for *this specific user profile*.
-4. STRICT JSON OUTPUT SCHEMA:
+1. ZERO DATA LOSS INVENTORY RULE:
+   You must count the total number of unique biomarkers in the incoming BIOMARKERS dictionary.
+   Your final JSON output MUST contain exactly that same number of unique biomarkers under "contextualizedBiomarkers". You are strictly forbidden from omitting, summarizing, or dropping any biomarker key.
+2. DEMOGRAPHICALLY ADJUSTED NORMAL RANGES: For every provided clinical metric, provide a profile-adjusted normal range. Explain why this reference range was adjusted for their age, gender, or ethnicity (e.g. muscle mass and creatinine, age-related eGFR, ethnic-specific lipid targets).
+3. EDUCATIONAL DESCRIPTIONS: Write a clear 2-sentence description of what each biomarker is and its physiological role.
+4. SPECIFIC RISK CONTEXT: For any marker identified as at-risk or abnormal, write a personalized 3-4 sentence explanation of *why* this specific value is critical or dangerous for *this specific user profile*.
+5. STRICT JSON OUTPUT SCHEMA:
 {
   "message": "Conversational summary of your educational and reference range adjustments.",
   "contextualizedBiomarkers": [
@@ -1497,23 +1688,27 @@ DIAGNOSTIC BACKGROUND:
 ${req.body.agentDiagnosticSummary || 'Mainly healthy'}
 
 === DIRECTIVES ===
-1. NUTRITION TARGETS: Generate strict daily targets for the app tracker. If a metabolic or hepatic risk was flagged, customize macronutrient/micronutrient limits mathematically (e.g. limiting saturated fats, increasing total fiber, targeting custom calories).
+1. NUTRITION TARGETS (Detailed Recommended Allowances): Generate strict daily targets for calories, protein, carbs, fat, saturatedFat, totalFibre, sodium, sugar.
+   - For EACH nutrient target, you MUST output a structured object containing:
+     - "value": The numeric value.
+     - "unit": The unit (e.g. "kcal", "g", "mg").
+     - "reason": A detailed clinical explanation of why they need to focus on this goal based on their biomarkers.
+     - "duration": How long they should maintain this specific target (e.g., "12 weeks", "Continuous").
 2. ACTIVITY HABITS: Provide 2-3 highly specific daily habits (e.g., '7,500 steps', '30 minutes Zone 2 cardio', 'Limit screen time after 10 PM').
 3. MATHEMATICAL PROJECTIONS: Provide biological time-to-goal estimates based on the math of physiology.
-   - Example: 'Maintaining a 400 kcal daily deficit will lead to a 5 kg weight reduction to reach your optimal BMI of 22.5 in roughly 12 weeks.'
-   - Example: 'By adhering to less than 15g saturated fat daily, you can expect an LDL-C reduction of 15% in approximately 8-12 weeks.'
+
 4. STRICT JSON OUTPUT SCHEMA:
 {
   "message": "Conversational explanation of your precision lifestyle design.",
   "nutrientTargets": {
-    "calories": "1850",
-    "protein": "110",
-    "carbs": "220",
-    "fat": "50",
-    "saturatedFat": "15",
-    "totalFibre": "30",
-    "sodium": "1800",
-    "sugar": "25"
+    "calories": { "value": 1850, "unit": "kcal", "reason": "To create a modest deficit for BMI optimization and lower cardiac workloads", "duration": "12 weeks / until BMI of 23 is achieved" },
+    "protein": { "value": 110, "unit": "g", "reason": "To support nitrogen balance and prevent muscle wasting during a caloric deficit", "duration": "Continuous" },
+    "carbs": { "value": 220, "unit": "g", "reason": "Optimized level to maintain energy without causing postprandial glucose surges", "duration": "Continuous" },
+    "fat": { "value": 50, "unit": "g", "reason": "Controlled healthy fats to maintain cellular structures and hormone synthesis", "duration": "Continuous" },
+    "saturatedFat": { "value": 15, "unit": "g", "reason": "Strict restriction to limit hepatic VLDL synthesis and improve your high ApoB/LDL ratio", "duration": "8-12 weeks" },
+    "totalFibre": { "value": 30, "unit": "g", "reason": "High prebiotic fiber to slow glucose absorption and optimize gut microbiome health", "duration": "Continuous" },
+    "sodium": { "value": 1800, "unit": "mg", "reason": "Restricted sodium to regulate extracellular fluid volume and support arterial pressure", "duration": "Continuous" },
+    "sugar": { "value": 25, "unit": "g", "reason": "Low simple sugars to reduce pancreatic stress and liver glycogen packing", "duration": "8-12 weeks" }
   },
   "activityChecklist": [
     {
@@ -1537,14 +1732,14 @@ Return ONLY raw JSON.`;
         mockData = {
           message: "I have created a high-precision, clinically aligned dietary and movement plan with mathematical timeline projections.",
           nutrientTargets: {
-            calories: "1900",
-            protein: "105",
-            carbs: "210",
-            fat: "55",
-            saturatedFat: "14",
-            totalFibre: "32",
-            sodium: "1700",
-            sugar: "22"
+            calories: { value: 1900, unit: "kcal", reason: "Support basic metabolism with a minor deficit for cardiorespiratory health", duration: "12 weeks" },
+            protein: { value: 105, unit: "g", reason: "Maintain nitrogen balance and protect lean muscle tissue", duration: "Continuous" },
+            carbs: { value: 210, unit: "g", reason: "Provide stable energy without triggering glycemic excursions", duration: "Continuous" },
+            fat: { value: 55, unit: "g", reason: "Ensure adequate absorption of fat-soluble vitamins and support cellular structures", duration: "Continuous" },
+            saturatedFat: { value: 14, unit: "g", reason: "Decrease hepatic VLDL secretion to target elevated LDL particle numbers", duration: "8-12 weeks" },
+            totalFibre: { value: 32, unit: "g", reason: "Slow down gastric transit and feed beneficial short-chain fatty acid producing gut bacteria", duration: "Continuous" },
+            sodium: { value: 1700, unit: "mg", reason: "Regulate blood pressure levels and balance vascular tone", duration: "Continuous" },
+            sugar: { value: 22, unit: "g", reason: "Mitigate spikes in insulin and prevent hepatic lipid deposition", duration: "8-12 weeks" }
           },
           activityChecklist: [
             { habit: "Walk 7,500 steps daily", target: "7500 steps", type: "steps" },
@@ -1669,8 +1864,8 @@ Return ONLY raw JSON.`;
         } else if (agentType === "agent1_step3") {
           dataContext = `\n\nEXTRACTED YAML DATA:\n${req.body.extractedYaml}\n\nBUCKET MAPPING JSON:\n${req.body.bucketMapping}\n`;
         } else {
-          const toonData = toonEncode(cleanedPayload);
-          dataContext = `\n\nUSER MEDICAL DATA (in TOON format):\n${toonData}\n`;
+          const yamlData = jsToYaml(cleanedPayload);
+          dataContext = `\n\nUSER MEDICAL DATA (in YAML format):\n${yamlData}\n`;
         }
 
         let promptText = `Chat History:\n${historyText}\n${imageCtx}\nUser message: "${message}"${dataContext}`;
@@ -1789,18 +1984,11 @@ Return ONLY raw JSON.`;
         });
       }
 
-      let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
       let parsedData;
       try {
-        parsedData = JSON.parse(cleanJson);
+        parsedData = robustParseJson(textOutput);
       } catch (parseErr: any) {
-        const firstBrace = cleanJson.indexOf("{");
-        const lastBrace = cleanJson.lastIndexOf("}");
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          parsedData = JSON.parse(cleanJson.substring(firstBrace, lastBrace + 1));
-        } else {
-          throw parseErr;
-        }
+        throw parseErr;
       }
 
       return res.json({
@@ -1962,18 +2150,11 @@ Note: If mode is not "extract_chunk", leave 'entries' and 'customBiomarkerDefs' 
       responseMimeType: "application/json"
     });
 
-    let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
     let parsedData;
     try {
-      parsedData = JSON.parse(cleanJson);
+      parsedData = robustParseJson(textOutput);
     } catch (parseErr: any) {
-      const firstBrace = cleanJson.indexOf("{");
-      const lastBrace = cleanJson.lastIndexOf("}");
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        parsedData = JSON.parse(cleanJson.substring(firstBrace, lastBrace + 1));
-      } else {
-        throw parseErr;
-      }
+      throw parseErr;
     }
 
     // Backward compatibility: If the AI returns old single date format, map it to entries
@@ -2054,7 +2235,7 @@ Important:
 - Do not include markdown blocks like \`\`\`json in your response, just the raw JSON.`;
 
     const resultText = await callUnifiedLLM({
-      modelId: modelId || "gemini-3.1-flash-lite",
+      modelId: modelId || "antigravity",
       systemInstruction,
       promptText: `${historyText}User Message: "${message}"`,
       responseMimeType: "application/json"

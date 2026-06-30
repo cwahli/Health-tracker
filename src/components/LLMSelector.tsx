@@ -11,7 +11,7 @@ interface LLMSelectorProps {
 
 export default function LLMSelector({ selectedModelId, onChangeModelId, label = "AI LLM Engine", variant = 'card' }: LLMSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const currentModel = AVAILABLE_LLMS.find(m => m.id === selectedModelId) || AVAILABLE_LLMS[2];
+  const currentModel = AVAILABLE_LLMS.find(m => m.id === selectedModelId) || AVAILABLE_LLMS[0];
 
   const handleSelect = (id: string) => {
     onChangeModelId(id);

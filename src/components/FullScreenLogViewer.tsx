@@ -57,8 +57,8 @@ export default function FullScreenLogViewer({
         </button>
       </div>
 
-      {/* Content Area - Truly fullscreen with 5px margins on the left/right */}
-      <div className="flex-1 overflow-auto mx-[5px] py-4 font-mono text-xs text-slate-300 leading-relaxed select-all whitespace-pre-wrap bg-transparent">
+      {/* Content Area - Truly fullscreen with 10px margins on the left/right */}
+      <div className="flex-1 overflow-auto mx-[10px] py-4 font-mono text-xs text-slate-300 leading-relaxed select-all whitespace-pre-wrap bg-transparent">
         {logsText || <span className="text-slate-500 italic">No logs recorded yet.</span>}
       </div>
 

@@ -1228,8 +1228,8 @@ export default function App() {
     }
   };
 
-  // Selected LLM Engine shared across sections - Gemini 3.1 Flash Lite is the default model
-  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-3.1-flash-lite');
+  // Selected LLM Engine shared across sections - Antigravity Agent is the default model
+  const [selectedModelId, setSelectedModelId] = useState<string>('antigravity');
 
   // Add / Edit logs handlers
   const handleLogFood = async (food: FoodLog) => {
@@ -2023,7 +2023,6 @@ export default function App() {
         onChangeModelId={setSelectedModelId}
         onClose={() => {
           setIsMedicalChatOpen(false);
-          setActiveAgentType(null);
         }}
         onLogMedical={handleLogMedical}
         biomarkers={biomarkers}

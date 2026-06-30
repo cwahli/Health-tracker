@@ -4,6 +4,8 @@ import { translations } from '../utils/translations';
 import { X, Send, Sparkles, Loader, ChevronDown, ChevronUp } from 'lucide-react';
 import { biomarkerDefinitions, getBiomarkerStatus, getBiomarkerColor } from '../utils/biomarkers';
 import LLMSelector from './LLMSelector';
+import { AVAILABLE_LLMS } from '../utils/llm';
+import FullScreenInstructionViewer from './FullScreenInstructionViewer';
 
 interface ReviewBiomarkerModalProps {
   profile: UserProfile;
@@ -42,6 +44,7 @@ export default function ReviewBiomarkerModal({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isEngineSelectorOpen, setIsEngineSelectorOpen] = useState(false);
   const [showDataUsed, setShowDataUsed] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
   const [hasLoadedPrevious, setHasLoadedPrevious] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -207,10 +210,7 @@ export default function ReviewBiomarkerModal({
                   onClick={() => setIsEngineSelectorOpen(!isEngineSelectorOpen)}
                   className="flex items-center gap-1 text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-bold hover:text-indigo-700 transition-colors focus:outline-none cursor-pointer"
                 >
-                  <span>{selectedModelId === 'gemini-3.1-flash-lite' ? 'Gemini 3.1 flash lite' : 
-                         selectedModelId === 'gemini-1.5-pro' ? 'Gemini 1.5 pro' :
-                         selectedModelId === 'gemini-1.5-flash' ? 'Gemini 1.5 flash' :
-                         selectedModelId === 'gemini-2.5-flash' ? 'Gemini 2.5 flash' : selectedModelId}</span>
+                  <span>{AVAILABLE_LLMS.find(m => m.id === selectedModelId)?.name || selectedModelId}</span>
                   <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isEngineSelectorOpen ? 'rotate-180 text-indigo-500' : 'text-slate-400'}`} />
                 </button>
               </div>
@@ -264,6 +264,16 @@ export default function ReviewBiomarkerModal({
                 return "BMI: N/A";
               })()} • {profile.ethnicity || 'N/A'}</div>
               <div className="w-full mt-1 pt-1.5 border-t border-slate-150 dark:border-slate-800/40"><strong className="text-slate-800 dark:text-slate-200">Description:</strong> {descriptionText}</div>
+              
+              <div className="w-full mt-2 pt-2 border-t border-slate-150 dark:border-slate-800/40">
+                <button
+                  type="button"
+                  onClick={() => setShowInstructions(true)}
+                  className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <span>ℹ️ View Programmed Agent Instructions &rarr;</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -443,6 +453,12 @@ export default function ReviewBiomarkerModal({
             </button>
           </div>
         </div>
+
+        <FullScreenInstructionViewer
+          isOpen={showInstructions}
+          onClose={() => setShowInstructions(false)}
+          agentType="biomarker_review"
+        />
 
       </div>
     </div>
