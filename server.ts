@@ -1285,57 +1285,100 @@ app.post("/api/gemini/medical-analyze", async (req, res) => {
       let mockData: any = {};
 
       if (agentType === "agent1_step1") {
-        systemInstruction = `You are a clinical data parser. Your ONLY job is to extract biomarker readings from the provided raw text and output them as a flat YAML array.
-Rules:
-Extract EVERY single biomarker. Do not skip any.
-If the exact same biomarker is logged multiple times on the SAME DATE under slightly different names (e.g., 'Serum ALT' and 'ALT level'), merge them into a single entry using the most standard clinical name.
-Preserve historical entries from different dates.
-Output ONLY valid YAML. No markdown formatting, no explanations.
-Target YAML Schema:
+        systemInstruction = `You are a clinical data parser and conversational health assistant (Step 1: Clinical Triage).
+Your tasks:
+1. Parse raw health reports/text and extract biomarker readings into a flat YAML array.
+2. Handle conversational questions, updates, requests to go back, or requests to continue/submit from the user.
+
+You MUST respond with a JSON object containing the following keys:
+- "text": A friendly, clinical-grade conversational response to the user. If this is the initial extraction, write: "I have extracted the biomarkers. Please review the output."
+- "extractedYaml": The flat YAML array representing the current state of extracted biomarkers.
+
+YAML Schema for "extractedYaml" field (must be a single string containing valid YAML):
 - biomarker: string
   date: YYYY-MM-DD
   value: number
-  unit: string`;
+  unit: string
+
+Rules for handling user inputs:
+- INITIAL/RAW DATA extraction: If the user provided a health report, extract ALL biomarkers. Do not skip any. If multiple readings of the same marker on the same date exist under slightly different names, merge them. Output the flat YAML in "extractedYaml", and set "text" to "I have extracted the biomarkers. Please review the output."
+- UPDATE DATA: If the user asks to edit, add, or delete a biomarker or value (e.g., "Change ALT on 2026-06-01 to 45"), perform that update on the YAML and return the updated "extractedYaml" string, explaining the change in "text".
+- START A CONVERSATION: If the user asks general or clinical questions about the biomarkers or their values (e.g., "What does ALT mean?"), answer the question in "text" with precise clinical detail, and return the unmodified YAML in "extractedYaml".
+- GO BACK / CONTINUE / SUBMIT: If the user asks to go back or continue, explain the current step in "text" (we are currently on Step 1: Data Extraction. They can click "Continue to Map Data" when ready, or we can discuss/update the extracted readings first).
+
+Make sure your entire output is valid JSON, containing "text" and "extractedYaml".`;
         mockData = {};
       } else if (agentType === "agent1_step2") {
-        systemInstruction = `You are an expert Clinical Ontologist. I will provide you with a YAML list of a patient's extracted medical logs.
-Your task is to identify all the UNIQUE biomarker names present in this list and assign each one to exactly ONE of the following buckets: 'Metabolic', 'Hepatic', 'Renal', 'Hematology', 'Biometrics', or 'Other'.
-Output your response as a simple JSON key-value dictionary where the key is the biomarker name and the value is the assigned bucket. Do not include any other text.
-Example Output:
+        systemInstruction = `You are an expert Clinical Ontologist and conversational health assistant (Step 2: Category Mapping).
+Your tasks:
+1. Identify all unique biomarkers in the YAML list and categorize them by associating:
+   - "riskCategories": An array of matching risk categories. Choose from: 'Cardiovascular', 'Kidney & hydration', 'Metabolic & glycemic', 'Liver & hepatitis stress', 'Hematology'. If none match, you can use other appropriate categories.
+   - "standardMedicalGrouping": Choose exactly ONE of these standard physiological groupings: 'Metabolic', 'Hepatic', 'Renal', 'Hematology', 'Biometrics', or 'Other'.
+   - "potentialMedicalConditions": An array of related medical conditions or risks (e.g. ['Diabetes Risk', 'Insulin Resistance', 'Obesity', 'Anemia', 'Hepatitis Stress', 'Fatty Liver', 'Chronic Kidney Disease']).
+2. Handle conversational questions, updates, requests to go back, or requests to continue/submit from the user.
+
+You MUST respond with a JSON object containing the following keys:
+- "text": A friendly, clinical-grade conversational response to the user. If this is the initial mapping, write: "I have categorized the biomarkers. Please review the mapping."
+- "bucketMapping": A key-value dictionary where the key is the biomarker name and the value is the assigned categorization object containing "riskCategories", "standardMedicalGrouping", and "potentialMedicalConditions".
+
+Example "bucketMapping" structure:
 {
-  "Serum ALT": "Hepatic",
-  "Body Weight": "Biometrics",
-  "Haemoglobin Estimation": "Hematology"
-}`;
+  "HbA1c": {
+    "riskCategories": ["Metabolic & glycemic"],
+    "standardMedicalGrouping": "Metabolic",
+    "potentialMedicalConditions": ["Diabetes Risk", "Insulin Resistance"]
+  },
+  "Serum ALT": {
+    "riskCategories": ["Liver & hepatitis stress"],
+    "standardMedicalGrouping": "Hepatic",
+    "potentialMedicalConditions": ["Fatty Liver", "Hepatitis Stress"]
+  }
+}
+
+Rules for handling user inputs:
+- INITIAL mapping: Categorize each biomarker into the detailed fields above and return the dictionary in "bucketMapping", and set "text" to "I have categorized the biomarkers. Please review the mapping."
+- UPDATE DATA: If the user requests to change a category mapping (e.g., "Move glucose to Metabolic"), perform the update on the "bucketMapping" dictionary and return the updated dictionary, explaining the change in "text".
+- START A CONVERSATION: If the user asks a clinical or general question (e.g., "Why is ALT under Hepatic?"), answer the question clearly in "text" and return the unmodified dictionary in "bucketMapping".
+- GO BACK / CONTINUE / SUBMIT: If the user asks to go back to Step 1 or proceed/continue/submit, explain in "text" how to proceed (they can click "Assemble Data" to continue, or click "Go Back" if needed).
+
+Make sure your entire output is valid JSON, containing "text" and "bucketMapping".`;
         mockData = {};
       } else if (agentType === "agent1_step3") {
-        systemInstruction = `You are a strict JSON formatter. I will provide you with two things:
-Extracted Data: A flat YAML array of historical patient data.
-Bucket Mapping: A JSON dictionary mapping each biomarker to a physiological bucket.
-Your task is to assemble this data into the strict nested JSON schema provided below.
-Rules:
-You must include EVERY entry from the Extracted Data. Do not drop a single marker or date.
-Use the Bucket Mapping to place each marker into the correct 'systemName' array.
-If a marker has readings on multiple dates, nest all dates under the 'history' array for that specific marker.
-Do not output anything except the raw, final JSON.
-Target Schema:
-{
-  "message": "Data successfully processed and categorized.",
-  "entriesCount": number, // Total unique entries processed
-  "buckets": [
-    {
-      "systemName": "Bucket Name",
-      "biomarkers": [
-        {
-          "name": "Biomarker Name",
-          "history": [
-            { "date": "YYYY-MM-DD", "value": number, "unit": "string" }
-          ]
-        }
-      ]
-    }
-  ]
-}`;
+        systemInstruction = `You are a clinical data coordinator and conversational health assistant (Step 3: Data Assembly).
+Your tasks:
+1. Assemble the flat YAML biomarker logs and the bucket mapping dictionary into a structured physiological nested JSON.
+2. Handle conversational questions, updates, requests to go back, or requests to continue/submit from the user.
+
+You MUST respond with a JSON object containing the following keys:
+- "text": A friendly, clinical-grade conversational response to the user. If this is the initial assembly, write: "Data successfully processed and categorized." (or similar).
+- "entriesCount": Total unique biomarker entries processed.
+- "buckets": An array of buckets matching the schema below.
+
+Nested JSON schema for "buckets":
+[
+  {
+    "systemName": "Bucket Name", // must be one of: 'Metabolic', 'Hepatic', 'Renal', 'Hematology', 'Biometrics', 'Other'
+    "biomarkers": [
+      {
+        "name": "Biomarker Name",
+        "riskCategories": ["Cardiovascular", "Metabolic & glycemic"], // arrays from the Step 2 bucket mapping
+        "standardMedicalGrouping": "Metabolic", // string from the Step 2 bucket mapping
+        "potentialMedicalConditions": ["Diabetes Risk", "Insulin Resistance"], // array of potential medical conditions from Step 2
+        "history": [
+          { "date": "YYYY-MM-DD", "value": number, "unit": "string" }
+        ]
+      }
+    ]
+  }
+]
+
+Rules for handling user inputs:
+- INITIAL assembly: Map EVERY single biomarker and entry from the YAML using the Bucket Mapping. Do not drop any. Organize them into the "buckets" array. Return the JSON structure, and set "text" to "Data successfully processed and categorized. Please review the final structured entries below."
+- UPDATE DATA: If the user asks to edit/add/delete a biomarker, date, or reading (e.g., "Remove red blood cell count reading on 2026-06-01"), perform that update on the nested "buckets" structure, update "entriesCount", and return the updated structure, explaining the change in "text".
+- START A CONVERSATION: If the user asks a clinical or general question (e.g., "Why is ALT high?" or questions about "total white cell count"), answer the question clearly in "text", and return the unmodified "buckets" and "entriesCount".
+- GO BACK / CONTINUE / SUBMIT: If the user asks to go back to Step 2, or finish and save/submit, explain in "text" how they can save their data or click the buttons to navigate.
+
+Make sure your entire output is valid JSON, containing "text", "entriesCount", and "buckets".`;
         mockData = {};
       } else if (agentType === "agent2") {
         systemInstruction = `You are an expert Clinical Pathologist and Prognostics AI (Diagnostic & Prognostic Agent). Analyze the provided biomarker history in the context of the user's specific demographics.
@@ -1620,7 +1663,7 @@ Return ONLY raw JSON.`;
 
         let dataContext = "";
         if (agentType === "agent1_step1") {
-          dataContext = `\n\nUSER RAW DATA:\n${message}\n`;
+          dataContext = `\n\nUSER RAW DATA:\n${message}\n\nEXISTING BIOMARKER LOGS:\n${JSON.stringify(biomarkerHistory || [], null, 2)}\n\nUSER PROFILE:\n${JSON.stringify(cleanProfile, null, 2)}\n`;
         } else if (agentType === "agent1_step2") {
           dataContext = `\n\nEXTRACTED YAML DATA:\n${req.body.extractedYaml}\n`;
         } else if (agentType === "agent1_step3") {
@@ -1632,7 +1675,7 @@ Return ONLY raw JSON.`;
 
         let promptText = `Chat History:\n${historyText}\n${imageCtx}\nUser message: "${message}"${dataContext}`;
 
-        let isYaml = agentType === "agent1_step1";
+        let isYaml = false;
         
         let maxRetries = agentType === "agent1_step3" ? 3 : 1;
         let attempt = 0;
@@ -1659,7 +1702,7 @@ Return ONLY raw JSON.`;
               }
               const parsed = JSON.parse(cleanJson);
               
-              const expectedCount = (req.body.extractedYaml.match(/- biomarker:/g) || []).length;
+              const expectedCount = (req.body.extractedYaml?.match(/- biomarker:/g) || []).length;
               let actualCount = 0;
               if (parsed.buckets && Array.isArray(parsed.buckets)) {
                 parsed.buckets.forEach((b: any) => {
@@ -1673,7 +1716,8 @@ Return ONLY raw JSON.`;
                 });
               }
               
-              if (actualCount === expectedCount || attempt === maxRetries) {
+              const isChatOrUpdate = req.body.message && req.body.message !== "Continue processing" && req.body.message !== "Assemble JSON" && req.body.message !== "Assemble Data" && req.body.message !== "Assemble data";
+              if (actualCount === expectedCount || attempt === maxRetries || isChatOrUpdate) {
                 success = true;
                 textOutput = cleanJson;
               } else {
@@ -1691,9 +1735,21 @@ Return ONLY raw JSON.`;
       }
 
       if (agentType === "agent1_step1") {
-        let cleanYaml = textOutput.replace(/```(?:yaml)?/gi, "").trim();
+        let cleanYaml = textOutput;
+        let text = "I have extracted the biomarkers. Please review the output.";
+        try {
+          const parsed = JSON.parse(textOutput.replace(/```(?:json)?/gi, "").trim());
+          if (parsed.extractedYaml) {
+            cleanYaml = parsed.extractedYaml;
+          }
+          if (parsed.text) {
+            text = parsed.text;
+          }
+        } catch (e) {
+          cleanYaml = textOutput.replace(/```(?:yaml)?/gi, "").trim();
+        }
         return res.json({
-          text: "I have extracted the biomarkers. Please review the YAML output.",
+          text,
           agentType,
           extractedYaml: cleanYaml
         });
@@ -1701,15 +1757,35 @@ Return ONLY raw JSON.`;
 
       if (agentType === "agent1_step2") {
         let cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
-        const firstBrace = cleanJson.indexOf("{");
-        const lastBrace = cleanJson.lastIndexOf("}");
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+        let text = "I have categorized the biomarkers. Please review the mapping.";
+        let bucketMapping = {};
+        try {
+          const parsed = JSON.parse(cleanJson);
+          if (parsed.bucketMapping) {
+            bucketMapping = parsed.bucketMapping;
+            if (parsed.text) text = parsed.text;
+          } else {
+            bucketMapping = parsed;
+          }
+        } catch (e) {
+          try {
+            const firstBrace = cleanJson.indexOf("{");
+            const lastBrace = cleanJson.lastIndexOf("}");
+            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+              const innerParsed = JSON.parse(cleanJson.substring(firstBrace, lastBrace + 1));
+              if (innerParsed.bucketMapping) {
+                bucketMapping = innerParsed.bucketMapping;
+                if (innerParsed.text) text = innerParsed.text;
+              } else {
+                bucketMapping = innerParsed;
+              }
+            }
+          } catch (e2) {}
         }
         return res.json({
-          text: "I have categorized the biomarkers. Please review the mapping.",
+          text,
           agentType,
-          bucketMapping: JSON.parse(cleanJson)
+          bucketMapping
         });
       }
 

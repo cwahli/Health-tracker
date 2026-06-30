@@ -8,6 +8,9 @@ export interface BiomarkerDefinition {
   normalRange: string;
   descriptions: { [lang: string]: string };
   benefitRisk?: string;
+  riskCategories?: string[];
+  standardMedicalGrouping?: string;
+  potentialMedicalConditions?: string[];
 }
 
 export const biomarkerDefinitions: BiomarkerDefinition[] = [
@@ -482,6 +485,89 @@ export function getPhysiologicalBucket(category: string, key?: string): 'metabol
     return 'hematology';
   }
   return 'other';
+}
+
+export function getBiomarkerMetadata(key: string, customDef?: any) {
+  const k = key.toLowerCase();
+  
+  if (customDef) {
+    return {
+      riskCategories: customDef.riskCategories || getFallbackRiskCategories(k),
+      standardMedicalGrouping: customDef.standardMedicalGrouping || getFallbackMedicalGrouping(k),
+      potentialMedicalConditions: customDef.potentialMedicalConditions || getFallbackMedicalConditions(k)
+    };
+  }
+
+  return {
+    riskCategories: getFallbackRiskCategories(k),
+    standardMedicalGrouping: getFallbackMedicalGrouping(k),
+    potentialMedicalConditions: getFallbackMedicalConditions(k)
+  };
+}
+
+function getFallbackRiskCategories(key: string): string[] {
+  const k = key.toLowerCase();
+  if (k === 'bmi' || k === 'weight' || k === 'height' || k.includes('waist') || k.includes('fat')) {
+    return ['Metabolic & glycemic'];
+  }
+  if (k === 'hba1c' || k === 'fasting_glucose' || k === 'fasting_insulin' || k.includes('glucose') || k.includes('sugar') || k.includes('insulin')) {
+    return ['Metabolic & glycemic'];
+  }
+  if (k === 'ldl' || k === 'apob' || k === 'hdl' || k === 'triglycerides' || k === 'total_cholesterol' || k === 'hscrp' || k.includes('cholesterol') || k.includes('lipid') || k.includes('crp')) {
+    return ['Cardiovascular'];
+  }
+  if (k === 'creatinine' || k === 'egfr' || k === 'urea' || k === 'uric_acid' || k === 'albumin' || k.includes('kidney') || k.includes('renal') || k.includes('urine')) {
+    return ['Kidney & hydration'];
+  }
+  if (k === 'alt' || k === 'ast' || k === 'alp' || k === 'bilirubin' || k.includes('liver') || k.includes('hepatic') || k.includes('transaminase')) {
+    return ['Liver & hepatitis stress'];
+  }
+  if (k === 'wbc' || k === 'rbc' || k === 'hemoglobin' || k === 'haemoglobin' || k === 'platelets' || k === 'hematocrit' || k.includes('cell') || k.includes('blood count') || k.includes('haem')) {
+    return ['Hematology'];
+  }
+  return ['Other'];
+}
+
+function getFallbackMedicalGrouping(key: string): string {
+  const k = key.toLowerCase();
+  if (k === 'bmi' || k === 'weight' || k === 'height' || k.includes('waist')) return 'Biometrics';
+  if (k === 'hba1c' || k === 'fasting_glucose' || k === 'fasting_insulin' || k.includes('glucose') || k.includes('sugar') || k.includes('insulin') || k === 'ldl' || k === 'apob' || k === 'hdl' || k === 'triglycerides' || k === 'total_cholesterol' || k === 'hscrp' || k.includes('cholesterol') || k.includes('lipid')) {
+    return 'Metabolic';
+  }
+  if (k === 'creatinine' || k === 'egfr' || k === 'urea' || k === 'uric_acid' || k === 'albumin' || k.includes('kidney') || k.includes('renal')) {
+    return 'Renal';
+  }
+  if (k === 'alt' || k === 'ast' || k === 'alp' || k === 'bilirubin' || k.includes('liver') || k.includes('hepatic')) {
+    return 'Hepatic';
+  }
+  if (k === 'wbc' || k === 'rbc' || k === 'hemoglobin' || k === 'haemoglobin' || k === 'platelets' || k === 'hematocrit' || k.includes('cell') || k.includes('blood count') || k.includes('haem')) {
+    return 'Hematology';
+  }
+  return 'Other';
+}
+
+function getFallbackMedicalConditions(key: string): string[] {
+  const k = key.toLowerCase();
+  if (k === 'bmi' || k === 'weight' || k === 'height' || k.includes('waist')) return ['Obesity', 'Metabolic Syndrome'];
+  if (k === 'hba1c' || k === 'fasting_glucose' || k === 'fasting_insulin' || k.includes('glucose') || k.includes('sugar') || k.includes('insulin')) {
+    return ['Diabetes Risk', 'Insulin Resistance'];
+  }
+  if (k === 'ldl' || k === 'apob' || k === 'hdl' || k === 'triglycerides' || k === 'total_cholesterol' || k.includes('cholesterol') || k.includes('lipid')) {
+    return ['Hyperlipidemia', 'Atherosclerosis Risk', 'Cardiovascular Disease'];
+  }
+  if (k === 'hscrp' || k.includes('crp')) return ['Systemic Inflammation', 'Cardiovascular Risk'];
+  if (k === 'creatinine' || k === 'egfr' || k === 'urea' || k === 'uric_acid' || k === 'albumin' || k.includes('kidney') || k.includes('renal')) {
+    return ['Chronic Kidney Disease', 'Dehydration', 'Impaired Renal Function'];
+  }
+  if (k === 'alt' || k === 'ast' || k === 'alp' || k === 'bilirubin' || k.includes('liver') || k.includes('hepatic')) {
+    return ['Fatty Liver', 'Hepatitis Stress', 'Liver Dysfunction'];
+  }
+  if (k === 'wbc' || k === 'rbc' || k === 'hemoglobin' || k === 'haemoglobin' || k === 'platelets' || k === 'hematocrit' || k.includes('cell') || k.includes('blood count') || k.includes('haem')) {
+    if (k.includes('wbc') || k.includes('white')) return ['Immune Response', 'Infection Risk'];
+    if (k.includes('platelet')) return ['Thrombocytopenia', 'Clotting Risk'];
+    return ['Anemia', 'Oxygen Transport Capacity'];
+  }
+  return ['General Health'];
 }
 
 

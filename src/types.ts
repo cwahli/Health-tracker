@@ -41,6 +41,9 @@ export interface UserProfile {
       normalRange: string;
       description: string;
       benefitRisk?: string;
+      riskCategories?: string[];
+      standardMedicalGrouping?: string;
+      potentialMedicalConditions?: string[];
     }
   };
   lastUpdatedAt?: number;
@@ -237,6 +240,9 @@ export interface ChatMessage {
     benefitRisk: string;
   };
   agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | null;
+  agentTypeStep?: string;
+  extractedYaml?: string;
+  bucketMapping?: any;
   agentResult?: any;
 }
 

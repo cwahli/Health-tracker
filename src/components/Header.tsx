@@ -275,7 +275,7 @@ export default function Header({
                 {profile.nickname || 'Healthy User'}
               </span>
               <span className="text-[10px] text-slate-400 capitalize font-medium mt-0.5 block tracking-wide">
-                {activeTab === 'home' ? 'Home' : activeTab === 'insights' ? 'Insights & Analytics' : activeTab === 'food' ? 'Food & Nutrition Logs' : activeTab === 'medical' ? 'Medical History' : activeTab === 'trends' ? 'Health Trends' : activeTab}
+                {activeTab === 'home' ? 'Home' : activeTab === 'insights' ? 'Health insights' : activeTab === 'food' ? 'Food & Nutrition Logs' : activeTab === 'medical' ? 'Medical History' : activeTab === 'trends' ? 'Health Trends' : activeTab}
               </span>
             </div>
           </div>

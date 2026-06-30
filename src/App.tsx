@@ -1925,6 +1925,10 @@ export default function App() {
             isGenerating={isGenerating}
             onNavigateToTab={setActiveTab}
             onOpenMedicalChat={() => setIsMedicalChatOpen(true)}
+            onOpenAgentChat={(agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5') => {
+              setActiveAgentType(agentType);
+              setIsMedicalChatOpen(true);
+            }}
           />
         )}
 
@@ -2011,6 +2015,7 @@ export default function App() {
       />
 
       <LogChat
+        key={`medical_${activeAgentType || 'general'}`}
         type="medical"
         profile={profile}
         isOpen={isMedicalChatOpen}
@@ -2062,12 +2067,18 @@ export default function App() {
                         if (!updatedProfile.customBiomarkers) {
                           updatedProfile.customBiomarkers = {};
                         }
-                        if (!updatedProfile.customBiomarkers[bioName]) {
-                          updatedProfile.customBiomarkers[bioName] = {
-                            name: bio.name,
-                            unit: unit
-                          };
-                        }
+                        const existingDef = updatedProfile.customBiomarkers[bioName] || {
+                          name: bio.name,
+                          unit: unit || '',
+                          normalRange: bio.normalRange || 'Unknown',
+                          description: bio.description || ''
+                        };
+                        updatedProfile.customBiomarkers[bioName] = {
+                          ...existingDef,
+                          riskCategories: bio.riskCategories || existingDef.riskCategories,
+                          standardMedicalGrouping: bio.standardMedicalGrouping || existingDef.standardMedicalGrouping,
+                          potentialMedicalConditions: bio.potentialMedicalConditions || existingDef.potentialMedicalConditions
+                        };
                       });
                     }
                   });

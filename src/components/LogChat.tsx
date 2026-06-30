@@ -14,6 +14,7 @@ import exifr from 'exifr';
 import { auth } from '../firebase';
 
 interface LogChatProps {
+  key?: string;
   type: 'food' | 'medical' | 'food_idea';
   profile?: UserProfile | null;
   isOpen: boolean;
@@ -612,7 +613,28 @@ export default function LogChat({
           bodyData.lastProcessedItem = lastMsg.lastProcessedItem;
         }
         if (agentType) {
-          bodyData.agentType = agentType === 'agent1' ? 'agent1_step1' : agentType;
+          let currentStep = 'agent1_step1';
+          if (agentType === 'agent1') {
+            const lastAgent1Msg = [...messages].reverse().find(m => m.agentType === 'agent1' && m.agentTypeStep);
+            if (lastAgent1Msg && lastAgent1Msg.agentTypeStep) {
+              currentStep = lastAgent1Msg.agentTypeStep;
+            }
+            
+            // Also find and attach extractedYaml and bucketMapping if available
+            const yamlMsg = [...messages].reverse().find(m => m.agentResult?.extractedYaml || m.extractedYaml);
+            if (yamlMsg) {
+              bodyData.extractedYaml = yamlMsg.agentResult?.extractedYaml || yamlMsg.extractedYaml;
+            }
+            const mapMsg = [...messages].reverse().find(m => m.agentResult?.bucketMapping || m.bucketMapping);
+            if (mapMsg) {
+              bodyData.bucketMapping = typeof (mapMsg.agentResult?.bucketMapping || mapMsg.bucketMapping) === 'string'
+                ? (mapMsg.agentResult?.bucketMapping || mapMsg.bucketMapping)
+                : JSON.stringify(mapMsg.agentResult?.bucketMapping || mapMsg.bucketMapping);
+            }
+          } else {
+            currentStep = agentType;
+          }
+          bodyData.agentType = currentStep;
           bodyData.biomarkerHistory = biomarkerHistory || [];
           bodyData.biomarkers = biomarkers || {};
           bodyData.recentMeals = foodLogs ? foodLogs.slice(-20).map(f => f.name) : [];
@@ -668,6 +690,9 @@ export default function LogChat({
         if (agentType) {
           assistantMsg.agentType = agentType;
           assistantMsg.agentResult = resData;
+          if (agentType === 'agent1') {
+            assistantMsg.agentTypeStep = resData.agentType || 'agent1_step1';
+          }
         } else {
           assistantMsg.mode = resData.mode;
           assistantMsg.status = resData.status;
@@ -778,7 +803,7 @@ export default function LogChat({
       <div id="food-chat-container" className="w-full max-w-md mx-auto bg-white dark:bg-slate-900 rounded-t-[32px] sm:rounded-[32px] h-[90vh] sm:h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800/80 transition-colors duration-200">
         
         {/* Modal Header */}
-        <div className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800/80 px-4 py-3 flex items-center justify-between">
+        <div className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800/80 px-4 py-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 rounded-xl bg-indigo-600/10 flex items-center justify-center text-indigo-600">
               <Sparkles className="w-5 h-5 animate-pulse" />
@@ -1330,7 +1355,7 @@ export default function LogChat({
                         <div className="space-y-3">
                           {msg.agentTypeStep === 'agent1_step1' && (
                             <div className="space-y-2">
-                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Step 1: Extracted YAML Data</span>
+                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Step 1: Extracted data</span>
                               <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">
                                 {msg.agentResult.extractedYaml || msg.extractedYaml}
                               </pre>
@@ -1364,7 +1389,7 @@ export default function LogChat({
                                   }}
                                   className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer mt-2"
                                 >
-                                  Assemble JSON
+                                  Assemble Data
                                 </button>
                               )}
                             </div>
@@ -1379,7 +1404,7 @@ export default function LogChat({
                                     <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">{bucket.systemName}</span>
                                     <div className="flex flex-wrap gap-1">
                                       {bucket.biomarkers?.map((b: any, bidx: number) => (
-                                        <span key={bidx} className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-800 text-[9px] font-semibold rounded-md">
+                                        <span key={bidx} className="px-1.5 py-0.5 bg-slate-600 dark:bg-slate-700 text-white text-[9px] font-semibold rounded-md">
                                           {b.name} ({b.history?.length || 0})
                                         </span>
                                       ))}
@@ -1695,7 +1720,7 @@ export default function LogChat({
       </div>
 
         {/* Input Dock */}
-        <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800/80 p-3 flex flex-col gap-2">
+        <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800/80 p-3 flex flex-col gap-2 shrink-0">
           {isCompressing && (
             <div className="flex items-center gap-2 p-2 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 rounded-xl">
               <Loader className="w-3.5 h-3.5 text-indigo-600 animate-spin" />

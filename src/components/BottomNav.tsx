@@ -9,7 +9,7 @@ interface BottomNavProps {
 export default function BottomNav({ activeTab, setActiveTab }: BottomNavProps) {
   const tabs = [
     { id: 'home', icon: Home, label: 'Home' },
-    { id: 'insights', icon: Lightbulb, label: 'Insights' },
+    { id: 'insights', icon: Lightbulb, label: 'Health insights' },
     { id: 'food', icon: Utensils, label: 'Food History' },
     { id: 'medical', icon: Stethoscope, label: 'Body Info' },
     { id: 'trends', icon: TrendingUp, label: 'Trends' },
