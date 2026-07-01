@@ -20,6 +20,7 @@ interface AgentResultTableProps {
   biomarkerHistory?: any[];
   initialRawText?: string;
   onApplyChanges?: () => Promise<void>;
+  onContinueToNextStep?: () => Promise<void>;
   isApplying?: boolean;
 }
 
@@ -70,6 +71,7 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
   biomarkerHistory = [],
   initialRawText = '',
   onApplyChanges,
+  onContinueToNextStep,
   isApplying = false
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -89,15 +91,18 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
       const yamlText = agentResult.extractedYaml || agentResult;
       let parsedRows: any[] = [];
       
-      if (typeof yamlText === 'string') {
+      if (Array.isArray(yamlText)) {
+        parsedRows = yamlText;
+      } else if (typeof yamlText === 'string') {
+        const cleanText = yamlText.replace(/```(?:yaml|json)?/gi, '').trim();
         try {
-          const parsed = parse(yamlText);
+          const parsed = parse(cleanText);
           if (Array.isArray(parsed)) {
             parsedRows = parsed;
           }
         } catch (e) {
           // Robust line-by-line regex fallback parser if YAML parser errors out
-          const lines = yamlText.split('\n');
+          const lines = cleanText.split('\n');
           let current: any = {};
           for (let line of lines) {
             line = line.trim();
@@ -732,14 +737,14 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
             <span>
               Initial Raw Markers: <strong className="text-slate-700 dark:text-slate-300">
                 {(isMultiphaseActive || totalEstimated > 0)
-                  ? `${verification.generatedCount}/${totalEstimated}`
+                  ? `${verification.initialCount}/${totalEstimated}`
                   : verification.initialCount}
               </strong>
             </span>
             <span>
               Generated Table Rows: <strong className="text-slate-700 dark:text-slate-300">
                 {(isMultiphaseActive || totalEstimated > 0)
-                  ? `${verification.generatedCount}/${totalEstimated}`
+                  ? `${verification.generatedCount}/${verification.initialCount}`
                   : verification.generatedCount}
               </strong>
             </span>
@@ -764,27 +769,37 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
 
       {/* Apply Changes Button or "No changes" info */}
       <div className="pt-1 space-y-2">
-        {hasChanges ? (
-          onApplyChanges && (
-            <button
-              type="button"
-              disabled={isApplying}
-              onClick={onApplyChanges}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              {isApplying 
-                ? 'Applying Agent Findings...' 
-                : (agentResult?.status === 'needs_continuation' || agentResult?.needsContinuation || agentResult?.hasMore)
-                  ? 'Continue to Next Batch'
-                  : 'Apply & Save Agent Findings'}
-            </button>
-          )
-        ) : (
+        {!hasChanges && (
           <div className="w-full py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800/50 rounded-xl text-center text-xs text-slate-500 italic">
             No changes to apply. All biomarker entries are already up-to-date.
           </div>
         )}
+
+        {onContinueToNextStep ? (
+          <button
+            type="button"
+            disabled={isApplying}
+            onClick={onContinueToNextStep}
+            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+          >
+            <ArrowRight className="w-4 h-4" />
+            Continue to next step
+          </button>
+        ) : onApplyChanges ? (
+          <button
+            type="button"
+            disabled={isApplying}
+            onClick={onApplyChanges}
+            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            {isApplying 
+              ? 'Applying Agent Findings...' 
+              : (agentResult?.status === 'needs_continuation' || agentResult?.needsContinuation || agentResult?.hasMore)
+                ? 'Continue to Next Batch'
+                : 'Apply & Save Agent Findings'}
+          </button>
+        ) : null}
 
         {agentResult?.status === 'needs_continuation' || agentResult?.needsContinuation || agentResult?.hasMore ? (
           <button
@@ -859,14 +874,14 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
                   <span>
                     Initial Raw Markers: <strong className="text-slate-800 dark:text-slate-200">
                       {(isMultiphaseActive || totalEstimated > 0)
-                        ? `${verification.generatedCount}/${totalEstimated}`
+                        ? `${verification.initialCount}/${totalEstimated}`
                         : verification.initialCount}
                     </strong>
                   </span>
                   <span>
                     Generated Table Rows: <strong className="text-slate-800 dark:text-slate-200">
                       {(isMultiphaseActive || totalEstimated > 0)
-                        ? `${verification.generatedCount}/${totalEstimated}`
+                        ? `${verification.generatedCount}/${verification.initialCount}`
                         : verification.generatedCount}
                     </strong>
                   </span>

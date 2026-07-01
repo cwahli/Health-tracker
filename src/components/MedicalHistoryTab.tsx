@@ -59,6 +59,7 @@ export default function MedicalHistoryTab({
   const [reviewingBiomarkerKey, setReviewingBiomarkerKey] = useState<string | null>(null);
   const [combineBiomarkerKey, setCombineBiomarkerKey] = useState<string | null>(null);
   const [flashingKey, setFlashingKey] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [reviewHistories, setReviewHistories] = useState<{[key: string]: ChatMessage[]}>({});
   const [openSubCategories, setOpenSubCategories] = useState<{ [category: string]: boolean }>({});
 
@@ -198,6 +199,18 @@ export default function MedicalHistoryTab({
 
   const filteredBiomarkers = useMemo(() => {
     let filtered = allDefinitions.filter(def => {
+      // Apply search query filter if it exists
+      if (searchQuery.trim() !== '') {
+        const q = searchQuery.toLowerCase();
+        const matchesName = def.name.toLowerCase().includes(q);
+        const matchesConditions = def.potentialMedicalConditions?.some(c => c.toLowerCase().includes(q));
+        const matchesRisks = def.riskCategories?.some(r => r.toLowerCase().includes(q));
+        const matchesGroup = def.standardMedicalGrouping?.toLowerCase().includes(q);
+        if (!matchesName && !matchesConditions && !matchesRisks && !matchesGroup) {
+          return false;
+        }
+      }
+
       if (selectedSubCategory === 'all') return true;
       if (viewType === 'risk') {
         return def.riskCategories?.includes(selectedSubCategory);
@@ -251,7 +264,7 @@ export default function MedicalHistoryTab({
 
   // Helper to filter biomarkers for a subcategory
   const getBiomarkersForSubCategory = (cat: string) => {
-    return allDefinitions.filter(def => {
+    return filteredBiomarkers.filter(def => {
       if (viewType === 'risk') {
         return def.riskCategories?.includes(cat);
       } else if (viewType === 'condition') {
@@ -267,20 +280,27 @@ export default function MedicalHistoryTab({
   const getSubCategoryRiskInfo = (cat: string) => {
     const groupMarkers = getBiomarkersForSubCategory(cat);
     let maxScore = 0;
+    let worstMarkerName = '';
     
     groupMarkers.forEach(def => {
       const val = biomarkers[def.key];
       if (val !== undefined) {
         const status = getBiomarkerStatus(def.key, val, def.normalRange);
-        if (status === 'critical') maxScore = Math.max(maxScore, 4);
-        else if (status === 'high' || status === 'low') maxScore = Math.max(maxScore, 3);
-        else if (status === 'normal') maxScore = Math.max(maxScore, 2);
-        else maxScore = Math.max(maxScore, 1);
+        let score = 0;
+        if (status === 'critical') score = 4;
+        else if (status === 'high' || status === 'low') score = 3;
+        else if (status === 'normal') score = 2;
+        else score = 1;
+        
+        if (score > maxScore) {
+          maxScore = score;
+          worstMarkerName = def.name;
+        }
       }
     });
     
-    if (maxScore === 4) return { label: 'Critical', bg: 'bg-rose-600', text: 'text-white' };
-    if (maxScore === 3) return { label: 'High', bg: 'bg-amber-500', text: 'text-white' };
+    if (maxScore === 4) return { label: `${worstMarkerName} Critical`, bg: 'bg-rose-600', text: 'text-white' };
+    if (maxScore === 3) return { label: `${worstMarkerName} High`, bg: 'bg-amber-500', text: 'text-white' };
     if (maxScore === 2) return { label: 'Normal', bg: 'bg-emerald-600', text: 'text-white' };
     if (maxScore === 1) return { label: 'Unknown', bg: 'bg-slate-400', text: 'text-white' };
     return { label: 'No Data', bg: 'bg-slate-200 dark:bg-slate-800/50', text: 'text-slate-600 dark:text-slate-400' };
@@ -288,7 +308,7 @@ export default function MedicalHistoryTab({
 
   // Sort subcategories
   const activeCategories = useMemo(() => {
-    const cats = subCategories.filter(cat => cat !== 'all');
+    const cats = subCategories.filter(cat => cat !== 'all' && getBiomarkersForSubCategory(cat).length > 0);
     if (sortBy === 'name') {
       return [...cats].sort((a, b) => a.localeCompare(b));
     } else {
@@ -315,7 +335,7 @@ export default function MedicalHistoryTab({
         return a.localeCompare(b);
       });
     }
-  }, [subCategories, sortBy, allDefinitions, biomarkers]);
+  }, [subCategories, sortBy, allDefinitions, biomarkers, filteredBiomarkers]);
 
   // Sort markers inside each subcategory
   const getSortedBiomarkersForSubCategory = (cat: string) => {
@@ -354,13 +374,26 @@ export default function MedicalHistoryTab({
   return (
     <div className="space-y-4 pb-24 animation-fade-in max-w-md mx-auto px-[10px] mt-4 font-sans text-slate-900 dark:text-slate-100">
       
+      {/* Search Input */}
+      <div className="relative">
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+        <input
+          type="text"
+          placeholder="Search conditions or markers..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full pl-10 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
+        />
+      </div>
+
       {/* View Selection Controls */}
       <div className="grid grid-cols-2 gap-3 mb-1">
         {/* View Selection */}
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] uppercase tracking-wider font-bold text-slate-400 dark:text-slate-500">
-            Select View
-          </label>
           <select
             value={viewType}
             onChange={(e) => {
@@ -377,9 +410,6 @@ export default function MedicalHistoryTab({
 
         {/* Sort Selection */}
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] uppercase tracking-wider font-bold text-slate-400 dark:text-slate-500">
-            Sort By
-          </label>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
@@ -394,7 +424,7 @@ export default function MedicalHistoryTab({
       {/* Accordions Group of Biomarkers */}
       <div className="space-y-2.5 mt-[20px]">
         {activeCategories.map((cat) => {
-          const isOpen = !!openSubCategories[cat];
+          const isOpen = searchQuery.trim() !== '' || !!openSubCategories[cat];
           const riskInfo = getSubCategoryRiskInfo(cat);
           const markers = getSortedBiomarkersForSubCategory(cat);
           
@@ -445,8 +475,8 @@ export default function MedicalHistoryTab({
                           >
                             <div className="min-w-0 flex-1 pr-3">
                               <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                                  {def.name}
+                                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate capitalize">
+                                  {hasVal && status !== 'normal' && status !== 'unknown' ? `${getBiomarkerStatusLabel(def.key, status).toLowerCase()} ${def.name}` : def.name}
                                 </span>
                                 {def.key === 'bmi' && hasBmiAlert && (
                                   <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 animate-pulse" />

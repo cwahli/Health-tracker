@@ -1105,7 +1105,8 @@ export default function LogChat({
               text: resData.text || m.agentResult?.text,
               extractedYaml: resData.extractedYaml || m.agentResult?.extractedYaml,
               hasMoreMarkers: resData.hasMoreMarkers,
-              remainingText: resData.remainingText || ''
+              remainingText: resData.remainingText || '',
+              estimatedTotalMarkers: resData.estimatedTotalMarkers !== undefined ? resData.estimatedTotalMarkers : m.agentResult?.estimatedTotalMarkers
             }
           };
         }
@@ -1151,6 +1152,12 @@ export default function LogChat({
          bodyData.bucketMapping = JSON.stringify(mapMsg?.agentResult?.bucketMapping || mapMsg?.bucketMapping);
       }
 
+      let prevTotalMarkers = msg.agentResult?.estimatedTotalMarkers;
+      if (prevTotalMarkers === undefined) {
+         const oldMsg = [...messages].reverse().find(m => m.agentResult?.estimatedTotalMarkers !== undefined);
+         prevTotalMarkers = oldMsg?.agentResult?.estimatedTotalMarkers;
+      }
+
       const displayPayload = { ...bodyData };
       setLastSentPayload(displayPayload);
 
@@ -1173,7 +1180,12 @@ export default function LogChat({
         content: resData.text || 'Processing...',
         timestamp: new Date().toISOString(),
         agentType: 'agent1',
-        agentResult: resData,
+        agentResult: {
+           ...resData,
+           extractedYaml: bodyData.extractedYaml,
+           bucketMapping: resData.bucketMapping || (bodyData.bucketMapping ? JSON.parse(bodyData.bucketMapping) : undefined),
+           estimatedTotalMarkers: prevTotalMarkers !== undefined ? prevTotalMarkers : resData.estimatedTotalMarkers
+        },
         agentTypeStep: step
       };
 
@@ -1880,7 +1892,11 @@ export default function LogChat({
                       {/* Content details based on Agent type */}
                       {['agent1', 'agent2', 'agent3', 'agent4'].includes(msg.agentType || '') && msg.agentResult && (
                         <AgentResultTable
-                          agentType={msg.agentType as 'agent1' | 'agent2' | 'agent3' | 'agent4'}
+                          agentType={
+                            msg.agentTypeStep === 'agent1_step2' ? 'agent2' :
+                            msg.agentTypeStep === 'agent1_step3' ? 'agent3' :
+                            msg.agentType as 'agent1' | 'agent2' | 'agent3' | 'agent4'
+                          }
                           agentResult={msg.agentResult}
                           profile={profile}
                           biomarkerHistory={biomarkerHistory || []}
@@ -1891,6 +1907,11 @@ export default function LogChat({
                               .find(m => m.role === 'user');
                             return precedingUserMsg?.content || '';
                           })()}
+                          onContinueToNextStep={
+                            msg.agentTypeStep === 'agent1_step1' ? async () => { await handleAgent1Step('agent1_step2', msg); } :
+                            msg.agentTypeStep === 'agent1_step2' ? async () => { await handleAgent1Step('agent1_step3', msg); } :
+                            undefined
+                          }
                           onApplyChanges={async () => {
                             if (onAgentFinish) {
                               const isContinuation = !!(msg.agentResult?.hasMoreMarkers || msg.agentResult?.hasMore || msg.agentResult?.needsContinuation || msg.agentResult?.status === 'needs_continuation');

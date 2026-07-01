@@ -1413,6 +1413,11 @@ export default function App() {
             hasNewBiomarkers = true;
           }
         } else if (cmd.action === 'remove_biomarker' && cmd.keyName) {
+          // Locked markers cannot be removed
+          if (cmd.keyName === 'bmi' || cmd.keyName === 'weight' || cmd.keyName === 'height') {
+            console.warn(`Prevented deletion of locked biomarker: ${cmd.keyName}`);
+            return;
+          }
           const targetDate = cmd.date || getCurrentDateInTimezone(profile?.timezone);
           const logIdx = updatedHistory.findIndex(h => h.date === targetDate);
           if (logIdx >= 0 && updatedHistory[logIdx].biomarkers[cmd.keyName] !== undefined) {

@@ -120,11 +120,15 @@ export default function InsightsTab({
   const groupedBiomarkers = React.useMemo<Record<string, Array<{ key: string; name: string; present: boolean }>>>(() => {
     const groups: Record<string, Array<{ key: string; name: string; present: boolean }>> = {};
 
+    const isPresent = (key: string) => {
+      const inBiomarkers = biomarkers[key] !== undefined && biomarkers[key] !== null && biomarkers[key] !== '';
+      const inHistory = biomarkerHistory?.some(h => h.biomarkers && h.biomarkers[key] !== undefined) || false;
+      return inBiomarkers || inHistory;
+    };
+
     // Gather standard ones
     biomarkerDefinitions.forEach(def => {
-      const inBiomarkers = biomarkers[def.key] !== undefined && biomarkers[def.key] !== null && biomarkers[def.key] !== '';
-      const inEntries = profile.biomarkerEntries?.some(e => e.key === def.key) || false;
-      const present = inBiomarkers || inEntries;
+      const present = isPresent(def.key);
       const risks = def.riskCategories || ['Uncategorized'];
       risks.forEach(cat => {
         if (!groups[cat]) groups[cat] = [];
@@ -137,9 +141,7 @@ export default function InsightsTab({
     // Custom/User ones in profile
     if (profile?.customBiomarkers) {
       Object.entries(profile.customBiomarkers).forEach(([key, def]) => {
-        const inBiomarkers = biomarkers[key] !== undefined && biomarkers[key] !== null && biomarkers[key] !== '';
-        const inEntries = profile.biomarkerEntries?.some(e => e.key === key) || false;
-        const present = inBiomarkers || inEntries;
+        const present = isPresent(key);
         const risks = (def as any).riskCategories || ['Uncategorized'];
         risks.forEach((cat: string) => {
           if (!groups[cat]) groups[cat] = [];
@@ -151,7 +153,7 @@ export default function InsightsTab({
     }
 
     return groups;
-  }, [profile, biomarkers]);
+  }, [profile, biomarkers, biomarkerHistory]);
 
   const toggleAgentHistory = (agentType: string) => {
     setExpandedAgentHistory(prev => ({ ...prev, [agentType]: !prev[agentType] }));
@@ -162,11 +164,13 @@ export default function InsightsTab({
       .filter(a => a.agentType === agentType)
       .sort((a, b) => b.date.localeCompare(a.date));
     
-    // Exclude the currently displayed one (index 0)
-    const prevAnalyses = history.slice(1);
+    // Exclude the currently displayed active one
+    const latestActive = history.filter(a => !a.archived)[0];
+    const prevAnalyses = history.filter(a => a.id !== latestActive?.id);
+    
     if (prevAnalyses.length === 0) return null;
     
-    const isExpanded = expandedAgentHistory[agentType];
+    const isExpanded = expandedAgentHistory[agentType] ?? (!latestActive);
     const latestPrev = prevAnalyses[0];
     
     const dateObj = new Date(latestPrev.date);
@@ -219,7 +223,7 @@ export default function InsightsTab({
                 {onDeleteAnalysis && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteAnalysis(item.id); }}
-                    className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800"
+                    className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-red-500 transition-opacity cursor-pointer bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -801,7 +805,7 @@ export default function InsightsTab({
                                 <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                                   what's done so far
                                 </span>
-                                <div className="grid grid-cols-3 gap-2">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                                   {checklistItems.map((item, idx) => {
                                     const hasAtLeastOne = item.present;
                                     return (
@@ -890,6 +894,20 @@ export default function InsightsTab({
                               <Sparkles className="w-3.5 h-3.5" />
                               Start {step.title}
                             </button>
+                          </div>
+                        )}
+
+                        {(status === 'To review' || status === 'Done') && !latestAnalysis && (
+                          <div className="pt-2">
+                            <p className="text-xs text-slate-500 mb-2 italic">All previous results have been archived.</p>
+                            <button
+                              onClick={() => onOpenAgentChat?.(step.agentType as any)}
+                              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Send className="w-3.5 h-3.5 text-slate-400" />
+                              Chat with agent
+                            </button>
+                            {step.agentType && renderAgentHistory(step.agentType)}
                           </div>
                         )}
 
