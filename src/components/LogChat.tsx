@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, FoodLog, UserProfile, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
-import { X, Send, Image, Camera, MessageSquare, Sparkles, Plus, ChevronDown, ChevronUp, Loader, MapPin, Trash2, Check, Table, RotateCcw, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { X, Send, Image, Camera, MessageSquare, Sparkles, Plus, ChevronDown, ChevronUp, Loader, MapPin, Trash2, Check, Table, RotateCcw, AlertTriangle, ShieldAlert, Edit2 } from 'lucide-react';
 import { nutrientDefinitions } from '../utils/nutrition';
 import { biomarkerDefinitions, getBiomarkerStatus, isAsianEthnicity, getBiomarkerStatusLabel } from '../utils/biomarkers';
 import LLMSelector from './LLMSelector';
@@ -297,6 +297,7 @@ interface LogChatProps {
   biomarkerHistory?: any[];
   onAgentFinish?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7', agentResult: any) => Promise<void>;
   onAgentAnalysisSaved?: (agentType: string, agentResult: any) => Promise<void>;
+  onGoToManualEdit?: () => void;
 }
 
 const getSessionId = (): string => {
@@ -325,7 +326,8 @@ export default function LogChat({
   agentType = null,
   biomarkerHistory = [],
   onAgentFinish,
-  onAgentAnalysisSaved
+  onAgentAnalysisSaved,
+  onGoToManualEdit
 }: LogChatProps) {
   const [showDataUsed, setShowDataUsed] = useState(false);
   const [showFullScreenConv, setShowFullScreenConv] = useState(false);
@@ -407,7 +409,7 @@ export default function LogChat({
         content: type === 'food' 
           ? 'Hello! Tell me or upload a photo of what you are planning to eat, and I will analyze its health benefits, risk factors, and full 30 nutrient breakdown based on your profile.'
           : type === 'food_idea'
-            ? 'Hello! Do you have any specific food preferences or cravings today?'
+            ? 'Hello! Do you have any specific food preferences or cravings today? I will need your location to find the best dining options matching your biomarker goals.'
             : agentType === 'agent1'
               ? 'Hello! I am the Clinical Data Parser. I extract biomarkers and readings from raw text or reports into a structured format.'
               : agentType === 'agent2'
@@ -483,7 +485,7 @@ export default function LogChat({
           content: type === 'food' 
             ? 'Hello! Tell me or upload a photo of what you are planning to eat, and I will analyze its health benefits, risk factors, and full 30 nutrient breakdown based on your profile.'
             : type === 'food_idea'
-              ? 'Hello! Do you have any specific food preferences or cravings today?'
+              ? 'Hello! Do you have any specific food preferences or cravings today? I will need your location to find the best dining options matching your biomarker goals.'
               : 'Hello! I can help you parse blood report photos, medical test charts, or manual body logs. Let me know what information you would like to enter today.',
           timestamp: new Date().toISOString()
         }
@@ -586,7 +588,7 @@ export default function LogChat({
             content: type === 'food' 
               ? 'Hello! Tell me or upload a photo of what you are planning to eat, and I will analyze its health benefits, risk factors, and full 30 nutrient breakdown based on your profile.'
               : type === 'food_idea'
-                ? 'Hello! Do you have any specific food preferences or cravings today?'
+                ? 'Hello! Do you have any specific food preferences or cravings today? I will need your location to find the best dining options matching your biomarker goals.'
                 : 'Hello! I can help you parse blood report photos, medical test charts, or manual body logs. Let me know what information you would like to enter today.',
             timestamp: new Date().toISOString()
           }];
@@ -598,7 +600,8 @@ export default function LogChat({
   }, [isOpen, type]);
 
   useEffect(() => {
-    // Eagerly fetch user location on component mount or whenever chat is active
+    // Eagerly fetch user location only when food idea chat is active
+    if (type !== 'food_idea' || !isOpen) return;
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((position) => {
         const lat = position.coords.latitude;
@@ -696,6 +699,24 @@ export default function LogChat({
       }
     }
   }, [isAnalyzing, messages]);
+
+  const matchingPreviousLogs = React.useMemo(() => {
+    if (type !== 'food' || !foodLogs || inputText.trim().length < 3) return [];
+    const query = inputText.toLowerCase().trim();
+    const uniqueMatches: FoodLog[] = [];
+    const seenNames = new Set<string>();
+    
+    const reversedLogs = [...foodLogs].reverse();
+    for (const log of reversedLogs) {
+      if (log.name && log.name.toLowerCase().includes(query)) {
+        if (!seenNames.has(log.name.toLowerCase())) {
+          seenNames.add(log.name.toLowerCase());
+          uniqueMatches.push(log);
+        }
+      }
+    }
+    return uniqueMatches;
+  }, [type, foodLogs, inputText]);
 
   if (!isOpen) return null;
 
@@ -997,16 +1018,34 @@ export default function LogChat({
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err: any) {
       console.error(err);
-      const isQuota = err.message?.includes("429") || err.message?.includes("quota") || err.message?.includes("RESOURCE_EXHAUSTED");
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `msg_err_${Date.now()}`,
-          role: 'assistant',
-          content: isQuota ? `You have exceeded your Gemini API quota limit. Please check your billing or try again later.` : `Error running analysis: ${err.message || 'Server connection timed out.'}`,
-          timestamp: new Date().toISOString()
+      if (type === 'food') {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `msg_err_${Date.now()}`,
+            role: 'assistant',
+            content: `The food log agent is not available. Please enter the food details manually.`,
+            timestamp: new Date().toISOString(),
+            agentUnavailable: true
+          }
+        ]);
+        if (onGoToManualEdit) {
+          setTimeout(() => {
+            onGoToManualEdit();
+          }, 800);
         }
-      ]);
+      } else {
+        const isQuota = err.message?.includes("429") || err.message?.includes("quota") || err.message?.includes("RESOURCE_EXHAUSTED");
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `msg_err_${Date.now()}`,
+            role: 'assistant',
+            content: isQuota ? `You have exceeded your Gemini API quota limit. Please check your billing or try again later.` : `Error running analysis: ${err.message || 'Server connection timed out.'}`,
+            timestamp: new Date().toISOString()
+          }
+        ]);
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -1136,6 +1175,27 @@ export default function LogChat({
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const handleDuplicateFoodLog = (log: FoodLog) => {
+    if (!onLogFood) return;
+    const todayDate = getCurrentDateInTimezone(profile?.timezone);
+    const duplicatedLog: FoodLog = {
+      ...log,
+      id: `food_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      date: todayDate
+    };
+    onLogFood(duplicatedLog);
+    setInputText('');
+    setMessages(prev => [
+      ...prev,
+      {
+        id: `msg_dup_${Date.now()}`,
+        role: 'assistant',
+        content: `Successfully duplicated your previously logged **${log.name}** to today (${todayDate})!`,
+        timestamp: new Date().toISOString()
+      }
+    ]);
   };
 
   return (
@@ -1530,6 +1590,23 @@ export default function LogChat({
                       </div>
                     ) : null}
                     <p className="whitespace-pre-line break-words">{msg.content}</p>
+
+                    {msg.agentUnavailable && (
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onGoToManualEdit) {
+                              onGoToManualEdit();
+                            }
+                          }}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md flex items-center gap-1.5"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                          Go to Manual Edit
+                        </button>
+                      </div>
+                    )}
                     
                     {msg.isError && (
                       <div className="mt-3 p-4 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-3">
@@ -2231,7 +2308,47 @@ export default function LogChat({
       </div>
 
         {/* Input Dock */}
-        <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800/80 p-3 flex flex-col gap-2 shrink-0">
+        <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800/80 p-3 flex flex-col gap-2 shrink-0 relative">
+          {matchingPreviousLogs.length > 0 && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 mx-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto z-50 animate-fade-in font-sans">
+              <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700/50 flex justify-between items-center">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">Previous Matches</span>
+                <span className="text-[9px] text-slate-400">Click Add to duplicate</span>
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                {matchingPreviousLogs.map((log) => (
+                  <div key={log.id} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {log.imageUrl || (log.imageUrls && log.imageUrls.length > 0) ? (
+                        <img 
+                          src={log.imageUrl || log.imageUrls?.[0]} 
+                          alt={log.name} 
+                          className="w-8 h-8 rounded-lg object-cover border border-slate-100 dark:border-slate-700 shrink-0"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-500 font-bold text-xs shrink-0">
+                          {log.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{log.name}</div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{log.composition || log.quantity}</div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDuplicateFoodLog(log)}
+                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Add
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {isCompressing && (
             <div className="flex items-center gap-2 p-2 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 rounded-xl">
               <Loader className="w-3.5 h-3.5 text-indigo-600 animate-spin" />

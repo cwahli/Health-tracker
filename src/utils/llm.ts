@@ -38,11 +38,11 @@ export const AVAILABLE_LLMS: LLMModel[] = [
     rpd: '500 RPD'
   },
   { 
-    id: 'gemini-2.5', 
-    name: 'Gemini 2.5', 
+    id: 'gemini-2.5-flash', 
+    name: 'Gemini 2.5 Flash', 
     provider: 'Gemini', 
     description: 'Our hybrid reasoning model, with a 1M token context window and thinking budgets.',
-    rpd: '500 RPD'
+    rpd: '20 RPD'
   },
   { 
     id: 'gemini-2.5-flash-lite', 

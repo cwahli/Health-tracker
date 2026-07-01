@@ -261,11 +261,11 @@ export const Agent7View: React.FC<{ rawResult: any }> = ({ rawResult }) => {
         </p>
       )}
 
-      <div className="flex items-center justify-between py-1 bg-slate-50 dark:bg-slate-850 px-3 rounded-xl border border-slate-200/50 dark:border-slate-800/40">
-        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+      <div className="flex items-center justify-between py-1 bg-slate-100 dark:bg-slate-800/80 px-3 rounded-xl border border-slate-200 dark:border-slate-700/60">
+        <span className="text-[10px] font-mono font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
           Scientific Database Search
         </span>
-        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-full">
+        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-indigo-950 dark:text-indigo-100 bg-indigo-100 dark:bg-indigo-900/95 px-2 py-0.5 rounded-full">
           <BookOpen className="w-3 h-3" />
           {insights.length} {insights.length === 1 ? 'article' : 'articles'} found
         </span>

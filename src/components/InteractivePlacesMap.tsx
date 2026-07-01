@@ -72,14 +72,7 @@ export function InteractivePlacesMap({
   const [selectedIds, setSelectedIds] = useState<string[]>(() => ideas.map(i => i.id));
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
 
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => setUserLocation([pos.coords.latitude, pos.coords.longitude]),
-        () => console.warn("Could not get user location for map")
-      );
-    }
-  }, []);
+
 
   if (!ideas || ideas.length === 0) return null;
 

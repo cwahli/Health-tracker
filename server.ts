@@ -891,30 +891,9 @@ app.post("/api/gemini/food-analyze", async (req, res) => {
         });
       }
 
-      const mockNewLog = {
-        name: "Avocado Salmon Toast",
-        date: new Date().toISOString().split("T")[0],
-        composition: "Whole wheat bread, mashed avocado, smoked salmon, cherry tomatoes, olive oil",
-        weightGrams: 220,
-        quantity: "1 serving",
-        benefits: "High in omega-3 fatty acids from the salmon, rich in heart-healthy monounsaturated fats from avocado, and packed with dietary fibre from whole wheat toast.",
-        risks: "Slightly elevated sodium from the smoked salmon. Moderation is advised if you have strict sodium limits.",
-        healthImpact: "Contributes beautifully to your daily unsaturated fat target and omega-3 allowance. Soluble fibre aids in optimizing LDL cholesterol.",
-        recommendation: "good",
-        itemsBreakdown: [
-          { name: "Whole wheat bread", weightGrams: 60, calories: 156, saturatedFat: 0.1, sodium: 180 },
-          { name: "Mashed avocado", weightGrams: 80, calories: 128, saturatedFat: 1.6, sodium: 6 },
-          { name: "Smoked salmon", weightGrams: 60, calories: 117, saturatedFat: 0.5, sodium: 290 },
-          { name: "Cherry tomatoes & olive oil", weightGrams: 20, calories: 79, saturatedFat: 1.0, sodium: 4 }
-        ],
-        nutrients: {
-          calories: 480, protein: 18, totalFat: 16, saturatedFat: 3.2, unsaturatedFat: 12.5, omega3: 1.8, carbohydrates: 28, addedSugar: 0, totalFibre: 8, solubleFibre: 2.5, sodium: 480, potassium: 520, magnesium: 65, calcium: 45, iron: 2.1, zinc: 1.5, selenium: 22, iodine: 15, phosphorus: 180, vitaminD: 120, vitaminB12: 1.8, folate: 45, vitaminC: 12, vitaminE: 3.5, vitaminK: 25, vitaminA: 60, vitaminB6: 0.4, thiamine: 0.15, riboflavin: 0.18, niacin: 4.2
-        }
-      };
-
       return res.json({
-        text: "Please note: GEMINI_API_KEY is not configured in the Secrets manager. Simulated Avocado Salmon Toast saved to your Firestore active state:",
-        data: mockNewLog
+        error: "The food log agent is not available. Please enter the food details manually.",
+        agentNotAvailable: true
       });
     }
 
@@ -1289,79 +1268,9 @@ Current User Input: "${message}"`;
     }
   } catch (error: any) {
     console.error("[Food Analyze Error]:", error);
-    const isQuotaError = error.message?.includes("429") || error.message?.includes("quota") || error.message?.includes("RESOURCE_EXHAUSTED");
-    
-    const rawMsg = req.body?.message || "";
-    let foodName = "Meal Log";
-    if (rawMsg.length > 0 && rawMsg.length < 50) {
-      foodName = rawMsg;
-    } else {
-      const match = rawMsg.match(/ate\s+([a-zA-Z\s]{3,25})/i) || rawMsg.match(/having\s+([a-zA-Z\s]{3,25})/i) || rawMsg.match(/had\s+([a-zA-Z\s]{3,25})/i);
-      if (match) {
-        foodName = match[1].trim();
-      }
-    }
-
-    const warningNotice = isQuotaError
-      ? `*(Note: Your Gemini API key has exceeded its quota/rate limits. I have estimated the nutritional data using offline heuristics so you can still log this meal!)*\n\nI have estimated the breakdown for **${foodName}**:`
-      : `*(Note: Gemini connection timed out. Showing offline estimated breakdown!)*\n\nI have estimated the breakdown for **${foodName}**:`;
-
-    const userTimezone = req.body.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-    let localDateStr;
-    try {
-      const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: userTimezone, year: 'numeric', month: '2-digit', day: '2-digit' });
-      localDateStr = formatter.format(new Date());
-    } catch(e) {
-      localDateStr = new Date().toISOString().split("T")[0];
-    }
-
-    const fallbackFoodLog = {
-      name: foodName,
-      date: localDateStr,
-      composition: "Estimated based on your description",
-      weightGrams: 200,
-      quantity: "1 serving",
-      benefits: "Provides foundational macronutrients and essential vitamins/minerals.",
-      risks: "None flagged for your profile.",
-      healthImpact: "Estimated offline due to API rate limiting. This log is still saved to your tracking history.",
-      recommendation: "neutral",
-      nutrients: {
-        calories: 350,
-        protein: 15,
-        totalFat: 12,
-        saturatedFat: 2.0,
-        unsaturatedFat: 8.0,
-        omega3: 0.5,
-        carbohydrates: 35,
-        addedSugar: 2.0,
-        totalFibre: 4.5,
-        solubleFibre: 1.5,
-        sodium: 350,
-        potassium: 350,
-        magnesium: 40,
-        calcium: 50,
-        iron: 1.5,
-        zinc: 1.2,
-        selenium: 10,
-        iodine: 8,
-        phosphorus: 120,
-        vitaminD: 20,
-        vitaminB12: 0.5,
-        folate: 30,
-        vitaminC: 10,
-        vitaminE: 1.5,
-        vitaminK: 15,
-        vitaminA: 40,
-        vitaminB6: 0.2,
-        thiamine: 0.1,
-        riboflavin: 0.1,
-        niacin: 2.5
-      }
-    };
-
-    res.json({
-      text: warningNotice,
-      data: fallbackFoodLog
+    return res.status(200).json({
+      error: `The food log agent is not available (Error: ${error.message || 'Connection timed out'}).`,
+      agentNotAvailable: true
     });
   }
 });

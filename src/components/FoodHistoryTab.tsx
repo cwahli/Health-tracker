@@ -16,6 +16,8 @@ interface FoodHistoryTabProps {
   onDeleteFoodLog: (id: string) => void;
   onLogFood?: (food: FoodLog) => void;
   onEditingActiveChange?: (active: boolean) => void;
+  isManualEntryOpen?: boolean;
+  onManualEntryOpenChange?: (open: boolean) => void;
 }
 
 function cleanData<T>(obj: T): T {
@@ -47,7 +49,9 @@ export default function FoodHistoryTab({
   onUpdateFoodLog,
   onDeleteFoodLog,
   onLogFood,
-  onEditingActiveChange
+  onEditingActiveChange,
+  isManualEntryOpen: propIsManualEntryOpen,
+  onManualEntryOpenChange
 }: FoodHistoryTabProps) {
   const t = translations[profile.language] || translations.en;
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,7 +75,14 @@ export default function FoodHistoryTab({
   }, [editingLogId, onEditingActiveChange]);
 
   // Manual Entry States
-  const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+  const [localManualEntryOpen, setLocalManualEntryOpen] = useState(false);
+  const isManualEntryOpen = propIsManualEntryOpen !== undefined ? propIsManualEntryOpen : localManualEntryOpen;
+  const setIsManualEntryOpen = (val: boolean) => {
+    setLocalManualEntryOpen(val);
+    if (onManualEntryOpenChange) {
+      onManualEntryOpenChange(val);
+    }
+  };
   const [manualCompressing, setManualCompressing] = useState(false);
   const [manualCompressingProgress, setManualCompressingProgress] = useState({ current: 0, total: 0, percent: 0 });
   const [manualLog, setManualLog] = useState<Partial<FoodLog>>({

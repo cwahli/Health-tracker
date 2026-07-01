@@ -343,6 +343,7 @@ export default function App() {
 
   // Chat window visibility modals
   const [isFoodChatOpen, setIsFoodChatOpen] = useState(false);
+  const [isManualFoodLogOpen, setIsManualFoodLogOpen] = useState(false);
   const [isMedicalChatOpen, setIsMedicalChatOpen] = useState(false);
   const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7' | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -1951,6 +1952,8 @@ export default function App() {
             onDeleteFoodLog={handleDeleteFoodLog}
             onLogFood={handleLogFood}
             onEditingActiveChange={setIsEditingFoodLog}
+            isManualEntryOpen={isManualFoodLogOpen}
+            onManualEntryOpenChange={setIsManualFoodLogOpen}
           />
         )}
 
@@ -2023,6 +2026,11 @@ export default function App() {
         biomarkers={biomarkers}
         foodLogs={foodLogs}
         report={report}
+        onGoToManualEdit={() => {
+          setIsFoodChatOpen(false);
+          setActiveTab('food');
+          setIsManualFoodLogOpen(true);
+        }}
       />
 
       <LogChat

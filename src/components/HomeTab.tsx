@@ -106,21 +106,7 @@ export default function HomeTab({
     localStorage.setItem('rollingAllowance', String(rollingAllowance));
   }, [rollingAllowance]);
 
-  React.useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setUserLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
-        },
-        (err) => {
-          console.warn("Could not retrieve user location in HomeTab:", err.message || `Error code ${err.code}`);
-        }
-      );
-    }
-  }, []);
+
 
   // Combine static and custom definitions for HomeTab
   const allDefinitions = React.useMemo(() => {
@@ -570,7 +556,7 @@ export default function HomeTab({
         <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800/50">
           <h3 className="font-bold text-slate-950 dark:text-slate-100 text-sm flex items-center gap-2">
             <Heart className="w-4 h-4 text-indigo-600" />
-            Today's Targets
+            Today's Top Targets
           </h3>
           <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
             <Calendar className="w-3 h-3" /> {todayStr}
