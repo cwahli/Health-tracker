@@ -3,7 +3,7 @@ import { UserProfile, FoodLog, RecommendationReport } from '../types';
 import { translations } from '../utils/translations';
 import { 
   Brain, Sparkles, AlertCircle, TrendingDown, BookOpen, Clock, Heart, 
-  CheckCircle, HelpCircle, Loader, ShieldCheck, Database, Check, X, ArrowRight, Activity, Send, ChevronDown, ChevronUp, Trash2, Lock
+  CheckCircle, HelpCircle, Loader, ShieldCheck, Database, Check, X, ArrowRight, Activity, Send, ChevronDown, ChevronUp, Trash2, Lock, Archive
 } from 'lucide-react';
 import LLMSelector from './LLMSelector';
 import { Agent5View, Agent6View, Agent7View } from './AgentResultViews';
@@ -30,6 +30,7 @@ interface InsightsTabProps {
     options?: { prefillMessage?: string }
   ) => void;
   onDeleteAnalysis?: (id: string) => Promise<void>;
+  onArchiveAnalysis?: (id: string) => Promise<void>;
 }
 
 export default function InsightsTab({
@@ -48,6 +49,7 @@ export default function InsightsTab({
   onOpenMedicalChat,
   onOpenAgentChat,
   onDeleteAnalysis,
+  onArchiveAnalysis,
   biomarkerHistory
 }: InsightsTabProps) {
   const t = translations[profile.language] || translations.en;
@@ -116,61 +118,35 @@ export default function InsightsTab({
 
   // Biomarkers grouped dynamically by risk categories
   const groupedBiomarkers = React.useMemo<Record<string, Array<{ key: string; name: string; present: boolean }>>>(() => {
-    const groups: Record<string, Array<{ key: string; name: string; present: boolean }>> = {
-      'Metabolic & glycemic': [],
-      'Cardiovascular': [],
-      'Kidney & hydration': [],
-      'Liver & hepatitis stress': [],
-      'Thyroid function': [],
-      'Hematology': []
-    };
-
-    const getBiomarkerRiskCategory = (key: string, category: string): string => {
-      const k = key.toLowerCase();
-      const c = category.toLowerCase();
-
-      if (c === 'blood_sugar' || k === 'fasting_glucose' || k === 'fasting_insulin' || k === 'hba1c' || k === 'bmi' || k === 'weight' || k === 'height' || k.includes('sugar') || k.includes('insulin') || k.includes('glucose')) {
-        return 'Metabolic & glycemic';
-      }
-      if (c === 'lipids' || k === 'ldl' || k === 'apob' || k === 'hdl' || k === 'triglycerides' || k === 'total_cholesterol' || k === 'hscrp' || k.includes('cholesterol') || k.includes('lipid') || k.includes('crp') || c === 'inflammation') {
-        return 'Cardiovascular';
-      }
-      if (c === 'kidneys' || k === 'creatinine' || k === 'egfr' || k === 'urea' || k === 'uric_acid' || k === 'albumin' || k.includes('kidney') || k.includes('renal')) {
-        return 'Kidney & hydration';
-      }
-      if (c === 'liver' || k === 'alt' || k === 'ast' || k === 'alp' || k === 'bilirubin' || k.includes('liver') || k.includes('hepatic')) {
-        return 'Liver & hepatitis stress';
-      }
-      if (c === 'thyroid' || k === 'tsh' || k === 'free_t3' || k === 'free_t4' || k.includes('thyroid')) {
-        return 'Thyroid function';
-      }
-      if (c === 'hematology' || k === 'wbc' || k === 'rbc' || k === 'hemoglobin' || k === 'haemoglobin' || k === 'platelets' || k === 'hematocrit' || k.includes('blood count')) {
-        return 'Hematology';
-      }
-      
-      if (c === 'hormones') return 'Thyroid function';
-      if (c === 'vitamins') return 'Metabolic & glycemic';
-      
-      return 'Metabolic & glycemic';
-    };
+    const groups: Record<string, Array<{ key: string; name: string; present: boolean }>> = {};
 
     // Gather standard ones
     biomarkerDefinitions.forEach(def => {
-      const present = biomarkers[def.key] !== undefined && biomarkers[def.key] !== null && biomarkers[def.key] !== '';
-      const cat = getBiomarkerRiskCategory(def.key, def.category);
-      if (groups[cat]) {
-        groups[cat].push({ key: def.key, name: def.name, present });
-      }
+      const inBiomarkers = biomarkers[def.key] !== undefined && biomarkers[def.key] !== null && biomarkers[def.key] !== '';
+      const inEntries = profile.biomarkerEntries?.some(e => e.key === def.key) || false;
+      const present = inBiomarkers || inEntries;
+      const risks = def.riskCategories || ['Uncategorized'];
+      risks.forEach(cat => {
+        if (!groups[cat]) groups[cat] = [];
+        if (!groups[cat].some(item => item.key === def.key)) {
+          groups[cat].push({ key: def.key, name: def.name, present });
+        }
+      });
     });
 
     // Custom/User ones in profile
     if (profile?.customBiomarkers) {
       Object.entries(profile.customBiomarkers).forEach(([key, def]) => {
-        const present = biomarkers[key] !== undefined && biomarkers[key] !== null && biomarkers[key] !== '';
-        const cat = getBiomarkerRiskCategory(key, (def as any).category || 'other');
-        if (groups[cat] && !groups[cat].some(item => item.key === key)) {
-          groups[cat].push({ key, name: def.name, present });
-        }
+        const inBiomarkers = biomarkers[key] !== undefined && biomarkers[key] !== null && biomarkers[key] !== '';
+        const inEntries = profile.biomarkerEntries?.some(e => e.key === key) || false;
+        const present = inBiomarkers || inEntries;
+        const risks = (def as any).riskCategories || ['Uncategorized'];
+        risks.forEach((cat: string) => {
+          if (!groups[cat]) groups[cat] = [];
+          if (!groups[cat].some(item => item.key === key)) {
+            groups[cat].push({ key, name: def.name, present });
+          }
+        });
       });
     }
 
@@ -376,7 +352,7 @@ export default function InsightsTab({
     if (history.length === 0) return 'To do';
 
     const latestAnalysis = (profile.agentAnalyses || [])
-      .filter(a => a.agentType === agentType)
+      .filter(a => a.agentType === agentType && !a.archived)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
 
     const isApproved = approvedSteps[agentType] && (!latestAnalysis || approvedAnalysisIds[agentType] === latestAnalysis.id);
@@ -391,7 +367,7 @@ export default function InsightsTab({
 
     const step = steps[index];
     const latestAnalysis = (profile.agentAnalyses || [])
-      .filter(a => a.agentType === step.agentType)
+      .filter(a => a.agentType === step.agentType && !a.archived)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
 
     if (!latestAnalysis) {
@@ -435,7 +411,7 @@ export default function InsightsTab({
     setApprovedSteps(prev => ({ ...prev, [step.agentType!]: true }));
     
     const latestAnalysis = (profile.agentAnalyses || [])
-      .filter(a => a.agentType === step.agentType)
+      .filter(a => a.agentType === step.agentType && !a.archived)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
     if (latestAnalysis) {
       setApprovedAnalysisId(step.agentType!, latestAnalysis.id);
@@ -721,7 +697,7 @@ export default function InsightsTab({
             const summaryText = getStepSummaryText(index, status);
             const latestAnalysis = step.agentType 
               ? (profile.agentAnalyses || [])
-                  .filter(a => a.agentType === step.agentType)
+                  .filter(a => a.agentType === step.agentType && !a.archived)
                   .sort((a, b) => b.date.localeCompare(a.date))[0]
               : null;
 
@@ -825,7 +801,7 @@ export default function InsightsTab({
                                 <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                                   what's done so far
                                 </span>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <div className="grid grid-cols-3 gap-2">
                                   {checklistItems.map((item, idx) => {
                                     const hasAtLeastOne = item.present;
                                     return (
@@ -961,7 +937,14 @@ export default function InsightsTab({
                             </div>
 
                             {status === 'To review' && (
-                              <div className="grid grid-cols-2 gap-3 pt-1">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1">
+                                <button
+                                  onClick={() => onArchiveAnalysis?.(latestAnalysis.id)}
+                                  className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                >
+                                  <Archive className="w-3.5 h-3.5" />
+                                  Archive
+                                </button>
                                 <button
                                   onClick={() => {
                                     const suggestionText = typeof latestAnalysis.result === 'string' 
@@ -973,8 +956,8 @@ export default function InsightsTab({
                                   }}
                                   className="py-2.5 px-3 bg-slate-150 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                                 >
-                                  <Send className="w-3 h-3 text-slate-400" />
-                                  Review with agent
+                                  <Send className="w-3.5 h-3.5 text-slate-400" />
+                                  Review
                                 </button>
                                 <button
                                   onClick={() => handleApproveStep(index)}

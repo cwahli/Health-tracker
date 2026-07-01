@@ -1955,6 +1955,16 @@ export default function App() {
                 await saveAndSync(updatedProfile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report);
               }
             }}
+            onArchiveAnalysis={async (id) => {
+              if (profile.agentAnalyses) {
+                const updatedProfile = {
+                  ...profile,
+                  agentAnalyses: profile.agentAnalyses.map(a => a.id === id ? { ...a, archived: true } : a)
+                };
+                setProfile(updatedProfile);
+                await saveAndSync(updatedProfile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report);
+              }
+            }}
           />
         )}
 

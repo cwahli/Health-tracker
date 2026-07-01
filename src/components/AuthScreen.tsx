@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
 import { translations } from '../utils/translations';
-import { Activity, Mail, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
-import { auth, googleProvider } from '../firebase';
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { Activity, Mail, AlertCircle, RefreshCw } from 'lucide-react';
+import { auth, googleProvider, facebookProvider, twitterProvider } from '../firebase';
+import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, onAuthStateChanged, User } from 'firebase/auth';
 
 interface AuthScreenProps {
   onLogin: (profile: UserProfile) => void;
@@ -11,197 +11,96 @@ interface AuthScreenProps {
 
 export default function AuthScreen({ onLogin }: AuthScreenProps) {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [nickname, setNickname] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [status, setStatus] = useState<'idle' | 'sending' | 'pending_verification'>('idle');
   const [language, setLanguage] = useState<'en' | 'fr' | 'zh' | 'id'>('en');
+  const [errorMsg, setErrorMsg] = useState('');
 
   const t = translations[language] || translations.en;
 
-  const handleManualAuth = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user && user.emailVerified) {
+        handleSuccessfulLogin(user);
+      } else if (user && !user.emailVerified) {
+        setStatus('pending_verification');
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
-    setStatus('sending');
-    // Simulate sending email verification link
-    setTimeout(() => {
-      setStatus('pending_verification');
-    }, 1200);
+  const handleSuccessfulLogin = (user: User) => {
+    const resolvedNickname = nickname || user.displayName || user.email?.split('@')[0] || 'User';
+    const profile: UserProfile = {
+      nickname: resolvedNickname,
+      photoUrl: user.photoURL || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120",
+      email: user.email || '',
+      age: 30,
+      ethnicity: 'Unknown',
+      weight: 70,
+      height: 170,
+      language
+    };
+    onLogin(profile);
   };
 
-  const handleCompleteVerification = async () => {
+  const handleManualAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) return;
+    setErrorMsg('');
     setStatus('sending');
-    const normalizedEmail = email.trim().toLowerCase();
-    const password = `HealthSync_${normalizedEmail.replace(/[^a-z0-9]/g, '')}_Secure2026!`;
-    const resolvedNickname = nickname || normalizedEmail.split('@')[0];
 
     try {
-      let userCredential;
-      try {
-        userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
-      } catch (signInError: any) {
-        if (
-          signInError.code === 'auth/user-not-found' ||
-          signInError.code === 'auth/invalid-credential' ||
-          signInError.code === 'auth/wrong-password'
-        ) {
-          userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+      if (isSignUp) {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await sendEmailVerification(userCredential.user);
+        setStatus('pending_verification');
+      } else {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        if (!userCredential.user.emailVerified) {
+          setStatus('pending_verification');
+          await sendEmailVerification(userCredential.user);
         } else {
-          throw signInError;
+          handleSuccessfulLogin(userCredential.user);
         }
       }
-
-      const profile: UserProfile = {
-        nickname: resolvedNickname,
-        photoUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120",
-        email: normalizedEmail,
-        age: 30,
-        ethnicity: 'Mixed',
-        weight: 70,
-        height: 170,
-        language
-      };
-      onLogin(profile);
     } catch (err: any) {
       console.error("Auth Error:", err);
-      // Fallback
-      const profile: UserProfile = {
-        nickname: resolvedNickname,
-        photoUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120",
-        email: normalizedEmail,
-        age: 30,
-        ethnicity: 'Mixed',
-        weight: 70,
-        height: 170,
-        language
-      };
-      onLogin(profile);
-    } finally {
+      setErrorMsg(err.message);
       setStatus('idle');
     }
   };
 
-  const handleDemoAccount = async () => {
+  const handleCheckVerification = async () => {
+    if (auth.currentUser) {
+      await auth.currentUser.reload();
+      if (auth.currentUser.emailVerified) {
+        handleSuccessfulLogin(auth.currentUser);
+      } else {
+        setErrorMsg('Email not verified yet. Please check your inbox.');
+      }
+    }
+  };
+
+  const handleThirdPartyLogin = async (provider: 'Google' | 'X' | 'Facebook') => {
+    setErrorMsg('');
     setStatus('sending');
-    const demoEmail = 'john@mail.com';
-    const password = `HealthSync_${demoEmail.replace(/[^a-z0-9]/g, '')}_Secure2026!`;
-
     try {
-      let userCredential;
-      try {
-        userCredential = await signInWithEmailAndPassword(auth, demoEmail, password);
-      } catch (signInError: any) {
-        if (
-          signInError.code === 'auth/user-not-found' ||
-          signInError.code === 'auth/invalid-credential' ||
-          signInError.code === 'auth/wrong-password'
-        ) {
-          userCredential = await createUserWithEmailAndPassword(auth, demoEmail, password);
-        } else {
-          throw signInError;
-        }
+      let authProvider;
+      if (provider === 'Google') authProvider = googleProvider;
+      else if (provider === 'X') authProvider = twitterProvider;
+      else if (provider === 'Facebook') authProvider = facebookProvider;
+      
+      if (authProvider) {
+        const result = await signInWithPopup(auth, authProvider);
+        handleSuccessfulLogin(result.user);
       }
-
-      const profile: UserProfile = {
-        nickname: 'John doe',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120',
-        email: demoEmail,
-        age: 35,
-        ethnicity: 'Caucasian',
-        weight: 75,
-        height: 178,
-        language: 'en'
-      };
-      onLogin(profile);
     } catch (err: any) {
-      console.error("Demo login Error:", err);
-      const profile: UserProfile = {
-        nickname: 'John doe',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120',
-        email: demoEmail,
-        age: 35,
-        ethnicity: 'Caucasian',
-        weight: 75,
-        height: 178,
-        language: 'en'
-      };
-      onLogin(profile);
-    } finally {
+      console.error(`${provider} Sign-In Error:`, err);
+      setErrorMsg(`${provider} Sign-In failed: ` + err.message);
       setStatus('idle');
-    }
-  };
-
-  const handleThirdPartyLogin = async (provider: 'Google' | 'X') => {
-    if (provider === 'Google') {
-      try {
-        setStatus('sending');
-        const result = await signInWithPopup(auth, googleProvider);
-        const user = result.user;
-        const profile: UserProfile = {
-          nickname: user.displayName || user.email?.split('@')[0] || 'User',
-          photoUrl: user.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120',
-          email: user.email || '',
-          age: 35,
-          ethnicity: 'Unknown',
-          weight: 75,
-          height: 178,
-          language
-        };
-        onLogin(profile);
-      } catch (err: any) {
-        console.error("Google Sign-In Error:", err);
-        alert("Google Sign-In failed: " + err.message);
-      } finally {
-        setStatus('idle');
-      }
-    } else {
-      setStatus('sending');
-      const xEmail = `user.x@healthsync.com`;
-      const password = `HealthSync_userx_Secure2026!`;
-
-      try {
-        let userCredential;
-        try {
-          userCredential = await signInWithEmailAndPassword(auth, xEmail, password);
-        } catch (signInError: any) {
-          if (
-            signInError.code === 'auth/user-not-found' ||
-            signInError.code === 'auth/invalid-credential' ||
-            signInError.code === 'auth/wrong-password'
-          ) {
-            userCredential = await createUserWithEmailAndPassword(auth, xEmail, password);
-          } else {
-            throw signInError;
-          }
-        }
-
-        const profile: UserProfile = {
-          nickname: 'X Practitioner',
-          photoUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&q=80&w=120',
-          email: xEmail,
-          age: 35,
-          ethnicity: 'Caucasian',
-          weight: 75,
-          height: 178,
-          language
-        };
-        onLogin(profile);
-      } catch (err: any) {
-        console.error("X login simulation error:", err);
-        const profile: UserProfile = {
-          nickname: 'X Practitioner',
-          photoUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&q=80&w=120',
-          email: xEmail,
-          age: 35,
-          ethnicity: 'Caucasian',
-          weight: 75,
-          height: 178,
-          language
-        };
-        onLogin(profile);
-      } finally {
-        setStatus('idle');
-      }
     }
   };
 
@@ -238,6 +137,13 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
           </select>
         </div>
 
+        {errorMsg && (
+          <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl flex items-center gap-2 text-rose-700 dark:text-rose-400 text-xs font-semibold">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <p>{errorMsg}</p>
+          </div>
+        )}
+
         {status === 'pending_verification' ? (
           /* Email Verification Pending State */
           <div id="auth-verification-pending" className="flex flex-col items-center text-center space-y-4 py-4 animation-fade-in">
@@ -247,15 +153,24 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
             <div className="space-y-2">
               <h3 className="font-semibold text-slate-900 dark:text-slate-200">Check your inbox</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs leading-relaxed">
-                {t.verifyingEmail}
+                We've sent a verification link to your email. Please verify to continue.
               </p>
             </div>
             <button
               id="auth-simulate-verify-btn"
-              onClick={handleCompleteVerification}
+              onClick={handleCheckVerification}
               className="w-full mt-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold shadow-md active:scale-[0.98] transition-all"
             >
-              {t.simulateVerify}
+              I have verified my email
+            </button>
+            <button
+              onClick={() => {
+                auth.signOut();
+                setStatus('idle');
+              }}
+              className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mt-2"
+            >
+              Sign out / Try another account
             </button>
           </div>
         ) : (
@@ -271,6 +186,19 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
                   placeholder={t.enterEmail}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 rounded-xl px-3.5 py-3 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Password</label>
+                <input
+                  id="auth-password-input"
+                  type="password"
+                  required
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 rounded-xl px-3.5 py-3 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
               </div>
@@ -322,15 +250,15 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
               <span className="absolute bg-white dark:bg-slate-900 px-3 text-[10px] font-mono tracking-widest text-slate-400 uppercase">OR</span>
             </div>
 
-            {/* Google / X Oauth Trigger Simulation */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Social Oauth Triggers */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <button
                 id="google-login-btn"
                 type="button"
                 onClick={() => handleThirdPartyLogin('Google')}
                 className="py-2.5 px-3 border border-slate-200 dark:border-slate-700/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
               >
-                <span className="w-2.5 h-2.5 bg-red-500 rounded-full" /> {t.googleLogin}
+                <span className="w-2.5 h-2.5 bg-red-500 rounded-full" /> Google
               </button>
               <button
                 id="x-login-btn"
@@ -338,20 +266,17 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
                 onClick={() => handleThirdPartyLogin('X')}
                 className="py-2.5 px-3 border border-slate-200 dark:border-slate-700/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
               >
-                <span className="w-2.5 h-2.5 bg-slate-800 dark:bg-slate-300 rounded-full" /> {t.xLogin}
+                <span className="w-2.5 h-2.5 bg-slate-800 dark:bg-slate-300 rounded-full" /> X
+              </button>
+              <button
+                id="facebook-login-btn"
+                type="button"
+                onClick={() => handleThirdPartyLogin('Facebook')}
+                className="py-2.5 px-3 border border-slate-200 dark:border-slate-700/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
+              >
+                <span className="w-2.5 h-2.5 bg-blue-600 rounded-full" /> Facebook
               </button>
             </div>
-
-            {/* Quick Demo Login Option */}
-            <button
-              id="demo-login-btn"
-              type="button"
-              onClick={handleDemoAccount}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold tracking-wide uppercase shadow-lg shadow-indigo-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-            >
-              <Sparkles className="w-4 h-4 animate-pulse" />
-              {t.demoAccount}
-            </button>
           </form>
         )}
       </div>

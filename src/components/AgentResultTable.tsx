@@ -625,6 +625,66 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
     </table>
   );
 
+  const renderFilterTags = () => (
+    <div className="flex flex-wrap items-center gap-2 pb-1 bg-slate-50/50 dark:bg-slate-900/40 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+      <button
+        type="button"
+        onClick={() => setStatusSortCategory(null)}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
+          statusSortCategory === null
+            ? 'bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border-indigo-200'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/30 hover:bg-slate-200'
+        }`}
+      >
+        Total: {tableData.length}
+      </button>
+      <button
+        type="button"
+        onClick={() => setStatusSortCategory('atRisk')}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
+          statusSortCategory === 'atRisk'
+            ? 'bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-300'
+            : 'bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 border-rose-200/20 hover:bg-rose-100/50'
+        }`}
+      >
+        At Risk: {counts.atRisk}
+      </button>
+      <button
+        type="button"
+        onClick={() => setStatusSortCategory('isNew')}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
+          statusSortCategory === 'isNew'
+            ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-300'
+            : 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200/20 hover:bg-emerald-100/50'
+        }`}
+      >
+        New: {counts.isNew}
+      </button>
+      <button
+        type="button"
+        onClick={() => setStatusSortCategory('changed')}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
+          statusSortCategory === 'changed'
+            ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-300'
+            : 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border-amber-200/20 hover:bg-amber-100/50'
+        }`}
+      >
+        Changed: {counts.changed}
+      </button>
+      <button
+        type="button"
+        onClick={() => setStatusSortCategory('synced')}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
+          statusSortCategory === 'synced'
+            ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border-slate-300'
+            : 'bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200/10 hover:bg-slate-100'
+        }`}
+      >
+        Synced: {counts.synced}
+      </button>
+    </div>
+  );
+
   return (
     <div className="space-y-3 w-full">
       {/* Table Container Header */}
@@ -649,63 +709,7 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
       </div>
 
       {/* Status Summary Counts Bar */}
-      <div className="flex flex-wrap items-center gap-2 pb-1 bg-slate-50/50 dark:bg-slate-900/40 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
-        <button
-          type="button"
-          onClick={() => setStatusSortCategory(null)}
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
-            statusSortCategory === null
-              ? 'bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border-indigo-200'
-              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/30 hover:bg-slate-200'
-          }`}
-        >
-          Total: {tableData.length}
-        </button>
-        <button
-          type="button"
-          onClick={() => setStatusSortCategory('atRisk')}
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
-            statusSortCategory === 'atRisk'
-              ? 'bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-300'
-              : 'bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 border-rose-200/20 hover:bg-rose-100/50'
-          }`}
-        >
-          At Risk: {counts.atRisk}
-        </button>
-        <button
-          type="button"
-          onClick={() => setStatusSortCategory('isNew')}
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
-            statusSortCategory === 'isNew'
-              ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-300'
-              : 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200/20 hover:bg-emerald-100/50'
-          }`}
-        >
-          New: {counts.isNew}
-        </button>
-        <button
-          type="button"
-          onClick={() => setStatusSortCategory('changed')}
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
-            statusSortCategory === 'changed'
-              ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-300'
-              : 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border-amber-200/20 hover:bg-amber-100/50'
-          }`}
-        >
-          Changed: {counts.changed}
-        </button>
-        <button
-          type="button"
-          onClick={() => setStatusSortCategory('synced')}
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
-            statusSortCategory === 'synced'
-              ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border-slate-300'
-              : 'bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200/10 hover:bg-slate-100'
-          }`}
-        >
-          Synced: {counts.synced}
-        </button>
-      </div>
+      {renderFilterTags()}
 
       {/* Main Table view */}
       <div className="overflow-x-auto border border-slate-150 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto bg-white dark:bg-slate-950">
@@ -717,7 +721,9 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
         {(isMultiphaseActive || totalEstimated > 0) && (
           <div className="flex items-center gap-1.5 pb-1 border-b border-slate-200/40 dark:border-slate-800/40">
             <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 font-bold rounded-md text-[9px] uppercase tracking-wider font-mono">
-              {isMultiphaseActive ? "Step 1 of 2: Multiphase Extraction Active" : "Step 2 of 2: Extraction Complete"}
+              {isMultiphaseActive 
+                ? `Extraction In Progress ${agentResult?.planningDetails?.batchesRequired ? `(Multiple Batches Required)` : ''}` 
+                : "Extraction Complete"}
             </span>
           </div>
         )}
@@ -770,7 +776,7 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
               {isApplying 
                 ? 'Applying Agent Findings...' 
                 : (agentResult?.status === 'needs_continuation' || agentResult?.needsContinuation || agentResult?.hasMore)
-                  ? 'Save & Continue to Next Batch'
+                  ? 'Continue to Next Batch'
                   : 'Apply & Save Agent Findings'}
             </button>
           )
@@ -828,8 +834,11 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
             </div>
 
             {/* Modal Table content */}
-            <div className="flex-1 overflow-auto p-6 bg-slate-50/30 dark:bg-slate-950/20">
-              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-950 overflow-hidden shadow-md">
+            <div className="flex-1 flex flex-col overflow-auto p-6 bg-slate-50/30 dark:bg-slate-950/20">
+              <div className="mb-4">
+                {renderFilterTags()}
+              </div>
+              <div className="flex-1 border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-950 overflow-hidden shadow-md">
                 {renderTableContent()}
               </div>
             </div>
@@ -840,7 +849,9 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
                 {(isMultiphaseActive || totalEstimated > 0) && (
                   <div className="pb-1">
                     <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 font-bold rounded-md text-[9px] uppercase tracking-wider font-mono">
-                      {isMultiphaseActive ? "Step 1 of 2: Multiphase Extraction Active" : "Step 2 of 2: Extraction Complete"}
+                      {isMultiphaseActive 
+                        ? `Extraction In Progress ${agentResult?.planningDetails?.batchesRequired ? `(Multiple Batches Required)` : ''}` 
+                        : "Extraction Complete"}
                     </span>
                   </div>
                 )}
@@ -887,7 +898,7 @@ export const AgentResultTable: React.FC<AgentResultTableProps> = ({
                     {isApplying 
                       ? 'Applying...' 
                       : (agentResult?.status === 'needs_continuation' || agentResult?.needsContinuation || agentResult?.hasMore)
-                        ? 'Save & Continue to Next Batch'
+                        ? 'Continue to Next Batch'
                         : 'Apply Findings & Close'}
                   </button>
                 )}

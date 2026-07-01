@@ -14,7 +14,7 @@ const UNSORTED_LLMS: LLMModel[] = [
     provider: 'Gemini', 
     isDefault: true,
     description: 'A general-purpose autonomous agent running in a remote, Google-hosted Linux environment',
-    rpd: '100 RPD'
+    rpd: '0 RPD'
   },
   { 
     id: 'gemini-3-flash', 

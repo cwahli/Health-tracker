@@ -2042,7 +2042,8 @@ export default function LogChat({
                               if (onLogMedical) {
                                 onLogMedical(msg.pendingBiomarkers || {}, msg.pendingProfile || {}, msg.pendingDate, msg.pendingBiomarkerEntries, msg.modificationCommand);
                                 setLoggedMessageIds(prev => [...prev, msg.id]);
-                                if (msg.status === 'needs_continuation') {
+                                const isContinuation = !!(msg.status === 'needs_continuation' || msg.agentResult?.status === 'needs_continuation' || msg.agentResult?.hasMore || msg.agentResult?.hasMoreMarkers || msg.agentResult?.needsContinuation);
+                                if (isContinuation) {
                                   handleSend("Proceed with extraction.");
                                 } else {
                                   onClose();
@@ -2052,13 +2053,14 @@ export default function LogChat({
                             className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                           >
                             <Plus className="w-4 h-4" />
-                            {msg.mode === 'modify' ? 'Apply modifications' : (msg.status === 'needs_continuation' || msg.agentResult?.status === 'needs_continuation') ? 'Save and continue to next batch' : 'Save extracted data'}
+                            {msg.mode === 'modify' ? 'Apply modifications' : (!!(msg.status === 'needs_continuation' || msg.agentResult?.status === 'needs_continuation' || msg.agentResult?.hasMore || msg.agentResult?.hasMoreMarkers || msg.agentResult?.needsContinuation)) ? 'Save and continue to next batch' : 'Save extracted data'}
                           </button>
                           
                           <button
                             onClick={() => {
                               setLoggedMessageIds(prev => [...prev, msg.id]);
-                              if (msg.status === 'needs_continuation' || msg.agentResult?.status === 'needs_continuation') {
+                              const isContinuation = !!(msg.status === 'needs_continuation' || msg.agentResult?.status === 'needs_continuation' || msg.agentResult?.hasMore || msg.agentResult?.hasMoreMarkers || msg.agentResult?.needsContinuation);
+                              if (isContinuation) {
                                 handleSend("Cancel extraction.");
                               }
                             }}

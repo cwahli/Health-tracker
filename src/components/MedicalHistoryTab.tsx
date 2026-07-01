@@ -49,7 +49,7 @@ export default function MedicalHistoryTab({
   onDismissBmiAlert,
 }: MedicalHistoryTabProps) {
   const t = translations[profile.language] || translations.en;
-  const [viewType, setViewType] = useState<'risk' | 'condition' | 'practice'>('practice');
+  const [viewType, setViewType] = useState<'risk' | 'condition' | 'practice'>('risk');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'risk' | 'name'>('risk');
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -354,7 +354,7 @@ export default function MedicalHistoryTab({
   return (
     <div className="space-y-4 pb-24 animation-fade-in max-w-md mx-auto px-[10px] mt-4 font-sans text-slate-900 dark:text-slate-100">
       
-      {/* View Selection Controls - Direct, no outer card box */}
+      {/* View Selection Controls */}
       <div className="grid grid-cols-2 gap-3 mb-1">
         {/* View Selection */}
         <div className="flex flex-col gap-1">
@@ -405,8 +405,8 @@ export default function MedicalHistoryTab({
                 onClick={() => toggleSubCategory(cat)}
                 className="flex items-center justify-between p-3.5 bg-slate-50/50 dark:bg-slate-900/60 hover:bg-slate-100/60 dark:hover:bg-slate-850/40 cursor-pointer select-none transition-colors border-b border-slate-100 dark:border-slate-800/30"
               >
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
-                  {cat}
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 lowercase [font-variant:small-caps] tracking-wider">
+                  {cat} ({markers.length})
                 </span>
                 <div className="flex items-center gap-2">
                   <span className={`${riskInfo.bg} ${riskInfo.text} text-[10px] font-bold px-2.5 py-0.5 rounded-full`}>

@@ -3,6 +3,7 @@ export interface AgentAnalysis {
   agentType: string;
   date: string;
   result: any;
+  archived?: boolean;
 }
 
 export interface UserProfile {
