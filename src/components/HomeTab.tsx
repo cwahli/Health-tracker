@@ -24,7 +24,7 @@ interface HomeTabProps {
   onEditBiomarkerLog: (id: string, key: string, value: string | number, newDate?: string) => void;
   onDeleteBiomarkerLog: (id: string) => void;
   onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string, entries?: { date: string | null; biomarkers: { [key: string]: number | string } }[]) => void;
-  onOpenAgentChat?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5') => void;
+  onOpenAgentChat?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5', options?: { prefillMessage?: string }) => void;
   hideSensitive: boolean;
   selectedModelId: string;
   onChangeModelId: (id: string) => void;

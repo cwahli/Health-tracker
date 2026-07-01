@@ -1,0 +1,43 @@
+1:import React, { useState, useRef, useEffect } from 'react';
+336:  const [showDataUsed, setShowDataUsed] = useState(false);
+337:  const [showFullScreenConv, setShowFullScreenConv] = useState(false);
+338:  const [isSendingLogs, setIsSendingLogs] = useState(false);
+339:  const [logsSendStatus, setLogsSendStatus] = useState<'idle' | 'success' | 'error'>('idle');
+340:  const [activeModalTableRows, setActiveModalTableRows] = useState<any[] | null>(null);
+341:  const [activeModalTitle, setActiveModalTitle] = useState<string>('Consolidated Clinical Biomarker Log');
+342:  const [activeInstructionAgentType, setActiveInstructionAgentType] = useState<string | null>(null);
+343:  const [expandedAudits, setExpandedAudits] = useState<Record<string, boolean>>({});
+383:  const [lastSentPayload, setLastSentPayload] = useState<any>(() => {
+392:  useEffect(() => {
+400:  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+437:  useEffect(() => {
+441:  useEffect(() => {
+500:  const [inputText, setInputText] = useState('');
+501:  const [budget, setBudget] = useState(() => localStorage.getItem('food_budget') || '');
+502:  const [currency, setCurrency] = useState(() => localStorage.getItem('food_currency') || 'GBP');
+503:  const [maxDistance, setMaxDistance] = useState(() => {
+508:  useEffect(() => {
+512:  useEffect(() => {
+516:  useEffect(() => {
+520:  useEffect(() => {
+535:  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+536:  const [imageDates, setImageDates] = useState<string[]>([]);
+537:  const [isCompressing, setIsCompressing] = useState(false);
+538:  const [compressionProgress, setCompressionProgress] = useState({ current: 0, total: 0, percent: 0 });
+539:  const [isAnalyzing, setIsAnalyzing] = useState(false);
+540:  const [expandedNutrients, setExpandedNutrients] = useState(false);
+541:  const [isEngineSelectorOpen, setIsEngineSelectorOpen] = useState(false);
+542:  const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
+543:  const fileInputRef = useRef<HTMLInputElement>(null);
+544:  const cameraInputRef = useRef<HTMLInputElement>(null);
+547:  const [loggedMessageIds, setLoggedMessageIds] = useState<string[]>([]);
+548:  const [showPastDiscussion, setShowPastDiscussion] = useState(false);
+549:  const [sessionStartTime, setSessionStartTime] = useState<number>(Date.now());
+550:  const messagesEndRef = useRef<HTMLDivElement>(null);
+575:  useEffect(() => {
+606:  useEffect(() => {
+627:  const outOfRangeBiomarkers = React.useMemo(() => {
+654:  const remainingAllowance = React.useMemo(() => {
+696:  useEffect(() => {
+707:  const matchingPreviousLogs = React.useMemo(() => {
+1058:  useEffect(() => {

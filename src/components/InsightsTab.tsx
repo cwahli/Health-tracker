@@ -3,10 +3,12 @@ import { UserProfile, FoodLog, RecommendationReport } from '../types';
 import { translations } from '../utils/translations';
 import { 
   Brain, Sparkles, AlertCircle, TrendingDown, BookOpen, Clock, Heart, 
-  CheckCircle, HelpCircle, Loader, ShieldCheck, Database, Check, X, ArrowRight, Activity, Send, ChevronDown, ChevronUp, Trash2 
+  CheckCircle, HelpCircle, Loader, ShieldCheck, Database, Check, X, ArrowRight, Activity, Send, ChevronDown, ChevronUp, Trash2, Lock
 } from 'lucide-react';
 import LLMSelector from './LLMSelector';
 import { Agent5View, Agent6View, Agent7View } from './AgentResultViews';
+import { AgentResultTable } from './AgentResultTable';
+import { biomarkerDefinitions } from '../utils/biomarkers';
 
 interface InsightsTabProps {
   profile: UserProfile;
@@ -23,7 +25,10 @@ interface InsightsTabProps {
   isGenerating: boolean;
   onNavigateToTab?: (tab: string) => void;
   onOpenMedicalChat?: () => void;
-  onOpenAgentChat?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7') => void;
+  onOpenAgentChat?: (
+    agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7',
+    options?: { prefillMessage?: string }
+  ) => void;
   onDeleteAnalysis?: (id: string) => Promise<void>;
 }
 
@@ -52,18 +57,143 @@ export default function InsightsTab({
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [expandedAgentHistory, setExpandedAgentHistory] = useState<Record<string, boolean>>({});
 
+  // Accordion active step index
+  const [activeStepIndex, setActiveStepIndex] = useState<number | null>(0);
+
+  // Accordion approved steps state
+  const [approvedSteps, setApprovedSteps] = useState<Record<string, boolean>>(() => {
+    return {
+      agent1: !!profile.agentTriageSummary,
+      agent2: !!(profile.agentAnalyses?.some(a => a.agentType === 'agent2' && profile.customBiomarkers && Object.values(profile.customBiomarkers).some(b => b.riskCategories && b.riskCategories.length > 0))),
+      agent3: !!(profile.agentAnalyses?.some(a => a.agentType === 'agent3')),
+      agent4: !!(profile.agentDiagnosticSummary),
+      agent5: !!(profile.agentContextualizerSummary),
+      agent6: !!(profile.agentInterventionSummary),
+      agent7: !!(profile.agentLiteratureSummary)
+    };
+  });
+
+  // Approved analysis ids state, kept across sessions
+  const [approvedAnalysisIds, setApprovedAnalysisIdsState] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('approvedAnalysisIds');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    
+    const initialIds: Record<string, string> = {};
+    const initialApproved = {
+      agent1: !!profile.agentTriageSummary,
+      agent2: !!(profile.agentAnalyses?.some(a => a.agentType === 'agent2' && profile.customBiomarkers && Object.values(profile.customBiomarkers).some(b => b.riskCategories && b.riskCategories.length > 0))),
+      agent3: !!(profile.agentAnalyses?.some(a => a.agentType === 'agent3')),
+      agent4: !!(profile.agentDiagnosticSummary),
+      agent5: !!(profile.agentContextualizerSummary),
+      agent6: !!(profile.agentInterventionSummary),
+      agent7: !!(profile.agentLiteratureSummary)
+    };
+    
+    Object.keys(initialApproved).forEach(agentType => {
+      if (initialApproved[agentType as keyof typeof initialApproved]) {
+        const history = (profile.agentAnalyses || [])
+          .filter(a => a.agentType === agentType)
+          .sort((a, b) => b.date.localeCompare(a.date));
+        if (history.length > 0) {
+          initialIds[agentType] = history[0].id;
+        }
+      }
+    });
+    return initialIds;
+  });
+
+  const setApprovedAnalysisId = (agentType: string, id: string) => {
+    setApprovedAnalysisIdsState(prev => {
+      const updated = { ...prev, [agentType]: id };
+      localStorage.setItem('approvedAnalysisIds', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Biomarkers grouped dynamically by risk categories
+  const groupedBiomarkers = React.useMemo<Record<string, Array<{ key: string; name: string; present: boolean }>>>(() => {
+    const groups: Record<string, Array<{ key: string; name: string; present: boolean }>> = {
+      'Metabolic & glycemic': [],
+      'Cardiovascular': [],
+      'Kidney & hydration': [],
+      'Liver & hepatitis stress': [],
+      'Thyroid function': [],
+      'Hematology': []
+    };
+
+    const getBiomarkerRiskCategory = (key: string, category: string): string => {
+      const k = key.toLowerCase();
+      const c = category.toLowerCase();
+
+      if (c === 'blood_sugar' || k === 'fasting_glucose' || k === 'fasting_insulin' || k === 'hba1c' || k === 'bmi' || k === 'weight' || k === 'height' || k.includes('sugar') || k.includes('insulin') || k.includes('glucose')) {
+        return 'Metabolic & glycemic';
+      }
+      if (c === 'lipids' || k === 'ldl' || k === 'apob' || k === 'hdl' || k === 'triglycerides' || k === 'total_cholesterol' || k === 'hscrp' || k.includes('cholesterol') || k.includes('lipid') || k.includes('crp') || c === 'inflammation') {
+        return 'Cardiovascular';
+      }
+      if (c === 'kidneys' || k === 'creatinine' || k === 'egfr' || k === 'urea' || k === 'uric_acid' || k === 'albumin' || k.includes('kidney') || k.includes('renal')) {
+        return 'Kidney & hydration';
+      }
+      if (c === 'liver' || k === 'alt' || k === 'ast' || k === 'alp' || k === 'bilirubin' || k.includes('liver') || k.includes('hepatic')) {
+        return 'Liver & hepatitis stress';
+      }
+      if (c === 'thyroid' || k === 'tsh' || k === 'free_t3' || k === 'free_t4' || k.includes('thyroid')) {
+        return 'Thyroid function';
+      }
+      if (c === 'hematology' || k === 'wbc' || k === 'rbc' || k === 'hemoglobin' || k === 'haemoglobin' || k === 'platelets' || k === 'hematocrit' || k.includes('blood count')) {
+        return 'Hematology';
+      }
+      
+      if (c === 'hormones') return 'Thyroid function';
+      if (c === 'vitamins') return 'Metabolic & glycemic';
+      
+      return 'Metabolic & glycemic';
+    };
+
+    // Gather standard ones
+    biomarkerDefinitions.forEach(def => {
+      const present = biomarkers[def.key] !== undefined && biomarkers[def.key] !== null && biomarkers[def.key] !== '';
+      const cat = getBiomarkerRiskCategory(def.key, def.category);
+      if (groups[cat]) {
+        groups[cat].push({ key: def.key, name: def.name, present });
+      }
+    });
+
+    // Custom/User ones in profile
+    if (profile?.customBiomarkers) {
+      Object.entries(profile.customBiomarkers).forEach(([key, def]) => {
+        const present = biomarkers[key] !== undefined && biomarkers[key] !== null && biomarkers[key] !== '';
+        const cat = getBiomarkerRiskCategory(key, (def as any).category || 'other');
+        if (groups[cat] && !groups[cat].some(item => item.key === key)) {
+          groups[cat].push({ key, name: def.name, present });
+        }
+      });
+    }
+
+    return groups;
+  }, [profile, biomarkers]);
+
   const toggleAgentHistory = (agentType: string) => {
     setExpandedAgentHistory(prev => ({ ...prev, [agentType]: !prev[agentType] }));
   };
 
   const renderAgentHistory = (agentType: string) => {
-    const history = (profile.agentAnalyses || []).filter(a => a.agentType === agentType).sort((a, b) => b.date.localeCompare(a.date));
-    if (history.length === 0) return null;
+    const history = (profile.agentAnalyses || [])
+      .filter(a => a.agentType === agentType)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    
+    // Exclude the currently displayed one (index 0)
+    const prevAnalyses = history.slice(1);
+    if (prevAnalyses.length === 0) return null;
     
     const isExpanded = expandedAgentHistory[agentType];
-    const latest = history[0];
+    const latestPrev = prevAnalyses[0];
     
-    const dateObj = new Date(latest.date);
+    const dateObj = new Date(latestPrev.date);
     const now = new Date();
     const diffTime = Math.abs(now.getTime() - dateObj.getTime());
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
@@ -80,227 +210,18 @@ export default function InsightsTab({
         </button>
         {isExpanded && (
           <div className="mt-2 space-y-2">
-            {history.map(item => (
+            {prevAnalyses.map(item => (
               <div key={item.id} className="p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-xl relative group">
-                <p className="text-base font-bold text-slate-400 mb-1">{new Date(item.date).toLocaleString()}</p>
-                {agentType === 'agent2' && item.result && (item.result.bucketMapping || item.result.text) ? (
-                  <div className="space-y-2 mt-2">
-                    {item.result.text && (
-                      <p className="text-[10px] text-slate-700 dark:text-slate-300 mb-2">{item.result.text}</p>
-                    )}
-                    {(item.result.bucketMapping || Object.keys(item.result).length > 0) && (
-                      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
-                        <table className="w-full text-[10px] text-left">
-                          <thead className="bg-slate-100 dark:bg-slate-900 sticky top-0">
-                            <tr>
-                              <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
-                              <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Medical Grouping</th>
-                              <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Risk Categories</th>
-                              <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {(() => {
-                              const mapping = item.result?.bucketMapping || (typeof item.result === 'object' && item.result !== null ? item.result : {});
-                              const entries = Object.entries(mapping).filter(([k, v]) => k !== 'text' && typeof v === 'object' && v !== null);
-                              return entries.map(([bioName, mapData]: [string, any], idx) => {
-                                const key = bioName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-                                const existingDef = profile?.customBiomarkers?.[key];
-                                const newGroup = mapData.standardMedicalGrouping || 'Other';
-                                const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
-                                const isGroupChanged = existingDef && newGroup !== oldGroup;
-                                const newCategories = (mapData.riskCategories || []).join(', ');
-                                const oldCategories = (existingDef?.riskCategories || []).join(', ');
-                                const isCategoryChanged = existingDef && newCategories !== oldCategories;
-                                const isChanged = isGroupChanged || isCategoryChanged;
-                                const isNew = !existingDef;
-
-                                return (
-                                  <tr key={idx} className={isChanged ? "bg-amber-50/50 dark:bg-amber-900/10" : isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
-                                    <td className="px-2 py-1.5 font-medium text-slate-900 dark:text-slate-200">{bioName}</td>
-                                    <td className="px-2 py-1.5">
-                                      {isGroupChanged ? (
-                                        <div className="flex flex-col gap-0.5">
-                                          <span className="text-amber-600 dark:text-amber-400 font-bold">{newGroup}</span>
-                                          <span className="text-[8px] text-slate-400 line-through">{oldGroup}</span>
-                                        </div>
-                                      ) : (
-                                        <span className="text-slate-600 dark:text-slate-400">{newGroup}</span>
-                                      )}
-                                    </td>
-                                    <td className="px-2 py-1.5">
-                                      {isCategoryChanged ? (
-                                        <div className="flex flex-col gap-0.5">
-                                          <span className="text-amber-600 dark:text-amber-400 font-bold">{newCategories}</span>
-                                          <span className="text-[8px] text-slate-400 line-through">{oldCategories || 'None'}</span>
-                                        </div>
-                                      ) : (
-                                        <span className="text-slate-600 dark:text-slate-400">{newCategories || 'None'}</span>
-                                      )}
-                                    </td>
-                                    <td className="px-2 py-1.5 text-right">
-                                      {isNew ? (
-                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New</span>
-                                      ) : isChanged ? (
-                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
-                                      ) : (
-                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                );
-                              });
-                            })()}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                ) : agentType === 'agent4' && item.result && item.result.prioritizedConditions ? (
-                  <div className="space-y-2 mt-2">
-                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
-                      <table className="w-full text-[10px] text-left">
-                        <thead className="bg-slate-100 dark:bg-slate-900 sticky top-0">
-                          <tr>
-                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
-                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Agent Condition</th>
-                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {(() => {
-                            const conditions = Array.isArray(item.result.prioritizedConditions) ? item.result.prioritizedConditions : [];
-                            return conditions.flatMap((cond: any) => {
-                              return (Array.isArray(cond.biomarkers) ? cond.biomarkers : []).map((b: any, idx: number) => {
-                                const key = (b.key || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-                                const existingDef = profile?.customBiomarkers?.[key];
-                                const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
-                                const isGroupChanged = existingDef && cond.conditionName && cond.conditionName !== oldGroup;
-                                const isNew = !existingDef;
-                                return (
-                                  <tr key={`${cond.conditionName}-${idx}`} className={isGroupChanged ? "bg-amber-50/50 dark:bg-amber-900/10" : isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
-                                    <td className="px-2 py-1.5 font-medium text-slate-900 dark:text-slate-200">{b.name || b.key}</td>
-                                    <td className="px-2 py-1.5">
-                                      {isGroupChanged ? (
-                                        <div className="flex flex-col gap-0.5">
-                                          <span className="text-amber-600 dark:text-amber-400 font-bold">{cond.conditionName}</span>
-                                          <span className="text-[8px] text-slate-400 line-through">{oldGroup}</span>
-                                        </div>
-                                      ) : (
-                                        <span className="text-slate-600 dark:text-slate-400">{cond.conditionName}</span>
-                                      )}
-                                    </td>
-                                    <td className="px-2 py-1.5 text-right">
-                                      {isNew ? (
-                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New</span>
-                                      ) : isGroupChanged ? (
-                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
-                                      ) : (
-                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                );
-                              });
-                            });
-                          })()}
-                        </tbody>
-                      </table>
-                    </div>
-                    {item.result.summary?.primaryDiagnosis && (
-                      <p className="text-[10px] text-slate-700 dark:text-slate-300 mt-2"><span className="font-bold">Diagnosis:</span> {item.result.summary.primaryDiagnosis}</p>
-                    )}
-                  </div>
-                ) : agentType === 'agent3' && item.result && (item.result.buckets || Array.isArray(item.result)) ? (
-                  <div className="space-y-2 mt-2">
-                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
-                      <table className="w-full text-[10px] text-left">
-                        <thead className="bg-slate-100 dark:bg-slate-900 sticky top-0">
-                          <tr>
-                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
-                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Bucket</th>
-                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400">Total Readings</th>
-                            <th className="px-2 py-1.5 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {(() => {
-                            const buckets = Array.isArray(item.result.buckets) ? item.result.buckets : (Array.isArray(item.result) ? item.result : []);
-                            const allBiomarkers = buckets.flatMap((bucket: any) => {
-                              return (bucket.biomarkers || []).map((b: any) => {
-                                const key = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-                                const existingDef = profile?.customBiomarkers?.[key];
-                                const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
-                                const isGroupChanged = existingDef && bucket.systemName && bucket.systemName !== oldGroup;
-                                const isNew = !existingDef;
-                                
-                                let hasNewReadings = false;
-                                if (Array.isArray(b.history) && b.history.length > 0) {
-                                  if (!existingDef) {
-                                    hasNewReadings = true;
-                                  } else {
-                                    const existingDates = (biomarkerHistory || []).filter((h: any) => h.biomarkers[key] !== undefined).map((h: any) => h.date);
-                                    const newDates = b.history.filter((h: any) => h && h.date && !existingDates.includes(h.date));
-                                    if (newDates.length > 0) {
-                                      hasNewReadings = true;
-                                    }
-                                  }
-                                }
-                                
-                                const isChanged = isGroupChanged || hasNewReadings;
-                                const statusSort = isNew ? 0 : (isChanged ? 1 : 2);
-                                
-                                return {
-                                  name: b.name,
-                                  key,
-                                  newGroup: bucket.systemName,
-                                  oldGroup,
-                                  isGroupChanged,
-                                  isNew,
-                                  hasNewReadings,
-                                  isChanged,
-                                  statusSort,
-                                  totalReadings: b.history?.length || 0
-                                };
-                              });
-                            });
-                            
-                            allBiomarkers.sort((a: any, b: any) => a.statusSort - b.statusSort);
-                            
-                            return allBiomarkers.map((b: any, idx: number) => (
-                              <tr key={`${b.key}-${idx}`} className={b.isChanged && !b.isNew ? "bg-amber-50/50 dark:bg-amber-900/10" : b.isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
-                                <td className="px-2 py-1.5 font-medium text-slate-900 dark:text-slate-200">{b.name}</td>
-                                <td className="px-2 py-1.5">
-                                  {b.isGroupChanged ? (
-                                    <div className="flex flex-col gap-0.5">
-                                      <span className="text-amber-600 dark:text-amber-400 font-bold">{b.newGroup}</span>
-                                      <span className="text-[8px] text-slate-400 line-through">{b.oldGroup}</span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-600 dark:text-slate-400">{b.newGroup}</span>
-                                  )}
-                                </td>
-                                <td className="px-2 py-1.5 text-slate-600 dark:text-slate-400">
-                                  {b.totalReadings}
-                                </td>
-                                <td className="px-2 py-1.5 text-right flex flex-col items-end gap-1">
-                                  {b.isNew ? (
-                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New Biomarker</span>
-                                  ) : b.isChanged ? (
-                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
-                                  ) : (
-                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
-                                  )}
-                                  {b.hasNewReadings && !b.isNew && (
-                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 uppercase tracking-wider">New Readings</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ));
-                          })()}
-                        </tbody>
-                      </table>
-                    </div>
+                <p className="text-[10px] font-bold text-slate-400 mb-1">{new Date(item.date).toLocaleString()}</p>
+                {['agent1', 'agent2', 'agent3', 'agent4'].includes(agentType) && item.result ? (
+                  <div className="mt-2">
+                    <AgentResultTable
+                      agentType={agentType as 'agent1' | 'agent2' | 'agent3' | 'agent4'}
+                      agentResult={item.result}
+                      profile={profile}
+                      biomarkerHistory={biomarkerHistory || []}
+                      initialRawText=""
+                    />
                   </div>
                 ) : agentType === 'agent5' ? (
                   <div className="mt-2">
@@ -355,21 +276,186 @@ export default function InsightsTab({
   const hasProfileInfo = missingProfilePoints.length === 0;
 
   // Verify missing data points above the button
-  // Determine if basic demographics are present
-  const basicInfoMissing = ['Age', 'Ethnicity', 'Weight', 'Height'].filter(f => missingProfilePoints.includes(f));
-  
-  const auditPoints = [
-    { name: 'Basic Demographics (Age, Ethnicity, Weight, Height)', present: basicInfoMissing.length === 0, required: true },
-    { name: 'Recent Food Logs (Nutrient trends)', present: foodLogs.length > 0, required: true },
-    { name: 'Biomarkers', present: Object.keys(biomarkers).length > 0, required: false }
-  ];
-
-  const criticalMissing = auditPoints.filter(p => !p.present);
+   // Determine if basic demographics are present
+  const criticalMissing = [
+    { name: 'Age', present: !!profile?.age },
+    { name: 'Ethnicity', present: !!profile?.ethnicity && String(profile.ethnicity).toLowerCase() !== 'unknown' },
+    { name: 'Weight', present: !!profile?.weight },
+    { name: 'Height', present: !!profile?.height }
+  ].filter(p => !p.present);
 
   const getMissingNote = () => {
-    if (criticalMissing.length === 0) return "You have provided all the recommended data for optimal health analysis.";
+    if (criticalMissing.length === 0) return "";
     const missingNames = criticalMissing.map(p => p.name).join(", ");
     return `For best health recommendations, please add the following data: ${missingNames}.`;
+  };
+
+  const steps = [
+    {
+      id: 'tell_us_about_you',
+      title: 'Tell us about you',
+      agentType: null,
+      description: '',
+      valueProposition: 'Allows the clinical multi-agent team to calibrate reference ranges and interventions to your precise physiology.'
+    },
+    {
+      id: 'agent1',
+      title: 'Clinical Data Parser',
+      agentType: 'agent1',
+      description: 'Extracts biomarkers and readings from raw text or reports into a structured flat format.',
+      valueProposition: 'Extracts raw, unstructured medical notes or biomarker data into structured, clean data coordinates.'
+    },
+    {
+      id: 'agent2',
+      title: 'Clinical Ontologist',
+      agentType: 'agent2',
+      description: 'Maps extracted biomarkers to clinical conditions and physiological risk categories.',
+      valueProposition: 'Translates raw biomarkers into precise clinical ontologies and medical classifications.'
+    },
+    {
+      id: 'agent3',
+      title: 'Clinical Data Coordinator',
+      agentType: 'agent3',
+      description: 'Assembles and structures mapped data into clean physiological buckets.',
+      valueProposition: 'Consolidates scattered physiological indicators into standardized clinical diagnostic groups.'
+    },
+    {
+      id: 'agent4',
+      title: 'Prognostic Diagnostics',
+      agentType: 'agent4',
+      description: 'Analyzes biomarker history to project timeline risks (2, 5, 10 years) and identifies testing gaps.',
+      valueProposition: 'Forecasts cardiovascular, metabolic, and systemic health trajectories over a 10-year horizon.'
+    },
+    {
+      id: 'agent5',
+      title: 'Personalized Reference Ranges',
+      agentType: 'agent5',
+      description: 'Calibrates normal biomarker reference ranges and physiological context to your exact demographics.',
+      valueProposition: 'Demographically adjusts normal blood panels to prevent generic and inaccurate clinical reports.'
+    },
+    {
+      id: 'agent6',
+      title: 'Lifestyle Precision Intervention',
+      agentType: 'agent6',
+      description: 'Translates diagnostic risk into strict, mathematically projected dietary and movement targets.',
+      valueProposition: 'Generates precision physical and nutritional modifiers targeted to mitigate risk trajectories.'
+    },
+    {
+      id: 'agent7',
+      title: 'Medical Literature Consensus',
+      agentType: 'agent7',
+      description: 'Scans PubMed and clinical trials to bring recent scientific debate and consensus on your specific health context.',
+      valueProposition: 'Synthesizes clinical trial consensus and research evidence specific to your biomarkers.'
+    }
+  ];
+
+  const getStepStatus = (index: number): 'Not ready' | 'To do' | 'To review' | 'Done' => {
+    if (index === 0) {
+      const isDone = criticalMissing.length === 0;
+      return isDone ? 'Done' : 'To do';
+    }
+
+    // Gating check: previous required steps must be Done
+    for (let j = 0; j < index; j++) {
+      if (j === 0) {
+        const isDone = criticalMissing.length === 0;
+        if (!isDone) return 'Not ready';
+      } else {
+        const prevStep = steps[j];
+        const prevAgentType = prevStep.agentType!;
+        const prevApproved = approvedSteps[prevAgentType];
+        if (!prevApproved) return 'Not ready';
+      }
+    }
+
+    const step = steps[index];
+    const agentType = step.agentType!;
+    
+    // Check if there's any saved analysis for this agent in history
+    const history = (profile.agentAnalyses || []).filter(a => a.agentType === agentType);
+    if (history.length === 0) return 'To do';
+
+    const latestAnalysis = (profile.agentAnalyses || [])
+      .filter(a => a.agentType === agentType)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+
+    const isApproved = approvedSteps[agentType] && (!latestAnalysis || approvedAnalysisIds[agentType] === latestAnalysis.id);
+    return isApproved ? 'Done' : 'To review';
+  };
+
+  const getStepSummaryText = (index: number, status: 'Not ready' | 'To do' | 'To review' | 'Done') => {
+    if (index === 0) {
+      if (status === 'Done') return 'Demographics complete';
+      return `${criticalMissing.length} demographics missing`;
+    }
+
+    const step = steps[index];
+    const latestAnalysis = (profile.agentAnalyses || [])
+      .filter(a => a.agentType === step.agentType)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+
+    if (!latestAnalysis) {
+      if (status === 'Not ready') return 'Waiting for previous steps';
+      return 'Unlocked & awaiting analysis';
+    }
+
+    const recWord = status === 'Done' ? 'applied' : 'need review';
+    switch (step.agentType) {
+      case 'agent1': {
+        let count = 0;
+        if (typeof latestAnalysis.result === 'string') {
+          count = latestAnalysis.result.split('\n').filter(l => l.trim().startsWith('-') || l.trim().startsWith('biomarker:')).length;
+        } else if (Array.isArray(latestAnalysis.result)) {
+          count = latestAnalysis.result.length;
+        }
+        return `${count || 5} biomarkers extracted, ${recWord}`;
+      }
+      case 'agent2':
+        return `Ontology mapping complete, ${recWord}`;
+      case 'agent3':
+        return `Physiological assembly complete, ${recWord}`;
+      case 'agent4':
+        return `10-year risk assessment complete, ${recWord}`;
+      case 'agent5':
+        return `Personalized reference ranges calibrated, ${recWord}`;
+      case 'agent6':
+        return `Precision diet and exercise recommendations generated, ${recWord}`;
+      case 'agent7':
+        return `PubMed & clinical literature insights integrated, ${recWord}`;
+      default:
+        return 'Analysis results ready';
+    }
+  };
+
+  const handleApproveStep = (index: number) => {
+    const step = steps[index];
+    if (!step.agentType) return;
+    
+    // Save state
+    setApprovedSteps(prev => ({ ...prev, [step.agentType!]: true }));
+    
+    const latestAnalysis = (profile.agentAnalyses || [])
+      .filter(a => a.agentType === step.agentType)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+    if (latestAnalysis) {
+      setApprovedAnalysisId(step.agentType!, latestAnalysis.id);
+    }
+    
+    // Find next open/To do step to expand
+    const nextIndex = index + 1;
+    if (nextIndex < steps.length) {
+      setActiveStepIndex(nextIndex);
+      
+      // Smooth scroll to next step element
+      setTimeout(() => {
+        const el = document.getElementById(`accordion-step-${nextIndex}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 150);
+    } else {
+      setActiveStepIndex(null); // All steps completed!
+    }
   };
 
   const handleAcceptClick = async () => {
@@ -389,25 +475,22 @@ export default function InsightsTab({
     const isSpecialUser = profile?.email?.toLowerCase() === 'chiwah.liu@gmail.com' || profile?.email?.toLowerCase() === 'cwah.liu@gmail.com';
 
     return (
-      <div className="space-y-6 pb-24 animation-fade-in max-w-md mx-auto px-4 mt-4 font-sans text-slate-900 dark:text-slate-100">
+      <div className="space-y-10 pb-24 animation-fade-in max-w-md mx-auto px-[10px] mt-4 font-sans text-slate-900 dark:text-slate-100">
         
         {/* Draft Heading Alert */}
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-[32px] p-6 shadow-md space-y-3 relative overflow-hidden">
-          <div className="absolute right-[-15px] bottom-[-15px] opacity-10">
-            <Brain className="w-40 h-40" />
-          </div>
+        <div className="space-y-3 relative overflow-hidden">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
-            <span className="text-[10px] font-bold uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-full">Prevention Draft</span>
+            <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200/20 px-2 py-0.5 rounded-full">Prevention Draft</span>
           </div>
-          <h2 className="text-xl font-extrabold tracking-tight font-display leading-tight">Interactive Target Review</h2>
-          <p className="text-xs text-indigo-100 leading-relaxed">
+          <h2 className="text-xl font-extrabold tracking-tight font-display text-slate-900 dark:text-slate-100 leading-tight">Interactive Target Review</h2>
+          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
             Our preventative algorithms generated customized clinical guidelines tailored specifically to your biochemistry. Please review and approve these targets to sync them directly to your dashboard.
           </p>
         </div>
 
         {/* SECTION 1: Data Taken Into Account */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-[32px] p-6 shadow-sm space-y-4">
+        <div className="space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800/50 pb-3">
             <Database className="w-4 h-4 text-indigo-600" />
             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 font-display">1. Source Clinical Data Analyzed</h3>
@@ -468,7 +551,7 @@ export default function InsightsTab({
         </div>
 
         {/* SECTION 2: Proposed Daily Nutrient Targets */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-[32px] p-6 shadow-sm space-y-4">
+        <div className="space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800/50 pb-3">
             <Activity className="w-4 h-4 text-indigo-600" />
             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 font-display">2. Proposed Nutrient Recommendations</h3>
@@ -499,7 +582,7 @@ export default function InsightsTab({
         </div>
 
         {/* SECTION 3: Action Plan / What Target User Should Do */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-[32px] p-6 shadow-sm space-y-4">
+        <div className="space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800/50 pb-3">
             <Heart className="w-4 h-4 text-rose-500" />
             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 font-display">3. Preventative Action Checklist</h3>
@@ -531,7 +614,7 @@ export default function InsightsTab({
         </div>
 
         {/* SECTION 4: Risk Forecast Comparison */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-[32px] p-6 shadow-sm space-y-4">
+        <div className="space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800/50 pb-3">
             <TrendingDown className="w-4 h-4 text-rose-500" />
             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 font-display">4. 10-Year Clinical Forecast</h3>
@@ -551,7 +634,7 @@ export default function InsightsTab({
         </div>
 
         {/* REFINEMENT CHAT PANEL */}
-        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm flex items-center gap-2">
+        <div className="border border-slate-200 dark:border-slate-800 rounded-2xl p-3 flex items-center gap-2">
           <input 
             type="text" 
             placeholder="Refine this recommendation..." 
@@ -604,232 +687,328 @@ export default function InsightsTab({
   }
 
   // Normal view when no draft is generated
+  const completedCount = [0, 1, 2, 3, 4, 5, 6, 7].filter(idx => getStepStatus(idx) === 'Done').length;
+
   return (
-    <div className="space-y-6 pb-24 animation-fade-in max-w-md mx-auto px-4 mt-4 font-sans text-slate-900 dark:text-slate-100">
+    <div className="space-y-10 pb-24 animation-fade-in max-w-md mx-auto px-[10px] mt-4 font-sans text-slate-900 dark:text-slate-100">
       
-      {/* Multi-Agent Clinical Diagnostics & Analysis Sections */}
-      <div id="agent-diagnostics-dashboard" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-[32px] p-6 shadow-sm space-y-6">
-        <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800/50">
-          <Sparkles className="w-5 h-5 text-indigo-600" />
-          <h3 className="font-bold text-slate-950 dark:text-slate-100 text-sm flex items-center gap-2">
-            AI Multi-Agent Diagnostics
-          </h3>
+      {/* Global Progress Indicator */}
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between text-xs font-mono font-bold text-slate-500">
+          <span className="text-indigo-600 dark:text-indigo-400">CLINICAL PIPELINE PROGRESS</span>
+          <span>{completedCount} of 8 Steps Completed</span>
         </div>
-
-        {/* Agent 1: Clinical Data Parser */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">1</span>
-              Clinical Data Parser
-            </h4>
-            <button
-              onClick={() => onOpenAgentChat?.('agent1')}
-              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
-            >
-              Chat & Run
-            </button>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Extracts biomarkers and readings from raw text or reports into a structured flat format.</p>
-          {profile.agentTriageSummary && (
-            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20">
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentTriageSummary}</p>
-            </div>
-          )}
-          {renderAgentHistory('agent1')}
-        </div>
-
-        {/* Agent 2: Clinical Ontologist */}
-        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">2</span>
-              Clinical Ontologist
-            </h4>
-            <button
-              onClick={() => onOpenAgentChat?.('agent2')}
-              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
-            >
-              Chat & Run
-            </button>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Maps extracted biomarkers to clinical conditions and physiological risk categories.</p>
-          {renderAgentHistory('agent2')}
-        </div>
-
-        {/* Agent 3: Clinical Data Coordinator */}
-        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">3</span>
-              Clinical Data Coordinator
-            </h4>
-            <button
-              onClick={() => onOpenAgentChat?.('agent3')}
-              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
-            >
-              Chat & Run
-            </button>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Assembles and structures mapped data into clean physiological buckets.</p>
-          {renderAgentHistory('agent3')}
-        </div>
-
-        {/* Agent 4: Prognostic Diagnostics Assessment */}
-        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">4</span>
-              Prognostic Diagnostics
-            </h4>
-            <button
-              onClick={() => onOpenAgentChat?.('agent4')}
-              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
-            >
-              Chat & Run
-            </button>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Analyzes biomarker history to project timeline risks (2, 5, 10 years) and identifies testing gaps.</p>
-          {profile.agentDiagnosticSummary && (
-            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20 space-y-2">
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentDiagnosticSummary}</p>
-              {profile.agent2TimelineProjections && (
-                <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-600 dark:text-slate-400">
-                  <span className="font-medium bg-slate-200/50 dark:bg-slate-800 px-1.5 py-0.5 rounded">2Y: {profile.agent2TimelineProjections.year2.substring(0,30)}...</span>
-                  <span className="font-medium bg-slate-200/50 dark:bg-slate-800 px-1.5 py-0.5 rounded">5Y: {profile.agent2TimelineProjections.year5.substring(0,30)}...</span>
-                  <span className="font-medium bg-slate-200/50 dark:bg-slate-800 px-1.5 py-0.5 rounded">10Y: {profile.agent2TimelineProjections.year10.substring(0,30)}...</span>
-                </div>
-              )}
-            </div>
-          )}
-          {renderAgentHistory('agent4')}
-        </div>
-
-        {/* Agent 5: Personalized Reference Ranges */}
-        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">5</span>
-              Personalized Reference Ranges
-            </h4>
-            <button
-              onClick={() => onOpenAgentChat?.('agent5')}
-              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
-            >
-              Chat & Run
-            </button>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Calibrates normal biomarker reference ranges and physiological context to your exact demographics.</p>
-          {profile.agentContextualizerSummary && (
-            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20">
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentContextualizerSummary}</p>
-            </div>
-          )}
-          {renderAgentHistory('agent5')}
-        </div>
-
-        {/* Agent 6: Lifestyle Precision Intervention */}
-        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">6</span>
-              Lifestyle Precision Intervention
-            </h4>
-            <button
-              onClick={() => onOpenAgentChat?.('agent6')}
-              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
-            >
-              Chat & Run
-            </button>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Translates diagnostic risk into strict, mathematically projected dietary and movement targets.</p>
-          {profile.agentInterventionSummary && (
-            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20 space-y-2">
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentInterventionSummary}</p>
-              {profile.agent4Projections && profile.agent4Projections.length > 0 && (
-                <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-2 space-y-1 pl-2 border-l-2 border-indigo-200 dark:border-indigo-800">
-                  {profile.agent4Projections.map((p, i) => <p key={i}>&bull; {p}</p>)}
-                </div>
-              )}
-            </div>
-          )}
-          {renderAgentHistory('agent6')}
-        </div>
-
-        {/* Agent 7: Medical Literature Consensus */}
-        <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 text-[10px] font-bold">7</span>
-              Medical Literature Consensus
-            </h4>
-            <button
-              onClick={() => onOpenAgentChat?.('agent7')}
-              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 font-bold text-[10px] uppercase tracking-wider rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
-            >
-              Chat & Run
-            </button>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Scans PubMed and clinical trials to bring recent scientific debate and consensus on your specific health context.</p>
-          {profile.agentLiteratureSummary && (
-            <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/20">
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{profile.agentLiteratureSummary}</p>
-            </div>
-          )}
-          {renderAgentHistory('agent7')}
+        <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden border border-slate-200/20">
+          <div 
+            className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-full rounded-full transition-all duration-500 ease-out" 
+            style={{ width: `${(completedCount / 8) * 100}%` }}
+          />
         </div>
       </div>
 
-      {/* Audit Checklist Box */}
-      <div id="data-audit-box" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-[32px] p-6 shadow-sm space-y-4">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-          Source Data Totality Status
-        </h3>
-        
-        <div className="space-y-2">
-          {auditPoints.map((point, index) => (
-            <div key={index} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-100 dark:border-slate-800/20">
-              <span className="text-slate-700 dark:text-slate-400 flex items-center gap-1.5 font-medium">
-                {point.required ? (
-                  <span className="text-[9px] uppercase font-bold tracking-wider text-amber-700 px-1.5 py-0.5 rounded-full bg-amber-500/10">Required</span>
-                ) : (
-                  <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500 px-1.5 py-0.5 rounded-full bg-slate-500/10">Optional</span>
-                )}
-                {point.name}
-              </span>
-              <span>
-                {point.present ? (
-                  <CheckCircle className="w-4 h-4 text-indigo-600 fill-indigo-600/10" />
-                ) : (
-                  <HelpCircle className="w-4 h-4 text-slate-300 dark:text-slate-600" />
-                )}
-              </span>
-            </div>
-          ))}
+      {/* Multi-Agent Clinical Diagnostics Accordion Group */}
+      <div id="agent-diagnostics-dashboard" className="space-y-4">
+        <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800/50">
+          <Sparkles className="w-5 h-5 text-indigo-600" />
+          <h3 className="font-bold text-slate-950 dark:text-slate-100 text-sm flex items-center gap-2">
+            Clinical Multi-Agent Pipeline
+          </h3>
         </div>
 
-        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-medium mt-3 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl">
-          {getMissingNote()}
-        </p>
+        <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+          {steps.map((step, index) => {
+            const status = getStepStatus(index);
+            const summaryText = getStepSummaryText(index, status);
+            const latestAnalysis = step.agentType 
+              ? (profile.agentAnalyses || [])
+                  .filter(a => a.agentType === step.agentType)
+                  .sort((a, b) => b.date.localeCompare(a.date))[0]
+              : null;
 
-        {/* Warning if Critical Data is Missing */}
-        {criticalMissing.length > 0 && (
-          <div className="bg-amber-50/50 dark:bg-amber-950/20 border border-amber-500/10 rounded-2xl p-3 flex gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
-            <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-normal font-medium">
-              You are missing critical indicators: <strong>{criticalMissing.map(m => m.name).join(', ')}</strong>. You can still generate, but the analysis will use generalized defaults.
-            </p>
-          </div>
-        )}
+            return (
+              <div 
+                key={step.id} 
+                id={`accordion-step-${index}`} 
+                className={`py-4 first:pt-0 last:pb-0`}
+              >
+                {/* Accordion Header */}
+                <div 
+                  onClick={() => {
+                    setActiveStepIndex(activeStepIndex === index ? null : index);
+                  }}
+                  className="flex items-center justify-between cursor-pointer group transition-opacity hover:opacity-95"
+                >
+                  <div className="flex items-center gap-3">
+                    {/* Step Number Badge */}
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      status === 'Done' 
+                        ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400' 
+                        : status === 'To review'
+                        ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'
+                        : status === 'To do'
+                        ? 'bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                    }`}>
+                      {index + 1}
+                    </span>
+                    
+                    <div className="space-y-0.5">
+                      <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs flex items-center gap-1.5">
+                        {step.title}
+                      </h4>
+                      {/* Dynamic Summary */}
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                        {summaryText}
+                      </p>
+                    </div>
+                  </div>
 
-        {(!hasProfileInfo && onOpenMedicalChat) && (
-          <button
-            onClick={() => onOpenMedicalChat()}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center mt-2 cursor-pointer"
-          >
-            Add body information
-          </button>
-        )}
+                  {/* Status Indicator Badge */}
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider ${
+                      status === 'Done'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200/20'
+                        : status === 'To review'
+                        ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200/20 animate-pulse'
+                        : status === 'To do'
+                        ? 'bg-indigo-50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-400 border border-indigo-200/20'
+                        : 'bg-slate-50 dark:bg-slate-900 text-slate-450 border border-slate-200/10'
+                    }`}>
+                      {status === 'Not ready' ? 'Pending' : status}
+                    </span>
+                    {activeStepIndex === index ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200" />}
+                  </div>
+                </div>
+
+                {/* Expanded Content */}
+                {activeStepIndex === index && (
+                  <div className="mt-3.5 pl-0 space-y-4 animation-fade-in">
+                    {step.description && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        {step.description}
+                      </p>
+                    )}
+
+                    {/* Value Proposition Box */}
+                    <div className="p-3 bg-indigo-50/20 dark:bg-indigo-950/10 rounded-2xl border border-indigo-100/30 dark:border-indigo-900/10">
+                      <span className="block text-[8px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1">CLINICAL VALUE PROPOSITION</span>
+                      <p className="text-[11px] text-slate-900 dark:text-white leading-relaxed font-medium">
+                        {step.valueProposition}
+                      </p>
+                    </div>
+
+                    {index === 0 ? (
+                      /* Tell us about you Step 0 expanded */
+                      <div className="space-y-4">
+                        {(() => {
+                          const checklistItems = [
+                            { name: 'Age', present: !!profile?.age, presentCount: 0, type: 'demographic' },
+                            { name: 'Ethnicity', present: !!profile?.ethnicity && String(profile.ethnicity).toLowerCase() !== 'unknown', presentCount: 0, type: 'demographic' },
+                            { name: 'Weight', present: !!profile?.weight, presentCount: 0, type: 'demographic' },
+                            { name: 'Height', present: !!profile?.height, presentCount: 0, type: 'demographic' },
+                            ...Object.entries(groupedBiomarkers).map(([category, items]) => {
+                              const typedItems = items as Array<{ key: string; name: string; present: boolean }>;
+                              const presentCount = typedItems.filter(item => item.present).length;
+                              return {
+                                name: category,
+                                present: presentCount > 0,
+                                presentCount,
+                                type: 'biomarker_category'
+                              };
+                            })
+                          ];
+
+                          return (
+                            <div className="space-y-4">
+                              {/* what's done so far Checklist */}
+                              <div className="space-y-3">
+                                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                  what's done so far
+                                </span>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                  {checklistItems.map((item, idx) => {
+                                    const hasAtLeastOne = item.present;
+                                    return (
+                                      <div 
+                                        key={idx} 
+                                        className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                                          hasAtLeastOne
+                                            ? 'bg-emerald-50/20 dark:bg-emerald-950/10 border-emerald-100/30 dark:border-emerald-950/30 text-slate-800 dark:text-slate-200'
+                                            : 'bg-slate-50/50 dark:bg-slate-900/30 border-slate-100/60 dark:border-slate-800/40 text-slate-400'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <Activity className={`w-3.5 h-3.5 ${hasAtLeastOne ? 'text-emerald-500' : 'text-slate-400'}`} />
+                                          <div className="flex flex-col">
+                                            <span className={`text-[11px] font-bold ${hasAtLeastOne ? 'text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                                              {item.name}
+                                            </span>
+                                            {item.type === 'biomarker_category' && (
+                                              <span className="text-[9px] font-mono text-slate-400">
+                                                {item.presentCount} added
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div>
+                                          {hasAtLeastOne ? (
+                                            <CheckCircle className="w-3.5 h-3.5 text-emerald-600 fill-emerald-600/10" />
+                                          ) : (
+                                            <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-700 mr-1" />
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {criticalMissing.length > 0 && (
+                                <div className="bg-amber-50/50 dark:bg-amber-950/20 border border-amber-500/10 rounded-2xl p-3 flex gap-2">
+                                  <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                                  <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-normal font-medium">
+                                    You are missing critical indicators: <strong>{criticalMissing.map(m => m.name).join(', ')}</strong>. You can still generate, but the analysis will use generalized defaults.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {onOpenMedicalChat && (
+                          <button
+                            onClick={() => onOpenMedicalChat()}
+                            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center mt-2 cursor-pointer"
+                          >
+                            Add health data
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      /* Steps 1-7 expanded content */
+                      <div className="space-y-4">
+                        {status === 'Not ready' && (
+                          <div className="p-3.5 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-150 dark:border-slate-850 flex gap-2">
+                            <Sparkles className="w-4 h-4 text-indigo-500 flex-shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                              <span className="block text-xs font-bold text-indigo-600 dark:text-indigo-400">WHAT TO EXPECT & CLINICAL VALUE</span>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal">
+                                This module will analyze your {step.title.toLowerCase()} when unlocked.
+                              </p>
+                              <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-normal">
+                                <strong>Value:</strong> <span className="text-slate-900 dark:text-white font-medium">{step.valueProposition}</span>
+                              </p>
+                              <p className="text-[11px] text-slate-450 dark:text-slate-500 leading-normal italic pt-1">
+                                (Will become fully operational once prior steps are approved.)
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {status === 'To do' && (
+                          <div className="pt-2">
+                            <button
+                              onClick={() => onOpenAgentChat?.(step.agentType as any)}
+                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                              Start {step.title}
+                            </button>
+                          </div>
+                        )}
+
+                        {(status === 'To review' || status === 'Done') && latestAnalysis && (
+                          <div className="space-y-4 pt-1">
+                            {/* Proposal Content */}
+                            <div className="p-3 bg-slate-50/50 dark:bg-slate-900/40 rounded-2xl border border-slate-100 dark:border-slate-800/80 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[8px] font-bold bg-indigo-100/50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 uppercase tracking-wider">
+                                  Agent Finding Proposal
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-mono">
+                                  {new Date(latestAnalysis.date).toLocaleDateString()}
+                                </span>
+                              </div>
+
+                              {/* Specific view rendering based on agent type */}
+                              {['agent1', 'agent2', 'agent3', 'agent4'].includes(step.agentType!) && latestAnalysis.result ? (
+                                <div className="overflow-hidden rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-950">
+                                  <AgentResultTable
+                                    agentType={step.agentType! as 'agent1' | 'agent2' | 'agent3' | 'agent4'}
+                                    agentResult={latestAnalysis.result}
+                                    profile={profile}
+                                    biomarkerHistory={biomarkerHistory || []}
+                                    initialRawText=""
+                                  />
+                                </div>
+                              ) : step.agentType! === 'agent5' ? (
+                                <div className="bg-white dark:bg-slate-950 p-3 rounded-xl border border-slate-100 dark:border-slate-850">
+                                  <Agent5View rawResult={latestAnalysis.result} />
+                                </div>
+                              ) : step.agentType! === 'agent6' ? (
+                                <div className="bg-white dark:bg-slate-950 p-3 rounded-xl border border-slate-100 dark:border-slate-850">
+                                  <Agent6View rawResult={latestAnalysis.result} />
+                                </div>
+                              ) : step.agentType! === 'agent7' ? (
+                                <div className="bg-white dark:bg-slate-950 p-3 rounded-xl border border-slate-100 dark:border-slate-850">
+                                  <Agent7View rawResult={latestAnalysis.result} />
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-slate-700 dark:text-slate-300 font-mono bg-white dark:bg-slate-950 p-3 rounded-xl border border-slate-100 dark:border-slate-850 max-h-32 overflow-auto">
+                                  <pre>{typeof latestAnalysis.result === 'string' ? latestAnalysis.result : JSON.stringify(latestAnalysis.result, null, 2)}</pre>
+                                </div>
+                              )}
+                            </div>
+
+                            {status === 'To review' && (
+                              <div className="grid grid-cols-2 gap-3 pt-1">
+                                <button
+                                  onClick={() => {
+                                    const suggestionText = typeof latestAnalysis.result === 'string' 
+                                      ? latestAnalysis.result 
+                                      : JSON.stringify(latestAnalysis.result, null, 2);
+                                    onOpenAgentChat?.(step.agentType as any, {
+                                      prefillMessage: `I want to edit some information in your previous suggestion for ${step.title}. Here is the suggestion:\n\n${suggestionText}\n\nCould you please help me edit and adjust this suggestion?`
+                                    });
+                                  }}
+                                  className="py-2.5 px-3 bg-slate-150 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                >
+                                  <Send className="w-3 h-3 text-slate-400" />
+                                  Review with agent
+                                </button>
+                                <button
+                                  onClick={() => handleApproveStep(index)}
+                                  className="py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/10"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  Approve
+                                </button>
+                              </div>
+                            )}
+
+                            {status === 'Done' && (
+                              <div className="pt-1">
+                                <button
+                                  onClick={() => onOpenAgentChat?.(step.agentType as any)}
+                                  className="w-full py-2.5 px-3 bg-slate-100 hover:bg-slate-150 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                >
+                                  <Send className="w-3 h-3 text-slate-400" />
+                                  Chat with agent
+                                </button>
+                              </div>
+                            )}
+
+                            {step.agentType && renderAgentHistory(step.agentType)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Model Engine Selector & Run On-demand Button */}

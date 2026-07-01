@@ -8,6 +8,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { compressMultipleImages } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone } from '../utils/dateUtils';
 import ImageSlider from './ImageSlider';
+import { resolveFoodImage, resolveFoodImages } from '../utils/imageResolver';
 
 interface FoodHistoryTabProps {
   profile: UserProfile;
@@ -584,6 +585,8 @@ export default function FoodHistoryTab({
           {filteredLogs.map((log) => {
             const isExpanded = expandedLogId === log.id;
             const isEditing = editingLogId === log.id;
+            const resolvedImg = resolveFoodImage(log.imageUrl, foodLogs);
+            const resolvedImgs = resolveFoodImages(log.imageUrls, foodLogs);
             
             return (
               <div
@@ -592,11 +595,11 @@ export default function FoodHistoryTab({
                 className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-[32px] overflow-hidden shadow-sm transition-all"
               >
                 {/* Large visual rendering of attached meal images */}
-                {((log.imageUrls && log.imageUrls.length > 0) || log.imageUrl) ? (
+                {(resolvedImgs.length > 0 || resolvedImg) ? (
                   <div className="w-full h-48 overflow-hidden relative">
                     <ImageSlider 
-                      images={log.imageUrls || []} 
-                      singleImage={log.imageUrl} 
+                      images={resolvedImgs} 
+                      singleImage={resolvedImg} 
                       altText={log.name || "Meal log"} 
                     />
                   </div>
@@ -681,7 +684,7 @@ export default function FoodHistoryTab({
                                       draggedPhotoIndex === idx ? 'border-indigo-500 scale-105 opacity-50' : 'border-slate-200 dark:border-slate-850'
                                     } cursor-grab active:cursor-grabbing`}
                                   >
-                                    <img src={img} className="w-full h-full object-cover pointer-events-none" referrerPolicy="no-referrer" />
+                                    <img src={resolveFoodImage(img, foodLogs) || img} className="w-full h-full object-cover pointer-events-none" referrerPolicy="no-referrer" />
                                     <button
                                       type="button"
                                       onClick={() => {

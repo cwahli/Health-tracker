@@ -10,6 +10,7 @@ import MedicalHistoryTab from './components/MedicalHistoryTab';
 import TrendsTab from './components/TrendsTab';
 import LogChat from './components/LogChat';
 import { translations } from './utils/translations';
+import { AVAILABLE_LLMS } from './utils/llm';
 import { getLocalFallbackReport } from './utils/fallbackReport';
 import { Plus, HeartHandshake, RefreshCw, Sparkles, Stethoscope, Utensils, Loader } from 'lucide-react';
 import { auth, db } from './firebase';
@@ -346,6 +347,7 @@ export default function App() {
   const [isManualFoodLogOpen, setIsManualFoodLogOpen] = useState(false);
   const [isMedicalChatOpen, setIsMedicalChatOpen] = useState(false);
   const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7' | null>(null);
+  const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEditingFoodLog, setIsEditingFoodLog] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -1229,8 +1231,18 @@ export default function App() {
     }
   };
 
-  // Selected LLM Engine shared across sections - Antigravity Agent is the default model
-  const [selectedModelId, setSelectedModelId] = useState<string>('antigravity');
+  // Selected LLM Engine shared across sections - highest RPD model is the default, and we persist the user selection
+  const [selectedModelId, setSelectedModelIdState] = useState<string>(() => {
+    const saved = localStorage.getItem('selectedModelId');
+    if (saved) return saved;
+    // Default is the one with the highest RPD
+    return AVAILABLE_LLMS[0]?.id || 'gemini-3.1-flash-lite';
+  });
+
+  const setSelectedModelId = (id: string) => {
+    setSelectedModelIdState(id);
+    localStorage.setItem('selectedModelId', id);
+  };
 
   // Add / Edit logs handlers
   const handleLogFood = async (food: FoodLog) => {
@@ -1898,8 +1910,9 @@ export default function App() {
             onEditBiomarkerLog={handleEditBiomarkerLog}
             onDeleteBiomarkerLog={handleDeleteBiomarkerLog}
             onLogMedical={handleLogMedical}
-            onOpenAgentChat={(agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5') => {
+            onOpenAgentChat={(agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5', options?: { prefillMessage?: string }) => {
               setActiveAgentType(agentType);
+              setPrefillMessage(options?.prefillMessage || null);
               setIsMedicalChatOpen(true);
             }}
             hideSensitive={hideSensitive}
@@ -1927,8 +1940,9 @@ export default function App() {
             isGenerating={isGenerating}
             onNavigateToTab={setActiveTab}
             onOpenMedicalChat={() => setIsMedicalChatOpen(true)}
-            onOpenAgentChat={(agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7') => {
+            onOpenAgentChat={(agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7', options?: { prefillMessage?: string }) => {
               setActiveAgentType(agentType);
+              setPrefillMessage(options?.prefillMessage || null);
               setIsMedicalChatOpen(true);
             }}
             onDeleteAnalysis={async (id) => {
@@ -2042,7 +2056,10 @@ export default function App() {
         onChangeModelId={setSelectedModelId}
         onClose={() => {
           setIsMedicalChatOpen(false);
+          setActiveAgentType(null);
+          setPrefillMessage(null);
         }}
+        autoSendMessage={prefillMessage}
         onLogMedical={handleLogMedical}
         biomarkers={biomarkers}
         biomarkerHistory={biomarkerHistory}
@@ -2168,8 +2185,6 @@ export default function App() {
           
           setProfile(updatedProfile);
           await saveAndSync(updatedProfile, foodLogs, biomarkers, currentHistory, actions, dailyBenefits, report);
-          
-          setActiveAgentType(null);
         }}
       />
 

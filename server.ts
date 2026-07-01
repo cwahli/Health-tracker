@@ -1297,25 +1297,28 @@ app.post("/api/gemini/medical-analyze", async (req, res) => {
       let systemInstruction = "";
       let mockData: any = {};
 
-      if (agentType === "agent1") {
+      if (agentType === "agent1" || agentType === "agent1_step1") {
+        const isFlashLite = engine && (engine.includes("lite") || engine.includes("flash-lite"));
+        const maxMetrics = isFlashLite ? 50 : 100;
         systemInstruction = `You are a clinical data parser and conversational health assistant (Step 1: Clinical Triage).
 Your tasks:
 1. Parse raw health reports/text and extract biomarker readings into a flat YAML array.
 2. Handle conversational questions, updates, requests to go back, or requests to continue/submit from the user.
 
-CHUNKED PROCESSING RULE (Max 50):
-If the user's raw data/text contains more than 50 biomarker readings, you MUST split the processing into chunks:
-- Extract ONLY the first 50 biomarker entries in this chunk.
+CHUNKED PROCESSING RULE (Max ${maxMetrics}):
+If the user's raw data/text contains more than ${maxMetrics} biomarker readings, you MUST split the processing into chunks:
+- Extract ONLY the first ${maxMetrics} biomarker entries in this chunk.
 - Set "hasMoreMarkers" to true in your JSON response.
 - Copy any remaining unparsed report text/context into "remainingText" in your JSON response.
-- In "text", friendly inform the user that you have extracted the first 50 biomarkers and ask if they would like to continue.
-- If there are 50 or fewer biomarkers, or if you are processing the final chunk of remaining text and finishing, set "hasMoreMarkers" to false and "remainingText" to "".
+- In "text", friendly inform the user that you have extracted the first ${maxMetrics} biomarkers and ask if they would like to continue.
+- If there are ${maxMetrics} or fewer biomarkers, or if you are processing the final chunk of remaining text and finishing, set "hasMoreMarkers" to false and "remainingText" to "".
 
 You MUST respond with a JSON object containing the following keys:
 - "text": A friendly, clinical-grade conversational response to the user.
 - "extractedYaml": The flat YAML array representing the current state of extracted biomarkers.
-- "hasMoreMarkers": boolean (true if there are more than 50 biomarkers and you chunked them, false otherwise).
+- "hasMoreMarkers": boolean (true if there are more than ${maxMetrics} biomarkers and you chunked them, false otherwise).
 - "remainingText": string (the remaining unparsed raw report text for the next chunk, or empty string if done).
+- "estimatedTotalMarkers": number (the total estimated number of biomarker readings present in the original input text, e.g., 60).
 
 YAML Schema for "extractedYaml" field (must be a single string containing valid YAML):
 - biomarker: string
@@ -1324,15 +1327,15 @@ YAML Schema for "extractedYaml" field (must be a single string containing valid 
   unit: string
 
 Rules for handling user inputs:
-- INITIAL/RAW DATA extraction: If the user provided a health report, extract biomarkers. If there are more than 50, extract ONLY the first 50 entries and apply the chunking rule. If multiple readings of the same marker on the same date exist under slightly different names, merge them. Output the flat YAML in "extractedYaml", and set "text" to "I have extracted the first 50 biomarkers. There are more biomarkers left in your report. Would you like to continue?"
-- CONTINUE EXTRACTING: If the user requests to "continue", "continue extracting", or similar, and you have unparsed text or previous YAML, take the previous "extractedYaml" and append/extract the next chunk of up to 50 biomarkers from the "remainingText". Set "hasMoreMarkers" and "remainingText" accordingly.
+- INITIAL/RAW DATA extraction: If the user provided a health report, extract biomarkers. If there are more than ${maxMetrics}, extract ONLY the first ${maxMetrics} entries and apply the chunking rule. If multiple readings of the same marker on the same date exist under slightly different names, merge them. Output the flat YAML in "extractedYaml", and set "text" to "I have extracted the first ${maxMetrics} biomarkers. There are more biomarkers left in your report. Would you like to continue?" Count the total estimated biomarker readings in the input and set "estimatedTotalMarkers" accordingly.
+- CONTINUE EXTRACTING: If the user requests to "continue", "continue extracting", or similar (they may pass the original text again), take the previous "extractedYaml" and append/extract the next chunk of up to ${maxMetrics} biomarkers from the original raw text that are NOT ALREADY in the previous YAML. Set "hasMoreMarkers" and "remainingText" accordingly. Make sure to keep the correct "estimatedTotalMarkers" value (the total for the whole document).
 - UPDATE DATA: If the user asks to edit, add, or delete a biomarker or value (e.g., "Change ALT on 2026-06-01 to 45"), perform that update on the YAML and return the updated "extractedYaml" string, explaining the change in "text".
 - START A CONVERSATION: If the user asks general or clinical questions about the biomarkers or their values (e.g., "What does ALT mean?"), answer the question in "text" with precise clinical detail, and return the unmodified YAML in "extractedYaml".
 - GO BACK / CONTINUE / SUBMIT: If the user asks to go back or continue, explain the current step in "text" (we are currently on Step 1: Data Extraction. They can click "Continue to Map Data" when ready, or we can discuss/update the extracted readings first).
 
-Make sure your entire output is valid JSON, containing "text", "extractedYaml", "hasMoreMarkers", and "remainingText".`;
+Make sure your entire output is valid JSON, containing "text", "extractedYaml", "hasMoreMarkers", "remainingText", and "estimatedTotalMarkers".`;
         mockData = {};
-      } else if (agentType === "agent2") {
+      } else if (agentType === "agent2" || agentType === "agent1_step2") {
         systemInstruction = `You are an expert Clinical Ontologist and conversational health assistant (Step 2: Category Mapping).
 Your tasks:
 1. Identify all unique biomarkers in the YAML list and categorize them by associating:
@@ -1367,7 +1370,7 @@ Rules for handling user inputs:
 
 Make sure your entire output is valid JSON, containing "text" and "bucketMapping".`;
         mockData = {};
-      } else if (agentType === "agent3") {
+      } else if (agentType === "agent3" || agentType === "agent1_step3") {
         systemInstruction = `You are a clinical data coordinator and conversational health assistant (Step 3: Data Assembly).
 Your tasks:
 1. Assemble the flat YAML biomarker logs and the bucket mapping dictionary into a structured physiological nested JSON.
@@ -1769,7 +1772,9 @@ Return ONLY raw JSON.`;
 
         let dataContext = "";
         if (agentType === "agent1_step1") {
-          dataContext = `\n\nUSER RAW DATA:\n${message}\n\nEXISTING BIOMARKER LOGS:\n${JSON.stringify(biomarkerHistory || [], null, 2)}\n\nUSER PROFILE:\n${JSON.stringify(cleanProfile, null, 2)}\n`;
+          const prevYaml = req.body.extractedYaml ? `\n\nPREVIOUSLY EXTRACTED YAML:\n${req.body.extractedYaml}` : "";
+          const remText = req.body.remainingText ? `\n\nREMAINING UNPARSED TEXT:\n${req.body.remainingText}` : "";
+          dataContext = `\n\nUSER RAW DATA:\n${message}${prevYaml}${remText}\n\nEXISTING BIOMARKER LOGS:\n${JSON.stringify(biomarkerHistory || [], null, 2)}\n\nUSER PROFILE:\n${JSON.stringify(cleanProfile, null, 2)}\n`;
         } else if (agentType === "agent1_step2") {
           dataContext = `\n\nEXTRACTED YAML DATA:\n${req.body.extractedYaml}\n`;
         } else if (agentType === "agent1_step3") {
@@ -1843,6 +1848,9 @@ Return ONLY raw JSON.`;
       if (agentType === "agent1_step1") {
         let cleanYaml = textOutput;
         let text = "I have extracted the biomarkers. Please review the output.";
+        let hasMoreMarkers = false;
+        let remainingText = "";
+        let estimatedTotalMarkers: number | null = null;
         try {
           const parsed = JSON.parse(textOutput.replace(/```(?:json)?/gi, "").trim());
           if (parsed.extractedYaml) {
@@ -1851,13 +1859,25 @@ Return ONLY raw JSON.`;
           if (parsed.text) {
             text = parsed.text;
           }
+          if (parsed.hasMoreMarkers !== undefined) {
+            hasMoreMarkers = !!parsed.hasMoreMarkers;
+          }
+          if (parsed.remainingText) {
+            remainingText = parsed.remainingText;
+          }
+          if (parsed.estimatedTotalMarkers !== undefined) {
+            estimatedTotalMarkers = Number(parsed.estimatedTotalMarkers);
+          }
         } catch (e) {
           cleanYaml = textOutput.replace(/```(?:yaml)?/gi, "").trim();
         }
         return res.json({
           text,
           agentType,
-          extractedYaml: cleanYaml
+          extractedYaml: cleanYaml,
+          hasMoreMarkers,
+          remainingText,
+          estimatedTotalMarkers
         });
       }
 

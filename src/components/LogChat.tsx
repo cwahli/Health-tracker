@@ -15,6 +15,8 @@ import { InteractivePlacesMap } from './InteractivePlacesMap';
 import exifr from 'exifr';
 import { auth } from '../firebase';
 import { Agent5View, Agent6View, Agent7View } from './AgentResultViews';
+import { AgentResultTable } from './AgentResultTable';
+import { resolveFoodImage } from '../utils/imageResolver';
 
 interface BiomarkerEntry {
   biomarker: string;
@@ -298,6 +300,7 @@ interface LogChatProps {
   onAgentFinish?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent6' | 'agent7', agentResult: any) => Promise<void>;
   onAgentAnalysisSaved?: (agentType: string, agentResult: any) => Promise<void>;
   onGoToManualEdit?: () => void;
+  autoSendMessage?: string | null;
 }
 
 const getSessionId = (): string => {
@@ -327,7 +330,8 @@ export default function LogChat({
   biomarkerHistory = [],
   onAgentFinish,
   onAgentAnalysisSaved,
-  onGoToManualEdit
+  onGoToManualEdit,
+  autoSendMessage = null
 }: LogChatProps) {
   const [showDataUsed, setShowDataUsed] = useState(false);
   const [showFullScreenConv, setShowFullScreenConv] = useState(false);
@@ -337,6 +341,7 @@ export default function LogChat({
   const [activeModalTitle, setActiveModalTitle] = useState<string>('Consolidated Clinical Biomarker Log');
   const [activeInstructionAgentType, setActiveInstructionAgentType] = useState<string | null>(null);
   const [expandedAudits, setExpandedAudits] = useState<Record<string, boolean>>({});
+  const [fullScreenJson, setFullScreenJson] = useState<string | null>(null);
 
   const handleSendLogToAdmin = async () => {
     setIsSendingLogs(true);
@@ -718,7 +723,7 @@ export default function LogChat({
     return uniqueMatches;
   }, [type, foodLogs, inputText]);
 
-  if (!isOpen) return null;
+
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files ? Array.from(e.target.files) : [];
@@ -1051,12 +1056,27 @@ export default function LogChat({
     }
   };
 
+  useEffect(() => {
+    if (isOpen && autoSendMessage && type === 'medical') {
+      const alreadySent = messages.some(m => m.role === 'user' && m.content === autoSendMessage);
+      if (!alreadySent) {
+        const timer = setTimeout(() => {
+          handleSend(autoSendMessage);
+        }, 400);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isOpen, autoSendMessage, type, messages]);
+
   const handleContinueExtractionChunk = async (msg: any) => {
     setIsAnalyzing(true);
     try {
+      const msgIndex = messages.findIndex(m => m.id === msg.id);
+      const allUserText = messages.slice(0, msgIndex).filter(m => m.role === 'user').map(m => m.content).join('\n\n');
+
       const bodyData: any = {
         agentType: 'agent1_step1',
-        message: 'continue',
+        message: `continue: ${allUserText}`,
         extractedYaml: msg.agentResult?.extractedYaml || msg.extractedYaml,
         remainingText: msg.agentResult?.remainingText || '',
         engine: selectedModelId
@@ -1180,10 +1200,26 @@ export default function LogChat({
   const handleDuplicateFoodLog = (log: FoodLog) => {
     if (!onLogFood) return;
     const todayDate = getCurrentDateInTimezone(profile?.timezone);
+    
+    // Save image reference to the primary log to avoid duplicating raw Base64 data in the database
+    let resolvedImageUrl = log.imageUrl;
+    let resolvedImageUrls = log.imageUrls;
+
+    if (log.imageUrl) {
+      const primaryId = log.imageUrl.startsWith('ref:') ? log.imageUrl.replace('ref:', '') : log.id;
+      resolvedImageUrl = `ref:${primaryId}`;
+    }
+    if (log.imageUrls && log.imageUrls.length > 0) {
+      const primaryId = log.imageUrls[0].startsWith('ref:') ? log.imageUrls[0].replace('ref:', '') : log.id;
+      resolvedImageUrls = [`ref:${primaryId}`];
+    }
+
     const duplicatedLog: FoodLog = {
       ...log,
       id: `food_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      date: todayDate
+      date: todayDate,
+      imageUrl: resolvedImageUrl,
+      imageUrls: resolvedImageUrls
     };
     onLogFood(duplicatedLog);
     setInputText('');
@@ -1197,6 +1233,8 @@ export default function LogChat({
       }
     ]);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex flex-col justify-end sm:justify-center p-0 sm:p-4 animation-fade-in font-sans">
@@ -1840,254 +1878,32 @@ export default function LogChat({
                       </div>
 
                       {/* Content details based on Agent type */}
-                      {msg.agentType === 'agent1' && msg.agentResult && (
-                        <div className="space-y-3">
-                          <div className="space-y-2">
-                            <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Extracted data</span>
-                            <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl text-[10px] max-h-96 overflow-y-auto whitespace-pre-wrap font-mono">
-                              {msg.agentResult.extractedYaml || msg.extractedYaml || (typeof msg.agentResult === 'string' ? msg.agentResult : JSON.stringify(msg.agentResult, null, 2))}
-                            </pre>
-                          </div>
-                        </div>
-                      )}
-
-                      {msg.agentType === 'agent2' && msg.agentResult && (
-                        <div className="space-y-3">
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Category Mapping</span>
-                              {(() => {
-                                const mapping = msg.agentResult.bucketMapping || msg.bucketMapping || (typeof msg.agentResult === 'object' && msg.agentResult !== null ? msg.agentResult : {});
-                                const count = Object.keys(mapping).filter(k => k !== 'text').length;
-                                return <span className="text-[9px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded-full">{count} mapped</span>;
-                              })()}
-                            </div>
-                            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
-                              <table className="w-full text-[10px] text-left">
-                                <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
-                                  <tr>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Medical Grouping</th>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Risk Categories</th>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                  {(() => {
-                                    const mapping = msg.agentResult.bucketMapping || msg.bucketMapping || (typeof msg.agentResult === 'object' && msg.agentResult !== null ? msg.agentResult : {});
-                                    const entries = Object.entries(mapping).filter(([k, v]) => k !== 'text' && typeof v === 'object' && v !== null);
-                                    return entries.map(([bioName, mapData]: [string, any], idx) => {
-                                      const key = bioName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-                                      const existingDef = profile?.customBiomarkers?.[key];
-                                      const newGroup = mapData.standardMedicalGrouping || 'Other';
-                                      const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
-                                      const isGroupChanged = existingDef && newGroup !== oldGroup;
-                                      const newCategories = (mapData.riskCategories || []).join(', ');
-                                      const oldCategories = (existingDef?.riskCategories || []).join(', ');
-                                      const isCategoryChanged = existingDef && newCategories !== oldCategories;
-                                      const isChanged = isGroupChanged || isCategoryChanged;
-                                      const isNew = !existingDef;
-
-                                      return (
-                                        <tr key={idx} className={isChanged ? "bg-amber-50/50 dark:bg-amber-900/10" : isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
-                                          <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-200">{bioName}</td>
-                                          <td className="px-3 py-2">
-                                            {isGroupChanged ? (
-                                              <div className="flex flex-col gap-0.5">
-                                                <span className="text-amber-600 dark:text-amber-400 font-bold">{newGroup}</span>
-                                                <span className="text-[8px] text-slate-400 line-through">{oldGroup}</span>
-                                              </div>
-                                            ) : (
-                                              <span className="text-slate-600 dark:text-slate-400">{newGroup}</span>
-                                            )}
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            {isCategoryChanged ? (
-                                              <div className="flex flex-col gap-0.5">
-                                                <span className="text-amber-600 dark:text-amber-400 font-bold">{newCategories}</span>
-                                                <span className="text-[8px] text-slate-400 line-through">{oldCategories || 'None'}</span>
-                                              </div>
-                                            ) : (
-                                              <span className="text-slate-600 dark:text-slate-400">{newCategories || 'None'}</span>
-                                            )}
-                                          </td>
-                                          <td className="px-3 py-2 text-right">
-                                            {isNew ? (
-                                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New</span>
-                                            ) : isChanged ? (
-                                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
-                                            ) : (
-                                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
-                                            )}
-                                          </td>
-                                        </tr>
-                                      );
-                                    });
-                                  })()}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {msg.agentType === 'agent3' && msg.agentResult && (
-                        <div className="space-y-3">
-                          <div className="space-y-2">
-                            <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Processed Categories</span>
-                            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
-                              <table className="w-full text-[10px] text-left">
-                                <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
-                                  <tr>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Bucket</th>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Total Readings</th>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400 text-right">Status</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                  {(() => {
-                                    const buckets = Array.isArray(msg.agentResult.buckets) ? msg.agentResult.buckets : (Array.isArray(msg.agentResult) ? msg.agentResult : []);
-                                    const allBiomarkers = buckets.flatMap((bucket: any) => {
-                                      return (bucket.biomarkers || []).map((b: any) => {
-                                        const key = (b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-                                        const existingDef = profile?.customBiomarkers?.[key];
-                                        const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
-                                        const isGroupChanged = existingDef && bucket.systemName && bucket.systemName !== oldGroup;
-                                        const isNew = !existingDef;
-                                        
-                                        let hasNewReadings = false;
-                                        if (Array.isArray(b.history) && b.history.length > 0) {
-                                          if (!existingDef) {
-                                            hasNewReadings = true;
-                                          } else {
-                                            const existingDates = (biomarkerHistory || []).filter((h: any) => h.biomarkers[key] !== undefined).map((h: any) => h.date);
-                                            const newDates = b.history.filter((h: any) => h && h.date && !existingDates.includes(h.date));
-                                            if (newDates.length > 0) {
-                                              hasNewReadings = true;
-                                            }
-                                          }
-                                        }
-                                        
-                                        const isChanged = isGroupChanged || hasNewReadings;
-                                        const statusSort = isNew ? 0 : (isChanged ? 1 : 2);
-                                        
-                                        return {
-                                          name: b.name,
-                                          key,
-                                          newGroup: bucket.systemName,
-                                          oldGroup,
-                                          isGroupChanged,
-                                          isNew,
-                                          hasNewReadings,
-                                          isChanged,
-                                          statusSort,
-                                          totalReadings: b.history?.length || 0
-                                        };
-                                      });
-                                    });
-                                    
-                                    allBiomarkers.sort((a: any, b: any) => a.statusSort - b.statusSort);
-                                    
-                                    return allBiomarkers.map((b: any, idx: number) => (
-                                      <tr key={`${b.key}-${idx}`} className={b.isChanged && !b.isNew ? "bg-amber-50/50 dark:bg-amber-900/10" : b.isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
-                                        <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-200">{b.name}</td>
-                                        <td className="px-3 py-2">
-                                          {b.isGroupChanged ? (
-                                            <div className="flex flex-col gap-0.5">
-                                              <span className="text-amber-600 dark:text-amber-400 font-bold">{b.newGroup}</span>
-                                              <span className="text-[8px] text-slate-400 line-through">{b.oldGroup}</span>
-                                            </div>
-                                          ) : (
-                                            <span className="text-slate-600 dark:text-slate-400">{b.newGroup}</span>
-                                          )}
-                                        </td>
-                                        <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
-                                          {b.totalReadings}
-                                        </td>
-                                        <td className="px-3 py-2 text-right flex flex-col items-end gap-1">
-                                          {b.isNew ? (
-                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New Biomarker</span>
-                                          ) : b.isChanged ? (
-                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
-                                          ) : (
-                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
-                                          )}
-                                          {b.hasNewReadings && !b.isNew && (
-                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 uppercase tracking-wider">New Readings</span>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    ));
-                                  })()}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {msg.agentType === 'agent4' && msg.agentResult && (
-                        <div className="space-y-3">
-                          <div className="space-y-2">
-                            <span className="text-[9px] uppercase font-mono font-bold text-slate-400">Prognostic Diagnostics & Grouping</span>
-                            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-64 overflow-y-auto">
-                              <table className="w-full text-[10px] text-left">
-                                <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
-                                  <tr>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Biomarker</th>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Agent Condition</th>
-                                    <th className="px-3 py-2 font-bold text-slate-600 dark:text-slate-400">Status</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                  {(() => {
-                                    const result = msg.agentResult;
-                                    const conditions = Array.isArray(result.prioritizedConditions) ? result.prioritizedConditions : [];
-                                    return conditions.flatMap((cond: any) => {
-                                      return (Array.isArray(cond.biomarkers) ? cond.biomarkers : []).map((b: any, idx: number) => {
-                                        const key = (b.key || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-                                        const existingDef = profile?.customBiomarkers?.[key];
-                                        const oldGroup = existingDef?.standardMedicalGrouping || 'Other';
-                                        const isGroupChanged = existingDef && cond.conditionName && cond.conditionName !== oldGroup;
-                                        const isNew = !existingDef;
-                                        return (
-                                          <tr key={`${cond.conditionName}-${idx}`} className={isGroupChanged ? "bg-amber-50/50 dark:bg-amber-900/10" : isNew ? "bg-emerald-50/50 dark:bg-emerald-900/10" : "bg-white dark:bg-slate-950"}>
-                                            <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-200">{b.name || b.key}</td>
-                                            <td className="px-3 py-2">
-                                              {isGroupChanged ? (
-                                                <div className="flex flex-col gap-0.5">
-                                                  <span className="text-amber-600 dark:text-amber-400 font-bold">{cond.conditionName}</span>
-                                                  <span className="text-[8px] text-slate-400 line-through">{oldGroup}</span>
-                                                </div>
-                                              ) : (
-                                                <span className="text-slate-600 dark:text-slate-400">{cond.conditionName}</span>
-                                              )}
-                                            </td>
-                                            <td className="px-3 py-2">
-                                              {isNew ? (
-                                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">New</span>
-                                              ) : isGroupChanged ? (
-                                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 uppercase tracking-wider">Changed</span>
-                                              ) : (
-                                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider">Unchanged</span>
-                                              )}
-                                            </td>
-                                          </tr>
-                                        );
-                                      });
-                                    });
-                                  })()}
-                                </tbody>
-                              </table>
-                            </div>
-                            <div className="text-[10px] space-y-1">
-                              {msg.agentResult.summary?.primaryDiagnosis && (
-                                <p className="text-slate-700 dark:text-slate-300"><span className="font-bold">Diagnosis:</span> {msg.agentResult.summary.primaryDiagnosis}</p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                      {['agent1', 'agent2', 'agent3', 'agent4'].includes(msg.agentType || '') && msg.agentResult && (
+                        <AgentResultTable
+                          agentType={msg.agentType as 'agent1' | 'agent2' | 'agent3' | 'agent4'}
+                          agentResult={msg.agentResult}
+                          profile={profile}
+                          biomarkerHistory={biomarkerHistory || []}
+                          initialRawText={(() => {
+                            const precedingUserMsg = messages
+                              .slice(0, idx)
+                              .reverse()
+                              .find(m => m.role === 'user');
+                            return precedingUserMsg?.content || '';
+                          })()}
+                          onApplyChanges={async () => {
+                            if (onAgentFinish) {
+                              const isContinuation = !!(msg.agentResult?.hasMoreMarkers || msg.agentResult?.hasMore || msg.agentResult?.needsContinuation || msg.agentResult?.status === 'needs_continuation');
+                              if (isContinuation) {
+                                await handleContinueExtractionChunk(msg);
+                              } else {
+                                await onAgentFinish(msg.agentType!, msg.agentResult);
+                                setLoggedMessageIds(prev => [...prev, msg.id]);
+                                onClose();
+                              }
+                            }
+                          }}
+                        />
                       )}
 
                       {msg.agentType === 'agent5' && msg.agentResult && (
@@ -2109,7 +1925,7 @@ export default function LogChat({
                       )}
 
                       {/* Confirm Button */}
-                      {msg.agentResult && (msg.agentType !== 'agent1' || msg.agentTypeStep === 'agent1_step3' || !msg.agentTypeStep) && (
+                      {msg.agentResult && !['agent1', 'agent2', 'agent3', 'agent4'].includes(msg.agentType || '') && (
                         <button
                           type="button"
                           onClick={async () => {
@@ -2236,13 +2052,13 @@ export default function LogChat({
                             className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/10 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                           >
                             <Plus className="w-4 h-4" />
-                            {msg.mode === 'modify' ? 'Apply modifications' : msg.status === 'needs_continuation' ? 'Save and continue to next batch' : 'Save extracted data'}
+                            {msg.mode === 'modify' ? 'Apply modifications' : (msg.status === 'needs_continuation' || msg.agentResult?.status === 'needs_continuation') ? 'Save and continue to next batch' : 'Save extracted data'}
                           </button>
                           
                           <button
                             onClick={() => {
                               setLoggedMessageIds(prev => [...prev, msg.id]);
-                              if (msg.status === 'needs_continuation') {
+                              if (msg.status === 'needs_continuation' || msg.agentResult?.status === 'needs_continuation') {
                                 handleSend("Cancel extraction.");
                               }
                             }}
@@ -2282,7 +2098,23 @@ export default function LogChat({
                           <img src={msg.imageUrl} alt="Attached meal" className="w-full h-full object-cover" />
                         </div>
                       ) : null}
-                      <p className="whitespace-pre-line break-words">{msg.content}</p>
+                      {msg.content.includes('Here is the suggestion:\n\n') ? (
+                        <div className="whitespace-pre-line break-words text-sm">
+                          {msg.content.split('Here is the suggestion:\n\n')[0]}
+                          Here is the suggestion:
+                          <div className="mt-2 mb-2 p-2 bg-indigo-700/30 rounded border border-indigo-400/30 font-mono text-xs overflow-hidden h-10 relative cursor-pointer"
+                               onClick={() => {
+                                  const jsonStr = msg.content.split('Here is the suggestion:\n\n')[1].split('\n\nCould you please')[0];
+                                  setFullScreenJson(jsonStr);
+                               }}
+                          >
+                            <span className="text-indigo-200 hover:text-white underline">(previous review)</span>
+                          </div>
+                          {msg.content.split('\n\nCould you please')[1] ? 'Could you please' + msg.content.split('\n\nCould you please')[1] : ''}
+                        </div>
+                      ) : (
+                        <p className="whitespace-pre-line break-words">{msg.content}</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2321,7 +2153,7 @@ export default function LogChat({
                     <div className="flex items-center gap-2.5 min-w-0">
                       {log.imageUrl || (log.imageUrls && log.imageUrls.length > 0) ? (
                         <img 
-                          src={log.imageUrl || log.imageUrls?.[0]} 
+                          src={resolveFoodImage(log.imageUrl || log.imageUrls?.[0], foodLogs)} 
                           alt={log.name} 
                           className="w-8 h-8 rounded-lg object-cover border border-slate-100 dark:border-slate-700 shrink-0"
                           referrerPolicy="no-referrer"
@@ -2527,6 +2359,62 @@ export default function LogChat({
                 className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
               >
                 Close View
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Full Screen JSON Viewer */}
+      {fullScreenJson && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[120] flex items-center justify-center p-4 animation-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[32px] shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden animate-scale-up">
+            
+            {/* Modal Header */}
+            <div className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800/80 px-6 py-4 flex items-center justify-between shrink-0 font-sans">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600/10 flex items-center justify-center text-indigo-600">
+                  <Table className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-950 dark:text-slate-100 font-display">
+                    Previous Review Data
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    The JSON data provided for context in this conversation step.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFullScreenJson(null)}
+                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 dark:text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-auto p-6 bg-slate-50/35 dark:bg-slate-950/20 font-sans">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm p-4 overflow-auto">
+                <pre className="text-xs font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">
+                  {fullScreenJson}
+                </pre>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800/80 px-6 py-4 flex items-center justify-between shrink-0 font-sans">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Read-only view
+              </span>
+              <button
+                type="button"
+                onClick={() => setFullScreenJson(null)}
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+              >
+                Close
               </button>
             </div>
 
