@@ -338,25 +338,32 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
       let prebuiltIngestTrace: any = null;
 
       if (dbKind === 'medical' && !images && !photoUrls.length && !photoUrl && !imageUrls?.length) {
-        // Attempt table extraction if no images
-        const { lexTable, buildIngestBatch, shouldAbortTablePath } = await import('./src/utils/biomarkerLifecycle.js');
+        const {
+          lexTable,
+          buildIngestBatch,
+          shouldAbortTablePath,
+          leftoverTextFromTrace,
+        } = await import('./src/utils/biomarkerLifecycle.js');
         const parsedRows = lexTable(finalMessage);
-        
-        // Basic heuristic: if it looks like a table
         const multiColRows = parsedRows.filter(r => r.length > 1);
         if (multiColRows.length > 1) {
           const trace = buildIngestBatch(parsedRows, jobId);
+          accumulatedLogs.push(`[System] Layer-1 lexer rows=${trace.totalInputRows} high=${trace.highConfidenceCount} flagged=${trace.flaggedCount} unmatched=${trace.unmatchedCount} skip=${trace.skippedCount}`);
           if (shouldAbortTablePath(trace)) {
              trace.abortedTablePath = true;
+             accumulatedLogs.push('[System] Layer-1 aborted (0 high-confidence). Full text to Parser.');
           } else {
              prebuiltIngestTrace = trace;
-             const unmatchedRows = trace.rows?.filter(r => r.bucket === 'unmatched') || [];
-             if (unmatchedRows.length > 0) {
-               finalMessage = unmatchedRows.map(r => r.comment || '').join('\n');
+             const leftover = leftoverTextFromTrace(trace);
+             if (leftover) {
+               finalMessage = leftover;
+               accumulatedLogs.push(`[System] Layer-1 leftover ${trace.unmatchedCount} rows to Parser.`);
              } else {
-               finalMessage = ''; // Nothing left for LLM
+               finalMessage = '';
              }
           }
+        } else {
+          accumulatedLogs.push(`[System] Layer-1 lexer did not see a multi-row table (lines=${parsedRows.length}).`);
         }
       }
 
@@ -419,32 +426,19 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
       if (prebuiltIngestTrace && !finalMessage && (!images || images.length === 0) && (!photoUrls || photoUrls.length === 0)) {
         accumulatedLogs.push(`[System] Intercepted table. 0 unmatched rows. Skipping LLM.`);
         
-        const highConfRows = prebuiltIngestTrace.rows?.filter((r: any) => r.bucket === 'high_confidence') || [];
-        const flaggedRows = prebuiltIngestTrace.rows?.filter((r: any) => r.bucket === 'flagged') || [];
-        
-        let extractedDate = new Date().toISOString().split('T')[0];
-        if (payload.imageDates && payload.imageDates.length > 0) {
-          extractedDate = payload.imageDates[0];
-        }
-        
-        const modificationCommand = flaggedRows.map((r: any) => ({
-          action: 'update_biomarker',
-          keyName: r.canonicalKey,
-          date: extractedDate,
-          oldValue: r.rawValue,
-          reason: r.comment || 'Flagged for review'
-        }));
+        const {
+          stagedRowsToExtractedData,
+          flaggedRowsToModificationCommands,
+        } = await import('./src/utils/biomarkerLifecycle.js');
+        const extracted = stagedRowsToExtractedData(prebuiltIngestTrace);
+        const modificationCommand = flaggedRowsToModificationCommands(prebuiltIngestTrace);
 
         finalData = {
-          extractedData: highConfRows.map((r: any) => ({
-            name: r.printedName,
-            value: r.rawValue,
-            unit: r.rawUnit,
-            biomarker: r.canonicalKey,
-            date: extractedDate
-          })),
+          extractedData: extracted,
           modificationCommand: modificationCommand.length > 0 ? modificationCommand : undefined,
-          text: 'I have parsed the structured table. No leftover rows to extract.',
+          text: `I matched ${prebuiltIngestTrace.highConfidenceCount || 0} lab rows automatically${prebuiltIngestTrace.flaggedCount ? ` and flagged ${prebuiltIngestTrace.flaggedCount} for unit review` : ''}. Review the table and Apply.`,
+          hasMoreMarkers: false,
+          estimatedTotalMarkers: extracted.length,
           ingestTrace: prebuiltIngestTrace
         };
       } else {
@@ -576,6 +570,11 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
           throw new Error(lastErr.replace(/^\[error\]\s*/, ''));
         }
         throw new Error('Stream finished but no final result data was received');
+      }
+
+      if (prebuiltIngestTrace && (dbKind === 'medical' || kind === 'medical')) {
+        const { mergeStagedExtract } = await import('./src/utils/biomarkerLifecycle.js');
+        finalData = mergeStagedExtract(finalData, prebuiltIngestTrace);
       }
 
       if (finalData.needsPortionClarify) {

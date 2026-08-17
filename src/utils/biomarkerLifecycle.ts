@@ -53,36 +53,98 @@ const RANGE_VARIES_BY: Record<string, RangeVariesBy[]> = {
 
 import type { IngestTrace, IngestTraceRow, ClassId } from '../types';
 
+/** EMIS/NHS Web pastes often concatenate quoted CSV records with a space, not a newline. */
+const QUOTED_DMY_RECORD = /"\s+"(?=\d{1,2}-[A-Za-z]{3}-\d{2,4}")/g;
+const QUOTED_ISO_RECORD = /"\s+"(?=\d{4}-\d{2}-\d{2}")/g;
+const PANEL_NAME_RE = /^(renal profile|liver function(?: test)?|bone profile|full blood count.*|fbc|serum lipids|lipid profile|point of care testing|urea and electrolytes|u(?:and|&)?e)$/i;
+const HEADER_CELL_RE = /^(date|test name|result|normal range|comment|reference range|value|unit)$/i;
+const MONTHS: Record<string, string> = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+};
+
+export function normalizeLabTableText(text: string): string {
+  if (!text) return '';
+  return String(text)
+    .replace(/^\uFEFF/, '')
+    .replace(QUOTED_DMY_RECORD, '"\n"')
+    .replace(QUOTED_ISO_RECORD, '"\n"');
+}
+
+function parseCsvLine(cleanLine: string): string[] {
+  const fields: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < cleanLine.length; i++) {
+    const char = cleanLine[i];
+    if (char === '"') {
+      if (inQuotes && cleanLine[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      fields.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
 export function lexTable(text: string): string[][] {
   if (!text) return [];
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const lines = normalizeLabTableText(text).split(/\r?\n/).filter((l) => l.trim().length > 0);
   return lines.map((line) => {
-    // Strip trailing OCR noise or carriage returns
     const cleanLine = line.trim();
-    // RFC 4180 / tab / pipe / multi-space delimiter
     if (cleanLine.includes('\t')) return cleanLine.split('\t').map((c) => c.trim());
     if (cleanLine.includes('|')) return cleanLine.split('|').map((c) => c.trim()).filter(Boolean);
-    if (cleanLine.includes(',')) {
-      // Basic CSV field parse
-      const fields: string[] = [];
-      let current = '';
-      let inQuotes = false;
-      for (let i = 0; i < cleanLine.length; i++) {
-        const char = cleanLine[i];
-        if (char === '"') {
-          inQuotes = !inQuotes;
-        } else if (char === ',' && !inQuotes) {
-          fields.push(current.trim());
-          current = '';
-        } else {
-          current += char;
-        }
-      }
-      fields.push(current.trim());
-      return fields;
-    }
+    if (cleanLine.includes(',')) return parseCsvLine(cleanLine);
     return cleanLine.split(/\s{2,}/).map((c) => c.trim());
   });
+}
+
+export function parsePrintedDate(raw: string): string | null {
+  const s = String(raw || '').trim().replace(/^"|"$/g, '');
+  const dmy = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
+  if (dmy) {
+    const mm = MONTHS[dmy[2].toLowerCase()];
+    if (!mm) return null;
+    const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return `${year}-${mm}-${dmy[1].padStart(2, '0')}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return null;
+}
+
+export function parseResultCell(raw: string): { numeric: number | null; unit: string; qualitative: string | null } {
+  const s = String(raw || '').trim();
+  if (!s) return { numeric: null, unit: '', qualitative: null };
+  if (/^(negative|positive|trace|not detected|detected|nil|n\/a|na)$/i.test(s)) {
+    return { numeric: null, unit: '', qualitative: s };
+  }
+  const bp = s.match(/^(\d+)\s*\/\s*(\d+)\s*(.*)$/);
+  if (bp && /mmhg|mm\s*hg/i.test(bp[3] || 'mmHg')) {
+    return { numeric: null, unit: (bp[3] || 'mmHg').trim() || 'mmHg', qualitative: `${bp[1]} / ${bp[2]}` };
+  }
+  const m = s.match(/^(-?\d+(?:\.\d+)?)\s*(.*)$/);
+  if (m) return { numeric: parseFloat(m[1]), unit: (m[2] || '').trim(), qualitative: null };
+  return { numeric: null, unit: '', qualitative: s };
+}
+
+/** True only when the name maps to a catalog/alias key, not a slug invented from the print name. */
+export function resolveKnownBiomarkerKey(raw: string): string {
+  if (!raw) return '';
+  const mapped = getMappedBiomarkerKey(raw);
+  if (!mapped) return '';
+  if (biomarkerDefinitions.some((d) => d.key === mapped)) return mapped;
+  const slug = raw.toLowerCase().replace(/[^a-z0-9_]/g, '');
+  const slugNoUs = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (mapped === slug || mapped === slugNoUs) return '';
+  return mapped;
 }
 
 export function buildIngestBatch(rows: string[][], jobId?: string): IngestTrace {
@@ -104,70 +166,105 @@ export function buildIngestBatch(rows: string[][], jobId?: string): IngestTrace 
   };
 
   rows.forEach((row, idx) => {
-    const rawRowString = row.join(' ');
-    
-    // Skip panel headers, page footers, or non-data lab metadata rows
-    const isLabMeta = /^(page\s+\d+|lab\s+ref|patient\s+id|dob:|date\s+of\s+birth|test\s+name|reference\s+range|\*\*\*)/i.test(rawRowString.trim());
-    if (row.length <= 1 || isLabMeta) {
+    const cells = row.map((c) => String(c || '').trim());
+    const rawRowString = cells.join(' ');
+    const dateFromCol = parsePrintedDate(cells[0] || '');
+    const headerish = cells.filter(Boolean).every((c) => HEADER_CELL_RE.test(c))
+      || /^(page\s+\d+|lab\s+ref|patient\s+id|dob:|date\s+of\s+birth|test\s+name|reference\s+range|\*\*\*)/i.test(rawRowString.trim());
+    const nameIdx = dateFromCol ? 1 : 0;
+    const printedName = cells[nameIdx] || cells[0] || '';
+    const isPanel = PANEL_NAME_RE.test(printedName) || (cells.length <= 2 && !/\d/.test(rawRowString));
+    if (cells.filter(Boolean).length <= 1 || headerish || isPanel) {
       trace.skippedCount = (trace.skippedCount || 0) + 1;
-      trace.rows!.push({ 
-        sourceRowIndex: idx, 
-        bucket: 'skip', 
-        why: isLabMeta ? 'Lab metadata / header line' : 'Too few columns',
-        printedName: row[0] || ''
+      trace.rows!.push({
+        sourceRowIndex: idx,
+        bucket: 'skip',
+        why: headerish ? 'Lab metadata / header line' : isPanel ? 'Panel / section header' : 'Too few columns',
+        printedName,
+        date: dateFromCol,
+        comment: rawRowString,
       });
       return;
     }
 
-    // Heuristics for NHS/EMIS printout
-    let printedName = '';
     let rawValueStr = '';
     let rawUnit = '';
-    
+    let printedRange = '';
     let matchedKey = '';
-    for (let i = 0; i < row.length; i++) {
-      const mapped = getMappedBiomarkerKey(row[i]);
-      if (mapped) {
-        matchedKey = mapped;
-        printedName = row[i];
-        rawValueStr = row[i + 1] || '';
-        rawUnit = row[i + 2] || '';
-        break;
+    let qualitative: string | null = null;
+
+    if (dateFromCol && cells.length >= 3) {
+      printedName && (matchedKey = resolveKnownBiomarkerKey(printedName));
+      const parsed = parseResultCell(cells[2] || '');
+      rawValueStr = parsed.numeric != null ? String(parsed.numeric) : (cells[2] || '');
+      rawUnit = parsed.unit;
+      qualitative = parsed.qualitative;
+      printedRange = cells[3] || '';
+    } else {
+      for (let i = 0; i < cells.length; i++) {
+        const mapped = resolveKnownBiomarkerKey(cells[i]);
+        if (mapped) {
+          matchedKey = mapped;
+          const parsed = parseResultCell(cells[i + 1] || '');
+          if (parsed.numeric != null || parsed.qualitative) {
+            rawValueStr = parsed.numeric != null ? String(parsed.numeric) : (cells[i + 1] || '');
+            rawUnit = parsed.unit || cells[i + 2] || '';
+            qualitative = parsed.qualitative;
+          } else {
+            rawValueStr = cells[i + 1] || '';
+            rawUnit = cells[i + 2] || '';
+          }
+          break;
+        }
       }
     }
-    
+
     if (!matchedKey) {
       trace.unmatchedCount = (trace.unmatchedCount || 0) + 1;
       trace.rows!.push({
         sourceRowIndex: idx,
         bucket: 'unmatched',
-        printedName: row[0] || row[1] || '',
-        rawValue: row[2] || row[1] || null,
-        comment: rawRowString
+        printedName,
+        rawValue: cells[dateFromCol ? 2 : 1] || cells[1] || null,
+        date: dateFromCol,
+        printedRange,
+        comment: cells.map((c) => `"${c.replace(/"/g, '""')}"`).join(','),
+        class: 'COMPLETENESS',
       });
       return;
     }
 
     const valNum = parseFloat(rawValueStr);
-    const catalogDef = biomarkerDefinitions.find(d => d.key === matchedKey);
+    const catalogDef = biomarkerDefinitions.find((d) => d.key === matchedKey);
     const catalogUnit = catalogDef?.unit || '';
-    
+
     let bucket: 'high_confidence' | 'flagged' | 'unmatched' = 'high_confidence';
     let classTag: string = 'IDENTITY_PARALLEL_KEY';
     let why = '';
-    
-    if (!isNaN(valNum)) {
-      if (catalogUnit && rawUnit && normUnit(catalogUnit) !== normUnit(rawUnit)) {
-         bucket = 'flagged';
-         classTag = 'CONFORMANCE_UNIT';
-         why = `Unit mismatch: ${rawUnit} vs catalog ${catalogUnit}`;
+
+    if (qualitative && isNaN(valNum)) {
+      bucket = 'unmatched';
+      classTag = 'COMPLETENESS';
+      why = 'Qualitative result — leftover Parser';
+    } else if (!isNaN(valNum)) {
+      if (catalogUnit && rawUnit && !unitsCompatible(catalogUnit, rawUnit, matchedKey)) {
+        const convertible = convertViaTable(matchedKey, valNum, rawUnit, catalogUnit);
+        bucket = 'flagged';
+        classTag = 'CONFORMANCE_UNIT';
+        why = convertible.ok
+          ? `Unit mismatch: ${rawUnit} vs catalog ${catalogUnit}`
+          : `Unknown unit pair ${rawUnit} → ${catalogUnit}`;
       } else if (isBiomarkerValueImprobable(matchedKey, valNum, catalogDef?.normalRange)) {
-         bucket = 'flagged';
-         classTag = 'PLAUSIBILITY';
-         why = `Implausible value for ${matchedKey}`;
+        bucket = 'flagged';
+        classTag = 'PLAUSIBILITY';
+        why = `Implausible value for ${matchedKey}`;
       }
+    } else {
+      bucket = 'unmatched';
+      classTag = 'COMPLETENESS';
+      why = 'No numeric result';
     }
-    
+
     if (bucket === 'flagged') {
       trace.flaggedCount = (trace.flaggedCount || 0) + 1;
     } else if (bucket === 'high_confidence') {
@@ -179,12 +276,16 @@ export function buildIngestBatch(rows: string[][], jobId?: string): IngestTrace 
     trace.rows!.push({
       sourceRowIndex: idx,
       printedName,
-      rawValue: isNaN(valNum) ? rawValueStr : valNum,
+      rawValue: isNaN(valNum) ? (qualitative || rawValueStr) : valNum,
       rawUnit,
       canonicalKey: matchedKey,
       bucket,
       class: classTag as any,
-      comment: why ? why : undefined
+      why: why || undefined,
+      date: dateFromCol,
+      qualitativeValue: qualitative || undefined,
+      printedRange: printedRange || undefined,
+      comment: bucket === 'unmatched' ? cells.map((c) => `"${c.replace(/"/g, '""')}"`).join(',') : (why || undefined),
     });
   });
   
@@ -202,6 +303,95 @@ export function shouldAbortTablePath(trace: any): boolean {
     return true;
   }
   return false;
+}
+
+export function unitsCompatible(fromUnit: string, toUnit: string, key?: string): boolean {
+  const a = normUnit(fromUnit);
+  const b = normUnit(toUnit);
+  if (!a || !b) return !a && !b;
+  if (a === b) return true;
+  const aliases: Record<string, string> = {
+    '10*9/l': '10^9/l',
+    '10e9/l': '10^9/l',
+    'x10^9/l': '10^9/l',
+    '10*12/l': '10^12/l',
+    '10e12/l': '10^12/l',
+    'ml/min/1.73m2': 'ml/min/1.73m²',
+    'ml/min/1.73m*2': 'ml/min/1.73m²',
+    'u/l': 'iu/l',
+  };
+  if ((aliases[a] || a) === (aliases[b] || b)) return true;
+  return false;
+}
+
+export function leftoverTextFromTrace(trace: IngestTrace): string {
+  const rows = (trace.rows || []).filter((r) => r.bucket === 'unmatched');
+  if (!rows.length) return '';
+  const header = '"Date","Test Name","Result","Normal Range","Comment"';
+  const body = rows.map((r) => {
+    if (r.comment && r.comment.includes(',')) return r.comment;
+    const result = r.qualitativeValue
+      || (r.rawValue != null ? `${r.rawValue}${r.rawUnit ? ' ' + r.rawUnit : ''}` : '');
+    return [r.date || '', r.printedName || '', result, r.printedRange || '', '']
+      .map((c) => `"${String(c).replace(/"/g, '""')}"`)
+      .join(',');
+  });
+  return [header, ...body].join('\n');
+}
+
+export function stagedRowsToExtractedData(trace: IngestTrace): any[] {
+  return (trace.rows || [])
+    .filter((r) => r.bucket === 'high_confidence' || r.bucket === 'flagged')
+    .map((r) => ({
+      biomarker: r.canonicalKey,
+      display_name: r.printedName || null,
+      date: r.date || null,
+      numeric_value: typeof r.rawValue === 'number' ? r.rawValue : null,
+      qualitative_value: r.qualitativeValue || null,
+      value: r.rawValue,
+      unit: r.rawUnit || '',
+      explanation: r.bucket === 'flagged' ? (r.why || r.comment || 'Flagged for review') : 'Layer-1 table match',
+      printedRange: r.printedRange,
+    }));
+}
+
+export function flaggedRowsToModificationCommands(trace: IngestTrace): any[] {
+  return (trace.rows || [])
+    .filter((r) => r.bucket === 'flagged' && r.canonicalKey)
+    .map((r) => ({
+      action: 'update_biomarker',
+      keyName: r.canonicalKey,
+      date: r.date || undefined,
+      oldValue: r.rawValue,
+      reason: r.why || r.comment || 'Flagged for review',
+    }));
+}
+
+export function mergeStagedExtract(payload: any, trace?: IngestTrace | null): any {
+  if (!trace || !trace.rows?.length) return payload;
+  const staged = stagedRowsToExtractedData(trace);
+  const llm = Array.isArray(payload?.extractedData) ? payload.extractedData : [];
+  const seen = new Set(staged.map((s) => `${s.biomarker}|${s.date}|${s.numeric_value}`));
+  const extra = llm.filter((item: any) => {
+    const key = `${item.biomarker}|${item.date}|${item.numeric_value ?? item.value ?? ''}`;
+    return !seen.has(key);
+  });
+  const cmds = [
+    ...(Array.isArray(payload?.modificationCommand) ? payload.modificationCommand : []),
+    ...flaggedRowsToModificationCommands(trace),
+  ];
+  const extractedData = [...staged, ...extra];
+  return {
+    ...payload,
+    extractedData,
+    hasMoreMarkers: extra.length ? !!payload?.hasMoreMarkers : false,
+    estimatedTotalMarkers: extractedData.length,
+    ingestTrace: payload?.ingestTrace || trace,
+    modificationCommand: cmds.length ? cmds : payload?.modificationCommand,
+    text: payload?.text && extra.length
+      ? payload.text
+      : `I matched ${staged.length} lab row${staged.length === 1 ? '' : 's'} automatically${extra.length ? ` and extracted ${extra.length} leftover name${extra.length === 1 ? '' : 's'}` : ''}. Review the table and Apply.`,
+  };
 }
 
 export function getRangeVariesBy(key: string): RangeVariesBy[] {

@@ -138,6 +138,17 @@ describe('Golden Biomarker — G-B2 EMIS / NHS Table Outer Regression', () => {
     expect(trace.sourceKind).toBe('table');
     expect(trace.totalInputRows).toBe(140);
     expect(rows.length).toBe(140);
+    expect(shouldAbortTablePath(trace)).toBe(false);
+    expect((trace.highConfidenceCount || 0) + (trace.flaggedCount || 0)).toBeGreaterThan(0);
+  });
+
+  it('splits a single-line quoted EMIS paste into records (production shape)', () => {
+    const oneLine = '"Date","Test Name","Result","Normal Range","Comment" "05-Jun-2026","Serum sodium","143 mmol/L","133 - 146 mmol/L","" "05-Jun-2026","HbA1c levl - IFCC standardised","40 mmol/mol","20 - 41 mmol/mol","" "05-Jun-2026","Renal profile","","","panel"';
+    const rows = lexTable(oneLine);
+    const trace = buildIngestBatch(rows, 'job_gb2_oneline');
+    expect(rows.length).toBeGreaterThanOrEqual(3);
+    expect(shouldAbortTablePath(trace)).toBe(false);
+    expect(trace.rows?.some((r) => r.canonicalKey === 'serum_sodium' && r.rawValue === 143)).toBe(true);
   });
 });
 

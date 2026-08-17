@@ -20,6 +20,14 @@ import {
   isLiveForUse,
   getBiomarkerRangeSourceInfo,
   recalibrateProfileOverlays,
+  lexTable,
+  buildIngestBatch,
+  shouldAbortTablePath,
+  leftoverTextFromTrace,
+  mergeStagedExtract,
+  parseResultCell,
+  parsePrintedDate,
+  resolveKnownBiomarkerKey,
 } from './biomarkerLifecycle';
 import { isValEmpty, sanitizeBiomarkerHistoryOnLoad } from './biomarkers';
 
@@ -489,6 +497,73 @@ describe('recalibrateProfileOverlays (7.5 Silent Calibrator)', () => {
     const res = recalibrateProfileOverlays(profile, ['creatinine']);
     expect(res.recalibratedCount).toBe(1);
     expect(res.updatedCustomBiomarkers.creatinine.overlayFingerprint).toBe('40-49|f|asian');
+  });
+});
+
+describe('Layer-1 EMIS / NHS table ingest', () => {
+  const emisOneLine = [
+    '"Date","Test Name","Result","Normal Range","Comment"',
+    '"09-Jun-2026","Sample site","","","(AlyssaFRS) - 01. Satisfactory - No Action Urine"',
+    '"09-Jun-2026","Chlamydia DNA detection","","","NEGATIVE"',
+    '"05-Jun-2026","HbA1c levl - IFCC standardised","40 mmol/mol","20 - 41 mmol/mol",""',
+    '"05-Jun-2026","Renal profile","","","(OlaFRS) - 01. Satisfactory - No Action"',
+    '"05-Jun-2026","Serum sodium","143 mmol/L","133 - 146 mmol/L",""',
+    '"05-Jun-2026","Serum creatinine","100 umol/L","64 - 104 umol/L",""',
+    '"05-Jun-2026","Serum HDL cholesterol level","1.5 mmol/L","0.9 - 1.7 mmol/L",""',
+    '"03-Jun-2026","Serum triglycerides","1.7 mmol/L","- mmol/L","."',
+    '"03-Jun-2026","Calculated LDL cholesterol lev","4.3 mmol/L","- mmol/L",""',
+  ].join(' ');
+
+  it('splits concatenated quoted EMIS records that have no newlines', () => {
+    expect(emisOneLine.includes('\n')).toBe(false);
+    const rows = lexTable(emisOneLine);
+    expect(rows.length).toBeGreaterThanOrEqual(9);
+    expect(rows[0][0].toLowerCase()).toContain('date');
+    expect(rows.some((r) => /serum sodium/i.test(r.join(' ')))).toBe(true);
+  });
+
+  it('stages known SI rows and leaves unknown / qualitative names unmatched', () => {
+    const trace = buildIngestBatch(lexTable(emisOneLine), 'job_emis_oneline');
+    expect(shouldAbortTablePath(trace)).toBe(false);
+    expect(trace.highConfidenceCount).toBeGreaterThanOrEqual(3);
+    const hba1c = trace.rows?.find((r) => r.canonicalKey === 'hba1c');
+    expect(hba1c?.bucket).toBe('high_confidence');
+    expect(hba1c?.rawValue).toBe(40);
+    expect(hba1c?.date).toBe('2026-06-05');
+    const sodium = trace.rows?.find((r) => r.canonicalKey === 'serum_sodium');
+    expect(sodium?.bucket).toBe('high_confidence');
+    expect(sodium?.rawValue).toBe(143);
+    const creat = trace.rows?.find((r) => r.canonicalKey === 'creatinine');
+    expect(creat?.bucket).toBe('high_confidence');
+    expect(creat?.rawValue).toBe(100);
+    const tg = trace.rows?.find((r) => r.canonicalKey === 'triglycerides');
+    expect(tg?.bucket).toBe('flagged');
+    expect(tg?.class).toBe('CONFORMANCE_UNIT');
+    const ldl = trace.rows?.find((r) => r.canonicalKey === 'ldl');
+    expect(ldl?.bucket).toBe('flagged');
+    expect(trace.rows?.some((r) => r.bucket === 'skip' && /renal profile/i.test(r.printedName || ''))).toBe(true);
+    const leftover = leftoverTextFromTrace(trace);
+    expect(leftover).toMatch(/Chlamydia|Sample site/i);
+    expect(leftover).not.toMatch(/Serum sodium/i);
+  });
+
+  it('mergeStagedExtract prepends Layer-1 rows so the parser table is not empty', () => {
+    const trace = buildIngestBatch(lexTable(emisOneLine), 'job_merge');
+    const merged = mergeStagedExtract({
+      extractedData: [{ biomarker: 'chlamydia_dna_detection', date: '2026-06-09', qualitative_value: 'NEGATIVE' }],
+      text: 'extracted leftovers',
+    }, trace);
+    expect(Array.isArray(merged.extractedData)).toBe(true);
+    expect(merged.extractedData.length).toBeGreaterThan(3);
+    expect(merged.extractedData.some((r: any) => r.biomarker === 'hba1c' && r.numeric_value === 40)).toBe(true);
+  });
+
+  it('parse helpers', () => {
+    expect(parsePrintedDate('05-Jun-2026')).toBe('2026-06-05');
+    expect(parseResultCell('143 mmol/L')).toEqual({ numeric: 143, unit: 'mmol/L', qualitative: null });
+    expect(parseResultCell('NEGATIVE').qualitative).toMatch(/NEGATIVE/i);
+    expect(resolveKnownBiomarkerKey('Sample site')).toBe('');
+    expect(resolveKnownBiomarkerKey('Serum sodium')).toBe('serum_sodium');
   });
 });
 

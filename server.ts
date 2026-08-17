@@ -55,6 +55,15 @@ import {
 } from './server_refine_scale.js';
 import { z } from "zod";
 import { getMappedBiomarkerKey } from './src/utils/biomarkers';
+import {
+  lexTable,
+  buildIngestBatch,
+  shouldAbortTablePath,
+  leftoverTextFromTrace,
+  stagedRowsToExtractedData,
+  flaggedRowsToModificationCommands,
+  mergeStagedExtract,
+} from './src/utils/biomarkerLifecycle';
 import { extractMostRecentImageDate } from './src/utils/dateUtils.js';
 import * as cheerio from "cheerio";
 import fs from "fs";
@@ -9843,6 +9852,45 @@ let {
       history = []; // One raw injection only.
     }
 
+    let ingestTrace = req.body.ingestTrace || null;
+    if (isExtractor && message) {
+      try {
+        const rows = lexTable(String(message));
+        const multiCol = rows.filter((r) => r.length > 1);
+        if (multiCol.length > 1) {
+          const trace = ingestTrace && ingestTrace.rows?.length ? ingestTrace : buildIngestBatch(rows);
+          const abort = shouldAbortTablePath(trace);
+          addDebugLog(`[Medical Analyze Agent] Layer-1 lexer rows=${trace.totalInputRows} high=${trace.highConfidenceCount} flagged=${trace.flaggedCount} unmatched=${trace.unmatchedCount} skip=${trace.skippedCount} abort=${abort}`, explicitSessionId);
+          if (!abort) {
+            ingestTrace = trace;
+            const leftover = leftoverTextFromTrace(trace);
+            if (!leftover) {
+              const extracted = stagedRowsToExtractedData(trace);
+              const cmds = flaggedRowsToModificationCommands(trace);
+              addDebugLog(`[Medical Analyze Agent] Layer-1 complete (${extracted.length} staged). Skipping LLM.`, explicitSessionId);
+              return res.json({
+                text: `I matched ${trace.highConfidenceCount} lab row${trace.highConfidenceCount === 1 ? '' : 's'} automatically${trace.flaggedCount ? ` and flagged ${trace.flaggedCount} for unit review` : ''}. Review the table and Apply.`,
+                agentType,
+                extractedData: extracted,
+                hasMoreMarkers: false,
+                lastProcessedIndex: null,
+                estimatedTotalMarkers: extracted.length,
+                unmappedTests: [],
+                ingestTrace: trace,
+                modificationCommand: cmds.length ? cmds : undefined,
+              });
+            }
+            message = leftover;
+            addDebugLog(`[Medical Analyze Agent] Layer-1 leftover ${trace.unmatchedCount} rows sent to Parser.`, explicitSessionId);
+          }
+        } else {
+          addDebugLog(`[Medical Analyze Agent] Layer-1 lexer did not see a multi-row table (lines=${rows.length}).`, explicitSessionId);
+        }
+      } catch (lexErr: any) {
+        addDebugLog(`[Medical Analyze Agent] Layer-1 lexer failed open: ${lexErr?.message || lexErr}`, explicitSessionId);
+      }
+    }
+
     addDebugLog(`[Medical Analyze Agent] Request received for agentType: ${agentType || 'None'}. Message: "${String(message).substring(0, 100)}..."`, explicitSessionId);
     sendLog('status', `Analyzing your message${agentType ? ` (${agentType})` : ''}...`);
     if (history && history.length > 0) {
@@ -10890,7 +10938,7 @@ Your output MUST be a valid JSON object matching the schema provided.`;
         } catch (e) {
           cleanJson = textOutput.replace(/```(?:json)?/gi, "").trim();
         }
-        return res.json({
+        return res.json(mergeStagedExtract({
           text,
           agentType,
           extractedData: cleanJson,
@@ -10901,7 +10949,7 @@ Your output MUST be a valid JSON object matching the schema provided.`;
           currentBatch: req.body.currentBatch || 1,
           agentPrompt: fullPromptSent,
           apiCalls: [{ type: 'gemini', label: `Medical History Agent (${engine || 'gemini-3.5-flash-lite'})` }]
-        });
+        }, ingestTrace));
       }
 
       if (agentType === "biomarker_review") {
