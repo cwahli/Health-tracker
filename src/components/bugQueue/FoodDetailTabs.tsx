@@ -12,6 +12,10 @@ export type FoodDetailTabsProps = {
   onAddDish?: () => void;
   onReplayLog?: () => void;
   replayingLog?: boolean;
+  onReplayCatalog?: () => void;
+  replayingCatalog?: boolean;
+  onReanalyze?: () => void;
+  canReanalyze?: boolean;
   className?: string;
 };
 
@@ -73,6 +77,10 @@ export const FoodDetailTabs: React.FC<FoodDetailTabsProps> = ({
   onAddDish,
   onReplayLog,
   replayingLog = false,
+  onReplayCatalog,
+  replayingCatalog = false,
+  onReanalyze,
+  canReanalyze = false,
   className = '',
 }) => {
   const journey = Array.isArray(board?.journey) ? board.journey : [];
@@ -179,6 +187,7 @@ export const FoodDetailTabs: React.FC<FoodDetailTabsProps> = ({
           </button>
         </div>
 
+        <div className="flex items-center gap-1 shrink-0">
         {onReplayLog && (
           <button
             type="button"
@@ -191,6 +200,31 @@ export const FoodDetailTabs: React.FC<FoodDetailTabsProps> = ({
             <span>Replay log</span>
           </button>
         )}
+        {onReplayCatalog && (
+          <button
+            type="button"
+            disabled={replayingCatalog}
+            onClick={onReplayCatalog}
+            className="py-1.5 px-2.5 rounded-xl bg-teal-950/70 hover:bg-teal-900 border border-teal-500/40 text-teal-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 disabled:opacity-50"
+            title="Frozen scout × dictionary. Preview only — does not mark the card done."
+          >
+            {replayingCatalog ? <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-400" /> : <Play className="w-3.5 h-3.5 text-teal-400" />}
+            <span>Replay catalog</span>
+          </button>
+        )}
+        {onReanalyze && (
+          <button
+            type="button"
+            disabled={!canReanalyze}
+            onClick={onReanalyze}
+            className="py-1.5 px-2.5 rounded-xl bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 disabled:opacity-50"
+            title={canReanalyze ? 'Open the saved food job' : 'No saved job_id on this card'}
+          >
+            <Play className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Re-analyze</span>
+          </button>
+        )}
+        </div>
       </div>
 
       {/* Pane: Checks */}

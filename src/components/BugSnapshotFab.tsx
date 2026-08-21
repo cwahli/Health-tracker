@@ -1080,48 +1080,8 @@ export default function BugSnapshotFab({
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
-      if (effectiveCategory === 'foodcart' && goldenLines.length > 0) {
-        try {
-          const fx = await collectOriginalFixture(activeJob);
-          const gRes = await fetch('/api/golden/cases', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jobId: activeJob?.id || env.activeJobId,
-              title:
-                goldenTitle.trim() ||
-                newTitle.trim() ||
-                deriveGoldenTitle({
-                  foodLog: resolvedFoodLog,
-                  scout: resolvedScoutItems,
-                  jobId: activeJob?.id,
-                  fallback: symptom.trim(),
-                }) ||
-                'Golden meal',
-              tag_id: json.tag_id || tagId || undefined,
-              logText: resolvedBackendLogs || combinedLogs,
-              scout: resolvedScoutItems,
-              foodLog: resolvedFoodLog,
-              expectedMeal: goldenLines,
-              extraIssues: allRemainingLines,
-              originalQuery: fx.query,
-              photos: fx.photos && fx.photos.length > 0 ? fx.photos : shots,
-              errorText: sanitizeJobErrorText(
-                String(activeJob?.error?.message || activeJob?.error || ''),
-                String(resolvedBackendLogs || combinedLogs || ''),
-                activeJob?.status
-              ),
-              jobStatus: activeJob?.status,
-            }),
-          });
-          const gJson = await gRes.json().catch(() => ({}));
-          if (gRes.ok) {
-            setSuccess((s) => `${s || 'Saved.'} Golden case ${gJson.id?.slice?.(0, 8) || ''} — ${gJson.fail_count ?? '?'} checks failing.`);
-          }
-        } catch (gErr) {
-          console.warn('[BugSnapshot] golden create failed', gErr);
-        }
-      }
+      // Q-6.4 item 6: snap writes issue_tags only. Do not mint D1 golden_cases / disk inbox/.
+      // Replay catalog / log on food #n uses POST /api/golden/preview.
 
       // Save directly to AI Agent Diagnostic Log History
       try {

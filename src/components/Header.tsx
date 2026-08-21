@@ -182,6 +182,7 @@ interface HeaderProps {
   onNavigateTab?: (tab: string) => void;
   /** Job currently open in the food/medical unified modal */
   viewingJobId?: string | null;
+  onViewJob?: (jobId: string) => void;
 }
 
 const getSessionId = (): string => {
@@ -300,6 +301,7 @@ export default function Header({
   onOpenUndo,
   onNavigateTab,
   viewingJobId = null,
+  onViewJob,
 }: HeaderProps) {
   const [jobs, setJobs] = useState(() => JobStore.getAllJobs());
   useEffect(() => {
@@ -1490,6 +1492,7 @@ export default function Header({
       <BugTrackerModal
         isOpen={showBugTracker}
         onClose={() => setShowBugTracker(false)}
+        onViewJob={onViewJob}
       />
       <SyncDiagnosticsModal
         isOpen={showSyncDiagnostics}
@@ -4573,6 +4576,7 @@ export default function Header({
       <BugTrackerModal
         isOpen={showBugTracker}
         onClose={() => setShowBugTracker(false)}
+        onViewJob={onViewJob}
       />
       <SyncDiagnosticsModal
         isOpen={showSyncDiagnostics}

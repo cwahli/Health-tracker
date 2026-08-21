@@ -52,13 +52,15 @@ import {
 } from '../utils/bugWorkItem';
 import { queueKpis, tagIsFixed } from '../utils/bugQueueKpis';
 import { FoodDetailTabs } from './bugQueue';
+import { buildTapeReplayBody, reanalyzeJobId } from '../utils/bugTapeReplay';
 
 interface BugTrackerModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onViewJob?: (jobId: string) => void;
 }
 
-export default function BugTrackerModal({ isOpen, onClose }: BugTrackerModalProps) {
+export default function BugTrackerModal({ isOpen, onClose, onViewJob }: BugTrackerModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<{
@@ -118,6 +120,7 @@ export default function BugTrackerModal({ isOpen, onClose }: BugTrackerModalProp
   const [zippingTagId, setZippingTagId] = useState<string | null>(null);
   const [makingGoldenId, setMakingGoldenId] = useState<string | null>(null);
   const [replayingLogId, setReplayingLogId] = useState<string | null>(null);
+  const [replayingCatalogId, setReplayingCatalogId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
@@ -389,6 +392,65 @@ export default function BugTrackerModal({ isOpen, onClose }: BugTrackerModalProp
     }
   };
 
+  const handleReplayCatalog = async (tag: any) => {
+    if (!tag) return;
+    setReplayingCatalogId(tag.id);
+    try {
+      const detail = selectedTagDetail;
+      const ev =
+        detail?.now?.current_evidence ||
+        detail?.bug?.current_evidence ||
+        tag?.now?.current_evidence ||
+        tag?.current_evidence ||
+        {};
+      const board = (detail as any)?.board;
+      const scout =
+        ev?.scoutItems ||
+        ev?.scout ||
+        board?.scout ||
+        (detail as any)?.bug?.scout ||
+        null;
+      const foodLog = ev?.pendingFoodLog || ev?.foodLog || (detail as any)?.bug?.foodLog || null;
+      const jobId = ev?.job_id || ev?.jobId || null;
+      const extraIssues = detail?.now?.remaining || tag?.remaining || [];
+      const body = buildTapeReplayBody({
+        mode: 'catalog',
+        jobId,
+        scout,
+        foodLog,
+        extraIssues,
+      });
+      const pRes = await fetch('/api/golden/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (pRes.ok) {
+        const next = await pRes.json().catch(() => null);
+        if (next) {
+          setSelectedTagDetail((prev) => (prev ? { ...prev, board: next } : prev));
+        }
+      }
+    } catch (e) {
+      console.warn('[BugTracker] Replay catalog failed:', e);
+    } finally {
+      setReplayingCatalogId(null);
+    }
+  };
+
+  const handleReanalyze = (tag: any) => {
+    const ev =
+      selectedTagDetail?.now?.current_evidence ||
+      selectedTagDetail?.bug?.current_evidence ||
+      tag?.now?.current_evidence ||
+      tag?.current_evidence ||
+      null;
+    const jobId = reanalyzeJobId(ev);
+    if (!jobId || !onViewJob) return;
+    onClose();
+    onViewJob(jobId);
+  };
+
   const fetchTagDetail = async (tagId: string) => {
     setDetailLoading(true);
     try {
@@ -425,6 +487,7 @@ export default function BugTrackerModal({ isOpen, onClose }: BugTrackerModalProp
         console.warn('Failed to load local bug cache:', e);
       }
       load();
+      fetch('/api/bugs/migrate-inbox', { method: 'POST' }).catch(() => {});
     }
   }, [isOpen]);
 
@@ -1266,6 +1329,17 @@ export default function BugTrackerModal({ isOpen, onClose }: BugTrackerModalProp
                                   goldenLines={(selectedTagDetail as any)?.expectedMeal || selectedTag.expectedMeal || []}
                                   onReplayLog={() => handleReplayLog(selectedTag)}
                                   replayingLog={replayingLogId === selectedTag.id}
+                                  onReplayCatalog={() => handleReplayCatalog(selectedTag)}
+                                  replayingCatalog={replayingCatalogId === selectedTag.id}
+                                  onReanalyze={() => handleReanalyze(selectedTag)}
+                                  canReanalyze={Boolean(
+                                    onViewJob &&
+                                      reanalyzeJobId(
+                                        selectedTagDetail?.now?.current_evidence ||
+                                          selectedTagDetail?.bug?.current_evidence ||
+                                          hydrateWorkItem(selectedTag).current_evidence
+                                      )
+                                  )}
                                 />
                               ) : null;
                             })()}

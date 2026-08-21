@@ -661,6 +661,13 @@ export function registerGoldenRoutes(app: Express, deps: GoldenRouteDeps = {}) {
         /* keep what we have */
       }
     }
+    const replayModeRaw = String(req.body?.replayMode || req.body?.mode || '');
+    if (replayModeRaw === 'catalog' && !normalizeScoutItems(scout).length) {
+      return res.status(409).json({
+        error: 'No frozen scout on this card — Replay catalog cannot run.',
+        replayMode: 'catalog',
+      });
+    }
     const board = buildScoreboard({
       logText,
       foodLog,
@@ -669,6 +676,18 @@ export function registerGoldenRoutes(app: Express, deps: GoldenRouteDeps = {}) {
       errorText: req.body?.errorText || req.body?.error || '',
       jobStatus: req.body?.jobStatus || req.body?.status,
     });
+    if (replayModeRaw === 'catalog') {
+      const journey = replayScoutAgainstCatalog(scout, lookupCanonicalBaseFood);
+      board.journey = journey;
+      board.replayMode = 'catalog';
+      board.invariants = [];
+      board.outcomes = journeyToOutcomes(journey, []);
+      board.ledger = compileGoldenMeal({
+        foodLog,
+        scout,
+        replayMode: 'catalog',
+      });
+    }
     res.json(board);
   });
 
@@ -774,17 +793,8 @@ export function registerGoldenRoutes(app: Express, deps: GoldenRouteDeps = {}) {
         capturedAt: new Date().toISOString(),
       };
       await putR2(deps, `${prefix}/fixture.json`, JSON.stringify(fixture, null, 2), 'application/json');
-      try {
-        writeInboxCase({
-          jobId: jobId || id,
-          title,
-          scout,
-          journey: board.journey || [],
-          d1Id: id,
-        });
-      } catch (diskErr: any) {
-        console.warn('[golden] inbox write skipped:', diskErr?.message || diskErr);
-      }
+      // Q-6.4 item 6: do not mint tests/Golden_meal/inbox/ from D1 create/replay.
+      // Official G* is Promote (deferred). Existing Inbox UI still reads D1 rows.
       await putR2(deps, `${prefix}/attempts.json`, '[]', 'application/json');
       await putR2(
         deps,

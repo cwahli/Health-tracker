@@ -6104,6 +6104,7 @@ export default function App() {
       <Header
         activeTab={activeTab}
         viewingJobId={activeJobId}
+        onViewJob={handleOpenJob}
         onNavigateTab={(tab) => setActiveTab(tab as any)}
         biomarkerHistory={biomarkerHistory}
         setBiomarkerHistory={setBiomarkerHistory}

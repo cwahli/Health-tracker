@@ -352,6 +352,23 @@ describe('FoodDetailTabs component (G1-4)', () => {
     expect(html).toContain('job job-1234');
   });
 
+  it('renders Replay catalog and Re-analyze on food #n without claiming queue done', () => {
+    const html = renderToStaticMarkup(
+      <FoodDetailTabs
+        activeTab="checks"
+        onTabChange={() => {}}
+        board={{ invariants: [{ id: 'inv-1', label: 'ok', pass: true }] }}
+        onReplayLog={() => {}}
+        onReplayCatalog={() => {}}
+        onReanalyze={() => {}}
+        canReanalyze
+      />
+    );
+    expect(html).toContain('Replay catalog');
+    expect(html).toContain('Re-analyze');
+    expect(html).toContain('Preview only');
+  });
+
   it('renders live auto-spot hits on Checks (curator skip / collision / drop)', () => {
     const html = renderToStaticMarkup(
       <FoodDetailTabs
