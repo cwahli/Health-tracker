@@ -1017,7 +1017,7 @@ export default function MedicalHistoryTab({
                         }}
                         className="px-2.5 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shrink-0 cursor-pointer shadow-xs"
                       >
-                        Fix All with Data Review Agent
+                        Fix All with Review
                       </button>
                     </div>
                   )}
@@ -1304,6 +1304,7 @@ export default function MedicalHistoryTab({
           onStandardizeUnits={onStandardizeUnits}
           onLogMedical={onLogMedical}
           onAgentAnalysisSaved={onAgentAnalysisSaved}
+          onOpenAgentChat={onOpenAgentChat as any}
           onDeleteAnalysis={onDeleteAnalysis}
           selectedModelId={selectedModelId}
           onChangeModelId={onChangeModelId}

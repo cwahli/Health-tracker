@@ -1,6 +1,6 @@
 import { ChatMessage } from '../types';
 
-export type AgentType = 'food' | 'medical' | 'food_idea' | 'daily_recommendation' | 'medical_extract' | 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | 'front_desk' | 'biomarker_review';
+export type AgentType = 'food' | 'medical' | 'food_idea' | 'daily_recommendation' | 'medical_extract' | 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | 'front_desk' | 'biomarker_review' | 'catalog_clean';
 
 export interface AgentConfig {
   id: AgentType;
@@ -46,11 +46,11 @@ export const AGENT_REGISTRY: Record<AgentType, AgentConfig> = {
   daily_recommendation: {
     id: 'daily_recommendation',
     category: 'insights',
-    displayName: 'Daily Actions Agent',
-    description: 'Generates daily action plans and tracks progress.',
+    displayName: 'Health Coach',
+    description: 'Daily “what’s up today?” mode of Health Coach. Does not write lab rows.',
     capabilities: ['action_planning', 'insight_card_view'],
     welcomeMessage: 'Hello! I am your AI Health Coach. Let me look at your clinical biomarkers, daily steps, and latest dietary intake to give you a customized, comprehensive health recommendation today.',
-    rolloutStatus: 'unified',
+    rolloutStatus: 'legacy',
   },
   medical_extract: {
     id: 'medical_extract',
@@ -67,7 +67,7 @@ export const AGENT_REGISTRY: Record<AgentType, AgentConfig> = {
     displayName: 'Range Calibrator',
     description: 'Personalizes reference ranges for this profile. Does not change logged numbers.',
     capabilities: ['data_validation', 'biomarker_table_view'],
-    welcomeMessage: (ctx: any) => `Hello! I am your Clinical Calibration Agent. Here is what is about to happen: I will analyze ${ctx?.dataReviewBatchIdx === 'custom' ? 'Custom Test Batch' : 'Batch ' + (ctx?.dataReviewBatchIdx !== null && ctx?.dataReviewBatchIdx !== undefined ? (ctx?.dataReviewBatchIdx as number) + 1 : 1)} containing your raw biomarker readings. I will automatically recognize your demographic parameters (age, gender, ethnicity) and calibrate all reference ranges precisely to your profile. I will then map each biomarker to its standard physiological grouping, potential medical conditions, and break down each medical range clinically (such as Borderline High or Optimal zones) with clear, actionable insights—all without repeating boilerplate demographic lines. Let's start the calibration!`,
+    welcomeMessage: (ctx: any) => `Hello! I am your Range Calibrator. I will personalize overlay reference ranges for ${ctx?.dataReviewBatchIdx === 'custom' ? 'Custom Test Batch' : 'Batch ' + (ctx?.dataReviewBatchIdx !== null && ctx?.dataReviewBatchIdx !== undefined ? (ctx?.dataReviewBatchIdx as number) + 1 : 1)} using your age, sex, and ethnicity. I will not change logged numbers. Let's start the calibration!`,
     rolloutStatus: 'unified',
   },
   agent1: {
@@ -76,26 +76,36 @@ export const AGENT_REGISTRY: Record<AgentType, AgentConfig> = {
     displayName: 'Lab Parser',
     description: 'Parses and maps extracted clinical names to the catalog.',
     capabilities: ['data_standardization', 'biomarker_table_view'],
-    welcomeMessage: 'Hello! I am the Clinical Calibration Agent. I standardize extracted clinical terminology against a master dictionary to ensure accuracy and consistency across your medical profile.',
+    welcomeMessage: 'Hello! I am the Lab Parser. I extract dated observations from reports and map names to the catalog. I do not convert numbers or approve new keys.',
+    rolloutStatus: 'unified',
+  },
+  catalog_clean: {
+    id: 'catalog_clean',
+    category: 'medical',
+    displayName: 'Catalog Cleaner',
+    description: 'Dictionary hygiene: one task per run (units, category, aliases, or population default range).',
+    capabilities: ['clinical_context', 'terminology_consolidation', 'biomarker_table_view'],
+    allowedModes: ['units', 'category', 'aliases', 'default_range'],
+    welcomeMessage: 'Hello! I am the Catalog Cleaner. I will run one dictionary task at a time — units, grouping, aliases, or population default ranges — for you to approve.',
     rolloutStatus: 'unified',
   },
   agent2: {
     id: 'agent2',
     category: 'medical',
-    displayName: 'Categoriser',
-    description: 'Maps biomarkers to medical groupings and risk categories.',
+    displayName: 'Catalog Cleaner',
+    description: 'Category task of Catalog Cleaner.',
     capabilities: ['clinical_context', 'biomarker_table_view'],
     welcomeMessage: 'Hello! I am the Clinical Ontologist. I map extracted biomarkers to clinical conditions and physiological risk categories.',
-    rolloutStatus: 'unified',
+    rolloutStatus: 'legacy',
   },
   agent3: {
     id: 'agent3',
     category: 'medical',
-    displayName: 'Name Deduper',
-    description: 'Groups synonymous biomarker names onto one catalog key.',
+    displayName: 'Catalog Cleaner',
+    description: 'Alias task of Catalog Cleaner.',
     capabilities: ['terminology_consolidation', 'biomarker_table_view'],
     welcomeMessage: 'Hello! I am the Clinical Data Coordinator. I assemble mapped data into clean physiological buckets.',
-    rolloutStatus: 'unified',
+    rolloutStatus: 'legacy',
   },
   agent4: {
     id: 'agent4',
@@ -113,23 +123,23 @@ export const AGENT_REGISTRY: Record<AgentType, AgentConfig> = {
     description: 'Educational context. Overlay ranges are written by Range Calibrator (data_review).',
     capabilities: ['holistic_analysis', 'insight_card_view'],
     welcomeMessage: 'Hello! I am the Personalized Reference Ranges agent. I calibrate normal biomarker reference ranges to your exact demographics.',
-    rolloutStatus: 'unified',
+    rolloutStatus: 'legacy',
   },
   agent7: {
     id: 'agent7',
     category: 'insights',
-    displayName: 'Literature',
-    description: 'Summarizes relevant clinical literature for this profile.',
+    displayName: 'Test Planner',
+    description: 'Literature mode of Test Planner.',
     capabilities: ['report_generation', 'insight_card_view'],
     welcomeMessage: 'Hello! I am the Medical Literature Consensus agent. I scan PubMed and clinical trials to bring recent scientific debate to your context.',
-    rolloutStatus: 'unified',
+    rolloutStatus: 'legacy',
   },
   front_desk: {
     id: 'front_desk',
     category: 'system',
     displayName: 'Front Desk',
     description: 'Answers general questions and routes users. Does not log labs.',
-    capabilities: ['general_qa', 'routing', 'profile_update', 'biomarker_logging'],
+    capabilities: ['general_qa', 'routing', 'profile_update'],
     welcomeMessage: 'Hello! I am your Health Preparation Agent. How can I help you today? You can ask me about your health data, or I can help you update your profile. I can also direct you to one of our specialized agents.',
     rolloutStatus: 'unified',
   },

@@ -1,7 +1,14 @@
 # AI Handover & Session Progress Board
 
 **Updated:** 2026-08-27
-**Status:** Composite Dish Breakdown Weight & Complete Ingredient Title Propagation Fix Complete (86/86 test files passing, assert-budgets PASS, tsc clean).
+**Status:** Biomarker 7-agent consolidation in progress (contract + wrong-door stops landed).
+
+- **Biomarker agent consolidation to 7 (`biomarkerAgentPacks.ts`, `biomarkerLifecycle.ts`, `agentConfig.ts`, Front Desk, Review Fix-All, Calibrator pack, rulebook - 2026-08-27):**
+  - **Root Cause & Diagnosis:** Sixteen LLM doors duplicated extract / convert / overlay / catalog / coach jobs. Front Desk wrote lab rows; Health “Fix All” dumped flagged keys into Lab Parser; `agent2`/`agent3` redirected to Range Calibrator; Calibrator prompt still asked for `correctedHistoricalLogs`.
+  - **Key Changes Applied:** Canonical seven (Front Desk, Lab Parser, Review, Catalog Cleaner, Range Calibrator, Health Coach, Test Planner) with `task` packs. Opposite packs cannot concatenate. Front Desk routes labs to Parser (no write). Fix All opens Review (≤5). Calibrator overlay-only in prompt and apply (no grouping fill). Parser extract no longer assigns categories. Display names and dictionary/Insight titles use the seven.
+  - **Verification:** pack+lifecycle 57/57; `tsc --noEmit` 0; lifecycle/governance/ingest asserts PASS. Leftover-only Parser and overlay-stale Calibrator on the wire; Diagnostic leftovers open LogChat; Home “What's up today?” is Coach `today`; LogChat seven-agent switcher; instruction viewer uses canonical names; Catalog apply no longer converts history. Insight `/insight-analyze` remains the structured Coach-targets report endpoint.
+
+- **Composite Dish Breakdown Weight & Complete Ingredient Title Propagation Fix Complete (86/86 test files passing, assert-budgets PASS, tsc clean).**
 
 - **Composite Dish Sub-Ingredient Weight & Title Component Completeness (`NutritionLabelTable.tsx`, `server_dish_finalize.ts`, `server_vision_scout.ts`, `server.ts` - 2026-08-27):**
   - **Root Cause & Diagnosis:**

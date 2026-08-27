@@ -81,7 +81,8 @@ import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, getDocFromServer, 
 import { sanitizeForFirestore, checkQuotaFlag, handleRetryQuota } from './utils/firestoreUtils';
 import { getCurrentDateInTimezone, toYYYYMMDD, normalizeBiomarkerHistory } from './utils/dateUtils';
 import { biomarkerDefinitions, isAsianEthnicity, hasBmiPendingAlert, getProfileFingerprint, isValEmpty, getMappedBiomarkerKey, selfHealCustomBiomarkerDefinitions } from './utils/biomarkers';
-import { applyModificationCommands, overlayFingerprint, resolveAgentDestination, shouldRunCalibrator, attachObservationMeta, enrichReviewModificationCommands, collectCatalogUnitMap, cleanupInventedBiomarkerCatalog, type ModificationCommand } from './utils/biomarkerLifecycle';
+import { applyModificationCommands, overlayFingerprint, shouldRunCalibrator, attachObservationMeta, enrichReviewModificationCommands, collectCatalogUnitMap, cleanupInventedBiomarkerCatalog, type ModificationCommand } from './utils/biomarkerLifecycle';
+import { applyAgentType, liveChatAgentType, selectBiomarkerAgentPack } from './utils/biomarkerAgentPacks';
 import { extractFallbackModifications } from './components/chat-cards/BiomarkerReviewCard';
 import { formatOptimalTargetValue } from './utils/agentCalibration';
 import { standardizeUnit, CONVERSION_FACTORS } from './utils/unitConversion';
@@ -1676,10 +1677,10 @@ export default function App() {
     if (job && job.kind === 'medical') {
       const jobAgentType = (job.inputSnapshot as any)?.agentType;
       if (jobAgentType && jobAgentType !== 'agent1_step1') {
-        const validTypes = ['agent1','agent2','agent3','agent4','agent5','health_baseline','agent7','data_review','biomarker_review'] as const;
+        const validTypes = ['agent1','agent2','agent3','agent4','agent5','health_baseline','agent7','data_review','biomarker_review','catalog_clean'] as const;
         const matched = validTypes.find(t => t === jobAgentType);
         if (matched) {
-          setActiveAgentType(matched);
+          setActiveAgentType((liveChatAgentType(matched) || matched) as any);
         }
       }
       if ((job.inputSnapshot as any)?.reviewBiomarkerKey) {
@@ -1695,7 +1696,36 @@ export default function App() {
     }
   }, [activeJobId]);
   const [isFrontDeskOpen, setIsFrontDeskOpen] = useState(false);
-  const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'health_baseline' | 'agent7' | 'data_review' | 'biomarker_review' | null>(null);
+  const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'health_baseline' | 'agent7' | 'data_review' | 'biomarker_review' | 'catalog_clean' | null>(null);
+  const [activeAgentTask, setActiveAgentTask] = useState<string | null>(null);
+  const openWiredAgent = (
+    agentType: string,
+    options?: {
+      prefillMessage?: string;
+      autoSendMessage?: string;
+      agentTask?: string;
+      biomarkerKey?: string;
+      dataReviewBatchIdx?: number | string;
+      dataReviewBatchKeys?: string[];
+      remainingText?: string;
+      extractedData?: any[];
+      currentBatch?: number;
+      estimatedTotalMarkers?: number | null;
+    }
+  ) => {
+    const pack = selectBiomarkerAgentPack(agentType, options?.agentTask);
+    setActiveAgentType((liveChatAgentType(agentType, pack?.task) || agentType) as any);
+    setActiveAgentTask(pack?.task || null);
+    setPrefillMessage(options?.prefillMessage || options?.autoSendMessage || null);
+    setActiveReviewBiomarkerKey(options?.biomarkerKey);
+    if (options?.dataReviewBatchIdx !== undefined) setActiveDataReviewBatchIdx(options.dataReviewBatchIdx);
+    if (options?.dataReviewBatchKeys) setActiveDataReviewBatchKeys(options.dataReviewBatchKeys);
+    if (options?.remainingText !== undefined) setActiveDataReviewRemainingText(options.remainingText);
+    if (options?.extractedData) setActiveDataReviewExtractedYaml(options.extractedData);
+    if (options?.currentBatch) setActiveDataReviewCurrentBatch(options.currentBatch);
+    if (options?.estimatedTotalMarkers !== undefined) setActiveDataReviewEstimatedTotalMarkers(options.estimatedTotalMarkers);
+    setIsMedicalChatOpen(true);
+  };
   const [activeReviewBiomarkerKey, setActiveReviewBiomarkerKey] = useState<string | undefined>(undefined);
   const [activeDataReviewBatchIdx, setActiveDataReviewBatchIdx] = useState<number | string | null>(null);
   const [activeDataReviewBatchKeys, setActiveDataReviewBatchKeys] = useState<string[]>([]);
@@ -5403,8 +5433,8 @@ export default function App() {
     let historyChanged = false;
     const logsToUpdate: string[] = [];
 
-    // 1. Apply user-approved historical log value conversions
-    if (Array.isArray(logValueCorrections) && logValueCorrections.length > 0) {
+    // Catalog Cleaner does not rewrite observation numbers. History converts belong to Review.
+    if (false && Array.isArray(logValueCorrections) && logValueCorrections.length > 0) {
       logValueCorrections.forEach(corr => {
         updatedHistory = updatedHistory.map(log => {
           const matches = corr.logId ? log.id === corr.logId : log.date === corr.date;
@@ -6374,14 +6404,7 @@ export default function App() {
             onBatchDeleteBiomarkersFromLogs={handleBatchDeleteBiomarkersFromLogs}
             onBatchEditBiomarkersInLogs={handleBatchEditBiomarkersInLogs}
             onLogMedical={handleLogMedical}
-            onOpenAgentChat={(agentType, options) => {
-              setActiveAgentType(agentType);
-              setPrefillMessage(options?.prefillMessage || null);
-              setActiveReviewBiomarkerKey(options?.biomarkerKey);
-              if (options?.dataReviewBatchIdx !== undefined) setActiveDataReviewBatchIdx(options.dataReviewBatchIdx);
-              if (options?.dataReviewBatchKeys) setActiveDataReviewBatchKeys(options.dataReviewBatchKeys);
-              setIsMedicalChatOpen(true);
-            }}
+            onOpenAgentChat={(agentType, options) => openWiredAgent(agentType, options)}
             hideSensitive={hideSensitive}
             selectedModelId={selectedModelId}
             onChangeModelId={setSelectedModelId}
@@ -6516,19 +6539,14 @@ export default function App() {
                 onBatchCombineBiomarkers={handleBatchCombineBiomarkers}
                 onBatchConsolidate={handleBatchConsolidate}
                 onReviewWithAgent={(keys) => {
-                  const userIdentifier = profile?.email?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'guest';
-                  localStorage.setItem(`agent1_custom_batch_keys_${userIdentifier}`, JSON.stringify(keys));
-                  sessionStorage.setItem('auto_open_custom_batch_modal', 'true');
-                  setActiveTab('insights');
+                  const scoped = (keys || []).slice(0, 5);
+                  openWiredAgent('biomarker_review', {
+                    dataReviewBatchKeys: scoped,
+                    biomarkerKey: scoped.length === 1 ? scoped[0] : undefined,
+                    prefillMessage: `Please review and correct scaling, unit, and notation errors in these flagged biomarkers: ${scoped.join(', ')}`,
+                  });
                 }}
-                onOpenAgentChat={(agentType, options) => {
-                  setActiveAgentType(agentType);
-                  setPrefillMessage(options?.prefillMessage || null);
-                  setActiveReviewBiomarkerKey(options?.biomarkerKey);
-                  if (options?.dataReviewBatchIdx !== undefined) setActiveDataReviewBatchIdx(options.dataReviewBatchIdx);
-                  if (options?.dataReviewBatchKeys) setActiveDataReviewBatchKeys(options.dataReviewBatchKeys);
-                  setIsMedicalChatOpen(true);
-                }}
+                onOpenAgentChat={(agentType, options) => openWiredAgent(agentType, options)}
                 onApplyCalculation={handleApplyCalculation}
                 selectedModelId={selectedModelId}
                 onChangeModelId={setSelectedModelId}
@@ -6559,12 +6577,7 @@ export default function App() {
                 onGenerateReport={handleGenerateReport}
                 isGenerating={isGenerating}
                 onNavigateToTab={setActiveTab as any}
-                onOpenMedicalChat={() => {
-                  setActiveAgentType(null);
-                  setPrefillMessage(null);
-                  setActiveReviewBiomarkerKey(undefined);
-                  setIsMedicalChatOpen(true);
-                }}
+                onOpenMedicalChat={() => openWiredAgent('agent1')}
                 onUpdateProfile={async (updatedProfile) => {
                   setProfile(updatedProfile);
                   await saveAndSync(updatedProfile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report);
@@ -6592,16 +6605,7 @@ export default function App() {
                   currentBatch?: number;
                   estimatedTotalMarkers?: number | null;
                 }) => {
-                  setActiveAgentType(resolveAgentDestination(agentType) as any);
-                  setPrefillMessage(options?.prefillMessage || null);
-                  setActiveReviewBiomarkerKey(options?.biomarkerKey);
-                  setActiveDataReviewBatchIdx(options?.dataReviewBatchIdx !== undefined ? options.dataReviewBatchIdx : null);
-                  setActiveDataReviewBatchKeys(options?.dataReviewBatchKeys || []);
-                  setActiveDataReviewRemainingText(options?.remainingText || '');
-                  setActiveDataReviewExtractedYaml(options?.extractedData || []);
-                  setActiveDataReviewCurrentBatch(options?.currentBatch || 1);
-                  setActiveDataReviewEstimatedTotalMarkers(options?.estimatedTotalMarkers !== undefined ? options.estimatedTotalMarkers : null);
-                  setIsMedicalChatOpen(true);
+                  openWiredAgent(agentType, options);
                 }}
                 onDeleteAnalysis={handleDeleteAnalysis}
                 onArchiveAnalysis={async (id) => {
@@ -6676,9 +6680,10 @@ export default function App() {
       {/* Slide-over interactive dialogs */}
       
       {(() => {
-        const handleOpenAgentFromFrontDesk = (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | null) => {
+        const handleOpenAgentFromFrontDesk = (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | 'biomarker_review' | 'catalog_clean' | null) => {
           setIsFrontDeskOpen(false);
-          setActiveAgentType(resolveAgentDestination(agentType) as any);
+          const liveId = liveChatAgentType(agentType || 'agent1') || 'agent1';
+          setActiveAgentType(liveId as any);
           setPrefillMessage(null);
           setActiveDataReviewBatchIdx(null);
           setActiveDataReviewBatchKeys([]);
@@ -6706,54 +6711,20 @@ export default function App() {
           await saveAndSync(updatedP, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
         }}
         onAddBiomarkerLogs={async (logs) => {
-          let updatedBiomarkers = { ...biomarkers };
-          let updatedHistory = [...biomarkerHistory];
-          let hasCustomUpdates = false;
-          const customBiomarkers = { ...(profile?.customBiomarkers || {}) };
-
-          logs.forEach(log => {
-            const key = getMappedBiomarkerKey(log.biomarker) || log.biomarker;
-            updatedBiomarkers[key] = log.value;
-            const day = log.date || new Date().toISOString().split('T')[0];
-            const sourceId = log.sourceReportId;
-            const idx = updatedHistory.findIndex((h) =>
-              toYYYYMMDD(h.date) === toYYYYMMDD(day)
-              && (!sourceId || !h.sourceReportId || h.sourceReportId === sourceId)
-            );
-            if (idx >= 0 && (!sourceId || !updatedHistory[idx].sourceReportId || updatedHistory[idx].sourceReportId === sourceId)) {
-              updatedHistory[idx] = {
-                ...updatedHistory[idx],
-                biomarkers: { ...updatedHistory[idx].biomarkers, [key]: log.value },
-                sync_state: 'update',
-                updated_at: Date.now(),
-              };
-              attachObservationMeta(updatedHistory[idx], key, { unit: log.unit, rawValue: log.value });
-            } else {
-              const row = {
-                id: `bm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                biomarkers: { [key]: log.value },
-                date: day,
-                sourceReportId: sourceId,
-              };
-              attachObservationMeta(row, key, { unit: log.unit, rawValue: log.value });
-              updatedHistory.push(row);
-            }
-
-          });
-
-          const { updatedCustoms, hasChanges } = selfHealCustomBiomarkerDefinitions(
-            logs.map(l => ({ key: l.biomarker, unit: l.unit, normalRange: l.normalRange })),
-            profile?.customBiomarkers
-          );
-          let targetProfile = profile;
-          if (hasChanges && profile) {
-            targetProfile = { ...profile, customBiomarkers: updatedCustoms };
-            setProfile(targetProfile);
-          }
-
-          setBiomarkers(updatedBiomarkers);
-          setBiomarkerHistory(updatedHistory);
-          await saveAndSync(targetProfile, foodLogs, updatedBiomarkers, updatedHistory, actions, dailyBenefits, report, { type: 'biomarkerLogsBatch', targetIds: updatedHistory.slice(-logs.length).map(l => l.id) });
+          // Front Desk must not write lab rows. Route extracted lines to Lab Parser.
+          const lines = (logs || []).map((log: any) => {
+            const name = log.biomarker || log.name || log.key || 'biomarker';
+            const value = log.value != null ? String(log.value) : '';
+            const unit = log.unit ? ` ${log.unit}` : '';
+            const date = log.date ? ` on ${log.date}` : '';
+            return `${name}: ${value}${unit}${date}`.trim();
+          }).filter(Boolean);
+          setIsFrontDeskOpen(false);
+          setActiveAgentType('agent1');
+          setPrefillMessage(lines.length
+            ? `Please parse these biomarker readings into dated observations:\n${lines.join('\n')}`
+            : 'Please parse my lab results into dated observations.');
+          setIsMedicalChatOpen(true);
         }}
 
       />}</ErrorBoundary>
@@ -6810,6 +6781,9 @@ export default function App() {
         <ErrorBoundary>{isMedicalChatOpen && <LogChat key={`medical_${activeAgentType || 'general'}`}
         type="medical"
         profile={profile}
+        onOpenAgentFromFrontDesk={(agentType) => {
+          setActiveAgentType((liveChatAgentType(agentType || 'agent1') || 'agent1') as any);
+        }}
         isOpen={isMedicalChatOpen}
         jobId={activeJobId}
         selectedModelId={selectedModelId}
@@ -6821,6 +6795,7 @@ export default function App() {
         onClose={() => {
           setIsMedicalChatOpen(false);
           setActiveAgentType(null);
+          setActiveAgentTask(null);
           setPrefillMessage(null);
           setActiveDataReviewBatchIdx(null);
           setActiveJobId(null);
@@ -6840,6 +6815,7 @@ export default function App() {
           await saveAndSync(updatedP, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
         }}
         agentType={activeAgentType}
+        agentTask={activeAgentTask}
         reviewBiomarkerKey={activeReviewBiomarkerKey}
         dataReviewBatchIdx={activeDataReviewBatchIdx}
         dataReviewBatchKeys={activeDataReviewBatchKeys}
@@ -6880,7 +6856,8 @@ export default function App() {
           if (!isPartialApply) {
             setIsMedicalChatOpen(false);
           }
-          setCalibratingAgentType(agentType);
+          const finishType = applyAgentType(agentType) || agentType;
+          setCalibratingAgentType(finishType);
           const updatedProfile = { ...profile };
           
           let currentHistory = [...biomarkerHistory];
@@ -6889,7 +6866,7 @@ export default function App() {
           let currentActions = [...actions];
 
           // Review: apply modificationCommand (dated) and/or flat corrections
-          if ((agentType as string) === 'biomarker_review') {
+          if ((finishType as string) === 'biomarker_review') {
             let candidate = agentResult;
             if (typeof candidate === 'string') {
               try {
@@ -7012,7 +6989,7 @@ export default function App() {
             return;
           }
           
-          if ((agentType as string) === 'agent1' || (agentType as string) === 'medical_extract') {
+          if ((finishType as string) === 'agent1' || (finishType as string) === 'medical_extract' || (agentType as string) === 'agent1' || (agentType as string) === 'medical_extract') {
             // A flat Step-1 extraction result always carries its own extractedData.
             // Only defer to the (unrelated) Standardize Biomarkers global batch state
             // when this result clearly isn't a flat extraction — otherwise a stale
@@ -7513,7 +7490,35 @@ export default function App() {
               });
               setBiomarkers(recomputedBiomarkers);
             }
-          } else if (agentType === 'agent2') {
+          } else if (finishType === 'catalog_clean') {
+            let parsed: any = agentResult;
+            if (typeof agentResult?.jsonResponse === 'string') {
+              try { parsed = JSON.parse(agentResult.jsonResponse.replace(/```(?:json)?/gi, '').trim()); } catch (e) {}
+            }
+            const rows = parsed?.mappedBiomarkers || parsed?.categorisedBiomarkers || parsed?.calibratedBiomarkers || [];
+            if (Array.isArray(rows) && rows.length > 0) {
+              const updates: any = {};
+              rows.forEach((row: any) => {
+                const key = row.originalKey || row.key;
+                if (!key) return;
+                updates[key] = {
+                  originalKey: key,
+                  name: row.name || row.Name || key,
+                  unit: row.standardizedUnit || row.unit,
+                  normalRange: row.normalRange,
+                  minRange: row.minRange,
+                  maxRange: row.maxRange,
+                  optimalRange: row.optimalRange,
+                  rangeBrackets: row.rangeBrackets,
+                  standardMedicalGrouping: row.standardMedicalGrouping,
+                  riskCategories: row.riskCategories,
+                  potentialMedicalConditions: row.potentialMedicalConditions,
+                  notes: row.notes || row.valueAdjustmentReason,
+                };
+              });
+              await handleStandardizeBiomarkerUnits(updates);
+            }
+          } else if (finishType === 'agent2' || agentType === 'agent2') {
              // Agent 2: Clinical Ontologist (Mapping)
              updatedProfile.agentTriageSummary = "Biomarker categories mapped.";
              const mapping = agentResult.bucketMapping || agentResult;
@@ -7532,10 +7537,10 @@ export default function App() {
                  };
                });
              }
-          } else if (agentType === 'agent3') {
+          } else if (finishType === 'agent3' || agentType === 'agent3') {
              // Agent 3: Clinical Data Coordinator (Assembly)
              updatedProfile.agentTriageSummary = agentResult.text || "Data assembled into buckets.";
-          } else if (agentType === 'agent4') {
+          } else if (finishType === 'agent4' || agentType === 'agent4') {
             const sumVal = agentResult.summary || agentResult.primaryDiagnosis || agentResult.text;
             updatedProfile.agentDiagnosticSummary = typeof sumVal === 'string'
               ? sumVal
@@ -7548,11 +7553,11 @@ export default function App() {
               currentActions = [...newAcceptedActions];
               setActions(currentActions);
             }
-          } else if (agentType === 'agent5') {
+          } else if (finishType === 'agent5' || agentType === 'agent5') {
             updatedProfile.agentContextualizerSummary = agentResult.message;
-          } else if (agentType === 'agent7') {
+          } else if (finishType === 'agent7' || agentType === 'agent7') {
             updatedProfile.agentLiteratureSummary = agentResult.message;
-          } else if (agentType === 'data_review') {
+          } else if (finishType === 'data_review' || agentType === 'data_review') {
             const batchIdx = agentResult.batchIdx !== undefined && agentResult.batchIdx !== null ? agentResult.batchIdx : activeDataReviewBatchIdx;
             if (batchIdx !== undefined && batchIdx !== null) {
               setCalibratingBatchIdx(Number(batchIdx));
@@ -7574,9 +7579,6 @@ export default function App() {
                   normalRange: existing.normalRange || '',
                   profileAdjustedNormalRange: bm.profileAdjustedNormalRange || existing.profileAdjustedNormalRange || '',
                   description: bm.description || existing.description || '',
-                  riskCategories: (existing.riskCategories && existing.riskCategories.length > 0) ? existing.riskCategories : (bm.riskCategories || []),
-                  standardMedicalGrouping: (existing.standardMedicalGrouping && existing.standardMedicalGrouping !== 'Other') ? existing.standardMedicalGrouping : (bm.standardMedicalGrouping || 'Other'),
-                  potentialMedicalConditions: bm.potentialMedicalConditions || existing.potentialMedicalConditions || [],
                   specificRiskContext: bm.specificRiskContext || existing.specificRiskContext || '',
                   status: bm.status || existing.status || 'Healthy',
                   rangeBrackets: bm.rangeBrackets || existing.rangeBrackets || [],
@@ -7678,7 +7680,7 @@ export default function App() {
                 console.error("Error moving missing biomarkers on clinical calibration finish:", e);
               }
             }
-          } else if (agentType === 'health_baseline') {
+          } else if (finishType === 'health_baseline' || agentType === 'health_baseline') {
              setIsMedicalChatOpen(false);
              const data = agentResult?.report || agentResult || {};
              const unselected = new Set(agentResult.unselectedRowKeys || []);

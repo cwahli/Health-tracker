@@ -14,6 +14,7 @@ import { BatchNavigator } from './BatchNavigator';
 
 import { biomarkerDefinitions, getBiomarkerMetadata, getPhysiologicalBucket, BIOMARKER_GROUPING_OPTIONS, getMappedBiomarkerKey, getMergedBiomarkerDef, isCatalogBuiltIn, shouldStampExtractedDefPending } from '../utils/biomarkers';
 import { formatOptimalTargetValue } from '../utils/agentCalibration';
+import { calibratorStaleKeys } from '../utils/biomarkerLifecycle';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 const BiomarkerDictionaryModal = lazyWithRetry(() => import('./BiomarkerDictionaryModal'));
 import { auth } from '../firebase';
@@ -34,7 +35,7 @@ interface InsightsTabProps {
   onNavigateToTab?: (tab: string) => void;
   onOpenMedicalChat?: () => void;
   onOpenAgentChat?: (
-    agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'health_baseline' | 'agent7' | 'data_review',
+    agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'health_baseline' | 'agent7' | 'data_review' | 'biomarker_review' | 'catalog_clean',
     options?: { 
       prefillMessage?: string; 
       dataReviewBatchIdx?: number | string; 
@@ -1378,9 +1379,9 @@ export default function InsightsTab({
     },
     {
       id: 'agent7',
-      title: 'Literature',
+      title: 'Test Planner · Literature',
       agentType: 'agent7',
-      description: 'Scans PubMed and clinical trials to bring recent scientific debate and consensus on your specific health context.',
+      description: 'Literature mode of Test Planner: scans PubMed and clinical trials for this profile.',
       valueProposition: 'Synthesizes clinical trial consensus and research evidence specific to your biomarkers.'
     }
   ];
@@ -2140,12 +2141,14 @@ export default function InsightsTab({
                                   e.stopPropagation();
                                   const firstUnapprovedIdx = batches.findIndex((_, idx) => !approvedBatches[idx]);
                                   const targetIdx = firstUnapprovedIdx >= 0 ? firstUnapprovedIdx : 0;
-                                  const batchKeys = batches[targetIdx] || [];
+                                  const batchKeys = calibratorStaleKeys(batches[targetIdx] || [], profile);
                                   if (onOpenAgentChat) {
                                     onOpenAgentChat('data_review', {
                                       dataReviewBatchIdx: targetIdx,
                                       dataReviewBatchKeys: batchKeys,
-                                      prefillMessage: `Calibrate Batch ${targetIdx + 1}`
+                                      prefillMessage: batchKeys.length
+                                        ? `Calibrate overlay ranges for ${batchKeys.length} stale keys`
+                                        : 'No overlay-stale keys in this batch; catalog defaults apply.'
                                     });
                                   }
                                 }}
@@ -2760,9 +2763,9 @@ export default function InsightsTab({
                   setShowCustomBatchModal(false);
                   if (onOpenAgentChat && customBatchKeys.length > 0) {
                     onOpenAgentChat('data_review', {
-                      dataReviewBatchKeys: customBatchKeys,
+                      dataReviewBatchKeys: calibratorStaleKeys(customBatchKeys, profile),
                       dataReviewBatchIdx: 'custom',
-                      prefillMessage: `Please calibrate and review reference ranges, units, and categories for these ${customBatchKeys.length} selected biomarkers:\n${customBatchKeys.join(', ')}`
+                      prefillMessage: `Please calibrate overlay ranges for: ${calibratorStaleKeys(customBatchKeys, profile).join(', ') || '(none stale)'}`
                     });
                   }
                 }} 
@@ -3014,9 +3017,9 @@ export default function InsightsTab({
                   setShowCustomDataReviewBatchModal(false);
                   if (onOpenAgentChat && customDataReviewBatchKeys.length > 0) {
                     onOpenAgentChat('data_review', {
-                      dataReviewBatchKeys: customDataReviewBatchKeys,
+                      dataReviewBatchKeys: calibratorStaleKeys(customDataReviewBatchKeys, profile),
                       dataReviewBatchIdx: 'custom',
-                      prefillMessage: `Please calibrate and review reference ranges, units, and categories for these ${customDataReviewBatchKeys.length} selected biomarkers:\n${customDataReviewBatchKeys.join(', ')}`
+                      prefillMessage: `Please calibrate overlay ranges for: ${calibratorStaleKeys(customDataReviewBatchKeys, profile).join(', ') || '(none stale)'}`
                     });
                   }
                 }}
@@ -3039,6 +3042,7 @@ export default function InsightsTab({
             setShowDictionaryModal(false);
             setDictionaryPreFillKey(null);
           }}
+          onOpenAgentChat={onOpenAgentChat as any}
           onReviewWithAgent={(keys) => {
             setCustomBatchKeys(keys);
             setShowCustomBatchModal(true);

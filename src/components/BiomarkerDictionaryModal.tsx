@@ -38,6 +38,7 @@ interface BiomarkerDictionaryModalProps {
   onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string, entries?: any, modificationCommand?: any, skipClose?: boolean) => void;
   onAgentAnalysisSaved?: (agentType: string, agentResult: any, existingId?: string) => Promise<string | void>;
   onReviewWithAgent?: (keys: string[]) => void;
+  onOpenAgentChat?: (agentType: string, options?: { prefillMessage?: string; dataReviewBatchKeys?: string[]; biomarkerKey?: string; agentTask?: string }) => void;
   onDeleteAnalysis?: (id: string) => Promise<void>;
   onDeleteBiomarker?: (key: string) => void;
   onDeleteMultipleBiomarkers?: (keys: string[]) => void;
@@ -894,6 +895,7 @@ export default function BiomarkerDictionaryModal({
   onLogMedical,
   onAgentAnalysisSaved,
   onReviewWithAgent,
+  onOpenAgentChat,
   onDeleteAnalysis,
   onDeleteBiomarker,
   onDeleteMultipleBiomarkers,
@@ -3153,11 +3155,11 @@ I can analyze these, compare them with our database keys, and find standard mapp
                 {isChatMode 
                   ? "Route Agent Chat" 
                   : isAgentMode 
-                    ? (isRangeCalibrationMode ? "Clinical Reference Range Calibration Agent" : isMedicalCategorisationMode ? "Clinical Categorisation Agent" : "Clinical Unit Standardization Agent") 
+                    ? (isRangeCalibrationMode ? "Catalog Cleaner · default ranges" : isMedicalCategorisationMode ? "Catalog Cleaner · category" : "Catalog Cleaner · units") 
                     : isDataAccuracyMode 
-                      ? "Data Accuracy Agent" 
+                      ? "Review · compare" 
                       : isNameConsolidationMode 
-                        ? "Name Consolidation Agent" 
+                        ? "Catalog Cleaner · aliases" 
                         : isBatchPasteMode 
                           ? "Batch Consolidation" 
                           : "Biomarker Dictionary"}
@@ -5602,8 +5604,8 @@ I can analyze these, compare them with our database keys, and find standard mapp
                           <span className="text-sm">🧪</span>
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300">Active Cleaning Session in Progress</p>
-                          <p className="text-[11px] text-indigo-600 dark:text-indigo-400">You have an ongoing data accuracy review session with the agent.</p>
+                          <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300">Review · compare session in progress</p>
+                          <p className="text-[11px] text-indigo-600 dark:text-indigo-400">Incoming vs current field diff is waiting for you to choose which values to keep.</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
@@ -5663,6 +5665,11 @@ I can analyze these, compare them with our database keys, and find standard mapp
                         )}
                         <button
                           onClick={() => {
+                            if (onOpenAgentChat) {
+                              onClose();
+                              onOpenAgentChat('biomarker_review', { prefillMessage: 'Please compare incoming readings against my dictionary and history (Review compare).' });
+                              return;
+                            }
                             setIsDataAccuracyMode(true);
                             setIsChatMode(false);
                             setIsAgentMode(false);
@@ -6107,6 +6114,11 @@ I can analyze these, compare them with our database keys, and find standard mapp
           onCombineBiomarkers={onCombineBiomarkers}
           onBatchCombineBiomarkers={onBatchCombineBiomarkers}
           onLaunchNameConsolidation={(keys) => {
+            if (onOpenAgentChat) {
+              onClose();
+              onOpenAgentChat('agent3', { dataReviewBatchKeys: keys, prefillMessage: `Consolidate alias groups for: ${keys.join(', ')}` });
+              return;
+            }
             setSelectedKeys(keys);
             setIsNameConsolidationMode(true);
             setIsAgentMode(false);
@@ -6116,6 +6128,11 @@ I can analyze these, compare them with our database keys, and find standard mapp
             handleRunConsolidationAgent(true, keys);
           }}
           onLaunchUnitStandardization={(keys) => {
+            if (onOpenAgentChat) {
+              onClose();
+              onOpenAgentChat('catalog_clean', { agentTask: 'units', dataReviewBatchKeys: keys, prefillMessage: `Standardize units for: ${keys.join(', ')}` });
+              return;
+            }
             setSelectedKeys(keys);
             setIsRangeCalibrationMode(false);
             setIsMedicalCategorisationMode(false);
@@ -6128,6 +6145,11 @@ I can analyze these, compare them with our database keys, and find standard mapp
             handleRunStandardizationAgent(keys, 'standardize');
           }}
           onLaunchMedicalCategorisation={(keys) => {
+            if (onOpenAgentChat) {
+              onClose();
+              onOpenAgentChat('agent2', { dataReviewBatchKeys: keys, prefillMessage: `Categorise: ${keys.join(', ')}` });
+              return;
+            }
             setSelectedKeys(keys);
             setIsMedicalCategorisationMode(true);
             setIsRangeCalibrationMode(false);
@@ -6140,6 +6162,11 @@ I can analyze these, compare them with our database keys, and find standard mapp
             handleRunStandardizationAgent(keys, 'categorise');
           }}
           onLaunchRangeCalibrator={(keys) => {
+            if (onOpenAgentChat) {
+              onClose();
+              onOpenAgentChat('data_review', { dataReviewBatchKeys: keys, prefillMessage: `Calibrate overlay ranges for: ${keys.join(', ')}` });
+              return;
+            }
             setSelectedKeys(keys);
             setIsRangeCalibrationMode(true);
             setIsMedicalCategorisationMode(false);

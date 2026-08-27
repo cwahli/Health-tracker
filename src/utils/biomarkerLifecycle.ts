@@ -6,6 +6,7 @@ import { toYYYYMMDD } from './dateUtils';
 import { getMappedBiomarkerKey, isBiomarkerApproved, detectFlaggedTelemetryErrors, biomarkerDefinitions, parseNormalRangeBounds, isBiomarkerValueImprobable, getActiveStructuredRangeRule } from './biomarkers';
 import { ANALYTE_CONVERSIONS } from './analyteConversions';
 import type { BiomarkerLog } from '../types';
+import { RETIRED_AGENT_REDIRECT as PACK_RETIRED_AGENT_REDIRECT, selectBiomarkerAgentPack } from './biomarkerAgentPacks';
 
 export { ANALYTE_CONVERSIONS } from './analyteConversions';
 export {
@@ -1123,14 +1124,38 @@ export function overlayFingerprint(profile: {
 
 export function shouldRunCalibrator(
   key: string,
-  profile: { age?: any; gender?: string; ethnicity?: string } | null | undefined,
-  overlay?: { fingerprint?: string; sameAsCatalog?: boolean } | null
+  profile: { age?: any; gender?: string; ethnicity?: string; customBiomarkers?: Record<string, any> } | null | undefined,
+  overlay?: { fingerprint?: string; overlayFingerprint?: string; sameAsCatalog?: boolean; same_as_catalog?: boolean } | null
 ): boolean {
   const varies = getRangeVariesBy(key);
   if (varies.length === 0) return false;
   const fp = overlayFingerprint(profile);
-  if (overlay?.fingerprint === fp) return false;
+  const stored = overlay?.fingerprint || overlay?.overlayFingerprint;
+  if (stored === fp) return false;
   return true;
+}
+
+/** Keys that still need Lab Parser identity (pending / unapproved / unmapped alias). */
+export function parserLeftoverKeys(
+  keys: string[],
+  profile?: { customBiomarkers?: Record<string, any> } | null
+): string[] {
+  return (keys || []).filter((k) => {
+    const custom = profile?.customBiomarkers?.[k];
+    if (custom?.needsApproval) return true;
+    if (!isBiomarkerApproved(k, profile)) return true;
+    const mapped = getMappedBiomarkerKey(k);
+    if (mapped && mapped !== k) return true;
+    return false;
+  });
+}
+
+/** Keys whose overlay is missing or stale for this age-band/sex/ethnicity. */
+export function calibratorStaleKeys(
+  keys: string[],
+  profile?: { age?: any; gender?: string; ethnicity?: string; customBiomarkers?: Record<string, any> } | null
+): string[] {
+  return (keys || []).filter((k) => shouldRunCalibrator(k, profile, profile?.customBiomarkers?.[k]));
 }
 
 export type RangeSourceKind = 'custom' | 'demographic' | 'lab_report' | 'catalog';
@@ -1230,12 +1255,7 @@ export function recalibrateProfileOverlays(
 }
 
 /** Retired chat destinations → owner the user should land on. */
-export const RETIRED_AGENT_REDIRECT: Record<string, string> = {
-  medical_extract: 'agent1',
-  agent2: 'data_review',
-  agent3: 'data_review',
-  agent5: 'data_review',
-};
+export const RETIRED_AGENT_REDIRECT: Record<string, string> = PACK_RETIRED_AGENT_REDIRECT;
 
 export interface AgentDestinationRoute {
   destination: string;
@@ -1266,10 +1286,11 @@ export function resolveAgentDestination(
         payload,
       };
     }
-    if (canonical === 'data_accuracy' || agentType === 'data_accuracy') {
+    if (canonical === 'data_accuracy' || agentType === 'data_accuracy' || (canonical === 'biomarker_review' && payload?.comparisonRows)) {
+      const comparePack = selectBiomarkerAgentPack('data_accuracy');
       return {
         destination: 'comparison_modal',
-        payload,
+        payload: { ...payload, task: 'compare', canonicalAgent: comparePack?.agentType || 'biomarker_review' },
         requiresApproval: true,
       };
     }
@@ -1308,10 +1329,13 @@ export function resolveAgentDestination(
 export const INSTRUCTION_KEY_ALIASES: Record<string, string[]> = {
   agent1: ['medical_extract'],
   medical: ['medical_extract', 'agent1'],
+  catalog_clean: ['agent2', 'agent3', 'standardize_units', 'medical_categorise', 'name_consolidation', 'calibrate_ranges'],
   medical_categorise: ['agent2'],
   consolidate_names: ['agent3'],
   data_review: ['agent5'],
-  biomarker_review: [],
+  biomarker_review: ['data_accuracy'],
+  health_baseline: ['daily_recommendation', 'agent6'],
+  agent4: ['agent7'],
 };
 
 export function readAliasedInstruction(storageKeyPrefix: string, resolvedKey: string): string | null {
@@ -1404,18 +1428,21 @@ export const AGENT_DISPLAY_NAMES: Record<string, string> = {
   medical_extract: 'Lab Parser',
   agent1: 'Lab Parser',
   biomarker_review: 'Review',
-  agent2: 'Categoriser',
-  agent3: 'Name Deduper',
+  catalog_clean: 'Catalog Cleaner',
+  agent2: 'Catalog Cleaner',
+  agent3: 'Catalog Cleaner',
   data_review: 'Range Calibrator',
   agent4: 'Test Planner',
   agent5: 'Range Calibrator',
-  agent7: 'Literature',
+  agent7: 'Test Planner',
   health_baseline: 'Health Coach',
+  daily_recommendation: 'Health Coach',
   front_desk: 'Front Desk',
-  data_accuracy: 'Field Compare',
-  name_consolidation: 'Name Deduper',
-  standardize_units: 'Unit Relabel',
-  medical_categorise: 'Categoriser',
+  data_accuracy: 'Review',
+  name_consolidation: 'Catalog Cleaner',
+  standardize_units: 'Catalog Cleaner',
+  medical_categorise: 'Catalog Cleaner',
+  calibrate_ranges: 'Catalog Cleaner',
 };
 
 export interface CleanupBiomarkerCatalogResult {

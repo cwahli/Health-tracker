@@ -3122,25 +3122,25 @@ Recent Biomarker History (most recent first, up to 40 entries): ${JSON.stringify
 </USER_DATA>
 
 If the user asks "What should I do?", analyze their data and see what is missing (e.g. missing age, weight, or missing biomarkers, or no food logs logged).
-Advise them on which of the 5 specialized agents to use:
-- Add Health Data
-- Review Biomarkers
-- Clinical Review
-- Health Planning
-- Medical Insights
+Advise them on which of the 7 specialized agents to use:
+- Lab Parser (parse lab photos/PDF/text)
+- Review (fix flagged logs, units, scale)
+- Catalog Cleaner (dictionary units, grouping, aliases, default ranges)
+- Range Calibrator (this-profile overlay ranges only)
+- Health Coach (targets and daily habits)
+- Test Planner (retest gaps and literature)
+- Front Desk (you — profile and routing)
 
 If the user gives you information to update their profile (like their weight, height, age, blood type), you MUST include a JSON block in your response to update the profile.
-Format for updating profile and adding biomarker logs:
+Do NOT emit lab observation rows. If they share lab numbers, tell them you will send them to Lab Parser.
+Format for updating profile:
 \`\`\`json
 {
   "updatedProfile": {
     "weight": 70,
     "height": 175,
     "age": 30
-  },
-  "newBiomarkerLogs": [
-    { "biomarker": "HbA1c", "value": 5.5, "unit": "%", "date": "2023-10-10" }
-  ]
+  }
 }
 \`\`\`
 Any fields you specify in the JSON will be merged into their profile. 
@@ -3167,23 +3167,19 @@ User Message: ${message}
     const reply = response.text || "";
     addDebugLog(`[FrontDesk-Response] ${reply}`);
     
-    // Parse updatedProfile if any
+    // Parse updatedProfile if any. Lab rows are not accepted from Front Desk.
     let updatedProfile = null;
-    let newBiomarkerLogs = null;
     const jsonMatch = reply.match(/\`\`\`json\s*({[\s\S]*?})\s*```/);
     if (jsonMatch) {
       try {
         const parsed = JSON.parse(jsonMatch[1]);
-        if (parsed.newBiomarkerLogs) {
-          newBiomarkerLogs = parsed.newBiomarkerLogs;
-        }
         if (parsed.updatedProfile) {
           updatedProfile = { ...profile, ...parsed.updatedProfile };
         }
       } catch(e) {}
     }
 
-    res.json({ agentPrompt: prompt, text: reply.replace(/\`\`\`json[\s\S]*?\`\`\`/g, '').trim(), updatedProfile, newBiomarkerLogs, type: 'front_desk' });
+    res.json({ agentPrompt: prompt, text: reply.replace(/\`\`\`json[\s\S]*?\`\`\`/g, '').trim(), updatedProfile, newBiomarkerLogs: null, type: 'front_desk' });
   } catch (err: any) {
     console.error("Front Desk Error:", err);
     res.status(500).json({ error: err.message });
@@ -11026,11 +11022,7 @@ Your primary objective is to parse raw health reports, standardize clinical term
 2. Lossless Math & Units (CRITICAL): You are strictly forbidden from performing calculations, unit conversions, or inferring missing units. Extract the exact numerical value and the exact unit provided in the text.
 3. Qualitative Data (CRITICAL): If a result is qualitative (e.g., "Negative", "Trace", "High"), extract it exactly as written.
 4. Dictionary Mapping (MANDATORY): Map to existing keys from EXISTING DATABASE KEYS when applicable. If a biomarker is a new or custom test not in EXISTING DATABASE KEYS, generate a clean lowercase snake_case key for it (e.g., 'blood_pressure') and extract its value, unit, date, and explanation into 'extractedData'.
-5. Clinical Mapping: For each biomarker, map it to:
-   - riskCategories: Physiological risk categories (e.g., 'Cardiovascular', 'Kidney & hydration', 'Metabolic & glycemic', 'Liver & hepatitis stress', 'Hematology', 'Biometrics', 'Other').
-   - standardMedicalGrouping: Main clinical division ('Metabolic', 'Hepatic', 'Renal', 'Hematology', 'Biometrics', 'Other').
-   - potentialMedicalConditions: Broad diagnostic associations.
-6. Explanation of Changes (CRITICAL): For each biomarker, if you standardized, changed, merged, or corrected its name, value, or unit, you MUST provide a detailed explanation of why you made this change in the 'explanation' field.
+5. Explanation of Changes (CRITICAL): For each biomarker, if you standardized, changed, merged, or corrected its name, value, or unit, you MUST provide a detailed explanation of why you made this change in the 'explanation' field. Do not assign riskCategories, standardMedicalGrouping, or potentialMedicalConditions — Catalog Cleaner owns those fields.
 
 === EXISTING DATABASE KEYS ===
 [${Array.from(new Set([...biomarkerDefinitions.map(d => d.key), ...Object.keys(userProfile?.customBiomarkers || {})])).join(', ')}]
@@ -11507,11 +11499,8 @@ CRITICAL BIAS OVERRIDE: Medical baselines in training data heavily skew toward r
   1) State in '_demographicAudit.ageAndGenderShifts': "Age unprovided (age: 0). Adult male baseline applied as fallback."
   2) Include a clear warning in 'specificRiskContext': "⚠️ Note: Profile age is 0. Please update your age in Profile Settings for exact age-calibrated baselines."
 
-=== HISTORICAL LOG CORRECTION MANDATE ===
-Review the 'historicalEntries' array for each biomarker. Identify scale/unit shifts (e.g., percentage vs decimal ratio notation, like 1.4 vs 140, or 4.1 vs 143).
-If anomalous scaling errors are found:
-1) Calculate the correct normalized value to match the predominant historical scale or normal range bounds.
-2) Output a 'correctedHistoricalLogs' array inside the biomarker object containing objects with: { "date": string, "originalValue": number, "correctedValue": number, "note": string }.
+=== NO LOG NUMBER REWRITES ===
+You write overlay ranges only. Do not output correctedHistoricalLogs, do not change userValue, and do not convert logged numbers. If a scale/unit mix-up is visible, set isDataArtifact true and note that Review must convert. Catalog grouping/risk tags are owned by Catalog Cleaner — do not fill them here.
 
 === OUTLIER & PARSING ARTIFACT DETECTION GUARDRAILS ===
 Perform pre-execution range verification on quantitative values:
@@ -13173,14 +13162,14 @@ app.post("/api/gemini/route-biomarker"
 Your job is to parse the user request, analyze any context, and route the user to the most appropriate specialized health agent.
 
 Available agents:
-- 'agent1': Clinical Calibration Agent (For terminology mapping & standardizing clinical terms)
-- 'agent2': Clinical Assessment Agent (For adding standard groupings & risk categories)
-- 'agent3': Clinical Harmonization Agent (For terminology consolidation & assembly into buckets)
-- 'agent4': Health Planning Agent (For retest timelines, auditing test errors, and finding short/long term gaps)
-- 'agent5': Holistic Review Agent (For broad health & demographics-aware insights)
-- 'agent7': Health Report Agent (For final cohesive formatted health report generation)
-- 'front_desk': Health Preparation Agent (For general health questions, logging biomarkers & profile updates)
-- 'health_baseline': Health Coach (For evidence-based, sustainable food & coaching habits)
+- 'agent1': Lab Parser (parse lab photos/PDF/text into dated observations)
+- 'biomarker_review': Review (fix flagged logs, unit mix-ups, scale)
+- 'agent2': Catalog Cleaner — category task
+- 'agent3': Catalog Cleaner — alias task
+- 'data_review': Range Calibrator (overlay ranges for this profile; no log numbers)
+- 'agent4': Test Planner (retest timelines, gaps, literature)
+- 'front_desk': Front Desk (general questions and profile updates; no lab rows)
+- 'health_baseline': Health Coach (dietary/movement targets and daily habits)
 
 You MUST respond with a JSON object containing:
 {

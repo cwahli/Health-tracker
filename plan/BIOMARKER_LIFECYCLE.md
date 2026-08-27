@@ -175,7 +175,7 @@ n = 10–50 (one report):
   Calibrator on stale overlay ∩ rangeVariesBy
 
 n ≥ 20–100 dictionary hygiene:
-  exactly one specialist pack per run
+  Catalog Cleaner — exactly one task per run (units | category | aliases | default_range)
 ```
 
 ### 4.4 Instruction law

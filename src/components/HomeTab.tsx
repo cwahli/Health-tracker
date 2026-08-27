@@ -71,7 +71,7 @@ interface HomeTabProps {
   onBatchDeleteBiomarkersFromLogs?: (deletions: { id: string; key: string }[]) => Promise<void> | void;
   onBatchEditBiomarkersInLogs?: (updates: { id: string; key: string; value: string | number }[]) => Promise<void> | void;
   onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string, entries?: { date: string | null; biomarkers: { [key: string]: number | string } }[]) => void;
-  onOpenAgentChat?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'health_baseline' | 'agent7' | 'data_review' | 'biomarker_review', options?: { prefillMessage?: string; dataReviewBatchKeys?: string[]; dataReviewBatchIdx?: number | string; autoSendMessage?: string; biomarkerKey?: string }) => void;
+  onOpenAgentChat?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'health_baseline' | 'agent7' | 'data_review' | 'biomarker_review', options?: { prefillMessage?: string; dataReviewBatchKeys?: string[]; dataReviewBatchIdx?: number | string; autoSendMessage?: string; biomarkerKey?: string; agentTask?: string }) => void;
   hideSensitive: boolean;
   selectedModelId: string;
   onChangeModelId: (id: string) => void;
@@ -1231,14 +1231,20 @@ export default function HomeTab({
           <div className="space-y-1">
             <h3 className="text-sm font-bold text-theme-text flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-indigo-500" />
-              Daily Recommendation
+              Health Coach
             </h3>
             <p className="text-xs text-theme-text-secondary">
               Get personalized insights on your progress and today's goals.
             </p>
           </div>
           <button
-            onClick={() => setIsDailyRecommendationChatOpen(true)}
+            onClick={() => {
+              if (onOpenAgentChat) {
+                onOpenAgentChat('health_baseline', { agentTask: 'today', autoSendMessage: "What's up today?", prefillMessage: "What's up today?" });
+              } else {
+                setIsDailyRecommendationChatOpen(true);
+              }
+            }}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap"
           >
             What's up today?

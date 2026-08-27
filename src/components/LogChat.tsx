@@ -18,7 +18,8 @@ import LLMSelector from './LLMSelector';
 import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
-import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
+import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply, parserLeftoverKeys, calibratorStaleKeys } from '../utils/biomarkerLifecycle';
+import { CANONICAL_SEVEN, selectBiomarkerAgentPack, wireBiomarkerRequest } from '../utils/biomarkerAgentPacks';
 import ImageSlider from './ImageSlider';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 const FullScreenLogViewer = lazyWithRetry(() => import('./FullScreenLogViewer'));
@@ -468,9 +469,10 @@ interface LogChatProps {
   report?: any;
   actions?: any[];
   googleSteps?: number | null;
-  agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | 'biomarker_review' | null;
+  agentType?: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | 'biomarker_review' | 'catalog_clean' | null;
+  agentTask?: string | null;
   reviewBiomarkerKey?: string;
-  onOpenAgentFromFrontDesk?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | null) => void;
+  onOpenAgentFromFrontDesk?: (agentType: 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'agent7' | 'data_review' | 'health_baseline' | 'biomarker_review' | 'catalog_clean' | null) => void;
   biomarkerHistory?: any[];
   onAgentFinish?: (agentType: string, agentResult: any, extraActions?: any) => Promise<void>;
   onAgentAnalysisSaved?: (agentType: string, agentResult: any, existingId?: string) => Promise<string>;
@@ -519,6 +521,7 @@ export default function LogChat({
   actions = [],
   googleSteps = null,
   agentType = null,
+  agentTask = null,
   reviewBiomarkerKey,
   onOpenAgentFromFrontDesk,
   biomarkerHistory = [],
@@ -3588,12 +3591,20 @@ ${logsText}`);
       }
 
       let endpoint = '';
+      const wired = !isAgent('food') && !isAgent('food_idea')
+        ? wireBiomarkerRequest(agentType || (isAgent('front_desk') ? 'front_desk' : isAgent('daily_recommendation') ? 'daily_recommendation' : isAgent('health_baseline') ? 'health_baseline' : 'agent1'), agentTask)
+        : null;
       if (isAgent('food')) endpoint = '/api/gemini/food-analyze';
       else if (isAgent('food_idea')) endpoint = '/api/gemini/food-idea';
       else if (isAgent('daily_recommendation')) endpoint = '/api/gemini/daily-recommendation-chat';
+      else if (wired?.endpoint) endpoint = wired.endpoint;
       else if (isAgent('health_baseline')) endpoint = '/api/gemini/health-baseline-analyze';
       else if (isAgent('front_desk')) endpoint = '/api/gemini/front-desk';
       else endpoint = '/api/gemini/medical-analyze';
+
+      if (wired?.usesSelectedBiomarkers && !(dataReviewBatchKeys && dataReviewBatchKeys.length > 0)) {
+        endpoint = '/api/gemini/medical-analyze';
+      }
 
       const lightProfile = profile ? { ...profile } as any : null;
       if (lightProfile) {
@@ -3807,6 +3818,12 @@ ${logsText}`);
         bodyData.biomarkerHistory = activeHistory;
         bodyData.outOfRangeBiomarkers = outOfRangeBiomarkers;
         bodyData.calibratedInsights = getAllAgentCalibrations();
+        if (agentTask === 'today' || wired?.pack?.task === 'today') {
+          bodyData.foodLogs = (activeFoodLogs || []).map(f => ({ name: f.name, date: f.date, nutrients: f.nutrients }));
+          bodyData.report = report;
+          bodyData.actions = actions;
+          bodyData.steps = googleSteps;
+        }
       } else if (isAgent('food_idea')) {
         bodyData.location = loc;
         bodyData.recentMeals = (activeFoodLogs || []).slice(-20).map(f => f.name);
@@ -3901,7 +3918,9 @@ ${logsText}`);
                 : JSON.stringify(mapMsg.agentResult?.bucketMapping || mapMsg.bucketMapping);
             }
           } else {
-            currentStep = agentType;
+            currentStep = (wired?.wireAgentType && wired.wireAgentType !== 'catalog_clean')
+              ? wired.wireAgentType
+              : agentType;
           }
           bodyData.agentType = currentStep;
           const deletedIds = profile?.deletedBiomarkerLogIds || {};
@@ -3982,6 +4001,12 @@ ${logsText}`);
               }
             }
 
+            if (currentStep === 'data_review') {
+              batchKeys = calibratorStaleKeys(batchKeys, profile);
+            } else if (currentStep === 'agent1' && (dataReviewBatchIdx !== null && dataReviewBatchIdx !== undefined)) {
+              batchKeys = parserLeftoverKeys(batchKeys, profile);
+            }
+
             const flaggedErrorsMap = new Map(flaggedList.map(f => [f.key, f]));
 
             bodyData.batchBiomarkers = batchKeys.map(k => {
@@ -4022,6 +4047,24 @@ ${logsText}`);
             bodyData.dataReviewBatchKeys = batchKeys;
           }
         }
+      }
+
+      if (wired?.usesSelectedBiomarkers && endpoint === wired.endpoint) {
+        const keys = (dataReviewBatchKeys && dataReviewBatchKeys.length > 0)
+          ? dataReviewBatchKeys
+          : (bodyData.batchKeys || []);
+        const selectedBiomarkers = (Array.isArray(bodyData.batchBiomarkers) && bodyData.batchBiomarkers.length > 0)
+          ? bodyData.batchBiomarkers.map((b: any) => ({
+              key: b.key,
+              name: b.name || b.key,
+              currentUnit: b.unit || '',
+              currentRange: b.normalRange || '',
+              sampleLogs: (b.historicalEntries || []).slice(0, 8),
+            }))
+          : keys.map((k: string) => ({ key: k, name: k }));
+        bodyData.selectedBiomarkers = selectedBiomarkers;
+        bodyData.unitPreference = profile?.unitPreference || 'SI';
+        bodyData.engine = selectedModelId;
       }
 
       const storageKey = isAgent('food') ? 'food' : (isAgent('food_idea') ? 'food_idea' : (agentType || 'agent1'));
@@ -5220,6 +5263,24 @@ ${logsText}`);
               <h2 className="text-sm font-bold text-theme-text font-display">
                 {activeAgentKey === 'data_review' ? `${dataReviewBatchIdx === 'custom' ? 'Custom Test Batch' : 'Batch ' + (dataReviewBatchIdx !== null && dataReviewBatchIdx !== undefined ? (dataReviewBatchIdx as number) + 1 : 1)}` : (activeAgentConfig?.displayName || t.addMedical)}
               </h2>
+              {(type === 'medical' || type === 'front_desk' || type === 'daily_recommendation') && onOpenAgentFromFrontDesk && (
+                <select
+                  value={selectBiomarkerAgentPack(agentType || (type === 'front_desk' ? 'front_desk' : type === 'daily_recommendation' ? 'health_baseline' : 'agent1'))?.agentType || 'agent1'}
+                  onChange={(e) => {
+                    const next = e.target.value as any;
+                    if (next === 'front_desk') return;
+                    onOpenAgentFromFrontDesk(next);
+                  }}
+                  className="mt-0.5 max-w-[11rem] text-[10px] font-bold bg-transparent text-indigo-600 dark:text-indigo-400 border-0 p-0 cursor-pointer"
+                  title="Switch biomarker agent"
+                >
+                  {CANONICAL_SEVEN.filter((id) => id !== 'front_desk').map((id) => (
+                    <option key={id} value={id === 'catalog_clean' ? 'catalog_clean' : id}>
+                      {AGENT_REGISTRY[id as AgentType]?.displayName || id}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 type="button"
                 onClick={() => setIsEngineSelectorOpen(!isEngineSelectorOpen)}
@@ -6321,38 +6382,45 @@ ${logsText}`);
                   </button>
                   <button
                     type="button"
-                    onClick={() => onOpenAgentFromFrontDesk?.(null)}
+                    onClick={() => onOpenAgentFromFrontDesk?.('agent1')}
                     className="whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-theme-neutral text-xs font-bold rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
-                    <span>➕ Add health data</span>
+                    <span>Lab Parser</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenAgentFromFrontDesk?.('biomarker_review')}
+                    className="whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-theme-neutral text-xs font-bold rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Review</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenAgentFromFrontDesk?.('catalog_clean')}
+                    className="whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-theme-neutral text-xs font-bold rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Catalog Cleaner</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => onOpenAgentFromFrontDesk?.('data_review')}
                     className="whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-theme-neutral text-xs font-bold rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
-                    <span>🩺 Review biomarkers</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onOpenAgentFromFrontDesk?.('agent1')}
-                    className="whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-theme-neutral text-xs font-bold rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <span>📋 Clinical review</span>
+                    <span>Range Calibrator</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => onOpenAgentFromFrontDesk?.('health_baseline')}
                     className="whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-theme-neutral text-xs font-bold rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
-                    <span>🎯 Health planning</span>
+                    <span>Health Coach</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => onOpenAgentFromFrontDesk?.('agent7')}
+                    onClick={() => onOpenAgentFromFrontDesk?.('agent4')}
                     className="whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-theme-neutral text-xs font-bold rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
-                    <span>💡 Medical insights</span>
+                    <span>Test Planner</span>
                   </button>
                 </>
               ) : (

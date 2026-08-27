@@ -77,24 +77,20 @@ Changing **one** layer without the next is the usual cascade.
 
 | Say | Id / menu | Allowed writes (target) |
 |---|---|---|
-| **Lab Parser** | `medical`, `medical_extract`, `agent1` extract | Raw / pending observations. **No catalog keys** |
-| **Review** | `biomarker_review` | **Only** agent that rewrites stored numbers (`modificationCommand`). n=1–5 may also propose alias, category, relabel **or** convert, compact `proposal.range` |
-| **Name Deduper** | Name Consolidation (`agent3` retired as destination) | Propose alias groups; human/combine apply |
-| **Categoriser** | Medical Categorisation (`agent2` retired as destination) | Catalog grouping/risks/conditions |
-| **Unit Relabel** | Standardize Units | Unit **label** only |
-| **Field Compare** | Data Accuracy (`data_accuracy`) | Diff table; no durable write until apply |
-| **Range Calibrator** | `data_review` | Overlay only. **No** observation values |
-| **Health Coach** | `health_baseline` | `report` targets from approved+unflagged |
-| **Test Planner** | `agent4` | Summaries / gaps / actions |
-| **Literature** | `agent7` | Summary |
+| **Lab Parser** | `agent1` (`medical`, `medical_extract`) | Raw / pending observations. **No catalog keys, no math** |
+| **Review** | `biomarker_review` (`data_accuracy` → task `compare`) | **Only** agent that rewrites stored numbers (`modificationCommand`). n=1–5 may also propose alias, category, relabel **or** convert, compact `proposal.range` |
+| **Catalog Cleaner** | `catalog_clean` (tasks: `units` / `category` / `aliases` / `default_range`; aliases `agent2`, `agent3`, `standardize_units`, `medical_categorise`, `name_consolidation`, `calibrate_ranges`) | Catalog fields after human apply. **One task per run.** No observation numbers, no overlay |
+| **Range Calibrator** | `data_review` (`agent5`) | Overlay only. **No** observation values, no catalog grouping |
+| **Health Coach** | `health_baseline` (`daily_recommendation` → task `today`) | `report` targets from approved+unflagged |
+| **Test Planner** | `agent4` (`agent7` → task `literature`) | Summaries / gaps / actions / literature |
 | **Front Desk** | `front_desk` | Route / profile. **No lab rows** |
 | **Dictionary** | Dictionary UI | Approve, alias-map, reject, combine → tombstones |
 
-**Retired as picks (keep instruction packs, alias them):** `agent3`, `agent5` as “ranges”, `medical_extract` as a second parser, menu “Standardize Biomarkers”.
+**Retired as picks (keep instruction packs, alias them):** `agent2`/`agent3`/`standardize_units`/`calibrate_ranges` → Catalog Cleaner tasks; `agent5` → Calibrator; `medical_extract` → Parser; `data_accuracy` → Review `compare`; `daily_recommendation` → Coach `today`; `agent7` → Planner `literature`.
 
-**Instruction packs are product.** Do not delete `server.ts` / viewer / `custom_system_instruction_*` when folding a name. Do not concatenate all packs into Review.
+**Instruction packs are product.** Do not delete `server.ts` / viewer / `custom_system_instruction_*` when folding a name. Do not concatenate opposite packs (Parser no-math vs Review convert vs Calibrator overlay).
 
-**Dispatcher:** n=1–5 → one Review/Add session (composed slices). n≥20 → one specialist pack per run. Full Calibrator novel stays on `data_review`.
+**Dispatcher:** n=1–5 → one Review session. n=10–50 report leftovers → Parser chunks. n≥20 hygiene → Catalog Cleaner **one task**. Overlay-stale ∩ `rangeVariesBy` → Calibrator. Full Calibrator novel stays on `data_review`.
 
 ### Laws
 
@@ -185,13 +181,13 @@ Any UI “remove” must use the **same** delete/tombstone rules as `domains/syn
 |---|---|---|
 | `medical_extract` / `agent1` | History + current + `customBiomarkers`; batch may tombstone | Slug **without** always `getMappedBiomarkerKey` |
 | `data_review` | Overlay fields only (2026-08-14) | No longer writes `userValue` / `correctedHistoricalLogs` |
-| `agent2` | Grouping/risk/conditions on customs | No history values |
-| `agent3` | Summary text | Real combine = dictionary modal |
+| `agent2` / Catalog `category` | Grouping/risk/conditions on customs | No history values |
+| `agent3` / Catalog `aliases` | Summary / alias groups | Real combine = dictionary modal |
 | `agent4` | Planning summaries / gaps / actions | No lab keys |
 | `agent5` | `agentContextualizerSummary` only | Does **not** write ranges |
 | `biomarker_review` | `modificationCommand` + optional `corrections` + `proposal` overlay | Date match via `toYYYYMMDD` |
 | `medical` | Apply → `handleLogMedical` | Customs often `needsApproval` |
-| `front_desk` | `onAddBiomarkerLogs` push | No same-day merge / alias |
+| `front_desk` | Profile only; lab lines routed to Lab Parser | **No** `onAddBiomarkerLogs` writes |
 | Dictionary UI | customs, approve, combine → tombstones | True consolidate path |
 
 **Shared:** delete/combine/sanitize tombstones; `mergeProfiles` / `mergeBiomarkerHistory`.

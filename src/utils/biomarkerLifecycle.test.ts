@@ -8,6 +8,8 @@ import {
   handleUnitChange,
   overlayAgeBand,
   overlayFingerprint,
+  parserLeftoverKeys,
+  calibratorStaleKeys,
   shouldRunCalibrator,
   getRangeVariesBy,
   resolveAgentDestination,
@@ -247,6 +249,25 @@ describe('overlay fingerprint / calibrator gate', () => {
     expect(res.updatedCustomBiomarkers.hdl.overlayFingerprint).toBe('20-29|f|asian');
   });
 
+  it('treats overlayFingerprint as the stored calibrator fingerprint', () => {
+    const profile = { age: 28, gender: 'Male', ethnicity: 'Chinese' };
+    const fp = overlayFingerprint(profile);
+    expect(shouldRunCalibrator('hdl', profile, { overlayFingerprint: fp })).toBe(false);
+    expect(calibratorStaleKeys(['hdl', 'serum_sodium'], {
+      ...profile,
+      customBiomarkers: { hdl: { overlayFingerprint: fp } },
+    })).toEqual([]);
+  });
+
+  it('parser leftovers are pending or unmapped aliases only', () => {
+    const keys = ['mystery', 'hdl', 'serumsodium'];
+    const leftover = parserLeftoverKeys(keys, {
+      customBiomarkers: { mystery: { needsApproval: true, name: 'Mystery' } },
+    });
+    expect(leftover).toContain('mystery');
+    expect(leftover).not.toContain('hdl');
+  });
+
   it('correctly attributes reference range sources (catalog, lab report, demographic, custom)', () => {
     const def = { normalRange: '135 - 145', unit: 'mmol/L' };
     
@@ -315,6 +336,10 @@ describe('resolveAgentDestination', () => {
     expect(resolveAgentDestination('agent5')).toBe('data_review');
     expect(resolveAgentDestination('medical_extract')).toBe('agent1');
     expect(resolveAgentDestination('biomarker_review')).toBe('biomarker_review');
+    expect(resolveAgentDestination('agent2')).toBe('catalog_clean');
+    expect(resolveAgentDestination('agent3')).toBe('catalog_clean');
+    expect(resolveAgentDestination('daily_recommendation')).toBe('health_baseline');
+    expect(resolveAgentDestination('agent7')).toBe('agent4');
   });
 
   it('routes data_accuracy to comparison modal payload', () => {

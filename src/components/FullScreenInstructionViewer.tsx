@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Copy, Check, Terminal, ShieldAlert, BookOpen, BrainCircuit, Edit2, RotateCcw, Save, Search, Code, Info, Sparkles, Plus, ChevronRight, Activity } from 'lucide-react';
 import { auth } from '../firebase';
-import { readAliasedInstruction } from '../utils/biomarkerLifecycle';
+import { AGENT_DISPLAY_NAMES, readAliasedInstruction } from '../utils/biomarkerLifecycle';
 
 interface FullScreenInstructionViewerProps {
   isOpen: boolean;
@@ -726,6 +726,8 @@ For each matched group, determine:
       defaultVariableData = '';
     }
 
+    const display = AGENT_DISPLAY_NAMES[key] || AGENT_DISPLAY_NAMES[resolvedKey];
+    if (display) title = display;
     return { title, subtitle, icon, defaultSystemInstruction, defaultVariableData };
   };
 
