@@ -1,0 +1,2342 @@
+{
+  "id": "C2",
+  "dry": true,
+  "insightSize": 20,
+  "draftSize": 12,
+  "turns": [
+    {
+      "turn": 0,
+      "kind": "dry",
+      "ids": [
+        "r01",
+        "r02",
+        "r03",
+        "r04",
+        "r05",
+        "r06",
+        "r07",
+        "r08",
+        "r09",
+        "r10",
+        "r11",
+        "r12",
+        "r13",
+        "r14",
+        "r15",
+        "r16",
+        "r17",
+        "r18",
+        "r19",
+        "r20",
+        "r21",
+        "r22",
+        "r23",
+        "r24",
+        "r25",
+        "r26",
+        "r27",
+        "r28",
+        "r29",
+        "r30"
+      ],
+      "ms": 0,
+      "n": 30,
+      "raw": "",
+      "rows": [
+        {
+          "id": "r01",
+          "op": "add",
+          "printed": "HbA1c (IFCC)",
+          "value": 40,
+          "unit": "mmol/mol",
+          "date": "2026-06-05",
+          "match": "alias",
+          "key": "hba1c",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r02",
+          "op": "add",
+          "printed": "Calculated LDL cholesterol",
+          "value": 4.3,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "alias",
+          "key": "ldl",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r03",
+          "op": "add",
+          "printed": "HDL cholesterol",
+          "value": 1.2,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "alias",
+          "key": "hdl",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r04",
+          "op": "add",
+          "printed": "Triglycerides",
+          "value": 2.1,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "triglycerides",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r05",
+          "op": "add",
+          "printed": "Total cholesterol",
+          "value": 6.5,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "total_cholesterol",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r06",
+          "op": "add",
+          "printed": "ApoB",
+          "value": 90,
+          "unit": "mg/dL",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "apob",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r07",
+          "op": "add",
+          "printed": "ApoA1",
+          "value": 1.4,
+          "unit": "g/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "apoa1",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r08",
+          "op": "add",
+          "printed": "eGFR (CKD-EPI)",
+          "value": 80,
+          "unit": "mL/min/1.73m2",
+          "date": "2026-06-05",
+          "match": "alias",
+          "key": "egfr",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r09",
+          "op": "add",
+          "printed": "Serum creatinine",
+          "value": 100,
+          "unit": "umol/L",
+          "date": "2026-06-05",
+          "match": "alias",
+          "key": "creatinine",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r10",
+          "op": "add",
+          "printed": "Serum ALT",
+          "value": 41,
+          "unit": "U/L",
+          "date": "2026-06-05",
+          "match": "alias",
+          "key": "alt",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r11",
+          "op": "add",
+          "printed": "AST",
+          "value": 27,
+          "unit": "U/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "ast",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r12",
+          "op": "add",
+          "printed": "Gamma GT",
+          "value": 35,
+          "unit": "U/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "gamma_gt",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r13",
+          "op": "add",
+          "printed": "Haemoglobin",
+          "value": 166,
+          "unit": "g/L",
+          "date": "2026-06-05",
+          "match": "alias",
+          "key": "hemoglobin",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r14",
+          "op": "add",
+          "printed": "Hematocrit",
+          "value": 0.48,
+          "unit": "L/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "hematocrit",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r15",
+          "op": "add",
+          "printed": "Total white cell count",
+          "value": 5.7,
+          "unit": "10*9/L",
+          "date": "2026-06-05",
+          "match": "alias",
+          "key": "wbc",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r16",
+          "op": "add",
+          "printed": "Platelets",
+          "value": 227,
+          "unit": "10*9/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "platelets",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r17",
+          "op": "add",
+          "printed": "Serum albumin",
+          "value": 46,
+          "unit": "g/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "serum_albumin",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r18",
+          "op": "add",
+          "printed": "Total protein",
+          "value": 81,
+          "unit": "g/L",
+          "date": "2026-06-05",
+          "match": "key",
+          "key": "total_protein",
+          "writeTarget": "observation",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": null
+        },
+        {
+          "id": "r19",
+          "op": "add",
+          "printed": "Lp(a)",
+          "value": 90,
+          "unit": "nmol/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "lp_a",
+            "name": "Lp(a)",
+            "unit": "nmol/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Lp(a)",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r20",
+          "op": "add",
+          "printed": "Homocysteine",
+          "value": 12,
+          "unit": "umol/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "homocysteine",
+            "name": "Homocysteine",
+            "unit": "umol/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Homocysteine",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r21",
+          "op": "add",
+          "printed": "PSA",
+          "value": 1.41,
+          "unit": "ug/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "prostate_specific_antigen",
+            "name": "PSA",
+            "unit": "ug/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "PSA",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r22",
+          "op": "add",
+          "printed": "Serum sodium",
+          "value": 143,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "serum_sodium",
+            "name": "Serum sodium",
+            "unit": "mmol/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Serum sodium",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r23",
+          "op": "add",
+          "printed": "Serum potassium",
+          "value": 4.3,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "serum_potassium",
+            "name": "Serum potassium",
+            "unit": "mmol/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Serum potassium",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r24",
+          "op": "add",
+          "printed": "Serum calcium",
+          "value": 2.47,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "serum_calcium",
+            "name": "Serum calcium",
+            "unit": "mmol/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Serum calcium",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r25",
+          "op": "add",
+          "printed": "Adjusted calcium",
+          "value": 2.37,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "adjustedcalcium",
+            "name": "Adjusted calcium",
+            "unit": "mmol/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Adjusted calcium",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r26",
+          "op": "add",
+          "printed": "Inorganic phosphate",
+          "value": 1.12,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "inorganicphosphate",
+            "name": "Inorganic phosphate",
+            "unit": "mmol/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Inorganic phosphate",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r27",
+          "op": "add",
+          "printed": "Alkaline phosphatase",
+          "value": 39,
+          "unit": "U/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "alkaline_phosphatase",
+            "name": "Alkaline phosphatase",
+            "unit": "U/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Alkaline phosphatase",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r28",
+          "op": "add",
+          "printed": "Globulin",
+          "value": 35,
+          "unit": "g/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "serum_globulin",
+            "name": "Globulin",
+            "unit": "g/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Globulin",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r29",
+          "op": "add",
+          "printed": "Non-HDL cholesterol",
+          "value": 5,
+          "unit": "mmol/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "non_hdl_cholesterol",
+            "name": "Non-HDL cholesterol",
+            "unit": "mmol/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Non-HDL cholesterol",
+            "riskCategories": []
+          }
+        },
+        {
+          "id": "r30",
+          "op": "add",
+          "printed": "Ferritin",
+          "value": 85,
+          "unit": "ug/L",
+          "date": "2026-06-05",
+          "match": "none",
+          "key": null,
+          "writeTarget": "pending",
+          "medicalInsight": "",
+          "customRangeOverlay": null,
+          "newCatalogDraft": {
+            "suggestedKey": "ferritin",
+            "name": "Ferritin",
+            "unit": "ug/L",
+            "aliases": [],
+            "normalRange": "Varies",
+            "description": "Ferritin",
+            "riskCategories": []
+          }
+        }
+      ]
+    }
+  ],
+  "classified": [
+    {
+      "id": "r01",
+      "printed": "HbA1c (IFCC)",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "hba1c",
+      "status": "Elevated"
+    },
+    {
+      "id": "r02",
+      "printed": "Calculated LDL cholesterol",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "ldl",
+      "status": "Very High"
+    },
+    {
+      "id": "r03",
+      "printed": "HDL cholesterol",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "hdl",
+      "status": "Optimal"
+    },
+    {
+      "id": "r04",
+      "printed": "Triglycerides",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "triglycerides",
+      "status": "Elevated"
+    },
+    {
+      "id": "r05",
+      "printed": "Total cholesterol",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "total_cholesterol",
+      "status": "Very High"
+    },
+    {
+      "id": "r06",
+      "printed": "ApoB",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "apob",
+      "status": "Optimal"
+    },
+    {
+      "id": "r07",
+      "printed": "ApoA1",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "apoa1",
+      "status": "Optimal"
+    },
+    {
+      "id": "r08",
+      "printed": "eGFR (CKD-EPI)",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "egfr",
+      "status": "Mildly Decreased (CKD G2)"
+    },
+    {
+      "id": "r09",
+      "printed": "Serum creatinine",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "creatinine",
+      "status": "Optimal"
+    },
+    {
+      "id": "r10",
+      "printed": "Serum ALT",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "alt",
+      "status": "Elevated"
+    },
+    {
+      "id": "r11",
+      "printed": "AST",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "ast",
+      "status": "Optimal"
+    },
+    {
+      "id": "r12",
+      "printed": "Gamma GT",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "gamma_gt",
+      "status": "Optimal"
+    },
+    {
+      "id": "r13",
+      "printed": "Haemoglobin",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "hemoglobin",
+      "status": "Optimal"
+    },
+    {
+      "id": "r14",
+      "printed": "Hematocrit",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "hematocrit",
+      "status": "Optimal"
+    },
+    {
+      "id": "r15",
+      "printed": "Total white cell count",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "wbc",
+      "status": "Optimal"
+    },
+    {
+      "id": "r16",
+      "printed": "Platelets",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "platelets",
+      "status": "Optimal"
+    },
+    {
+      "id": "r17",
+      "printed": "Serum albumin",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "serum_albumin",
+      "status": "Optimal"
+    },
+    {
+      "id": "r18",
+      "printed": "Total protein",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "total_protein",
+      "status": "Elevated"
+    },
+    {
+      "id": "r19",
+      "printed": "Lp(a)",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r20",
+      "printed": "Homocysteine",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r21",
+      "printed": "PSA",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r22",
+      "printed": "Serum sodium",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r23",
+      "printed": "Serum potassium",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r24",
+      "printed": "Serum calcium",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r25",
+      "printed": "Adjusted calcium",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r26",
+      "printed": "Inorganic phosphate",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r27",
+      "printed": "Alkaline phosphatase",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r28",
+      "printed": "Globulin",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r29",
+      "printed": "Non-HDL cholesterol",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r30",
+      "printed": "Ferritin",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    }
+  ],
+  "templates": [
+    {
+      "id": "r01",
+      "printed": "HbA1c (IFCC)",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "HbA1c",
+      "key": "hba1c",
+      "alias": [
+        "hba1cc",
+        "glycatedhaemoglobin",
+        "hemoglobin_a1c_mmol_mol",
+        "hba1c_mmol_mol",
+        "hemoglobin_a1c"
+      ],
+      "normalRange": "20 - 41",
+      "unit": "mmol/mol",
+      "description": "Average blood glucose levels over the past 2-3 months.",
+      "riskCategories": [
+        "Metabolic"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Elevated (Diabetes): >= 48; Elevated: >= 39; Normal: >= 20; Elevated (Diabetes): >= 6.5; Elevated: >= 5.7",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2024-04-04",
+          "value": 39,
+          "unit": "mmol/mol"
+        },
+        {
+          "date": "2026-06-05",
+          "value": 40,
+          "unit": "mmol/mol"
+        }
+      ],
+      "currentEvaluationStatus": "Elevated",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r02",
+      "printed": "Calculated LDL cholesterol",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "LDL-C",
+      "key": "ldl",
+      "alias": [
+        "ldlc",
+        "ldlcholesterol",
+        "calculatedldlcholesterol",
+        "calculatedldl",
+        "calculated_ldl_cholesterol_mmol_l",
+        "calculated_ldl_cholesterol"
+      ],
+      "normalRange": "< 2.6",
+      "unit": "mmol/L",
+      "description": "Low-Density Lipoprotein, the \"bad\" cholesterol driving plaque.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Very High: > 3.4; Elevated: > 2.6; Optimal: <= 2.6",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 4.3,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Very High",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r03",
+      "printed": "HDL cholesterol",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "HDL-C",
+      "key": "hdl",
+      "alias": [
+        "hdlc",
+        "hdlcholesterol",
+        "serum_hdl_cholesterol",
+        "serum_hdl_cholesterol_mmol_l"
+      ],
+      "normalRange": "0.9 - 1.7",
+      "unit": "mmol/L",
+      "description": "High-Density Lipoprotein, the \"good\" cholesterol removing excess lipids.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 1.2,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r04",
+      "printed": "Triglycerides",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Triglycerides",
+      "key": "triglycerides",
+      "alias": [
+        "trig",
+        "serum_triglycerides",
+        "serum_triglycerides_mmol_l"
+      ],
+      "normalRange": "< 1.7",
+      "unit": "mmol/L",
+      "description": "Type of fat in the blood used for energy storage.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Very High: >= 5.6; Elevated: >= 1.7; Optimal: < 1.7",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 2.1,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Elevated",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r05",
+      "printed": "Total cholesterol",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Total Cholesterol",
+      "key": "total_cholesterol",
+      "alias": [
+        "cholesterol",
+        "serumtotalcholesterol",
+        "serum_cholesterol"
+      ],
+      "normalRange": "Aim under 5.0",
+      "unit": "mmol/L",
+      "description": "Total amount of cholesterol in the blood.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Very High: > 6.2; Elevated: > 5; Optimal: <= 5",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 6.5,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Very High",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r06",
+      "printed": "ApoB",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "ApoB",
+      "key": "apob",
+      "alias": [],
+      "normalRange": "under 90",
+      "unit": "mg/dL",
+      "description": "Apolipoprotein B, the best indicator of atherogenic particle count.",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Very High: > 110; Elevated: > 90; Optimal: <= 90",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 90,
+          "unit": "mg/dL"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r07",
+      "printed": "ApoA1",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "ApoA1",
+      "key": "apoa1",
+      "alias": [
+        "apolipoprotein_a1",
+        "apolipoproteina1",
+        "apoa_1",
+        "apolipoprotein_a_1",
+        "apo_a1",
+        "apoa1_g_l"
+      ],
+      "normalRange": "1.19 - 2.40",
+      "unit": "g/L",
+      "description": "Apolipoprotein A1, the primary protein constituent of HDL particles that mediates reverse cholesterol transport.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 1.4,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r08",
+      "printed": "eGFR (CKD-EPI)",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "eGFR",
+      "key": "egfr",
+      "alias": [
+        "egfrmlmin173m2",
+        "egfrmlmin173",
+        "egfr_ml_min_1_73m2",
+        "egfr_mlmin173m2"
+      ],
+      "normalRange": "over 90",
+      "unit": "mL/min/1.73m²",
+      "description": "Estimated Glomerular Filtration Rate, showing kidney health.",
+      "riskCategories": [
+        "Kidney"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Decreased (CKD G3): < 60; Mildly Decreased (CKD G2): < 90; Optimal: >= 90",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 80,
+          "unit": "mL/min/1.73m2"
+        }
+      ],
+      "currentEvaluationStatus": "Mildly Decreased (CKD G2)",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r09",
+      "printed": "Serum creatinine",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "Creatinine",
+      "key": "creatinine",
+      "alias": [
+        "serumcreatinine",
+        "serumcreatinineumoll",
+        "serum_creatinine_umol_l",
+        "serum_creatinine"
+      ],
+      "normalRange": "44 - 106",
+      "unit": "umol/L",
+      "description": "A waste product from muscle breakdown, filtered by kidneys.",
+      "riskCategories": [
+        "Kidney"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 100,
+          "unit": "umol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r10",
+      "printed": "Serum ALT",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "ALT (SGPT)",
+      "key": "alt",
+      "alias": [
+        "sgpt",
+        "alanine_aminotransferase",
+        "serum_alt_level_u_l",
+        "serum_alt_level"
+      ],
+      "normalRange": "10 - 40",
+      "unit": "U/L",
+      "description": "Alanine Aminotransferase, an enzyme found mostly in the liver.",
+      "riskCategories": [
+        "Liver"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 41,
+          "unit": "U/L"
+        }
+      ],
+      "currentEvaluationStatus": "Elevated",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r11",
+      "printed": "AST",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "AST (SGOT)",
+      "key": "ast",
+      "alias": [
+        "sgot",
+        "aspartate_aminotransferase",
+        "ast_serum_level_u_l",
+        "ast_serum_level"
+      ],
+      "normalRange": "10 - 40",
+      "unit": "U/L",
+      "description": "Aspartate Aminotransferase, an enzyme found in liver and muscle.",
+      "riskCategories": [
+        "Liver"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 27,
+          "unit": "U/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r12",
+      "printed": "Gamma GT",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Gamma GT (GGT)",
+      "key": "gamma_gt",
+      "alias": [
+        "ggt",
+        "gamma_glutamyl_transferase",
+        "gamma_glutamyl_transpeptidase",
+        "gammagt",
+        "gammaglutamyltransferase",
+        "gammaglutamyltranspeptidase",
+        "serum_gamma_gt_level",
+        "serum_ggt_level"
+      ],
+      "normalRange": "9 - 48",
+      "unit": "U/L",
+      "description": "Gamma-Glutamyl Transferase, a sensitive enzyme marker for biliary tract function, hepatic stress, and alcohol intake.",
+      "riskCategories": [
+        "Liver"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 35,
+          "unit": "U/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r13",
+      "printed": "Haemoglobin",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "Hemoglobin",
+      "key": "hemoglobin",
+      "alias": [
+        "haemoglobin",
+        "hgb",
+        "hb",
+        "hemoglobin_g_l",
+        "haemoglobinestimation",
+        "haemoglobin_estimation",
+        "haemoglobin_estimation_hb",
+        "haemoglobin_hb",
+        "hemoglobingl",
+        "hemoglobingdl",
+        "haemoglobingl",
+        "haemoglobingdl"
+      ],
+      "normalRange": "120 - 175",
+      "unit": "g/L",
+      "description": "Oxygen-carrying protein in red blood cells.",
+      "riskCategories": [
+        "Hematology"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 166,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r14",
+      "printed": "Hematocrit",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Hematocrit",
+      "key": "hematocrit",
+      "alias": [],
+      "normalRange": "0.36 - 0.50",
+      "unit": "L/L",
+      "description": "The proportion of blood made up of red blood cells.",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 0.48,
+          "unit": "L/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r15",
+      "printed": "Total white cell count",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "White Blood Cell (WBC)",
+      "key": "wbc",
+      "alias": [
+        "whitebloodcell",
+        "total_white_cell_count",
+        "total_white_cell_count_10_9_l",
+        "white_blood_cell_count"
+      ],
+      "normalRange": "4.5 - 11.0",
+      "unit": "K/uL",
+      "description": "Total white blood cell count for immune function.",
+      "riskCategories": [
+        "Hematology"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 5.7,
+          "unit": "10*9/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r16",
+      "printed": "Platelets",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Platelets",
+      "key": "platelets",
+      "alias": [
+        "plateletcount",
+        "platelet",
+        "platelet_count_10_9_l",
+        "platelet_count"
+      ],
+      "normalRange": "150 - 450",
+      "unit": "K/uL",
+      "description": "Cells responsible for blood clotting and wound repair.",
+      "riskCategories": [
+        "Hematology"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 227,
+          "unit": "10*9/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r17",
+      "printed": "Serum albumin",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Serum Albumin",
+      "key": "serum_albumin",
+      "alias": [
+        "albumin",
+        "serumalbumin",
+        "serum_albumin_g_l"
+      ],
+      "normalRange": "35 - 50",
+      "unit": "g/L",
+      "description": "Main protein produced by the liver, keeping fluid balance in vessels.",
+      "riskCategories": [
+        "Liver",
+        "Kidney"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 46,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r18",
+      "printed": "Total protein",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Total Protein",
+      "key": "total_protein",
+      "alias": [
+        "serumtotalprotein",
+        "serum_total_protein_g_l",
+        "serum_total_protein"
+      ],
+      "normalRange": "60 - 80",
+      "unit": "g/L",
+      "description": "Measures the total amount of protein in your blood.",
+      "riskCategories": [
+        "Liver",
+        "Kidney"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 81,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "Elevated",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r19",
+      "printed": "Lp(a)",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Lp(a)",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "nmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 90,
+          "unit": "nmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "lp_a",
+        "name": "Lp(a)",
+        "unit": "nmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Lp(a)",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r20",
+      "printed": "Homocysteine",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Homocysteine",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "umol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 12,
+          "unit": "umol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "homocysteine",
+        "name": "Homocysteine",
+        "unit": "umol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Homocysteine",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r21",
+      "printed": "PSA",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "PSA",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "ug/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 1.41,
+          "unit": "ug/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "prostate_specific_antigen",
+        "name": "PSA",
+        "unit": "ug/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "PSA",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r22",
+      "printed": "Serum sodium",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Serum sodium",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 143,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "serum_sodium",
+        "name": "Serum sodium",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Serum sodium",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r23",
+      "printed": "Serum potassium",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Serum potassium",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 4.3,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "serum_potassium",
+        "name": "Serum potassium",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Serum potassium",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r24",
+      "printed": "Serum calcium",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Serum calcium",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 2.47,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "serum_calcium",
+        "name": "Serum calcium",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Serum calcium",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r25",
+      "printed": "Adjusted calcium",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Adjusted calcium",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 2.37,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "adjustedcalcium",
+        "name": "Adjusted calcium",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Adjusted calcium",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r26",
+      "printed": "Inorganic phosphate",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Inorganic phosphate",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 1.12,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "inorganicphosphate",
+        "name": "Inorganic phosphate",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Inorganic phosphate",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r27",
+      "printed": "Alkaline phosphatase",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Alkaline phosphatase",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "U/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 39,
+          "unit": "U/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "alkaline_phosphatase",
+        "name": "Alkaline phosphatase",
+        "unit": "U/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Alkaline phosphatase",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r28",
+      "printed": "Globulin",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Globulin",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "g/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 35,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "serum_globulin",
+        "name": "Globulin",
+        "unit": "g/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Globulin",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r29",
+      "printed": "Non-HDL cholesterol",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Non-HDL cholesterol",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 5,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "non_hdl_cholesterol",
+        "name": "Non-HDL cholesterol",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Non-HDL cholesterol",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r30",
+      "printed": "Ferritin",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Ferritin",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "ug/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 85,
+          "unit": "ug/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "ferritin",
+        "name": "Ferritin",
+        "unit": "ug/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Ferritin",
+        "riskCategories": []
+      }
+    }
+  ],
+  "filled": [
+    {
+      "id": "r01",
+      "op": "add",
+      "printed": "HbA1c (IFCC)",
+      "value": 40,
+      "unit": "mmol/mol",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "hba1c",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r02",
+      "op": "add",
+      "printed": "Calculated LDL cholesterol",
+      "value": 4.3,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "ldl",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r03",
+      "op": "add",
+      "printed": "HDL cholesterol",
+      "value": 1.2,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "hdl",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r04",
+      "op": "add",
+      "printed": "Triglycerides",
+      "value": 2.1,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "triglycerides",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r05",
+      "op": "add",
+      "printed": "Total cholesterol",
+      "value": 6.5,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "total_cholesterol",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r06",
+      "op": "add",
+      "printed": "ApoB",
+      "value": 90,
+      "unit": "mg/dL",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "apob",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r07",
+      "op": "add",
+      "printed": "ApoA1",
+      "value": 1.4,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "apoa1",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r08",
+      "op": "add",
+      "printed": "eGFR (CKD-EPI)",
+      "value": 80,
+      "unit": "mL/min/1.73m2",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "egfr",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r09",
+      "op": "add",
+      "printed": "Serum creatinine",
+      "value": 100,
+      "unit": "umol/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "creatinine",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r10",
+      "op": "add",
+      "printed": "Serum ALT",
+      "value": 41,
+      "unit": "U/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "alt",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r11",
+      "op": "add",
+      "printed": "AST",
+      "value": 27,
+      "unit": "U/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "ast",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r12",
+      "op": "add",
+      "printed": "Gamma GT",
+      "value": 35,
+      "unit": "U/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "gamma_gt",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r13",
+      "op": "add",
+      "printed": "Haemoglobin",
+      "value": 166,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "hemoglobin",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r14",
+      "op": "add",
+      "printed": "Hematocrit",
+      "value": 0.48,
+      "unit": "L/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "hematocrit",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r15",
+      "op": "add",
+      "printed": "Total white cell count",
+      "value": 5.7,
+      "unit": "10*9/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "wbc",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r16",
+      "op": "add",
+      "printed": "Platelets",
+      "value": 227,
+      "unit": "10*9/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "platelets",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r17",
+      "op": "add",
+      "printed": "Serum albumin",
+      "value": 46,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "serum_albumin",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r18",
+      "op": "add",
+      "printed": "Total protein",
+      "value": 81,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "total_protein",
+      "writeTarget": "observation",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r19",
+      "op": "add",
+      "printed": "Lp(a)",
+      "value": 90,
+      "unit": "nmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "lp_a",
+        "name": "Lp(a)",
+        "unit": "nmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Lp(a)",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r20",
+      "op": "add",
+      "printed": "Homocysteine",
+      "value": 12,
+      "unit": "umol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "homocysteine",
+        "name": "Homocysteine",
+        "unit": "umol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Homocysteine",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r21",
+      "op": "add",
+      "printed": "PSA",
+      "value": 1.41,
+      "unit": "ug/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "prostate_specific_antigen",
+        "name": "PSA",
+        "unit": "ug/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "PSA",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r22",
+      "op": "add",
+      "printed": "Serum sodium",
+      "value": 143,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "serum_sodium",
+        "name": "Serum sodium",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Serum sodium",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r23",
+      "op": "add",
+      "printed": "Serum potassium",
+      "value": 4.3,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "serum_potassium",
+        "name": "Serum potassium",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Serum potassium",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r24",
+      "op": "add",
+      "printed": "Serum calcium",
+      "value": 2.47,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "serum_calcium",
+        "name": "Serum calcium",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Serum calcium",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r25",
+      "op": "add",
+      "printed": "Adjusted calcium",
+      "value": 2.37,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "adjustedcalcium",
+        "name": "Adjusted calcium",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Adjusted calcium",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r26",
+      "op": "add",
+      "printed": "Inorganic phosphate",
+      "value": 1.12,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "inorganicphosphate",
+        "name": "Inorganic phosphate",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Inorganic phosphate",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r27",
+      "op": "add",
+      "printed": "Alkaline phosphatase",
+      "value": 39,
+      "unit": "U/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "alkaline_phosphatase",
+        "name": "Alkaline phosphatase",
+        "unit": "U/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Alkaline phosphatase",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r28",
+      "op": "add",
+      "printed": "Globulin",
+      "value": 35,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "serum_globulin",
+        "name": "Globulin",
+        "unit": "g/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Globulin",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r29",
+      "op": "add",
+      "printed": "Non-HDL cholesterol",
+      "value": 5,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "non_hdl_cholesterol",
+        "name": "Non-HDL cholesterol",
+        "unit": "mmol/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Non-HDL cholesterol",
+        "riskCategories": []
+      }
+    },
+    {
+      "id": "r30",
+      "op": "add",
+      "printed": "Ferritin",
+      "value": 85,
+      "unit": "ug/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "ferritin",
+        "name": "Ferritin",
+        "unit": "ug/L",
+        "aliases": [],
+        "normalRange": "Varies",
+        "description": "Ferritin",
+        "riskCategories": []
+      }
+    }
+  ],
+  "score": {
+    "pass": true,
+    "fails": [],
+    "known": 18,
+    "unknown": 12,
+    "turns": 0
+  }
+}
