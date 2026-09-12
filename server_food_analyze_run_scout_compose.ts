@@ -9,7 +9,6 @@ import {
   sumPrecalcTotals,
   buildCreateSkipResponse,
   resolveCreateMealTitle,
-  PROJECTOR_NARRATOR_INSTRUCTION,
 } from './src/server/food/server_food_dietitian_dispatch.js';
 import { getCurrentDateInTimezone } from './src/utils/dateUtils.js';
 import { interpolate, t } from './src/utils/i18n.js';
@@ -22,15 +21,12 @@ import { applyServerAverageNutrients, enrichBilingualItemName } from './server_p
  *
  * Formerly the projector phase in the deleted dietitian owner file.
  * There is no dietitian and no narrator: every branch below is pure TypeScript
- * composing rawParsed from scout outputs + the math engine. The debug-contract
- * `narrator` dispatch label and `narrator_answer`/`dietitian_answer` log tags
- * are kept as-is for backward compatibility (LogChat, FullScreenLogViewer,
- * debugRunTree all key off them) — they now record this scout-owned leg.
+ * composing rawParsed from scout outputs + the math engine. No narrator
+ * dispatch is emitted anywhere; the scout leg is the only dispatch.
  */
-export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<{ textOutput: string; rawParsed: any; composeNote: any }> {
+export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<{ textOutput: string; rawParsed: any }> {
   let textOutput: string = '';
   let rawParsed: any;
-  let composeNote: any = null;
 
   const { canSkipDietitianForPureScale } = computeDietitianSkipGates({
     isPureWeightModification: ctx.isPureWeightModification,
@@ -52,14 +48,6 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
     const pureScale = buildPureScaleResponse({ targetWeightGrams: targetWeight, language: ctx.userProfile?.language });
     textOutput = pureScale.textOutput;
     rawParsed = pureScale.rawParsed;
-    composeNote = {
-      systemInstruction: PROJECTOR_NARRATOR_INSTRUCTION,
-      userPrompt: `[projector] scale-only refine to ${targetWeight}g — no LLM call, ledger rescaled from locked label truth.`,
-      model: 'projector',
-      latencyMs: 0,
-      tokens: 0,
-      projected: true,
-    };
   } else if (
     isAcceptDefaultsWithinTolerance({
       portionChoices: ctx.req.body.portionChoices,
@@ -83,14 +71,6 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
     });
     textOutput = JSON.stringify(acceptParsed);
     rawParsed = acceptParsed;
-    composeNote = {
-      systemInstruction: PROJECTOR_NARRATOR_INSTRUCTION,
-      userPrompt: `[projector] portion choices within tolerance — no LLM call, TS-composed message from ledger, targets, and rest-of-day math.`,
-      model: 'projector',
-      latencyMs: 0,
-      tokens: 0,
-      projected: true,
-    };
   } else if (ctx.visionScoutRanAndReturnedItems || (ctx.visionScoutItems && ctx.visionScoutItems.length > 0) || ctx.rawScoutData) {
     // Empty arrays are truthy — require NON-EMPTY compare content, otherwise
     // a zero-extraction scout run falls into this path and ships an empty
@@ -134,14 +114,6 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
         scoutItems: ctx.visionScoutItems,
       };
       textOutput = JSON.stringify(rawParsed);
-      composeNote = {
-        systemInstruction: PROJECTOR_NARRATOR_INSTRUCTION,
-        userPrompt: `[projector] single-agent compare — evaluation finalized directly from scout compare pass.`,
-        model: 'projector',
-        latencyMs: 0,
-        tokens: 0,
-        projected: true,
-      };
     } else if (ctx.isModifySession) {
       ctx.addDebugLog('[MealAgent] Single-agent edit path: diffing Scout output into active meal.');
       ctx.sendStreamEvent({ type: 'status', stage: 'finalize', status: 'completed', message: 'Meal update finalized.' });
@@ -184,14 +156,6 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
         },
       };
       textOutput = JSON.stringify(rawParsed);
-      composeNote = {
-        systemInstruction: PROJECTOR_NARRATOR_INSTRUCTION,
-        userPrompt: `[projector] single-agent edit — diffed scout dishes into active meal without secondary LLM call.`,
-        model: 'projector',
-        latencyMs: 0,
-        tokens: 0,
-        projected: true,
-      };
     } else {
       ctx.addDebugLog('[MealAgent] Single-agent create path: using Scout verdict & clinical advice with finalized ledger.');
       ctx.sendStreamEvent({ type: 'status', stage: 'finalize', status: 'completed', message: 'Meal analysis finalized.' });
@@ -224,14 +188,6 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
       });
       textOutput = createSkip.textOutput;
       rawParsed = createSkip.rawParsed;
-      composeNote = {
-        systemInstruction: PROJECTOR_NARRATOR_INSTRUCTION,
-        userPrompt: `[projector] single-agent create — ledger finalized from scout truth and math engine.`,
-        model: 'projector',
-        latencyMs: 0,
-        tokens: 0,
-        projected: true,
-      };
     }
   } else {
     ctx.addDebugLog('[MealAgent] Fallback projector: finalizing empty/text response from available ledger.');
@@ -264,14 +220,6 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
     });
     textOutput = createSkip.textOutput;
     rawParsed = createSkip.rawParsed;
-    composeNote = {
-      systemInstruction: PROJECTOR_NARRATOR_INSTRUCTION,
-      userPrompt: `[projector] single-agent fallback — finalized from available ledger.`,
-      model: 'projector',
-      latencyMs: 0,
-      tokens: 0,
-      projected: true,
-    };
   }
 
   if (rawParsed._internalReasoning) {
@@ -286,6 +234,6 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
     visionScoutItems: ctx.visionScoutItems,
   });
 
-  return { textOutput, rawParsed, composeNote };
+  return { textOutput, rawParsed };
 }
 

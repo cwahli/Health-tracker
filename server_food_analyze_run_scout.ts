@@ -151,9 +151,8 @@ export async function executeScoutPhase(ctx: AnalyzeRunContext): Promise<void> {
         logScoutItemSummaries(ctx.visionScoutItems, ctx.addDebugLog);
         logScoutImageInventory({ perImage: (ctx.rawScoutData as any)?.perImage, imageCount: ctx.imagePayloads?.length || 0, items: ctx.visionScoutItems, onLog: ctx.addDebugLog });
         // S-10: record the scout leg in the run tree (system instruction as
-        // dispatched, model, latency). Without this leg the tree holds only
-        // the narrator dispatch, so the QUANTITY & MULTIPACKS chunk law and
-        // any weight triage are uncheckable from the export.
+        // dispatched, model, latency, output). Scout is the sole Meal Agent
+        // dispatch and carries rawEmission (dishes, verdict, clinicalAdvice).
         const scoutLegs = ctx.accumulatedDispatches.filter((d: any) => d?.agent === 'scout').length;
         const scoutTurn = scoutLegs + 1;
         const scoutModel =
@@ -172,6 +171,8 @@ export async function executeScoutPhase(ctx: AnalyzeRunContext): Promise<void> {
             `=== SYSTEM INSTRUCTION ===\n${resolvedScoutSystemInstruction}`,
             `=== USER PROMPT ===\n${scoutPromptText}`,
           ].join('\n\n'),
+          output: ctx.rawScoutData,
+          rawEmission: ctx.rawScoutData,
           model: scoutModel,
           latency_ms: Date.now() - scoutLegStartMs,
           error: null,

@@ -9,9 +9,9 @@ Infra and quotas, not a patient/data lifecycle. Was `RELIABILITY_FREE_TIER_PLAN.
 
 **Pillar:** 3 — Sync / reliability. Map: `plan/README.md`.
 
-**Status:** M23–M28 **core COMPLETE** (`assert-free-tier-complete.mjs` exit 0, 2026-08-16). Remaining parked R-ids are in §8–9. Standing gate for every new feature or update is §10.  
-**Updated:** 2026-09-04  
-**Code truth:** Desktop working tree; ship via AI Studio packs only  
+**Status:** M23–M28 **core COMPLETE** (`assert-free-tier-complete.mjs` exit 0, 2026-08-16). Remaining parked R-ids are in §8–9. Standing gate for every new feature or update is §10. Cloudflare **go-live** is **R-13** (§12) — draft until the human locks `specs/active/R-13.md`.  
+**Updated:** 2026-09-12  
+**Code truth:** Desktop working tree; AI Studio stays `tsx server.ts` on port 3000; live hosting is R-13, not a sixth plan file  
 **Domain:** `docs/agent/domains/sync.md` (Class L/X when touching merge/tombstones)
 
 ---
@@ -87,9 +87,13 @@ These are the principles behind this program — not new invention.
 
 ```text
 Firebase Auth          → identity only (50k MAU class limits; no app-data writes)
-Supabase Postgres      → thin rows: food_logs, biomarker_logs, profiles, agent_jobs (status only)
+D1 (HTTP today)        → thin rows: food_logs, biomarker_logs, profiles, agent_jobs (status only)
+                         (Supabase remains fallback when D1 env is missing — AI Studio)
 Cloudflare R2          → photos, debug JSON, mealBuild blobs, backend logs
-Cloud Run (Express)    → AI + sync proxies + job workers (in-process → optional later split)
+Express (server.ts)    → AI + sync proxies + job workers (loopback 127.0.0.1, in-memory maps)
+  AI Studio / local    → tsx server.ts, port 3000, Vite HMR
+  Production (R-13)    → same Express in a Node process (Cloudflare Container or Cloud Run)
+                         + Workers/Pages static assets for the Vite SPA
 Local IDB              → chat transcripts, offline cache, in-flight jobs
 ```
 
@@ -104,7 +108,7 @@ Local IDB              → chat transcripts, offline cache, in-flight jobs
 | Chat | **IDB primary** (cloud optional rare export — off by default) |
 | Telemetry | Local only (no free-tier DB) |
 
-**Deferred “forever free hardcore”:** Cloudflare D1 + Pages only if **after** packs below, measured egress/writes still threaten free tiers.
+**D1 as primary SQL** stays parked (**R-5**, after R-1). **R-13** is “put the existing Express app on the public internet on Cloudflare” — not a D1 rewrite, not Pages Functions importing `server.ts`. Native `env.DB` / `env.BUCKET` is **R-13.4**, after go-live.
 
 ---
 
@@ -162,7 +166,8 @@ Absorbed from archived `Reliability_perf.md`. **Do not start these to “finish 
 | ID | Item | Trigger | Abandoned if |
 |---|---|---|---|
 | R-1 | Re-measure Firestore writes / Supabase egress on a normal day | Quota or bill spike | — |
-| R-2 | Cloudflare Pages for `dist/` | Global static latency actually hurts | Never required for personal use |
+| R-2 | Cloudflare Pages for `dist/` only (no API) | Global static latency actually hurts | Never required for personal use. **Go-live is R-13**, not this row. |
+| R-13 | Cloudflare go-live + AI Studio parity | Human wants a public URL | See §12. Do not start until `specs/active/R-13.md` is **locked**. |
 | R-3 | Playwright leftover-English crawl plus Kosong empty Front Desk | After Track **S-1** string list is green; not a 10-case meal loop | Not a substitute for class goldens |
 | R-4 | Extract `server.ts` routes (food / jobs / biomarkers) | Touching the monolith anyway | Do not big-bang for free-tier |
 | R-5 | Investigate D1 as primary SQL | **After** R-1, free tier still fails | Default: stay on thin Supabase + R2 |
@@ -615,5 +620,185 @@ Industry (OTel GenAI SIG, LangSmith/Phoenix evals, SRE golden signals) splits **
 | **I. No LLM-judge / no Phoenix inner loop** | Burns the quota we refused to spend on Grok-in-the-spinner. Code evals only. | Standing |
 
 Do **not** import LangSmith. Do **not** add a fourth live-testing tier.
+
+---
+
+## 12. Cloudflare go-live (R-13) — AI Studio parity
+
+**Execute IDs:** [ROADMAP.md](./ROADMAP.md) Track R **R-13.0–R-13.5**.  
+**Locked contract:** `specs/active/R-13.md` (draft until the human replies **go**).  
+**Class:** `LIVE_DEPLOY`. Class X when touching auth, jobs, or sync.  
+**Do not** add a sixth `plan/` file. This section is the architecture.
+
+Trigger: the human wants a public URL. Not R-2 (static latency). Not R-5 (D1 as primary). Not “Current work” for AI Studio.
+
+### 12.1 Dual-mode (non-negotiable)
+
+```text
+                     SHARED SOURCE — do not fork
+     React SPA (src/)  •  job client  •  pure TS nutrition  •  Express (server.ts)
+                                      |
+              ┌───────────────────────┴───────────────────────┐
+              ▼                                               ▼
+     AI STUDIO / LOCAL                               PRODUCTION (R-13)
+     npm run dev → tsx server.ts                     build:web → Workers/Pages static
+     port 3000, runningViaTsx → Vite                 Express in a Node process:
+     D1 via HTTP REST (server_d1.ts)                   Cloudflare Container (default)
+     R2 via S3 keys (server_routes_r2.ts)              or Cloud Run behind Cloudflare
+     data/sync on disk                                 INTERNAL_BASE_URL=127.0.0.1:$PORT
+```
+
+AI Studio must keep `npm run dev`, port **3000**, and `runningViaTsx` Vite serving. Production is the same Express binary (`node dist/server.cjs`) plus a static SPA. **Do not** import `server.ts` into a Pages Function or Worker.
+
+### 12.2 What the code actually does (do not “fix” this in R-13.1)
+
+| Fact | File | Implication |
+|---|---|---|
+| Live analyze is **job submit + poll**, not browser SSE | `src/App.tsx` → `POST /api/jobs/submit`; `GET /api/jobs/status` | A catch-all `functions/api/[[route]].ts` that “handles food-analyze SSE” is the wrong door |
+| `/api/gemini/food-analyze` is **internal loopback only** | `server_food_analyze_run_setup.ts` requires `X-Session-ID: server-job-*` | Direct client SSE is 403 by design (M29) |
+| Jobs `fetch('http://127.0.0.1:${PORT}/api/gemini/…?stream=true')` | `serverJobs.ts` | Workers have no loopback HTTP server. Container / Cloud Run do |
+| Hard abort **180s**; stall abort **90s** no tokens; D1 stale fail **5 min** | `serverJobs.ts`; `server_routes_jobs.ts` | The “3 minute” product limit is **application** code, not a Cloudflare Worker duration cap |
+| In-memory job maps + user locks | `inMemoryServerJobs`, `activeUserJobLocks` | Isolates do not share Maps. One Node process in v1, or D1 locks later |
+| `recoverInterruptedServerJobs()` on boot | `server.ts` `startServer` | Needs a process that boots. Workers do not |
+| `sharp` + `fs.mkdirSync('data/sync')` at module eval | `server.ts` | V8 isolate crash if `server.ts` is the Worker entry |
+| D1 is **REST-only** (no `env.DB`) | `server_d1.ts` | Native binding is R-13.4, not a wrangler flag |
+| R2 is **S3 SDK**, not `env.BUCKET` | `server_routes_r2.ts` | Same |
+| Auth skip if `NODE_ENV !== 'production'` | `server_auth.ts` | Production **must** set `NODE_ENV=production` or anyone can spoof `uid` |
+| `npm run build` = Vite **and** esbuild Node server | `package.json` | Pages “Vite / dist” would upload `server.cjs` and still have no API |
+
+### 12.3 Rejected approach (do not implement)
+
+The draft “Pages Functions catch-all + export `app` + skip `listen` on `CF_PAGES` + SSE against HTTP 524” is **wontfix**:
+
+1. Importing Express into `/functions` loads `sharp` / `fs` / `firebase-admin` / Vite.
+2. `CF_PAGES` is set at **build** time; it is the wrong listen gate.
+3. HTTP **524** is Cloudflare’s **proxy-read timeout to a separate origin** (~125s, Enterprise can raise). When a Worker/Pages Function **is** the origin, official limits (2026-09-05) are: HTTP wall-clock **unlimited** while the client stays connected; CPU 10 ms free / 30s default paid / 5 min opt-in; `waitUntil` **30s** after the response. 524 **does** apply if we orange-cloud a Container/Cloud Run origin and the origin is silent.
+4. Cloudflare’s 2026 full-stack default is **Workers + static assets**, not new Pages Functions. Pages is fine for Git SPA hosting; it is not the API host for this monolith.
+5. Firebase Authorized Domains do **not** take `*.pages.dev`. Exact hostnames only.
+6. `server_d1.ts` has no native-binding fallback today. Putting `CLOUDFLARE_API_TOKEN` on the edge to call the D1 HTTP API is slower and over-privileged versus `env.DB`.
+
+### 12.4 Time-limit threat model (use this, not “3 min Worker cap”)
+
+| Limit | Value | Hits us? |
+|---|---|---|
+| App analyze abort | **180s** (`serverJobs.ts`) | Yes — product budget. Keep. Surface as `status_message`. |
+| App first-token stall | **90s** | Yes — Gemini think with no SSE bytes |
+| App D1 stale `running` | **300s** | Copy says “>3 min”; either align copy or the timer |
+| Worker HTTP wall-clock | Unlimited while connected | No 3-min CF cap |
+| Worker CPU | Free **10 ms**; Paid default 30s, max 5 min | Free cannot run this pipeline → **Workers Paid required** |
+| `waitUntil` after 202 | 30s | Cannot finish Scout after returning |
+| Queue / Cron / DO alarm | 15 min wall | Right place for durable jobs (R-13.4) |
+| Workflows per step | Unlimited wall; CPU still capped | CF-native long AI (later) |
+| Subrequests / invocation | Free 50 / Paid 10,000 | Food path: Gemini + D1 + R2 + loopback. Free too tight |
+| Memory / isolate | 128 MB | Do not buffer 15 MB jobs in a Worker |
+| Simultaneous outbound waiting on headers | 6 | Parallel R2 PUTs + Gemini |
+| Proxy 524 / read timeout | ~125s to **origin** (Free/Pro/Business) | Only if API is orange-clouded **and** silent. Mitigate: SSE `: ping` every 15s (already on `/api/debug/live-stream`) **or** DNS-only API hostname |
+| Workers runtime push grace | ~30s in-flight | Rare; persist job in D1 so client can resume |
+
+SSE heartbeats are for **proxied origins and UX**, not for magically extending Worker CPU. Food-analyze today writes only when scout chunks arrive — a 90s silent Gemini think hits the **app** stall timer.
+
+### 12.5 OAuth / domain (R-13.0, before first prod login)
+
+Firebase project `kempt-charmer-0r5vm`. OAuth client `615352013376-mm2cuakcdfosd02t9mqnfbnnbo4uju5t`. `authDomain` = `kempt-charmer-0r5vm.firebaseapp.com`. Client: `signInWithPopup` (`AuthScreen.tsx`, `googleBackup.ts`). Redirect helper already uses `window.location.origin`.
+
+**Firebase Console → Authentication → Settings → Authorized domains** (exact hosts):
+
+- Production host (`health-tracker.pages.dev` or custom)
+- `localhost` (AI Studio)
+- Optional stable `preview.<custom>` — **not** `*.pages.dev`
+
+**Google Cloud Console → Credentials → that OAuth client:**
+
+- Authorized JavaScript origins: `https://<prod-host>`, `http://localhost:3000`, `https://kempt-charmer-0r5vm.firebaseapp.com`
+- Authorized redirect URIs: `https://kempt-charmer-0r5vm.firebaseapp.com/__/auth/handler` (keep; popup uses `authDomain`)
+
+**Also:** `NODE_ENV=production` on the live process. Never `ALLOW_UNAUTH_SYNC=1`. Preview PR URLs (`<hash>.<project>.pages.dev`) will `auth/unauthorized-domain` unless allowlisted or Google is prod-only. `signInWithRedirect` fallback if popup + COOP/ITP. Do not set Cross-Origin-Opener-Policy on `/` without testing popup.
+
+### 12.6 Lessons applied (Vercel / GCP / this repo)
+
+| Source | Take | Skip |
+|---|---|---|
+| Vercel Hobby 10–15s | Do not run Scout on a short function cutoff | CF wall-clock is not the problem; Free **10 ms CPU** is |
+| Vercel bandwidth $ | R2 $0 egress already (Rule 3) | — |
+| Vercel preview + Firebase | Exact-host allowlist; stable preview domain | Automating every `*.pages.dev` hash |
+| Vercel `waitUntil` / `after()` | 30s side effects only | Hiding a 180s job after 202 |
+| Cloud Run (this repo’s own §4) | Express + 300s request timeout matches 180s abort; D1 REST fallback for no binding | Rewriting math to go live |
+| GCP “CPU always allocated” | Job must stay **on the request** or on a real queue | `waitUntil` as a fake worker |
+| Fowler strangler | Extract adapters later (R-13.4) | Big-bang `server.ts` rewrite (R-4 remains parked) |
+| CF 2026 | Workers + static assets; Containers for Node; Queues/Workflows/DO for long jobs | Pages Functions as the API |
+| RELIABILITY §1 | Idempotent submit → durable status → poll (already M29 direction) | Dual client-SSE + server-job paths |
+
+### 12.7 Phases (one ID at a time)
+
+**R-13.0 Preconditions (no app code).** Workers Paid. D1 + R2 exist; schema applied. R2 CORS for SPA origin + `http://localhost:3000`. Secrets on the **runtime** process (not the Vite build): `GEMINI_API_KEY`, D1 REST trio (Studio/Container), R2 keys, Firebase project. `NODE_ENV=production`. Firebase + OAuth allowlists (§12.5).
+
+**R-13.1 Ship: static SPA + existing Express in a Node process.** Default host: **Cloudflare Containers**. Alternative: Cloud Run behind Cloudflare (human pick at lock).
+
+- Split scripts: `build:web` = `vite build` only; `build:server` = current esbuild; `build` = both. Pages/Workers asset build uses **`build:web` only**.
+- `PORT` from env, **default 3000**. Replace hardcoded `http://localhost:3000` loopbacks with `http://127.0.0.1:${PORT}`. Keep `app.listen` gated by `NODE_ENV !== 'test' && !VITEST` only — **not** `CF_PAGES`.
+- `INTERNAL_BASE_URL=http://127.0.0.1:${PORT}` in the container.
+- Dockerfile: `node dist/server.cjs`, health `GET /api/status`.
+- Front door: Workers (preferred) or Pages serve `dist/` SPA. Route `/api/*`, `/photos/*`, `/admin/*` to the Container. SPA not-found → `index.html`. Static `/assets/*` must **not** invoke compute.
+- If the API hostname is orange-clouded: start bytes (SSE ping) within seconds **or** grey-cloud that hostname. Silent 180s behind orange-cloud is a real 524.
+
+**Done when:** `npm run dev` still Vite on 3000. Public URL serves SPA. `POST /api/jobs/submit` → poll → meal in D1, photo from R2. Google login on the **exact** prod host.
+
+**R-13.2 Time-limit hardening (same process model).** Keep 180s abort. Add `: ping` every 15s on loopback food/medical streams (copy `/api/debug/live-stream`). Flush D1 progress every chunk (already partly there). Align stale-fail copy with 180s or 5 min. Do not raise CPU limits to “make 3 min work” on a Worker — we are not on a Worker for the API yet.
+
+**R-13.3 Auth productionization.** Tighten `server_auth.ts`: localhost skip = host is localhost / 127.0.0.1 **only**. Popup + redirect fallback. Preview policy. Test Chrome, Safari, incognito, Drive backup popup, email verification.
+
+**R-13.4 Edge-native adapter (parked until 13.1 is live).** `getD1()`: `env.DB` else REST. `getR2()`: `env.BUCKET` else S3. In-process `runFoodAnalyze` instead of loopback fetch (Worker-to-Worker `fetch` on the same zone **fails** without a service binding). Durable jobs: D1 + Durable Object or Queue/Workflow (15 min). Verify Firebase tokens with WebCrypto/`jose`, not `firebase-admin`. Drop `sharp` from the Worker path (client `imageCompressor.ts` already compresses). **Do not** start this to unstick 13.1.
+
+**R-13.5 Observability / cost.** Workers Logs (Pages Functions do not have them). Alert 1102 / 1027 / 524. Confirm `_routes` so static is free. Keep D1 3-row chunks (`server_db_d1.ts`).
+
+### 12.8 What can go wrong
+
+| Risk | Symptom | Mitigation |
+|---|---|---|
+| Auth bypass | Cross-user D1 writes | `NODE_ENV=production`; R-13.3 localhost-only skip |
+| `auth/unauthorized-domain` | Google popup dies | Exact hosts; no `*.pages.dev` |
+| Preview OAuth | PR URLs fail | Stable preview host or Google prod-only |
+| Popup + COOP / ITP | Blank popup | No COOP on `/`; redirect fallback |
+| 524 on orange-cloud API | Timeout ~100–125s, job still running | Heartbeat **or** DNS-only API host |
+| 180s abort | Expected | Readable `status_message`; retry + model fallback already exist |
+| Free Worker 10 ms / 50 subrequests | Error 1102 / mid-pipeline fetch fail | Workers Paid; API not on a Worker in 13.1 |
+| Loopback on Worker | `ECONNREFUSED` | Do not run Express-as-Worker in 13.1 |
+| In-memory jobs | Lost progress, duplicate meals | One Container instance until 13.4 |
+| `npm run build` as Pages command | `server.cjs` uploaded, no API | `build:web` only for assets |
+| SPA refresh 404 | `/food` 404 | SPA not-found handling; never for `/api/*` |
+| R2 CORS | Broken thumbnails / tainted canvas | Bucket CORS for SPA + localhost |
+| Service worker | Stale SPA | `public/sw.js` already skips `/api/`; re-check after deploy |
+| Script startup > 1s | Worker deploy 10021 | Do not bundle the monolith into a Worker |
+| AI Studio `PORT` | Preview not on 3000 | Default 3000; Studio must not require `PORT` |
+
+### 12.9 Verification
+
+**AI Studio (must stay green with no Cloudflare):**
+
+```bash
+npm run dev
+# boot log: frontend=vite  (not dist)
+npx tsc --noEmit
+npx vitest run src/server/receptionist/handoffContract.test.ts server_derivation.test.ts server_sse_json.test.ts
+node scripts/assert-free-tier-complete.mjs
+```
+
+**Production (after R-13.1):**
+
+1. `GET https://<host>/` — SPA; client routes do not 404.
+2. `GET /api/status` — JSON `startTime`.
+3. Google Sign-In + email verification on the exact prod host.
+4. Meal photo: submit → poll → D1 row → R2 image. Typical 4–15s; hard fail at 180s with a readable message.
+5. Chrome + Safari incognito.
+6. Kill API mid-job: client shows failed/stale, not infinite spinner.
+7. `npm run dev` still Vite on 3000.
+
+### 12.10 Open questions (human at lock)
+
+1. **API host:** Cloudflare Containers (default) vs Cloud Run behind Cloudflare.
+2. **Public hostname:** `*.pages.dev` / `*.workers.dev` vs custom domain (needed for sane OAuth).
+3. **Preview Google login:** prod-only vs stable `preview.` host.
+
+Do **not** silently pick 2–3. Default 1 is Containers unless the human says Cloud Run.
 
 

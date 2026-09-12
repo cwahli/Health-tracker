@@ -77,11 +77,12 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
+| Make the site live / Cloudflare | **R-13** — [RELIABILITY.md](./RELIABILITY.md) **§12**. Draft spec `specs/active/R-13.md`. Wait for **go**. Not R-2. Not Pages Functions importing `server.ts`. |
 | Localisation leftover | **Parked** except live leftover chrome then **S-1**. Do not start L-2 to L-5 until the human reopens Track L. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: USDA/FDC workstream, curator rebuild, B7.4/B7.5, Track R D1, god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, **Track L-2 to L-5** (parked), a 10-case live replay queue.  
+Do **not** start: USDA/FDC workstream, curator rebuild, B7.4/B7.5, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, **Track L-2 to L-5** (parked), a 10-case live replay queue, **R-13** until the human locks `specs/active/R-13.md`.  
 Do **not** add a sixth plan file. F-10 lives here + [FOOD.md](./FOOD.md) Process.
 
 ---
@@ -302,7 +303,7 @@ Same pattern as biomarkers: one Review for n=1–5; TypeScript decides batch/exp
 | ID | Still to do | Trigger |
 |---|---|---|
 | **R-1** | Re-measure Firestore writes / Supabase egress | Quota or bill spike |
-| **R-2** | Cloudflare Pages for `dist/` | Static latency actually hurts |
+| **R-2** | Cloudflare Pages for `dist/` only (no API) | Static latency actually hurts. **Go-live is R-13.** |
 | **R-3** | Playwright leftover-English plus demo-empty smoke | After **S-1** string list is green; not instead of class goldens |
 | **R-4** | Finish `server.ts` router split | Already touching the monolith (`server_routes_{jobs,biomarkers,food}.ts` exist; `server.ts` still huge) |
 | **R-5** | D1 as primary SQL | **After** R-1 still fails free tier |
@@ -312,6 +313,18 @@ Same pattern as biomarkers: one Review for n=1–5; TypeScript decides batch/exp
 | **R-10** | Header code-split | `themeRegistry` audit, Drive backup, `FoodCatalogAdminTab`, quota checkers lazy; Header line count may not grow | After R-9 |
 | **R-11** | `HomeTab` / `LogChat` stay out of other tabs’ first paint | Already lazy-tabbed; do not eagerly import them from Insights / History | Regression after R-10 |
 | **R-12** | One-line stall/503 count (free-tier hang rate) | After F-8.13 JSON tree has `latency_ms` / error on dispatches. A number in `AI_HANDOVER.md`, **not** a metrics product. RELIABILITY.md §11.12 **H** | LangSmith; Grafana; inner-loop Gemini |
+| **R-13** | Cloudflare go-live + AI Studio parity | Human wants a public URL. RELIABILITY.md §12 + `specs/active/R-13.md` (draft — wait for **go**) |
+
+### R-13 sub-IDs (one at a time after lock)
+
+| ID | Still to do | Done when | Do not |
+|---|---|---|---|
+| **R-13.0** | Preconditions: Workers Paid, D1/R2/CORS, runtime secrets, Firebase + OAuth exact hosts, `NODE_ENV=production` | Checklist ticked in `AI_HANDOVER.md`. No `src/` / `server.ts` diff | `*.pages.dev` wildcard; `ALLOW_UNAUTH_SYNC=1` |
+| **R-13.1** | Static SPA (`build:web`) + existing Express in a Node process (Cloudflare Container default, or Cloud Run) | `npm run dev` still Vite on 3000; public URL SPA; job submit → D1 + R2; Google login on exact host | Import `server.ts` into Pages Functions; skip `listen` on `CF_PAGES`; `npm run build` as the asset command |
+| **R-13.2** | Loopback SSE `: ping`; keep 180s abort; align stale-fail copy | Silent 180s behind orange-cloud does not 524; `server_sse_json.test.ts` green | Raise Worker CPU to “make 3 min work” on V8 |
+| **R-13.3** | `server_auth.ts` localhost-only skip; popup/redirect fallback; preview policy | Spoofed `uid` rejected in prod; Google + email verify + Drive backup on prod host | `NODE_ENV !== 'production'` as a localhost synonym |
+| **R-13.4** | Native `env.DB` / `env.BUCKET`; in-process analyze; durable jobs | Worker can analyze without `127.0.0.1` and without `sharp` | Start this to unstick 13.1; D1-as-primary (that is **R-5**) |
+| **R-13.5** | Workers Logs; 1102/1027/524 alerts; static excluded from compute | Static `/assets/*` not billed as Functions | Pages Functions as the log host |
 
 R-7 knip / `getBiomarkerStatus` memo as a reliability gate is **abandoned**.  
 R-8–R-11 are **client speed**, not a free-tier redo. Do not re-migrate images or re-kill Firestore writes.  

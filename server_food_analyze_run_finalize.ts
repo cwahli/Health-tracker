@@ -8,7 +8,6 @@ import {
   buildDegradeResponse,
 } from './src/server/food/server_food_responses.js';
 import { buildFoodApiCalls } from './src/server/food/server_food_mode_routing.js';
-import { buildNarratorDispatch } from './src/server/food/server_food_dietitian_dispatch.js';
 import {
   runEvaluationFinalize,
   assembleEvaluationComparison,
@@ -43,11 +42,6 @@ import { sanitizeVerdictLabel } from './server_pure_helpers.js';
 export async function executeFinalizePhase(
   ctx: AnalyzeRunContext,
   rawParsed: any,
-  // Scout compose note (was `narratorInput`). The `narrator` dispatch label and
-  // `narrator_answer`/`dietitian_answer` log tags below are kept for backward
-  // compatibility — LogChat, FullScreenLogViewer, and the debug contract all
-  // key off them. They record the scout stage's compose leg; no narrator exists.
-  composeNote: any,
   textOutput: string,
   error?: any
 ): Promise<any> {
@@ -137,44 +131,12 @@ export async function executeFinalizePhase(
   });
 
   const scoutRanThisTurn = Boolean(ctx.scoutInstructionForDebug || ctx.rawScoutData);
-  const narratorScoutLegs = ctx.accumulatedDispatches.filter((d: any) => d.agent === 'scout').length;
-  const currentTurnNumber = scoutRanThisTurn ? (narratorScoutLegs || 1) : (narratorScoutLegs + 1);
+  const scoutLegs = ctx.accumulatedDispatches.filter((d: any) => d.agent === 'scout').length;
+  const currentTurnNumber = scoutRanThisTurn ? (scoutLegs || 1) : (scoutLegs + 1);
 
-  if (composeNote) {
-    // Single-agent compare owns composition end-to-end: no narrator exists,
-    // so no narrator dispatch is emitted. (The synthetic leg used to put
-    // meal-framed "TARGETED DISH UPDATE ONLY" projector text on compare
-    // exports; the scout leg already carries model + latency_ms.)
-    const isCompareRun = ctx.userSelectedMode === 'compare';
-    if (isCompareRun) {
-      ctx.addDebugLog(`[Narrator] suppressed synthetic narrator dispatch for compare run — scout leg is the only dispatch.`);
-    } else {
-    const narratorDispatch = buildNarratorDispatch({
-      turn: currentTurnNumber,
-      userMessage:
-        ctx.message && ctx.message.trim()
-          ? ctx.message.trim()
-          : ctx.imagePayloads && ctx.imagePayloads.length > 0
-          ? 'Analyze this meal photo.'
-          : 'Text meal entry',
-      mode,
-      systemInstruction: composeNote.systemInstruction,
-      userPrompt: composeNote.userPrompt,
-      rawParsed,
-      model: composeNote.model,
-      latencyMs: composeNote.latencyMs,
-      tokens: composeNote.tokens,
-      projected: composeNote.projected,
-    });
-    ctx.accumulatedDispatches.push(narratorDispatch);
-    ctx.sendLog('narrator_answer', 'narrator', rawParsed?.message || rawParsed?.clinicalAdvice || 'Meal narrative finalized.', {
-      mode,
-      turn: currentTurnNumber,
-      projected: Boolean(composeNote.projected),
-    });
-    ctx.addDebugLog(`[Narrator] dispatch t${currentTurnNumber}/narrator recorded (${composeNote.projected ? 'projector' : 'narrator LLM'}).`);
-    }
-  }
+  // Scout-only: no narrator dispatch is constructed here. The scout leg
+  // already carries model + latency_ms, and composition output travels in
+  // rawParsed (message/verdict) — not in a second dispatch.
 
   // CASE B: discussion mode
   if (mode === 'discussion') {

@@ -249,13 +249,13 @@ export async function runFoodAnalyze(req: any, res: any) {
     await executePrecalcPhase(ctx);
 
     // 3. Scout Compose (single Meal Agent; pure TS, no second agent)
-    const { textOutput, rawParsed, composeNote } = await executeScoutComposePhase(ctx);
+    const { textOutput, rawParsed } = await executeScoutComposePhase(ctx);
 
     // 4. Finalize Meal Assemble & Gate
-    return await executeFinalizePhase(ctx, rawParsed, composeNote, textOutput);
+    return await executeFinalizePhase(ctx, rawParsed, textOutput);
   } catch (error: any) {
     if (ctx!) {
-      return await executeFinalizePhase(ctx, null, null, '', error);
+      return await executeFinalizePhase(ctx, null, '', error);
     }
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
