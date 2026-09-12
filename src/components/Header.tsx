@@ -11,7 +11,7 @@ import {
   Eye, EyeOff, CloudLightning, CloudCheck, RefreshCw, LogOut, Check, ShieldCheck,
   Archive, FileSpreadsheet, KeyRound, Lock, Unlock, FileDown, FileUp, AlertTriangle,
   CloudUpload, CloudDownload, HelpCircle, Terminal, User, Cloud, Coins, Users, Copy, RotateCcw,
-  Trash2
+  Trash2, GitBranch
 } from 'lucide-react';
 import { db, auth } from '../firebase';
 import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
@@ -3843,6 +3843,33 @@ export default function Header({
                   </div>
                 </div>
               )}
+
+
+              {/* Build Version */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/40 border border-slate-150 dark:border-slate-800 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
+                  <div>
+                    <span className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">App Version</span>
+                    <span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      {__GIT_COMMIT_HASH__}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0">
+                  {(() => {
+                    const commitMs = new Date(__GIT_COMMIT_TIME__).getTime();
+                    const diffMs = Date.now() - commitMs;
+                    const diffMin = Math.floor(diffMs / 60_000);
+                    const diffHr = Math.floor(diffMin / 60);
+                    const diffDay = Math.floor(diffHr / 24);
+                    if (diffMin < 1) return 'just now';
+                    if (diffMin < 60) return `updated ${diffMin} min ago`;
+                    if (diffHr < 24) return `updated ${diffHr}h ago`;
+                    return `updated ${diffDay}d ago`;
+                  })()}
+                </span>
+              </div>
 
 
                 </>
