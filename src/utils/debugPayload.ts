@@ -171,9 +171,12 @@ export function parseNutritionalTargetStatus(input: DebugReportInput): {
   // leading "N days avg:" prefix the regex couldn't consume inside JSON
   // sources (it otherwise becomes part of the first nutrient's key, as seen
   // live: "**\n3 days avg: Sat fat**").
-  const rawList = match[2].replace(/^(?:\\n)+/, '').split(/\\n/)[0]
-    .replace(/^\d+\s*days?\s*avg:\s*/i, '')
-    .replace(/\.\s*Budgets[\s\S]*$/i, '').trim();
+  const rawList = match[2]
+    .replace(/^(?:\\n|\n|\s)+/, '')
+    .split(/\r?\n|\\n|"|'/)[0]
+    .replace(/^\s*\d+\s*days?\s*avg:\s*/i, '')
+    .replace(/\.\s*Budgets[\s\S]*$/i, '')
+    .trim();
   const parts = rawList.split(/,(?![^(]*\))/).map(s => s.trim()).filter(Boolean);
   if (parts.length === 0) return null;
 
@@ -198,7 +201,15 @@ export function parseNutritionalTargetStatus(input: DebugReportInput): {
   for (const part of parts) {
     const itemMatch = part.match(/^([^(]+)\s*\(([^)]+)\)/);
     if (!itemMatch) continue;
-    const rawKey = itemMatch[1].trim();
+    let rawKey = itemMatch[1].replace(/^(?:\\n|\n|\s)+/, '').trim();
+    rawKey = rawKey.replace(/^\d+\s*days?\s*avg:\s*/i, '').trim();
+    if (!rawKey || rawKey.length > 35 || /[\n\r\t\\=;:#]/.test(rawKey)) continue;
+    if (!/^[a-zA-Z0-9\s_-]+$/.test(rawKey)) continue;
+
+    const normKey = rawKey.toLowerCase();
+    const isKnownNutrient = Boolean(baselineBudgets[normKey]) || /^(calories?|protein|total fat|saturated fat|sat fat|carbs|carbohydrates?|fiber|total fibre|soluble fibre|dietary fiber|sodium|potassium|sugar|added sugar|trans fat|cholesterol|calcium|iron|magnesium|vitamin [a-z0-9]+)$/i.test(normKey);
+    if (!isKnownNutrient) continue;
+
     const inside = itemMatch[2].trim();
     const splitInside = inside.split(/\s*-\s*/);
     const intake = splitInside[0]?.trim() || inside;
@@ -208,7 +219,6 @@ export function parseNutritionalTargetStatus(input: DebugReportInput): {
       status = rawStatus.includes('over') ? `+${rawStatus}` : (rawStatus.includes('under') ? `-${rawStatus.replace('under', 'deficit')}` : rawStatus);
     }
 
-    const normKey = rawKey.toLowerCase();
     const config = baselineBudgets[normKey] || { budget: 'Standard guideline', impact: 'Monitored against daily dietary allowance guidelines.' };
     const displayKey = rawKey.charAt(0).toUpperCase() + rawKey.slice(1);
 
@@ -1419,7 +1429,12 @@ export function buildDebugMarkdownReport(input: DebugReportInput): string {
         for (const [agentName, instr] of Object.entries(input.agentInstructions)) {
           if (!instr) continue;
           if (dispatchAgentsWithInstruction.has(agentName.toLowerCase())) continue;
-          directInstructions.push(`[${agentName}] System Instruction:\n${instr}`);
+          const text = typeof instr === 'string'
+            ? instr
+            : (typeof instr === 'object' && instr !== null)
+              ? ((instr as any).systemInstruction || (instr as any).instruction || (instr as any).userPrompt || JSON.stringify(instr, null, 2))
+              : String(instr);
+          directInstructions.push(`[${agentName}] System Instruction:\n${text}`);
         }
       }
     }

@@ -63,6 +63,30 @@ describe('detectPortionAmbiguity & buildPortionClarifyPayload', () => {
     expect(grams).not.toContain(201);
   });
 
+  it('triggers portion clarify for bulk 800g oats bag when servingsPerContainer is missing', () => {
+    const item = {
+      scoutIndex: 0,
+      originalName: 'Quaker Whole Rolled Oats Package',
+      keyword: 'rolled oats package',
+      estimatedWeightGrams: 40,
+      packGrams: 800,
+      packageLabelText: 'QUAKER WHOLE ROLLED OATS EMPING OAT UTUH BERAT BERSIH 800g',
+      rawNutritionLabel: {
+        servingSize: '40g',
+        calories: '160',
+        totalFat: '4g',
+      },
+    };
+    const res = detectPortionAmbiguity(item, 0);
+    expect(res).not.toBeNull();
+    const grams = (res?.options || []).map((o) => o.weightGrams);
+    expect(grams).toContain(40);
+    expect(grams).toContain(80);
+    expect(grams).toContain(200);
+    expect(grams).not.toContain(800);
+    expect(grams).not.toContain(400);
+  });
+
   it('detects multipack cereal bar box as portion ambiguous', () => {
     const item = {
       scoutIndex: 2,

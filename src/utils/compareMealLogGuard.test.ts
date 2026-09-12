@@ -7,6 +7,7 @@ describe('isCompareOnlyResult (Mode D meal boundary)', () => {
     expect(isCompareOnlyResult({ mode: 'compare', comparison: { groups: [{ groupName: 'g' }] } })).toBe(true);
     expect(isCompareOnlyResult({ kind: 'food_compare', comparison: { groups: [{ groupName: 'g' }] } })).toBe(true);
     expect(isCompareOnlyResult({ mode: 'compare', groups: [{ groupName: 'g' }] })).toBe(true);
+    expect(isCompareOnlyResult({ mode: 'compare', comparisonTitle: 'Menu Options' })).toBe(true);
   });
 
   it('passes meal modes through (new_log / modify / portion_clarify)', () => {

@@ -486,5 +486,45 @@ describe('edit patch ledger', () => {
       expect(cmds[0].componentName).toBe('Potato');
       expect(cmds[0].newWeightGrams).toBe(50);
     });
+
+    it('contract: removes redundant package item when user clarifies same meal and targets correct dish by replacesDish', () => {
+      const prior = [
+        {
+          name: 'Quaker Whole Rolled Oats Package',
+          weightGrams: 140,
+          packGrams: 800,
+          scoutIndex: 0,
+          rawNutritionLabel: { servingSize: '40g', calories: '160' },
+        },
+        {
+          name: 'Cooked Oatmeal',
+          weightGrams: 40,
+          scoutIndex: 1,
+        },
+      ];
+      const scout = [
+        {
+          dishName: 'Cooked Oatmeal',
+          estimatedWeightGrams: 140,
+          replacesDish: 'Cooked Oatmeal',
+          targetDishIndex: 1,
+          scoutIndex: 1,
+          action: 'replace',
+        },
+      ];
+
+      const cmds = diffScoutToEditCommands({
+        priorItems: prior,
+        scoutItems: scout,
+        userMessage: "The cooked oatmeal is the same as the package. It's all the same meal",
+      });
+
+      // 1. Should target Cooked Oatmeal for update (140g), NOT Quaker package
+      expect(cmds.some(c => (c.action === 'set_weight' || c.action === 'replace_identity') && c.itemName === 'Cooked Oatmeal' && c.newWeightGrams === 140)).toBe(true);
+      // 2. Should remove Quaker package because user clarified it is the same meal
+      expect(cmds.some(c => c.action === 'remove_item' && c.itemName === 'Quaker Whole Rolled Oats Package')).toBe(true);
+      // 3. Quaker package must NOT have been targeted as Cooked Oatmeal
+      expect(cmds.some(c => c.action === 'replace_identity' && c.itemName === 'Quaker Whole Rolled Oats Package')).toBe(false);
+    });
   });
 });

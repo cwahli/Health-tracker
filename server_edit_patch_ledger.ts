@@ -281,20 +281,30 @@ export function diffScoutToEditCommands(args: {
     let priorIdx = -1;
 
     if (!isExplicitAdd) {
-      // 1. Explicit targetDishIndex from agent
+      // 1. Explicit targetDishIndex from agent — validate against replacesDish if present!
+      const rep = typeof scout.replacesDish === 'string' ? scout.replacesDish.trim().toLowerCase() : '';
       if (scout.targetDishIndex != null && Number.isFinite(Number(scout.targetDishIndex))) {
         const rawIdx = Number(scout.targetDishIndex);
         const oneBased = rawIdx - 1;
-        if (oneBased >= 0 && oneBased < priorItems.length && !usedPrior.has(oneBased)) {
-          priorIdx = oneBased;
-        } else if (rawIdx >= 0 && rawIdx < priorItems.length && !usedPrior.has(rawIdx)) {
-          priorIdx = rawIdx;
+        if (rep) {
+          if (oneBased >= 0 && oneBased < priorItems.length && !usedPrior.has(oneBased) &&
+              itemAllNames(priorItems[oneBased]).some(n => n.toLowerCase() === rep || namesReferSame(n, rep) || namesShareSubstance(n, rep))) {
+            priorIdx = oneBased;
+          } else if (rawIdx >= 0 && rawIdx < priorItems.length && !usedPrior.has(rawIdx) &&
+              itemAllNames(priorItems[rawIdx]).some(n => n.toLowerCase() === rep || namesReferSame(n, rep) || namesShareSubstance(n, rep))) {
+            priorIdx = rawIdx;
+          }
+        } else {
+          if (oneBased >= 0 && oneBased < priorItems.length && !usedPrior.has(oneBased)) {
+            priorIdx = oneBased;
+          } else if (rawIdx >= 0 && rawIdx < priorItems.length && !usedPrior.has(rawIdx)) {
+            priorIdx = rawIdx;
+          }
         }
       }
 
       // 2. Explicit replacesDish from agent
-      if (priorIdx < 0 && scout.replacesDish && typeof scout.replacesDish === 'string') {
-        const rep = scout.replacesDish.trim().toLowerCase();
+      if (priorIdx < 0 && rep) {
         priorIdx = priorItems.findIndex((p, i) => !usedPrior.has(i) && (
           itemAllNames(p).some(n => n.toLowerCase() === rep || namesReferSame(n, rep) || namesShareSubstance(n, rep))
         ));
@@ -534,6 +544,30 @@ export function diffScoutToEditCommands(args: {
       }
     }
   }
+  // 3. User message clarification: duplicate / same-meal package removal
+  if (args.userMessage) {
+    const msg = args.userMessage.toLowerCase();
+    const isSameMeal = /\b(same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|duplicate|all\s+(?:the\s+)?same\s+meal|it'?s\s+(?:all\s+)?the\s+same)\b/i.test(msg);
+    const isExplicitRemovePackage = /\b(remove|delete|omit|drop|don't\s+include)\b/i.test(msg) && /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(msg);
+    if (isSameMeal || isExplicitRemovePackage) {
+      const pkgIdx = priorItems.findIndex((p, i) => {
+        if (usedPrior.has(i)) return false;
+        const pName = displayName(p).toLowerCase();
+        return /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(pName) || Boolean(p.packGrams && p.rawNutritionLabel && !/boiled|fried|cooked|soup|porridge|oatmeal\b/i.test(pName));
+      });
+      if (pkgIdx >= 0 && !commands.some(c => c.action === 'remove_item' && c.itemName === displayName(priorItems[pkgIdx]))) {
+        const p = priorItems[pkgIdx];
+        commands.push({
+          action: 'remove_item',
+          itemName: displayName(p),
+          targetDbId: p.dbId || null,
+          scoutIndex: scoutIndexOf(p, pkgIdx),
+        });
+        usedPrior.add(pkgIdx);
+      }
+    }
+  }
+
   return commands;
 }
 

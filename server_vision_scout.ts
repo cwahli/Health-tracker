@@ -1434,6 +1434,30 @@ export function parseAndHealVisionScout(
       }
     }
 
+    if (isCompareData && (!Array.isArray(parsedScout.items) || parsedScout.items.length === 0) && Array.isArray(parsedScout.groups)) {
+      const groupDishes: any[] = [];
+      parsedScout.groups.forEach((g: any) => {
+        if (Array.isArray(g?.items)) {
+          g.items.forEach((dish: any) => {
+            const rawName = typeof dish === 'string' ? dish.trim() : (dish?.name || dish?.originalName || dish?.keyword || '');
+            if (rawName) {
+              groupDishes.push({
+                name: rawName,
+                keyword: rawName,
+                originalName: rawName,
+                sourceImageIndex: typeof dish?.sourceImageIndex === 'number' ? dish.sourceImageIndex : (typeof g.sourceImageIndex === 'number' ? g.sourceImageIndex : 0),
+                boundingBox2D: dish?.boundingBox2D || g.boundingBox2D || [0, 0, 1000, 1000],
+                groupName: g.groupName,
+              });
+            }
+          });
+        }
+      });
+      if (groupDishes.length > 0) {
+        parsedScout.items = groupDishes;
+      }
+    }
+
     if (isCompareData && Array.isArray(parsedScout.items)) {
       visionScoutItems = parsedScout.items.map((it: any, idx: number) => {
         const pServ = it.perServing || {};

@@ -46,6 +46,7 @@ export interface AgentJob {
     globalLiveLogs?: string;
   };
   savedToLog?: boolean;
+  clean_result?: any;
   result?: any;
   error?: {
     class: ErrorClass;

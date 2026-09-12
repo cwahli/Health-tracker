@@ -364,30 +364,63 @@ export function applyScoutResultState(args: ScoutResultStateArgs): {
   // NOTE: the field name below is compare-domain vocabulary handled entirely
   // in this compare-owned module; the shared meal parser stays untouched.
   let stateItems: any[] = Array.isArray(scoutResult.items) ? scoutResult.items : [];
-  if (requestedMode === 'compare' && stateItems.length === 0
-    && rawScoutData && Array.isArray(rawScoutData.allExtractedDishes) && rawScoutData.allExtractedDishes.length > 0) {
-    stateItems = rawScoutData.allExtractedDishes.map((entry: any, idx: number) => {
-      const obj = (entry && typeof entry === 'object') ? entry : null;
-      const name = obj
-        ? (obj.name || obj.dish || obj.product || obj.originalName || obj.keyword || 'Unnamed item')
-        : (typeof entry === 'string' && entry.trim() ? entry.trim() : 'Unnamed item');
-      return {
-        ...(obj || {}),
-        scoutIndex: idx,
-        keyword: name,
-        originalName: name,
-        name,
-        estimatedWeightGrams: 100,
-        nutrientBasisWeight: 100,
-        source: 'visual',
-        sourceImageIndex: typeof obj?.sourceImageIndex === 'number' ? obj.sourceImageIndex : 0,
-        rawNutritionLabel: null,
-        nutrients: null,
-        per100g: {},
-      };
-    });
-    rawScoutData.items = stateItems;
-    onLog(`[Vision Scout Compare Heal] items[] empty — promoted ${stateItems.length} allExtractedDishes transcription(s).`);
+  if (requestedMode === 'compare' && stateItems.length === 0 && rawScoutData) {
+    if (Array.isArray(rawScoutData.allExtractedDishes) && rawScoutData.allExtractedDishes.length > 0) {
+      stateItems = rawScoutData.allExtractedDishes.map((entry: any, idx: number) => {
+        const obj = (entry && typeof entry === 'object') ? entry : null;
+        const name = obj
+          ? (obj.name || obj.dish || obj.product || obj.originalName || obj.keyword || 'Unnamed item')
+          : (typeof entry === 'string' && entry.trim() ? entry.trim() : 'Unnamed item');
+        return {
+          ...(obj || {}),
+          scoutIndex: idx,
+          keyword: name,
+          originalName: name,
+          name,
+          estimatedWeightGrams: 100,
+          nutrientBasisWeight: 100,
+          source: 'visual',
+          sourceImageIndex: typeof obj?.sourceImageIndex === 'number' ? obj.sourceImageIndex : 0,
+          rawNutritionLabel: null,
+          nutrients: null,
+          per100g: {},
+        };
+      });
+      rawScoutData.items = stateItems;
+      onLog(`[Vision Scout Compare Heal] items[] empty — promoted ${stateItems.length} allExtractedDishes transcription(s).`);
+    } else if (Array.isArray(rawScoutData.groups) && rawScoutData.groups.length > 0) {
+      const groupDishes: any[] = [];
+      rawScoutData.groups.forEach((g: any) => {
+        if (Array.isArray(g?.items)) {
+          g.items.forEach((entry: any) => {
+            const obj = (entry && typeof entry === 'object') ? entry : null;
+            const name = obj
+              ? (obj.name || obj.dish || obj.product || obj.originalName || obj.keyword || 'Unnamed item')
+              : (typeof entry === 'string' && entry.trim() ? entry.trim() : 'Unnamed item');
+            groupDishes.push({
+              ...(obj || {}),
+              scoutIndex: groupDishes.length,
+              keyword: name,
+              originalName: name,
+              name,
+              estimatedWeightGrams: 100,
+              nutrientBasisWeight: 100,
+              source: 'visual',
+              sourceImageIndex: typeof obj?.sourceImageIndex === 'number' ? obj.sourceImageIndex : (typeof g.sourceImageIndex === 'number' ? g.sourceImageIndex : 0),
+              boundingBox2D: obj?.boundingBox2D || g.boundingBox2D || [0, 0, 1000, 1000],
+              rawNutritionLabel: null,
+              nutrients: null,
+              per100g: {},
+            });
+          });
+        }
+      });
+      if (groupDishes.length > 0) {
+        stateItems = groupDishes;
+        rawScoutData.items = stateItems;
+        onLog(`[Vision Scout Compare Heal] items[] empty — promoted ${stateItems.length} group item(s).`);
+      }
+    }
   }
   const visionScoutItems = stateItems.map((item: any) => {
     const rawName = item.name || item.originalName || item.keyword;

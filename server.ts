@@ -876,10 +876,21 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
       }
     });
 
-    // Text-only comparisons (no image / no scout items): fall back to plain names.
-    if (scoutItems.length === 0 && Array.isArray(g.itemNames)) {
-      g.itemNames.forEach((n: string) => {
-        if (n) items.push({ name: enrichBilingualItemName(n), boundingBox2D: null, sourceImageIndex: null });
+    // Text-only comparisons or un-indexed compare: fall back to g.items or g.itemNames
+    if (items.length === 0) {
+      const fallbackList = Array.isArray(g.items) && g.items.length > 0 ? g.items : (Array.isArray(g.itemNames) ? g.itemNames : []);
+      fallbackList.forEach((it: any, fIdx: number) => {
+        const rawName = typeof it === 'string' ? it.trim() : (it?.name || it?.originalName || it?.keyword || '');
+        if (rawName) {
+          items.push({
+            name: enrichBilingualItemName(rawName),
+            keyword: it?.keyword || rawName,
+            originalName: it?.originalName || rawName,
+            boundingBox2D: it?.boundingBox2D || g.boundingBox2D || null,
+            sourceImageIndex: typeof it?.sourceImageIndex === 'number' ? it.sourceImageIndex : (typeof g.sourceImageIndex === 'number' ? g.sourceImageIndex : 0),
+            scoutIndex: typeof it?.scoutIndex === 'number' ? it.scoutIndex : fIdx,
+          });
+        }
       });
     }
 

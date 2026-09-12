@@ -16,6 +16,6 @@
 export function isCompareOnlyResult(res: any): boolean {
   if (!res || typeof res !== 'object') return false;
   const isCompareMode = (res as any).mode === 'evaluation' || (res as any).mode === 'compare' || (res as any).kind === 'food_compare';
-  const hasComparison = !!(res as any).comparison || (Array.isArray((res as any).groups) && (res as any).groups.length > 0);
+  const hasComparison = !!(res as any).comparison || (Array.isArray((res as any).groups) && (res as any).groups.length > 0) || Boolean((res as any).comparisonTitle);
   return isCompareMode && hasComparison;
 }

@@ -717,6 +717,7 @@ ${logsText}`);
   const hasUnsavedChangesRef = useRef<boolean>(false);
   const handoffFiredKeyRef = useRef<string | null>(null);
   const activeAnalysisIdRef = useRef<string | null>(null);
+  const fetchedFullJobIdsRef = useRef<Set<string>>(new Set());
   const setMessages = (
     update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
     markAsUnsaved = true
@@ -1364,7 +1365,13 @@ ${logsText}`);
         let currentResult = job.result?.clean_result || job.result || (job as any).clean_result || {};
         // Compare results carry no meal log by design (Mode D boundary) —
         // treat them as content-bearing so we don't refetch in a loop.
-        if (currentResult.is_r2 || (job as any).clean_result?.is_r2 || (!resolvePendingFoodLog(job) && !isCompareOnlyResult(currentResult))) {
+        const needsFullFetch = !fetchedFullJobIdsRef.current.has(activeJobId) && (
+          Boolean(currentResult.is_r2) ||
+          Boolean((job as any).clean_result?.is_r2) ||
+          (!resolvePendingFoodLog(job) && !isCompareOnlyResult(currentResult))
+        );
+        if (needsFullFetch) {
+          fetchedFullJobIdsRef.current.add(activeJobId);
           try {
             const baseUrl = typeof window !== 'undefined' ? '' : 'http://localhost:3000';
             const r = await fetch(`${baseUrl}/api/jobs/status?jobId=${activeJobId}&full=true`);
@@ -1375,12 +1382,14 @@ ${logsText}`);
                 currentResult = backendJob.clean_result;
                 job = {
                   ...job,
+                  clean_result: currentResult,
                   result: currentResult,
                   mealBuild: currentResult.mealBuild || job.mealBuild,
                   photoUrl: currentResult.photoUrl || job.photoUrl,
                   debugUrl: currentResult.debugUrl || job.debugUrl
                 };
                 JobStore.updateJob(activeJobId, {
+                  clean_result: currentResult,
                   result: currentResult,
                   mealBuild: currentResult.mealBuild || job.mealBuild,
                   photoUrl: currentResult.photoUrl || job.photoUrl,

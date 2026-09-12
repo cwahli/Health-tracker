@@ -327,7 +327,7 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
     const allTimings = parseUnifiedTimingAll(logs);
     const modelMatch = logs.match(/Vision Scout \(([^)]+)\)|\[UnifiedLLM\] Calling (gemini-[^\s]+)/i);
 
-    const enriched = input.dispatches.map((d, idx) => {
+    let enriched = input.dispatches.map((d, idx) => {
       const copy = { ...d };
       if (!copy.model) {
         copy.model = modelMatch ? (modelMatch[1] || modelMatch[2]) : 'gemini-3.5-flash-lite';
@@ -409,6 +409,74 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
     }
 
     if (pack === 'food') {
+      if (isCompareRunTree(input, enriched)) {
+        enriched = enriched.filter(d => d.agent !== 'narrator' && d.agent !== 'dietitian');
+      }
+      const hasScout = enriched.some(d => d.agent === 'scout');
+      if (!hasScout) {
+        let extractedSystemInstruction: string | undefined = undefined;
+        let extractedUserPrompt: string | undefined = undefined;
+
+        if (typeof input.agentInstructions === 'object' && !Array.isArray(input.agentInstructions)) {
+          const s = (input.agentInstructions as any)?.scout;
+          if (typeof s === 'object' && s) {
+            if (s.systemInstruction) extractedSystemInstruction = s.systemInstruction;
+            if (s.userPrompt) extractedUserPrompt = s.userPrompt;
+          } else if (typeof s === 'string' && s.trim()) {
+            extractedUserPrompt = s;
+          }
+        } else if (typeof input.agentInstructions === 'string' && input.agentInstructions.trim()) {
+          extractedUserPrompt = input.agentInstructions;
+        }
+
+        if (!extractedSystemInstruction && logs) {
+          const match = logs.match(/\[UnifiedLLM-Prompt:scout\] System Instruction:\n([\s\S]+?)(?=\n\[UnifiedLLM-Prompt:|\n\[scout_|\n\[dietitian_|\n\[Vision Scout\]|$)/);
+          if (match) {
+            extractedSystemInstruction = match[1].trim();
+          } else {
+            const altMatch = logs.match(/Vision Scout System Instruction \(config\.systemInstruction\):\s*"([\s\S]+?)"(?:\n\[|\n$|$)/);
+            if (altMatch) extractedSystemInstruction = altMatch[1].trim();
+          }
+        }
+        if (!extractedUserPrompt && logs) {
+          const match = logs.match(/\[UnifiedLLM-Prompt:scout\] User Prompt:\n([\s\S]+?)(?=\n\[UnifiedLLM-Prompt:|\n\[scout_|\n\[dietitian_|\n\[Vision Scout\]|$)/);
+          if (match) extractedUserPrompt = match[1].trim();
+        }
+
+        if (!extractedSystemInstruction) {
+          if (isCompareRunTree(input, enriched)) {
+            extractedSystemInstruction = 'You are a Clinical Dietitian & Vision Scout evaluating competing food options (Mode D).';
+          } else {
+            extractedSystemInstruction = "- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs, set 'weightGrams' to a single unit/serving size and 'packGrams' to the container total.";
+          }
+        }
+
+        const scoutTiming = timings.find(x => x.stage === 'scout');
+        const scoutUsage = usages.find(x => x.stage === 'scout');
+        const scoutEmission = input.rawScout || input.scoutItems || (input as any)?.result?.comparison || (input as any)?.comparisonData || undefined;
+        const scoutDisp: DispatchTrace = {
+          id: 't1/scout',
+          parent: null,
+          turn: 1,
+          agent: 'scout',
+          user: 'Analyze this meal photo.',
+          received: {
+            mode: isCompareRunTree(input, enriched) ? 'compare' : (input.mode || 'new_log'),
+            photoCount: input.photoUrls?.length || (input.photoUrl ? 1 : 0),
+          },
+          systemInstruction: extractedSystemInstruction,
+          userPrompt: extractedUserPrompt,
+          instruction: [extractedSystemInstruction, extractedUserPrompt].filter(Boolean).join('\n\n'),
+          output: scoutEmission,
+          rawEmission: scoutEmission,
+          model: modelMatch ? (modelMatch[1] || modelMatch[2]) : 'gemini-3.5-flash-lite',
+          latency_ms: scoutTiming?.ms ?? 1500,
+          tokens: scoutUsage?.total ?? undefined,
+          error: null,
+        };
+        enriched.unshift(scoutDisp);
+      }
+
       const turnSet = new Set(enriched.map(d => Number(d.turn) || 1));
       for (const t of turnSet) {
         const turnDispatches = enriched.filter(d => (Number(d.turn) || 1) === t);

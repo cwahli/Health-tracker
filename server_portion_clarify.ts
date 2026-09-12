@@ -205,7 +205,7 @@ export function detectPortionAmbiguity(item: any, scoutIndex: number): PortionCl
 
   // Multi-serve package / container / servings check
   const servingsRaw = raw?.servingsPerContainer ?? raw?.servings ?? raw?.numberOfServings;
-  const servings =
+  let servings =
     servingsRaw != null && String(servingsRaw).trim() !== ''
       ? Math.round(Number(String(servingsRaw).match(/[\d.]+/)?.[0] || 0))
       : null;
@@ -333,23 +333,25 @@ export function detectPortionAmbiguity(item: any, scoutIndex: number): PortionCl
     // is not. Gating halves on whole-pack sanity hid the only meaningful
     // options and silenced the question entirely.
     const saneCap = 5 * servingGrams;
-    if (wholePackSane || packGrams / 2 <= saneCap) {
-      const half = Math.round(packGrams / 2);
-      if (half >= 15 && half <= saneCap && !seen.has(half) && half !== packGrams) {
-        seen.add(half);
-        options.push({ id: `half_${half}`, label: `Half pack (${half}g)`, weightGrams: half });
-      }
-      const quarter = Math.round(packGrams / 4);
-      if (quarter >= 15 && quarter <= saneCap && !seen.has(quarter) && quarter !== packGrams) {
-        seen.add(quarter);
-        options.push({ id: `quarter_${quarter}`, label: `1/4 pack (${quarter}g)`, weightGrams: quarter });
-      }
-    } else if (servings != null && servings >= 2) {
-      // Bulk pack with absurd whole/half/quarter options (e.g. 805g oats):
+    const half = Math.round(packGrams / 2);
+    if (half >= 15 && half <= saneCap && !seen.has(half) && half !== packGrams) {
+      seen.add(half);
+      options.push({ id: `half_${half}`, label: `Half pack (${half}g)`, weightGrams: half });
+    }
+    const quarter = Math.round(packGrams / 4);
+    if (quarter >= 15 && quarter <= saneCap && !seen.has(quarter) && quarter !== packGrams) {
+      seen.add(quarter);
+      options.push({ id: `quarter_${quarter}`, label: `1/4 pack (${quarter}g)`, weightGrams: quarter });
+    }
+    const effectiveServings = servings != null && servings >= 2
+      ? servings
+      : (servingGrams > 0 && packGrams >= 2 * servingGrams ? Math.round(packGrams / servingGrams) : null);
+    if (effectiveServings != null && effectiveServings >= 2) {
+      // Bulk pack with absurd whole/half options (e.g. 805g oats):
       // offer a realistic second serving instead so the question survives.
-      const sliceGrams = Math.max(5, Math.round(packGrams / servings));
+      const sliceGrams = Math.max(5, Math.round(packGrams / effectiveServings));
       const twoServ = sliceGrams * 2;
-      if (!seen.has(twoServ) && twoServ > 0 && twoServ !== packGrams) {
+      if (!seen.has(twoServ) && twoServ > 0 && twoServ !== packGrams && twoServ <= saneCap) {
         seen.add(twoServ);
         options.push({ id: `n2_${twoServ}`, label: `2 servings (${twoServ}g)`, weightGrams: twoServ });
       }
@@ -590,7 +592,11 @@ export function resolveItemQuantities(
           return;
       }
     }
-    resolutions.push({ scoutIndex: si, name, candidates, decision: 'accept-visual', why: 'no statement, no pack divergence — visual estimate stands' });
+    const hasPackDivergence = pack != null && Math.abs(pack - w) > 1;
+    const whyText = hasPackDivergence
+      ? `no user statement; package (${pack}g) differs from visual guess (${w}g) but options collapsed — visual estimate stands`
+      : 'no statement, no pack divergence — visual estimate stands';
+    resolutions.push({ scoutIndex: si, name, candidates, decision: 'accept-visual', why: whyText });
   });
 
   return { items: adopted, clarifyItems, resolutions };
