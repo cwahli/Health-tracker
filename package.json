@@ -30,7 +30,8 @@
     "golden:inbox": "vitest run tests/golden_inbox.test.ts",
     "golden:inbox:watch": "vitest tests/golden_inbox.test.ts",
     "golden:promote": "node scripts/golden-promote.mjs",
-    "golden:loop": "node scripts/golden-loop.mjs"
+    "golden:loop": "node scripts/golden-loop.mjs",
+    "prebuild:web": "node scripts/write-git-version.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1105.0",
