@@ -3306,12 +3306,17 @@ export default function Header({
                 <ShieldCheck className="w-5 h-5 text-indigo-600 shrink-0" />
                 <div className="hidden xs:block">
                   <h2 className="text-base sm:text-lg font-bold text-theme-text leading-none">Settings</h2>
-                  <span className="text-[10px] sm:text-xs font-normal text-slate-400 block mt-0.5">
-                    {(() => {
-                      const buildTime = serverStartTime || 1782721085000;
-                      const diffMs = Math.max(0, now - buildTime);
-                      const diffMins = Math.floor(diffMs / 60000);
-                      return diffMins < 1 ? 'last published just now' : `last published ${diffMins} min ago`;
+                  <span className="text-[10px] sm:text-xs font-normal text-slate-400 block mt-0.5 font-mono">
+                    {__GIT_COMMIT_HASH__} · {(() => {
+                      const commitMs = new Date(__GIT_COMMIT_TIME__).getTime();
+                      const diffMs = Date.now() - commitMs;
+                      const diffMin = Math.floor(diffMs / 60_000);
+                      const diffHr = Math.floor(diffMin / 60);
+                      const diffDay = Math.floor(diffHr / 24);
+                      if (diffMin < 1) return 'just now';
+                      if (diffMin < 60) return `updated ${diffMin} min ago`;
+                      if (diffHr < 24) return `updated ${diffHr}h ago`;
+                      return `updated ${diffDay}d ago`;
                     })()}
                   </span>
                 </div>
