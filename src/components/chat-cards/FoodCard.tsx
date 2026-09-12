@@ -1588,63 +1588,65 @@ export const FoodCard: React.FC<AgentCardProps & {
                                   })()}
                                 </div>
                                 
-                                                                 {/* Top Nutrients for Mode D */}
+                                {/* Top Nutrients for Mode D */}
                                 {group.averageNutrients && Object.keys(group.averageNutrients).length > 0 && (
-                                  <div className="py-2 border-t border-theme-border mt-2">
-                                    <div className="flex flex-wrap gap-2 justify-start pb-2">
+                                  <div className="py-2.5 border-t border-theme-border/50 w-full text-left font-sans mt-2">
+                                    <div className="flex flex-wrap gap-2 justify-start">
                                       {(() => {
+                                        const allowanceObj = remainingAllowance || msg.data?.remainingAllowance;
                                         const defaultTargets: { [key: string]: number } = { calories: 2000, saturatedFat: 15, sodium: 1200, addedSugar: 30, totalFat: 65, protein: 50, carbohydrates: 250, totalFibre: 30 };
-                                        const nutrientColors: { [key: string]: string } = { calories: 'rgb(249, 115, 22)', saturatedFat: 'rgb(234, 179, 8)', sodium: 'rgb(34, 197, 94)', addedSugar: 'rgb(239, 68, 68)', totalFat: 'rgb(168, 85, 247)', protein: 'rgb(59, 130, 246)', carbohydrates: 'rgb(6, 182, 212)', totalFibre: 'rgb(16, 185, 129)' };
-                                        const nutrientLabels: { [key: string]: string } = { calories: t.caloriesLabel || 'Calories', saturatedFat: t.satFatLabel || 'Sat Fat', sodium: t.sodiumLabel || 'Sodium', addedSugar: (t as any).addedSugarLabel || 'Added Sugar', totalFat: (t as any).fatLabel || 'Total Fat', protein: (t as any).proteinLabel || 'Protein', carbohydrates: t.carbohydratesLabel || 'Carbs', totalFibre: (t as any).fiberLabel || 'Fiber' };
-                                        const nutrientUnits: { [key: string]: string } = { calories: 'kcal', saturatedFat: 'g', sodium: 'mg', addedSugar: 'g', totalFat: 'g', protein: 'g', carbohydrates: 'g', totalFibre: 'g' };
-                                        const formatNutrientValue = (v: number, u: string) => {
-                                          if (v === null || v === undefined || isNaN(v)) return `—${u}`;
-                                          const cleanV = cleanNutrientVal(v);
-                                          const abs = Math.abs(cleanV);
-                                          if (abs >= 1000) return `${(cleanV / 1000).toFixed(2)}k${u}`;
-                                          if (abs >= 100) return `${Math.round(cleanV)}${u}`;
-                                          if (abs >= 10) return `${cleanV.toFixed(1)}${u}`;
-                                          return `${cleanV.toFixed(2)}${u}`;
+                                        const nutrientLabels: { [key: string]: string } = {
+                                          calories: t.caloriesLabel || 'Calories',
+                                          saturatedFat: t.satFatLabel || 'Sat Fat',
+                                          sodium: t.sodiumLabel || 'Sodium',
+                                          addedSugar: (t as any).addedSugarLabel || 'Added Sugar',
+                                          totalFat: (t as any).fatLabel || 'Total Fat',
+                                          protein: (t as any).proteinLabel || 'Protein',
+                                          carbohydrates: t.carbohydratesLabel || 'Carbs',
+                                          totalFibre: (t as any).fiberLabel || 'Fiber'
                                         };
-                                        
-                                        // Respect report topNutrientTargets or profile topNutrientsToMonitor
+                                        const nutrientUnits: { [key: string]: string } = {
+                                          calories: 'kcal',
+                                          saturatedFat: 'g',
+                                          sodium: 'mg',
+                                          addedSugar: 'g',
+                                          totalFat: 'g',
+                                          protein: 'g',
+                                          carbohydrates: 'g',
+                                          totalFibre: 'g'
+                                        };
+
+                                        // Full list of user nutrient targets
                                         const rawReportTargets = (report as any)?.topNutrientTargets || (report as any)?.nutrientTargets;
-                                        const reportKeys = Array.isArray(rawReportTargets) && rawReportTargets.length > 0
-                                          ? rawReportTargets.map((item: any) => typeof item === 'string' ? item : (item?.nutrientKey || item?.key || '')).filter(Boolean)
-                                          : null;
-                                        const activeKeys = reportKeys || profile?.topNutrientsToMonitor || ['calories', 'protein', 'carbohydrates', 'totalFat'];
-                                        const keysToRender = activeKeys.filter(k => {
-                                          if (!group.averageNutrients) return false;
-                                          if (group.averageNutrients[k] !== undefined && group.averageNutrients[k] !== null) return true;
-                                          const lower = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
-                                          return Object.keys(group.averageNutrients).some(gk => gk.toLowerCase().replace(/[^a-z0-9]/g, '') === lower);
-                                        });
+                                        const monitoredKeys = Array.from(new Set([
+                                          ...(Array.isArray(rawReportTargets) ? rawReportTargets.map((item: any) => typeof item === 'string' ? item : (item?.nutrientKey || item?.key || '')) : []),
+                                          ...(profile?.topNutrientsToMonitor || [])
+                                        ])).filter(Boolean);
 
-                                        const sortedKeysToRender = [...keysToRender].sort((a, b) => {
-                                          const parseT = (k: string) => {
-                                            const rVal = (report as any)?.dailyNutrientTargets?.[k as any];
-                                            if (rVal) {
-                                              const m = String(rVal).replace(/,/g, '').match(/\d+(\.\d+)?/);
-                                              if (m) return parseFloat(m[0]);
-                                            }
-                                            return profile?.targets?.[k as any] ?? defaultTargets[k] ?? 1000;
-                                          };
-                                          const targetA = parseT(a);
-                                          const targetB = parseT(b);
-                                          const valA = Number(group.averageNutrients?.[a]) || 0;
-                                          const valB = Number(group.averageNutrients?.[b]) || 0;
-                                          const pctA = targetA > 0 ? (valA / targetA) : 0;
-                                          const pctB = targetB > 0 ? (valB / targetB) : 0;
-                                          return pctB - pctA;
-                                        });
+                                        const baseTargetKeys = ['calories', 'protein', 'carbohydrates', 'totalFat', 'saturatedFat', 'sodium', 'totalFibre', 'addedSugar'];
+                                        const customTargetKeys = [
+                                          ...Object.keys(profile?.targets || {}),
+                                          ...Object.keys((report as any)?.dailyNutrientTargets || {})
+                                        ].filter(k => k && k !== 'steps');
 
-                                        return sortedKeysToRender.map(key => {
-                                          let val = group.averageNutrients[key];
-                                          let parsedVal = typeof val === 'string' ? parseFloat(val.replace(/[^\d.]/g, '')) : val;
-                                          if (isNaN(parsedVal)) return null;
-                                          
+                                        const allTargetKeys = Array.from(new Set([
+                                          ...monitoredKeys,
+                                          ...baseTargetKeys,
+                                          ...customTargetKeys
+                                        ]));
+
+                                        return allTargetKeys.map((key: string) => {
+                                          let val = group.averageNutrients?.[key];
+                                          if (val === undefined || val === null) {
+                                            const lower = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+                                            const matchEntry = Object.entries(group.averageNutrients || {}).find(([k]) => k.toLowerCase().replace(/[^a-z0-9]/g, '') === lower);
+                                            if (matchEntry) val = matchEntry[1];
+                                          }
+
+                                          let parsedVal = typeof val === 'string' ? parseFloat(val.replace(/[^\d.]/g, '')) : Number(val);
+
                                           // Fallback for past messages where agent might have output 0 because of localized keys (e.g. Lemak Jenuh)
-                                          if (parsedVal === 0 && group.scoutItemIndices && group.scoutItemIndices.length === 1) {
+                                          if ((isNaN(parsedVal) || parsedVal === 0) && group.scoutItemIndices && group.scoutItemIndices.length === 1) {
                                             const scoutItem = activeScoutItems[group.scoutItemIndices[0]];
                                             if (scoutItem && scoutItem.rawNutritionLabel) {
                                               const rawK = Object.keys(scoutItem.rawNutritionLabel).find(k => 
@@ -1678,28 +1680,63 @@ export const FoodCard: React.FC<AgentCardProps & {
                                               }
                                             }
                                           }
-                                          
-                                          // group.averageNutrients already holds the group's real/average total
-                                          // nutrient values (not a per-100g figure) — no weight-based scaling here.
-                                          const totalVal = parsedVal;
-                                          if (isNaN(totalVal) || totalVal <= 0 || Number(totalVal.toFixed(2)) <= 0) return null;
-                                          
+
+                                          const mealVal = parsedVal;
+                                          if (isNaN(mealVal) || mealVal <= 0 || Number(mealVal.toFixed(2)) <= 0) return null;
+
+                                          const targetVal = Number(
+                                            allowanceObj?.[`${key}Target`] ||
+                                            (report as any)?.dailyNutrientTargets?.[key] ||
+                                            profile?.targets?.[key] ||
+                                            defaultTargets[key] ||
+                                            1000
+                                          );
+                                          const alreadyLogged = Number(
+                                            key === 'saturatedFat'
+                                              ? (allowanceObj?.saturatedFatLogged ?? allowanceObj?.satFatLogged ?? 0)
+                                              : allowanceObj?.[`${key}Logged`] ?? 0
+                                          );
+                                          const remainingVal = allowanceObj?.[key] !== undefined
+                                            ? Math.max(0, Number(allowanceObj[key]) - mealVal)
+                                            : Math.max(0, targetVal - (alreadyLogged + mealVal));
+                                          const avgVal = allowanceObj?.averages?.[key] !== undefined
+                                            ? Number(allowanceObj.averages[key])
+                                            : null;
+
                                           const color = getNutrientColor(key);
                                           const label = nutrientLabels[key] || (key.replace(/([A-Z])/g, ' $1').trim());
                                           const unit = nutrientUnits[key] || 'g';
 
                                           return (
-                                            <div key={key} className="flex items-center gap-1.5">
+                                            <div
+                                              key={key}
+                                              className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/70 dark:border-slate-800/80 px-2.5 py-1.5 rounded-xl shadow-xs"
+                                            >
                                               <NutrientPieChart
-                                                allowance={profile?.targets?.[key as any] ?? defaultTargets[key]}
-                                                alreadyConsumed={0}
-                                                mealValue={totalVal}
+                                                allowance={targetVal}
+                                                alreadyConsumed={alreadyLogged}
+                                                mealValue={mealVal}
                                                 nutrientKey={key as any}
                                                 size="sm"
                                               />
-                                              <span className={key === 'calories' ? "text-[11px] font-extrabold" : "text-[11px] font-bold"} style={{ color }}>
-                                                {key === 'calories' ? '' : `${label}: `}{formatNutrientValue(totalVal, unit)}
-                                              </span>
+                                              <div className="flex flex-col text-left">
+                                                <div className="flex items-center gap-1 leading-tight">
+                                                  <span className="text-[11px] font-bold" style={{ color }}>
+                                                    {formatNutrientValue ? formatNutrientValue(mealVal, unit) : `${mealVal}${unit}`}
+                                                  </span>
+                                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                                    {label}
+                                                  </span>
+                                                </div>
+                                                <div className="text-[9.5px] text-slate-400 dark:text-slate-500 font-mono leading-tight mt-0.5 flex items-center gap-1.5">
+                                                  <span>{Math.round(remainingVal)} {unit} left</span>
+                                                  {avgVal !== null && !isNaN(avgVal) && (
+                                                    <span className="text-indigo-600 dark:text-indigo-400 font-semibold">
+                                                      {t.sevenDayAvg || '7d Avg:'} {Math.round(avgVal)}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </div>
                                             </div>
                                           );
                                         });
@@ -1729,33 +1766,32 @@ export const FoodCard: React.FC<AgentCardProps & {
 
                                   return null;
                                 })()}
-                                            {/* Recommendation & Clinical Insights */}
-                                 <div className="space-y-1.5 pt-1">
-                                   {group.comparisonSentence && (
-                                     <p data-testid="compare-sentence" className="text-[12.5px] font-semibold text-slate-800 dark:text-slate-100 italic bg-slate-50 dark:bg-slate-850/80 p-2 rounded-lg border border-slate-200/60 dark:border-slate-800 leading-snug">
-                                       <span className="not-italic font-bold text-indigo-600 dark:text-indigo-400 mr-1.5">
-                                         {t.comparisonSentenceLabel || "Comparison"}:
-                                       </span>
-                                       {group.comparisonSentence}
-                                     </p>
-                                   )}
-                                   {(group.message || group.recommendation) && (
-                                     <p className="text-[13px] text-theme-neutral leading-snug">
-                                       {group.message || group.recommendation}
-                                     </p>
-                                   )}
-                                   {group.orderingTip && (
-                                     <p data-testid="compare-ordering-tip" className="text-[12px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50/70 dark:bg-emerald-950/40 p-2 rounded-lg border border-emerald-200/60 dark:border-emerald-900/60 leading-snug">
-                                       <span className="font-bold mr-1.5">💡 {t.orderingTipLabel || "Ordering Tip"}:</span>
-                                       {group.orderingTip}
-                                     </p>
-                                   )}
-                                   {group.averageNutrientsPer100g && (
-                                     <p data-testid="compare-per-100g-note" className="text-[11px] text-slate-500 italic pt-1">
-                                       * Nutritional values are estimates per 100g
-                                     </p>
-                                   )}
-                                 </div>
+                                             {/* Recommendation & Clinical Insights */}
+                                  <div className="pt-2 text-left">
+                                    <p data-testid="compare-consolidated-message" className="text-[13px] text-theme-neutral leading-relaxed">
+                                      {group.comparisonSentence && (
+                                        <span data-testid="compare-sentence" className="font-medium text-slate-800 dark:text-slate-100 mr-1.5">
+                                          {group.comparisonSentence}{' '}
+                                        </span>
+                                      )}
+                                      {(group.message || group.recommendation) && (group.message !== group.comparisonSentence) && (
+                                        <span className="mr-1.5">
+                                          {group.message || group.recommendation}{' '}
+                                        </span>
+                                      )}
+                                      {group.orderingTip && (
+                                        <span data-testid="compare-ordering-tip" className="text-slate-700 dark:text-slate-300">
+                                          <span className="font-semibold mr-1">💡 {t.orderingTipLabel || "Ordering Tip"}:</span>
+                                          {group.orderingTip}
+                                        </span>
+                                      )}
+                                    </p>
+                                    {group.averageNutrientsPer100g && (
+                                      <p data-testid="compare-per-100g-note" className="text-[11px] text-slate-500 italic pt-1.5">
+                                        * Nutritional values are estimates per 100g
+                                      </p>
+                                    )}
+                                  </div>
                                 
                                                          {/* Items in this bucket */}
                                  {(group.items && group.items.length > 1) && (
@@ -2769,10 +2805,20 @@ export const FoodCard: React.FC<AgentCardProps & {
                         const nutrientUnits: { [key: string]: string } = { calories: 'kcal', saturatedFat: 'g', sodium: 'mg', addedSugar: 'g', totalFat: 'g', protein: 'g', carbohydrates: 'g', totalFibre: 'g' };
 
                         const rawReportTargets = (report as any)?.topNutrientTargets || (report as any)?.nutrientTargets;
-                        const reportKeys = Array.isArray(rawReportTargets) && rawReportTargets.length > 0
-                          ? rawReportTargets.map((item: any) => typeof item === 'string' ? item : (item?.nutrientKey || item?.key || '')).filter(Boolean)
-                          : null;
-                        const activeKeys = reportKeys || profile?.topNutrientsToMonitor || ['calories', 'saturatedFat', 'sodium', 'protein'];
+                        const monitoredKeys = Array.from(new Set([
+                          ...(Array.isArray(rawReportTargets) ? rawReportTargets.map((item: any) => typeof item === 'string' ? item : (item?.nutrientKey || item?.key || '')) : []),
+                          ...(profile?.topNutrientsToMonitor || [])
+                        ])).filter(Boolean);
+                        const baseTargetKeys = ['calories', 'protein', 'carbohydrates', 'totalFat', 'saturatedFat', 'sodium', 'totalFibre', 'addedSugar'];
+                        const customTargetKeys = [
+                          ...Object.keys(profile?.targets || {}),
+                          ...Object.keys((report as any)?.dailyNutrientTargets || {})
+                        ].filter(k => k && k !== 'steps');
+                        const activeKeys = Array.from(new Set([
+                          ...monitoredKeys,
+                          ...baseTargetKeys,
+                          ...customTargetKeys
+                        ]));
                         const keysToRender = activeKeys.filter((k: string) => {
                           if (mealNutrients[k] !== undefined && mealNutrients[k] !== null && Number(mealNutrients[k]) > 0) return true;
                           const lower = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');

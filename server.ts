@@ -1015,8 +1015,8 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
             : getQuadrantBox(idx, scoutItems.length);
           resolvedGroups.push({
             groupName: itemName,
-            verdict: { label: t(lang, 'comparisonSupportsEval'), level: "neutral" },
-            message: interpolate(t(lang, 'comparisonEvalFor'), { name: itemName }),
+            verdict: { label: t(lang, 'comparisonSupportsEval') || 'Supports Evaluation', level: "neutral" },
+            message: interpolate(t(lang, 'comparisonEvalFor') || 'Nutritional evaluation for {name}.', { name: itemName }),
             comparisonSentence: `Evaluation for ${itemName}.`,
             orderingTip: "Consider your daily nutrition allowance when selecting.",
             averageNutrients: sItem.preCalcNutrients || { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
@@ -1042,8 +1042,8 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
           const itemBox = s.boundingBox2D || getQuadrantBox(resolvedGroups.length, scoutItems.length);
           resolvedGroups.push({
             groupName: itemName,
-            verdict: { label: t(lang, 'comparisonSupportsEval'), level: "neutral" },
-            message: interpolate(t(lang, 'comparisonEvalFor'), { name: itemName }),
+            verdict: { label: t(lang, 'comparisonSupportsEval') || 'Supports Evaluation', level: "neutral" },
+            message: interpolate(t(lang, 'comparisonEvalFor') || 'Nutritional evaluation for {name}.', { name: itemName }),
             comparisonSentence: `Evaluation for ${itemName}.`,
             orderingTip: "Consider your daily nutrition allowance when selecting.",
             averageNutrients: s.preCalcNutrients || { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
@@ -1064,9 +1064,9 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
       } else {
         const missing = unassignedIdxs.map(i => scoutItems[i]);
         resolvedGroups.push({
-          groupName: t(lang, 'comparisonUnassigned'),
-          verdict: { label: t(lang, 'comparisonSupportsEval'), level: "neutral" },
-          message: t(lang, 'comparisonUnassignedMsg'),
+          groupName: t(lang, 'comparisonUnassigned') || 'Other Menu Options',
+          verdict: { label: t(lang, 'comparisonSupportsEval') || 'Supports Evaluation', level: "neutral" },
+          message: t(lang, 'comparisonUnassignedMsg') || 'Additional menu choices available for selection and nutritional comparison.',
           comparisonSentence: t(lang, 'comparisonUnassignedMsg') || "Additional option for evaluation.",
           orderingTip: "Consider your daily nutrition allowance when selecting.",
           averageNutrients: { calories: 150, protein: 5, totalFat: 5, saturatedFat: 1, carbohydrates: 20, sodium: 100 },
@@ -1092,6 +1092,8 @@ export function resolveComparisonGroups(rawGroups: any[], scoutItems: any[], lan
     const isLumped = resolvedGroups.length === 1 && (
       (resolvedGroups[0].scoutItemIndices && resolvedGroups[0].scoutItemIndices.length > 1) ||
       resolvedGroups[0].groupName === t(lang, 'comparisonUnassigned') ||
+      resolvedGroups[0].groupName === 'Other Menu Options' ||
+      resolvedGroups[0].groupName === 'Pilihan Menu Lainnya' ||
       resolvedGroups[0].groupName === 'Unassigned items'
     );
     if (isLumped) {
@@ -2301,7 +2303,7 @@ async function callUnifiedLLMInternal({
         _localAddDebugLog(`[UnifiedLLM-Usage:${stage}] none (usageMetadata present but total=0)`);
         return;
       }
-      recordUnifiedUsage(stage, p, c, t);
+      recordUnifiedUsage(stage, { promptTokens: p, candidatesTokens: c, totalTokens: t });
       recordUnifiedTiming(stage, Date.now() - __callStartMs);
       _localAddDebugLog(`[UnifiedLLM-Usage:${stage}] prompt=${p} completion=${c} total=${t}`);
       _localAddDebugLog(`[UnifiedLLM-Timing:${stage}] ms=${Date.now() - __callStartMs}`);

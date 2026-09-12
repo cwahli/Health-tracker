@@ -99,7 +99,7 @@ test.describe('Q-8.3: Dialog Inventory & Job Process Tier 2 Stubs', () => {
     // 4. Assert composer controls count === 1
     const photoInputs = page.locator('input[type="file"][accept*="image"]');
     const photoButtons = page.locator('button[title*="photo" i], button[title*="image" i], button:has(svg.lucide-camera)');
-    const textInputs = page.locator('textarea, input[placeholder*="eat" i], input[placeholder*="message" i]').first();
+    const textInputs = page.locator('textarea, input[type="text"], input[placeholder*="eat" i], input[placeholder*="message" i]').first();
 
     await expect(textInputs).toBeVisible({ timeout: 10000 });
 
@@ -120,14 +120,15 @@ test.describe('Q-8.3: Dialog Inventory & Job Process Tier 2 Stubs', () => {
     await expect(foodCardName).toBeVisible({ timeout: 15000 });
 
     // 7. Dialog Inventory Invariant: on_card kcal matches stub ledger (420)
-    const kcalText = page.getByText(/420\s*kcal|420/).first();
+    const mealCard = page.locator('[data-testid="task-placeholder-card"]').filter({ has: page.getByRole('heading', { name: /Grilled Chicken Salad/i }) }).first();
+    const kcalText = mealCard.getByText(/420\s*kcal|420/).first();
     await expect(kcalText).toBeVisible({ timeout: 5000 });
 
     // 8. Dialog Inventory Invariant: Retry and Attempt 1/3 MUST BE HIDDEN when job succeeded
-    const attemptText = page.getByText(/Attempt \d/i);
+    const attemptText = mealCard.getByText(/Attempt \d/i);
     await expect(attemptText).not.toBeVisible();
 
-    const retryBtn = page.locator('button:has-text("Retry"), button[title*="Retry" i]');
+    const retryBtn = mealCard.getByRole('button', { name: /Retry/i });
     await expect(retryBtn).not.toBeVisible();
   });
 
@@ -181,7 +182,7 @@ test.describe('Q-8.3: Dialog Inventory & Job Process Tier 2 Stubs', () => {
     await logMealBtn.waitFor({ state: 'visible', timeout: 5000 });
     await logMealBtn.click();
 
-    const textInputs = page.locator('textarea, input[placeholder*="eat" i], input[placeholder*="message" i]').first();
+    const textInputs = page.locator('textarea, input[type="text"], input[placeholder*="eat" i], input[placeholder*="message" i]').first();
     await expect(textInputs).toBeVisible({ timeout: 10000 });
     await textInputs.fill('Salmon sashimi');
 

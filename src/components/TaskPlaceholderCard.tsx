@@ -538,7 +538,7 @@ export default function TaskPlaceholderCard({
           : job.status === 'succeeded' ? (t.mealAnalysisComplete || 'Meal Analysis Complete') : job.status === 'failed' ? (t.analysisFailed || 'Analysis failed') : (t.analyzingMealPhoto || 'Analyzing Meal Photo...')));
 
   return (
-    <div id={`task-card-${job.id}`} className={`bg-theme-bg-card border rounded-3xl py-4 pl-0 pr-4 shadow-sm mx-0 mb-4 w-full transition-all hover:shadow-md overflow-hidden ${
+    <div id={`task-card-${job.id}`} data-testid="task-placeholder-card" className={`bg-theme-bg-card border rounded-3xl py-4 pl-0 pr-4 shadow-sm mx-0 mb-4 w-full transition-all hover:shadow-md overflow-hidden ${
       job.status === 'awaiting_user'
         ? 'border-purple-300 dark:border-purple-700 bg-purple-50/30 dark:bg-purple-950/20'
         : 'border-theme-border'
