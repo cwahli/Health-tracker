@@ -42,7 +42,7 @@ export interface CalculatorInputProjection {
   lockedNutrientKeys: string[];
 }
 
-export interface DietitianItemProjection {
+export interface DietItemProjection {
   name: string;
   weightGrams?: number;
   calories?: number;
@@ -52,12 +52,12 @@ export interface DietitianItemProjection {
   lockedNutrientKeys?: string[];
 }
 
-export interface DietitianInputProjection {
+export interface DietInputProjection {
   mealId: string;
   mode: string;
   mealName?: string;
   macroTotals: NutrientMap;
-  itemsSummary: DietitianItemProjection[];
+  itemsSummary: DietItemProjection[];
   userProfileSummary?: {
     age?: number;
     gender?: string;
@@ -69,7 +69,7 @@ export interface DietitianInputProjection {
 /**
  * Stage Input Mask: Vision Scout
  * May read: text, imageUrls, mode flags
- * Must not receive: dietitian history, candidate search dumps, raw base64 if URLs exist
+ * Must not receive: diet history, candidate search dumps, raw base64 if URLs exist
  */
 export function projectScoutInput(job: any): ScoutInputProjection {
   const text = job?.inputSnapshot?.message || job?.text || job?.result?.text || '';
@@ -88,7 +88,7 @@ export function projectScoutInput(job: any): ScoutInputProjection {
 /**
  * Stage Input Mask: Food Resolver
  * May read per item: labels/keywords, components sketch, diningEnvironment, weights
- * Must not receive: raw image tokens, dietitian prompts, full search candidate arrays
+ * Must not receive: raw image tokens, diet prompts, full search candidate arrays
  */
 export function projectResolverInput(meal: MealBuild): ResolverInputProjection {
   const items: ResolverItemProjection[] = (meal.items || [])
@@ -139,12 +139,12 @@ export function projectCalculatorInput(meal: MealBuild): CalculatorInputProjecti
 }
 
 /**
- * Stage Input Mask: Dietitian Agent
+ * Stage Input Mask: Diet Agent
  * May read: meal name, composition summary, macro/totals + locked preCalc, user profile (light)
  * Must not receive: vector/DB search candidate lists, raw OCR JSON walls, scout scratchpads, base64
  */
-export function projectDietitianInput(meal: MealBuild, profile?: any): DietitianInputProjection {
-  const itemsSummary: DietitianItemProjection[] = (meal.items || [])
+export function projectDietInput(meal: MealBuild, profile?: any): DietInputProjection {
+  const itemsSummary: DietItemProjection[] = (meal.items || [])
     .filter(item => !meal.deletedItemIds?.includes(item.itemId || ''))
     .map(item => ({
       name: item.name || item.originalName || 'Unspecified food',

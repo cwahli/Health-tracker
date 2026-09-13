@@ -30,7 +30,7 @@ describe('Phase 6: 409 OCC Rebase & Tombstones', () => {
     expect(rebasedMeal.items.find(i => i.itemId === 'item-1')?.weightGrams).toBe(250);
     // Rice is preserved untouched from server
     expect(rebasedMeal.items.find(i => i.itemId === 'item-2')?.weightGrams).toBe(150);
-    expect(rebasedMeal.staleDietitianNarrative).toBe(true);
+    expect(rebasedMeal.staleDietNarrative).toBe(true);
   });
 
   it('preserves deletedItemIds tombstones during rebase and prevents zombie items', () => {

@@ -3,7 +3,7 @@ import {
   projectScoutInput,
   projectResolverInput,
   projectCalculatorInput,
-  projectDietitianInput
+  projectDietInput
 } from '../projectors';
 import { MealBuild } from '../types';
 
@@ -89,16 +89,16 @@ describe('Pure Stage Projectors (Plan §3A Context Subtraction)', () => {
     expect(calcInput.lockedNutrientKeys).toContain('protein');
   });
 
-  it('projectDietitianInput extracts clean macros and light user profile summary without raw candidate dumps', () => {
+  it('projectDietInput extracts clean macros and light user profile summary without raw candidate dumps', () => {
     const mockProfile = { age: 30, gender: 'female', healthGoals: ['muscle_gain'], allergies: ['peanuts'] };
-    const dietitianInput = projectDietitianInput(sampleMeal, mockProfile);
+    const dietInput = projectDietInput(sampleMeal, mockProfile);
 
-    expect(dietitianInput.mealId).toBe('meal-101');
-    expect(dietitianInput.macroTotals.calories).toBe(395);
-    expect(dietitianInput.itemsSummary).toHaveLength(2);
-    expect(dietitianInput.itemsSummary[0].name).toBe('Grilled Salmon');
-    expect(dietitianInput.itemsSummary[0].protein).toBe(34);
-    expect(dietitianInput.userProfileSummary).toEqual({
+    expect(dietInput.mealId).toBe('meal-101');
+    expect(dietInput.macroTotals.calories).toBe(395);
+    expect(dietInput.itemsSummary).toHaveLength(2);
+    expect(dietInput.itemsSummary[0].name).toBe('Grilled Salmon');
+    expect(dietInput.itemsSummary[0].protein).toBe(34);
+    expect(dietInput.userProfileSummary).toEqual({
       age: 30,
       gender: 'female',
       goals: ['muscle_gain'],

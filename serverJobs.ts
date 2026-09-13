@@ -731,7 +731,7 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
                         prog = Math.max(prog, 30);
                       } else if (msg.toLowerCase().includes('database') || msg.toLowerCase().includes('usda') || msg.toLowerCase().includes('search')) {
                         prog = Math.max(prog, 50);
-                      } else if (msg.toLowerCase().includes('dietitian') || msg.toLowerCase().includes('nutritionist') || msg.toLowerCase().includes('meal agent')) {
+                      } else if (msg.toLowerCase().includes('dietitian') || msg.toLowerCase().includes('diet_answer') || msg.toLowerCase().includes('diet generated') || msg.toLowerCase().includes('nutritionist') || msg.toLowerCase().includes('meal agent')) {
                         prog = Math.max(prog, 70);
                       } else if (msg.toLowerCase().includes('extract') || msg.toLowerCase().includes('medical analyze')) {
                         prog = Math.max(prog, 25);

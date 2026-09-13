@@ -27,7 +27,7 @@ import {
   appendEditHistoryEntry,
 } from './src/server/food/server_food_meal_assemble.js';
 import { mergeScoutItems } from './server_vision_scout.js';
-import { attachHappyPathMealBuild, buildSavableMealFromParsed, markDietitianDegraded } from './server_meal_orchestrator.js';
+import { attachHappyPathMealBuild, buildSavableMealFromParsed, markDietDegraded } from './server_meal_orchestrator.js';
 import { evaluateMealGate } from './server_meal_gate.js';
 import { checkResumedFromImageTurn, checkMenuScaleBypass } from './src/server/food/server_food_scout_source.js';
 import { applyMealEdits } from './server_meal_edit.js';
@@ -62,17 +62,17 @@ export async function executeFinalizePhase(
         (p: any) => (p.nutrients && p.nutrients.calories != null) || (p.primaryBase100g && p.primaryBase100g.calories !== undefined)
       )
     ) {
-      ctx.addDebugLog(`[Dietitian Degrade] Dietitian failed permanently, but pre-calculated math exists. Salvaging meal build.`);
+      ctx.addDebugLog(`[Diet Degrade] Diet failed permanently, but pre-calculated math exists. Salvaging meal build.`);
       let degradeClarify: any = null;
       if (ctx.portionClarify) degradeClarify = ctx.portionClarify;
       const salvagedAggregatedNutrients = sumSalvagedAggregates(ctx.preCalculatedItems);
       const salvagedMeal = buildSavableMealFromParsed(ctx.preCalculatedItems, ctx.req.body?.activeMeal, salvagedAggregatedNutrients, null);
-      const degradedMeal = markDietitianDegraded(salvagedMeal, error.message);
+      const degradedMeal = markDietDegraded(salvagedMeal, error.message);
       const payloadData = toPendingFoodLog(degradedMeal);
 
       const salvageCheck = salvageLedgerPlausibility((payloadData as any)?.nutrients, (payloadData as any)?.weightGrams);
       if (!salvageCheck.ok) {
-        ctx.addDebugLog(`[Dietitian Degrade] Refusing implausible salvage (${salvageCheck.reason}).`);
+        ctx.addDebugLog(`[Diet Degrade] Refusing implausible salvage (${salvageCheck.reason}).`);
         const implausiblePayload: any = {
           error: `Analysis produced an implausible ledger (${salvageCheck.reason}) — nothing was saved. Please retry; pick a different model if it repeats.`,
           agentNotAvailable: true,
@@ -466,7 +466,7 @@ export async function executeFinalizePhase(
       scoutItems: syncedScoutItemsForEdit,
       diningEnvironment: activeMeal?.diningEnvironment,
     });
-    mealBuild.staleDietitianNarrative = false;
+    mealBuild.staleDietNarrative = false;
     if (pendingFoodLog && Array.isArray(activeMeal.userLockedSlots)) {
       pendingFoodLog.userLockedSlots = activeMeal.userLockedSlots;
       (mealBuild as any).userLockedSlots = activeMeal.userLockedSlots;
@@ -523,12 +523,12 @@ export async function executeFinalizePhase(
       model: 'projector',
     });
     ctx.accumulatedDispatches.push(expertDispatch);
-    ctx.sendLog('dietitian_answer', 'dietitian', finalMessage, {
+    ctx.sendLog('diet_answer', 'diet', finalMessage, {
       mode: 'modify',
       turn: expertTurn,
       editApplied: result.changed,
     });
-    ctx.addDebugLog(`[PatchLedger] expert dispatch t${expertTurn}/dietitian recorded (edit parity).`);
+    ctx.addDebugLog(`[PatchLedger] expert dispatch t${expertTurn}/diet recorded (edit parity).`);
 
     return ctx.res.json(
       buildModifyResponse({

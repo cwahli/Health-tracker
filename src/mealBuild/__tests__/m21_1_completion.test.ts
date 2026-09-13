@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { consolidateMeal, appendHistory, migrateMealSchema } from '../consolidate';
 import { fromEvaluationComparison, toEvaluationPayload, fromPendingFoodLog, toPendingFoodLog } from '../adapters';
-import { projectDietitianInput } from '../projectors';
+import { projectDietInput } from '../projectors';
 import type { MealBuild } from '../types';
 
 describe('M21.1 Mode D groups (live server shape)', () => {
@@ -83,18 +83,18 @@ describe('M21.1 zombie + history + projector', () => {
     meal = appendHistory(meal, {
       type: 'error',
       timestamp: new Date().toISOString(),
-      message: 'dietitian quota',
-      stage: 'dietitian',
+      message: 'diet quota',
+      stage: 'diet',
     } as any);
     const e = meal.historyLog?.[0] as any;
     expect(e).toBeTruthy();
-    expect(e.message).toMatch(/quota|dietitian/i);
+    expect(e.message).toMatch(/quota|diet/i);
     // At least one of the dual schemas
     expect(e.type || e.kind).toBeTruthy();
     expect(e.timestamp || e.at).toBeTruthy();
   });
 
-  it('projectDietitianInput strips candidate dumps shape (no databaseMatchesArray passthrough)', () => {
+  it('projectDietInput strips candidate dumps shape (no databaseMatchesArray passthrough)', () => {
     const meal: MealBuild = {
       id: 'p1',
       schemaVersion: 1,
@@ -104,7 +104,7 @@ describe('M21.1 zombie + history + projector', () => {
       nutrients: { calories: 200, protein: 4 },
       content: { name: 'Lunch' },
     };
-    const proj = projectDietitianInput(meal, { age: 40, goals: ['lose'] });
+    const proj = projectDietInput(meal, { age: 40, goals: ['lose'] });
     const s = JSON.stringify(proj);
     expect(s).not.toMatch(/databaseMatchesArray/);
     expect(proj.macroTotals || (proj as any).itemsSummary).toBeTruthy();

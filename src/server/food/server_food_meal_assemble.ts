@@ -624,7 +624,7 @@ export function mapFinalizeToMeal(args: FinalizeMapArgs): void {
     parsedData.serving_grams = mapped.weightGrams;
     parsedData.receiptTable = mapped.receiptTable;
     parsedData.name = mapped.name || parsedData.name;
-    sendLog('dietitian_answer', 'dietitian', rawParsed?.message || 'Dietitian generated clinical advice.', {
+    sendLog('diet_answer', 'diet', rawParsed?.message || 'Diet generated clinical advice.', {
       mode: rawParsed?.mode
     });
   } else {

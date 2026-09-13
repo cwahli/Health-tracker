@@ -7,7 +7,7 @@ export const MEAL_ENVELOPE_FIELDS: string[] = [
   'degradedStages', 'stageLedger', 'coldDebugUrl', 'photoUrl',
   'portionClarify', 'needsPortionClarify', 'date', 'weightGrams',
   'quantity', 'basis_type', 'serving_grams', 'updatedAt',
-  'deletedItemIds', 'staleDietitianNarrative'
+  'deletedItemIds', 'staleDietNarrative', 'staleDietitianNarrative'
 ];
 
 export const MEAL_ITEM_FIELDS: string[] = [

@@ -11,7 +11,7 @@ export type StageName =
   | 'portion'
   | 'resolver'
   | 'calculation'
-  | 'dietitian'
+  | 'diet'
   | 'user_edit';
 
 export interface StageLimits {
@@ -175,7 +175,7 @@ export function endStage(
   return m;
 }
 
-export function formatDietitianProjectionBlock(projection: any): string {
+export function formatDietProjectionBlock(projection: any): string {
   if (!projection) return '';
   const macros = projection.macroTotals || {};
   const items = projection.itemsSummary || [];

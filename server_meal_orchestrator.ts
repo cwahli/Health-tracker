@@ -6,16 +6,16 @@ export function appendStage(meal: MealBuild, stage: string, status: 'success'|'e
   return consolidateMeal(meal, {}, stage, { stageKey: `${meal.id}_${stage}_1`, attempt: 1 });
 }
 
-export function markDietitianDegraded(meal: MealBuild, errorMsg?: string): MealBuild {
+export function markDietDegraded(meal: MealBuild, errorMsg?: string): MealBuild {
   let m = consolidateMeal(meal, { 
     savable: true, 
     lastCompletedStage: 'calculation', 
-    degradedStages: ['dietitian'] 
-  }, 'dietitian');
+    degradedStages: ['diet'] 
+  }, 'diet');
   
   const record: StageAuditRecord = {
-    stageKey: `${m.id}_dietitian_1`,
-    stage: 'dietitian',
+    stageKey: `${m.id}_diet_1`,
+    stage: 'diet',
     attempt: 1,
     timestamp: new Date().toISOString(),
     status: 'degraded',
@@ -35,8 +35,8 @@ export function markDietitianDegraded(meal: MealBuild, errorMsg?: string): MealB
   m = appendHistory(m, {
     type: 'error',
     timestamp: new Date().toISOString(),
-    stage: 'dietitian',
-    message: errorMsg || 'Dietitian degraded',
+    stage: 'diet',
+    message: errorMsg || 'Diet degraded',
   } as any);
 
   return m;
@@ -65,11 +65,11 @@ export function attachHappyPathMealBuild(opts: {
     {
       ...fromPendingFoodLog(parsedData, { id: base.id, mode: base.mode || 'new_log' }),
       savable: true,
-      lastCompletedStage: degradedStages?.length ? 'calculation' : 'dietitian',
+      lastCompletedStage: degradedStages?.length ? 'calculation' : 'diet',
       degradedStages: degradedStages || [],
       diningEnvironment: diningEnvironment || base.diningEnvironment,
       scoutSnapshot: scoutItems || base.scoutSnapshot,
-      staleDietitianNarrative: false,
+      staleDietNarrative: false,
     },
     'calculation',
     { actor: 'job_stage_calculation', stageKey: `${base.id}|calculation|1`, attempt: 1 }

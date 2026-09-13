@@ -23,7 +23,7 @@ describe('consolidateMeal', () => {
       ]
     };
     
-    const result = consolidateMeal(initial, patch, 'dietitian');
+    const result = consolidateMeal(initial, patch, 'diet');
     expect(result.items[0].name).toBe('Green Apple');
     expect(result.items[0].rawNutritionLabel).toEqual({ calories: 95 });
     expect(result.items[0].lockedNutrientKeys).toEqual(['calories']);
@@ -50,9 +50,9 @@ describe('consolidateMeal', () => {
       stageLedger: [{ stageKey: '1_scout_1', stage: 'scout', attempt: 1, timestamp: '123', status: 'success' }]
     };
     
-    const result = consolidateMeal(initial, {}, 'dietitian', { stageKey: '1_dietitian_1' });
+    const result = consolidateMeal(initial, {}, 'diet', { stageKey: '1_diet_1' });
     expect(result.stageLedger?.length).toBe(2);
-    expect(result.stageLedger?.[1].stageKey).toBe('1_dietitian_1');
+    expect(result.stageLedger?.[1].stageKey).toBe('1_diet_1');
   });
   
   it('delete item + stage patch resends it -> stays deleted (zombie)', () => {
@@ -67,7 +67,7 @@ describe('consolidateMeal', () => {
     expect(result.items.find(i => i.itemId === 'delete-me')).toBeUndefined();
   });
   
-  it('weight +50% -> staleDietitianNarrative true', () => {
+  it('weight +50% -> staleDietNarrative true', () => {
     const initial: MealBuild = {
       id: '5', schemaVersion: 1, version: 1, mode: 'new_log',
       items: [{ itemId: 'w1', name: 'Beef', weightGrams: 100 }],
@@ -75,7 +75,7 @@ describe('consolidateMeal', () => {
     };
     
     const result = consolidateMeal(initial, { items: [{ itemId: 'w1', weightGrams: 150 }] }, 'user_edit');
-    expect(result.staleDietitianNarrative).toBe(true);
+    expect(result.staleDietNarrative).toBe(true);
   });
 
   it('matches base item by scoutIndex when patch lacks itemId, preventing duplication', () => {

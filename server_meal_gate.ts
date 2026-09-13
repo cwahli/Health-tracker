@@ -37,6 +37,8 @@ export interface MealGateInput {
   mealHasImages?: boolean;
   imageCount?: number;
   narrative?: string | null;
+  staleDietNarrative?: boolean;
+  /** Backcompat: pre-rename stored meals carry staleDietitianNarrative. */
   staleDietitianNarrative?: boolean;
   previousMeal?: {
     items?: MealGateItem[];
@@ -181,7 +183,8 @@ export function evaluateMealGate(input: MealGateInput): MealGateResult {
   }
 
   // 6. Narrative vs Ledger mismatch
-  if (input.narrative && !input.staleDietitianNarrative) {
+  const staleNarrative = (input as any).staleDietNarrative ?? input.staleDietitianNarrative;
+  if (input.narrative && !staleNarrative) {
     const text = input.narrative.toLowerCase();
     
     // Check protein claim: e.g. "42g protein", "136.2g of protein", "108.5g protein"

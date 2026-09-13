@@ -149,9 +149,9 @@ export function consolidateMeal(
       const mergedItem = mergeFoodItem(prevItem, patchItem);
       
       // Structural/weight change detection
-      if (prevItem && stage !== 'dietitian') {
+      if (prevItem && stage !== 'diet') {
         if (mergedItem.weightGrams !== prevItem.weightGrams || mergedItem.name !== prevItem.name) {
-          merged.staleDietitianNarrative = true;
+          merged.staleDietNarrative = true;
         }
       }
       

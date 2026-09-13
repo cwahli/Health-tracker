@@ -17,10 +17,10 @@ import { normalizeParsedPostDietitian } from './src/server/food/server_food_mode
 import { applyServerAverageNutrients, enrichBilingualItemName } from './server_pure_helpers.js';
 
 /**
- * Scout compose phase (single Meal Agent owns response composition).
+ * Scout compose phase (single diet agent owns response composition).
  *
  * Formerly the projector phase in the deleted dietitian owner file.
- * There is no dietitian and no narrator: every branch below is pure TypeScript
+ * There is no second agent and no narrator: every branch below is pure TypeScript
  * composing rawParsed from scout outputs + the math engine. No narrator
  * dispatch is emitted anywhere; the scout leg is the only dispatch.
  */

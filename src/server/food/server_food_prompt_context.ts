@@ -12,8 +12,8 @@ import {
   buildFoodAnalyzeInstruction,
 } from '../../../agents/dietitianInstructions.js';
 import { buildSavableMealFromParsed } from '../../../server_meal_orchestrator.js';
-import { projectDietitianInput } from '../../mealBuild/projectors.js';
-import { beginStage, formatDietitianProjectionBlock } from '../../mealBuild/stageLifecycle.js';
+import { projectDietInput } from '../../mealBuild/projectors.js';
+import { beginStage, formatDietProjectionBlock } from '../../mealBuild/stageLifecycle.js';
 
 export function buildUserContext(userProfile: any): string {
   let userCtx = "";
@@ -293,24 +293,24 @@ export interface PrecalcBlockArgs {
 
 /**
  * F-8.10 shard 23 — precalc prompt block, extracted verbatim from
- * runFoodAnalyze. Projects the finalize ledger into the dietitian prompt.
+ * runFoodAnalyze. Projects the finalize ledger into the diet prompt.
  */
 export function assemblePrecalcPromptBlock(args: PrecalcBlockArgs): {
   promptText: string;
   fullPromptSent: string;
 } {
   const { preCalculatedItems, activeMeal, aggregatedNutrients, userProfile, promptText, fullPromptSent, onLog } = args;
-  onLog('[MealBuild] projector dietitian');
-  const dietitianTempMeal = buildSavableMealFromParsed(preCalculatedItems || [], activeMeal, aggregatedNutrients, null);
-  const lifeStart = beginStage(dietitianTempMeal, 'dietitian', { actor: 'server' });
+  onLog('[MealBuild] projector diet');
+  const dietTempMeal = buildSavableMealFromParsed(preCalculatedItems || [], activeMeal, aggregatedNutrients, null);
+  const lifeStart = beginStage(dietTempMeal, 'diet', { actor: 'server' });
   if (!lifeStart.allowed) {
     onLog(`[MealBuild] stage-limits: ${lifeStart.limitReason}`);
   } else {
-    onLog('[MealBuild] stage dietitian started');
+    onLog('[MealBuild] stage diet started');
   }
-  const dietitianProjection = projectDietitianInput(dietitianTempMeal, userProfile);
-  const precalcBlock = formatDietitianProjectionBlock(dietitianProjection);
-  onLog('[MealBuild] projector dietitian applied');
+  const dietProjection = projectDietInput(dietTempMeal, userProfile);
+  const precalcBlock = formatDietProjectionBlock(dietProjection);
+  onLog('[MealBuild] projector diet applied');
   return {
     promptText: `${promptText}\n\n${precalcBlock}`,
     fullPromptSent: `${fullPromptSent}\n\n${precalcBlock}`,

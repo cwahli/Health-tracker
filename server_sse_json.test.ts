@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { attachSseJsonResponder, parseSseFinalResult } from './server_sse_json';
-import { markDietitianDegraded, buildSavableMealFromParsed } from './server_meal_orchestrator';
+import { markDietDegraded, buildSavableMealFromParsed } from './server_meal_orchestrator';
 import { toPendingFoodLog } from './src/mealBuild/adapters';
 import { previewStatusLabel } from './src/jobs/jobPreview';
 import fs from 'fs';
@@ -37,26 +37,26 @@ describe('SSE res.json wrap (DEGRADE_NOT_TERMINAL)', () => {
   });
 });
 
-describe('dietitian salvage is a succeeded job, not stuck running', () => {
-  it('markDietitianDegraded keeps macros and sets dietitian degrade', () => {
+describe('diet salvage is a succeeded job, not stuck running', () => {
+  it('markDietDegraded keeps macros and sets diet degrade', () => {
     const items = [
       { originalName: 'Soto Daging Santan', estimatedWeightGrams: 400, nutrients: { calories: 380, protein: 24.7 } },
       { originalName: 'Donut Malaysia Matcha', estimatedWeightGrams: 75, nutrients: { calories: 268, protein: 4 } },
     ];
     const meal = buildSavableMealFromParsed(items, null, { calories: 648, protein: 28.7 }, null);
-    const degraded = markDietitianDegraded(meal, '503 UNAVAILABLE');
-    expect(degraded.degradedStages).toEqual(['dietitian']);
+    const degraded = markDietDegraded(meal, '503 UNAVAILABLE');
+    expect(degraded.degradedStages).toEqual(['diet']);
     expect(degraded.savable).toBe(true);
     const log = toPendingFoodLog(degraded);
     expect(log.nutrients?.calories ?? log.calories).toBe(648);
   });
 
-  it('preview says AI advice pending only when succeeded + dietitian degrade', () => {
+  it('preview says AI advice pending only when succeeded + diet degrade', () => {
     const job: any = {
       status: 'succeeded',
       result: {
         pendingFoodLog: { name: 'Soto', nutrients: { calories: 648 } },
-        degradedStages: ['dietitian'],
+        degradedStages: ['diet'],
       },
     };
     expect(previewStatusLabel(job)).toMatch(/AI advice pending/i);

@@ -130,6 +130,8 @@ export interface MealBuild {
   serving_grams?: number;
   updatedAt?: string;
   deletedItemIds?: string[];
+  staleDietNarrative?: boolean;
+  /** Backcompat: pre-rename stored meals carry staleDietitianNarrative. */
   staleDietitianNarrative?: boolean;
 }
 

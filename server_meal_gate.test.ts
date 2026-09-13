@@ -168,7 +168,7 @@ describe('evaluateMealGate', () => {
     expect(result.failures.some(f => f.code === 'SUM_MISMATCH')).toBe(true);
   });
 
-  it('fails with NARRATIVE_MISMATCH when narrative claims conflicting protein or calories without staleDietitianNarrative flag', () => {
+  it('fails with NARRATIVE_MISMATCH when narrative claims conflicting protein or calories without staleDietNarrative flag', () => {
     const input: MealGateInput = {
       mealId: 'food_106',
       name: 'Greek Yogurt Bowl',
@@ -189,7 +189,7 @@ describe('evaluateMealGate', () => {
         },
       ],
       narrative: "You logged 12g of protein and 150 kcal with this bowl.", // Conflicting with 25g P and 300 kcal
-      staleDietitianNarrative: false,
+      staleDietNarrative: false,
     };
 
     const result = evaluateMealGate(input);

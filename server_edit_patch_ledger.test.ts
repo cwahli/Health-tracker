@@ -82,8 +82,8 @@ describe('edit patch ledger', () => {
       editCommands: [{ action: 'set_modifier', itemName: 'Es Teh Manis', modifier: 'unsweetened' }],
       items: [{ scoutIndex: 2, name: 'Es Teh Tawar', weightGrams: 350, nutrients: { calories: 0 } }],
     });
-    expect(d.id).toBe('t2/dietitian');
-    expect(d.agent).toBe('dietitian');
+    expect(d.id).toBe('t2/diet');
+    expect(d.agent).toBe('diet');
     expect(d.systemInstruction).toBeTruthy();
     expect(d.systemInstruction).toContain('TARGETED DISH UPDATE ONLY');
     expect(d.userPrompt).toBeTruthy();
@@ -525,6 +525,36 @@ describe('edit patch ledger', () => {
       expect(cmds.some(c => c.action === 'remove_item' && c.itemName === 'Quaker Whole Rolled Oats Package')).toBe(true);
       // 3. Quaker package must NOT have been targeted as Cooked Oatmeal
       expect(cmds.some(c => c.action === 'replace_identity' && c.itemName === 'Quaker Whole Rolled Oats Package')).toBe(false);
+    });
+
+    it('emits merge_dishes preserving label truth and user selected weight when user says only had 1 dish', () => {
+      const prior = [
+        {
+          name: 'Quaker Whole Rolled Oats',
+          weightGrams: 100,
+          packGrams: 800,
+          scoutIndex: 0,
+          rawNutritionLabel: { servingSize: '40g', calories: 160, protein: 5, saturatedFat: 1.5, carbohydrates: 27 },
+        },
+        {
+          name: 'Rolled Oats Porridge',
+          weightGrams: 250,
+          scoutIndex: 1,
+        },
+      ];
+
+      const cmds = diffScoutToEditCommands({
+        priorItems: prior,
+        scoutItems: [],
+        userMessage: "I only had 1 dish. It's the same dish",
+      });
+
+      expect(cmds).toHaveLength(1);
+      expect(cmds[0].action).toBe('merge_dishes');
+      expect(cmds[0].itemName).toBe('Quaker Whole Rolled Oats');
+      expect(cmds[0].targetItemName).toBe('Rolled Oats Porridge');
+      // Must preserve the user-selected 100g portion, not add up 100g + 250g = 350g
+      expect(cmds[0].newWeightGrams).toBe(100);
     });
   });
 });

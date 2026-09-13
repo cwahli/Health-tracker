@@ -56,7 +56,7 @@ export function previewStatusLabel(
   const d = opts?.dict;
   const effectiveStatus = previewStatus(job);
   const edit = isEditJob(job);
-  if (effectiveStatus === 'succeeded' && Array.isArray(job.result?.degradedStages) && job.result.degradedStages.includes('dietitian')) {
+  if (effectiveStatus === 'succeeded' && Array.isArray(job.result?.degradedStages) && (job.result.degradedStages.includes('diet') || job.result.degradedStages.includes('dietitian'))) {
     return d?.statusAiAdvicePending || 'AI advice pending';
   }
   if (isPreviewFailed(job, opts?.lastMsgContent)) {

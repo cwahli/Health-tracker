@@ -3,8 +3,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { consolidateMeal, rebaseUserEdit, makeStageKey, appendHistory } from '../consolidate';
-import { beginStage, endStage, checkStageLimits, formatDietitianProjectionBlock, DEFAULT_STAGE_LIMITS } from '../stageLifecycle';
-import { projectDietitianInput } from '../projectors';
+import { beginStage, endStage, checkStageLimits, formatDietProjectionBlock, DEFAULT_STAGE_LIMITS } from '../stageLifecycle';
+import { projectDietInput } from '../projectors';
 import { buildColdDebugPackage, coldDebugExpiredMessage } from '../coldDebug';
 import { fromPendingFoodLog, toPendingFoodLog } from '../adapters';
 import type { MealBuild } from '../types';
@@ -63,7 +63,7 @@ describe('M22 stage lifecycle + circuit', () => {
   });
 
   it('checkStageLimits default allows first attempt', () => {
-    const c = checkStageLimits(baseMeal({ stageLedger: [] }), 'dietitian');
+    const c = checkStageLimits(baseMeal({ stageLedger: [] }), 'diet');
     expect(c.ok).toBe(true);
     expect(c.attempt).toBe(1);
     expect(DEFAULT_STAGE_LIMITS.maxStageAttempts).toBeGreaterThan(0);
@@ -101,10 +101,10 @@ describe('M22 idempotency + zombie + rebase', () => {
 });
 
 describe('M22 projector + cold debug + partial meal', () => {
-  it('formatDietitianProjectionBlock is non-empty and has PRECALC', () => {
+  it('formatDietProjectionBlock is non-empty and has PRECALC', () => {
     const meal = baseMeal({ content: { name: 'Bowl' }, nutrients: { calories: 500, protein: 30 } });
-    const p = projectDietitianInput(meal, { age: 30 });
-    const block = formatDietitianProjectionBlock(p);
+    const p = projectDietInput(meal, { age: 30 });
+    const block = formatDietProjectionBlock(p);
     expect(block).toMatch(/PRECALC|macroTotals/i);
     expect(block).not.toMatch(/databaseMatchesArray/);
   });
@@ -135,7 +135,7 @@ describe('M22 projector + cold debug + partial meal', () => {
       type: 'error',
       timestamp: new Date().toISOString(),
       message: 'quota',
-      stage: 'dietitian',
+      stage: 'diet',
     } as any);
     const cold = buildColdDebugPackage({ meal, jobId: 'j1', backendLogsText: 'log line' });
     expect(cold.schemaVersion).toBe(1);
