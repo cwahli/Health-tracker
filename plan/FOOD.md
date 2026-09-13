@@ -10,7 +10,7 @@ Not a “lifecycle” in the biomarker sense: a meal is one-shot (Meal Agent →
 - **Part A** — identity / curator / catalog (was `FOOD_RESOLVER_CURATOR_AND_1PASS_CATALOG_PLAN.md`)
 - **Part B** — durable meal document (was `MEAL_BUILD_DURABLE_STATE.md`)
 
-Remaining execute IDs on [ROADMAP.md](./ROADMAP.md): **F-10** (adaptive Meal Agent — one role, expand when TypeScript says so), **F-8.10–F-8.13** (split / packaged facts / debug; soak is F-10.8, not the old always-dietitian path), **F-9.5** (job session leftover), **F-3 / F-4 / F-6** (identity + FoodCard). Do **not** rebuild the curator (M30 stays). Do **not** reopen F-1/F-2 USDA.
+Remaining execute IDs on [ROADMAP.md](./ROADMAP.md): **F-10** (adaptive Meal Agent — one role, expand when TypeScript says so), **F-8.10–F-8.13** (split / packaged facts / debug; soak is F-10.8, not the old always-dietitian path), **F-9.5** (job session leftover), **F-3 / F-4 / F-6** (identity + FoodCard), **F-12** (delete live USDA), **F-11** (brand-catalog self-clean). Do **not** put a curator LLM back on Analyze. Do **not** reopen FDC.
 
 ---
 
@@ -102,15 +102,241 @@ Detail, leftover F-8 IDs (**F-8.10–F-8.13**), F-10 execute IDs, and debug shap
 
 ---
 
-## Part A — Resolver, curator, self-heal catalog
+## Part A — Catalog: no USDA; brand catalog self-cleans
 
-**Pillar:** 2 — Food. Map: `plan/README.md`.
+**Pillar:** 2 — Food. Execute: [ROADMAP.md](./ROADMAP.md) **F-12** (delete USDA) then **F-11** (brand self-clean).  
+**Laws:** `docs/agent/domains/food-calc.md` §1 truth hierarchy (rung 3 USDA line updates in F-12 with confirmation).  
+**Updated:** 2026-09-13
 
-**Status:** Proposed architecture (implementation-ready)  
+Locked: live USDA/FDC is **out**. Meal Agent + OCR + brand catalog are enough (50-meal audit: loose FDC overwrite injected ~2.2k kcal of false friends; strict match still only moved ~0–20 kcal and did not add a 30-nutrient panel on current logs). Curator/resolver is **one** librarian for **brand_menu_items**, off Analyze.
+
+---
+
+### A.0 How it is called today (do not guess)
+
+Default Analyze is dish-estimate (`isDishEstimateEnabled` returns **true**).
+
+```text
+Meal Agent (scout LLM)
+  → precalc
+       dish-estimate ON (default)
+         → SKIP runDatabaseSearchStage
+         → SKIP executeFoodResolverCurator
+         → PackagedBind for OCR items
+         → STILL fetch USDA if a component has suggestedFdcId   ← F-12 deletes this
+       dish-estimate OFF (legacy flag)
+         → USDA + OFF + food_items + curator   ← F-12 deletes this path
+  → finalizeDishLedger
+       Rung 1 OCR
+       Rung 2 Brand menu (matchBrandMenu)
+       Rung 3 Meal Agent P/C/F + Atwater
+       Ghost component: lookupCanonicalBaseFood (local frozen table)
+```
+
+Brand **match** still runs. Brand **clean** (`selfCleanBrandDatabase`) is hung off the skipped resolver, so it never runs. That is F-11.
+
+| Catalog | On Analyze? |
+|---|---|
+| `food_items` / aliases / dish_cache | **No** |
+| `brand_menu_items` | **Yes, rung 2** |
+| Live FDC / `searchUSDA` | **No — F-12 removes the leftover hooks** |
+
+---
+
+### A.1 Target (one librarian, brand only)
+
+```text
+Log Meal  — never waits on curator
+  Meal Agent → finalize (OCR → brand HIT/MULTI/MISS → estimates)
+  → Layer 1 TS clean (unofficial / exact dups) — always eligible, throttled
+  → Layer 2 curator LLM — only if A.2.1 says yes
+```
+
+**One agent.** Today the same function is logged as `food_resolver`, debug `t1/resolver`, UI “Food Resolver”, comments “Curator”. Collapse to:
+
+| Surface | Token |
+|---|---|
+| Wire / dispatch | `curator` (`t1/curator`, `agent: 'curator'`) |
+| Log type | `curator_answer` / `curator_instruction` |
+| UI | Curator |
+| History | dual-accept `food_resolver` / `resolver` |
+
+Not the Meal Agent. Different trigger, different schema (catalog actions, no dishes, no kcal). Do not invent a second “brand resolver” persona.
+
+**Do not invoke the LLM** except as **A.2.1**. Unofficial clones are TypeScript (Layer 1), not the curator.
+
+---
+
+### A.2 Brand catalog self-clean (how it works)
+
+The meal never waits. Clean is **after** `matchBrandMenu` (or admin). No USDA. No `food_items`.
+
+**Code fact (do not ignore):** `matchBrandMenu` returns **HIT** if any candidate is an exact `normalizeDishKey` match **even when other rows exist**. MULTI is only “no exact key, and top score is not ≥2× second.” Same-key clones (`Big Mac` / `Big Mac®` → `big_mac`) are **Layer 1**, not the LLM. The LLM is for leftovers Layer 1 cannot collapse.
+
+```text
+matchBrandMenu(chain, dish)  →  HIT | MULTI | MISS | SKIPPED
+finalize continues (MULTI does not lock brand kcal — already `matched: false`)
+enqueueBrandClean({ chainKey, country, dishNameKey, bindStatus, usedRowId, candidateIds })
+  Layer 1 TS  — this chain+country (throttle per chain, not global GB)
+  Layer 2 LLM — only if A.2.1 says yes
+```
+
+**Layer 1 TypeScript** (default). Throttle: **per `chain_key` + `country_code`**, not one global 1h for the whole table (today’s `SELF_CLEAN_THROTTLE_MS` is global — F-11.1 changes that). Admin “Clean now” bypasses throttle.
+
+1. Quarantine unofficial / composite titles (`isUnofficialOrCompositeDish`) — **soft** (`status=quarantined`), not hard delete, so a bad rule is reversible.
+2. Same `chain+country+normalizeDishKey` → keep **one** row. Winner: `provenance=official` > `ocr` > `user` > unknown; then `capture_count`; then newest. Never keep unofficial over official.
+3. Quarantine empty / 0-kcal / missing `chain_key`.
+4. Rewrite `dish_name_key` via `normalizeDishKey` if stale.
+5. **Do not** quarantine `usedRowId` from this meal’s HIT.
+
+Country = profile/meal country (ID and GB both exist in this diary). Do not hardcode `'GB'`.
+
+KPI: next Analyze for that chain+dish is HIT or honest MISS — never a pile of exact-key clones.
+
+#### A.2.1 When the brand curator (LLM) is called
+
+**Clock:** after finalize has kcal; job may return. Same `jobId`, async. This meal’s numbers do not change.
+
+Layer 1 may run on compare / OCR / HIT. **The LLM does not.**
+
+**All of G0–G4, then one of T1–T3.** Else do not call Gemini.
+
+| Gate | Must be true | If false |
+|---|---|---|
+| **G0 Mode** | Create or identity-changing edit | Skip **LLM**. Layer 1 may still run |
+| **G1 Brand attempt** | `matchBrandMenu` ran (HIT, MULTI, or MISS) | SKIPPED → skip **LLM**. Layer 1 may still run for that chain if a chainKey exists |
+| **G2 Layer 1 first** | TS cleaner finished for this `chainKey+country` | Run Layer 1; no LLM yet |
+| **G3 Still dirty** | After Layer 1: MULTI leftover, near-dup cluster, or basis conflict | Stop |
+| **G4 Dedup** | No in-flight curator job and no success for this `chainKey+dish_name_key` in 24h | Skip LLM |
+
+| Trigger | Meaning | LLM does |
+|---|---|---|
+| **T1 MULTI** | Bind was MULTI **or** HIT/MISS with ≥2 live non-quarantined rows still matching this query after Layer 1 | `pick_existing` or `merge_duplicates` |
+| **T2 NEAR_DUP** | Same chain, **token Jaccard ≥ 0.85**, **kcal within 10%**, neither name is a strict superset with `meal`/`combo`/`large`/`share` (do not merge Big Mac vs Big Mac Meal) | `merge_duplicates` |
+| **T3 BASIS_AMBIGUOUS** | Surviving rows disagree per_dish vs per_100g vs per_serving | `normalize_basis` |
+
+**LLM actions are proposals.** TypeScript rejects a merge if kcal differs by >15% at the same basis, or if the loser is `provenance=official` and the winner is not. Quarantine only; no hard delete from Gemini.
+
+**Never call the LLM when:** HIT with a single live row; MISS (do not invent a SKU); SKIPPED; OCR rung-1 lock (LLM not required; Layer 1 ok); unofficial/0-kcal (Layer 1); Q&A / weight-only; USDA/FDC.
+
+**Batch:** one call, cap 12 cases, T1 then T3 then T2. Schema = brand actions only. No `chosenFdcId`.
+
+**Admin:** “Clean brand catalog” = Layer 1 now. “Curate leftovers” = A.2.1 on the MULTI/NEAR_DUP/BASIS queue (no meal).
+
+**Examples**
+
+| Logged | Table | Bind | LLM? |
+|---|---|---|---|
+| McDonald’s **Big Mac**, no OCR | `Big Mac` 550 and `Big Mac®` 540. `normalizeDishKey` → both `big_mac` | **HIT** on exact key (code today) | **No.** Layer 1 merges same-key clones. Next meal HIT. |
+| McDonald’s **Big Mac** | `Big Mac` vs `Big Mac Meal` (combo, +800 kcal) | MULTI or two keys | **No T2** (superset `meal`, kcal >10%). Leave both. |
+| McDonald’s **Big Mac** | `Big Mac` vs `Big Mac sandwich` (same kcal, Jaccard ≥ 0.85) | leftover after Layer 1 | **Yes T2.** Merge. This meal already saved. |
+| Tesco oats | one row per_100g 389, one per_pack tagged per_dish 156 | T3 | **Yes.** `normalize_basis`. |
+| Nasi goreng, no chain | — | SKIPPED | **No.** Meal Agent. |
+| Quaker oats, carton in frame | maybe a brand row | OCR lock | **No** LLM. Layer 1 may still quarantine junk oats rows. |
+| McDonald’s Secret Menu xyz | zero rows | MISS | **No.** Do not invent. |
+| “Make it 200 g” | — | weight-only | **No** LLM. |
+| Homemade “McD style” | `provenance=user_prompt` | — | **No** LLM. Layer 1 quarantines. |
+
+| Action | Who | Brand meaning |
+|---|---|---|
+| quarantine unofficial | TS | homemade/decomposed/0-kcal |
+| merge same `dish_name_key` | TS | one row per chain+dish key |
+| merge spelling variants | LLM if T2 | Jaccard + kcal gate; TS validates |
+| normalize_basis | LLM if T3 | per_dish vs per_100g |
+| pick_existing | LLM if T1 | this query is `brand_menu_<id>` |
+
+**Do not** invent meal nutrients. **Do not** call FDC. **Do not** dual-write `food_items`. **Do not** hard-delete from Gemini.
+
+#### A.2.2 What can go wrong (and the lock)
+
+| Risk | What happens | Lock |
+|---|---|---|
+| Bind HIT while clones remain | LLM never sees MULTI; junk stays | Layer 1 always scans the chain after HIT/MULTI/MISS; same-key merge is TS |
+| Global 1h throttle | 20 meals in an hour, only first chain cleaned | Throttle **per chain+country** |
+| Merge Big Mac × Big Mac Meal | Combo destroyed | T2: Jaccard ≥ 0.85, kcal ±10%, no `meal`/`combo`/`large` superset |
+| Merge official into user junk | Official SKU gone | Winner provenance official > ocr > user; TS rejects LLM if loser is official and winner is not |
+| Gemini hard-deletes | Irreversible | Quarantine only; admin restore |
+| Hardcoded `country_code=GB` | Indonesian Indomaret/Quaker rows never cleaned | Use meal/profile country |
+| Curator writes kcal onto this meal | Second calorie book | Writes catalog only; `usedRowId` frozen for this job |
+| LLM merge 550 vs 900 kcal | Wrong SKU | TS rejects if kcal differs >15% at same basis |
+| In-flight overlap | Two curator jobs on one key | G4 + one writer per `chainKey+dish_name_key` |
+| Compare skipped entirely | Shelf packs never cleaned | G0 skips **LLM** only; Layer 1 may run |
+| MISS → curator invents a dish | False brand lock next time | MISS never calls LLM |
+| Layer 1 too aggressive unofficial regex | Real SKU quarantined | Soft quarantine; official provenance immune |
+
+---
+
+### A.3 Remove USDA (F-12) — not parked, delete
+
+Audit (50 meals, production ranker): loose overwrite injected false friends (tofu→mayo, coconut water→coconut milk). Strict head-lock avoided those but kcal moved ~0–20 per honest dish; current scout already writes ~20–23 of the 32 nutrient keys. Live FDC is not needed.
+
+**Delete from Analyze (one ID, named sensors that the pipeline does not call these):**
+
+| Code | Why |
+|---|---|
+| `searchUSDA` / `fetchUSDAFoodById` / `searchUSDAFood` / `searchUSDAWithTwoRounds` in `server.ts` | Live FDC HTTP |
+| `collectFdcHintTasks` / `isFdcHintRelevant` / `verifiedFdcHintMap` | leftover hint fetch on default path |
+| `runDatabaseSearchStage` USDA/OFF fan-out when used to inject meal macros | legacy flag path |
+| `server_fdc_resolve.ts` as Analyze resolver | HIT_UNIQUE auto-alias to FDC ids |
+| `executeFoodResolverCurator` parametric FDC / `searchUSDAFn` | curator must not look up FDC |
+| `extractUSDANutrientsPer100g` call sites on Analyze | keep helper only if a test still needs a fixture; otherwise delete with callers |
+| `getCachedUSDAFood` / `setCachedUSDAFood` | cache of the API |
+| `dbSource: 'usda'` writes | historical rows stay; do not emit new |
+| `suggestedFdcId` on scout schema/merge | stop emitting FDC ids |
+
+**Keep (not USDA-the-API):** `lookupCanonicalBaseFood` / `CANONICAL_BASE_FOODS` as a **frozen local table** for ghost 0-macro components. Strip `fdcId` fields from that table in the same ID so nothing can fetch. No HTTP.
+
+**Do not keep** F-1/F-2 as “reopen later.” They are **abandoned**.
+
+Food catalog tables may remain in DB for history/admin. They are not a meal-path reader.
+
+---
+
+### A.4 Invariants
+
+- `finalizeDishLedger` is the only kcal writer. Curator does not emit calories onto the meal.
+- Brand HIT still wins over Meal Agent estimates (rung 2).
+- Brand MULTI/MISS stays honest (`BIND_MISS`). Clean may fix the **next** meal; it does not paint this one.
+- One writer per brand row (Rule 5).
+- Analyze never calls `searchUSDA` / `fetchUSDAFoodById` / `collectFdcHintTasks` (single-path negative).
+- M30 assert retargets to brand cleaner files with a confirmed before→after. Do not silently delete `assert-food-curator-m30.mjs`.
+- `docs/agent/domains/food-calc.md` truth hierarchy drops “USDA Atomics as last-resort”; Database Curator paragraph becomes brand-only. Same change as F-12 / F-11 (protected — confirmation).
+
+---
+
+### A.6 Review recap (2026-09-13)
+
+**Journey after F-12 + F-11**
+
+```text
+Meal Agent (P/C/F) → finalize
+  OCR → brand HIT (lock) / MULTI (honest, no lock) / MISS / SKIPPED
+  → Meal Agent estimates + Atwater
+  → return job
+  → Layer 1 TS clean (per chain+country)
+  → Layer 2 curator LLM only if A.2.1
+```
+
+No live USDA. No food_items on Analyze. Local staple table for empty ghost components only (no `fdcId`).
+
+**Execute (wait for go):** **F-12** delete FDC hooks → **F-11.1** TS cleaner actually runs → **F-11.2** LLM behind A.2.1 → **F-11.3** one name `curator`. Current work stays B0 until the human says go.
+
+**Why USDA is gone:** 50-meal audit. Loose FDC overwrite was net-negative (tofu→mayo, coconut water→coconut milk). Strict match avoided disasters but only moved ~0–20 kcal; current scout already writes ~20–23 nutrient keys. Not worth a process.
+
+**Why the curator is rare:** most brand mess is same-key clones or unofficial titles — TypeScript. Gemini only for leftover MULTI / spelling near-dup / basis fight, after TS, after Save.
+
+**Open confirmation at lock:** `food-calc.md` rung 3 + Database Curator (protected). Soft-quarantine column if `status` is not already on `brand_menu_items` (check schema in F-11.1; if missing, add in that ID, not a sixth table).
+
+---
+
+### A.5 Historical M30 (food_items + USDA hot path) — do not execute
+
+The 2026-08-12 text below is the **old** Analyze resolver (query set → FDC → curator → inject nutrients). Do not execute. **F-12** removes the leftover hooks; **F-11** is brand self-clean only.
+
+**Status (historical):** Proposed architecture (implementation-ready)  
 **Date:** 2026-08-12  
-**Domain:** Food-calc / catalog / resolver  
-**Related:** `docs/agent/domains/food-calc.md`, `server_food_catalog.ts`, `server_nutrient_basis.ts`, `server_budget_reconcile.ts`, `server_vision_scout.ts`, `executeFoodResolverAgent` in `server.ts`  
-**Evidence job:** `debug-job_1786486910960_lj1iw1c3k` (22 redundant queries, bad FDC candidates, 0-kcal tortilla persisted, brand false-positives)
+**Related:** `server_food_catalog.ts`, `server_fdc_resolve.ts`, `executeFoodResolverCurator`  
+**Evidence job:** `debug-job_1786486910960_lj1iw1c3k`
 
 ---
 

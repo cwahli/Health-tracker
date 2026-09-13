@@ -21,6 +21,8 @@ export type PatchEditCommand = {
   itemName?: string;
   newItemName?: string;
   replacementItemName?: string;
+  targetItemName?: string;
+  sourceItemName?: string;
   newWeightGrams?: number | null;
   targetDbId?: string | null;
   componentName?: string | null;
@@ -30,7 +32,7 @@ export type PatchEditCommand = {
   estimate?: Record<string, any> | null;
 };
 
-function displayName(it: any): string {
+export function displayName(it: any): string {
   return String(it?.canonicalDbName || it?.originalName || it?.keyword || it?.name || it?.dishName || '').trim();
 }
 
@@ -186,6 +188,71 @@ function estimateFromScout(it: any): Record<string, any> | null {
 }
 
 /**
+ * Handle user message clarification for duplicate / same-meal package removal or merge.
+ */
+export function applySameMealClarification(args: {
+  commands: PatchEditCommand[];
+  usedPrior: Set<number>;
+  priorItems: any[];
+  userMessage?: string;
+}): void {
+  const { commands, usedPrior, priorItems, userMessage } = args;
+  if (!userMessage || !Array.isArray(priorItems) || priorItems.length === 0) return;
+  const msg = userMessage.toLowerCase();
+  const isSameMeal = /\b(same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|same\s+food|duplicate|all\s+(?:the\s+)?same\s+meal|it'?s\s+(?:all\s+)?the\s+same|only\s+(?:had\s+)?(?:1|one)\s+dish)\b/i.test(msg);
+  const isExplicitRemovePackage = /\b(remove|delete|omit|drop|don't\s+include)\b/i.test(msg) && /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(msg);
+  if (!isSameMeal && !isExplicitRemovePackage) return;
+
+  let pkgIdx = priorItems.findIndex((p, i) => {
+    if (usedPrior.has(i)) return false;
+    const pName = displayName(p).toLowerCase();
+    return /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(pName) || Boolean((p.packGrams || p.rawNutritionLabel) && !/boiled|fried|cooked|soup|porridge|oatmeal\b/i.test(pName));
+  });
+  if (pkgIdx < 0 && isSameMeal && priorItems.length === 2) {
+    const labelIdx = priorItems.findIndex((p) => Boolean(p.rawNutritionLabel && Object.keys(p.rawNutritionLabel).length > 0));
+    pkgIdx = labelIdx >= 0 ? labelIdx : 0;
+  }
+  if (pkgIdx >= 0) {
+    const otherIdx = priorItems.findIndex((_, i) => i !== pkgIdx && !usedPrior.has(i));
+    if (otherIdx >= 0 && (isSameMeal || Boolean(priorItems[pkgIdx].rawNutritionLabel))) {
+      const pkgItem = priorItems[pkgIdx];
+      const otherItem = priorItems[otherIdx];
+      let targetWeight = 0;
+      const wMatch = msg.match(/\b(\d+(?:\.\d+)?)\s*g(?:rams)?\b/i);
+      if (wMatch && Number(wMatch[1]) > 0) {
+        targetWeight = Math.round(Number(wMatch[1]));
+      } else if (pkgItem.weightGrams && Number(pkgItem.weightGrams) > 0) {
+        targetWeight = Number(pkgItem.weightGrams);
+      } else if (otherItem.weightGrams && Number(otherItem.weightGrams) > 0) {
+        targetWeight = Number(otherItem.weightGrams);
+      }
+      if (!commands.some(c => c.action === 'merge_dishes' && (c.itemName === displayName(pkgItem) || c.targetItemName === displayName(otherItem)))) {
+        commands.push({
+          action: 'merge_dishes',
+          itemName: displayName(pkgItem),
+          targetItemName: displayName(otherItem),
+          newItemName: displayName(otherItem),
+          newWeightGrams: targetWeight > 0 ? targetWeight : null,
+          targetDbId: pkgItem.dbId || null,
+          scoutIndex: scoutIndexOf(pkgItem, pkgIdx),
+        });
+        usedPrior.add(pkgIdx);
+        usedPrior.add(otherIdx);
+      }
+    } else if (!commands.some(c => c.action === 'remove_item' && c.itemName === displayName(priorItems[pkgIdx]))) {
+      const p = priorItems[pkgIdx];
+      commands.push({
+        action: 'remove_item',
+        itemName: displayName(p),
+        targetDbId: p.dbId || null,
+        scoutIndex: scoutIndexOf(p, pkgIdx),
+      });
+      usedPrior.add(pkgIdx);
+    }
+  }
+}
+
+/**
  * Align prior ledger rows to scout emission (scoutIndex, else positional)
  * and emit structural patch commands for identity/weight/component drifts.
  */
@@ -263,6 +330,7 @@ export function diffScoutToEditCommands(args: {
 
   // Pure portion modification with empty scout emission
   if (!Array.isArray(scoutItems) || scoutItems.length === 0) {
+    applySameMealClarification({ commands, usedPrior, priorItems, userMessage: args.userMessage });
     return commands;
   }
 
@@ -544,29 +612,8 @@ export function diffScoutToEditCommands(args: {
       }
     }
   }
-  // 3. User message clarification: duplicate / same-meal package removal
-  if (args.userMessage) {
-    const msg = args.userMessage.toLowerCase();
-    const isSameMeal = /\b(same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|duplicate|all\s+(?:the\s+)?same\s+meal|it'?s\s+(?:all\s+)?the\s+same)\b/i.test(msg);
-    const isExplicitRemovePackage = /\b(remove|delete|omit|drop|don't\s+include)\b/i.test(msg) && /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(msg);
-    if (isSameMeal || isExplicitRemovePackage) {
-      const pkgIdx = priorItems.findIndex((p, i) => {
-        if (usedPrior.has(i)) return false;
-        const pName = displayName(p).toLowerCase();
-        return /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(pName) || Boolean(p.packGrams && p.rawNutritionLabel && !/boiled|fried|cooked|soup|porridge|oatmeal\b/i.test(pName));
-      });
-      if (pkgIdx >= 0 && !commands.some(c => c.action === 'remove_item' && c.itemName === displayName(priorItems[pkgIdx]))) {
-        const p = priorItems[pkgIdx];
-        commands.push({
-          action: 'remove_item',
-          itemName: displayName(p),
-          targetDbId: p.dbId || null,
-          scoutIndex: scoutIndexOf(p, pkgIdx),
-        });
-        usedPrior.add(pkgIdx);
-      }
-    }
-  }
+  // 3. User message clarification: duplicate / same-meal package removal or merge
+  applySameMealClarification({ commands, usedPrior, priorItems, userMessage: args.userMessage });
 
   return commands;
 }
@@ -713,6 +760,27 @@ export function mergeLocksFromCommands(args: {
           scoutIndex: sIdx,
           field: 'weightGrams',
           value: w,
+          lockedAtTurn: args.turn,
+          sourceUserMessage: args.userMessage,
+        });
+      }
+    } else if (action === 'merge_dishes') {
+      const w = weightOf(found.item) || Number(cmd.newWeightGrams);
+      if (w > 0) {
+        byKey.set(`${sIdx}:weightGrams`, {
+          scoutIndex: sIdx,
+          field: 'weightGrams',
+          value: w,
+          lockedAtTurn: args.turn,
+          sourceUserMessage: args.userMessage,
+        });
+      }
+      const val = displayName(found.item);
+      if (val) {
+        byKey.set(`${sIdx}:identity`, {
+          scoutIndex: sIdx,
+          field: 'identity',
+          value: val,
           lockedAtTurn: args.turn,
           sourceUserMessage: args.userMessage,
         });
