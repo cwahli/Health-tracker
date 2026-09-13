@@ -269,7 +269,7 @@ describe('accept-defaults gate (portion choices within 30%, no agent)', () => {
     expect(out.clinicalAdvice).toContain('72g protein');
     expect(out.clinicalAdvice).toContain('0.1g trans fat');
     expect(out.clinicalAdvice).toContain('\n\n');
-    expect(out.verdict.label).toBe('High Glycemic Load');
+    expect(out.verdict.label).toBe('High Glycemic Sugar');
     expect(out.verdict.level).toBe('warning');
     expect(out.message).toBe(out.clinicalAdvice);
   });

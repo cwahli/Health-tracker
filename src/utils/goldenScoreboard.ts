@@ -4,10 +4,13 @@ import {
   snapshotVisibleInvariants,
   sanitizeJobErrorText,
   buildJourney,
+  buildAutoInvariants,
   journeyPhaseCounts,
   type GoldenJourneyRow,
   type GoldenInvariant,
 } from './goldenJourney.js';
+import { autoSpotFood } from './bugAutoSpot.js';
+import { compileGoldenMeal } from './goldenLedger.js';
 
 export {
   PHASE_LABEL,
@@ -447,6 +450,23 @@ export function buildScoreboard(input: {
   const tensions = parseTensions(logText);
   let outcomes: GoldenOutcome[] = input.outcomes ? [...input.outcomes] : parseKnownFails(logText);
 
+  // Auto invariants from journey and foodLog
+  const autoInvariants = buildAutoInvariants({ logText, foodLog: input.foodLog, scout: input.scout, journey });
+  for (const inv of autoInvariants) {
+    if (!inv.pass) {
+      outcomes.push({
+        id: inv.id,
+        kind: inv.group || 'invariant',
+        label: inv.label,
+        expected: inv.expected,
+        actual: inv.actual,
+        pass: inv.pass,
+        source: 'auto',
+        enabled: true,
+      });
+    }
+  }
+
   // If identity ended on labels, remove leftover category fallback fails
   const hasLabelTruth = journey.some((j) => String(j.phase || '').includes('label'));
   if (hasLabelTruth) {
@@ -494,14 +514,18 @@ export function buildScoreboard(input: {
   const meal = input.expectedMeal ? evaluateMealLines(input.expectedMeal, mealLines) : { pass: true, misses: [] };
   const summary = scoreboardSummary(outcomes, meal.misses);
 
+  const autoSpotRes = autoSpotFood({ logText, foodLog: input.foodLog, scout: input.scout });
+  const autoSpot = autoSpotRes?.remaining || [];
+  const ledger = input.foodLog?.ledger || compileGoldenMeal({ logText, foodLog: input.foodLog, scout: input.scout });
+
   return {
     outcomes,
     meal,
     summary,
     journey,
-    invariants: [],
-    ledger: input.foodLog?.ledger || null,
-    autoSpot: null,
+    invariants: autoInvariants,
+    ledger,
+    autoSpot,
     replayMode: 'log',
     tensions,
     scout: input.scout,
