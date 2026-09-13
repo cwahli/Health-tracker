@@ -9,6 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
+# Render passes environment variables as Docker build args
+ARG RENDER_GIT_COMMIT
+ENV RENDER_GIT_COMMIT=${RENDER_GIT_COMMIT}
+
 COPY package*.json ./
 RUN npm ci
 
@@ -25,7 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-ENV NODE_ENV=production \
+ARG RENDER_GIT_COMMIT
+ENV RENDER_GIT_COMMIT=${RENDER_GIT_COMMIT} \
+    NODE_ENV=production \
     PORT=3000 \
     INTERNAL_BASE_URL=http://127.0.0.1:3000
 
