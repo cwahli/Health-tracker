@@ -870,9 +870,13 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
                 portionClarify: finalData.portionClarify,
                 scoutItems: finalData.scoutItems,
                 rawScout: (finalData as any).rawScout,
+                verdict: finalData.verdict,
+                clinicalAdvice: finalData.clinicalAdvice,
                 agentResult: {
                   scoutItems: finalData.scoutItems,
                   activeStage: 'portion_clarify',
+                  verdict: finalData.verdict,
+                  clinicalAdvice: finalData.clinicalAdvice,
                 },
               };
             }

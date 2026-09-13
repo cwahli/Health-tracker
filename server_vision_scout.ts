@@ -146,7 +146,7 @@ export const scoutSystemInstruction = `- HIERARCHY: Extract each distinct food i
 - GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.
 - LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').
 - INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.
-- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify every sub-nutrient against its exact line (confirming saturated fat is the specific saturated row, never unsaturated or total fat; fiber is fiber, not carbs). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.
+- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.
 - BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.
 - COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.
 - CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person ("You got..."). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.
@@ -1047,8 +1047,31 @@ export function parseAndHealVisionScout(
           const fnuts = f.nutrients || {};
           const fp = Number(fnuts.protein) || 0;
           const fc = Number(fnuts.carbohydrates) || 0;
-          const fsat = Number(fnuts.saturatedFat) || 0;
-          const ffat = Number(fnuts.totalFat) || Number(fnuts.fat) || Math.round(fsat * 1.5 * 10) / 10;
+          let fsat = Number(fnuts.saturatedFat) || 0;
+          let ffat = Number(fnuts.totalFat) || Number(fnuts.fat) || Math.round(fsat * 1.5 * 10) / 10;
+
+          // Pure TypeScript reconciliation for printed label text / OCR strings:
+          // Negative lookbehind ensures 'tidak jenuh' (unsaturated) is never mistaken for pure 'jenuh' (saturated fat)
+          const rawLabelStr = [
+            typeof f.rawNutritionLabel === 'string' ? f.rawNutritionLabel : (f.rawNutritionLabel && typeof f.rawNutritionLabel === 'object' ? Object.values(f.rawNutritionLabel).join(' ') : ''),
+            typeof f.packageLabelText === 'string' ? f.packageLabelText : '',
+            typeof d.packageLabelText === 'string' ? d.packageLabelText : '',
+          ].filter(Boolean).join(' ');
+
+          if (rawLabelStr) {
+            const indoSatMatch = rawLabelStr.match(/(?<!tidak\s+)lemak\s+jenuh\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*g?/i);
+            const engSatMatch = rawLabelStr.match(/(?<!(?:un|poly|mono|not)\s*)saturated\s+fat\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*g?/i);
+            const labelSat = indoSatMatch ? parseFloat(indoSatMatch[1].replace(',', '.')) : (engSatMatch ? parseFloat(engSatMatch[1].replace(',', '.')) : null);
+            if (labelSat !== null && Number.isFinite(labelSat) && Math.abs(labelSat - fsat) > 0.1) {
+              addDebugLog(`[Vision Scout SatFat Reconciliation] Correcting saturated fat from ${fsat}g to printed label truth ${labelSat}g for "${fn}"`);
+              fsat = labelSat;
+              if (f.nutrients) f.nutrients.saturatedFat = labelSat;
+              if (f.rawNutritionLabel && typeof f.rawNutritionLabel === 'object') {
+                f.rawNutritionLabel.saturatedFat = `${labelSat}g`;
+              }
+            }
+          }
+
           const fas = Number(fnuts.addedSugar) || 0;
           const ffib = Number(fnuts.totalFibre) || 0;
           const fna = Number(fnuts.sodium) || 0;
@@ -1103,6 +1126,9 @@ export function parseAndHealVisionScout(
         const dNuts = d.dishNutrients || {};
         let totalFat = Number(dNuts.totalFat) || Math.round(sumSatFat * 1.5 * 10) / 10;
         let satFat = Math.max(sumSatFat, Number(dNuts.saturatedFat) || 0);
+        if (sumSatFat > 0 && satFat > sumSatFat && components.length === 1) {
+          satFat = sumSatFat;
+        }
         if (totalFat < satFat) totalFat = satFat;
 
         // Reconcile dish-level fat back to ingredients (cooking oil / deep-frying absorption).

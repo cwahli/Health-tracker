@@ -37,6 +37,7 @@ import { ZoomableImage } from '../ZoomableImage';
 import { FoodScoutItemPreview, OnlineFoodImage } from './FoodScoutItemPreview';
 import { FoodEvaluationComparisonCard } from './FoodEvaluationComparisonCard';
 import { translations } from '../../utils/translations';
+import { resolveMealVerdict } from '../../utils/verdictUtils';
 /** Scout index matches the exact visual detected slot for the dish */
 function scoutIndexAgrees(item: any, s: any): boolean {
   if (s?.scoutIndex === undefined || item?.scoutIndex === undefined || s?.scoutIndex === null || item?.scoutIndex === null) return false;
@@ -2630,7 +2631,7 @@ export const FoodCard: React.FC<AgentCardProps & {
 
                       {/* Verdict Tag rendered below the message */}
                       {(() => {
-                        const v = msg.data?.agentResult?.verdict || msg.data?.pendingFoodLog?.verdict;
+                        const v = resolveMealVerdict(msg.data?.agentResult || msg.data?.pendingFoodLog || msg.data || msg);
                         if (!v?.label) return null;
                         const lblLower = (v.label || '').toLowerCase();
                         const lvl = (v.level || '').toLowerCase();

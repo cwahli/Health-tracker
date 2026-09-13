@@ -387,6 +387,7 @@ export async function runLiveMealBenchmark(c: MealBenchmarkCase, options: { port
   const protein = Math.round(Number(macros.protein || meal.protein || 0) * 10) / 10;
   const carbs = Math.round(Number(macros.carbohydrates || meal.carbs || 0) * 10) / 10;
   const fat = Math.round(Number(macros.totalFat || meal.fat || 0) * 10) / 10;
+  const satFat = Math.round(Number(macros.saturatedFat || meal.saturatedFat || 0) * 10) / 10;
 
   // Assertions
   const failures: string[] = [];
@@ -422,6 +423,15 @@ export async function runLiveMealBenchmark(c: MealBenchmarkCase, options: { port
   const carbPass = carbDiff <= 0.40;
   const fatPass = fatDiff <= 0.40;
 
+  let satPass = true;
+  if (gt.satFat !== undefined) {
+    const satDiff = Math.abs(satFat - gt.satFat);
+    satPass = satDiff <= Math.max(0.4, gt.satFat * 0.4);
+    if (!satPass) {
+      failures.push(`Saturated fat mismatch: calculated ${satFat}g vs GT ${gt.satFat}g (diff: ${satDiff.toFixed(1)}g)`);
+    }
+  }
+
   console.log(`------------------------------------------------------------------------`);
   console.log(`[RESULTS] Case ${c.id}: ${meal.mealName || "Meal"} (Latency: ${(durationMs / 1000).toFixed(1)}s, ${usedHttp ? "HTTP" : "In-Process"})`);
   console.log(`  Items Identified (${items.length}):`);
@@ -435,6 +445,9 @@ export async function runLiveMealBenchmark(c: MealBenchmarkCase, options: { port
   console.log(`    Protein:  ${protein}g (GT: ${gt.protein}g, diff: ${(proDiff * 100).toFixed(1)}%) -> ${proPass ? "✅" : "⚠️"}`);
   console.log(`    Carbs:    ${carbs}g (GT: ${gt.carbs}g, diff: ${(carbDiff * 100).toFixed(1)}%) -> ${carbPass ? "✅" : "⚠️"}`);
   console.log(`    Fat:      ${fat}g (GT: ${gt.fat}g, diff: ${(fatDiff * 100).toFixed(1)}%) -> ${fatPass ? "✅" : "⚠️"}`);
+  if (gt.satFat !== undefined) {
+    console.log(`    Sat Fat:  ${satFat}g (GT: ${gt.satFat}g) -> ${satPass ? "✅" : "⚠️"}`);
+  }
   console.log(`------------------------------------------------------------------------`);
 
   const passed = failures.length === 0;
@@ -450,7 +463,7 @@ export async function runLiveMealBenchmark(c: MealBenchmarkCase, options: { port
     caseId: c.id,
     durationMs,
     failures,
-    output: { calories, protein, carbs, fat, itemsCount: items.length },
+    output: { calories, protein, carbs, fat, satFat, itemsCount: items.length },
   };
 }
 
