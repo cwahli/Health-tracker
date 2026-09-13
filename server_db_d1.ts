@@ -64,7 +64,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
         f.benefits || '',
         f.risks || '',
         f.health_impact || '',
-        f.recommendation || 'good',
+        f.recommendation || null,
         f.verdict || null,
         f.description || '',
         f.message || '',

@@ -780,7 +780,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
       benefits: food.benefits || '',
       risks: food.risks || '',
       health_impact: food.healthImpact || '',
-      recommendation: food.recommendation || 'good',
+      recommendation: food.recommendation || null,
       verdict: food.verdict || null,
       description: food.description || '',
       message: food.message || '',
