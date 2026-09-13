@@ -126,6 +126,17 @@ export const benchmarkCases: Record<string, MealBenchmarkCase> = {
     // Approximate GT — used for portion defaults / band checks; refine later if needed
     groundTruth: { weight: 700, calories: 900, protein: 55.0, carbs: 80.0, fat: 30.0, satFat: 8.0, fibre: 10.0, sodium: 1200 },
   },
+  "12": {
+    id: "12",
+    name: "Quaker Rolled Oats (Back Label, Front Bag, Cooked Pot)",
+    imageFiles: [
+      "prototype/meallog/images/12_quaker_oats_label_0.jpg",
+      "prototype/meallog/images/12_quaker_oats_front_1.jpg",
+      "prototype/meallog/images/12_quaker_oats_pot_2.jpg",
+    ],
+    userPrompt: "",
+    groundTruth: { weight: 40, calories: 160, protein: 5.0, carbs: 27.0, fat: 4.0, satFat: 0.5, fibre: 3.0, sodium: 0 },
+  },
 };
 
 function arg(flag: string, fallback?: string): string | undefined {
