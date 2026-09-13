@@ -16,6 +16,7 @@ import {
   diffScoutToEditCommands,
   displayName,
   invalidateStaleIdentityMetadata,
+  isSameMealMergeRequest,
   itemsReferSame,
   itemsShareSubstance,
   mergeLocksFromCommands,
@@ -392,7 +393,7 @@ export function coalesceLegacyCommands(commands: MealEditCommand[], items: any[]
     if (removeIdx >= 0) {
       const itemToRemove = items[removeIdx];
       const otherItem = items.find((_, i) => i !== removeIdx);
-      const isSameMeal = /\b(same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|same\s+food|duplicate|all\s+(?:the\s+)?same\s+meal|it'?s\s+(?:all\s+)?the\s+same|only\s+(?:had\s+)?(?:1|one)\s+dish)\b/i.test(userMessage || '');
+      const isSameMeal = isSameMealMergeRequest(userMessage);
       const sharesFood = otherItem && (itemsReferSame(itemToRemove, otherItem) || itemsShareSubstance(itemToRemove, otherItem));
       if (otherItem && (isSameMeal || sharesFood || Boolean(itemToRemove.rawNutritionLabel))) {
         return [
@@ -780,7 +781,7 @@ export async function applyMealEdits(opts: {
       if (idx < 0) { notes.push(`remove_item: no item "${itemName}"`); continue; }
       const itemToRemove = items[idx];
       const otherItem = items.find((_, i) => i !== idx);
-      const isSameMeal = /\b(same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|same\s+food|duplicate|all\s+(?:the\s+)?same\s+meal|it'?s\s+(?:all\s+)?the\s+same|only\s+(?:had\s+)?(?:1|one)\s+dish)\b/i.test(opts.userMessage || '');
+      const isSameMeal = isSameMealMergeRequest(opts.userMessage);
       const sharesFood = otherItem && (itemsReferSame(itemToRemove, otherItem) || itemsShareSubstance(itemToRemove, otherItem));
       if (otherItem && (isSameMeal || sharesFood || Boolean(itemToRemove.rawNutritionLabel))) {
         // Fallback: merge dishes rather than discarding label truth

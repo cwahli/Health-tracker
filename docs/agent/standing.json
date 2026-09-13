@@ -160,6 +160,27 @@
           "kcal/g > 9.2"
         ]
       }
+    },
+    {
+      "id": "same_meal_package_prepared",
+      "label": "Package + prepared views of the same food collapse to one dish; combine-language edits emit merge_dishes",
+      "asked": "repeated",
+      "files_must_contain": {
+        "server_edit_patch_ledger.ts": [
+          "isSameMealMergeRequest",
+          "collapsePackagePreparedScoutItems",
+          "findPackagePreparedPair"
+        ],
+        "server_edit_patch_ledger.test.ts": [
+          "It's only 1 meal. Just combine them"
+        ],
+        "server_vision_scout.ts": [
+          "collapsePackagePreparedScoutItems"
+        ],
+        "server_vision_scout.test.ts": [
+          "collapses a labeled oats package and the cooked porridge"
+        ]
+      }
     }
   ],
   "sibling_pairs": [

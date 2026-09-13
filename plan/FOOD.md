@@ -10,7 +10,7 @@ Not a “lifecycle” in the biomarker sense: a meal is one-shot (Meal Agent →
 - **Part A** — identity / curator / catalog (was `FOOD_RESOLVER_CURATOR_AND_1PASS_CATALOG_PLAN.md`)
 - **Part B** — durable meal document (was `MEAL_BUILD_DURABLE_STATE.md`)
 
-Remaining execute IDs on [ROADMAP.md](./ROADMAP.md): **F-10** (adaptive Meal Agent — one role, expand when TypeScript says so), **F-8.10–F-8.13** (split / packaged facts / debug; soak is F-10.8, not the old always-dietitian path), **F-9.5** (job session leftover), **F-3 / F-4 / F-6** (identity + FoodCard), **F-12** (delete live USDA), **F-11** (brand-catalog self-clean). Do **not** put a curator LLM back on Analyze. Do **not** reopen FDC.
+Remaining execute IDs on [ROADMAP.md](./ROADMAP.md): **B0** is Current work (not this file). Food leftovers: **F-3 / F-4 / F-6** (identity + FoodCard), **F-12.4** (strip `fdcId` / USDA cache), **F-11.2 / F-11.3** (curator LLM, wait for **go**). F-10, F-8.10–8.13, F-9.5, F-11.1, F-12.1–12.3 shipped. Do **not** put a curator LLM back on Analyze. Do **not** reopen FDC.
 
 ---
 

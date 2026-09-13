@@ -10,7 +10,7 @@ const getBiomarkerDef = (key: string) => biomarkerDefinitions.find(d => d.key ==
 import { getAgentCalibration, formatOptimalTargetValue } from '../utils/agentCalibration';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { standardizeUnit, reverseStandardizeUnit, formatNormalRange } from '../utils/unitConversion';
-import { PRIMARY_NUTRIENTS, isCoreNutrient, isAdditionalNutrient, getTopTargetNutrientKeys, extractNutrientValue } from '../utils/nutrients';
+import { isCoreNutrient, isAdditionalNutrient, getTopTargetNutrientKeys, extractNutrientValue, isLimitNutrient, isNutrientOverLimit, isNutrientGoalMet, lookupByNutrientKey, canonicalNutrientKey, nutrientKeySlug } from '../utils/nutrients';
 import { nutrientDefinitions } from '../utils/nutrition';
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
 import { FilterPills } from './ui/FilterPills';
@@ -720,36 +720,37 @@ export default function HomeTab({
 
   const topWeeklyNutrientKeys = React.useMemo(() => {
     const rawKeys: string[] = [];
+    const pushKey = (raw: any) => {
+      const k = typeof raw === 'string' ? raw : (raw?.nutrientKey || raw?.key);
+      if (!k) return;
+      const canon = canonicalNutrientKey(k);
+      if (canon && !rawKeys.includes(canon)) rawKeys.push(canon);
+    };
     const rawWeekly = report?.topWeeklyNutrientTargets || report?.weeklyNutrientTargets || [];
     if (Array.isArray(rawWeekly)) {
-      rawWeekly.forEach((item: any) => {
-        const k = typeof item === 'string' ? item : (item?.nutrientKey || item?.key);
-        if (k && !rawKeys.includes(k)) rawKeys.push(k);
-      });
+      rawWeekly.forEach(pushKey);
     } else if (typeof rawWeekly === 'object' && rawWeekly !== null) {
-      Object.keys(rawWeekly).forEach(k => { if (!rawKeys.includes(k)) rawKeys.push(k); });
+      Object.keys(rawWeekly).forEach(pushKey);
     }
     if (Array.isArray(report?.topNutrientTargets)) {
       report.topNutrientTargets.forEach((k: any) => {
         const strKey = typeof k === 'string' ? k : (k?.nutrientKey || k?.key);
-        if (strKey && isAdditionalNutrient(strKey) && !rawKeys.includes(strKey)) rawKeys.push(strKey);
+        if (strKey && isAdditionalNutrient(strKey)) pushKey(strKey);
       });
     }
     const cats = report?.healthBaselineCategories || (report as any)?.riskCategories || [];
     if (Array.isArray(cats)) {
       cats.forEach((cat: any) => {
         if (Array.isArray(cat.nutrientTargets) || Array.isArray(cat.priorityNutrientTargets)) {
-          (cat.priorityNutrientTargets || cat.nutrientTargets).forEach((nt: any) => {
-            const strKey = typeof nt === 'string' ? nt : (nt?.nutrientKey || nt?.key);
-            if (strKey && isAdditionalNutrient(strKey) && !rawKeys.includes(strKey)) rawKeys.push(strKey);
-          });
+          (cat.priorityNutrientTargets || cat.nutrientTargets).forEach(pushKey);
         }
       });
     }
+    const topSlugs = new Set(topMonitoredKeys.map(nutrientKeySlug));
     const additionalOnly = rawKeys.filter(isAdditionalNutrient);
     const set = new Set<string>();
     additionalOnly.forEach(k => {
-      if (!topMonitoredKeys.includes(k)) set.add(k);
+      if (!topSlugs.has(nutrientKeySlug(k))) set.add(k);
     });
     return Array.from(set);
   }, [report, topMonitoredKeys]);
@@ -843,12 +844,14 @@ export default function HomeTab({
     return profile?.email ? `_${profile.email.toLowerCase().trim()}` : '_guest';
   }, [profile?.email]);
 
-  const isLimitNutrient = React.useCallback((key: string) => {
-    return ['calories', 'saturatedFat', 'sodium', 'addedSugar', 'totalFat', 'transFat', 'cholesterol', 'salt'].includes(key);
-  }, []);
+  const lookupTargetRaw = React.useCallback((key: string) => {
+    return lookupByNutrientKey(report?.dailyNutrientTargets, key)
+      ?? lookupByNutrientKey((report as any)?.generalNutrientTargets, key)
+      ?? lookupByNutrientKey(defaultNutrientTargets, key);
+  }, [report]);
 
   const getNutrientSortRank = React.useCallback((key: string) => {
-    const reportTargetRaw = report?.dailyNutrientTargets?.[key] ?? defaultNutrientTargets[key];
+    const reportTargetRaw = lookupTargetRaw(key);
     const baseTarget = parseTarget(reportTargetRaw, 0);
     const adjustedTarget = getAdjustedTarget(key, baseTarget);
     // Use the X days AVG for sorting as requested
@@ -864,17 +867,17 @@ export default function HomeTab({
     }
 
     return { tier, pct };
-  }, [report, getAdjustedTarget, getAverageIntake, rollingDays, isLimitNutrient]);
+  }, [lookupTargetRaw, getAdjustedTarget, getAverageIntake, rollingDays]);
 
   const sortNutrientKeys = React.useCallback((keys: string[]) => {
     return [...keys].sort((a, b) => {
       const getRank = (key: string) => {
-        const reportTargetRaw = report?.dailyNutrientTargets?.[key] ?? defaultNutrientTargets[key];
+        const reportTargetRaw = lookupTargetRaw(key);
         const baseTarget = parseTarget(reportTargetRaw, 0);
         const adjustedTarget = getAdjustedTarget(key, baseTarget);
         const actualRaw = getAverageIntake(key, rollingDays) || 0;
         const pct = (adjustedTarget && adjustedTarget > 0) ? (actualRaw / adjustedTarget) : 0;
-        const isLimit = ['calories', 'saturatedFat', 'sodium', 'addedSugar', 'totalFat', 'transFat', 'cholesterol', 'salt'].includes(key);
+        const isLimit = isLimitNutrient(key);
 
         let tier = 2; 
         if (isLimit && pct > 1) {
@@ -893,7 +896,7 @@ export default function HomeTab({
       }
       return infoB.pct - infoA.pct;
     });
-  }, [report, getAdjustedTarget, getAverageIntake, rollingDays, parseTarget]);
+  }, [lookupTargetRaw, getAdjustedTarget, getAverageIntake, rollingDays, parseTarget]);
 
   const [googleSteps, setGoogleSteps] = React.useState<number | null>(null);
   const [googleStepsAverage, setGoogleStepsAverage] = React.useState<number | null>(null);
@@ -1279,19 +1282,19 @@ export default function HomeTab({
             const sortedKeys = sortNutrientKeys(topMonitoredKeys);
 
             return sortedKeys.map((key) => {
-              const reportTargetRaw = report?.dailyNutrientTargets?.[key] ?? defaultNutrientTargets[key];
+              const reportTargetRaw = lookupTargetRaw(key);
             const baseTarget = parseTarget(reportTargetRaw, 0);
             const adjustedTarget = getAdjustedTarget(key, baseTarget);
-            const actualRaw = Number(timeframeTotals[key] || 0);
+            const actualRaw = extractNutrientValue(timeframeTotals, key);
             const actual = formatValue(actualRaw);
-            const unit = parseUnit(reportTargetRaw, fallbackUnits[key] || 'g');
+            const unit = parseUnit(reportTargetRaw, fallbackUnits[canonicalNutrientKey(key)] || fallbackUnits[key] || 'g');
 
-            const nutDef = nutrientDefinitions.find(n => n.key === key);
+            const nutDef = nutrientDefinitions.find(n => n.key === canonicalNutrientKey(key));
             const label = displayNutrientName(profile.language, key) || nutDef?.labels?.en || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 
-            const isLimit = ['calories', 'saturatedFat', 'sodium', 'addedSugar', 'totalFat', 'transFat', 'cholesterol'].includes(key);
-            const isOver = isLimit && adjustedTarget > 0 && actualRaw > adjustedTarget;
-            const isMet = !isLimit && adjustedTarget > 0 && actualRaw >= adjustedTarget;
+            const isLimit = isLimitNutrient(key);
+            const isOver = isNutrientOverLimit(key, actualRaw, adjustedTarget);
+            const isMet = isNutrientGoalMet(key, actualRaw, adjustedTarget);
 
             return (
               <div key={key} className="space-y-1">
@@ -1433,19 +1436,19 @@ export default function HomeTab({
 
             <div className="space-y-3">
               {sortNutrientKeys(topWeeklyNutrientKeys).map((key) => {
-                const reportTargetRaw = (report?.dailyNutrientTargets as any)?.[key] ?? (report?.generalNutrientTargets as any)?.[key] ?? defaultNutrientTargets[key];
+                const reportTargetRaw = lookupTargetRaw(key);
                 const baseDailyTarget = parseTarget(reportTargetRaw, 0);
                 const weeklyTarget = baseDailyTarget * 7;
-                const actual7dRaw = Number(rolling7DayTotals[key] || 0);
+                const actual7dRaw = extractNutrientValue(rolling7DayTotals, key);
                 const actual7d = formatValue(actual7dRaw);
-                const unit = parseUnit(reportTargetRaw, fallbackUnits[key] || 'mg');
+                const unit = parseUnit(reportTargetRaw, fallbackUnits[canonicalNutrientKey(key)] || fallbackUnits[key] || 'mg');
 
-                const nutDef = nutrientDefinitions.find(n => n.key === key);
+                const nutDef = nutrientDefinitions.find(n => n.key === canonicalNutrientKey(key));
                 const label = displayNutrientName(profile.language, key) || nutDef?.labels?.en || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 
-                const isLimit = ['addedSugar', 'saturatedFat', 'sodium', 'totalFat', 'transFat', 'cholesterol'].includes(key);
-                const isOver = isLimit && weeklyTarget > 0 && actual7dRaw > weeklyTarget;
-                const isMet = !isLimit && weeklyTarget > 0 && actual7dRaw >= weeklyTarget;
+                const isLimit = isLimitNutrient(key);
+                const isOver = isNutrientOverLimit(key, actual7dRaw, weeklyTarget);
+                const isMet = isNutrientGoalMet(key, actual7dRaw, weeklyTarget);
 
                 const pct = weeklyTarget > 0 ? (actual7dRaw / weeklyTarget) * 100 : 0;
 
@@ -1516,31 +1519,32 @@ export default function HomeTab({
             </div>
 
             {showAllTargets && (() => {
-              const rawRemaining = Object.entries(report?.dailyNutrientTargets || defaultNutrientTargets).filter(([key]) => !topMonitoredKeys.includes(key) && key !== 'steps' && !topWeeklyNutrientKeys.includes(key));
-              const sortedRemainingKeys = sortNutrientKeys(rawRemaining.map(([k]) => k));
+              const topSlugs = new Set([...topMonitoredKeys, ...topWeeklyNutrientKeys].map(nutrientKeySlug));
+              const rawRemaining = Object.entries(report?.dailyNutrientTargets || defaultNutrientTargets).filter(([key]) => nutrientKeySlug(key) !== 'steps' && !topSlugs.has(nutrientKeySlug(key)));
+              const sortedRemainingKeys = sortNutrientKeys([...new Set(rawRemaining.map(([k]) => canonicalNutrientKey(k)))]);
               const remainingEntries = sortedRemainingKeys.map(k => {
-                const item = rawRemaining.find(([rk]) => rk === k);
-                return item || [k, (report?.dailyNutrientTargets || defaultNutrientTargets)[k]];
+                const item = rawRemaining.find(([rk]) => nutrientKeySlug(rk) === nutrientKeySlug(k));
+                return item ? [canonicalNutrientKey(item[0]), item[1]] : [k, lookupTargetRaw(k)];
               });
               const coreTargets = remainingEntries.filter(([key]) => isCoreNutrient(key));
               const additionalTargets = remainingEntries.filter(([key]) => !isCoreNutrient(key));
 
               const renderTarget = ([key, val]: [string, any]) => {
                   const baseTarget = parseTarget(val, 0);
-                  const unit = parseUnit(val, fallbackUnits[key] || 'g');
-                  const actual = Number(timeframeTotals[key] || 0);
+                  const unit = parseUnit(val, fallbackUnits[canonicalNutrientKey(key)] || fallbackUnits[key] || 'g');
+                  const actual = extractNutrientValue(timeframeTotals, key);
                   const adjustedTarget = getAdjustedTarget(key, baseTarget);
                   
                   const pct = adjustedTarget > 0 ? (actual / adjustedTarget) * 100 : 0;
                   
-                  const isLimit = ['addedSugar', 'saturatedFat', 'sodium', 'totalFat', 'cholesterol'].includes(key);
-                  const isOver = actual > adjustedTarget;
+                  const isLimit = isLimitNutrient(key);
+                  const isOver = isNutrientOverLimit(key, actual, adjustedTarget);
                   
                   let barColor = 'bg-indigo-600';
                   if (isLimit) {
                     barColor = isOver ? 'bg-rose-500' : 'bg-emerald-500';
                   } else {
-                    barColor = actual >= adjustedTarget ? 'bg-emerald-500' : 'bg-indigo-600';
+                    barColor = isNutrientGoalMet(key, actual, adjustedTarget) ? 'bg-emerald-500' : 'bg-indigo-600';
                   }
 
                   const formattedActual = formatValue(actual);
@@ -1549,7 +1553,7 @@ export default function HomeTab({
                     <div key={key} className="flex flex-col py-2 border-b border-theme-border/50 space-y-1">
                       <div className="flex justify-between items-start text-[10px] leading-tight">
                         <span className="text-theme-text-secondary font-bold capitalize truncate max-w-[80px]">
-                          {key.replace(/([A-Z])/g, ' $1').trim()}
+                          {displayNutrientName(profile.language, key) || key.replace(/([A-Z])/g, ' $1').trim()}
                         </span>
                         <span className="text-slate-400 dark:text-slate-500 font-semibold font-mono text-[9px] whitespace-nowrap">
                           {formattedActual}/{adjustedTarget}{unit}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { getNutrientColor } from '../utils/nutrition';
+import { isLimitNutrient } from '../utils/nutrients';
 
 interface NutrientPieChartProps {
   allowance: number;       // Daily allowance (e.g. 1500)
@@ -30,6 +31,7 @@ export const NutrientPieChart: React.FC<NutrientPieChartProps> = ({
   const pctC = (C / A) * 100;
   const pctM = (M / A) * 100;
   const pctTotal = pctC + pctM;
+  const wrapColor = isLimitNutrient(nutrientKey) ? 'var(--color-rose-500)' : 'var(--color-emerald-500)';
 
   let pieGradient = '';
 
@@ -44,27 +46,20 @@ export const NutrientPieChart: React.FC<NutrientPieChartProps> = ({
       transparent ${pctTotal}% 100%
     )`;
   } else {
-    // Over allowance
+    // Over allowance — rose wrap for ceiling nutrients, green wrap for goals
     if (C < A) {
-      // Consumption exceeded limit, but alreadyConsumed was under limit.
-      // Part of meal filled up to 100%, remaining is excess (Red).
-      // Excess percent = pctTotal - 100
+      // Consumption exceeded target, but alreadyConsumed was under.
       const pctExcess = Math.min(pctTotal - 100, 100);
-      // Red from 0% to pctExcess (the wrapped-around excess)
-      // consumedColor from pctExcess to pctC
-      // highlightColor from pctC to 100% (the meal filling the rest of the allowance)
       pieGradient = `conic-gradient(
-        var(--color-rose-500) 0% ${pctExcess}%,
+        ${wrapColor} 0% ${pctExcess}%,
         ${consumedColor} ${pctExcess}% ${pctC}%,
         ${highlightColor} ${pctC}% 100%
       )`;
     } else {
-      // alreadyConsumed was ALREADY over or equal to limit.
-      // The entire meal value is excess (Red).
-      // We show the meal's excess in Red, and the rest as consumedColor.
+      // alreadyConsumed was already over or equal to target.
       const pctExcess = Math.min(pctM, 100);
       pieGradient = `conic-gradient(
-        var(--color-rose-500) 0% ${pctExcess}%,
+        ${wrapColor} 0% ${pctExcess}%,
         ${consumedColor} ${pctExcess}% 100%
       )`;
     }

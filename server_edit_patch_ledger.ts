@@ -148,6 +148,138 @@ export function itemsShareSubstance(a: any, b: any): boolean {
   return false;
 }
 
+const PREPARED_COOKING = new Set([
+  'boiled', 'steamed', 'baked', 'cooked', 'fried', 'pan_fried', 'stir_fried',
+  'grilled', 'poached', 'simmered', 'deep_fried', 'roasted', 'braised',
+]);
+
+function hasPrintedLabel(it: any): boolean {
+  const raw = it?.rawNutritionLabel;
+  if (!raw || typeof raw !== 'object') return false;
+  return Object.keys(raw).some((k) => {
+    if (k === 'servingSize' || k === 'weight' || k === 'servingsPerContainer' || k === 'confidence') return false;
+    const v = raw[k];
+    return v !== undefined && v !== null && v !== '' && v !== '-' && v !== '--';
+  });
+}
+
+export function isPreparedDishItem(it: any): boolean {
+  const cm = String(it?.cookingMethod || '').toLowerCase().replace(/\s+/g, '_');
+  if (PREPARED_COOKING.has(cm)) return true;
+  return /\b(porridge|oatmeal|cooked|boiled|rebus|bubur|prepared)\b/i.test(displayName(it));
+}
+
+export function isPackageOrLabelItem(it: any): boolean {
+  const name = displayName(it);
+  if (/\b(package|pack|bungkus|kemasan|unopened|nutrition facts|label)\b/i.test(name)) return true;
+  const pack = Number(it?.packGrams) || 0;
+  const w = Number(it?.estimatedWeightGrams || it?.weightGrams) || 0;
+  if (hasPrintedLabel(it) && pack > 0 && w > 0 && pack >= w * 2) return true;
+  if (hasPrintedLabel(it) && String(it?.cookingMethod || '').toLowerCase() === 'raw') return true;
+  return hasPrintedLabel(it) && !isPreparedDishItem(it);
+}
+
+/** User asked to collapse split views of one meal (package vs cooked, "combine them", "1 meal"). */
+export function isSameMealMergeRequest(msg?: string): boolean {
+  if (!msg) return false;
+  return /\b(?:same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|same\s+food|duplicate|all\s+(?:the\s+)?same(?:\s+meal)?|it'?s\s+(?:all\s+)?the\s+same|only\s+(?:had\s+)?(?:1|one)\s+(?:dish|meal)|(?:it'?s\s+)?(?:only\s+)?(?:1|one)\s+meal|combine(?:\s+them)?|merge(?:\s+them)?|just\s+combine|join\s+them)\b/i.test(msg);
+}
+
+function printedCalories(it: any): number | null {
+  const raw = it?.rawNutritionLabel?.calories;
+  if (raw == null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Package/label row + prepared row of the same food. Never pairs two distinctly labeled products. */
+export function findPackagePreparedPair(items: any[]): { pkgIdx: number; preparedIdx: number } | null {
+  if (!Array.isArray(items) || items.length < 2) return null;
+  for (let i = 0; i < items.length; i++) {
+    if (!isPackageOrLabelItem(items[i])) continue;
+    for (let j = 0; j < items.length; j++) {
+      if (i === j) continue;
+      if (!itemsShareSubstance(items[i], items[j])) continue;
+      const calA = printedCalories(items[i]);
+      const calB = printedCalories(items[j]);
+      if (calA != null && calB != null && Math.abs(calA - calB) >= 2) continue;
+      if (isPreparedDishItem(items[j]) || !hasPrintedLabel(items[j])) {
+        return { pkgIdx: i, preparedIdx: j };
+      }
+    }
+  }
+  return null;
+}
+
+function packageServingWeight(pkg: any, prepared: any): number {
+  const wPkg = Number(pkg?.weightGrams || pkg?.estimatedWeightGrams) || 0;
+  const wPrep = Number(prepared?.weightGrams || prepared?.estimatedWeightGrams) || 0;
+  if (wPkg > 0) return wPkg;
+  if (wPrep > 0) return wPrep;
+  return 0;
+}
+
+/**
+ * Create-path collapse: package photo + cooked bowl of the same food → one dish.
+ * Keeps label truth and the package serving weight (never dry+wet sum).
+ */
+export function collapsePackagePreparedScoutItems(items: any[], addDebugLog?: (msg: string) => void): any[] {
+  if (!Array.isArray(items) || items.length < 2) return items || [];
+  const out = items.slice();
+  const log = addDebugLog || (() => {});
+  let pair = findPackagePreparedPair(out);
+  while (pair) {
+    const pkg = out[pair.pkgIdx];
+    const prep = out[pair.preparedIdx];
+    const serving = packageServingWeight(pkg, prep);
+    const brand = String(pkg.chainName || pkg.brandLock || (displayName(pkg).match(/\b(Quaker|Lidl|Kellogg|Nestle|Indomie)\b/i) || [])[0] || '');
+    let mergedName = displayName(prep) || displayName(pkg);
+    if (brand && mergedName && !mergedName.toLowerCase().includes(brand.toLowerCase())) {
+      mergedName = `${brand} ${mergedName}`;
+    }
+    const survivor = {
+      ...prep,
+      ...pkg,
+      originalName: mergedName,
+      keyword: mergedName,
+      dishName: mergedName,
+      name: mergedName,
+      estimatedWeightGrams: serving || prep.estimatedWeightGrams || pkg.estimatedWeightGrams,
+      weightGrams: serving || prep.weightGrams || pkg.weightGrams,
+      packGrams: pkg.packGrams ?? prep.packGrams ?? null,
+      rawNutritionLabel: pkg.rawNutritionLabel || prep.rawNutritionLabel || null,
+      cookingMethod: prep.cookingMethod || pkg.cookingMethod,
+      components: (Array.isArray(prep.components) && prep.components.length > 0) ? prep.components : pkg.components,
+      foods: (Array.isArray(prep.foods) && prep.foods.length > 0) ? prep.foods : pkg.foods,
+      sourceImageIndex: prep.sourceImageIndex ?? pkg.sourceImageIndex,
+      chainName: pkg.chainName || prep.chainName || null,
+    };
+    const drop = Math.max(pair.pkgIdx, pair.preparedIdx);
+    const keep = Math.min(pair.pkgIdx, pair.preparedIdx);
+    out[keep] = survivor;
+    out.splice(drop, 1);
+    log(`[Package-Prepared Merge] Collapsed "${displayName(pkg)}" + "${displayName(prep)}" → "${mergedName}" (${serving || survivor.estimatedWeightGrams}g, label preserved).`);
+    pair = findPackagePreparedPair(out);
+  }
+  return out;
+}
+
+function mergeDishesCommand(pkg: any, prep: any, pkgIdx: number, userMessage?: string): PatchEditCommand {
+  let targetWeight = 0;
+  const wMatch = String(userMessage || '').match(/\b(\d+(?:\.\d+)?)\s*g(?:rams)?\b/i);
+  if (wMatch && Number(wMatch[1]) > 0) targetWeight = Math.round(Number(wMatch[1]));
+  else targetWeight = packageServingWeight(pkg, prep);
+  return {
+    action: 'merge_dishes',
+    itemName: displayName(pkg),
+    targetItemName: displayName(prep),
+    newItemName: displayName(prep),
+    newWeightGrams: targetWeight > 0 ? targetWeight : null,
+    targetDbId: pkg.dbId || null,
+    scoutIndex: scoutIndexOf(pkg, pkgIdx),
+  };
+}
+
 function scoutIndexOf(it: any, fallback: number): number {
   const n = Number(it?.scoutIndex);
   return Number.isFinite(n) ? n : fallback;
@@ -189,6 +321,8 @@ function estimateFromScout(it: any): Record<string, any> | null {
 
 /**
  * Handle user message clarification for duplicate / same-meal package removal or merge.
+ * Looks at leftover siblings even if scout already "used" one row (replace_identity
+ * of the package must not leave the prepared bowl behind).
  */
 export function applySameMealClarification(args: {
   commands: PatchEditCommand[];
@@ -197,58 +331,54 @@ export function applySameMealClarification(args: {
   userMessage?: string;
 }): void {
   const { commands, usedPrior, priorItems, userMessage } = args;
-  if (!userMessage || !Array.isArray(priorItems) || priorItems.length === 0) return;
-  const msg = userMessage.toLowerCase();
-  const isSameMeal = /\b(same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|same\s+food|duplicate|all\s+(?:the\s+)?same\s+meal|it'?s\s+(?:all\s+)?the\s+same|only\s+(?:had\s+)?(?:1|one)\s+dish)\b/i.test(msg);
-  const isExplicitRemovePackage = /\b(remove|delete|omit|drop|don't\s+include)\b/i.test(msg) && /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(msg);
+  if (!Array.isArray(priorItems) || priorItems.length === 0) return;
+  const isSameMeal = isSameMealMergeRequest(userMessage);
+  const isExplicitRemovePackage = /\b(remove|delete|omit|drop|don't\s+include)\b/i.test(userMessage || '') && /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(userMessage || '');
   if (!isSameMeal && !isExplicitRemovePackage) return;
 
-  let pkgIdx = priorItems.findIndex((p, i) => {
-    if (usedPrior.has(i)) return false;
-    const pName = displayName(p).toLowerCase();
-    return /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(pName) || Boolean((p.packGrams || p.rawNutritionLabel) && !/boiled|fried|cooked|soup|porridge|oatmeal\b/i.test(pName));
-  });
-  if (pkgIdx < 0 && isSameMeal && priorItems.length === 2) {
-    const labelIdx = priorItems.findIndex((p) => Boolean(p.rawNutritionLabel && Object.keys(p.rawNutritionLabel).length > 0));
-    pkgIdx = labelIdx >= 0 ? labelIdx : 0;
-  }
-  if (pkgIdx >= 0) {
-    const otherIdx = priorItems.findIndex((_, i) => i !== pkgIdx && !usedPrior.has(i));
-    if (otherIdx >= 0 && (isSameMeal || Boolean(priorItems[pkgIdx].rawNutritionLabel))) {
-      const pkgItem = priorItems[pkgIdx];
-      const otherItem = priorItems[otherIdx];
-      let targetWeight = 0;
-      const wMatch = msg.match(/\b(\d+(?:\.\d+)?)\s*g(?:rams)?\b/i);
-      if (wMatch && Number(wMatch[1]) > 0) {
-        targetWeight = Math.round(Number(wMatch[1]));
-      } else if (pkgItem.weightGrams && Number(pkgItem.weightGrams) > 0) {
-        targetWeight = Number(pkgItem.weightGrams);
-      } else if (otherItem.weightGrams && Number(otherItem.weightGrams) > 0) {
-        targetWeight = Number(otherItem.weightGrams);
-      }
-      if (!commands.some(c => c.action === 'merge_dishes' && (c.itemName === displayName(pkgItem) || c.targetItemName === displayName(otherItem)))) {
-        commands.push({
-          action: 'merge_dishes',
-          itemName: displayName(pkgItem),
-          targetItemName: displayName(otherItem),
-          newItemName: displayName(otherItem),
-          newWeightGrams: targetWeight > 0 ? targetWeight : null,
-          targetDbId: pkgItem.dbId || null,
-          scoutIndex: scoutIndexOf(pkgItem, pkgIdx),
-        });
-        usedPrior.add(pkgIdx);
-        usedPrior.add(otherIdx);
-      }
-    } else if (!commands.some(c => c.action === 'remove_item' && c.itemName === displayName(priorItems[pkgIdx]))) {
-      const p = priorItems[pkgIdx];
-      commands.push({
-        action: 'remove_item',
-        itemName: displayName(p),
-        targetDbId: p.dbId || null,
-        scoutIndex: scoutIndexOf(p, pkgIdx),
-      });
-      usedPrior.add(pkgIdx);
+  const pair = findPackagePreparedPair(priorItems);
+  let pkgIdx = pair?.pkgIdx ?? -1;
+  let otherIdx = pair?.preparedIdx ?? -1;
+  if (pkgIdx < 0) {
+    pkgIdx = priorItems.findIndex((p) => {
+      const pName = displayName(p).toLowerCase();
+      return /\b(package|pack|bungkus|kemasan|box|bag)\b/i.test(pName) || Boolean((p.packGrams || p.rawNutritionLabel) && !/boiled|fried|cooked|soup|porridge|oatmeal\b/i.test(pName));
+    });
+    if (pkgIdx < 0 && isSameMeal && priorItems.length === 2) {
+      const labelIdx = priorItems.findIndex((p) => hasPrintedLabel(p));
+      pkgIdx = labelIdx >= 0 ? labelIdx : 0;
     }
+    if (pkgIdx >= 0) {
+      otherIdx = priorItems.findIndex((_, i) => i !== pkgIdx);
+    }
+  }
+  if (pkgIdx < 0) return;
+  const pkgItem = priorItems[pkgIdx];
+  const otherItem = otherIdx >= 0 ? priorItems[otherIdx] : null;
+  if (otherItem && (isSameMeal || hasPrintedLabel(pkgItem))) {
+    const names = new Set([displayName(pkgItem), displayName(otherItem)].map((n) => n.toLowerCase()));
+    for (let i = commands.length - 1; i >= 0; i--) {
+      const c = commands[i];
+      const hit = [c.itemName, c.newItemName, c.targetItemName, c.replacementItemName]
+        .filter(Boolean)
+        .some((n) => names.has(String(n).toLowerCase()));
+      if (hit && c.action !== 'merge_dishes') commands.splice(i, 1);
+    }
+    if (!commands.some((c) => c.action === 'merge_dishes')) {
+      commands.push(mergeDishesCommand(pkgItem, otherItem, pkgIdx, userMessage));
+    }
+    usedPrior.add(pkgIdx);
+    usedPrior.add(otherIdx);
+    return;
+  }
+  if (!commands.some((c) => c.action === 'remove_item' && c.itemName === displayName(pkgItem))) {
+    commands.push({
+      action: 'remove_item',
+      itemName: displayName(pkgItem),
+      targetDbId: pkgItem.dbId || null,
+      scoutIndex: scoutIndexOf(pkgItem, pkgIdx),
+    });
+    usedPrior.add(pkgIdx);
   }
 }
 
@@ -326,6 +456,18 @@ export function diffScoutToEditCommands(args: {
         }
       }
     }
+  }
+
+  const pair = findPackagePreparedPair(priorItems);
+  const mergeAsk = isSameMealMergeRequest(args.userMessage);
+  const scoutLooksCombined = Array.isArray(scoutItems) && scoutItems.length === 1 && priorItems.length === 2 && Boolean(pair)
+    && itemsShareSubstance(scoutItems[0], priorItems[pair!.pkgIdx])
+    && itemsShareSubstance(scoutItems[0], priorItems[pair!.preparedIdx]);
+  if (pair && (mergeAsk || scoutLooksCombined)) {
+    commands.push(mergeDishesCommand(priorItems[pair.pkgIdx], priorItems[pair.preparedIdx], pair.pkgIdx, args.userMessage));
+    usedPrior.add(pair.pkgIdx);
+    usedPrior.add(pair.preparedIdx);
+    return commands;
   }
 
   // Pure portion modification with empty scout emission

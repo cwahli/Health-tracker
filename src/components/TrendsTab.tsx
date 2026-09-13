@@ -3,6 +3,7 @@ import { UserProfile, FoodLog, BiomarkerLog, RecommendationReport, NutrientBreak
 import { nutrientDefinitions } from '../utils/nutrition';
 import { translations } from '../utils/translations';
 import { displayStatusLabel } from '../utils/i18n';
+import { isLimitNutrient, lookupByNutrientKey } from '../utils/nutrients';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { TrendingUp, BarChart2, Calendar, EyeOff, Copy, Check } from 'lucide-react';
 import { toYYYYMMDD, formatTimelineDate } from '../utils/dateUtils';
@@ -25,8 +26,7 @@ const parseTargetBounds = (targetStr: string | undefined, nutrientKey: string, d
   }
   if (nums && nums.length === 1) {
     const val = parseFloat(nums[0]);
-    const limitMaxKeys = ['calories', 'totalFat', 'saturatedFat', 'addedSugar', 'sodium'];
-    if (limitMaxKeys.includes(nutrientKey)) {
+    if (isLimitNutrient(nutrientKey)) {
        return { min: 0, max: val };
     }
     return { min: val, max: Infinity };
@@ -51,10 +51,8 @@ const getBiomarkerTargetBounds = (key: string, report: any, profile?: UserProfil
 const evaluateNutrientStatus = (value: number, bounds: { min: number, max: number }, nutrientKey?: string) => {
   if (bounds.min === 0 && bounds.max === Infinity) return { color: 'bg-slate-300 dark:bg-slate-600', text: 'No Target' };
 
-  const betterLowKeys = ['calories', 'totalFat', 'saturatedFat', 'addedSugar', 'sodium', 'sugar', 'cholesterol', 'transFat', 'carbohydrates'];
-  
-  if (nutrientKey && betterLowKeys.includes(nutrientKey)) {
-    // For these, being under bounds.max is optimal (green)
+  if (nutrientKey && isLimitNutrient(nutrientKey)) {
+    // Ceiling nutrient: staying at or under max is optimal (green)
     const maxLimit = bounds.max !== Infinity ? bounds.max : (bounds.min !== 0 ? bounds.min : Infinity);
     if (maxLimit === Infinity) return { color: 'bg-slate-300 dark:bg-slate-600', text: 'No Target' };
     
@@ -414,9 +412,9 @@ export default function TrendsTab({
   const summaryData = activeSubTab === 'summary' ? getSummaryData() : null;
   const nutrientDots = summaryData ? nutrientDefinitions.map(nut => {
     const value = summaryData.nutrientAverages[nut.key] || 0;
-    const targetStr = report?.dailyNutrientTargets?.[nut.key as any];
+    const targetStr = lookupByNutrientKey(report?.dailyNutrientTargets as any, nut.key);
     const bounds = parseTargetBounds(targetStr, nut.key);
-    const status = evaluateNutrientStatus(value, bounds);
+    const status = evaluateNutrientStatus(value, bounds, nut.key);
     return { name: nut.labels[profile.language] || nut.labels.en, value: value.toFixed(1), unit: nut.unit, target: targetStr || t.statusNoTarget, bounds, statusText: displayStatusLabel(profile.language, status.text), color: status.color, key: nut.key };
   }) : [];
   const biomarkerDots = summaryData ? summaryData.allBioKeys.map(key => {
@@ -809,12 +807,13 @@ export default function TrendsTab({
 
               let datePieGradient = '';
               const dateTotalPercent = (totalValue / targetVal) * 100;
+              const wrapColor = isLimitNutrient(selectedMetric) ? 'var(--color-rose-500)' : 'var(--color-emerald-500)';
               if (totalValue <= targetVal) {
                   datePieGradient = `conic-gradient(currentColor ${dateTotalPercent}%, transparent ${dateTotalPercent}%)`;
               } else {
                   const excess = dateTotalPercent - 100;
                   const cappedExcess = Math.min(excess, 100);
-                  datePieGradient = `conic-gradient(var(--color-rose-500) ${cappedExcess}%, currentColor ${cappedExcess}% 100%)`;
+                  datePieGradient = `conic-gradient(${wrapColor} ${cappedExcess}%, currentColor ${cappedExcess}% 100%)`;
               }
               
               const chronoFoods = [...dayFoods].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.id.localeCompare(b.id));
@@ -833,7 +832,7 @@ export default function TrendsTab({
                       {t.foodConsumedOn} {formatTimelineDate(dateStr)}
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold ${totalValue > targetVal ? 'text-rose-500' : 'text-theme-text'}`}>
+                      <span className={`text-xs font-bold ${totalValue > targetVal ? (isLimitNutrient(selectedMetric) ? 'text-rose-500' : 'text-emerald-500') : 'text-theme-text'}`}>
                         {totalValue.toFixed(1)} / {targetVal} {metricMeta.unit}
                       </span>
                       <div className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden flex-shrink-0 relative text-theme-text">
@@ -853,15 +852,17 @@ export default function TrendsTab({
 
                       let pieGradient = '';
                       let textColorClass = 'text-theme-text';
+                      const itemWrap = isLimitNutrient(selectedMetric) ? 'var(--color-rose-500)' : 'var(--color-emerald-500)';
+                      const itemWrapText = isLimitNutrient(selectedMetric) ? 'text-rose-500' : 'text-emerald-500';
                       
                       if (endsAt <= targetVal) {
                         pieGradient = `conic-gradient(currentColor ${normalPercent}%, transparent ${normalPercent}%)`;
                       } else if (startsAt >= targetVal) {
-                        pieGradient = `conic-gradient(var(--color-rose-500) ${excessPercent}%, transparent ${excessPercent}%)`;
-                        textColorClass = 'text-rose-500';
+                        pieGradient = `conic-gradient(${itemWrap} ${excessPercent}%, transparent ${excessPercent}%)`;
+                        textColorClass = itemWrapText;
                       } else {
-                        pieGradient = `conic-gradient(currentColor ${normalPercent}%, var(--color-rose-500) ${normalPercent}% ${normalPercent + excessPercent}%, transparent ${normalPercent + excessPercent}%)`;
-                        textColorClass = 'text-rose-500';
+                        pieGradient = `conic-gradient(currentColor ${normalPercent}%, ${itemWrap} ${normalPercent}% ${normalPercent + excessPercent}%, transparent ${normalPercent + excessPercent}%)`;
+                        textColorClass = itemWrapText;
                       }
                       
                       return (

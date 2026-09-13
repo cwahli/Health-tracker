@@ -487,7 +487,7 @@ describe('edit patch ledger', () => {
       expect(cmds[0].newWeightGrams).toBe(50);
     });
 
-    it('contract: removes redundant package item when user clarifies same meal and targets correct dish by replacesDish', () => {
+    it('contract: same-meal package vs cooked bowl emits merge_dishes, not a leftover sibling', () => {
       const prior = [
         {
           name: 'Quaker Whole Rolled Oats Package',
@@ -500,6 +500,7 @@ describe('edit patch ledger', () => {
           name: 'Cooked Oatmeal',
           weightGrams: 40,
           scoutIndex: 1,
+          cookingMethod: 'boiled',
         },
       ];
       const scout = [
@@ -519,11 +520,11 @@ describe('edit patch ledger', () => {
         userMessage: "The cooked oatmeal is the same as the package. It's all the same meal",
       });
 
-      // 1. Should target Cooked Oatmeal for update (140g), NOT Quaker package
-      expect(cmds.some(c => (c.action === 'set_weight' || c.action === 'replace_identity') && c.itemName === 'Cooked Oatmeal' && c.newWeightGrams === 140)).toBe(true);
-      // 2. Should remove Quaker package because user clarified it is the same meal
-      expect(cmds.some(c => c.action === 'remove_item' && c.itemName === 'Quaker Whole Rolled Oats Package')).toBe(true);
-      // 3. Quaker package must NOT have been targeted as Cooked Oatmeal
+      expect(cmds).toHaveLength(1);
+      expect(cmds[0].action).toBe('merge_dishes');
+      expect(cmds[0].itemName).toBe('Quaker Whole Rolled Oats Package');
+      expect(cmds[0].targetItemName).toBe('Cooked Oatmeal');
+      expect(cmds[0].newWeightGrams).toBe(140);
       expect(cmds.some(c => c.action === 'replace_identity' && c.itemName === 'Quaker Whole Rolled Oats Package')).toBe(false);
     });
 
@@ -555,6 +556,48 @@ describe('edit patch ledger', () => {
       expect(cmds[0].targetItemName).toBe('Rolled Oats Porridge');
       // Must preserve the user-selected 100g portion, not add up 100g + 250g = 350g
       expect(cmds[0].newWeightGrams).toBe(100);
+    });
+
+    it('job_1789312118652: "It\'s only 1 meal. Just combine them" merges even when scout replaces the package and leaves the porridge', () => {
+      const prior = [
+        {
+          name: 'Quaker Whole Rolled Oats',
+          weightGrams: 100,
+          packGrams: 800,
+          scoutIndex: 0,
+          cookingMethod: 'raw',
+          rawNutritionLabel: { servingSize: '40g', calories: '160 kcal', protein: '5g' },
+        },
+        {
+          name: 'Boiled Rolled Oats Porridge',
+          weightGrams: 200,
+          scoutIndex: 1,
+          cookingMethod: 'boiled',
+        },
+      ];
+      const scout = [
+        {
+          dishName: 'Quaker Rolled Oats Porridge',
+          estimatedWeightGrams: 200,
+          cookingMethod: 'boiled',
+          action: 'replace',
+          targetDishIndex: 0,
+          sourceImageIndex: 2,
+        },
+      ];
+
+      const cmds = diffScoutToEditCommands({
+        priorItems: prior,
+        scoutItems: scout,
+        userMessage: "It's only 1 meal. Just combine them",
+      });
+
+      expect(cmds.some((c) => c.action === 'merge_dishes')).toBe(true);
+      expect(cmds.some((c) => c.action === 'replace_identity')).toBe(false);
+      const merge = cmds.find((c) => c.action === 'merge_dishes')!;
+      expect(merge.itemName).toBe('Quaker Whole Rolled Oats');
+      expect(merge.targetItemName).toBe('Boiled Rolled Oats Porridge');
+      expect(merge.newWeightGrams).toBe(100);
     });
   });
 });

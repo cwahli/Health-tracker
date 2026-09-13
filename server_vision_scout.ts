@@ -4,6 +4,7 @@ import { parseLabelCalories } from "./server_budget_reconcile";
 import { isStandaloneCondimentPacket, reconcileContainerVolumeBudget } from "./server_dish_classify";
 import { computeSolubleFibre } from "./server_derivation";
 import { deduceSugarBreakdown } from "./server_sugar_engine";
+import { collapsePackagePreparedScoutItems } from "./server_edit_patch_ledger";
 export const ScoutNutrientsSchema = z.object({
   calories: z.number().nullable().optional(), protein: z.number().nullable().optional(),
   totalFat: z.number().nullable().optional(), saturatedFat: z.number().nullable().optional(),
@@ -1924,6 +1925,7 @@ export function parseAndHealVisionScout(
       }
       if (!isCompareData) {
         visionScoutItems = resolvePackageAndContextItems(visionScoutItems, addDebugLog, userMessage, isCompareMode);
+        visionScoutItems = collapsePackagePreparedScoutItems(visionScoutItems, addDebugLog);
         visionScoutItems = clusterSpatialCompositeDishes(visionScoutItems, addDebugLog, isCompareMode);
         visionScoutItems = reconcileContainerVolumeBudget(visionScoutItems, addDebugLog);
       }

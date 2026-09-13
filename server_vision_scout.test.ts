@@ -467,6 +467,51 @@ describe("server_vision_scout", () => {
   });
 
   describe("cross-photo deduplication guards", () => {
+    it("collapses a labeled oats package and the cooked porridge from another photo into one dish", () => {
+      const result = parseAndHealVisionScout({
+        dishes: [
+          {
+            dishName: "Quaker Whole Rolled Oats",
+            genericEnglishName: "rolled oats",
+            chainName: "Quaker",
+            estimatedWeightGrams: 40,
+            packGrams: 800,
+            cookingMethod: "raw",
+            sourceImageIndex: 0,
+            foods: [
+              {
+                foodName: "Quaker Whole Rolled Oats",
+                weightGrams: 40,
+                packGrams: 800,
+                sourceImageIndex: 0,
+                rawNutritionLabel: { servingSize: "40g", calories: "160 kcal", protein: "5g", carbohydrates: "28g", totalFat: "4g" },
+                nutrients: { protein: 5, carbohydrates: 28, saturatedFat: 0.5 },
+              },
+            ],
+            dishNutrients: { protein: 5, carbohydrates: 28, totalFat: 4, saturatedFat: 0.5 },
+          },
+          {
+            dishName: "Boiled Rolled Oats Porridge",
+            genericEnglishName: "oatmeal porridge",
+            estimatedWeightGrams: 200,
+            cookingMethod: "boiled",
+            sourceImageIndex: 2,
+            foods: [
+              { foodName: "Rolled Oats", weightGrams: 40, nutrients: { protein: 5, carbohydrates: 28 } },
+              { foodName: "Water", weightGrams: 160, nutrients: { protein: 0, carbohydrates: 0 } },
+            ],
+            dishNutrients: { protein: 5, carbohydrates: 28, totalFat: 4 },
+          },
+        ],
+      }, () => {});
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].rawNutritionLabel).toBeTruthy();
+      expect(result.items[0].rawNutritionLabel.calories).toBeTruthy();
+      expect(Number(result.items[0].estimatedWeightGrams)).toBe(40);
+      expect(String(result.items[0].originalName || result.items[0].keyword)).toMatch(/oat/i);
+    });
+
     it("does not merge two distinct items sharing flavor words when printed calories or labels differ", () => {
       const mockOutput = {
         items: [
