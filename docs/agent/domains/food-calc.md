@@ -162,6 +162,10 @@ Create does **not** run a Dietitian audit LLM. Hidden commercial fat and sodium 
    - **Agent Modal (`FoodCard` - Compare & Single Meal):** Displays the exact same top target nutrients via the shared component (not an arbitrary expanded 8–10 macro list).
    - **Shared Reusable Component (`NutrientTargetRow`):** A shared, callable UI component rendered across both `FoodHistoryTab` and `FoodCard` (and any other meal views) ensuring visual styling parity (`NutrientPieChart` + bold colored text with display name, value, and unit) and numerical consistency.
 
+3. **Rolling Average Calculation & Non-Dilution Invariant:**
+   - Rolling averages over $N$ days (e.g. 7-day rolling) MUST divide by the count of active logged days ($activeDaysCount > 0 ? total / activeDaysCount : 0$), never calendar days. Empty days without logs must never dilute intake.
+   - Top Targets on the Home screen must clearly display the rolling average, match normalized dates via `toYYYYMMDD`, and support quick switching between Today and Rolling Average view without hidden modal settings.
+
 ---
 
 ## 2. Mode matrix (all modes share finalize math)

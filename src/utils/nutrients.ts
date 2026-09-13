@@ -90,3 +90,36 @@ export function getTopTargetNutrientKeys(report?: any, profile?: any): string[] 
   }
   return Array.from(set);
 }
+
+/**
+ * Safely extracts numeric nutrient value from a food/meal nutrients record,
+ * handling case differences, special characters, and common alias fallbacks.
+ */
+export function extractNutrientValue(nutrients: Record<string, any> | undefined | null, targetKey: string): number {
+  if (!nutrients || typeof nutrients !== 'object') return 0;
+  if (nutrients[targetKey] !== undefined && nutrients[targetKey] !== null) {
+    const v = Number(nutrients[targetKey]);
+    return Number.isFinite(v) ? v : 0;
+  }
+  const cleanTarget = targetKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const [k, v] of Object.entries(nutrients)) {
+    if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTarget) {
+      const num = Number(v);
+      return Number.isFinite(num) ? num : 0;
+    }
+  }
+  // Common aliases
+  if (cleanTarget === 'saturatedfat' && nutrients['satFat'] !== undefined) {
+    const v = Number(nutrients['satFat']);
+    return Number.isFinite(v) ? v : 0;
+  }
+  if (cleanTarget === 'totalfibre' && (nutrients['dietaryFiber'] !== undefined || nutrients['fiber'] !== undefined)) {
+    const v = Number(nutrients['dietaryFiber'] ?? nutrients['fiber']);
+    return Number.isFinite(v) ? v : 0;
+  }
+  if (cleanTarget === 'carbohydrates' && nutrients['carbs'] !== undefined) {
+    const v = Number(nutrients['carbs']);
+    return Number.isFinite(v) ? v : 0;
+  }
+  return 0;
+}

@@ -10,7 +10,7 @@ const getBiomarkerDef = (key: string) => biomarkerDefinitions.find(d => d.key ==
 import { getAgentCalibration, formatOptimalTargetValue } from '../utils/agentCalibration';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { standardizeUnit, reverseStandardizeUnit, formatNormalRange } from '../utils/unitConversion';
-import { PRIMARY_NUTRIENTS, isCoreNutrient, isAdditionalNutrient, getTopTargetNutrientKeys } from '../utils/nutrients';
+import { PRIMARY_NUTRIENTS, isCoreNutrient, isAdditionalNutrient, getTopTargetNutrientKeys, extractNutrientValue } from '../utils/nutrients';
 import { nutrientDefinitions } from '../utils/nutrition';
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
 import { FilterPills } from './ui/FilterPills';
@@ -185,7 +185,7 @@ export default function HomeTab({
   // Rolling target configurations and persistent states
   const [showAverageInBar, setShowAverageInBar] = React.useState<boolean>(() => {
     const saved = localStorage.getItem('showAverageInBar');
-    return saved !== null ? saved === 'true' : false;
+    return saved !== null ? saved === 'true' : true;
   });
 
   React.useEffect(() => {
@@ -365,11 +365,11 @@ export default function HomeTab({
         
         let displayValue = val;
         let displayUnit = def.unit || '';
-        if (profile.unitPreference === 'US' && typeof val === 'number') {
-           const reversed = reverseStandardizeUnit(key, val, displayUnit);
-           displayValue = reversed.newValue;
-           displayUnit = reversed.newUnit || displayUnit;
-        }
+         if (profile.unitPreference === 'US' && typeof val === 'number') {
+            const reversed: any = reverseStandardizeUnit(key, val, displayUnit);
+            displayValue = reversed?.newValue ?? reversed;
+            displayUnit = reversed?.newUnit || displayUnit;
+         }
 
         return {
           key,
@@ -477,6 +477,7 @@ export default function HomeTab({
 
   const getAverageIntake = React.useCallback((key: string, numDays: number) => {
     let totalIntake = 0;
+    let activeDaysCount = 0;
     for (let d = 0; d < numDays; d++) {
       const parts = todayStr.split('-');
       const todayDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
@@ -488,15 +489,18 @@ export default function HomeTab({
       const dd = String(targetDate.getDate()).padStart(2, '0');
       const targetDateStr = `${yyyy}-${mm}-${dd}`;
       
-      const dayFoods = activeFoodLogs.filter(f => f.date === targetDateStr);
-      const dayTotal = dayFoods.reduce((acc, curr) => {
-        return acc + (Number(curr.nutrients?.[key]) || 0);
-      }, 0);
-      totalIntake += dayTotal;
+      const dayFoods = activeFoodLogs.filter(f => toYYYYMMDD(f.date) === targetDateStr);
+      if (dayFoods.length > 0) {
+        const dayTotal = dayFoods.reduce((acc, curr) => {
+          return acc + extractNutrientValue(curr.nutrients, key);
+        }, 0);
+        totalIntake += dayTotal;
+        activeDaysCount++;
+      }
     }
-    return numDays > 0 ? totalIntake / numDays : 0;
+    return activeDaysCount > 0 ? totalIntake / activeDaysCount : 0;
   }, [todayStr, activeFoodLogs]);
-  const todaysFoods = activeFoodLogs.filter(f => f.date === todayStr);
+  const todaysFoods = activeFoodLogs.filter(f => toYYYYMMDD(f.date) === todayStr);
 
   const todaysTotals = todaysFoods.reduce((acc, curr) => {
     if (curr.nutrients) {
@@ -530,7 +534,9 @@ export default function HomeTab({
       targetDates.add(`${yyyy}-${mm}-${dd}`);
     }
     
-    const foodsInRange = activeFoodLogs.filter(f => targetDates.has(f.date));
+    const foodsInRange = activeFoodLogs.filter(f => targetDates.has(toYYYYMMDD(f.date)));
+    const activeDatesInRange = new Set(foodsInRange.map(f => toYYYYMMDD(f.date)));
+    const divisor = activeDatesInRange.size > 0 ? activeDatesInRange.size : 1;
     
     foodsInRange.forEach(f => {
       if (f.nutrients) {
@@ -543,7 +549,7 @@ export default function HomeTab({
     
     const averages: { [key: string]: number } = {};
     Object.keys(totals).forEach(k => {
-      const avg = totals[k] / days;
+      const avg = totals[k] / divisor;
       if (avg >= 10) {
         averages[k] = Math.round(avg);
       } else {
@@ -570,7 +576,7 @@ export default function HomeTab({
       targetDates.add(`${yyyy}-${mm}-${dd}`);
     }
     
-    const foodsInRange = activeFoodLogs.filter(f => targetDates.has(f.date));
+    const foodsInRange = activeFoodLogs.filter(f => targetDates.has(toYYYYMMDD(f.date)));
     
     foodsInRange.forEach(f => {
       if (f.nutrients) {
@@ -672,10 +678,10 @@ export default function HomeTab({
       const dd = String(prevDate.getDate()).padStart(2, '0');
       const targetDateStr = `${yyyy}-${mm}-${dd}`;
       
-      const dayFoods = activeFoodLogs.filter(f => f.date === targetDateStr);
+      const dayFoods = activeFoodLogs.filter(f => toYYYYMMDD(f.date) === targetDateStr);
       if (dayFoods.length > 0) {
         const dayTotal = dayFoods.reduce((acc, curr) => {
-          return acc + (Number(curr.nutrients?.[key]) || 0);
+          return acc + extractNutrientValue(curr.nutrients, key);
         }, 0);
         totalPrevIntake += dayTotal;
       } else {
@@ -1230,12 +1236,39 @@ export default function HomeTab({
       {/* Nutrition Allowance Tracker Dashboard (MOVED UP just above Health Status & BMI) */}
       <div id="dashboard-nutrition-targets" className="space-y-4">
         <div className="flex justify-between items-center pb-2 border-b border-theme-border/50">
-          <h3 className="font-bold text-theme-text text-sm flex items-center gap-2">
-            <Heart className="w-4 h-4 text-indigo-600" />
-            {t.topTargets}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-bold text-theme-text text-sm flex items-center gap-1.5">
+              <Heart className="w-4 h-4 text-indigo-600" />
+              {t.topTargets}
+            </h3>
+            {/* Quick Timeframe Switcher */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700/60">
+              <button
+                type="button"
+                onClick={() => setViewTimeframe('1')}
+                className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors cursor-pointer ${
+                  viewTimeframe === '1'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                {t.viewTimeframeToday || 'Today'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewTimeframe('7')}
+                className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors cursor-pointer ${
+                  viewTimeframe === '7'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                {t.rolling7Day || 'Rolling 7-Day'}
+              </button>
+            </div>
+          </div>
           <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-            <Calendar className="w-3 h-3" /> {todayStr}
+            <Calendar className="w-3 h-3" /> {viewTimeframe === '1' ? todayStr : (t.rolling7Day || 'Rolling 7-Day')}
           </span>
         </div>
 
@@ -1263,13 +1296,13 @@ export default function HomeTab({
             return (
               <div key={key} className="space-y-1">
                 <div className="flex justify-between text-xs font-semibold">
-                  <span className="text-theme-neutral flex items-center gap-1">
-                    {label}
-                    {showAverageInBar && getAverageIntake(key, rollingDays) > 0 && (() => {
+                  <span className="text-theme-neutral flex items-center gap-1.5">
+                    <span>{label}</span>
+                    {getAverageIntake(key, rollingDays) > 0 && (() => {
                       const avg = getAverageIntake(key, rollingDays);
                       const isAvgOver = adjustedTarget > 0 && avg > adjustedTarget;
                       const pctAbove = isAvgOver ? ((avg - adjustedTarget) / adjustedTarget) * 100 : 0;
-                      let textColor = "text-amber-550 dark:text-amber-400";
+                      let textColor = "text-slate-400 dark:text-slate-500 font-normal";
                       let overText = "";
                       
                       if (isAvgOver) {
@@ -1279,7 +1312,7 @@ export default function HomeTab({
                       
                       return (
                         <span className={`text-[10px] ${textColor}`}>
-                          - {interpolate(t.avgAmount, { value: formatValue(avg), unit })}{overText}
+                          · {interpolate(t.avgAmount, { value: formatValue(avg), unit })}{overText}
                         </span>
                       );
                     })()}
@@ -1316,7 +1349,7 @@ export default function HomeTab({
                   )}
                   
                   {/* Average wrap-around and indicator */}
-                  {showAverageInBar && (() => {
+                  {(() => {
                      const avg = getAverageIntake(key, rollingDays);
                      if (avg === 0 || adjustedTarget === 0) return null;
                      
@@ -1325,7 +1358,7 @@ export default function HomeTab({
                        if (isLimit) {
                          return (
                            <div 
-                             className="absolute top-0 bottom-0 bg-rose-500/30 z-10 border-r-[3px] border-rose-600 shadow-sm"
+                             className="absolute top-0 bottom-0 bg-rose-500/30 z-10 border-r-[3px] border-rose-600 shadow-xs"
                              style={{ left: 0, width: `${pctOverage}%` }}
                              title={interpolate(t.nDayAverageOver, { days: rollingDays, value: formatValue(avg), unit, pct: pctOverage.toFixed(0) })}
                            />
@@ -1333,7 +1366,7 @@ export default function HomeTab({
                        } else {
                          return (
                            <div 
-                             className="absolute top-0 bottom-0 bg-emerald-500/30 z-10 border-r-[3px] border-emerald-600 shadow-sm"
+                             className="absolute top-0 bottom-0 bg-emerald-500/30 z-10 border-r-[3px] border-emerald-600 shadow-xs"
                              style={{ left: 0, width: `${pctOverage}%` }}
                              title={interpolate(t.nDayAverageOver, { days: rollingDays, value: formatValue(avg), unit, pct: pctOverage.toFixed(0) })}
                            />
@@ -1343,7 +1376,7 @@ export default function HomeTab({
                        const pct = Math.min(100, (avg / adjustedTarget) * 100);
                        return (
                          <div 
-                           className="absolute top-0 bottom-0 w-[3px] bg-amber-400 z-10 shadow-sm"
+                           className="absolute top-0 bottom-0 w-[3px] bg-amber-400 z-10 shadow-xs"
                            style={{ left: `${pct}%` }}
                            title={interpolate(t.nDayAverage, { days: rollingDays, value: formatValue(avg), unit })}
                          />

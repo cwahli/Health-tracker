@@ -2,7 +2,7 @@ import React from 'react';
 import { NutrientPieChart } from './NutrientPieChart';
 import { getNutrientColor, nutrientDefinitions } from '../utils/nutrition';
 import { displayNutrientName } from '../utils/i18n';
-import { getTopTargetNutrientKeys } from '../utils/nutrients';
+import { getTopTargetNutrientKeys, extractNutrientValue } from '../utils/nutrients';
 
 export interface NutrientTargetRowProps {
   nutrients?: Record<string, any> | null;
@@ -118,7 +118,7 @@ export const NutrientTargetRow: React.FC<NutrientTargetRowProps> = ({
         consumedBefore = Number(consumedBeforeMap[lookupKey] ?? consumedBeforeMap[key]) || 0;
       } else if (logsBefore.length > 0) {
         consumedBefore = logsBefore.reduce((acc, curr) => {
-          return acc + (Number((curr.nutrients as any)?.[lookupKey] ?? (curr.nutrients as any)?.[key] ?? 0) || 0);
+          return acc + extractNutrientValue(curr.nutrients, lookupKey);
         }, 0);
       } else if (allowanceObj) {
         if (lookupKey === 'saturatedFat' || key === 'saturatedFat') {
@@ -129,17 +129,11 @@ export const NutrientTargetRow: React.FC<NutrientTargetRowProps> = ({
       }
 
       // In meal value
-      let inMealRaw = nutrients?.[lookupKey] ?? nutrients?.[key];
-      if (inMealRaw === undefined || inMealRaw === null) {
-        const match = Object.entries(nutrients || {}).find(([k]) => k.toLowerCase().replace(/[^a-z0-9]/g, '') === lowerKey);
-        if (match) inMealRaw = match[1];
-      }
-      let inMealVal = typeof inMealRaw === 'number' ? inMealRaw : parseFloat(String(inMealRaw || '0'));
-      if (isNaN(inMealVal)) inMealVal = 0;
+      const inMealVal = extractNutrientValue(nutrients, lookupKey);
 
       // Day total & percentage
       const dayTotal = logsBefore.length > 0 || dayLogs.length > 0
-        ? dayLogs.reduce((acc, curr) => acc + (Number((curr.nutrients as any)?.[lookupKey] ?? (curr.nutrients as any)?.[key] ?? 0) || 0), 0)
+        ? dayLogs.reduce((acc, curr) => acc + extractNutrientValue(curr.nutrients, lookupKey), 0)
         : (consumedBefore + inMealVal);
 
       const pct = allowance > 0 ? (dayTotal / allowance) : 0;
