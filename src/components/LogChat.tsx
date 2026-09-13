@@ -106,7 +106,7 @@ import { reserveCredits } from '../jobs/credits';
 import { JobQueueRunner } from '../jobs/JobQueueRunner';
 import { recordBreadcrumb, setActiveJobScope } from '../utils/breadcrumbTracker';
 import { consumeGoldenAnalyzeToken, GOLDEN_NEW_ANALYZE_EVENT } from '../utils/goldenIngestClient';
-import { PRIMARY_NUTRIENTS, formatNutrientDisplayValue } from '../utils/nutrients';
+import { PRIMARY_NUTRIENTS, formatNutrientDisplayValue, getTopTargetNutrientKeys } from '../utils/nutrients';
 import { AgentType, AGENT_REGISTRY, getAgentRolloutStatus } from '../utils/agentConfig';
 import { getAvailableCredits, deductAgentCredits } from '../utils/creditManager';
 import { getAdminSettings } from '../utils/userManagement';
@@ -3368,6 +3368,8 @@ ${logsText}`);
           outOfRangeBiomarkers,
           remainingAllowance,
           dailyNutrientTargets: report?.dailyNutrientTargets || null,
+          topTargetNutrientKeys: getTopTargetNutrientKeys(report, profile),
+          report: report || null,
           messages,
         };
         let resData: any = null;

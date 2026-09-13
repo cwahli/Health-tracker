@@ -6,6 +6,7 @@ import { withScoutLanguage } from './src/utils/i18n.js';
 import { formatLockedSlotsForPrompt } from './server_edit_patch_ledger.js';
 import { buildNutritionTargetStatus, pickExplicitTargets } from './src/utils/nutritionTargetStatus.js';
 import { getCurrentDateInTimezone } from './src/utils/dateUtils.js';
+import { getTopTargetNutrientKeys } from './src/utils/nutrients.js';
 
 export async function executeScoutPhase(ctx: AnalyzeRunContext): Promise<void> {
   if (ctx.compareOnly) {
@@ -66,7 +67,15 @@ export async function executeScoutPhase(ctx: AnalyzeRunContext): Promise<void> {
           scoutPromptText = buildVisualScoutPrompt(ctx.message || '', imageCount, false);
         }
         const scoutPersonalization = buildScoutPersonalizationBlock({ biomarkersNeedingImprovement: ctx.biomarkersNeedingImprovement });
-        const nutritionTargetStatus = buildNutritionTargetStatus({ logs: ctx.req.body.foodLogs, targets: pickExplicitTargets(ctx.req.body.dailyNutrientTargets), todayStr: getCurrentDateInTimezone(ctx.userProfile?.timezone) });
+        const topTargetKeys = (Array.isArray(ctx.req.body?.topTargetNutrientKeys) && ctx.req.body.topTargetNutrientKeys.length > 0)
+          ? ctx.req.body.topTargetNutrientKeys
+          : getTopTargetNutrientKeys(ctx.req.body?.report, ctx.req.body?.userProfile || ctx.userProfile);
+        const nutritionTargetStatus = buildNutritionTargetStatus({
+          logs: ctx.req.body.foodLogs,
+          targets: pickExplicitTargets(ctx.req.body.dailyNutrientTargets, topTargetKeys),
+          todayStr: getCurrentDateInTimezone(ctx.userProfile?.timezone),
+          targetKeys: topTargetKeys
+        });
         const resolvedScoutSystemInstruction = (ctx.userSelectedMode === 'compare'
           ? withScoutLanguage(scoutOnlyCompareSystemInstruction, ctx.userProfile?.language)
           : withScoutLanguage(scoutSystemInstruction, ctx.userProfile?.language))

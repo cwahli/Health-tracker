@@ -10,7 +10,7 @@ const getBiomarkerDef = (key: string) => biomarkerDefinitions.find(d => d.key ==
 import { getAgentCalibration, formatOptimalTargetValue } from '../utils/agentCalibration';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { standardizeUnit, reverseStandardizeUnit, formatNormalRange } from '../utils/unitConversion';
-import { PRIMARY_NUTRIENTS, isCoreNutrient, isAdditionalNutrient } from '../utils/nutrients';
+import { PRIMARY_NUTRIENTS, isCoreNutrient, isAdditionalNutrient, getTopTargetNutrientKeys } from '../utils/nutrients';
 import { nutrientDefinitions } from '../utils/nutrition';
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
 import { FilterPills } from './ui/FilterPills';
@@ -709,40 +709,7 @@ export default function HomeTab({
   }, [getRollingBreakdown]);
 
   const topMonitoredKeys = React.useMemo(() => {
-    const rawKeys: string[] = [];
-    if (Array.isArray(report?.topNutrientTargets) && report.topNutrientTargets.length > 0) {
-      report.topNutrientTargets.forEach((k: any) => {
-        const strKey = typeof k === 'string' ? k : (k?.nutrientKey || k?.key);
-        if (strKey && !rawKeys.includes(strKey)) rawKeys.push(strKey);
-      });
-    }
-    const cats = report?.healthBaselineCategories || (report as any)?.riskCategories || [];
-    if (Array.isArray(cats)) {
-      cats.forEach((cat: any) => {
-        if (Array.isArray(cat.nutrientTargets) || Array.isArray(cat.priorityNutrientTargets)) {
-          (cat.priorityNutrientTargets || cat.nutrientTargets).forEach((nt: any) => {
-            const strKey = typeof nt === 'string' ? nt : (nt?.nutrientKey || nt?.key);
-            if (strKey && isCoreNutrient(strKey) && !rawKeys.includes(strKey)) rawKeys.push(strKey);
-          });
-        }
-      });
-    }
-    if (profile?.topNutrientsToMonitor && profile.topNutrientsToMonitor.length > 0) {
-      profile.topNutrientsToMonitor.forEach(k => {
-        if (!rawKeys.includes(k)) rawKeys.push(k);
-      });
-    }
-    if (rawKeys.length === 0) {
-      PRIMARY_NUTRIENTS.forEach(k => rawKeys.push(k));
-    }
-    // Filter strictly to core nutrients while maintaining rank order
-    const coreOnly = rawKeys.filter(isCoreNutrient);
-    const set = new Set<string>();
-    coreOnly.forEach(k => set.add(k));
-    if (set.size === 0) {
-      PRIMARY_NUTRIENTS.forEach(k => set.add(k));
-    }
-    return Array.from(set);
+    return getTopTargetNutrientKeys(report, profile);
   }, [profile?.topNutrientsToMonitor, report]);
 
   const topWeeklyNutrientKeys = React.useMemo(() => {

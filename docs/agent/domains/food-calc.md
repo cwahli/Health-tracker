@@ -1,7 +1,7 @@
 # Domain rulebook: Food-calc
 
 **Load when:** calories, scout, budget, reconcile, receipt, portion, catalog/resolver, Mode A/D/Edit food analyze.  
-**F-10:** read **§1–1d only**. Do not load the rest of this file, and do not load `plan/FOOD.md` Part A/B.  
+**F-10:** read **§1–1e only**. Do not load the rest of this file, and do not load `plan/FOOD.md` Part A/B.  
 **Do not load** for pure biomarker UI, questions about prototype logs, or unrelated CSS.
 
 **Plans (architecture):** `plan/FOOD.md` Process + `plan/FOOD_SINGLE_PATH.md` · execute `plan/ROADMAP.md` Track F  
@@ -140,6 +140,27 @@ Create does **not** run a Dietitian audit LLM. Hidden commercial fat and sodium 
 2. **No default critic LLM.** A Commercial Cooking Critic agent is parked until TS multipliers fail a named soak.
 3. **Edit corrections:** On a later submit the Meal Agent may emit `correctedNutrients` with a clinical note. Then `rebalanceNutrientProfile` recomputes kcal = 4P+4C+9F. Create path does not.
 4. **Parity:** Saved table and message numbers both come from the finalize ledger after TS critic / edit rebalance.
+
+---
+
+## 1e. Single Source of Truth: Top Targets Synchronization
+
+**Rule:** The user's Top Targets across the entire application MUST be unified from a single source of truth helper (`getTopTargetNutrientKeys(report, profile)`).
+
+1. **Definition & Prioritization:**
+   - Top targets are strictly the prioritized core nutrients indicated on the Home tab (excluding physical activity metrics such as `steps`; nutrients only).
+   - Priority rank order:
+     1. `report.topNutrientTargets`
+     2. `report.healthBaselineCategories` / `report.riskCategories` (`priorityNutrientTargets` or `nutrientTargets`)
+     3. `profile.topNutrientsToMonitor`
+     4. Fallback to `PRIMARY_NUTRIENTS` (`calories`, `saturatedFat`, `sodium`)
+   - Strict core filter: `isCoreNutrient(key) && key.toLowerCase() !== 'steps'`.
+
+2. **Parity Across All Surfaces:**
+   - **Scout Analysis Prompt (`=== NUTRITIONAL TARGET STATUS ===`):** Evaluates rolling averages for the exact same top target keys, and `pickExplicitTargets` parses explicit target limits for all top target keys so over/under percentages are included.
+   - **Meal History Card (`FoodHistoryTab`):** Displays the complete list of top target nutrients for the meal via the shared component (not a truncated subset).
+   - **Agent Modal (`FoodCard` - Compare & Single Meal):** Displays the exact same top target nutrients via the shared component (not an arbitrary expanded 8–10 macro list).
+   - **Shared Reusable Component (`NutrientTargetRow`):** A shared, callable UI component rendered across both `FoodHistoryTab` and `FoodCard` (and any other meal views) ensuring visual styling parity (`NutrientPieChart` + bold colored text with display name, value, and unit) and numerical consistency.
 
 ---
 

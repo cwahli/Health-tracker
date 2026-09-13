@@ -17,6 +17,8 @@ export interface FoodAgentExecutorInput {
   outOfRangeBiomarkers?: any[];
   remainingAllowance?: any;
   dailyNutrientTargets?: any;
+  topTargetNutrientKeys?: string[];
+  report?: any;
   messages?: any[]; // Only what's needed for context
   portionChoices?: any;
   activeMeal?: any;
@@ -142,6 +144,12 @@ export async function* executeFoodAgent(input: FoodAgentExecutorInput): AsyncGen
   }
   if ((input as any).dailyNutrientTargets) {
     bodyData.dailyNutrientTargets = (input as any).dailyNutrientTargets;
+  }
+  if ((input as any).topTargetNutrientKeys) {
+    bodyData.topTargetNutrientKeys = (input as any).topTargetNutrientKeys;
+  }
+  if ((input as any).report) {
+    bodyData.report = (input as any).report;
   }
   if (input.skipScout) {
     bodyData.skipScout = input.skipScout;

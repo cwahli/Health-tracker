@@ -3901,15 +3901,23 @@ async function startServer() {
       server: {
         middlewareMode: true,
         watch: {
-          ignored: [
-            '**/brand_menu_items_local.json',
-            '**/tests/**',
-            '**/studio/**',
-            '**/archive/**',
-            '**/*.log',
-            '**/tmp/**'
-          ]
-        }
+            ignored: [
+              // Large generated/dependency trees — chokidar FSEvents on macOS
+              // spins at 10-40% CPU when any of these are written to during a run.
+              '**/node_modules/**',
+              '**/specs/**',
+              '**/prototype/**',
+              '**/.git/**',
+              // App-specific files that change frequently at runtime
+              '**/brand_menu_items_local.json',
+              '**/*.log',
+              '**/tmp/**',
+              // Test/archive dirs not needed for hot-reload
+              '**/tests/**',
+              '**/studio/**',
+              '**/archive/**',
+            ]
+          }
       },
       appType: "spa",
     });
@@ -3923,4 +3931,46 @@ async function startServer() {
 
 if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
   startServer();
+
+  // Graceful shutdown: mark all in-flight Supabase jobs as failed before exit.
+  // Without this, every Ctrl+C / kill leaves jobs stuck in 'running' state in
+  // Supabase — the recovery on next boot then re-runs all of them simultaneously,
+  // pegging CPU at 99% and generating GB-scale ingress traffic.
+  const handleShutdown = async (signal: string) => {
+    console.log(`\n[shutdown] ${signal} received — marking in-flight jobs failed in Supabase...`);
+    try {
+      const { inMemoryServerJobs } = await import('./serverJobs.js');
+      const { supabaseAdmin, isSupabaseConfigured } = await import('./supabaseAdmin.js');
+
+      if (isSupabaseConfigured) {
+        const runningIds: string[] = [];
+        for (const [id, job] of inMemoryServerJobs.entries()) {
+          if (job.status === 'running' || job.status === 'pending') {
+            runningIds.push(id);
+          }
+        }
+
+        if (runningIds.length > 0) {
+          console.log(`[shutdown] Failing ${runningIds.length} in-flight job(s): ${runningIds.join(', ')}`);
+          await Promise.race([
+            supabaseAdmin.from('agent_jobs').update({
+              status: 'failed',
+              status_message: 'Server stopped — please retry.',
+              updated_at: new Date().toISOString(),
+            }).in('id', runningIds),
+            new Promise(r => setTimeout(r, 3000)), // 3s timeout — don't hang the kill
+          ]);
+          console.log('[shutdown] Supabase cleanup done.');
+        } else {
+          console.log('[shutdown] No in-flight jobs to clean up.');
+        }
+      }
+    } catch (e) {
+      console.warn('[shutdown] Cleanup error (non-fatal):', e);
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT',  () => handleShutdown('SIGINT'));
 }

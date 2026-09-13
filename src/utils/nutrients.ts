@@ -49,5 +49,44 @@ export function formatNutrientDisplayValue(val: any, unit: string = ''): string 
   return unit ? `${cleaned} ${unit}` : `${cleaned}`;
 }
 
-
-
+/**
+ * Single source of truth for Top Target nutrient keys across the application.
+ * Extracts prioritized core nutrients from report and user profile, strictly
+ * excluding non-nutrient activity metrics (e.g. 'steps').
+ */
+export function getTopTargetNutrientKeys(report?: any, profile?: any): string[] {
+  const rawKeys: string[] = [];
+  if (Array.isArray(report?.topNutrientTargets) && report.topNutrientTargets.length > 0) {
+    report.topNutrientTargets.forEach((k: any) => {
+      const strKey = typeof k === 'string' ? k : (k?.nutrientKey || k?.key);
+      if (strKey && !rawKeys.includes(strKey)) rawKeys.push(strKey);
+    });
+  }
+  const cats = report?.healthBaselineCategories || (report as any)?.riskCategories || [];
+  if (Array.isArray(cats)) {
+    cats.forEach((cat: any) => {
+      if (Array.isArray(cat.nutrientTargets) || Array.isArray(cat.priorityNutrientTargets)) {
+        (cat.priorityNutrientTargets || cat.nutrientTargets).forEach((nt: any) => {
+          const strKey = typeof nt === 'string' ? nt : (nt?.nutrientKey || nt?.key);
+          if (strKey && isCoreNutrient(strKey) && !rawKeys.includes(strKey)) rawKeys.push(strKey);
+        });
+      }
+    });
+  }
+  if (profile?.topNutrientsToMonitor && profile.topNutrientsToMonitor.length > 0) {
+    profile.topNutrientsToMonitor.forEach((k: any) => {
+      if (typeof k === 'string' && !rawKeys.includes(k)) rawKeys.push(k);
+    });
+  }
+  if (rawKeys.length === 0) {
+    PRIMARY_NUTRIENTS.forEach(k => rawKeys.push(k));
+  }
+  // Filter strictly to core nutrients while maintaining rank order, excluding non-nutrients like steps
+  const coreOnly = rawKeys.filter(k => isCoreNutrient(k) && k.toLowerCase() !== 'steps');
+  const set = new Set<string>();
+  coreOnly.forEach(k => set.add(k));
+  if (set.size === 0) {
+    PRIMARY_NUTRIENTS.forEach(k => set.add(k));
+  }
+  return Array.from(set);
+}

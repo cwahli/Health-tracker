@@ -233,35 +233,67 @@ export async function recoverInterruptedServerJobs(): Promise<number> {
         console.error('[ServerJobs Worker] Failed to query stuck jobs from D1:', d1Err);
       }
     } else if (isSupabaseConfigured && isSupabaseAdminConfigured) {
+      // Only recover jobs stuck for >3 min (matches D1 threshold) but <2 hrs.
+      // Without the lower bound, every server restart re-runs ALL historical
+      // running jobs in Supabase — spawning N simultaneous LLM pipelines and
+      // pegging CPU at 99% while hammering Supabase with progress writes.
+      const STUCK_MIN_MS = 180_000;   // 3 min  — same as d1GetStuckJobs
+      const STUCK_MAX_MS = 7_200_000; // 2 hrs  — older jobs are unrecoverable
+      const now = Date.now();
+      const stuckAfter  = new Date(now - STUCK_MAX_MS).toISOString();
+      const stuckBefore = new Date(now - STUCK_MIN_MS).toISOString();
+
       const { data: stuckJobs, error } = await supabaseAdmin
         .from('agent_jobs')
         .select('id, user_id, kind, mode, status, progress_percent, status_message, photo_url, updated_at, clean_result')
-        .in('status', ['running', 'pending']);
+        .in('status', ['running', 'pending'])
+        .gt('updated_at', stuckAfter)   // not older than 2 hrs
+        .lt('updated_at', stuckBefore); // stuck for at least 3 min
 
       if (error) {
         console.error('[ServerJobs Worker] Failed to query stuck jobs from Supabase:', error);
       } else if (stuckJobs && stuckJobs.length > 0) {
-        for (const dbJob of stuckJobs) {
-          if (!inMemoryServerJobs.has(dbJob.id)) {
-            console.log(`[ServerJobs Worker] Recovering Supabase job ${dbJob.id}...`);
-            inMemoryServerJobs.set(dbJob.id, {
-              ...dbJob,
-              status: 'running',
-              status_message: 'Resuming analysis after process restart...',
-              updated_at: new Date().toISOString()
-            });
-            recoveredCount++;
+        // Cap concurrent boot-time recoveries to 2 to avoid CPU storm on restart.
+        // Additional jobs remain in Supabase as 'running' and will be auto-failed
+        // by the stale-threshold check in the /api/jobs/status route after 5 min.
+        const MAX_BOOT_RECOVERIES = 2;
+        let bootRecoveries = 0;
 
-            submitServerJob({
-              jobId: dbJob.id,
-              userId: dbJob.user_id,
-              kind: dbJob.kind,
-              mode: dbJob.mode,
-              text: (dbJob as any).input_snapshot?.message || dbJob.clean_result?.text || '',
-              imageUrls: dbJob.photo_url ? [dbJob.photo_url] : [],
-              activeMeal: dbJob.clean_result?.mealBuild || dbJob.clean_result?.pendingFoodLog
-            }).catch(e => console.error(`[ServerJobs Worker] Error resuming Supabase job ${dbJob.id}:`, e));
+        for (const dbJob of stuckJobs) {
+          if (inMemoryServerJobs.has(dbJob.id)) continue;
+
+          if (bootRecoveries >= MAX_BOOT_RECOVERIES) {
+            console.warn(`[ServerJobs Worker] Boot recovery cap (${MAX_BOOT_RECOVERIES}) reached — skipping Supabase job ${dbJob.id}. Marking failed.`);
+            // Mark it failed immediately so the client doesn't spin-poll forever.
+            void Promise.resolve(
+              supabaseAdmin.from('agent_jobs').update({
+                status: 'failed',
+                status_message: 'Server restarted — analysis could not be recovered. Please retry.',
+                updated_at: new Date().toISOString(),
+              }).eq('id', dbJob.id)
+            ).catch(() => {});
+            continue;
           }
+
+          console.log(`[ServerJobs Worker] Recovering Supabase job ${dbJob.id}...`);
+          inMemoryServerJobs.set(dbJob.id, {
+            ...dbJob,
+            status: 'running',
+            status_message: 'Resuming analysis after process restart...',
+            updated_at: new Date().toISOString()
+          });
+          recoveredCount++;
+          bootRecoveries++;
+
+          submitServerJob({
+            jobId: dbJob.id,
+            userId: dbJob.user_id,
+            kind: dbJob.kind,
+            mode: dbJob.mode,
+            text: (dbJob as any).input_snapshot?.message || dbJob.clean_result?.text || '',
+            imageUrls: dbJob.photo_url ? [dbJob.photo_url] : [],
+            activeMeal: dbJob.clean_result?.mealBuild || dbJob.clean_result?.pendingFoodLog
+          }).catch(e => console.error(`[ServerJobs Worker] Error resuming Supabase job ${dbJob.id}:`, e));
         }
       }
     }

@@ -18,6 +18,7 @@ import { fetchFoodLogDetail } from '../utils/syncUtils';
 /** B13 — only this many history rows mount image sliders at once */
 export const FOOD_HISTORY_PAGE_SIZE = 15;
 import { NutrientPieChart } from './NutrientPieChart';
+import { NutrientTargetRow } from './NutrientTargetRow';
 import { NutritionLabelTable } from './chat-cards/NutritionLabelTable';
 import { MealPortionController } from './chat-cards/MealPortionController';
 import { scaleMealPortion, scaleSingleDishPortion } from '../utils/portionUtils';
@@ -1797,91 +1798,14 @@ export default function FoodHistoryTab({
 
                       {/* Calories Badge & Top Targets & Expand Indicator */}
                       <div className="flex flex-wrap items-center justify-between pt-1 gap-2">
-                        {(() => {
-                          const parseTarget = (val: any, fallback: number) => {
-                            if (val === null || val === undefined) return fallback;
-                            const cleanStr = String(val).replace(/,/g, '');
-                            const matches = cleanStr.match(/\d+(\.\d+)?/g);
-                            if (!matches || matches.length === 0) return fallback;
-                            const parsed = parseFloat(matches[0]);
-                            return isNaN(parsed) ? fallback : parsed;
-                          };
-
-                          const defaultKeys = ['calories', 'saturatedFat', 'sodium'];
-                          const rawTargets = (report as any)?.topNutrientTargets || (report as any)?.nutrientTargets || profile?.topNutrientsToMonitor;
-                          const targetKeys = Array.isArray(rawTargets) && rawTargets.length > 0
-                            ? rawTargets.map((item: any) => {
-                                if (typeof item === 'string') return item;
-                                return item?.nutrientKey || item?.key || '';
-                              }).filter(Boolean)
-                            : defaultKeys;
-                          const activeKeys = targetKeys;
-
-                          const logDate = log.date;
-                          const dayLogs = activeFoodLogs ? activeFoodLogs.filter(f => f.date === logDate) : [];
-                          const dayLogsChronological = [...dayLogs].sort((a, b) => a.id.localeCompare(b.id));
-                          const currentIndex = dayLogsChronological.findIndex(f => f.id === log.id);
-                          const logsBefore = currentIndex !== -1 ? dayLogsChronological.slice(0, currentIndex) : [];
-
-                          const sortedActiveNutrients = activeKeys.map((rawKey: string) => {
-                            const key = String(rawKey);
-                            const lowerKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-                            const nutrientDef = nutrientDefinitions.find(n => n.key.toLowerCase().replace(/[^a-z0-9]/g, '') === lowerKey);
-                            const lookupKey = nutrientDef?.key || key;
-
-                            const allowance = report && report.dailyNutrientTargets ? parseTarget((report.dailyNutrientTargets as any)[lookupKey] || (report.dailyNutrientTargets as any)[key], 1000) : 1000;
-                            const consumedBefore = logsBefore.reduce((acc, curr) => acc + (Number((curr.nutrients as any)?.[lookupKey] ?? (curr.nutrients as any)?.[key] ?? 0) || 0), 0);
-                            const inMeal = (log.nutrients as any)?.[lookupKey] ?? (log.nutrients as any)?.[key] ?? 0;
-                            const inMealVal = typeof inMeal === 'number' ? inMeal : parseFloat(String(inMeal));
-                            const dayTotal = dayLogs.reduce((acc, curr) => acc + (Number((curr.nutrients as any)?.[lookupKey] ?? (curr.nutrients as any)?.[key] ?? 0) || 0), 0);
-
-                            const pct = allowance > 0 ? (dayTotal / allowance) : 0;
-                            const mealPct = allowance > 0 ? ((isNaN(inMealVal) ? 0 : inMealVal) / allowance) : 0;
-
-                            return {
-                              rawKey,
-                              key,
-                              lookupKey,
-                              nutrientDef,
-                              allowance,
-                              consumedBefore,
-                              inMeal,
-                              inMealVal,
-                              pct: pct > 0 ? pct : mealPct
-                            };
-                          }).sort((a, b) => b.pct - a.pct);
-
-                          return (
-                            <div className="flex items-center gap-3 overflow-x-auto py-1 scrollbar-none flex-nowrap max-w-full text-left">
-                              {sortedActiveNutrients.map(({ rawKey, key, lookupKey, nutrientDef, allowance, consumedBefore, inMeal, inMealVal }) => {
-                                if (isNaN(inMealVal)) {
-                                  return null;
-                                }
-
-                                const unit = nutrientDef ? nutrientDef.unit : 'g';
-                                const labelColor = getNutrientColor(lookupKey);
-                                const displayName = nutrientDef
-                                  ? displayNutrientName(profile.language, lookupKey || key, { short: true })
-                                  : key.replace(/([A-Z])/g, ' $1').trim();
-
-                                return (
-                                  <div key={key} className="flex items-center gap-1.5 shrink-0">
-                                    <NutrientPieChart
-                                      allowance={allowance}
-                                      alreadyConsumed={consumedBefore}
-                                      mealValue={inMeal}
-                                      nutrientKey={lookupKey}
-                                      size="sm"
-                                    />
-                                    <span className="text-[11px] font-extrabold" style={{ color: labelColor }}>
-                                      {displayName}: {typeof inMeal === 'number' ? (inMeal >= 100 ? Math.round(inMeal) : inMeal.toFixed(inMeal >= 10 ? 1 : 2)) : inMeal} {unit}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
+                        <NutrientTargetRow
+                          nutrients={log.nutrients}
+                          report={report}
+                          profile={profile}
+                          activeFoodLogs={activeFoodLogs}
+                          logDate={log.date}
+                          logId={log.id}
+                        />
 
                         {/* Reduce link shown below top nutrients when card is expanded */}
                         {isExpanded && (

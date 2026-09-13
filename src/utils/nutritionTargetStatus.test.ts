@@ -71,4 +71,41 @@ describe('buildNutritionTargetStatus (adaptive rolling average)', () => {
       .toEqual({ calories: 2000, saturatedFat: 20 });
     expect(pickExplicitTargets(null)).toEqual({});
   });
+
+  it('evaluates custom targetKeys matching Top Targets', () => {
+    const topKeys = ['saturatedFat', 'addedSugar', 'calories', 'solubleFibre', 'sodium'];
+    const targets = pickExplicitTargets({
+      saturatedFat: 15,
+      addedSugar: 25,
+      calories: 2100,
+      solubleFibre: 15,
+      sodium: 2000,
+      steps: 8000
+    }, topKeys);
+
+    const logs = [day('2026-09-07', {
+      saturatedFat: 12,
+      addedSugar: 10,
+      calories: 1800,
+      solubleFibre: 12,
+      sodium: 1500,
+      protein: 80
+    })];
+
+    const out = buildNutritionTargetStatus({
+      logs,
+      targets,
+      todayStr: '2026-09-07',
+      targetKeys: topKeys
+    });
+
+    expect(out).toContain('Sat fat (12g - 20% under)');
+    expect(out).toContain('Added Sugar (10g - 60% under)');
+    expect(out).toContain('Calorie (1800kcal - 14% under)');
+    expect(out).toContain('Soluble Fibre (12g - 20% under)');
+    expect(out).toContain('Sodium (1500mg - 25% under)');
+    // Protein was logged but not in targetKeys, so should not appear
+    expect(out).not.toContain('Protein');
+    expect(out).not.toContain('steps');
+  });
 });
