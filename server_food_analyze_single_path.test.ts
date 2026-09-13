@@ -73,6 +73,22 @@ describe('F-12.1 no live USDA on Analyze', () => {
     expect(pipeline).not.toMatch(/suggestedFdcId/);
   });
 });
+
+describe('F-12.3 no new usda meal writes; curator takes no USDA fn', () => {
+  const dbSearch = readFileSync(resolve(__dirname, './src/server/food/server_food_db_search.ts'), 'utf8');
+  const curator = readFileSync(resolve(__dirname, './server_food_resolver_curator.ts'), 'utf8');
+  const helpers = readFileSync(resolve(__dirname, './src/server/food/server_food_analyze_helpers.ts'), 'utf8');
+  it('curator has no USDA search hook; db search never labels matches usda', () => {
+    expect(curator).not.toMatch(/searchUSDAFn/);
+    expect(dbSearch).not.toMatch(/searchUSDAFn/);
+    expect(dbSearch).not.toMatch(/source:\s*["']usda["']/);
+    expect(dbSearch).not.toMatch(/["']usda["']\s*:\s*["']/);
+  });
+  it('component fallback defaults to estimated, never usda', () => {
+    expect(helpers).not.toMatch(/:\s*['"]usda['"]\s*\)/);
+    expect(helpers).toMatch(/brand_official.*estimated/);
+  });
+});
 describe('F-8 compiler uses finalize not aggregateItemsNutrients', () => {
   const src = readFileSync(resolve(__dirname, './server_meal_compiler.ts'), 'utf8');
   it('compileMealState calls finalizeDishLedger and not aggregateItemsNutrients(', () => {

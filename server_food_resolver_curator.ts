@@ -82,7 +82,6 @@ export async function executeFoodResolverCurator(
   addDebugLog: (msg: string) => void,
   callLLMFn: (prompt: string, sysInst: string) => Promise<string>,
   fetchNutrientsFn?: (fdcId: string) => Promise<Record<string, number> | null>,
-  searchUSDAFn?: (query: string) => Promise<any[]>,
   fetchFoodDetailsFn?: (fdcId: string) => Promise<{ title: string, nutrients: Record<string, number> } | null>
 ): Promise<Array<{ query: string; chosenFdcId: string | null; formTags?: string[]; dishCore?: Record<string, number>; nutrientsPer100g?: Record<string, number>; quarantinedIds?: string[] }>> {
   
@@ -287,34 +286,10 @@ export async function executeFoodResolverCurator(
         }
       }
 
-      // 3b. Option 3 Backend Fallback: Search USDA API if FDC ID is null but parametricFoodName is populated
-      if (!finalChosenId && action.parametricFoodName && searchUSDAFn) {
-        addDebugLog(`[Backend Fallback Search] Searching USDA for parametricFoodName: "${action.parametricFoodName}" (Original query: "${gap.query}")...`);
-        try {
-          const searchHits = await searchUSDAFn(action.parametricFoodName);
-          if (searchHits && searchHits.length > 0) {
-            const firstHit = searchHits.find(h => checkCategoryAndStateCompatibility(gap.query, h.description || '').compatible);
-            if (firstHit) {
-              const hitIdStr = String(firstHit.fdcId);
-              const hitDescription = firstHit.description || "";
-              const overlap = calculateTokenOverlap(action.parametricFoodName, hitDescription);
-              
-              if (overlap >= 0.25 || hasCoreTokenOverlap(action.parametricFoodName, hitDescription)) {
-                addDebugLog(`[Backend Fallback Search] MATCH FOUND: "${action.parametricFoodName}" -> FDC ${hitIdStr} ("${hitDescription}", overlap: ${(overlap * 100).toFixed(0)}%)`);
-                finalChosenId = hitIdStr;
-              } else {
-                addDebugLog(`[Backend Fallback Search] Weak match discarded: FDC ${hitIdStr} ("${hitDescription}") has low overlap with "${action.parametricFoodName}".`);
-              }
-            } else {
-              addDebugLog(`[Backend Fallback Search] No category-compatible USDA hits found for "${action.parametricFoodName}".`);
-            }
-          } else {
-            addDebugLog(`[Backend Fallback Search] No USDA hits found for "${action.parametricFoodName}".`);
-          }
-        } catch (err) {
-          addDebugLog(`[Backend Fallback Search] Error during fallback search: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
+      // 3b. [F-12.3 deleted] Backend USDA fallback search for parametricFoodName.
+      // No live USDA: if no candidate ID was chosen above, finalChosenId stays
+      // null and the gap resolves as an honest MISS (the LLM-failure path keeps
+      // its deterministic top-candidate fallback in the catch block).
 
       // 3c. Filter out quarantined or category-incompatible candidate choices
       if (finalChosenId) {

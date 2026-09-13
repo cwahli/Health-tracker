@@ -384,14 +384,12 @@ export async function runDatabaseSearchStage(
     });
     const cleanedForRank = cleanQuery(resItem.query);
     // F-12.1: USDA candidate feed deleted; rank runs over an empty set (MISS)
-    // until F-12.3 rewires gap candidates to brand/OFF rows.
-    let { resolveClass, survivors } = rankAndClassifyCandidates(cleanedForRank, [], 85);
+    // until F-11.2 rewires gap candidates to brand/OFF rows.
+    rankAndClassifyCandidates(cleanedForRank, [], 85);
 
-    // For MULTI_MATCH or MISS, pass the survivors to the Curator
-    const candidatesToAdd = survivors.length > 0 ? survivors.map(s => s.candidate) : [];
-    candidatesToAdd.forEach((food: any) => {
-      candidates.push({ id: String(food.fdcId), name: food.description || "", source: "usda" });
-    });
+    // For MULTI_MATCH or MISS, pass the survivors to the Curator.
+    // F-12.3: USDA survivor feed deleted with rank input (always []); OFF
+    // rows below are the only candidates until F-11.2 rewires brand/OFF gaps.
     resItem.off.forEach((product: any) => {
       const idStr = String(product.barcode || product.id || product.code || "");
       if (idStr) {
@@ -472,13 +470,13 @@ export async function runDatabaseSearchStage(
       }
       return null;
     };
-    // F-12.1: searchUSDAFn arg dropped with the helper (optional param); F-12.3 removes it.
+    // F-12.3: USDA hook removed from the curator; fetchFoodDetailsForFdcId
+    // is now the 5th positional arg.
     const resolvedGaps = await executeFoodResolverCurator(
       gapsForResolver,
       addDebugLog,
       callLLMFn,
       fetchNutrientsForFdcId,
-      undefined,
       fetchFoodDetailsForFdcId
     );
     // For each resolved item, add it to databaseMatchesArray & dbMatchMap
@@ -508,7 +506,9 @@ export async function runDatabaseSearchStage(
         const caloriesStr = String(rg.nutrientsPer100g.calories || 0);
         databaseMatchesArray.push({
           id: virtualId,
-          source: rg.chosenFdcId ? (rg.chosenFdcId.match(/^\d{8,}$/) ? "off" : "usda") : "estimated",
+          // F-12.3: no new 'usda' meal writes. OFF barcodes keep 'off';
+          // everything else the curator resolves is labelled 'estimated'.
+          source: rg.chosenFdcId && rg.chosenFdcId.match(/^\d{8,}$/) ? "off" : "estimated",
           searchQuery: rg.query,
           name: rg.query,
           servingGrams: 100,

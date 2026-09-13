@@ -275,7 +275,7 @@ export function enrichScoutComponentsWithMatches(visionScoutItems: any[], databa
               c.chainName = null;
               c.brand = null;
             } else {
-              c.dbSource = (match.source || match.dbSource) || (isBrandMatch ? 'brand_official' : 'usda');
+              c.dbSource = (match.source || match.dbSource) || (isBrandMatch ? 'brand_official' : 'estimated');
               c.primaryBaseMatchName = match.name || c.primaryBaseMatchName;
               if (queryHasBrand) {
                 c.chainName = match.chainName || c.chainName;
