@@ -58,6 +58,14 @@ describe('Single Meal Agent owns compose: no dietitian/narrator phase', () => {
   });
 });
 
+describe('F-12.1 no live USDA on Analyze', () => {
+  it('pipeline never calls searchUSDA / fetchUSDAFoodById / two-round helpers', () => {
+    expect(pipeline).not.toMatch(/searchUSDA\s*\(/);
+    expect(pipeline).not.toMatch(/fetchUSDAFoodById\s*\(/);
+    expect(pipeline).not.toMatch(/searchUSDAFood\s*\(/);
+    expect(pipeline).not.toMatch(/searchUSDAWithTwoRounds\s*\(/);
+  });
+});
 describe('F-8 compiler uses finalize not aggregateItemsNutrients', () => {
   const src = readFileSync(resolve(__dirname, './server_meal_compiler.ts'), 'utf8');
   it('compileMealState calls finalizeDishLedger and not aggregateItemsNutrients(', () => {

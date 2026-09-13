@@ -73,7 +73,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Tests feel huge / every edit runs everything | **Q-7:** named map rows only. Do not `npm test`. Do not recreate missing asserts. |
 | Food create architecture | **F-10** (one Meal Agent + TS expand). Not a Dietitian critic. |
 | Food calories / debug file | **F-8.10, F-8.12, F-8.13** (split, packaged bind, debug). Soak is **F-10.8**, not a replay of always-dietitian. |
-| Food identity still wrong | One **class** playbook (`FALSE_FRIEND` first). **Not** F-1/F-2 USDA. M30 curator stays. |
+| Food identity still wrong | One **class** playbook (`FALSE_FRIEND` first). **Not** USDA. Brand catalog = **F-11**. Delete FDC = **F-12**. |
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
@@ -82,7 +82,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: USDA/FDC workstream, curator rebuild, B7.4/B7.5, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, **Track L-2 to L-5** (parked), a 10-case live replay queue, **R-13** until the human locks `specs/active/R-13.md`.  
+Do **not** start: putting curator back on Analyze, reopening FDC, B7.4/B7.5, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, **Track L-2 to L-5** (parked), a 10-case live replay queue, **R-13** until the human locks `specs/active/R-13.md`, **F-11 / F-12** until the human says **go**.  
 Do **not** add a sixth plan file. F-10 lives here + [FOOD.md](./FOOD.md) Process.
 
 ---
@@ -218,19 +218,19 @@ Does **not** replace B0–B7. Same pillar, same `convertViaTable` law. Trigger: 
 **Method:** `QUALITY.md` + `FALSE_FRIEND` / `DISH_DROP` / `OPENING_WRONG` / `SILENT_REPAIR`  
 **Laws:** `docs/agent/domains/food-calc.md`
 
-M21/M22 meal document and M30 curator stay. F-5 TypeError `.calories` is **done**.  
-Live USDA/FDC is a **last-resort gap filler** on Analyze, not a workstream. Do not open F-1/F-2.
+M21/M22 meal document stay. F-5 TypeError `.calories` is **done**.  
+Live USDA/FDC is **abandoned** (F-12). Brand catalog self-clean is **F-11**.
 
 | ID | Status | Done when / parked why | Do not |
 |---|---|---|---|
-| **F-1** | **Parked** | Self-heal KPI unmeasured. Reopen only as a named soak (same query, no curator) during identity-class work | Rebuild curator; “fix USDA” |
-| **F-2** | **Parked** | Catalog/M30 is the identity path. USDA still allowed as last resort / research | Ban USDA; make Analyze USDA-first |
+| **F-1** | **Abandoned** | 50-meal audit: FDC overwrite is net-negative. Replaced by **F-12** delete | Reopen FDC; “fix USDA” |
+| **F-2** | **Abandoned** | Same. Analyze is OCR → brand → Meal Agent | Last-resort USDA; Analyze USDA-first |
 | **F-3** | Open | One class playbook per session (picnic / lassi / ham…). Fixture tests in `golden_meals.test.ts` are **not** this item | `POST /loop` until all-green |
 | **F-4** | Open | Measured alias hit rate; dups gated, not silently merged | Silent merge |
 | **F-6** | Open | `FoodCard.tsx` ~4121 / catalog 4200. Net-zero toward ~3800 or pack lists growth. New portion/receipt UI stays in existing cards | New food table / +100 lines “enhance” |
 | **F-7** | **Gate green** | `assert-budgets.mjs` PROMPT_BUDGET/scout. Keep net-zero on prompt edits (L12) | Prompt-only unit math |
 
-Q-1 (`assert-budgets.mjs`) is **green**. They do **not** rebuild the curator (M30 stays).
+Q-1 (`assert-budgets.mjs`) is **green**. Brand self-clean is **F-11**. USDA delete is **F-12**.
 
 ### F-8 — Single-path add/edit (calorie host must die)
 
@@ -273,7 +273,7 @@ Gemini leftover from PR4 (do not treat as architecture): one-shot `patch_*.mjs` 
 **Architecture:** [FOOD.md](./FOOD.md) Process · `docs/agent/domains/food-calc.md`  
 **Class:** `ALWAYS_SECOND_AGENT` (create always ran Scout then Dietitian)  
 **Evidence:** `prototype/meallog/meal/` (`compare_1_vs_2_agent.ts`, `run_all_11_elastic_benchmark.ts`, `BENCHMARK_PERFORMANCE_SUMMARY.md`)  
-**Not:** USDA, curator rebuild, F-9.5, a Commercial Cooking Critic LLM, LLM-emitted calories.
+**Not:** USDA/FDC, putting curator back on Analyze, F-9.5, a Commercial Cooking Critic LLM, LLM-emitted calories.
 
 Production today still **always** dispatches Vision Scout then Dietitian on create (`server_food_analyze_run.ts`). Prototype 1-agent (scout does identity + P/C/F + verdict; TS Atwater) matched or beat the hierarchical 2-agent path on the 11-case set. Elastic COMPLETE/DELEGATE showed simple packaged meals finishing in ~2.5s with one call; complex hotpots needed extra capacity. **Do not copy the prototype blindly:** the model picked DELEGATE poorly (airline tray COMPLETE’d and Na accuracy went to 0%), and the elastic schema emitted `calories` (F-8 forbidden).
 
@@ -290,7 +290,39 @@ Same pattern as biomarkers: one Review for n=1–5; TypeScript decides batch/exp
 | **F-10.7** | **Shipped** | `server_food_analyze_run.ts` adaptive create cutover via `shouldExpandMealAgent`. Dietitian LLM skipped on single-agent paths; D8 scale preserved. | Wrap the old dietitian create as fallback forever | — |
 | **F-10.8** | Inner named; outer = Q-8.6 | Inner: 11 prototype cases in `server_dish_finalize.test.ts` (restaurant fat residual on 1/4/9 named, not 90%). Outer: `scripts/soak-q8-tier3.md` | `POST /loop`; soak old scout+dietitian; Grok in the wait loop | Grok reviews / human |
 
-**Do not mix** F-10 with F-9.5 (`App.tsx` collision). Catalog bind (F-8.12) and M30 curator stay — 1-agent OCR is not a replacement for identity.
+**Do not mix** F-10 with F-9.5 (`App.tsx` collision). Catalog bind (F-8.12) stays on finalize. USDA is **F-12**. Brand clean is **F-11**.
+
+### F-12 — Delete live USDA/FDC from Analyze
+
+**Architecture:** [FOOD.md](./FOOD.md) **Part A.3**.  
+**Evidence:** 50-meal audit (production ranker): loose FDC overwrite net-negative; strict match ~0–20 kcal, no extra 30-nutrient panel on current logs.  
+**Trigger:** human **go**. Not Current work.  
+**Not:** keeping a “last-resort” hook; making Analyze USDA-first.
+
+| ID | Item | Done when | Do not |
+|---|---|---|---|
+| **F-12.1** | Remove `searchUSDA` / `fetchUSDAFoodById` / two-round helpers and all Analyze call sites. **DONE 2026-09-13**: 4 defs + rank-import cut from `server.ts`; precalc DI/imports + scout-hint fetch block cut; db_search fan-out/consumption/HIT_UNIQUE-inject/rank-feed cut, curator gets `undefined` for optional `searchUSDAFn` (param removed in F-12.3). Single-path `F-12.1` negatives + rewritten db_search tests green; `tsc` 0; Guard PASS | `rg 'searchUSDA\s*\(' / 'fetchUSDAFoodById\s*\('` empty in `server*.ts` + `src/server/food` (param name + comments cleared in F-12.3). `tsc` baseline 0 | Wrap in a flag |
+| **F-12.2** | Remove `collectFdcHintTasks` / `verifiedFdcHintMap` / `suggestedFdcId` merge | Default precalc never hits FDC. Single-path test forbids `collectFdcHintTasks` | Leave a hint “just in case” |
+| **F-12.3** | Stop `dbSource: 'usda'` writes; curator must not take `searchUSDAFn` / `chosenFdcId` | New meals never `usda`. Historical rows stay | Rewrite old food_logs |
+| **F-12.4** | Strip `fdcId` from `CANONICAL_BASE_FOODS`; delete USDA cache helpers | Local ghost-component table has numbers only. No HTTP | Delete the local staple table |
+
+`docs/agent/domains/food-calc.md` rung 3 drops “USDA Atomics” — confirmed before→after with F-12.1. F-1/F-2 stay **Abandoned**.
+
+### F-11 — Brand catalog self-clean (one librarian, off Analyze)
+
+**Architecture:** [FOOD.md](./FOOD.md) **Part A.2**.  
+**Trigger:** after F-12 or in parallel if no shared files. Human **go**.  
+**Not:** food_items on Analyze, FDC lookup, a second resolver persona, blocking Save.
+
+Today: curator LLM skipped. Brand **match** in finalize. Brand **clean** does not run (`selfCleanBrandDatabase` behind skipped resolver).
+
+| ID | Item | Done when | Do not |
+|---|---|---|---|
+| **F-11.1** | Unhook TS cleaner from resolver. After HIT/MULTI/MISS (HIT can still have same-key clones). Throttle **per chain+country**. Country from meal/profile, not hardcoded GB. Soft quarantine. Winner: official > ocr > user. Never touch `usedRowId` | Named vitest: same-key clones collapse; unofficial quarantined; meal kcal unchanged; ID country cleaned | Gemini delete; global 1h throttle; hard delete |
+| **F-11.2** | Curator LLM only when [FOOD.md](./FOOD.md) **A.2.1** passes. T2 Jaccard ≥ 0.85 + kcal ±10% + no meal/combo superset. TS rejects merge if kcal >15% or official loser | Next same spelling-variant HIT. Big Mac vs Big Mac Meal **not** merged. HIT/MISS/SKIPPED/OCR never call Gemini | Invent SKU; `chosenFdcId`; LLM every meal; write kcal onto this meal |
+| **F-11.3** | One name: wire `curator`. Dual-accept `food_resolver` / `resolver` | Debug `t1/curator` or nothing — never both | Wire id `diet` |
+
+M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` + `food-calc.md` Database Curator (brand-only). Same change as F-11.2/11.3.
 
 ---
 

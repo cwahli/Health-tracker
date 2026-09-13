@@ -9,8 +9,8 @@ Infra and quotas, not a patient/data lifecycle. Was `RELIABILITY_FREE_TIER_PLAN.
 
 **Pillar:** 3 — Sync / reliability. Map: `plan/README.md`.
 
-**Status:** M23–M28 **core COMPLETE** (`assert-free-tier-complete.mjs` exit 0, 2026-08-16). Remaining parked R-ids are in §8–9. Standing gate for every new feature or update is §10. Cloudflare **go-live** is **R-13** (§12) — draft until the human locks `specs/active/R-13.md`.  
-**Updated:** 2026-09-12  
+**Status:** M23–M28 **core COMPLETE** (`assert-free-tier-complete.mjs` exit 0, 2026-08-16). Remaining parked R-ids are in §8–9. Standing gate for every new feature or update is §10. Cloudflare **go-live** is **R-13** (§12). USDA delete is **F-12**. Brand-catalog self-clean is **F-11** ([FOOD.md](./FOOD.md) Part A).  
+**Updated:** 2026-09-13  
 **Code truth:** Desktop working tree; AI Studio stays `tsx server.ts` on port 3000; live hosting is R-13, not a sixth plan file  
 **Domain:** `docs/agent/domains/sync.md` (Class L/X when touching merge/tombstones)
 
@@ -800,5 +800,68 @@ node scripts/assert-free-tier-complete.mjs
 3. **Preview Google login:** prod-only vs stable `preview.` host.
 
 Do **not** silently pick 2–3. Default 1 is Containers unless the human says Cloud Run.
+
+## 13. Agent purge program — narrator/dietitian + curator/resolver removal (2026-09-13)
+
+Locked human decisions: canonical names `meal_agent` / `meal_agent_answer` · history stays, all future references (golden, tests, plan) update via **re-run, not hand-edit** · frozen `specs/checkpoints/*` stay immutable, new checkpoints cut afterward · `dietitian*` i18n keys renamed (en+id, parity test guards). `archive/` is out of scope for both purges.
+
+### 13.1 Purge A — narrator/dietitian (scout is the sole Meal Agent)
+
+Status: narrator already fully dead (no `buildNarratorDispatch`, no `PROJECTOR_NARRATOR_INSTRUCTION` anywhere live). `server_food_dietitian_dispatch.ts` is pure-TS helpers. What remains is the `dietitian` name on live emissions plus one dead file.
+
+Live emission points (re-stamp to `meal_agent`):
+- `server_food_analyze_run_finalize.ts:526` — `sendLog('dietitian_answer','dietitian',…)` on every modify turn, plus `t{n}/dietitian` dispatch via `buildEditExpertDispatch` (`server_edit_patch_ledger.ts:839`, `agent:'dietitian'`).
+- `src/server/food/server_food_meal_assemble.ts:627` — `sendLog('dietitian_answer','dietitian',…)` in `mapFinalizeToMeal`, called from `finalize.ts:219` (live create path).
+
+Dead code (done upstream `a5bf1ce` — dietitian owner file deleted; `tsc` baseline is now 0):
+- ~~`server_food_analyze_run_dietitian.ts`~~ deleted upstream. Single-path test (`server_food_analyze_single_path.test.ts:42-46`) still asserts the pipeline never references it.
+- Verify-then-delete: `agents/dietitianInstructions.ts` (+2 test files, `agents/index.ts` re-export), `print_narrator.ts`, `patch.js` / `patch-listen.*`.
+
+Name-only remnants (rename with all call sites in one commit each): `computeDietitianSkipGates`, `normalizeParsedPostDietitian` (called once from live `scout_compose`), `applyPreDietitianDensityCheck`, `staleDietitianNarrative` gate flag, `reconcileDietitianToScout` alias, `dietitianItems` params, executor stage buckets (`FoodAgentExecutor`, `MedicalAgentExecutor`), `jobPreview`/`progress`/`types` stage labels.
+
+Readers keep dual acceptance (old tags still parse — Supabase history): `LogChat.tsx:4281`, `FoodCardViewers.tsx:602-623`, `FullScreenLogViewer.tsx`, `debugRunTree.ts` compare filter, `dumpContract.ts` agent-agnostic law. Add a backcompat test feeding a `dietitian_answer` fixture.
+
+### 13.2 Purge B — curator is a brand librarian, not a meal-path delete
+
+**Canonical architecture:** [FOOD.md](./FOOD.md) **Part A** (2026-09-13, recap **A.6**). Execute: **F-12** then **F-11**. Do not start from this subsection alone.
+
+Locked human decisions (this turn):
+- Catalog still needs cleaning. **Brand catalog** (`brand_menu_items`) stays; **food catalog** is off Analyze.
+- Live USDA/FDC is **deleted** (**F-12**), not parked. Local staple table stays without `fdcId`.
+- Curator and resolver are **one agent**, wire **`curator`**. Brand self-clean is **F-11**.
+- G4 dedup record = new tiny `brand_clean_runs(chain_key, dish_name_key, ran_at, result)` table (F-11.2 scope; per-dish granularity cannot piggyback on `updated_at`).
+- Layer 1 TS cleaner **may run on compare** (post-response, throttled per chain+country, soft-quarantine only); LLM stays skipped per G0.
+- `brand_menu_items.status` migration uses FOOD.md §10.2 spellings (`candidate/active/merged/quarantined`) + read-side exclusion in `searchBrandMenuItems` (F-11.1 scope; `status` confirmed absent on that table — it exists only on `food_items`/`dish_cache`).
+
+Today: curator LLM skipped. Brand match in finalize. Brand clean stuck behind the skipped resolver.
+
+Do **not**: delete the curator to “finish the purge”; put it back on Analyze; keep two names; reopen FDC; wire id `diet`.
+
+### 13.3 Execution order (stacked, one green commit each)
+
+1. Phase 0: file-level audit table (live-emit / live-read / sensor / reference / frozen / dead) into `AI_HANDOVER.md`.
+2. Purge A dead code → Purge A re-stamp → Purge A renames → Purge A i18n keys.
+3. **F-12** delete USDA hooks, then **F-11** brand self-clean (FOOD.md Part A). Not a curator-on-Analyze restore.
+4. Sensors: single-path negatives (`dietitian`, `narrator`, `searchUSDA`, `collectFdcHintTasks`). Brand self-clean has its own named test.
+5. Re-run goldens/references that still emit old tags (never hand-edit outputs); frozen checkpoints/learnings untouched, fresh checkpoint set cut at the post-purge commit.
+6. `plan/` updates (`ROADMAP.md`, `FOOD.md`, `FOOD_SINGLE_PATH.md`, `QUALITY.md`, this file) where they describe live behavior.
+
+Gates per phase: `tsc` (no new errors) → matching `DOMAIN_REGRESSION_MAP` rows (never `npm test`) → `journey-guard` → shell-smoke → Playwright compare + meals. L1: `src/jobs/*` + `LogChat` touches ship with the `JobSession` contract test in the same commit.
+
+### 13.4 Dead-code deletion program (Tier 1–3) with journey checkpoints
+
+Batches (one green commit each, in this order):
+- **D1:** ~~dietitian owner file~~ done upstream (`a5bf1ce`); remaining: `server_food_analyze_run_logs.ts` + `server_food_analyze_types.ts`.
+- **D2:** `server_meal_compiler.ts` + `tests/code_state_compiler.test.ts` (parallel architecture, only its own test imports it).
+- **D3:** root orphan dev scripts (`parse_debug*`, `print_*`, `check_*`, `download_debug*`, `patch*`, `patch-listen*`) — confirm zero refs per file at delete time.
+- **D4:** `prototype/meallog/procedural_graph/*` + compare one-offs → move to `archive/`, never delete outright.
+- **D5:** do **not** delete `server_food_resolver_curator.ts` / `agents/foodResolverInstructions.ts` / M30 goldens as dead code. F-11 retargets them to brand-only. Export-level `reconcileBreakdownToScout` + alias only if unused after F-11.
+- **Excluded until F-11 / confirmed:** `server_food_prompt_context.ts` (fingerprint-anchored), `src/mealBuild/*` (live), `assert-food-curator-m30.mjs` + protected `docs/agent` rows (before→after).
+
+Safety protocol per batch (SHEPHERD):
+1. `node scripts/journey-checkpoint.mjs save purge-<Dn>` before touching code.
+2. Delete → `tsc` → matching regression-map rows → `journey-guard`.
+3. Journey proof — meal log: `meal01-golden.live`, `key-journeys`, `multiturn-meal-edit.live`, `portion-funnel`; compare: `compare-mode-six-cases`, `meal03-compare-benchmark`; contract: `dialog-inventory`. Live (`.live`, benchmark) specs are Tier 3 budget — **one live shape per batch**, not per file; stub specs run every batch.
+4. Red → `restore purge-<Dn>`, fork hypothesis 2; two failed attempts → STOP + Reviewer/Learner (L17, L14).
 
 

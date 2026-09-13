@@ -11,9 +11,7 @@ import { finalizeDishLedger } from './server_dish_finalize.js';
 import { extractUSDANutrientsPer100g, extractOFFNutrientsPer100g } from './server_pure_helpers.js';
 import { NUTRIENT_KEYS } from './src/utils/nutrients.js';
 import {
-  searchUSDA,
   searchOpenFoodFacts,
-  fetchUSDAFoodById,
   fetchOFFProductByBarcode,
   lookupChainMenuSources,
   isUsableWebNutritionHit,
@@ -67,7 +65,7 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
     if (registeredChainSources.length > 0) {
       ctx.addDebugLog(`[ChainSource] Found ${registeredChainSources.length} source(s) for ${detectedChainKey}: ${registeredChainSources.map((s: any) => s.url).join(' | ')}`);
     } else {
-      ctx.addDebugLog(`[ChainSource] No official source for "${detectedChainKey}". Preferring component/USDA path over web_search absolute injection.`);
+      ctx.addDebugLog(`[ChainSource] No official source for "${detectedChainKey}". Preferring component/brand path over web_search absolute injection.`);
     }
   }
 
@@ -76,7 +74,7 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
 
   if (isDishEstimateEnabled(ctx.req)) {
     if (packagedBindItems.length > 0) {
-      ctx.addDebugLog(`[PackagedBind] ${packagedBindItems.length} packaged/OCR item(s) bind via finalize brand/OCR rungs; generic USDA curator still skipped.`);
+      ctx.addDebugLog(`[PackagedBind] ${packagedBindItems.length} packaged/OCR item(s) bind via finalize brand/OCR rungs; hot-path database search still skipped.`);
       inferPackagedBindChains({ packagedBindItems, onLog: ctx.addDebugLog });
     } else {
       ctx.addDebugLog('[CuratorSkipped] Dish estimate pipeline active, skipping hot-path database search and resolver curator.');
@@ -112,7 +110,6 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
         },
         sendLog: ctx.sendLog,
         addDebugLog: ctx.addDebugLog,
-        searchUSDA: dbDeps?.searchUSDA || searchUSDA,
         searchOpenFoodFacts: dbDeps?.searchOpenFoodFacts || searchOpenFoodFacts,
         searchBrandMenuItems: dbDeps?.searchBrandMenuItems || searchBrandMenuItems,
         isKnownDatabaseBrand: dbDeps?.isKnownDatabaseBrand || isKnownDatabaseBrand,
@@ -128,7 +125,6 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
         writeAliasIfHitUnique: dbDeps?.writeAliasIfHitUnique || writeAliasIfHitUnique,
         sanitizeDishTitle: dbDeps?.sanitizeDishTitle || sanitizeDishTitle,
         normalizeFoodKey: dbDeps?.normalizeFoodKey || normalizeFoodKey,
-        fetchUSDAFoodById: dbDeps?.fetchUSDAFoodById || fetchUSDAFoodById,
         fetchOFFProductByBarcode: dbDeps?.fetchOFFProductByBarcode || fetchOFFProductByBarcode,
         getFallbackCategoryProfile: dbDeps?.getFallbackCategoryProfile || getFallbackCategoryProfile,
         recordFoodObservation: dbDeps?.recordFoodObservation || recordFoodObservation,
@@ -161,43 +157,8 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
     ctx.addDebugLog(`[PortionClarify] Non-blocking clarification check attached for: ${ctx.portionClarify.items.map((i: any) => i.name).join('; ')}`);
   }
 
-  const hintFetchTasks = collectFdcHintTasks(ctx.visionScoutItems);
-  const fetchUsdaFn = dbDeps?.fetchUSDAFoodById || fetchUSDAFoodById;
-  if (hintFetchTasks.length > 0) {
-    const hintResults = await Promise.all(
-      hintFetchTasks.map(async (task) => {
-        const food = await fetchUsdaFn(task.fdcId);
-        return { task, food };
-      })
-    );
-    hintResults.forEach(({ task, food }) => {
-      if (!food || !food.description) {
-        ctx.addDebugLog(`[ScoutFdcHint] id=${task.fdcId} for query "${task.query}" did not resolve.`);
-        return;
-      }
-      const relevant = isFdcHintRelevant(task.query, food.description);
-      if (!relevant) {
-        ctx.addDebugLog(`[ScoutFdcHint] Relevance check rejected hint id=${task.fdcId}`);
-        return;
-      }
-      const fdcIdStr = String(food.fdcId || task.fdcId);
-      const nutrients100g = extractUSDANutrientsPer100g(food);
-      ctx.dbMatchMap.set(fdcIdStr, nutrients100g);
-      const verifiedHit = {
-        id: fdcIdStr,
-        source: 'usda_direct_hint',
-        name: food.description || '',
-        calories: String(nutrients100g.calories || 0),
-        protein: nutrients100g.protein,
-        fat: nutrients100g.totalFat,
-        saturatedFat: nutrients100g.saturatedFat,
-        sodium: nutrients100g.sodium,
-      };
-      ctx.databaseMatchesArray.push(verifiedHit);
-      ctx.verifiedFdcHintMap.set(task.key, verifiedHit);
-      ctx.addDebugLog(`[ScoutFdcHint] Verified hint id=${fdcIdStr} accepted.`);
-    });
-  }
+  // F-12.1: scout FDC hint fetch deleted with fetchUSDAFoodById. Hint machinery
+  // (collectFdcHintTasks / verifiedFdcHintMap / suggestedFdcId) is removed in F-12.2.
 
   const ledgers = await Promise.all(
     ctx.visionScoutItems.map(async (vItem: any, vIdx: number) => {

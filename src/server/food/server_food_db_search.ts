@@ -2,13 +2,12 @@ import {
   cleanQuery,
   loosenQuery,
   scoutHasCompletePrintedLabel,
-  formatUSDANutrients,
   formatOFFNutrients,
 } from './server_food_analyze_helpers.js';
 
 /**
  * F-8.10 shard 14 — database search stage, extracted verbatim from
- * runFoodAnalyze. USDA/OFF/brand fan-out, result shaping, internal catalog
+ * runFoodAnalyze. OFF/brand fan-out, result shaping, internal catalog
  * + dish cache, resolver gaps + curator LLM, category fallbacks.
  *
  * All services arrive via deps (full DI): production passes the live
@@ -34,7 +33,6 @@ export interface DbSearchStageDeps {
   flushRes: () => void;
   sendLog: (type: string, stage: string, message: string, data?: any) => void;
   addDebugLog: (msg: string) => void;
-  searchUSDA: (query: string, n: number, dataTypes: string) => Promise<any[]>;
   searchOpenFoodFacts: (query: string, n: number) => Promise<any[]>;
   searchBrandMenuItems: (query: string, chain?: string) => Promise<any[]>;
   isKnownDatabaseBrand: (query: string) => Promise<boolean>;
@@ -50,7 +48,6 @@ export interface DbSearchStageDeps {
   writeAliasIfHitUnique: (...args: any[]) => Promise<any>;
   sanitizeDishTitle: (query: string) => string;
   normalizeFoodKey: (query: string) => string;
-  fetchUSDAFoodById: (fdcId: string) => Promise<any>;
   fetchOFFProductByBarcode: (fdcId: string) => Promise<any>;
   getFallbackCategoryProfile: (query: string) => any;
   recordFoodObservation: (event: any) => void;
@@ -82,7 +79,6 @@ export async function runDatabaseSearchStage(
     flushRes,
     sendLog,
     addDebugLog,
-    searchUSDA,
     searchOpenFoodFacts,
     searchBrandMenuItems,
     isKnownDatabaseBrand,
@@ -95,10 +91,8 @@ export async function runDatabaseSearchStage(
     resolveInternalFood,
     resolveDishCache,
     rankAndClassifyCandidates,
-    writeAliasIfHitUnique,
     sanitizeDishTitle,
     normalizeFoodKey,
-    fetchUSDAFoodById,
     fetchOFFProductByBarcode,
     getFallbackCategoryProfile,
     recordFoodObservation,
@@ -113,8 +107,8 @@ export async function runDatabaseSearchStage(
   let databaseMatches = "";
   sendStreamEvent({ type: 'status', stage: 'db_search', status: 'started', message: 'Searching nutrition databases...' });
   flushRes();
-  sendLog('db_search', 'db_search', `Querying USDA & OpenFoodFacts databases for: [${uniqueQueries.join(', ')}]`);
-  addDebugLog(`[Database Search] Performing USDA & OFF searches for queries: ${JSON.stringify(uniqueQueries)}`);
+  sendLog('db_search', 'db_search', `Querying OpenFoodFacts & brand catalog for: [${uniqueQueries.join(', ')}]`);
+  addDebugLog(`[Database Search] Performing OFF & brand searches for queries: ${JSON.stringify(uniqueQueries)}`);
   const searchPromises = uniqueQueries.map(async (q) => {
     try {
       const cleaned = cleanQuery(q);
@@ -127,7 +121,7 @@ export async function runDatabaseSearchStage(
       const isGeneric = /^(mayo|mayonnaise|granola|tortilla|salad greens|mixed salad leaves|lettuce|tomato|onion|cucumber|bread|wrap|egg|boiled egg|salt|pepper|oil|butter|sugar|chicken|beef|pork|fish|tuna|salmon|rice|pasta|cheese)$/i.test(cleaned);
       if (isGeneric && !isDbBrand && !isBarcode) {
         dataTypes = 'Foundation,SR Legacy,Survey (FNDDS)'; // Override and lock to generics
-        addDebugLog(`[BrandGuard] Using generic USDA types for "${cleaned}" (not a brand — skip branded/OFF catalog)`);
+        addDebugLog(`[BrandGuard] Using generic types for "${cleaned}" (not a brand — skip branded/OFF catalog)`);
       }
       let offP = Promise.resolve([]);
       if (isBarcode || dataTypes.includes('Branded')) {
@@ -142,14 +136,13 @@ export async function runDatabaseSearchStage(
       const brandP = (isGeneric && !isDbBrand && !isBarcode && !detectedChainKey)
         ? Promise.resolve([])
         : searchBrandMenuItems(cleaned, detectedChainKey);
-      let [usda, off, brandHits] = await Promise.all([
-        searchUSDA(cleaned, 3, dataTypes),
+      let [off, brandHits] = await Promise.all([
         offP,
         brandP,
       ]);
       const web: any[] = [];
       // If zero results found in main database search, retry with loosened query
-      if (usda.length === 0 && off.length === 0 && brandHits.length === 0) {
+      if (off.length === 0 && brandHits.length === 0) {
         const loosened = loosenQuery(cleaned);
         if (loosened && loosened !== cleaned) {
           addDebugLog(`[Database Search Fallback] Zero results for "${cleaned}". Retrying with loosened query "${loosened}"...`);
@@ -160,22 +153,20 @@ export async function runDatabaseSearchStage(
           const fallbackBrandP = (isGeneric && !isDbBrand && !isBarcode && !detectedChainKey)
             ? Promise.resolve([])
             : searchBrandMenuItems(loosened, detectedChainKey);
-          const [fallUSDA, fallOFF, fallBrand] = await Promise.all([
-            searchUSDA(loosened, 3, dataTypes),
+          const [fallOFF, fallBrand] = await Promise.all([
             fallbackOffP,
             fallbackBrandP
           ]);
-          if (fallUSDA.length > 0 || fallOFF.length > 0 || fallBrand.length > 0) {
-            addDebugLog(`[Database Search Fallback] Succeeded for "${loosened}". USDA: ${fallUSDA.length}, OFF: ${fallOFF.length}, Brand: ${fallBrand.length}`);
-            usda = fallUSDA;
+          if (fallOFF.length > 0 || fallBrand.length > 0) {
+            addDebugLog(`[Database Search Fallback] Succeeded for "${loosened}". OFF: ${fallOFF.length}, Brand: ${fallBrand.length}`);
             off = fallOFF;
             brandHits = fallBrand;
           }
         }
       }
-      return { query: q, usda, off, brandHits, web };
+      return { query: q, off, brandHits, web };
     } catch (err) {
-      return { query: q, usda: [], off: [], brandHits: [], web: [] };
+      return { query: q, off: [], brandHits: [], web: [] };
     }
   });
   const searchResultsList = await Promise.all(searchPromises);
@@ -187,7 +178,6 @@ export async function runDatabaseSearchStage(
         if (brandItem) {
           searchResultsList.push({
             query: tag.name,
-            usda: [],
             off: [],
             brandHits: [brandItem],
             web: []
@@ -231,29 +221,6 @@ export async function runDatabaseSearchStage(
         addDebugLog(`[Brand DB Match] Found official restaurant/brand menu item for "${resItem.query}" -> "${bmHit.name}" (${bmHit.chainName})`);
       });
     }
-    resItem.usda.forEach((food: any) => {
-      const fdcIdStr = String(food.fdcId);
-      dbMatchMap.set(fdcIdStr, extractUSDANutrientsPer100g(food));
-      const parsedNutrients = extractUSDANutrientsPer100g(food);
-      const caloriesStr = String(parsedNutrients.calories);
-      databaseMatchesArray.push({
-        id: fdcIdStr,
-        source: "usda",
-        searchQuery: resItem.query,
-        name: food.description || "",
-        servingGrams: 100,
-        ...parsedNutrients,
-        calories: caloriesStr,
-        protein: parsedNutrients.protein,
-        fat: parsedNutrients.totalFat,
-        saturatedFat: parsedNutrients.saturatedFat,
-        sodium: parsedNutrients.sodium,
-        carbohydrates: parsedNutrients.carbohydrates,
-        totalFibre: parsedNutrients.totalFibre,
-        nutrients: parsedNutrients
-      });
-      list.push(`- [USDA] ID: ${fdcIdStr} | Name: ${food.description} | Nutrients (per 100g): ${formatUSDANutrients(food.foodNutrients)}`);
-    });
     resItem.off.forEach((product: any) => {
       const idStr = String(product.barcode || product.id || product.code || "");
       if (idStr) {
@@ -347,9 +314,9 @@ export async function runDatabaseSearchStage(
   if (list.length > 0) {
     databaseMatches = list.slice(0, 50).join("\n");
   } else {
-    databaseMatches = "No matches found in USDA or Open Food Facts databases for these queries.";
+    databaseMatches = "No matches found in Open Food Facts or brand catalog for these queries.";
   }
-  sendLog('db_search_complete', 'db_search', `Found ${databaseMatchesArray.length} database match(es) across USDA & OpenFoodFacts.`);
+  sendLog('db_search_complete', 'db_search', `Found ${databaseMatchesArray.length} database match(es) across OpenFoodFacts & brand catalog.`);
   sendStreamEvent({ type: 'status', stage: 'db_search', status: 'completed', message: 'Database search completed.' });
   // Run Food Resolver Agent only for query gaps that do NOT hit the internal catalog or dish cache
   // and that are NOT covered by a complete printed packaging label (token save + avoid bad USDA).
@@ -416,39 +383,12 @@ export async function runDatabaseSearchStage(
       candidates.push({ id: String(item.id), name: `${item.chainName || ''} ${item.name || item.dish_name || ''}`.trim(), source: "brand_official" });
     });
     const cleanedForRank = cleanQuery(resItem.query);
-    let { resolveClass, bestMatch, survivors } = rankAndClassifyCandidates(cleanedForRank, resItem.usda, 85);
-    
-    if (resolveClass === 'MULTI_MATCH' && survivors.length > 0 && survivors[0].score >= 115) {
-      resolveClass = 'HIT_UNIQUE';
-      bestMatch = survivors[0].candidate;
-    }
+    // F-12.1: USDA candidate feed deleted; rank runs over an empty set (MISS)
+    // until F-12.3 rewires gap candidates to brand/OFF rows.
+    let { resolveClass, survivors } = rankAndClassifyCandidates(cleanedForRank, [], 85);
 
-    if (resolveClass === 'HIT_UNIQUE' && bestMatch) {
-      addDebugLog(`[ResolveClass] HIT_UNIQUE for "${resItem.query}" -> ${bestMatch.description}`);
-      writeAliasIfHitUnique(resolveClass, resItem.query, bestMatch).catch(e => console.error(e));
-      // Treat as auto-resolved gap
-      const virtualId = String(bestMatch.fdcId);
-      const nut = extractUSDANutrientsPer100g(bestMatch);
-      dbMatchMap.set(virtualId, nut);
-      databaseMatchesArray.push({
-        id: virtualId,
-        source: "usda",
-        searchQuery: resItem.query,
-        name: bestMatch.description || resItem.query,
-        servingGrams: 100,
-        calories: String(nut.calories || 0),
-        protein: nut.protein || 0,
-        fat: nut.totalFat || nut.fat || 0,
-        saturatedFat: nut.saturatedFat || 0,
-        sodium: nut.sodium || 0,
-        carbohydrates: nut.carbohydrates || nut.carbs || 0,
-        totalFibre: nut.totalFibre || 0,
-        nutrients: nut
-      });
-      continue; // Skip adding to gapsForResolver!
-    }
-    // For MULTI_MATCH or MISS, pass the survivors (or top N if none) to the Curator
-    const candidatesToAdd = survivors.length > 0 ? survivors.map(s => s.candidate) : resItem.usda;
+    // For MULTI_MATCH or MISS, pass the survivors to the Curator
+    const candidatesToAdd = survivors.length > 0 ? survivors.map(s => s.candidate) : [];
     candidatesToAdd.forEach((food: any) => {
       candidates.push({ id: String(food.fdcId), name: food.description || "", source: "usda" });
     });
@@ -513,8 +453,6 @@ export async function runDatabaseSearchStage(
         return data ? { title: data.name || data.description || data.searchQuery || '', nutrients: data } : null;
       }
       if (/^\d+$/.test(fdcId)) {
-        const food = await fetchUSDAFoodById(fdcId);
-        if (food) return { title: food.description || '', nutrients: extractUSDANutrientsPer100g(food) };
         if (/^\d{6,}$/.test(fdcId)) {
           const prod = await fetchOFFProductByBarcode(fdcId);
           if (prod) return { title: prod.product_name || '', nutrients: extractOFFNutrientsPer100g(prod) };
@@ -527,8 +465,6 @@ export async function runDatabaseSearchStage(
         return dbMatchMap.get(fdcId) || null;
       }
       if (/^\d+$/.test(fdcId)) {
-        const food = await fetchUSDAFoodById(fdcId);
-        if (food) return extractUSDANutrientsPer100g(food);
         if (/^\d{6,}$/.test(fdcId)) {
           const prod = await fetchOFFProductByBarcode(fdcId);
           if (prod) return extractOFFNutrientsPer100g(prod);
@@ -536,12 +472,13 @@ export async function runDatabaseSearchStage(
       }
       return null;
     };
+    // F-12.1: searchUSDAFn arg dropped with the helper (optional param); F-12.3 removes it.
     const resolvedGaps = await executeFoodResolverCurator(
       gapsForResolver,
       addDebugLog,
       callLLMFn,
       fetchNutrientsForFdcId,
-      searchUSDA,
+      undefined,
       fetchFoodDetailsForFdcId
     );
     // For each resolved item, add it to databaseMatchesArray & dbMatchMap
