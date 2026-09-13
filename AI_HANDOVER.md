@@ -5,7 +5,8 @@
 |---|---|---|
 | 2026-09-13 | **promote** `same_meal_package_prepared` | Standing needle on merge_dishes / package+prepared collapse. Guard fails if helpers/tests disappear. |
 | 2026-09-13 | sat-fat polarity + merge_dishes | Home/Trends/pie use `isLimitNutrient`. Job `job_1789312118652` class: combine-language + scout 1-dish replace → `merge_dishes`. |
-| 2026-09-13 | ROADMAP Current work | **B0** (Gemini). F-10 shipped. F-11.1 / F-12.1–12.3 shipped. Grok leftover: F-12.4. |
+| 2026-09-13 | **F-12.4** | Stripped `fdcId` from `CANONICAL_BASE_FOODS`; deleted USDA cache helpers. Lookup returns local `id` + nutrients. |
+| 2026-09-13 | ROADMAP Current work | **B0** (Gemini). F-10 / F-11.1 / F-12.1–12.4 / B8.1 shipped. Grok leftover: Q-4 only if Q-1 red; Q-9 later. |
 | Human ops | live site | Deploy `main`. Run `supabase/migrations/20260913_brand_menu_items_status.sql`. Confirm Home sat fat over target is red. |
 
 ## Status

@@ -240,9 +240,8 @@ export async function executeFoodResolverCurator(
       // curator did not supply a verified high-confidence parametric match above.
       if (!finalChosenId) {
         const localMatch = lookupCanonicalBaseFood(action.parametricFoodName || gap.query);
-        if (localMatch && localMatch.fdcId) {
-          addDebugLog(`[LocalDictionaryMatch] Resolved locally for "${gap.query}" -> FDC ${localMatch.fdcId} ("${action.parametricFoodName || gap.query}")`);
-          finalChosenId = String(localMatch.fdcId);
+        if (localMatch && localMatch.id) {
+          addDebugLog(`[LocalDictionaryMatch] Resolved locally for "${gap.query}" -> ${localMatch.id} (no FDC)`);
         }
       }
 

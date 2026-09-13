@@ -71,7 +71,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | If you are… | Do |
 |---|---|
 | **AI Studio / Gemini (default)** | **Current work — B0** above. This file only. F-10 is shipped. |
-| **Grok leftover** | F-9.5 / F-10.6 / Q-8.1–8.5 / F-11.1 / F-12.1–12.3 shipped. Remaining: **F-12.4** (strip `fdcId` / USDA cache), **Q-4** only if Q-1 red on AgentResultTable, **Q-9** later. Outer live confirm is **Q-8.6** (human or script, not Grok in the wait loop). |
+| **Grok leftover** | F-9.5 / F-10.6 / Q-8.1–8.5 / F-11.1 / F-12.1–12.4 / B8.1 shipped. **Q-4** only if Q-1 red on AgentResultTable. **Q-9** later. Outer live confirm is **Q-8.6** (human or script, not Grok in the wait loop). |
 | Tests feel huge / every edit runs everything | **Q-7:** named map rows only. Do not `npm test`. Do not recreate missing asserts. |
 | Food create architecture | **F-10** (one Meal Agent + TS expand). Not a Dietitian critic. |
 | Food calories / debug file | **F-8.10, F-8.12, F-8.13** (split, packaged bind, debug). Soak is **F-10.8**, not a replay of always-dietitian. |
@@ -84,7 +84,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: putting curator back on Analyze, reopening FDC, B7.5 before B7.4, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, **Track L-2 to L-5** (parked), a 10-case live replay queue, **R-13** until the human locks `specs/active/R-13.md`, **F-11.2 / F-11.3** (curator LLM) until **go**, **F-12.4** until Grok (USDA HTTP already gone).  
+Do **not** start: putting curator back on Analyze, reopening FDC, B7.5 before B7.4, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, **Track L-2 to L-5** (parked), a 10-case live replay queue, **R-13** until the human locks `specs/active/R-13.md`, **F-11.2 / F-11.3** (curator LLM) until **go**, **Q-9** rewrite binge.  
 Do **not** add a sixth plan file. F-10 lives here + [FOOD.md](./FOOD.md) Process.
 
 ---
@@ -208,7 +208,7 @@ Does **not** replace B0–B7. Same pillar, same `convertViaTable` law. Trigger: 
 | # | Item | Done when | Class | Who |
 |---|---|---|---|---|
 | **B8.0** | Human: one Auto-Fix surface | Choice written in `AI_HANDOVER.md`: **(A)** Flagged Telemetry modal is the only Auto-Fix, or **(B)** Auto-Fix banned again | product | Human |
-| **B8.1** | Telemetry Auto-Fix calls `convertViaTable` only | `computeBiomarkerTelemetryMultiplier` has no private factors; extra pairs live in `ANALYTE_CONVERSIONS`; locked `1.293` / `1.411` / `3.362` / `79.56` / `13.68` unchanged | `SECOND_MATH_PATH` | Grok (constants) |
+| **B8.1** | **Shipped** | `computeBiomarkerTelemetryMultiplier` uses `ANALYTE_CONVERSIONS` only; locked `1.293` / `1.411` / `3.362` / `79.56` / `13.68` unchanged | `SECOND_MATH_PATH` | Grok (constants) |
 | **B8.2** | **Shipped** | Dictionary toolbar **or** Cleaning menu, not both | `CLONE_UI` | Gemini |
 | **B8.3** | **Shipped** | `runGeneralizedBiomarkerAudit` / `detectFlaggedTelemetryErrors` not re-run from Dictionary + Medical History + Trends + LogChat on the same paint | `EAGER_MOUNT` | Gemini after Grok names call sites |
 
@@ -298,7 +298,7 @@ Same pattern as biomarkers: one Review for n=1–5; TypeScript decides batch/exp
 
 **Architecture:** [FOOD.md](./FOOD.md) **Part A.3**.  
 **Evidence:** 50-meal audit (production ranker): loose FDC overwrite net-negative; strict match ~0–20 kcal, no extra 30-nutrient panel on current logs.  
-**Trigger:** F-12.1–12.3 **shipped**. **F-12.4** is the leftover Grok strip. Not Current work.  
+**Trigger:** F-12.1–12.4 **shipped**. Not Current work.  
 **Not:** keeping a “last-resort” hook; making Analyze USDA-first.
 
 | ID | Item | Done when | Do not |
@@ -306,7 +306,7 @@ Same pattern as biomarkers: one Review for n=1–5; TypeScript decides batch/exp
 | **F-12.1** | Remove `searchUSDA` / `fetchUSDAFoodById` / two-round helpers and all Analyze call sites. **DONE 2026-09-13**: 4 defs + rank-import cut from `server.ts`; precalc DI/imports + scout-hint fetch block cut; db_search fan-out/consumption/HIT_UNIQUE-inject/rank-feed cut, curator gets `undefined` for optional `searchUSDAFn` (param removed in F-12.3). Single-path `F-12.1` negatives + rewritten db_search tests green; `tsc` 0; Guard PASS | `rg 'searchUSDA\s*\(' / 'fetchUSDAFoodById\s*\('` empty in `server*.ts` + `src/server/food` (param name + comments cleared in F-12.3). `tsc` baseline 0 | Wrap in a flag |
 | **F-12.2** | Remove `collectFdcHintTasks` / `verifiedFdcHintMap` / `suggestedFdcId` merge. **DONE 2026-09-13**: hint collectors + stopword gate cut from `server_food_precalc`; ctx map init + type field cut; scout schema field + 3 merge sites cut (prompt never instructed it); hint unit test removed, single-path forbids all four names. 19/19 vitest, `tsc` 0, Guard PASS | Default precalc never hits FDC. Single-path test forbids `collectFdcHintTasks` | Leave a hint “just in case” |
 | **F-12.3** | Stop `dbSource: 'usda'` writes; curator must not take `searchUSDAFn` / `chosenFdcId`. **DONE 2026-09-13**: `searchUSDAFn` param + USDA parametric-fallback block cut from curator; db_search passes 5 args; curator-result source mapping `usda`→`estimated` (OFF barcodes keep `off`); component fallback default `usda`→`estimated`; dead USDA-candidate push removed; `chosenFdcId` allowlist plumbing stays for F-11.2. Single-path F-12.3 sensor green; `tsc` 0; curator + M30 tests green. Historical `usda` reads (aggregation, scoped-match, dish type union) stay | New meals never `usda`. Historical rows stay | Rewrite old food_logs |
-| **F-12.4** | **Open (Grok).** Strip `fdcId` from `CANONICAL_BASE_FOODS`; delete `getCachedUSDAFood` / `setCachedUSDAFood` / `LOCAL_USDA_CACHE`. HTTP Analyze path already gone. | Local ghost-component table has numbers only. No HTTP | Delete the local staple table |
+| **F-12.4** | **Shipped.** `fdcId` stripped from `CANONICAL_BASE_FOODS`; `getCachedUSDAFood` / `setCachedUSDAFood` / `LOCAL_USDA_CACHE` deleted. Lookup returns local `id` (map key) + nutrients only. | Local ghost-component table has numbers only. No HTTP | Delete the local staple table |
 
 `docs/agent/domains/food-calc.md` rung 3 drops “USDA Atomics” — confirmed before→after with F-12.1. F-1/F-2 stay **Abandoned**.
 
@@ -415,11 +415,11 @@ F-10.6 fat/Na TS             ← shipped (Grok)
 F-8.13 debug contract        ← shipped
 Q-8.1 → 8.5                  ← shipped (Grok)
 F-8.10 shards                ← shipped
-F-12.1–12.3 USDA HTTP gone   ← shipped
+F-12.1–12.4 USDA gone        ← shipped (local staple table remains, no FDC ids)
 F-11.1 brand TS self-clean   ← shipped (live: status migration)
+B8.1 convertViaTable only    ← shipped
 B0 / fill-template C1–C7     ← Current work (Gemini)
 Q-8.6 / F-10.8 outer         ← one website Log Meal (human/script)
-F-12.4 strip fdcId/cache     ← Grok leftover
 F-11.2 / F-11.3 curator LLM  ← wait for go
 Q-9 website consolidation    ← later step (Grok; serialize App.tsx)
 Q-10 dependency audit        ← later step after Q-9
@@ -431,7 +431,7 @@ Do **not** open Q-4 or a Dictionary/FoodCard/`App.tsx` breakup unless Q-1 is red
 
 | | **Gemini** (AI Studio — this ROADMAP) | **Grok** |
 |---|---|---|
-| Prefer | **B0** Apply smoke + C1–C7; then B7.4; F-3 one class; F-6 net-zero in existing cards | F-12.4 strip fdcId/cache; Q-4 if Q-1 red on AgentResultTable; Q-9 later; any split of `App.tsx` / `LogChat.tsx` / `Header.tsx` |
+| Prefer | **B0** Apply smoke + C1–C7; then B7.4; F-3 one class; F-6 net-zero in existing cards | Q-4 if Q-1 red on AgentResultTable; Q-9 later; any split of `App.tsx` / `LogChat.tsx` / `Header.tsx` |
 | Do not | `npm test`; critic LLM; USDA; invent a pack file; live Gemini as inner loop | Grok Bot clicking remaining live cases; Q-9 rewrite binge |
 
 ---

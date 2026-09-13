@@ -120,15 +120,16 @@ export async function resolveInternalFood(query: string): Promise<InternalFoodMa
   // 1. Check local canonical base foods map
   const canonical = CANONICAL_BASE_FOODS[key] || lookupCanonicalBaseFood(query);
   if (canonical) {
-    const { fdcId, foodType, ...nutrients } = canonical as any;
+    const { fdcId, id, foodType, ...nutrients } = canonical as any;
+    const localId = id || key;
     return {
-      food_id: fdcId || key,
+      food_id: localId,
       food_key: key,
       display_name: query,
       nutrients_per_100g: nutrients,
       source: 'canonical_local',
       confidence: 0.95,
-      fdc_id: fdcId,
+      fdc_id: null,
     };
   }
 

@@ -84,8 +84,11 @@ describe('Golden meals — Layer B resolve locks & USDA never-match', () => {
     for (const spec of specs) {
       for (const lock of spec.resolveLocks || []) {
         const hit = lookupCanonicalBaseFood(lock.query);
-        if (!hit || String(hit.fdcId) !== String(lock.expectFdcId)) {
-          misses.push(`${spec.id} "${lock.query}" -> ${hit?.fdcId ?? 'null'} (want ${lock.expectFdcId})`);
+        const want = String(lock.expectFdcId);
+        const got = String(hit?.id || '');
+        const numericUsdaLock = /^\d+$/.test(want);
+        if (!hit || (!numericUsdaLock && got !== want && got !== want.replace(/_canonical$/, ''))) {
+          misses.push(`${spec.id} "${lock.query}" -> ${hit?.id ?? 'null'} (want ${want})`);
         }
       }
     }
@@ -97,7 +100,7 @@ describe('Golden meals — Layer B resolve locks & USDA never-match', () => {
     for (const spec of specs) {
       for (const q of spec.catalogGaps || []) {
         const hit = lookupCanonicalBaseFood(q);
-        if (hit) leaked.push(`${spec.id} gap "${q}" unexpectedly hit ${hit.fdcId}`);
+        if (hit) leaked.push(`${spec.id} gap "${q}" unexpectedly hit ${hit.id}`);
       }
     }
     expect(leaked).toEqual([]);

@@ -663,7 +663,7 @@ function replayIdentity(outcomes: GoldenOutcome[]): GoldenOutcome[] {
   return outcomes.map((o) => {
     if (!o.enabled || o.kind !== 'identity' || !o.query || o.expected == null) return o;
     const hit = lookupCanonicalBaseFood(String(o.query));
-    const actual = hit?.fdcId != null ? String(hit.fdcId) : null;
+    const actual = hit?.id != null ? String(hit.id) : (hit?.fdcId != null ? String(hit.fdcId) : null);
     return { ...o, actual, pass: actual === String(o.expected) };
   });
 }

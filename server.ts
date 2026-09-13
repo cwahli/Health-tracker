@@ -327,7 +327,7 @@ export function sanitizeUnitText(rawUnit: any): string {
 }
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { getTraceNutrientsForFoodType, getCookingMethodModifier, calculateUniversalAddedNutrients, lookupCanonicalBaseFood, getCachedUSDAFood, setCachedUSDAFood } from "./server_food_db";
+import { getTraceNutrientsForFoodType, getCookingMethodModifier, calculateUniversalAddedNutrients, lookupCanonicalBaseFood } from "./server_food_db";
 import { decidePrepAddition } from "./server_prep_policy";
 import dotenv from "dotenv";
 import { AsyncLocalStorage } from "async_hooks";

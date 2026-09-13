@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getTraceNutrientsForFoodType, getCookingMethodModifier, lookupCanonicalBaseFood, getCachedUSDAFood, setCachedUSDAFood } from './server_food_db';
+import { getTraceNutrientsForFoodType, getCookingMethodModifier, lookupCanonicalBaseFood } from './server_food_db';
 import { classifyUniversalPhysicalFormV3 } from './server_matching_engine';
 
 describe('getTraceNutrientsForFoodType', () => {
@@ -83,8 +83,9 @@ describe('lookupCanonicalBaseFood (F-1 & F-2 Catalog-First Resolution)', () => {
   it('resolves canonical base foods instantly without network calls', () => {
     const salmon = lookupCanonicalBaseFood('Grilled Salmon');
     expect(salmon).toBeDefined();
-    expect(salmon.fdcId).toBe('175168');
+    expect(salmon.id).toBe('grilled_salmon');
     expect(salmon.foodType).toBe('fish_fatty');
+    expect(salmon.fdcId).toBeUndefined();
 
     const oats = lookupCanonicalBaseFood('Rolled Oats');
     expect(oats).toBeDefined();
@@ -92,30 +93,30 @@ describe('lookupCanonicalBaseFood (F-1 & F-2 Catalog-First Resolution)', () => {
 
     const avocado = lookupCanonicalBaseFood('Fresh Avocado');
     expect(avocado).toBeDefined();
-    expect(avocado.fdcId).toBe('171705');
+    expect(avocado.id).toBe('avocado');
 
     const painAuRaisin = lookupCanonicalBaseFood('Pain au Raisin');
     expect(painAuRaisin).toBeDefined();
-    expect(painAuRaisin.fdcId).toBe('canonical_pain_au_raisin');
+    expect(painAuRaisin.id).toBe('pain_au_raisin');
     expect(painAuRaisin.foodType).toBe('grain');
     expect(painAuRaisin.calories).toBe(355);
 
     const cinnamonSwirl = lookupCanonicalBaseFood('Cinnamon Swirl');
     expect(cinnamonSwirl).toBeDefined();
-    expect(cinnamonSwirl.fdcId).toBe('canonical_cinnamon_swirl');
+    expect(cinnamonSwirl.id).toBe('cinnamon_swirl');
     expect(cinnamonSwirl.foodType).toBe('grain');
 
     const plainRaisins = lookupCanonicalBaseFood('Raisins');
     expect(plainRaisins).toBeDefined();
-    expect(plainRaisins.fdcId).toBe('169641');
+    expect(plainRaisins.id).toBe('raisins');
     expect(plainRaisins.foodType).toBe('fruit');
   });
 
-  it('manages local USDA lookup cache for repeat queries', () => {
-    setCachedUSDAFood('custom_greek_salad', { fdcId: 'custom_999', calories: 150 });
-    const cached = getCachedUSDAFood('custom_greek_salad');
-    expect(cached).toBeDefined();
-    expect(cached.fdcId).toBe('custom_999');
+  it('does not keep an in-memory USDA HTTP cache', async () => {
+    const mod = await import('./server_food_db');
+    expect((mod as any).getCachedUSDAFood).toBeUndefined();
+    expect((mod as any).setCachedUSDAFood).toBeUndefined();
+    expect((mod as any).LOCAL_USDA_CACHE).toBeUndefined();
   });
 
   it('classifies bakery/pastries with fruit in name as bakery_dessert rather than fruit_vegetable', () => {
@@ -133,26 +134,25 @@ describe('lookupCanonicalBaseFood (F-1 & F-2 Catalog-First Resolution)', () => {
 
 
 describe('FALSE_FRIEND class examples', () => {
-  it('pomegranate seeds does not steal sesame seed FDC ID (170150)', () => {
+  it('pomegranate seeds does not steal sesame seed', () => {
     const p = lookupCanonicalBaseFood('pomegranate seeds');
-    // We changed it to 169134 (or brand_menu...) so it should not be 170150!
-    expect(p?.fdcId).not.toBe('170150');
+    expect(p?.id).not.toBe('sesame_seed');
   });
 
   it('individual berry species resolve to distinct base food references rather than falling back to generic mixed berries', () => {
     const s = lookupCanonicalBaseFood('strawberry');
     const b = lookupCanonicalBaseFood('blueberry');
     const r = lookupCanonicalBaseFood('raspberry');
-    expect(s?.fdcId).toBe('167762');
-    expect(b?.fdcId).toBe('171711');
-    expect(r?.fdcId).toBe('167755');
-    expect(s?.fdcId).not.toBe(b?.fdcId);
-    expect(r?.fdcId).not.toBe(b?.fdcId);
+    expect(s?.id).toBe('strawberry');
+    expect(b?.id).toBe('blueberry');
+    expect(r?.id).toBe('raspberry');
+    expect(s?.id).not.toBe(b?.id);
+    expect(r?.id).not.toBe(b?.id);
   });
 
   it('mixed fruit cup query returns canonical fruit cup instead of actimel or yogurt drink', () => {
     const res = lookupCanonicalBaseFood('mixed fruit cup');
-    expect(res?.fdcId).toBe('mixed_fruit_cup_canonical');
+    expect(res?.id).toBe('mixed_fruit_cup');
   });
 
   it('american cheese has comprehensive micronutrient profile populated', () => {
@@ -179,37 +179,36 @@ describe('FALSE_FRIEND class examples', () => {
 
   it('crispy onion query returns canonical crispy onion instead of category fallback', () => {
     const res = lookupCanonicalBaseFood('crispy onion');
-    expect(res?.fdcId).toBe('crispy_onion_canonical');
+    expect(res?.id).toBe('crispy_onion');
   });
 
   it('ranch dressing query returns canonical ranch dressing instead of category fallback', () => {
     const res = lookupCanonicalBaseFood('ranch dressing');
-    expect(res?.fdcId).toBe('ranch_dressing_canonical');
+    expect(res?.id).toBe('ranch_dressing');
   });
 
   it('gherkin query returns canonical gherkin instead of category fallback', () => {
     const res = lookupCanonicalBaseFood('gherkin');
-    expect(res?.fdcId).toBe('gherkin_canonical');
+    expect(res?.id).toBe('gherkin');
   });
 
   it('cobb salad query returns canonical cobb salad instead of salad dressing', () => {
     const res = lookupCanonicalBaseFood('cobb salad');
-    expect(res?.fdcId).toBe('cobb_salad_canonical');
+    expect(res?.id).toBe('cobb_salad');
   });
 
   it('resolves cooked bacon query to canonical bacon entry', () => {
     const res = lookupCanonicalBaseFood('cooked bacon');
-    expect(res?.fdcId).toBe('172550');
+    expect(res?.id).toBe('cooked_bacon');
   });
 
   it('F-3 FALSE_FRIEND PLANT_MILK_AS_DAIRY: plant milks never resolve to dairy milk', () => {
     for (const q of ['oat milk', 'soy milk', 'almond milk', 'coconut milk', 'Oat Milk Latte']) {
       const res = lookupCanonicalBaseFood(q);
-      expect(res?.fdcId).not.toBe('746782');
+      expect(res?.id).not.toBe('whole_cow_milk');
       expect(res?.foodType).not.toBe('dairy');
     }
-    // Dairy control still resolves; oats-with-milk composite is not a plant milk.
-    expect(lookupCanonicalBaseFood('whole milk')?.fdcId).toBe('746782');
-    expect(lookupCanonicalBaseFood('glass of milk')?.fdcId).toBe('746782');
+    expect(lookupCanonicalBaseFood('whole milk')?.id).toBe('whole_cow_milk');
+    expect(lookupCanonicalBaseFood('glass of milk')?.id).toBe('whole_cow_milk');
   });
 });

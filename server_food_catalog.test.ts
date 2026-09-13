@@ -58,7 +58,8 @@ describe('Food Catalog Normalization & Resolution (PASS 2 - R7)', () => {
     const cobbMatch = await resolveInternalFood('Cobb Salad');
     expect(cobbMatch).not.toBeNull();
     expect(cobbMatch?.source).toBe('canonical_local');
-    expect(cobbMatch?.fdc_id).toBe('cobb_salad_canonical');
+    expect(cobbMatch?.food_id).toBe('cobb_salad');
+    expect(cobbMatch?.fdc_id).toBeNull();
 
     const caesarMatch = await resolveInternalFood('Caesar Dressing');
     expect(caesarMatch).not.toBeNull();

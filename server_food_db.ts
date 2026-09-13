@@ -192,246 +192,238 @@ export function getCookingMethodModifier(methodStr: string | null | undefined): 
   return COOKING_METHOD_OIL_MODIFIERS.unknown;
 }
 
-export const LOCAL_USDA_CACHE = new Map<string, any>();
 
-export function getCachedUSDAFood(query: string): any | null {
-  if (!query) return null;
-  const key = query.toLowerCase().replace(/[^a-z0-9]/g, '_');
-  return LOCAL_USDA_CACHE.get(key) || null;
-}
+export const CANONICAL_BASE_FOODS: Record<string, { calories: number; protein: number; totalFat: number; saturatedFat: number; transFat: number; carbohydrates: number; sugar: number; sodium: number; potassium: number; totalFibre: number; vitaminC?: number; vitaminA?: number; calcium?: number; magnesium?: number; iron?: number; zinc?: number; folate?: number; vitaminB6?: number; vitaminD?: number; vitaminE?: number; vitaminK?: number; selenium?: number; phosphorus?: number; vitaminB12?: number; iodine?: number; thiamine?: number; riboflavin?: number; niacin?: number; unsaturatedFat?: number; omega3?: number; foodType: string; [key: string]: any }> = {
+  plain_yogurt: { calories: 61, protein: 3.47, totalFat: 3.25, saturatedFat: 2.09, transFat: 0, carbohydrates: 4.66, sugar: 4.66, sodium: 46, potassium: 155, totalFibre: 0, foodType: 'dairy' },
+  pain_au_raisin: { calories: 355, protein: 6.2, totalFat: 14.5, saturatedFat: 8.5, transFat: 0.1, carbohydrates: 49.5, sugar: 21.0, sodium: 340, potassium: 160, totalFibre: 2.2, vitaminC: 0.2, vitaminA: 180, calcium: 32, magnesium: 14, iron: 1.8, zinc: 0.6, folate: 70, vitaminB6: 0.04, foodType: 'grain' },
+  cinnamon_swirl: { calories: 430, protein: 5.5, totalFat: 19.5, saturatedFat: 11.5, transFat: 0.1, carbohydrates: 55.0, sugar: 24.0, sodium: 320, potassium: 120, totalFibre: 1.8, vitaminC: 0.1, vitaminA: 190, calcium: 35, magnesium: 15, iron: 1.9, zinc: 0.65, folate: 75, vitaminB6: 0.04, foodType: 'grain' },
+  pain_au_chocolat: { calories: 414, protein: 7.1, totalFat: 23.5, saturatedFat: 13.8, transFat: 0.1, carbohydrates: 44.0, sugar: 14.5, sodium: 430, potassium: 130, totalFibre: 2.4, vitaminC: 0.2, vitaminA: 195, calcium: 36, magnesium: 18, iron: 2.1, zinc: 0.72, folate: 80, vitaminB6: 0.04, foodType: 'grain' },
+  almond_croissant: { calories: 420, protein: 9.0, totalFat: 24.0, saturatedFat: 12.0, transFat: 0.1, carbohydrates: 42.0, sugar: 16.0, sodium: 380, potassium: 190, totalFibre: 3.0, vitaminC: 0.2, vitaminA: 200, calcium: 42, magnesium: 28, iron: 2.2, zinc: 0.8, folate: 85, vitaminB6: 0.05, foodType: 'grain' },
+  danish_pastry: { calories: 374, protein: 6.0, totalFat: 20.0, saturatedFat: 9.2, transFat: 0.1, carbohydrates: 43.0, sugar: 18.0, sodium: 320, potassium: 110, totalFibre: 1.5, foodType: 'grain' },
+  apple_turnover: { calories: 330, protein: 3.5, totalFat: 17.0, saturatedFat: 8.0, transFat: 0.1, carbohydrates: 42.0, sugar: 16.0, sodium: 280, potassium: 90, totalFibre: 1.6, foodType: 'grain' },
+  raisin_bread: { calories: 274, protein: 7.9, totalFat: 4.2, saturatedFat: 0.9, transFat: 0, carbohydrates: 52.4, sugar: 15.6, sodium: 342, potassium: 204, totalFibre: 3.1, foodType: 'grain' },
+  raisins: { calories: 299, protein: 3.07, totalFat: 0.46, saturatedFat: 0.05, transFat: 0, carbohydrates: 79.18, sugar: 59.19, sodium: 11, potassium: 749, totalFibre: 3.7, foodType: 'fruit' },
+  almonds: { calories: 579, protein: 21.15, totalFat: 49.93, saturatedFat: 3.8, transFat: 0, carbohydrates: 21.55, sugar: 4.35, sodium: 1, potassium: 733, totalFibre: 12.5, foodType: 'nut' },
+  croissant: { calories: 406, protein: 8.2, totalFat: 21.0, saturatedFat: 11.66, transFat: 0.16, carbohydrates: 45.8, sugar: 11.26, sodium: 467, potassium: 118, totalFibre: 2.6, vitaminC: 0.2, vitaminA: 206, calcium: 37, magnesium: 16, iron: 2.03, zinc: 0.77, folate: 83, vitaminB6: 0.04, foodType: 'processed' },
+  butter: { calories: 717, protein: 0.85, totalFat: 81.1, saturatedFat: 51.4, transFat: 3.3, carbohydrates: 0.06, sugar: 0.06, sodium: 643, potassium: 24, totalFibre: 0, vitaminA: 684, calcium: 24, foodType: 'dairy' },
+  unsalted_butter: { calories: 717, protein: 0.85, totalFat: 81.1, saturatedFat: 51.4, transFat: 3.3, carbohydrates: 0.06, sugar: 0.06, sodium: 11, potassium: 24, totalFibre: 0, vitaminA: 684, calcium: 24, foodType: 'dairy' },
+  whipped_butter: { calories: 717, protein: 0.85, totalFat: 81.1, saturatedFat: 51.4, transFat: 3.3, carbohydrates: 0.06, sugar: 0.06, sodium: 643, potassium: 24, totalFibre: 0, vitaminA: 684, calcium: 24, foodType: 'dairy' },
+  raspberry: { calories: 52, protein: 1.2, totalFat: 0.65, saturatedFat: 0.02, transFat: 0, carbohydrates: 11.9, sugar: 4.42, sodium: 1, potassium: 151, totalFibre: 6.5, vitaminC: 26.2, vitaminA: 2, calcium: 25, magnesium: 22, iron: 0.69, zinc: 0.42, folate: 21, vitaminB6: 0.06, foodType: 'fruit' },
+  cobb_salad: { calories: 145, protein: 11.2, totalFat: 10.5, saturatedFat: 3.2, transFat: 0, carbohydrates: 2.8, sugar: 1.6, sodium: 380, potassium: 310, totalFibre: 1.4, vitaminC: 9.5, vitaminA: 210, calcium: 75, magnesium: 24, iron: 1.4, zinc: 0.85, folate: 65, vitaminB6: 0.12, foodType: 'processed' },
+  donut_malaysia_matcha: { calories: 426, protein: 5.7, totalFat: 22.9, saturatedFat: 5.8, transFat: 0, carbohydrates: 50.8, sugar: 26.7, sodium: 387, potassium: 115, totalFibre: 1.5, calcium: 87, foodType: 'processed' },
+  tomat_dan_daun_bawang: { calories: 18, protein: 0.9, totalFat: 0.2, saturatedFat: 0, transFat: 0, carbohydrates: 3.9, sugar: 2.6, sodium: 5, potassium: 237, totalFibre: 1.2, vitaminC: 13.7, vitaminA: 42, calcium: 10, magnesium: 11, iron: 0.27, foodType: 'leafy_veg' },
+  santan: { calories: 230, protein: 2.29, totalFat: 23.8, saturatedFat: 21.1, transFat: 0, carbohydrates: 5.5, sugar: 3.3, sodium: 15, potassium: 263, totalFibre: 2.2, calcium: 16, iron: 1.6, foodType: 'processed' },
+  cooked_bacon: { calories: 541, protein: 37.0, totalFat: 42.0, saturatedFat: 14.0, transFat: 0, carbohydrates: 1.4, sugar: 0, sodium: 1717, potassium: 565, totalFibre: 0, foodType: 'processed' },
+  mixed_fruit_cup: { calories: 50, protein: 0.6, totalFat: 0.2, saturatedFat: 0.02, transFat: 0, carbohydrates: 12.5, sugar: 9.8, sodium: 3, potassium: 160, totalFibre: 1.8, vitaminC: 25.0, vitaminA: 15, calcium: 12, magnesium: 10, iron: 0.3, zinc: 0.1, folate: 12, vitaminB6: 0.05, foodType: 'fruit' },
+  falafel: { calories: 333, protein: 13.3, totalFat: 17.8, saturatedFat: 2.39, transFat: 0, carbohydrates: 31.8, sugar: 4.88, sodium: 294, potassium: 585, totalFibre: 4.9, foodType: 'legume' },
+  hummus: { calories: 277, protein: 7.9, totalFat: 21.4, saturatedFat: 2.94, transFat: 0, carbohydrates: 15.6, sugar: 0, sodium: 395, potassium: 251, totalFibre: 6, foodType: 'processed' },
+  feta_cheese: { calories: 264, protein: 14.21, totalFat: 21.28, saturatedFat: 14.94, transFat: 0, carbohydrates: 4.09, sugar: 4.09, sodium: 917, potassium: 62, totalFibre: 0, foodType: 'dairy' },
+  raw_red_onion: { calories: 40, protein: 1.1, totalFat: 0.1, saturatedFat: 0.04, transFat: 0, carbohydrates: 9.34, sugar: 4.24, sodium: 4, potassium: 146, totalFibre: 1.7, foodType: 'veg' },
+  raw_bell_pepper: { calories: 20, protein: 0.86, totalFat: 0.17, saturatedFat: 0.05, transFat: 0, carbohydrates: 4.64, sugar: 2.4, sodium: 3, potassium: 175, totalFibre: 1.7, foodType: 'veg' },
+  sweet_bell_pepper: { calories: 31, protein: 0.99, totalFat: 0.30, saturatedFat: 0.03, transFat: 0, carbohydrates: 6.03, sugar: 4.20, sodium: 4, potassium: 211, totalFibre: 2.1, foodType: 'veg' },
+  cucumber: { calories: 15, protein: 0.65, totalFat: 0.11, saturatedFat: 0.03, transFat: 0, carbohydrates: 3.63, sugar: 1.67, sodium: 2, potassium: 147, totalFibre: 0.5, vitaminC: 2.8, calcium: 16, foodType: 'leafy_veg' },
+  chickpeas: { calories: 164, protein: 8.86, totalFat: 2.59, saturatedFat: 0.27, transFat: 0, carbohydrates: 27.42, sugar: 4.8, sodium: 24, potassium: 291, totalFibre: 7.6, iron: 2.89, calcium: 49, magnesium: 48, foodType: 'legume' },
+  fried_ring_doughnut: { calories: 426, protein: 5.7, totalFat: 22.9, saturatedFat: 5.8, transFat: 0, carbohydrates: 50.8, sugar: 26.7, sodium: 387, potassium: 115, totalFibre: 1.5, calcium: 87, foodType: 'processed' },
+  pomegranate_seeds_brand: { calories: 83, protein: 1.67, totalFat: 1.17, saturatedFat: 0.15, transFat: 0, carbohydrates: 18.7, sugar: 13.67, sodium: 3, potassium: 236, totalFibre: 4.0, vitaminC: 10.2, calcium: 10, foodType: 'fruit' },
+  sainsbury_rolled_oats: { calories: 370, protein: 11.0, totalFat: 6.0, saturatedFat: 1.0, transFat: 0, carbohydrates: 60.0, sugar: 1.0, sodium: 10, potassium: 350, totalFibre: 9.0, foodType: 'grain' },
 
-export function setCachedUSDAFood(query: string, match: any): void {
-  if (!query || !match) return;
-  const key = query.toLowerCase().replace(/[^a-z0-9]/g, '_');
-  LOCAL_USDA_CACHE.set(key, match);
-}
+  tartar_sauce: { calories: 211, protein: 1.0, totalFat: 21.0, saturatedFat: 3.4, transFat: 0, carbohydrates: 4.4, sugar: 1.0, sodium: 730, potassium: 50, totalFibre: 1.0, foodType: 'ultra_processed' },
+  wheat_flour: { calories: 364, protein: 10.33, totalFat: 0.98, saturatedFat: 0.15, transFat: 0, carbohydrates: 76.31, sugar: 0.27, sodium: 2, potassium: 107, totalFibre: 2.7, foodType: 'grain' },
+  granulated_sugar: { calories: 387, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 99.98, sugar: 99.9, sodium: 1, potassium: 2, totalFibre: 0, foodType: 'processed' },
+  american_cheese: { calories: 330, protein: 18.0, totalFat: 27.0, saturatedFat: 17.0, transFat: 0, carbohydrates: 3.0, sugar: 2.0, sodium: 1500, potassium: 150, totalFibre: 0, calcium: 1045, iron: 0.6, magnesium: 26, phosphorus: 734, zinc: 2.7, selenium: 14.5, vitaminA: 322, vitaminB12: 1.4, folate: 10, vitaminB6: 0.08, vitaminC: 0.1, vitaminD: 0.6, vitaminE: 0.5, vitaminK: 2.5, iodine: 14, thiamine: 0.02, riboflavin: 0.3, niacin: 0.1, unsaturatedFat: 10.0, omega3: 0.2, foodType: 'dairy' },
+  processed_cheese: { calories: 330, protein: 18.0, totalFat: 27.0, saturatedFat: 17.0, transFat: 0, carbohydrates: 3.0, sugar: 2.0, sodium: 1500, potassium: 150, totalFibre: 0, calcium: 1045, iron: 0.6, magnesium: 26, phosphorus: 734, zinc: 2.7, selenium: 14.5, vitaminA: 322, vitaminB12: 1.4, folate: 10, vitaminB6: 0.08, vitaminC: 0.1, vitaminD: 0.6, vitaminE: 0.5, vitaminK: 2.5, iodine: 14, thiamine: 0.02, riboflavin: 0.3, niacin: 0.1, unsaturatedFat: 10.0, omega3: 0.2, foodType: 'dairy' },
+  mayonnaise: { calories: 680, protein: 1.0, totalFat: 75.0, saturatedFat: 12.0, transFat: 0, carbohydrates: 0.6, sugar: 0.6, sodium: 635, potassium: 20, totalFibre: 0, calcium: 8, iron: 0.2, magnesium: 1, phosphorus: 24, zinc: 0.1, selenium: 1.5, vitaminA: 10, vitaminB12: 0.1, folate: 4, vitaminB6: 0.01, vitaminC: 0.1, vitaminD: 0.1, vitaminE: 3.3, vitaminK: 163, iodine: 2, thiamine: 0.01, riboflavin: 0.01, niacin: 0.1, unsaturatedFat: 63.0, omega3: 5.0, foodType: 'ultra_processed' },
+  crispy_onion: { calories: 590, protein: 5, totalFat: 43, saturatedFat: 17, transFat: 0, carbohydrates: 46, sugar: 9, sodium: 750, potassium: 150, totalFibre: 3.5, foodType: 'ultra_processed' },
+  ranch_dressing: { calories: 430, protein: 1, totalFat: 46, saturatedFat: 7, transFat: 0, carbohydrates: 6, sugar: 3, sodium: 850, potassium: 75, totalFibre: 0, foodType: 'processed' },
+  cheddar_cheese_cubes: { calories: 402, protein: 25, totalFat: 33, saturatedFat: 21, transFat: 0, carbohydrates: 1.3, sugar: 0.5, sodium: 621, potassium: 98, totalFibre: 0, calcium: 721, iron: 0.7, magnesium: 28, phosphorus: 512, zinc: 3.1, selenium: 14, vitaminA: 330, vitaminB12: 1.2, folate: 18, vitaminB6: 0.1, vitaminC: 0, vitaminD: 0.6, vitaminE: 0.3, vitaminK: 2.8, iodine: 15, thiamine: 0.03, riboflavin: 0.4, niacin: 0.1, unsaturatedFat: 12.0, omega3: 0.4, foodType: 'dairy' },
+  gherkin: { calories: 14, protein: 0.5, totalFat: 0.2, saturatedFat: 0, transFat: 0, carbohydrates: 2.9, sugar: 1.4, sodium: 1208, potassium: 23, totalFibre: 1, calcium: 0, iron: 0, magnesium: 0, phosphorus: 0, zinc: 0, selenium: 0, vitaminA: 0, vitaminB12: 0, folate: 0, vitaminB6: 0, vitaminC: 0, vitaminD: 0, vitaminE: 0, vitaminK: 0, iodine: 0, thiamine: 0, riboflavin: 0, niacin: 0, unsaturatedFat: 0.2, omega3: 0, foodType: 'processed' },
+  ketchup: { calories: 101, protein: 1.0, totalFat: 0.1, saturatedFat: 0, transFat: 0, carbohydrates: 27.4, sugar: 21.8, sodium: 907, potassium: 281, totalFibre: 0.3, calcium: 15, iron: 0.4, magnesium: 15, phosphorus: 30, zinc: 0.2, selenium: 0.5, vitaminA: 20, vitaminB12: 0.1, folate: 5, vitaminB6: 0.1, vitaminC: 4.0, vitaminD: 0.1, vitaminE: 1.4, vitaminK: 2.8, iodine: 0, thiamine: 0.01, riboflavin: 0.05, niacin: 1.4, unsaturatedFat: 0.1, omega3: 0.1, foodType: 'ultra_processed' },
 
-export const CANONICAL_BASE_FOODS: Record<string, { fdcId: string; calories: number; protein: number; totalFat: number; saturatedFat: number; transFat: number; carbohydrates: number; sugar: number; sodium: number; potassium: number; totalFibre: number; vitaminC?: number; vitaminA?: number; calcium?: number; magnesium?: number; iron?: number; zinc?: number; folate?: number; vitaminB6?: number; vitaminD?: number; vitaminE?: number; vitaminK?: number; selenium?: number; phosphorus?: number; vitaminB12?: number; iodine?: number; thiamine?: number; riboflavin?: number; niacin?: number; unsaturatedFat?: number; omega3?: number; foodType: string; [key: string]: any }> = {
-  plain_yogurt: { fdcId: "170903", calories: 61, protein: 3.47, totalFat: 3.25, saturatedFat: 2.09, transFat: 0, carbohydrates: 4.66, sugar: 4.66, sodium: 46, potassium: 155, totalFibre: 0, foodType: 'dairy' },
-  pain_au_raisin: { fdcId: "canonical_pain_au_raisin", calories: 355, protein: 6.2, totalFat: 14.5, saturatedFat: 8.5, transFat: 0.1, carbohydrates: 49.5, sugar: 21.0, sodium: 340, potassium: 160, totalFibre: 2.2, vitaminC: 0.2, vitaminA: 180, calcium: 32, magnesium: 14, iron: 1.8, zinc: 0.6, folate: 70, vitaminB6: 0.04, foodType: 'grain' },
-  cinnamon_swirl: { fdcId: "canonical_cinnamon_swirl", calories: 430, protein: 5.5, totalFat: 19.5, saturatedFat: 11.5, transFat: 0.1, carbohydrates: 55.0, sugar: 24.0, sodium: 320, potassium: 120, totalFibre: 1.8, vitaminC: 0.1, vitaminA: 190, calcium: 35, magnesium: 15, iron: 1.9, zinc: 0.65, folate: 75, vitaminB6: 0.04, foodType: 'grain' },
-  pain_au_chocolat: { fdcId: "canonical_pain_au_chocolat", calories: 414, protein: 7.1, totalFat: 23.5, saturatedFat: 13.8, transFat: 0.1, carbohydrates: 44.0, sugar: 14.5, sodium: 430, potassium: 130, totalFibre: 2.4, vitaminC: 0.2, vitaminA: 195, calcium: 36, magnesium: 18, iron: 2.1, zinc: 0.72, folate: 80, vitaminB6: 0.04, foodType: 'grain' },
-  almond_croissant: { fdcId: "canonical_almond_croissant", calories: 420, protein: 9.0, totalFat: 24.0, saturatedFat: 12.0, transFat: 0.1, carbohydrates: 42.0, sugar: 16.0, sodium: 380, potassium: 190, totalFibre: 3.0, vitaminC: 0.2, vitaminA: 200, calcium: 42, magnesium: 28, iron: 2.2, zinc: 0.8, folate: 85, vitaminB6: 0.05, foodType: 'grain' },
-  danish_pastry: { fdcId: "172836", calories: 374, protein: 6.0, totalFat: 20.0, saturatedFat: 9.2, transFat: 0.1, carbohydrates: 43.0, sugar: 18.0, sodium: 320, potassium: 110, totalFibre: 1.5, foodType: 'grain' },
-  apple_turnover: { fdcId: "canonical_apple_turnover", calories: 330, protein: 3.5, totalFat: 17.0, saturatedFat: 8.0, transFat: 0.1, carbohydrates: 42.0, sugar: 16.0, sodium: 280, potassium: 90, totalFibre: 1.6, foodType: 'grain' },
-  raisin_bread: { fdcId: "172689", calories: 274, protein: 7.9, totalFat: 4.2, saturatedFat: 0.9, transFat: 0, carbohydrates: 52.4, sugar: 15.6, sodium: 342, potassium: 204, totalFibre: 3.1, foodType: 'grain' },
-  raisins: { fdcId: "169641", calories: 299, protein: 3.07, totalFat: 0.46, saturatedFat: 0.05, transFat: 0, carbohydrates: 79.18, sugar: 59.19, sodium: 11, potassium: 749, totalFibre: 3.7, foodType: 'fruit' },
-  almonds: { fdcId: "170567", calories: 579, protein: 21.15, totalFat: 49.93, saturatedFat: 3.8, transFat: 0, carbohydrates: 21.55, sugar: 4.35, sodium: 1, potassium: 733, totalFibre: 12.5, foodType: 'nut' },
-  croissant: { fdcId: "172242", calories: 406, protein: 8.2, totalFat: 21.0, saturatedFat: 11.66, transFat: 0.16, carbohydrates: 45.8, sugar: 11.26, sodium: 467, potassium: 118, totalFibre: 2.6, vitaminC: 0.2, vitaminA: 206, calcium: 37, magnesium: 16, iron: 2.03, zinc: 0.77, folate: 83, vitaminB6: 0.04, foodType: 'processed' },
-  butter: { fdcId: "173410", calories: 717, protein: 0.85, totalFat: 81.1, saturatedFat: 51.4, transFat: 3.3, carbohydrates: 0.06, sugar: 0.06, sodium: 643, potassium: 24, totalFibre: 0, vitaminA: 684, calcium: 24, foodType: 'dairy' },
-  unsalted_butter: { fdcId: "173410", calories: 717, protein: 0.85, totalFat: 81.1, saturatedFat: 51.4, transFat: 3.3, carbohydrates: 0.06, sugar: 0.06, sodium: 11, potassium: 24, totalFibre: 0, vitaminA: 684, calcium: 24, foodType: 'dairy' },
-  whipped_butter: { fdcId: "173410", calories: 717, protein: 0.85, totalFat: 81.1, saturatedFat: 51.4, transFat: 3.3, carbohydrates: 0.06, sugar: 0.06, sodium: 643, potassium: 24, totalFibre: 0, vitaminA: 684, calcium: 24, foodType: 'dairy' },
-  raspberry: { fdcId: "167755", calories: 52, protein: 1.2, totalFat: 0.65, saturatedFat: 0.02, transFat: 0, carbohydrates: 11.9, sugar: 4.42, sodium: 1, potassium: 151, totalFibre: 6.5, vitaminC: 26.2, vitaminA: 2, calcium: 25, magnesium: 22, iron: 0.69, zinc: 0.42, folate: 21, vitaminB6: 0.06, foodType: 'fruit' },
-  cobb_salad: { fdcId: "cobb_salad_canonical", calories: 145, protein: 11.2, totalFat: 10.5, saturatedFat: 3.2, transFat: 0, carbohydrates: 2.8, sugar: 1.6, sodium: 380, potassium: 310, totalFibre: 1.4, vitaminC: 9.5, vitaminA: 210, calcium: 75, magnesium: 24, iron: 1.4, zinc: 0.85, folate: 65, vitaminB6: 0.12, foodType: 'processed' },
-  donut_malaysia_matcha: { fdcId: "172813", calories: 426, protein: 5.7, totalFat: 22.9, saturatedFat: 5.8, transFat: 0, carbohydrates: 50.8, sugar: 26.7, sodium: 387, potassium: 115, totalFibre: 1.5, calcium: 87, foodType: 'processed' },
-  tomat_dan_daun_bawang: { fdcId: "170010", calories: 18, protein: 0.9, totalFat: 0.2, saturatedFat: 0, transFat: 0, carbohydrates: 3.9, sugar: 2.6, sodium: 5, potassium: 237, totalFibre: 1.2, vitaminC: 13.7, vitaminA: 42, calcium: 10, magnesium: 11, iron: 0.27, foodType: 'leafy_veg' },
-  santan: { fdcId: "170172", calories: 230, protein: 2.29, totalFat: 23.8, saturatedFat: 21.1, transFat: 0, carbohydrates: 5.5, sugar: 3.3, sodium: 15, potassium: 263, totalFibre: 2.2, calcium: 16, iron: 1.6, foodType: 'processed' },
-  cooked_bacon: { fdcId: "172550", calories: 541, protein: 37.0, totalFat: 42.0, saturatedFat: 14.0, transFat: 0, carbohydrates: 1.4, sugar: 0, sodium: 1717, potassium: 565, totalFibre: 0, foodType: 'processed' },
-  mixed_fruit_cup: { fdcId: "mixed_fruit_cup_canonical", calories: 50, protein: 0.6, totalFat: 0.2, saturatedFat: 0.02, transFat: 0, carbohydrates: 12.5, sugar: 9.8, sodium: 3, potassium: 160, totalFibre: 1.8, vitaminC: 25.0, vitaminA: 15, calcium: 12, magnesium: 10, iron: 0.3, zinc: 0.1, folate: 12, vitaminB6: 0.05, foodType: 'fruit' },
-  falafel: { fdcId: "falafel_canonical", calories: 333, protein: 13.3, totalFat: 17.8, saturatedFat: 2.39, transFat: 0, carbohydrates: 31.8, sugar: 4.88, sodium: 294, potassium: 585, totalFibre: 4.9, foodType: 'legume' },
-  hummus: { fdcId: "174289", calories: 277, protein: 7.9, totalFat: 21.4, saturatedFat: 2.94, transFat: 0, carbohydrates: 15.6, sugar: 0, sodium: 395, potassium: 251, totalFibre: 6, foodType: 'processed' },
-  feta_cheese: { fdcId: "173420", calories: 264, protein: 14.21, totalFat: 21.28, saturatedFat: 14.94, transFat: 0, carbohydrates: 4.09, sugar: 4.09, sodium: 917, potassium: 62, totalFibre: 0, foodType: 'dairy' },
-  raw_red_onion: { fdcId: "11282", calories: 40, protein: 1.1, totalFat: 0.1, saturatedFat: 0.04, transFat: 0, carbohydrates: 9.34, sugar: 4.24, sodium: 4, potassium: 146, totalFibre: 1.7, foodType: 'veg' },
-  raw_bell_pepper: { fdcId: "170108", calories: 20, protein: 0.86, totalFat: 0.17, saturatedFat: 0.05, transFat: 0, carbohydrates: 4.64, sugar: 2.4, sodium: 3, potassium: 175, totalFibre: 1.7, foodType: 'veg' },
-  sweet_bell_pepper: { fdcId: "170393", calories: 31, protein: 0.99, totalFat: 0.30, saturatedFat: 0.03, transFat: 0, carbohydrates: 6.03, sugar: 4.20, sodium: 4, potassium: 211, totalFibre: 2.1, foodType: 'veg' },
-  cucumber: { fdcId: "168409", calories: 15, protein: 0.65, totalFat: 0.11, saturatedFat: 0.03, transFat: 0, carbohydrates: 3.63, sugar: 1.67, sodium: 2, potassium: 147, totalFibre: 0.5, vitaminC: 2.8, calcium: 16, foodType: 'leafy_veg' },
-  chickpeas: { fdcId: "173800", calories: 164, protein: 8.86, totalFat: 2.59, saturatedFat: 0.27, transFat: 0, carbohydrates: 27.42, sugar: 4.8, sodium: 24, potassium: 291, totalFibre: 7.6, iron: 2.89, calcium: 49, magnesium: 48, foodType: 'legume' },
-  fried_ring_doughnut: { fdcId: "172813", calories: 426, protein: 5.7, totalFat: 22.9, saturatedFat: 5.8, transFat: 0, carbohydrates: 50.8, sugar: 26.7, sodium: 387, potassium: 115, totalFibre: 1.5, calcium: 87, foodType: 'processed' },
-  pomegranate_seeds_brand: { fdcId: "brand_menu_7dc1e5b0-2e01-44ad-a020-75efc8cdec5e", calories: 83, protein: 1.67, totalFat: 1.17, saturatedFat: 0.15, transFat: 0, carbohydrates: 18.7, sugar: 13.67, sodium: 3, potassium: 236, totalFibre: 4.0, vitaminC: 10.2, calcium: 10, foodType: 'fruit' },
-  sainsbury_rolled_oats: { fdcId: "brand_menu_0c6ab961-8c5c-4bcc-bc5d-2de648e7e470", calories: 370, protein: 11.0, totalFat: 6.0, saturatedFat: 1.0, transFat: 0, carbohydrates: 60.0, sugar: 1.0, sodium: 10, potassium: 350, totalFibre: 9.0, foodType: 'grain' },
-
-  tartar_sauce: { fdcId: "tartar_sauce_canonical", calories: 211, protein: 1.0, totalFat: 21.0, saturatedFat: 3.4, transFat: 0, carbohydrates: 4.4, sugar: 1.0, sodium: 730, potassium: 50, totalFibre: 1.0, foodType: 'ultra_processed' },
-  wheat_flour: { fdcId: "169680", calories: 364, protein: 10.33, totalFat: 0.98, saturatedFat: 0.15, transFat: 0, carbohydrates: 76.31, sugar: 0.27, sodium: 2, potassium: 107, totalFibre: 2.7, foodType: 'grain' },
-  granulated_sugar: { fdcId: "169652", calories: 387, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 99.98, sugar: 99.9, sodium: 1, potassium: 2, totalFibre: 0, foodType: 'processed' },
-  american_cheese: { fdcId: "american_cheese_canonical", calories: 330, protein: 18.0, totalFat: 27.0, saturatedFat: 17.0, transFat: 0, carbohydrates: 3.0, sugar: 2.0, sodium: 1500, potassium: 150, totalFibre: 0, calcium: 1045, iron: 0.6, magnesium: 26, phosphorus: 734, zinc: 2.7, selenium: 14.5, vitaminA: 322, vitaminB12: 1.4, folate: 10, vitaminB6: 0.08, vitaminC: 0.1, vitaminD: 0.6, vitaminE: 0.5, vitaminK: 2.5, iodine: 14, thiamine: 0.02, riboflavin: 0.3, niacin: 0.1, unsaturatedFat: 10.0, omega3: 0.2, foodType: 'dairy' },
-  processed_cheese: { fdcId: "processed_cheese_canonical", calories: 330, protein: 18.0, totalFat: 27.0, saturatedFat: 17.0, transFat: 0, carbohydrates: 3.0, sugar: 2.0, sodium: 1500, potassium: 150, totalFibre: 0, calcium: 1045, iron: 0.6, magnesium: 26, phosphorus: 734, zinc: 2.7, selenium: 14.5, vitaminA: 322, vitaminB12: 1.4, folate: 10, vitaminB6: 0.08, vitaminC: 0.1, vitaminD: 0.6, vitaminE: 0.5, vitaminK: 2.5, iodine: 14, thiamine: 0.02, riboflavin: 0.3, niacin: 0.1, unsaturatedFat: 10.0, omega3: 0.2, foodType: 'dairy' },
-  mayonnaise: { fdcId: "mayo_canonical", calories: 680, protein: 1.0, totalFat: 75.0, saturatedFat: 12.0, transFat: 0, carbohydrates: 0.6, sugar: 0.6, sodium: 635, potassium: 20, totalFibre: 0, calcium: 8, iron: 0.2, magnesium: 1, phosphorus: 24, zinc: 0.1, selenium: 1.5, vitaminA: 10, vitaminB12: 0.1, folate: 4, vitaminB6: 0.01, vitaminC: 0.1, vitaminD: 0.1, vitaminE: 3.3, vitaminK: 163, iodine: 2, thiamine: 0.01, riboflavin: 0.01, niacin: 0.1, unsaturatedFat: 63.0, omega3: 5.0, foodType: 'ultra_processed' },
-  crispy_onion: { fdcId: "crispy_onion_canonical", calories: 590, protein: 5, totalFat: 43, saturatedFat: 17, transFat: 0, carbohydrates: 46, sugar: 9, sodium: 750, potassium: 150, totalFibre: 3.5, foodType: 'ultra_processed' },
-  ranch_dressing: { fdcId: "ranch_dressing_canonical", calories: 430, protein: 1, totalFat: 46, saturatedFat: 7, transFat: 0, carbohydrates: 6, sugar: 3, sodium: 850, potassium: 75, totalFibre: 0, foodType: 'processed' },
-  cheddar_cheese_cubes: { fdcId: "cheddar_cheese_cubes_canonical", calories: 402, protein: 25, totalFat: 33, saturatedFat: 21, transFat: 0, carbohydrates: 1.3, sugar: 0.5, sodium: 621, potassium: 98, totalFibre: 0, calcium: 721, iron: 0.7, magnesium: 28, phosphorus: 512, zinc: 3.1, selenium: 14, vitaminA: 330, vitaminB12: 1.2, folate: 18, vitaminB6: 0.1, vitaminC: 0, vitaminD: 0.6, vitaminE: 0.3, vitaminK: 2.8, iodine: 15, thiamine: 0.03, riboflavin: 0.4, niacin: 0.1, unsaturatedFat: 12.0, omega3: 0.4, foodType: 'dairy' },
-  gherkin: { fdcId: "gherkin_canonical", calories: 14, protein: 0.5, totalFat: 0.2, saturatedFat: 0, transFat: 0, carbohydrates: 2.9, sugar: 1.4, sodium: 1208, potassium: 23, totalFibre: 1, calcium: 0, iron: 0, magnesium: 0, phosphorus: 0, zinc: 0, selenium: 0, vitaminA: 0, vitaminB12: 0, folate: 0, vitaminB6: 0, vitaminC: 0, vitaminD: 0, vitaminE: 0, vitaminK: 0, iodine: 0, thiamine: 0, riboflavin: 0, niacin: 0, unsaturatedFat: 0.2, omega3: 0, foodType: 'processed' },
-  ketchup: { fdcId: "ketchup_canonical", calories: 101, protein: 1.0, totalFat: 0.1, saturatedFat: 0, transFat: 0, carbohydrates: 27.4, sugar: 21.8, sodium: 907, potassium: 281, totalFibre: 0.3, calcium: 15, iron: 0.4, magnesium: 15, phosphorus: 30, zinc: 0.2, selenium: 0.5, vitaminA: 20, vitaminB12: 0.1, folate: 5, vitaminB6: 0.1, vitaminC: 4.0, vitaminD: 0.1, vitaminE: 1.4, vitaminK: 2.8, iodine: 0, thiamine: 0.01, riboflavin: 0.05, niacin: 1.4, unsaturatedFat: 0.1, omega3: 0.1, foodType: 'ultra_processed' },
-
-  ice: { fdcId: "000000", calories: 0, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 0, potassium: 0, totalFibre: 0, foodType: 'unknown' },
-  water: { fdcId: "000000", calories: 0, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 0, potassium: 0, totalFibre: 0, foodType: 'unknown' },
-  coca_cola: { fdcId: "173256", calories: 42, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 10.6, sugar: 10.6, sodium: 10, potassium: 2, totalFibre: 0, foodType: 'processed' },
-  soda_cola: { fdcId: "173256", calories: 42, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 10.6, sugar: 10.6, sodium: 10, potassium: 2, totalFibre: 0, foodType: 'processed' },
-  cherry_tomato: { fdcId: "170010", calories: 18, protein: 0.9, totalFat: 0.2, saturatedFat: 0, transFat: 0, carbohydrates: 3.9, sugar: 2.6, sodium: 5, potassium: 237, totalFibre: 1.2, vitaminC: 13.7, vitaminA: 42, calcium: 10, magnesium: 11, iron: 0.27, foodType: 'leafy_veg' },
-  white_rice: { fdcId: "169756", calories: 130, protein: 2.7, totalFat: 0.3, saturatedFat: 0.1, transFat: 0, carbohydrates: 28.2, sugar: 0.1, sodium: 1, potassium: 35, totalFibre: 0.4, calcium: 10, magnesium: 12, iron: 0.2, zinc: 0.49, foodType: 'grain' },
-  rice_congee: { fdcId: null, calories: 45, protein: 1.3, totalFat: 0.3, saturatedFat: 0.05, transFat: 0, carbohydrates: 9.5, sugar: 0.1, sodium: 5, potassium: 20, totalFibre: 0.2, calcium: 4, magnesium: 5, iron: 0.1, zinc: 0.2, foodType: 'grain' },
-  seaweed_salad: { fdcId: "seaweed_salad_canonical", calories: 85, protein: 1.5, totalFat: 6.0, saturatedFat: 1.0, transFat: 0, carbohydrates: 8.5, sugar: 3.0, sodium: 650, potassium: 150, totalFibre: 1.5, calcium: 50, magnesium: 30, iron: 1.0, zinc: 0.3, foodType: 'prepared dish/entree' },
-  fruit_jam: { fdcId: "172081", calories: 250, protein: 0.4, totalFat: 0.1, saturatedFat: 0, transFat: 0, carbohydrates: 65.0, sugar: 49.0, sodium: 15, potassium: 75, totalFibre: 1.0, calcium: 15, magnesium: 5, iron: 0.2, zinc: 0.1, foodType: 'ultra_processed' },
-  chicken_breast: { fdcId: "171077", calories: 165, protein: 31.0, totalFat: 3.6, saturatedFat: 1.0, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 74, potassium: 256, totalFibre: 0, calcium: 15, magnesium: 29, iron: 1.0, zinc: 1.0, foodType: 'poultry' },
-  breaded_chicken_tender: { fdcId: "171057", calories: 268, protein: 15.6, totalFat: 14.5, saturatedFat: 2.6, transFat: 0, carbohydrates: 18.7, sugar: 0.5, sodium: 604, potassium: 220, totalFibre: 1.2, foodType: 'poultry' },
-  white_fish: { fdcId: "171986", calories: 90, protein: 19.0, totalFat: 1.2, saturatedFat: 0.3, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 80, potassium: 338, totalFibre: 0, calcium: 16, magnesium: 32, iron: 0.4, foodType: 'fish_lean' },
-  watermelon: { fdcId: "167765", calories: 30, protein: 0.6, totalFat: 0.2, saturatedFat: 0, transFat: 0, carbohydrates: 7.6, sugar: 6.2, sodium: 1, potassium: 112, totalFibre: 0.4, vitaminC: 8.1, vitaminA: 28, calcium: 7, magnesium: 10, foodType: 'fruit' },
-  honeydew: { fdcId: "167760", calories: 36, protein: 0.5, totalFat: 0.1, saturatedFat: 0, transFat: 0, carbohydrates: 9.1, sugar: 8.1, sodium: 18, potassium: 228, totalFibre: 0.8, vitaminC: 18, vitaminA: 3, calcium: 6, magnesium: 10, foodType: 'fruit' },
-  margarine: { fdcId: "173872", calories: 717, protein: 0.2, totalFat: 81.0, saturatedFat: 15.0, transFat: 2.0, carbohydrates: 0.7, sugar: 0, sodium: 700, potassium: 18, totalFibre: 0, foodType: 'processed' },
-  bread_roll: { fdcId: "172688", calories: 290, protein: 9.0, totalFat: 3.2, saturatedFat: 0.7, transFat: 0, carbohydrates: 49.0, sugar: 5.0, sodium: 490, potassium: 120, totalFibre: 2.4, foodType: 'grain' },
-  sesame_seed: { fdcId: "170150", calories: 573, protein: 17.7, totalFat: 49.7, saturatedFat: 7.0, transFat: 0, carbohydrates: 23.4, sugar: 0.3, sodium: 11, potassium: 468, totalFibre: 11.8, foodType: 'grain' },
-  pomegranate_seed: { fdcId: "169134", calories: 83, protein: 1.67, totalFat: 1.17, saturatedFat: 0.12, transFat: 0, carbohydrates: 18.7, sugar: 13.7, sodium: 3, potassium: 236, totalFibre: 4.0, vitaminC: 10.2, foodType: 'fruit' },
-  sugar_syrup: { fdcId: "19362", calories: 300, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 77.0, sugar: 77.0, sodium: 30, potassium: 0, totalFibre: 0, foodType: 'ultra_processed' },
-  citrus_juice: { fdcId: "14263", calories: 45, protein: 0.2, totalFat: 0.1, saturatedFat: 0, transFat: 0, carbohydrates: 11.2, sugar: 10.5, sodium: 4, potassium: 200, totalFibre: 0.2, vitaminC: 50, foodType: 'fruit' },
-  whole_cow_milk: { fdcId: "746782", calories: 61, protein: 3.2, totalFat: 3.2, saturatedFat: 1.9, transFat: 0, carbohydrates: 4.8, sugar: 4.8, sodium: 43, potassium: 132, totalFibre: 0, calcium: 113, vitaminA: 46, foodType: 'dairy' },
-  espresso: { fdcId: "171891", calories: 9, protein: 0.1, totalFat: 0.18, saturatedFat: 0.09, transFat: 0, carbohydrates: 1.7, sugar: 0, sodium: 14, potassium: 115, totalFibre: 0, foodType: 'processed' },
-  peppermint_patty: { fdcId: "167982", calories: 384, protein: 2.19, totalFat: 7.17, saturatedFat: 4.34, transFat: 0, carbohydrates: 70, sugar: 50, sodium: 28, potassium: 40, totalFibre: 2, foodType: 'ultra_processed' },
-  peppermint_fondant: { fdcId: "167986", calories: 373, protein: 0.1, totalFat: 0.1, saturatedFat: 0.1, transFat: 0, carbohydrates: 93, sugar: 93, sodium: 11, potassium: 5, totalFibre: 0, foodType: 'ultra_processed' },
-  grapes: { fdcId: "173954", calories: 69, protein: 0.72, totalFat: 0.16, saturatedFat: 0.05, transFat: 0, carbohydrates: 18.1, sugar: 15.5, sodium: 2, potassium: 191, totalFibre: 0.9, vitaminC: 3.2, vitaminA: 3, calcium: 10, magnesium: 7, iron: 0.36, zinc: 0.07, folate: 2, vitaminB6: 0.09, foodType: 'fruit' },
-  banana: { fdcId: "173944", calories: 89, protein: 1.09, totalFat: 0.33, saturatedFat: 0.11, transFat: 0, carbohydrates: 22.8, sugar: 12.2, sodium: 1, potassium: 358, totalFibre: 2.6, vitaminC: 8.7, vitaminA: 3, calcium: 5, magnesium: 27, iron: 0.26, zinc: 0.15, folate: 20, vitaminB6: 0.37, foodType: 'fruit' },
-  nectarine: { fdcId: "169914", calories: 44, protein: 1.06, totalFat: 0.32, saturatedFat: 0.03, transFat: 0, carbohydrates: 10.6, sugar: 7.89, sodium: 0, potassium: 201, totalFibre: 1.7, vitaminC: 5.4, vitaminA: 17, calcium: 6, magnesium: 9, iron: 0.28, zinc: 0.17, folate: 5, vitaminB6: 0.02, foodType: 'fruit' },
-  tangerine: { fdcId: "169105", calories: 53, protein: 0.81, totalFat: 0.31, saturatedFat: 0.04, transFat: 0, carbohydrates: 13.3, sugar: 10.6, sodium: 2, potassium: 166, totalFibre: 1.8, vitaminC: 26.7, vitaminA: 34, calcium: 37, magnesium: 12, iron: 0.15, zinc: 0.07, folate: 16, vitaminB6: 0.08, foodType: 'fruit' },
-  apple: { fdcId: "171688", calories: 52, protein: 0.26, totalFat: 0.17, saturatedFat: 0.03, transFat: 0, carbohydrates: 13.8, sugar: 10.4, sodium: 1, potassium: 107, totalFibre: 2.4, vitaminC: 4.6, vitaminA: 3, calcium: 6, magnesium: 5, iron: 0.12, zinc: 0.04, folate: 3, vitaminB6: 0.04, foodType: 'fruit' },
-  orange: { fdcId: "169097", calories: 47, protein: 0.94, totalFat: 0.12, saturatedFat: 0.02, transFat: 0, carbohydrates: 11.8, sugar: 9.35, sodium: 0, potassium: 181, totalFibre: 2.4, vitaminC: 53.2, vitaminA: 11, calcium: 40, magnesium: 10, iron: 0.1, zinc: 0.07, folate: 30, vitaminB6: 0.06, foodType: 'fruit' },
-  peach: { fdcId: "171704", calories: 39, protein: 0.91, totalFat: 0.25, saturatedFat: 0.04, transFat: 0, carbohydrates: 9.54, sugar: 8.39, sodium: 0, potassium: 190, totalFibre: 1.5, vitaminC: 6.6, vitaminA: 16, calcium: 6, magnesium: 9, iron: 0.25, zinc: 0.17, folate: 4, vitaminB6: 0.03, foodType: 'fruit' },
-  strawberry: { fdcId: "167762", calories: 32, protein: 0.67, totalFat: 0.30, saturatedFat: 0.02, transFat: 0, carbohydrates: 7.68, sugar: 4.89, sodium: 1, potassium: 153, totalFibre: 2.0, vitaminC: 58.8, vitaminA: 1, calcium: 16, magnesium: 13, iron: 0.41, zinc: 0.14, folate: 24, vitaminB6: 0.05, foodType: 'fruit' },
-  blueberry: { fdcId: "171711", calories: 57, protein: 0.74, totalFat: 0.33, saturatedFat: 0.03, transFat: 0, carbohydrates: 14.5, sugar: 9.96, sodium: 1, potassium: 77, totalFibre: 2.4, vitaminC: 9.7, vitaminA: 3, calcium: 6, magnesium: 6, iron: 0.28, zinc: 0.16, folate: 6, vitaminB6: 0.05, foodType: 'fruit' },
-  pear: { fdcId: "169118", calories: 57, protein: 0.36, totalFat: 0.14, saturatedFat: 0.01, transFat: 0, carbohydrates: 15.2, sugar: 9.8, sodium: 1, potassium: 116, totalFibre: 3.1, vitaminC: 4.3, vitaminA: 1, calcium: 9, magnesium: 7, iron: 0.18, zinc: 0.1, folate: 7, vitaminB6: 0.03, foodType: 'fruit' },
-  rolled_oats: { fdcId: "169705", calories: 379, protein: 13.2, totalFat: 6.5, saturatedFat: 1.1, transFat: 0, carbohydrates: 67.7, sugar: 0.99, sodium: 2, potassium: 362, totalFibre: 10.1, calcium: 52, magnesium: 138, iron: 4.25, zinc: 3.64, foodType: "grain" },
-  plum: { fdcId: "169949", calories: 46, protein: 0.70, totalFat: 0.28, saturatedFat: 0.02, transFat: 0, carbohydrates: 11.4, sugar: 9.9, sodium: 0, potassium: 157, totalFibre: 1.4, vitaminC: 9.5, vitaminA: 17, calcium: 6, magnesium: 7, iron: 0.17, zinc: 0.1, folate: 5, vitaminB6: 0.03, foodType: 'fruit' },
-  kiwi: { fdcId: "168153", calories: 61, protein: 1.14, totalFat: 0.52, saturatedFat: 0.03, transFat: 0, carbohydrates: 14.7, sugar: 9.0, sodium: 3, potassium: 312, totalFibre: 3.0, vitaminC: 92.7, vitaminA: 4, calcium: 34, magnesium: 17, iron: 0.31, zinc: 0.14, folate: 25, vitaminB6: 0.06, foodType: 'fruit' },
-  pineapple: { fdcId: "169124", calories: 50, protein: 0.54, totalFat: 0.12, saturatedFat: 0.01, transFat: 0, carbohydrates: 13.1, sugar: 9.85, sodium: 1, potassium: 109, totalFibre: 1.4, vitaminC: 47.8, vitaminA: 3, calcium: 13, magnesium: 12, iron: 0.29, zinc: 0.12, folate: 18, vitaminB6: 0.11, foodType: 'fruit' },
-  mango: { fdcId: "169910", calories: 60, protein: 0.82, totalFat: 0.38, saturatedFat: 0.09, transFat: 0, carbohydrates: 15.0, sugar: 13.7, sodium: 1, potassium: 168, totalFibre: 1.6, vitaminC: 36.4, vitaminA: 54, calcium: 11, magnesium: 10, iron: 0.16, zinc: 0.09, folate: 43, vitaminB6: 0.12, foodType: 'fruit' },
-  avocado: { fdcId: "171705", calories: 160, protein: 2.0, totalFat: 14.7, saturatedFat: 2.13, transFat: 0, carbohydrates: 8.53, sugar: 0.66, sodium: 7, potassium: 485, totalFibre: 6.7, vitaminC: 10, vitaminA: 7, calcium: 12, magnesium: 29, iron: 0.55, zinc: 0.64, folate: 81, vitaminE: 2.07, vitaminK: 21, foodType: 'fruit' },
-  salmon: { fdcId: "175167", calories: 208, protein: 20.4, totalFat: 13.4, saturatedFat: 3.1, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 59, potassium: 363, totalFibre: 0, vitaminD: 525, vitaminB12: 3.2, calcium: 10, magnesium: 27, iron: 0.4, zinc: 0.5, selenium: 36, phosphorus: 250, foodType: 'fish_fatty' },
-  grilled_salmon: { fdcId: "175168", calories: 220, protein: 24.6, totalFat: 12.3, saturatedFat: 2.8, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 65, potassium: 384, totalFibre: 0, vitaminD: 525, vitaminB12: 3.2, calcium: 10, magnesium: 27, iron: 0.4, zinc: 0.5, selenium: 36, phosphorus: 250, foodType: 'fish_fatty' },
-  macaroni_and_cheese: { fdcId: "173430", calories: 200, protein: 6.8, totalFat: 9.2, saturatedFat: 4.8, transFat: 0, carbohydrates: 22.5, sugar: 2.0, sodium: 410, potassium: 90, totalFibre: 1.2, calcium: 120, iron: 1.1, magnesium: 18, phosphorus: 140, zinc: 0.85, selenium: 14.5, vitaminA: 65, vitaminB12: 0.35, folate: 45, vitaminB6: 0.05, vitaminC: 0.1, vitaminD: 0.1, vitaminE: 0.2, vitaminK: 1.5, iodine: 5, thiamine: 0.1, riboflavin: 0.1, niacin: 1.0, unsaturatedFat: 4.4, omega3: 0.1, foodType: 'processed' },
-  cheddar_cheese_sauce: { fdcId: "173432", calories: 210, protein: 7.5, totalFat: 16.0, saturatedFat: 9.5, transFat: 0, carbohydrates: 8.0, sugar: 2.5, sodium: 800, potassium: 110, totalFibre: 0.3, calcium: 180, iron: 0.3, magnesium: 15, phosphorus: 180, zinc: 1.1, vitaminA: 110, vitaminB12: 0.4, folate: 10, vitaminB6: 0.05, vitaminC: 0.1, vitaminD: 0.2, vitaminE: 0.3, vitaminK: 2.0, iodine: 10, thiamine: 0.1, riboflavin: 0.1, niacin: 0.5, unsaturatedFat: 6.5, omega3: 0.2, foodType: 'dairy' },
-  macaroni_pasta: { fdcId: "168928", calories: 158, protein: 5.8, totalFat: 0.9, saturatedFat: 0.2, transFat: 0, carbohydrates: 31.0, sugar: 0.6, sodium: 1, potassium: 44, totalFibre: 1.8, calcium: 7, iron: 1.3, magnesium: 18, phosphorus: 58, zinc: 0.51, selenium: 26.4, folate: 49, vitaminA: 1, vitaminB12: 0.01, vitaminB6: 0.05, vitaminC: 0.1, vitaminD: 0.01, vitaminE: 0.1, vitaminK: 0.1, iodine: 1, thiamine: 0.2, riboflavin: 0.1, niacin: 1.2, unsaturatedFat: 0.7, omega3: 0.05, foodType: 'grain' },
-  romaine_lettuce: { fdcId: "169248", calories: 17, protein: 1.2, totalFat: 0.3, saturatedFat: 0.04, transFat: 0, carbohydrates: 3.3, sugar: 1.2, sodium: 8, potassium: 247, totalFibre: 2.1, vitaminC: 4.0, vitaminA: 436, calcium: 33, folate: 136, foodType: 'leafy_veg' },
-  surimi_crab_stick: { fdcId: "173702", calories: 99, protein: 12.0, totalFat: 0.9, saturatedFat: 0.1, transFat: 0, carbohydrates: 15.0, sugar: 6.2, sodium: 841, potassium: 90, totalFibre: 0, calcium: 13, iron: 0.4, foodType: 'shellfish' },
-  quinoa: { fdcId: "168917", calories: 120, protein: 4.4, totalFat: 1.9, saturatedFat: 0.2, transFat: 0, carbohydrates: 21.3, sugar: 0.9, sodium: 7, potassium: 172, totalFibre: 2.8, calcium: 17, iron: 1.5, magnesium: 64, foodType: 'grain' },
-  edamame: { fdcId: "168411", calories: 121, protein: 11.9, totalFat: 5.2, saturatedFat: 0.6, transFat: 0, carbohydrates: 8.9, sugar: 2.2, sodium: 6, potassium: 436, totalFibre: 5.2, calcium: 63, iron: 2.3, magnesium: 64, foodType: 'vegetable' },
-  cabbage_slaw: { fdcId: "170420", calories: 35, protein: 1.2, totalFat: 0.2, saturatedFat: 0.03, transFat: 0, carbohydrates: 7.5, sugar: 3.8, sodium: 22, potassium: 170, totalFibre: 2.4, vitaminC: 30, calcium: 35, iron: 0.5, foodType: 'vegetable' },
-  mcdonalds_mcchicken_sandwich: { fdcId: "canonical_mcd_mcchicken", calories: 225, protein: 8.67, totalFat: 10.0, saturatedFat: 1.7, transFat: 0, carbohydrates: 25.0, sugar: 2.7, sodium: 324, potassium: 120, totalFibre: 1.2, foodType: 'ultra_processed' },
-  hard_boiled_egg: { fdcId: "173424", calories: 155, protein: 12.6, totalFat: 10.6, saturatedFat: 3.3, transFat: 0, carbohydrates: 1.1, sugar: 1.1, sodium: 124, potassium: 126, totalFibre: 0, foodType: 'egg' },
-  plain_greek_yogurt: { fdcId: "170903", calories: 97, protein: 9.0, totalFat: 5.0, saturatedFat: 2.3, transFat: 0, carbohydrates: 3.9, sugar: 3.6, sodium: 47, potassium: 141, totalFibre: 0, foodType: 'dairy' },
-  granola_cereal: { fdcId: "170287", calories: 471, protein: 10.0, totalFat: 20.0, saturatedFat: 3.5, transFat: 0, carbohydrates: 64.0, sugar: 29.0, sodium: 290, potassium: 336, totalFibre: 5.0, foodType: 'grain' },
-  flour_tortilla: { fdcId: "172522", calories: 304, protein: 8.5, totalFat: 7.7, saturatedFat: 1.8, transFat: 0, carbohydrates: 49.7, sugar: 2.3, sodium: 521, potassium: 121, totalFibre: 2.4, foodType: 'grain' },
-  mixed_salad_greens: { fdcId: "169248", calories: 20, protein: 1.5, totalFat: 0.2, saturatedFat: 0.04, transFat: 0, carbohydrates: 3.6, sugar: 1.2, sodium: 20, potassium: 250, totalFibre: 2.2, foodType: 'leafy_veg' },
-  chocolate_brownie: { fdcId: "brownie_canonical", calories: 466, protein: 5.5, totalFat: 23.0, saturatedFat: 8.0, transFat: 0, carbohydrates: 62.0, sugar: 40.0, sodium: 300, potassium: 200, totalFibre: 3.5, foodType: 'processed' },
-  brownie: { fdcId: "brownie_canonical", calories: 466, protein: 5.5, totalFat: 23.0, saturatedFat: 8.0, transFat: 0, carbohydrates: 62.0, sugar: 40.0, sodium: 300, potassium: 200, totalFibre: 3.5, foodType: 'processed' },
-  fudge_brownie: { fdcId: "brownie_canonical", calories: 466, protein: 5.5, totalFat: 23.0, saturatedFat: 8.0, transFat: 0, carbohydrates: 62.0, sugar: 40.0, sodium: 300, potassium: 200, totalFibre: 3.5, foodType: 'processed' },
-  dark_chocolate: { fdcId: "170272", calories: 546, protein: 4.9, totalFat: 31.0, saturatedFat: 19.0, transFat: 0, carbohydrates: 61.0, sugar: 48.0, sodium: 24, potassium: 559, totalFibre: 7.0, foodType: 'processed' },
-  dark_chocolate_chunk: { fdcId: "170272", calories: 546, protein: 4.9, totalFat: 31.0, saturatedFat: 19.0, transFat: 0, carbohydrates: 61.0, sugar: 48.0, sodium: 24, potassium: 559, totalFibre: 7.0, foodType: 'processed' },
-  chocolate_chunk: { fdcId: "170272", calories: 546, protein: 4.9, totalFat: 31.0, saturatedFat: 19.0, transFat: 0, carbohydrates: 61.0, sugar: 48.0, sodium: 24, potassium: 559, totalFibre: 7.0, foodType: 'processed' },
-  chocolate_chip_cookie: { fdcId: "cookie_canonical", calories: 488, protein: 5.5, totalFat: 24.0, saturatedFat: 11.0, transFat: 0, carbohydrates: 64.0, sugar: 38.0, sodium: 350, potassium: 180, totalFibre: 2.5, foodType: 'processed' },
-  chocolate_cake: { fdcId: "cake_canonical", calories: 389, protein: 4.5, totalFat: 18.0, saturatedFat: 5.5, transFat: 0, carbohydrates: 53.0, sugar: 36.0, sodium: 320, potassium: 160, totalFibre: 2.0, foodType: 'processed' },
-  sweet_chilli_sauce: { fdcId: "1099195", calories: 190, protein: 0.4, totalFat: 0.2, saturatedFat: 0.0, transFat: 0, carbohydrates: 46.9, sugar: 40.0, sodium: 1240, potassium: 50, totalFibre: 0.5, foodType: 'ultra_processed' },
-  kalamata_olives: { fdcId: "1103091", calories: 115, protein: 0.8, totalFat: 10.7, saturatedFat: 1.4, transFat: 0, carbohydrates: 6.3, sugar: 0, sodium: 735, potassium: 42, totalFibre: 3.2, foodType: 'processed' },
-  balsamic_dressing: { fdcId: "1099238", calories: 238, protein: 0.1, totalFat: 19.3, saturatedFat: 2.8, transFat: 0, carbohydrates: 17.0, sugar: 14.2, sodium: 610, potassium: 25, totalFibre: 0, foodType: 'ultra_processed' },
-  mixed_vegetables: { fdcId: "170447", calories: 65, protein: 2.6, totalFat: 0.2, saturatedFat: 0.05, transFat: 0, carbohydrates: 14.1, sugar: 4.0, sodium: 42, potassium: 230, totalFibre: 4.1, foodType: 'veg' },
-  cooked_prawns: { fdcId: "175179", calories: 99, protein: 24.0, totalFat: 0.3, saturatedFat: 0.08, transFat: 0, carbohydrates: 0.2, sugar: 0, sodium: 111, potassium: 220, totalFibre: 0, foodType: 'shellfish' },
-  marie_rose_sauce: { fdcId: "marie_rose_canonical", calories: 320, protein: 1.0, totalFat: 30.0, saturatedFat: 4.5, transFat: 0, carbohydrates: 10.0, sugar: 8.0, sodium: 700, potassium: 40, totalFibre: 0, foodType: 'ultra_processed' },
-  chicken_sandwich: { fdcId: "canonical_chicken_sandwich", calories: 230, protein: 12.5, totalFat: 10.2, saturatedFat: 2.1, transFat: 0.1, carbohydrates: 22.0, sugar: 2.5, sodium: 450, potassium: 180, totalFibre: 1.5, foodType: 'poultry' },
-  steak_sandwich: { fdcId: "canonical_steak_sandwich", calories: 240, protein: 13.5, totalFat: 12.0, saturatedFat: 4.5, transFat: 0.2, carbohydrates: 19.5, sugar: 2.0, sodium: 480, potassium: 200, totalFibre: 1.2, foodType: 'red_meat' },
-  beef_burger: { fdcId: "canonical_beef_burger", calories: 250, protein: 13.0, totalFat: 13.5, saturatedFat: 5.0, transFat: 0.5, carbohydrates: 19.0, sugar: 3.0, sodium: 460, potassium: 210, totalFibre: 1.2, foodType: 'red_meat' },
-  tuna_sandwich: { fdcId: "canonical_tuna_sandwich", calories: 210, protein: 13.0, totalFat: 8.5, saturatedFat: 1.5, transFat: 0, carbohydrates: 20.0, sugar: 2.0, sodium: 420, potassium: 190, totalFibre: 1.5, foodType: 'fish_fatty' },
-  egg_sandwich: { fdcId: "canonical_egg_sandwich", calories: 220, protein: 10.5, totalFat: 11.0, saturatedFat: 2.8, transFat: 0, carbohydrates: 20.0, sugar: 2.5, sodium: 430, potassium: 160, totalFibre: 1.5, foodType: 'egg' },
-  chicken_wrap: { fdcId: "canonical_chicken_wrap", calories: 215, protein: 12.0, totalFat: 8.5, saturatedFat: 2.0, transFat: 0.1, carbohydrates: 23.0, sugar: 2.0, sodium: 460, potassium: 170, totalFibre: 1.8, foodType: 'poultry' },
-  serrano_ham: { fdcId: "172551", calories: 235, protein: 22.0, totalFat: 15.0, saturatedFat: 5.5, transFat: 0, carbohydrates: 1.0, sugar: 0, sodium: 1200, potassium: 300, totalFibre: 0, foodType: 'processed' },
-  mixed_berries: { fdcId: "canonical_mixed_berries", calories: 45, protein: 0.7, totalFat: 0.3, saturatedFat: 0.02, transFat: 0, carbohydrates: 11.0, sugar: 7.0, sodium: 1, potassium: 120, totalFibre: 2.5, foodType: 'fruit' },
-  low_fat_yogurt: { fdcId: "170903", calories: 63, protein: 5.25, totalFat: 1.55, saturatedFat: 1.0, transFat: 0, carbohydrates: 7.04, sugar: 7.04, sodium: 70, potassium: 230, totalFibre: 0, foodType: 'dairy' },
-  cooked_mushrooms: { fdcId: "169252", calories: 28, protein: 2.2, totalFat: 0.5, saturatedFat: 0.1, transFat: 0, carbohydrates: 4.4, sugar: 2.0, sodium: 4, potassium: 356, totalFibre: 2.2, foodType: 'leafy_veg' },
-  mushrooms: { fdcId: "169252", calories: 28, protein: 2.2, totalFat: 0.5, saturatedFat: 0.1, transFat: 0, carbohydrates: 4.4, sugar: 2.0, sodium: 4, potassium: 356, totalFibre: 2.2, foodType: 'leafy_veg' },
-  bok_choy: { fdcId: "170390", calories: 13, protein: 1.5, totalFat: 0.2, saturatedFat: 0.03, transFat: 0, carbohydrates: 2.18, sugar: 1.18, sodium: 65, potassium: 252, totalFibre: 1.0, vitaminC: 45, vitaminA: 223, calcium: 105, magnesium: 19, iron: 0.8, foodType: 'leafy_veg' },
-  raw_beef_cut: { fdcId: "170197", calories: 217, protein: 26.1, totalFat: 11.8, saturatedFat: 4.6, transFat: 0.5, carbohydrates: 0, sugar: 0, sodium: 55, potassium: 318, totalFibre: 0, iron: 2.6, zinc: 5.8, magnesium: 21, phosphorus: 200, foodType: 'red_meat' },
-  sea_salt: { fdcId: "173468", calories: 0, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 38758, potassium: 8, totalFibre: 0, foodType: 'processed' }
+  ice: { calories: 0, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 0, potassium: 0, totalFibre: 0, foodType: 'unknown' },
+  water: { calories: 0, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 0, potassium: 0, totalFibre: 0, foodType: 'unknown' },
+  coca_cola: { calories: 42, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 10.6, sugar: 10.6, sodium: 10, potassium: 2, totalFibre: 0, foodType: 'processed' },
+  soda_cola: { calories: 42, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 10.6, sugar: 10.6, sodium: 10, potassium: 2, totalFibre: 0, foodType: 'processed' },
+  cherry_tomato: { calories: 18, protein: 0.9, totalFat: 0.2, saturatedFat: 0, transFat: 0, carbohydrates: 3.9, sugar: 2.6, sodium: 5, potassium: 237, totalFibre: 1.2, vitaminC: 13.7, vitaminA: 42, calcium: 10, magnesium: 11, iron: 0.27, foodType: 'leafy_veg' },
+  white_rice: { calories: 130, protein: 2.7, totalFat: 0.3, saturatedFat: 0.1, transFat: 0, carbohydrates: 28.2, sugar: 0.1, sodium: 1, potassium: 35, totalFibre: 0.4, calcium: 10, magnesium: 12, iron: 0.2, zinc: 0.49, foodType: 'grain' },
+  rice_congee: { calories: 45, protein: 1.3, totalFat: 0.3, saturatedFat: 0.05, transFat: 0, carbohydrates: 9.5, sugar: 0.1, sodium: 5, potassium: 20, totalFibre: 0.2, calcium: 4, magnesium: 5, iron: 0.1, zinc: 0.2, foodType: 'grain' },
+  seaweed_salad: { calories: 85, protein: 1.5, totalFat: 6.0, saturatedFat: 1.0, transFat: 0, carbohydrates: 8.5, sugar: 3.0, sodium: 650, potassium: 150, totalFibre: 1.5, calcium: 50, magnesium: 30, iron: 1.0, zinc: 0.3, foodType: 'prepared dish/entree' },
+  fruit_jam: { calories: 250, protein: 0.4, totalFat: 0.1, saturatedFat: 0, transFat: 0, carbohydrates: 65.0, sugar: 49.0, sodium: 15, potassium: 75, totalFibre: 1.0, calcium: 15, magnesium: 5, iron: 0.2, zinc: 0.1, foodType: 'ultra_processed' },
+  chicken_breast: { calories: 165, protein: 31.0, totalFat: 3.6, saturatedFat: 1.0, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 74, potassium: 256, totalFibre: 0, calcium: 15, magnesium: 29, iron: 1.0, zinc: 1.0, foodType: 'poultry' },
+  breaded_chicken_tender: { calories: 268, protein: 15.6, totalFat: 14.5, saturatedFat: 2.6, transFat: 0, carbohydrates: 18.7, sugar: 0.5, sodium: 604, potassium: 220, totalFibre: 1.2, foodType: 'poultry' },
+  white_fish: { calories: 90, protein: 19.0, totalFat: 1.2, saturatedFat: 0.3, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 80, potassium: 338, totalFibre: 0, calcium: 16, magnesium: 32, iron: 0.4, foodType: 'fish_lean' },
+  watermelon: { calories: 30, protein: 0.6, totalFat: 0.2, saturatedFat: 0, transFat: 0, carbohydrates: 7.6, sugar: 6.2, sodium: 1, potassium: 112, totalFibre: 0.4, vitaminC: 8.1, vitaminA: 28, calcium: 7, magnesium: 10, foodType: 'fruit' },
+  honeydew: { calories: 36, protein: 0.5, totalFat: 0.1, saturatedFat: 0, transFat: 0, carbohydrates: 9.1, sugar: 8.1, sodium: 18, potassium: 228, totalFibre: 0.8, vitaminC: 18, vitaminA: 3, calcium: 6, magnesium: 10, foodType: 'fruit' },
+  margarine: { calories: 717, protein: 0.2, totalFat: 81.0, saturatedFat: 15.0, transFat: 2.0, carbohydrates: 0.7, sugar: 0, sodium: 700, potassium: 18, totalFibre: 0, foodType: 'processed' },
+  bread_roll: { calories: 290, protein: 9.0, totalFat: 3.2, saturatedFat: 0.7, transFat: 0, carbohydrates: 49.0, sugar: 5.0, sodium: 490, potassium: 120, totalFibre: 2.4, foodType: 'grain' },
+  sesame_seed: { calories: 573, protein: 17.7, totalFat: 49.7, saturatedFat: 7.0, transFat: 0, carbohydrates: 23.4, sugar: 0.3, sodium: 11, potassium: 468, totalFibre: 11.8, foodType: 'grain' },
+  pomegranate_seed: { calories: 83, protein: 1.67, totalFat: 1.17, saturatedFat: 0.12, transFat: 0, carbohydrates: 18.7, sugar: 13.7, sodium: 3, potassium: 236, totalFibre: 4.0, vitaminC: 10.2, foodType: 'fruit' },
+  sugar_syrup: { calories: 300, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 77.0, sugar: 77.0, sodium: 30, potassium: 0, totalFibre: 0, foodType: 'ultra_processed' },
+  citrus_juice: { calories: 45, protein: 0.2, totalFat: 0.1, saturatedFat: 0, transFat: 0, carbohydrates: 11.2, sugar: 10.5, sodium: 4, potassium: 200, totalFibre: 0.2, vitaminC: 50, foodType: 'fruit' },
+  whole_cow_milk: { calories: 61, protein: 3.2, totalFat: 3.2, saturatedFat: 1.9, transFat: 0, carbohydrates: 4.8, sugar: 4.8, sodium: 43, potassium: 132, totalFibre: 0, calcium: 113, vitaminA: 46, foodType: 'dairy' },
+  espresso: { calories: 9, protein: 0.1, totalFat: 0.18, saturatedFat: 0.09, transFat: 0, carbohydrates: 1.7, sugar: 0, sodium: 14, potassium: 115, totalFibre: 0, foodType: 'processed' },
+  peppermint_patty: { calories: 384, protein: 2.19, totalFat: 7.17, saturatedFat: 4.34, transFat: 0, carbohydrates: 70, sugar: 50, sodium: 28, potassium: 40, totalFibre: 2, foodType: 'ultra_processed' },
+  peppermint_fondant: { calories: 373, protein: 0.1, totalFat: 0.1, saturatedFat: 0.1, transFat: 0, carbohydrates: 93, sugar: 93, sodium: 11, potassium: 5, totalFibre: 0, foodType: 'ultra_processed' },
+  grapes: { calories: 69, protein: 0.72, totalFat: 0.16, saturatedFat: 0.05, transFat: 0, carbohydrates: 18.1, sugar: 15.5, sodium: 2, potassium: 191, totalFibre: 0.9, vitaminC: 3.2, vitaminA: 3, calcium: 10, magnesium: 7, iron: 0.36, zinc: 0.07, folate: 2, vitaminB6: 0.09, foodType: 'fruit' },
+  banana: { calories: 89, protein: 1.09, totalFat: 0.33, saturatedFat: 0.11, transFat: 0, carbohydrates: 22.8, sugar: 12.2, sodium: 1, potassium: 358, totalFibre: 2.6, vitaminC: 8.7, vitaminA: 3, calcium: 5, magnesium: 27, iron: 0.26, zinc: 0.15, folate: 20, vitaminB6: 0.37, foodType: 'fruit' },
+  nectarine: { calories: 44, protein: 1.06, totalFat: 0.32, saturatedFat: 0.03, transFat: 0, carbohydrates: 10.6, sugar: 7.89, sodium: 0, potassium: 201, totalFibre: 1.7, vitaminC: 5.4, vitaminA: 17, calcium: 6, magnesium: 9, iron: 0.28, zinc: 0.17, folate: 5, vitaminB6: 0.02, foodType: 'fruit' },
+  tangerine: { calories: 53, protein: 0.81, totalFat: 0.31, saturatedFat: 0.04, transFat: 0, carbohydrates: 13.3, sugar: 10.6, sodium: 2, potassium: 166, totalFibre: 1.8, vitaminC: 26.7, vitaminA: 34, calcium: 37, magnesium: 12, iron: 0.15, zinc: 0.07, folate: 16, vitaminB6: 0.08, foodType: 'fruit' },
+  apple: { calories: 52, protein: 0.26, totalFat: 0.17, saturatedFat: 0.03, transFat: 0, carbohydrates: 13.8, sugar: 10.4, sodium: 1, potassium: 107, totalFibre: 2.4, vitaminC: 4.6, vitaminA: 3, calcium: 6, magnesium: 5, iron: 0.12, zinc: 0.04, folate: 3, vitaminB6: 0.04, foodType: 'fruit' },
+  orange: { calories: 47, protein: 0.94, totalFat: 0.12, saturatedFat: 0.02, transFat: 0, carbohydrates: 11.8, sugar: 9.35, sodium: 0, potassium: 181, totalFibre: 2.4, vitaminC: 53.2, vitaminA: 11, calcium: 40, magnesium: 10, iron: 0.1, zinc: 0.07, folate: 30, vitaminB6: 0.06, foodType: 'fruit' },
+  peach: { calories: 39, protein: 0.91, totalFat: 0.25, saturatedFat: 0.04, transFat: 0, carbohydrates: 9.54, sugar: 8.39, sodium: 0, potassium: 190, totalFibre: 1.5, vitaminC: 6.6, vitaminA: 16, calcium: 6, magnesium: 9, iron: 0.25, zinc: 0.17, folate: 4, vitaminB6: 0.03, foodType: 'fruit' },
+  strawberry: { calories: 32, protein: 0.67, totalFat: 0.30, saturatedFat: 0.02, transFat: 0, carbohydrates: 7.68, sugar: 4.89, sodium: 1, potassium: 153, totalFibre: 2.0, vitaminC: 58.8, vitaminA: 1, calcium: 16, magnesium: 13, iron: 0.41, zinc: 0.14, folate: 24, vitaminB6: 0.05, foodType: 'fruit' },
+  blueberry: { calories: 57, protein: 0.74, totalFat: 0.33, saturatedFat: 0.03, transFat: 0, carbohydrates: 14.5, sugar: 9.96, sodium: 1, potassium: 77, totalFibre: 2.4, vitaminC: 9.7, vitaminA: 3, calcium: 6, magnesium: 6, iron: 0.28, zinc: 0.16, folate: 6, vitaminB6: 0.05, foodType: 'fruit' },
+  pear: { calories: 57, protein: 0.36, totalFat: 0.14, saturatedFat: 0.01, transFat: 0, carbohydrates: 15.2, sugar: 9.8, sodium: 1, potassium: 116, totalFibre: 3.1, vitaminC: 4.3, vitaminA: 1, calcium: 9, magnesium: 7, iron: 0.18, zinc: 0.1, folate: 7, vitaminB6: 0.03, foodType: 'fruit' },
+  rolled_oats: { calories: 379, protein: 13.2, totalFat: 6.5, saturatedFat: 1.1, transFat: 0, carbohydrates: 67.7, sugar: 0.99, sodium: 2, potassium: 362, totalFibre: 10.1, calcium: 52, magnesium: 138, iron: 4.25, zinc: 3.64, foodType: "grain" },
+  plum: { calories: 46, protein: 0.70, totalFat: 0.28, saturatedFat: 0.02, transFat: 0, carbohydrates: 11.4, sugar: 9.9, sodium: 0, potassium: 157, totalFibre: 1.4, vitaminC: 9.5, vitaminA: 17, calcium: 6, magnesium: 7, iron: 0.17, zinc: 0.1, folate: 5, vitaminB6: 0.03, foodType: 'fruit' },
+  kiwi: { calories: 61, protein: 1.14, totalFat: 0.52, saturatedFat: 0.03, transFat: 0, carbohydrates: 14.7, sugar: 9.0, sodium: 3, potassium: 312, totalFibre: 3.0, vitaminC: 92.7, vitaminA: 4, calcium: 34, magnesium: 17, iron: 0.31, zinc: 0.14, folate: 25, vitaminB6: 0.06, foodType: 'fruit' },
+  pineapple: { calories: 50, protein: 0.54, totalFat: 0.12, saturatedFat: 0.01, transFat: 0, carbohydrates: 13.1, sugar: 9.85, sodium: 1, potassium: 109, totalFibre: 1.4, vitaminC: 47.8, vitaminA: 3, calcium: 13, magnesium: 12, iron: 0.29, zinc: 0.12, folate: 18, vitaminB6: 0.11, foodType: 'fruit' },
+  mango: { calories: 60, protein: 0.82, totalFat: 0.38, saturatedFat: 0.09, transFat: 0, carbohydrates: 15.0, sugar: 13.7, sodium: 1, potassium: 168, totalFibre: 1.6, vitaminC: 36.4, vitaminA: 54, calcium: 11, magnesium: 10, iron: 0.16, zinc: 0.09, folate: 43, vitaminB6: 0.12, foodType: 'fruit' },
+  avocado: { calories: 160, protein: 2.0, totalFat: 14.7, saturatedFat: 2.13, transFat: 0, carbohydrates: 8.53, sugar: 0.66, sodium: 7, potassium: 485, totalFibre: 6.7, vitaminC: 10, vitaminA: 7, calcium: 12, magnesium: 29, iron: 0.55, zinc: 0.64, folate: 81, vitaminE: 2.07, vitaminK: 21, foodType: 'fruit' },
+  salmon: { calories: 208, protein: 20.4, totalFat: 13.4, saturatedFat: 3.1, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 59, potassium: 363, totalFibre: 0, vitaminD: 525, vitaminB12: 3.2, calcium: 10, magnesium: 27, iron: 0.4, zinc: 0.5, selenium: 36, phosphorus: 250, foodType: 'fish_fatty' },
+  grilled_salmon: { calories: 220, protein: 24.6, totalFat: 12.3, saturatedFat: 2.8, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 65, potassium: 384, totalFibre: 0, vitaminD: 525, vitaminB12: 3.2, calcium: 10, magnesium: 27, iron: 0.4, zinc: 0.5, selenium: 36, phosphorus: 250, foodType: 'fish_fatty' },
+  macaroni_and_cheese: { calories: 200, protein: 6.8, totalFat: 9.2, saturatedFat: 4.8, transFat: 0, carbohydrates: 22.5, sugar: 2.0, sodium: 410, potassium: 90, totalFibre: 1.2, calcium: 120, iron: 1.1, magnesium: 18, phosphorus: 140, zinc: 0.85, selenium: 14.5, vitaminA: 65, vitaminB12: 0.35, folate: 45, vitaminB6: 0.05, vitaminC: 0.1, vitaminD: 0.1, vitaminE: 0.2, vitaminK: 1.5, iodine: 5, thiamine: 0.1, riboflavin: 0.1, niacin: 1.0, unsaturatedFat: 4.4, omega3: 0.1, foodType: 'processed' },
+  cheddar_cheese_sauce: { calories: 210, protein: 7.5, totalFat: 16.0, saturatedFat: 9.5, transFat: 0, carbohydrates: 8.0, sugar: 2.5, sodium: 800, potassium: 110, totalFibre: 0.3, calcium: 180, iron: 0.3, magnesium: 15, phosphorus: 180, zinc: 1.1, vitaminA: 110, vitaminB12: 0.4, folate: 10, vitaminB6: 0.05, vitaminC: 0.1, vitaminD: 0.2, vitaminE: 0.3, vitaminK: 2.0, iodine: 10, thiamine: 0.1, riboflavin: 0.1, niacin: 0.5, unsaturatedFat: 6.5, omega3: 0.2, foodType: 'dairy' },
+  macaroni_pasta: { calories: 158, protein: 5.8, totalFat: 0.9, saturatedFat: 0.2, transFat: 0, carbohydrates: 31.0, sugar: 0.6, sodium: 1, potassium: 44, totalFibre: 1.8, calcium: 7, iron: 1.3, magnesium: 18, phosphorus: 58, zinc: 0.51, selenium: 26.4, folate: 49, vitaminA: 1, vitaminB12: 0.01, vitaminB6: 0.05, vitaminC: 0.1, vitaminD: 0.01, vitaminE: 0.1, vitaminK: 0.1, iodine: 1, thiamine: 0.2, riboflavin: 0.1, niacin: 1.2, unsaturatedFat: 0.7, omega3: 0.05, foodType: 'grain' },
+  romaine_lettuce: { calories: 17, protein: 1.2, totalFat: 0.3, saturatedFat: 0.04, transFat: 0, carbohydrates: 3.3, sugar: 1.2, sodium: 8, potassium: 247, totalFibre: 2.1, vitaminC: 4.0, vitaminA: 436, calcium: 33, folate: 136, foodType: 'leafy_veg' },
+  surimi_crab_stick: { calories: 99, protein: 12.0, totalFat: 0.9, saturatedFat: 0.1, transFat: 0, carbohydrates: 15.0, sugar: 6.2, sodium: 841, potassium: 90, totalFibre: 0, calcium: 13, iron: 0.4, foodType: 'shellfish' },
+  quinoa: { calories: 120, protein: 4.4, totalFat: 1.9, saturatedFat: 0.2, transFat: 0, carbohydrates: 21.3, sugar: 0.9, sodium: 7, potassium: 172, totalFibre: 2.8, calcium: 17, iron: 1.5, magnesium: 64, foodType: 'grain' },
+  edamame: { calories: 121, protein: 11.9, totalFat: 5.2, saturatedFat: 0.6, transFat: 0, carbohydrates: 8.9, sugar: 2.2, sodium: 6, potassium: 436, totalFibre: 5.2, calcium: 63, iron: 2.3, magnesium: 64, foodType: 'vegetable' },
+  cabbage_slaw: { calories: 35, protein: 1.2, totalFat: 0.2, saturatedFat: 0.03, transFat: 0, carbohydrates: 7.5, sugar: 3.8, sodium: 22, potassium: 170, totalFibre: 2.4, vitaminC: 30, calcium: 35, iron: 0.5, foodType: 'vegetable' },
+  mcdonalds_mcchicken_sandwich: { calories: 225, protein: 8.67, totalFat: 10.0, saturatedFat: 1.7, transFat: 0, carbohydrates: 25.0, sugar: 2.7, sodium: 324, potassium: 120, totalFibre: 1.2, foodType: 'ultra_processed' },
+  hard_boiled_egg: { calories: 155, protein: 12.6, totalFat: 10.6, saturatedFat: 3.3, transFat: 0, carbohydrates: 1.1, sugar: 1.1, sodium: 124, potassium: 126, totalFibre: 0, foodType: 'egg' },
+  plain_greek_yogurt: { calories: 97, protein: 9.0, totalFat: 5.0, saturatedFat: 2.3, transFat: 0, carbohydrates: 3.9, sugar: 3.6, sodium: 47, potassium: 141, totalFibre: 0, foodType: 'dairy' },
+  granola_cereal: { calories: 471, protein: 10.0, totalFat: 20.0, saturatedFat: 3.5, transFat: 0, carbohydrates: 64.0, sugar: 29.0, sodium: 290, potassium: 336, totalFibre: 5.0, foodType: 'grain' },
+  flour_tortilla: { calories: 304, protein: 8.5, totalFat: 7.7, saturatedFat: 1.8, transFat: 0, carbohydrates: 49.7, sugar: 2.3, sodium: 521, potassium: 121, totalFibre: 2.4, foodType: 'grain' },
+  mixed_salad_greens: { calories: 20, protein: 1.5, totalFat: 0.2, saturatedFat: 0.04, transFat: 0, carbohydrates: 3.6, sugar: 1.2, sodium: 20, potassium: 250, totalFibre: 2.2, foodType: 'leafy_veg' },
+  chocolate_brownie: { calories: 466, protein: 5.5, totalFat: 23.0, saturatedFat: 8.0, transFat: 0, carbohydrates: 62.0, sugar: 40.0, sodium: 300, potassium: 200, totalFibre: 3.5, foodType: 'processed' },
+  brownie: { calories: 466, protein: 5.5, totalFat: 23.0, saturatedFat: 8.0, transFat: 0, carbohydrates: 62.0, sugar: 40.0, sodium: 300, potassium: 200, totalFibre: 3.5, foodType: 'processed' },
+  fudge_brownie: { calories: 466, protein: 5.5, totalFat: 23.0, saturatedFat: 8.0, transFat: 0, carbohydrates: 62.0, sugar: 40.0, sodium: 300, potassium: 200, totalFibre: 3.5, foodType: 'processed' },
+  dark_chocolate: { calories: 546, protein: 4.9, totalFat: 31.0, saturatedFat: 19.0, transFat: 0, carbohydrates: 61.0, sugar: 48.0, sodium: 24, potassium: 559, totalFibre: 7.0, foodType: 'processed' },
+  dark_chocolate_chunk: { calories: 546, protein: 4.9, totalFat: 31.0, saturatedFat: 19.0, transFat: 0, carbohydrates: 61.0, sugar: 48.0, sodium: 24, potassium: 559, totalFibre: 7.0, foodType: 'processed' },
+  chocolate_chunk: { calories: 546, protein: 4.9, totalFat: 31.0, saturatedFat: 19.0, transFat: 0, carbohydrates: 61.0, sugar: 48.0, sodium: 24, potassium: 559, totalFibre: 7.0, foodType: 'processed' },
+  chocolate_chip_cookie: { calories: 488, protein: 5.5, totalFat: 24.0, saturatedFat: 11.0, transFat: 0, carbohydrates: 64.0, sugar: 38.0, sodium: 350, potassium: 180, totalFibre: 2.5, foodType: 'processed' },
+  chocolate_cake: { calories: 389, protein: 4.5, totalFat: 18.0, saturatedFat: 5.5, transFat: 0, carbohydrates: 53.0, sugar: 36.0, sodium: 320, potassium: 160, totalFibre: 2.0, foodType: 'processed' },
+  sweet_chilli_sauce: { calories: 190, protein: 0.4, totalFat: 0.2, saturatedFat: 0.0, transFat: 0, carbohydrates: 46.9, sugar: 40.0, sodium: 1240, potassium: 50, totalFibre: 0.5, foodType: 'ultra_processed' },
+  kalamata_olives: { calories: 115, protein: 0.8, totalFat: 10.7, saturatedFat: 1.4, transFat: 0, carbohydrates: 6.3, sugar: 0, sodium: 735, potassium: 42, totalFibre: 3.2, foodType: 'processed' },
+  balsamic_dressing: { calories: 238, protein: 0.1, totalFat: 19.3, saturatedFat: 2.8, transFat: 0, carbohydrates: 17.0, sugar: 14.2, sodium: 610, potassium: 25, totalFibre: 0, foodType: 'ultra_processed' },
+  mixed_vegetables: { calories: 65, protein: 2.6, totalFat: 0.2, saturatedFat: 0.05, transFat: 0, carbohydrates: 14.1, sugar: 4.0, sodium: 42, potassium: 230, totalFibre: 4.1, foodType: 'veg' },
+  cooked_prawns: { calories: 99, protein: 24.0, totalFat: 0.3, saturatedFat: 0.08, transFat: 0, carbohydrates: 0.2, sugar: 0, sodium: 111, potassium: 220, totalFibre: 0, foodType: 'shellfish' },
+  marie_rose_sauce: { calories: 320, protein: 1.0, totalFat: 30.0, saturatedFat: 4.5, transFat: 0, carbohydrates: 10.0, sugar: 8.0, sodium: 700, potassium: 40, totalFibre: 0, foodType: 'ultra_processed' },
+  chicken_sandwich: { calories: 230, protein: 12.5, totalFat: 10.2, saturatedFat: 2.1, transFat: 0.1, carbohydrates: 22.0, sugar: 2.5, sodium: 450, potassium: 180, totalFibre: 1.5, foodType: 'poultry' },
+  steak_sandwich: { calories: 240, protein: 13.5, totalFat: 12.0, saturatedFat: 4.5, transFat: 0.2, carbohydrates: 19.5, sugar: 2.0, sodium: 480, potassium: 200, totalFibre: 1.2, foodType: 'red_meat' },
+  beef_burger: { calories: 250, protein: 13.0, totalFat: 13.5, saturatedFat: 5.0, transFat: 0.5, carbohydrates: 19.0, sugar: 3.0, sodium: 460, potassium: 210, totalFibre: 1.2, foodType: 'red_meat' },
+  tuna_sandwich: { calories: 210, protein: 13.0, totalFat: 8.5, saturatedFat: 1.5, transFat: 0, carbohydrates: 20.0, sugar: 2.0, sodium: 420, potassium: 190, totalFibre: 1.5, foodType: 'fish_fatty' },
+  egg_sandwich: { calories: 220, protein: 10.5, totalFat: 11.0, saturatedFat: 2.8, transFat: 0, carbohydrates: 20.0, sugar: 2.5, sodium: 430, potassium: 160, totalFibre: 1.5, foodType: 'egg' },
+  chicken_wrap: { calories: 215, protein: 12.0, totalFat: 8.5, saturatedFat: 2.0, transFat: 0.1, carbohydrates: 23.0, sugar: 2.0, sodium: 460, potassium: 170, totalFibre: 1.8, foodType: 'poultry' },
+  serrano_ham: { calories: 235, protein: 22.0, totalFat: 15.0, saturatedFat: 5.5, transFat: 0, carbohydrates: 1.0, sugar: 0, sodium: 1200, potassium: 300, totalFibre: 0, foodType: 'processed' },
+  mixed_berries: { calories: 45, protein: 0.7, totalFat: 0.3, saturatedFat: 0.02, transFat: 0, carbohydrates: 11.0, sugar: 7.0, sodium: 1, potassium: 120, totalFibre: 2.5, foodType: 'fruit' },
+  low_fat_yogurt: { calories: 63, protein: 5.25, totalFat: 1.55, saturatedFat: 1.0, transFat: 0, carbohydrates: 7.04, sugar: 7.04, sodium: 70, potassium: 230, totalFibre: 0, foodType: 'dairy' },
+  cooked_mushrooms: { calories: 28, protein: 2.2, totalFat: 0.5, saturatedFat: 0.1, transFat: 0, carbohydrates: 4.4, sugar: 2.0, sodium: 4, potassium: 356, totalFibre: 2.2, foodType: 'leafy_veg' },
+  mushrooms: { calories: 28, protein: 2.2, totalFat: 0.5, saturatedFat: 0.1, transFat: 0, carbohydrates: 4.4, sugar: 2.0, sodium: 4, potassium: 356, totalFibre: 2.2, foodType: 'leafy_veg' },
+  bok_choy: { calories: 13, protein: 1.5, totalFat: 0.2, saturatedFat: 0.03, transFat: 0, carbohydrates: 2.18, sugar: 1.18, sodium: 65, potassium: 252, totalFibre: 1.0, vitaminC: 45, vitaminA: 223, calcium: 105, magnesium: 19, iron: 0.8, foodType: 'leafy_veg' },
+  raw_beef_cut: { calories: 217, protein: 26.1, totalFat: 11.8, saturatedFat: 4.6, transFat: 0.5, carbohydrates: 0, sugar: 0, sodium: 55, potassium: 318, totalFibre: 0, iron: 2.6, zinc: 5.8, magnesium: 21, phosphorus: 200, foodType: 'red_meat' },
+  sea_salt: { calories: 0, protein: 0, totalFat: 0, saturatedFat: 0, transFat: 0, carbohydrates: 0, sugar: 0, sodium: 38758, potassium: 8, totalFibre: 0, foodType: 'processed' }
 };
 
 export function lookupCanonicalBaseFood(name: string): any | null {
-  
+  const resolve = (row: any | null | undefined) => {
+    if (!row) return null;
+    const key = (Object.keys(CANONICAL_BASE_FOODS) as string[]).find((k) => CANONICAL_BASE_FOODS[k] === row) || '';
+    return { ...row, id: key };
+  };
+
   const normalized = name.toLowerCase().trim();
-  if (normalized.includes('chicken') && (normalized.includes('sandwich') || normalized.includes('sub') || normalized.includes('bap') || normalized.includes('bun') || normalized.includes('bagel') || normalized.includes('toastie'))) return CANONICAL_BASE_FOODS.chicken_sandwich;
-  if ((normalized.includes('steak') || normalized.includes('beef')) && (normalized.includes('sandwich') || normalized.includes('sub') || normalized.includes('bap') || normalized.includes('toastie'))) return CANONICAL_BASE_FOODS.steak_sandwich;
-  if (normalized.includes('tuna') && (normalized.includes('sandwich') || normalized.includes('melt') || normalized.includes('sub') || normalized.includes('wrap'))) return CANONICAL_BASE_FOODS.tuna_sandwich;
-  if (normalized.includes('egg') && (normalized.includes('sandwich') || normalized.includes('mayo sandwich') || normalized.includes('sub') || normalized.includes('bap'))) return CANONICAL_BASE_FOODS.egg_sandwich;
-  if (normalized.includes('chicken') && normalized.includes('wrap')) return CANONICAL_BASE_FOODS.chicken_wrap;
-  if (normalized.includes('burger') || normalized.includes('cheeseburger')) return CANONICAL_BASE_FOODS.beef_burger;
-  if (normalized.includes('sweet chilli') || normalized.includes('sweet chili') || normalized.includes('chilli sauce') || normalized.includes('chili sauce')) return CANONICAL_BASE_FOODS.sweet_chilli_sauce;
-  if (normalized.includes('kalamata') || normalized.includes('olive')) return CANONICAL_BASE_FOODS.kalamata_olives;
-  if (normalized.includes('balsamic')) return CANONICAL_BASE_FOODS.balsamic_dressing;
-  if (normalized.includes('marie rose') || normalized.includes('rose sauce')) return CANONICAL_BASE_FOODS.marie_rose_sauce;
-  if (normalized.includes('serrano') || normalized.includes('cured ham') || normalized.includes('cooked ham') || normalized === 'ham') return CANONICAL_BASE_FOODS.serrano_ham;
-  if (normalized.includes('strawberry') || normalized.includes('strawberries')) return CANONICAL_BASE_FOODS.strawberry;
-  if (normalized.includes('blueberry') || normalized.includes('blueberries')) return CANONICAL_BASE_FOODS.blueberry;
-  if (normalized.includes('raspberry') || normalized.includes('raspberries')) return CANONICAL_BASE_FOODS.raspberry;
-  if (normalized.includes('mixed berries fruit compote')) return CANONICAL_BASE_FOODS.strawberry;
-  if (normalized.includes('mixed berries') || normalized.includes('berry') || normalized.includes('berries')) return CANONICAL_BASE_FOODS.mixed_berries;
-  if (normalized.includes('low fat yogurt') || normalized.includes('low-fat yogurt') || normalized.includes('low fat yoghurt')) return CANONICAL_BASE_FOODS.low_fat_yogurt;
-  if (normalized.includes('sea salt') || normalized === 'salt') return CANONICAL_BASE_FOODS.sea_salt;
-  if (normalized.includes('cooked pasta') || normalized === 'pasta') return CANONICAL_BASE_FOODS.macaroni_pasta;
-  if (normalized.includes('mixed veg') || normalized === 'vegetables') return CANONICAL_BASE_FOODS.mixed_vegetables;
-  if (normalized.includes('prawn') || normalized.includes('prawns') || normalized.includes('shrimp')) return CANONICAL_BASE_FOODS.cooked_prawns;
+  if (normalized.includes('chicken') && (normalized.includes('sandwich') || normalized.includes('sub') || normalized.includes('bap') || normalized.includes('bun') || normalized.includes('bagel') || normalized.includes('toastie'))) return resolve(CANONICAL_BASE_FOODS.chicken_sandwich);
+  if ((normalized.includes('steak') || normalized.includes('beef')) && (normalized.includes('sandwich') || normalized.includes('sub') || normalized.includes('bap') || normalized.includes('toastie'))) return resolve(CANONICAL_BASE_FOODS.steak_sandwich);
+  if (normalized.includes('tuna') && (normalized.includes('sandwich') || normalized.includes('melt') || normalized.includes('sub') || normalized.includes('wrap'))) return resolve(CANONICAL_BASE_FOODS.tuna_sandwich);
+  if (normalized.includes('egg') && (normalized.includes('sandwich') || normalized.includes('mayo sandwich') || normalized.includes('sub') || normalized.includes('bap'))) return resolve(CANONICAL_BASE_FOODS.egg_sandwich);
+  if (normalized.includes('chicken') && normalized.includes('wrap')) return resolve(CANONICAL_BASE_FOODS.chicken_wrap);
+  if (normalized.includes('burger') || normalized.includes('cheeseburger')) return resolve(CANONICAL_BASE_FOODS.beef_burger);
+  if (normalized.includes('sweet chilli') || normalized.includes('sweet chili') || normalized.includes('chilli sauce') || normalized.includes('chili sauce')) return resolve(CANONICAL_BASE_FOODS.sweet_chilli_sauce);
+  if (normalized.includes('kalamata') || normalized.includes('olive')) return resolve(CANONICAL_BASE_FOODS.kalamata_olives);
+  if (normalized.includes('balsamic')) return resolve(CANONICAL_BASE_FOODS.balsamic_dressing);
+  if (normalized.includes('marie rose') || normalized.includes('rose sauce')) return resolve(CANONICAL_BASE_FOODS.marie_rose_sauce);
+  if (normalized.includes('serrano') || normalized.includes('cured ham') || normalized.includes('cooked ham') || normalized === 'ham') return resolve(CANONICAL_BASE_FOODS.serrano_ham);
+  if (normalized.includes('strawberry') || normalized.includes('strawberries')) return resolve(CANONICAL_BASE_FOODS.strawberry);
+  if (normalized.includes('blueberry') || normalized.includes('blueberries')) return resolve(CANONICAL_BASE_FOODS.blueberry);
+  if (normalized.includes('raspberry') || normalized.includes('raspberries')) return resolve(CANONICAL_BASE_FOODS.raspberry);
+  if (normalized.includes('mixed berries fruit compote')) return resolve(CANONICAL_BASE_FOODS.strawberry);
+  if (normalized.includes('mixed berries') || normalized.includes('berry') || normalized.includes('berries')) return resolve(CANONICAL_BASE_FOODS.mixed_berries);
+  if (normalized.includes('low fat yogurt') || normalized.includes('low-fat yogurt') || normalized.includes('low fat yoghurt')) return resolve(CANONICAL_BASE_FOODS.low_fat_yogurt);
+  if (normalized.includes('sea salt') || normalized === 'salt') return resolve(CANONICAL_BASE_FOODS.sea_salt);
+  if (normalized.includes('cooked pasta') || normalized === 'pasta') return resolve(CANONICAL_BASE_FOODS.macaroni_pasta);
+  if (normalized.includes('mixed veg') || normalized === 'vegetables') return resolve(CANONICAL_BASE_FOODS.mixed_vegetables);
+  if (normalized.includes('prawn') || normalized.includes('prawns') || normalized.includes('shrimp')) return resolve(CANONICAL_BASE_FOODS.cooked_prawns);
 
-  if (normalized.includes('cobb salad') || (normalized.includes('cobb') && normalized.includes('salad'))) return CANONICAL_BASE_FOODS.cobb_salad;
-  if (normalized.includes('bacon')) return CANONICAL_BASE_FOODS.cooked_bacon;
-  if (normalized.includes('crispy onion') || normalized.includes('fried onion')) return CANONICAL_BASE_FOODS.crispy_onion;
-  if (normalized.includes('ranch dressing') || normalized.includes('ranch')) return CANONICAL_BASE_FOODS.ranch_dressing;
-  if (normalized.includes('cheddar cheese cube') || (normalized.includes('cheddar') && normalized.includes('cube'))) return CANONICAL_BASE_FOODS.cheddar_cheese_cubes;
-  if (normalized.includes('gherkin') || normalized.includes('pickle')) return CANONICAL_BASE_FOODS.gherkin;
-  if (normalized.includes('fruit cup') || normalized.includes('fruit salad') || (normalized.includes('mixed') && normalized.includes('fruit'))) return CANONICAL_BASE_FOODS.mixed_fruit_cup;
-  if (normalized.includes('raspberry') || normalized.includes('raspberries')) return CANONICAL_BASE_FOODS.raspberry;
-  if (normalized.includes('plain yogurt') || normalized.includes('plain yoghurt')) return CANONICAL_BASE_FOODS.plain_yogurt;
+  if (normalized.includes('cobb salad') || (normalized.includes('cobb') && normalized.includes('salad'))) return resolve(CANONICAL_BASE_FOODS.cobb_salad);
+  if (normalized.includes('bacon')) return resolve(CANONICAL_BASE_FOODS.cooked_bacon);
+  if (normalized.includes('crispy onion') || normalized.includes('fried onion')) return resolve(CANONICAL_BASE_FOODS.crispy_onion);
+  if (normalized.includes('ranch dressing') || normalized.includes('ranch')) return resolve(CANONICAL_BASE_FOODS.ranch_dressing);
+  if (normalized.includes('cheddar cheese cube') || (normalized.includes('cheddar') && normalized.includes('cube'))) return resolve(CANONICAL_BASE_FOODS.cheddar_cheese_cubes);
+  if (normalized.includes('gherkin') || normalized.includes('pickle')) return resolve(CANONICAL_BASE_FOODS.gherkin);
+  if (normalized.includes('fruit cup') || normalized.includes('fruit salad') || (normalized.includes('mixed') && normalized.includes('fruit'))) return resolve(CANONICAL_BASE_FOODS.mixed_fruit_cup);
+  if (normalized.includes('raspberry') || normalized.includes('raspberries')) return resolve(CANONICAL_BASE_FOODS.raspberry);
+  if (normalized.includes('plain yogurt') || normalized.includes('plain yoghurt')) return resolve(CANONICAL_BASE_FOODS.plain_yogurt);
   
-  if (normalized.includes('sainsbury') && normalized.includes('oat')) return CANONICAL_BASE_FOODS.sainsbury_rolled_oats;
+  if (normalized.includes('sainsbury') && normalized.includes('oat')) return resolve(CANONICAL_BASE_FOODS.sainsbury_rolled_oats);
 
-  if (normalized.includes('pomegranate seed') || normalized.includes('pomegranate seeds')) return CANONICAL_BASE_FOODS.pomegranate_seeds_brand;
+  if (normalized.includes('pomegranate seed') || normalized.includes('pomegranate seeds')) return resolve(CANONICAL_BASE_FOODS.pomegranate_seeds_brand);
 
-  if (normalized.includes('cucumber')) return CANONICAL_BASE_FOODS.cucumber;
+  if (normalized.includes('cucumber')) return resolve(CANONICAL_BASE_FOODS.cucumber);
 
-  if (normalized.includes('chickpea') || normalized.includes('garbanzo')) return CANONICAL_BASE_FOODS.chickpeas;
+  if (normalized.includes('chickpea') || normalized.includes('garbanzo')) return resolve(CANONICAL_BASE_FOODS.chickpeas);
 
-  if (normalized.includes('doughnut') || normalized.includes('donut')) return CANONICAL_BASE_FOODS.fried_ring_doughnut;
+  if (normalized.includes('doughnut') || normalized.includes('donut')) return resolve(CANONICAL_BASE_FOODS.fried_ring_doughnut);
 
   // Specific compound pastries & baked goods (checked before single-ingredient keywords)
   if (normalized.includes('pain au raisin') || normalized.includes('pain aux raisins') || normalized.includes('escargot pastry') || (normalized.includes('raisin') && (normalized.includes('pastry') || normalized.includes('swirl') || normalized.includes('danish') || normalized.includes('roll') || normalized.includes('bun')))) {
-    return CANONICAL_BASE_FOODS.pain_au_raisin;
+    return resolve(CANONICAL_BASE_FOODS.pain_au_raisin);
   }
   if (normalized.includes('pain au chocolat') || normalized.includes('chocolatine') || (normalized.includes('chocolate') && normalized.includes('croissant'))) {
-    return CANONICAL_BASE_FOODS.pain_au_chocolat;
+    return resolve(CANONICAL_BASE_FOODS.pain_au_chocolat);
   }
   if (normalized.includes('almond croissant') || (normalized.includes('almond') && (normalized.includes('croissant') || normalized.includes('pastry')))) {
-    return CANONICAL_BASE_FOODS.almond_croissant;
+    return resolve(CANONICAL_BASE_FOODS.almond_croissant);
   }
   if (normalized.includes('cinnamon swirl') || normalized.includes('cinnamon roll') || normalized.includes('cinnamon bun') || normalized.includes('cinnamon pastry')) {
-    return CANONICAL_BASE_FOODS.cinnamon_swirl;
+    return resolve(CANONICAL_BASE_FOODS.cinnamon_swirl);
   }
   if (normalized.includes('apple turnover') || normalized.includes('chausson aux pommes') || (normalized.includes('apple') && normalized.includes('turnover'))) {
-    return CANONICAL_BASE_FOODS.apple_turnover;
+    return resolve(CANONICAL_BASE_FOODS.apple_turnover);
   }
   if (normalized.includes('danish pastry') || (normalized.includes('danish') && !normalized.includes('cheese') && !normalized.includes('ham'))) {
-    return CANONICAL_BASE_FOODS.danish_pastry;
+    return resolve(CANONICAL_BASE_FOODS.danish_pastry);
   }
   if (normalized.includes('raisin bread') || normalized.includes('raisin toast') || normalized.includes('raisin bagel')) {
-    return CANONICAL_BASE_FOODS.raisin_bread;
+    return resolve(CANONICAL_BASE_FOODS.raisin_bread);
   }
 
   const isBakedOrCompositeContext = /\b(bread|toast|bagel|muffin|bran|cookie|scone|cereal|pastry|swirl|cake|roll|bun|pie|tart|loaf|croissant|flour|milk|butter)\b/i.test(normalized);
 
   if (!isBakedOrCompositeContext && normalized.includes('raisin')) {
-    return CANONICAL_BASE_FOODS.raisins;
+    return resolve(CANONICAL_BASE_FOODS.raisins);
   }
   
   if (!isBakedOrCompositeContext && normalized.includes('almond')) {
-    return CANONICAL_BASE_FOODS.almonds;
+    return resolve(CANONICAL_BASE_FOODS.almonds);
   }
   
-  if (normalized.includes('croissant')) return CANONICAL_BASE_FOODS.croissant;
+  if (normalized.includes('croissant')) return resolve(CANONICAL_BASE_FOODS.croissant);
 
-  if (normalized.includes('unsalted butter') || normalized.includes('unsalted_butter')) return CANONICAL_BASE_FOODS.unsalted_butter;
-  if (normalized.includes('whipped butter') || normalized.includes('whipped_butter')) return CANONICAL_BASE_FOODS.whipped_butter;
-  if (normalized.includes('butter') && !normalized.includes('peanut') && !normalized.includes('almond') && !normalized.includes('apple') && !normalized.includes('cookie') && !normalized.includes('milk') && !normalized.includes('squash') && !normalized.includes('fly')) return CANONICAL_BASE_FOODS.butter;
+  if (normalized.includes('unsalted butter') || normalized.includes('unsalted_butter')) return resolve(CANONICAL_BASE_FOODS.unsalted_butter);
+  if (normalized.includes('whipped butter') || normalized.includes('whipped_butter')) return resolve(CANONICAL_BASE_FOODS.whipped_butter);
+  if (normalized.includes('butter') && !normalized.includes('peanut') && !normalized.includes('almond') && !normalized.includes('apple') && !normalized.includes('cookie') && !normalized.includes('milk') && !normalized.includes('squash') && !normalized.includes('fly')) return resolve(CANONICAL_BASE_FOODS.butter);
   
-  if (normalized.includes('falafel')) return CANONICAL_BASE_FOODS.falafel;
+  if (normalized.includes('falafel')) return resolve(CANONICAL_BASE_FOODS.falafel);
   
-  if (normalized.includes('hummus')) return CANONICAL_BASE_FOODS.hummus;
+  if (normalized.includes('hummus')) return resolve(CANONICAL_BASE_FOODS.hummus);
   
-  if (normalized.includes('feta cheese')) return CANONICAL_BASE_FOODS.feta_cheese;
+  if (normalized.includes('feta cheese')) return resolve(CANONICAL_BASE_FOODS.feta_cheese);
   
-  if (normalized.includes('red onion')) return CANONICAL_BASE_FOODS.raw_red_onion;
+  if (normalized.includes('red onion')) return resolve(CANONICAL_BASE_FOODS.raw_red_onion);
   
-  if (normalized === 'raw bell pepper') return CANONICAL_BASE_FOODS.raw_bell_pepper;
-  if (normalized.includes('bell pepper') || normalized.includes('sweet pepper')) return CANONICAL_BASE_FOODS.sweet_bell_pepper;
+  if (normalized === 'raw bell pepper') return resolve(CANONICAL_BASE_FOODS.raw_bell_pepper);
+  if (normalized.includes('bell pepper') || normalized.includes('sweet pepper')) return resolve(CANONICAL_BASE_FOODS.sweet_bell_pepper);
 
   if (!name) return null;
   let clean = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -444,60 +436,60 @@ export function lookupCanonicalBaseFood(name: string): any | null {
   const tokens = clean.split('_').filter(Boolean);
   if (clean.includes('egg') || clean.includes('hard_boiled')) {
     if (clean.includes('boiled') || clean.includes('cook') || clean.includes('whole') || clean.includes('hard')) {
-      return CANONICAL_BASE_FOODS.hard_boiled_egg;
+      return resolve(CANONICAL_BASE_FOODS.hard_boiled_egg);
     }
   }
-  if (clean.includes('greek_yogurt') || clean.includes('plain_greek') || (clean.includes('yogurt') && clean.includes('greek'))) return CANONICAL_BASE_FOODS.plain_greek_yogurt;
-  if (clean.includes('granola')) return CANONICAL_BASE_FOODS.granola_cereal;
-  if (clean.includes('tortilla')) return CANONICAL_BASE_FOODS.flour_tortilla;
-  if (clean.includes('salad_greens') || clean.includes('salad_leaves') || (clean.includes('salad') && clean.includes('mixed'))) return CANONICAL_BASE_FOODS.mixed_salad_greens;
-  if (clean.includes('surimi') || clean.includes('crab_stick') || (clean.includes('crab') && clean.includes('stick')) || clean.includes('imitation_crab')) return CANONICAL_BASE_FOODS.surimi_crab_stick;
-  if (clean.includes('edamame')) return CANONICAL_BASE_FOODS.edamame;
-  if (clean.includes('quinoa')) return CANONICAL_BASE_FOODS.quinoa;
-  if (clean.includes('slaw') || clean.includes('cabbage') || clean.includes('coleslaw')) return CANONICAL_BASE_FOODS.cabbage_slaw;
-  if (clean.includes('mcchicken') || (clean.includes('mcdonald') && clean.includes('chicken'))) return CANONICAL_BASE_FOODS.mcdonalds_mcchicken_sandwich;
-  if (clean.includes('avocado') && !clean.includes('oil')) return CANONICAL_BASE_FOODS.avocado;
-  if (clean.includes('chocolate') || clean.includes('dark_chocolate')) return CANONICAL_BASE_FOODS.dark_chocolate;
-  if (clean.includes('flour') || clean.includes('wheat_flour')) return CANONICAL_BASE_FOODS.wheat_flour;
-  if (clean.includes('sugar') && !clean.includes('syrup')) return CANONICAL_BASE_FOODS.granulated_sugar;
+  if (clean.includes('greek_yogurt') || clean.includes('plain_greek') || (clean.includes('yogurt') && clean.includes('greek'))) return resolve(CANONICAL_BASE_FOODS.plain_greek_yogurt);
+  if (clean.includes('granola')) return resolve(CANONICAL_BASE_FOODS.granola_cereal);
+  if (clean.includes('tortilla')) return resolve(CANONICAL_BASE_FOODS.flour_tortilla);
+  if (clean.includes('salad_greens') || clean.includes('salad_leaves') || (clean.includes('salad') && clean.includes('mixed'))) return resolve(CANONICAL_BASE_FOODS.mixed_salad_greens);
+  if (clean.includes('surimi') || clean.includes('crab_stick') || (clean.includes('crab') && clean.includes('stick')) || clean.includes('imitation_crab')) return resolve(CANONICAL_BASE_FOODS.surimi_crab_stick);
+  if (clean.includes('edamame')) return resolve(CANONICAL_BASE_FOODS.edamame);
+  if (clean.includes('quinoa')) return resolve(CANONICAL_BASE_FOODS.quinoa);
+  if (clean.includes('slaw') || clean.includes('cabbage') || clean.includes('coleslaw')) return resolve(CANONICAL_BASE_FOODS.cabbage_slaw);
+  if (clean.includes('mcchicken') || (clean.includes('mcdonald') && clean.includes('chicken'))) return resolve(CANONICAL_BASE_FOODS.mcdonalds_mcchicken_sandwich);
+  if (clean.includes('avocado') && !clean.includes('oil')) return resolve(CANONICAL_BASE_FOODS.avocado);
+  if (clean.includes('chocolate') || clean.includes('dark_chocolate')) return resolve(CANONICAL_BASE_FOODS.dark_chocolate);
+  if (clean.includes('flour') || clean.includes('wheat_flour')) return resolve(CANONICAL_BASE_FOODS.wheat_flour);
+  if (clean.includes('sugar') && !clean.includes('syrup')) return resolve(CANONICAL_BASE_FOODS.granulated_sugar);
   if (clean.includes('salmon') && !clean.includes('bap') && !clean.includes('sandwich') && !clean.includes('sushi') && !clean.includes('roll')) {
     if (clean.includes('grill') || clean.includes('cook') || clean.includes('roast') || clean.includes('bake')) {
-      return CANONICAL_BASE_FOODS.grilled_salmon;
+      return resolve(CANONICAL_BASE_FOODS.grilled_salmon);
     }
-    return CANONICAL_BASE_FOODS.salmon;
+    return resolve(CANONICAL_BASE_FOODS.salmon);
   }
-  if (clean.includes('cheddar_cheese_sauce') || (clean.includes('cheese') && clean.includes('sauce'))) return CANONICAL_BASE_FOODS.cheddar_cheese_sauce;
-  if (clean.includes('macaroni_and_cheese') || clean.includes('mac_and_cheese') || clean.includes('mac_n_cheese') || clean.includes('macaroni_cheese')) return CANONICAL_BASE_FOODS.macaroni_and_cheese;
-  if (clean.includes('macaroni') || clean.includes('elbow_pasta')) return CANONICAL_BASE_FOODS.macaroni_pasta;
-  if (clean.includes('lettuce') || clean.includes('romaine')) return CANONICAL_BASE_FOODS.romaine_lettuce;
-  if (clean.includes('bok_choy') || clean.includes('pak_choi') || clean.includes('caisim') || clean.includes('choy_sum') || clean.includes('baby_bok_choy')) return CANONICAL_BASE_FOODS.bok_choy;
-  if (clean.includes('empal') || clean.includes('daging') || clean.includes('beef_blade') || clean.includes('beef_chuck') || clean.includes('beef_cut') || clean.includes('beef_brisket')) return CANONICAL_BASE_FOODS.raw_beef_cut;
-  if (clean.includes('tartar') || clean.includes('tartar_sauce') || clean.includes('tartar sauce')) return CANONICAL_BASE_FOODS.tartar_sauce;
-  if (clean.includes('american_cheese') || clean.includes('american cheese') || (clean.includes('cheese') && clean.includes('processed'))) return CANONICAL_BASE_FOODS.american_cheese;
-  if (clean.includes('mayo') || clean.includes('mayonnaise')) return CANONICAL_BASE_FOODS.mayonnaise;
-  if (clean.includes('ketchup')) return CANONICAL_BASE_FOODS.ketchup;
-  if (clean.includes('peppermint_patty') || clean.includes('mint_patty') || clean.includes('peppermint_pattie') || clean.includes('york_peppermint')) return CANONICAL_BASE_FOODS.peppermint_patty;
-  if (clean.includes('peppermint_fondant') || clean.includes('mint_cream') || (clean.includes('peppermint') && (clean.includes('fondant') || clean.includes('filling') || clean.includes('cream')))) return CANONICAL_BASE_FOODS.peppermint_fondant;
-  if (clean.includes('ice_cube') || clean.includes('ice_cubes') || tokens.includes('ice')) return CANONICAL_BASE_FOODS.ice;
-  if (clean.includes('water') || clean.includes('soda_water') || clean.includes('sparkling_water')) return CANONICAL_BASE_FOODS.water;
-  if (clean.includes('coca') || tokens.includes('cola') || tokens.includes('coke')) return CANONICAL_BASE_FOODS.coca_cola;
-  if (clean.includes('cherry_tomato') || (clean.includes('cherry') && clean.includes('tomato'))) return CANONICAL_BASE_FOODS.cherry_tomato;
-  if (clean.includes('breaded_chicken_tender') || clean.includes('chicken_tender') || (clean.includes('breaded') && clean.includes('chicken')) || (clean.includes('chicken') && (clean.includes('crispy') || clean.includes('crumbed') || clean.includes('panko') || clean.includes('battered') || clean.includes('katsu') || clean.includes('schnitzel')) && clean.includes('fried'))) return CANONICAL_BASE_FOODS.breaded_chicken_tender;
-  if (clean.includes('chicken_breast') || (clean.includes('chicken') && clean.includes('breast'))) return CANONICAL_BASE_FOODS.chicken_breast;
-  if (tokens.includes('rice') && (clean.includes('porridge') || clean.includes('congee'))) return CANONICAL_BASE_FOODS.rice_congee;
-  if (tokens.includes('rice')) return CANONICAL_BASE_FOODS.white_rice;
-  if (clean.includes('white_fish') || (tokens.includes('fish') && !tokens.includes('salmon'))) return CANONICAL_BASE_FOODS.white_fish;
-  if (clean.includes('seaweed_salad') || clean.includes('wakame_salad') || clean.includes('wakame') || (clean.includes('seaweed') && (clean.includes('salad') || clean.includes('side')))) return CANONICAL_BASE_FOODS.seaweed_salad;
-  if (clean.includes('watermelon')) return CANONICAL_BASE_FOODS.watermelon;
-  if (clean.includes('honeydew') || clean.includes('melon')) return CANONICAL_BASE_FOODS.honeydew;
-  if (clean.includes('margarine')) return CANONICAL_BASE_FOODS.margarine;
-  if (clean.includes('bread_roll') || clean.includes('dinner_roll')) return CANONICAL_BASE_FOODS.bread_roll;
-  if ((clean.includes('butter') && !clean.includes('peanut_butter') && !clean.includes('almond_butter') && !clean.includes('butter_croissant') && !clean.includes('butter_chicken')) || clean.includes('lurpak')) return CANONICAL_BASE_FOODS.butter;
-  if (clean.includes('pomegranate')) return CANONICAL_BASE_FOODS.pomegranate_seed;
-  if (clean.includes('sesame_seed') || (clean.includes('sesame') && clean.includes('seed'))) return CANONICAL_BASE_FOODS.sesame_seed;
-  if (clean.includes('sugar_syrup') || clean.includes('simple_syrup') || (clean.includes('sugar') && clean.includes('syrup')) || clean.includes('corn_syrup')) return CANONICAL_BASE_FOODS.sugar_syrup;
-  if (clean.includes('citrus_juice') || clean.includes('orange_juice') || (clean.includes('orange') && (clean.includes('juice') || clean.includes('drink'))) || (clean.includes('citrus') && (clean.includes('juice') || clean.includes('drink')))) return CANONICAL_BASE_FOODS.citrus_juice;
-  if (clean.includes('espresso') || clean.includes('brewed_espresso') || clean.includes('cold_brew_espresso')) return CANONICAL_BASE_FOODS.espresso;
+  if (clean.includes('cheddar_cheese_sauce') || (clean.includes('cheese') && clean.includes('sauce'))) return resolve(CANONICAL_BASE_FOODS.cheddar_cheese_sauce);
+  if (clean.includes('macaroni_and_cheese') || clean.includes('mac_and_cheese') || clean.includes('mac_n_cheese') || clean.includes('macaroni_cheese')) return resolve(CANONICAL_BASE_FOODS.macaroni_and_cheese);
+  if (clean.includes('macaroni') || clean.includes('elbow_pasta')) return resolve(CANONICAL_BASE_FOODS.macaroni_pasta);
+  if (clean.includes('lettuce') || clean.includes('romaine')) return resolve(CANONICAL_BASE_FOODS.romaine_lettuce);
+  if (clean.includes('bok_choy') || clean.includes('pak_choi') || clean.includes('caisim') || clean.includes('choy_sum') || clean.includes('baby_bok_choy')) return resolve(CANONICAL_BASE_FOODS.bok_choy);
+  if (clean.includes('empal') || clean.includes('daging') || clean.includes('beef_blade') || clean.includes('beef_chuck') || clean.includes('beef_cut') || clean.includes('beef_brisket')) return resolve(CANONICAL_BASE_FOODS.raw_beef_cut);
+  if (clean.includes('tartar') || clean.includes('tartar_sauce') || clean.includes('tartar sauce')) return resolve(CANONICAL_BASE_FOODS.tartar_sauce);
+  if (clean.includes('american_cheese') || clean.includes('american cheese') || (clean.includes('cheese') && clean.includes('processed'))) return resolve(CANONICAL_BASE_FOODS.american_cheese);
+  if (clean.includes('mayo') || clean.includes('mayonnaise')) return resolve(CANONICAL_BASE_FOODS.mayonnaise);
+  if (clean.includes('ketchup')) return resolve(CANONICAL_BASE_FOODS.ketchup);
+  if (clean.includes('peppermint_patty') || clean.includes('mint_patty') || clean.includes('peppermint_pattie') || clean.includes('york_peppermint')) return resolve(CANONICAL_BASE_FOODS.peppermint_patty);
+  if (clean.includes('peppermint_fondant') || clean.includes('mint_cream') || (clean.includes('peppermint') && (clean.includes('fondant') || clean.includes('filling') || clean.includes('cream')))) return resolve(CANONICAL_BASE_FOODS.peppermint_fondant);
+  if (clean.includes('ice_cube') || clean.includes('ice_cubes') || tokens.includes('ice')) return resolve(CANONICAL_BASE_FOODS.ice);
+  if (clean.includes('water') || clean.includes('soda_water') || clean.includes('sparkling_water')) return resolve(CANONICAL_BASE_FOODS.water);
+  if (clean.includes('coca') || tokens.includes('cola') || tokens.includes('coke')) return resolve(CANONICAL_BASE_FOODS.coca_cola);
+  if (clean.includes('cherry_tomato') || (clean.includes('cherry') && clean.includes('tomato'))) return resolve(CANONICAL_BASE_FOODS.cherry_tomato);
+  if (clean.includes('breaded_chicken_tender') || clean.includes('chicken_tender') || (clean.includes('breaded') && clean.includes('chicken')) || (clean.includes('chicken') && (clean.includes('crispy') || clean.includes('crumbed') || clean.includes('panko') || clean.includes('battered') || clean.includes('katsu') || clean.includes('schnitzel')) && clean.includes('fried'))) return resolve(CANONICAL_BASE_FOODS.breaded_chicken_tender);
+  if (clean.includes('chicken_breast') || (clean.includes('chicken') && clean.includes('breast'))) return resolve(CANONICAL_BASE_FOODS.chicken_breast);
+  if (tokens.includes('rice') && (clean.includes('porridge') || clean.includes('congee'))) return resolve(CANONICAL_BASE_FOODS.rice_congee);
+  if (tokens.includes('rice')) return resolve(CANONICAL_BASE_FOODS.white_rice);
+  if (clean.includes('white_fish') || (tokens.includes('fish') && !tokens.includes('salmon'))) return resolve(CANONICAL_BASE_FOODS.white_fish);
+  if (clean.includes('seaweed_salad') || clean.includes('wakame_salad') || clean.includes('wakame') || (clean.includes('seaweed') && (clean.includes('salad') || clean.includes('side')))) return resolve(CANONICAL_BASE_FOODS.seaweed_salad);
+  if (clean.includes('watermelon')) return resolve(CANONICAL_BASE_FOODS.watermelon);
+  if (clean.includes('honeydew') || clean.includes('melon')) return resolve(CANONICAL_BASE_FOODS.honeydew);
+  if (clean.includes('margarine')) return resolve(CANONICAL_BASE_FOODS.margarine);
+  if (clean.includes('bread_roll') || clean.includes('dinner_roll')) return resolve(CANONICAL_BASE_FOODS.bread_roll);
+  if ((clean.includes('butter') && !clean.includes('peanut_butter') && !clean.includes('almond_butter') && !clean.includes('butter_croissant') && !clean.includes('butter_chicken')) || clean.includes('lurpak')) return resolve(CANONICAL_BASE_FOODS.butter);
+  if (clean.includes('pomegranate')) return resolve(CANONICAL_BASE_FOODS.pomegranate_seed);
+  if (clean.includes('sesame_seed') || (clean.includes('sesame') && clean.includes('seed'))) return resolve(CANONICAL_BASE_FOODS.sesame_seed);
+  if (clean.includes('sugar_syrup') || clean.includes('simple_syrup') || (clean.includes('sugar') && clean.includes('syrup')) || clean.includes('corn_syrup')) return resolve(CANONICAL_BASE_FOODS.sugar_syrup);
+  if (clean.includes('citrus_juice') || clean.includes('orange_juice') || (clean.includes('orange') && (clean.includes('juice') || clean.includes('drink'))) || (clean.includes('citrus') && (clean.includes('juice') || clean.includes('drink')))) return resolve(CANONICAL_BASE_FOODS.citrus_juice);
+  if (clean.includes('espresso') || clean.includes('brewed_espresso') || clean.includes('cold_brew_espresso')) return resolve(CANONICAL_BASE_FOODS.espresso);
   // F-3 FALSE_FRIEND (PLANT_MILK_AS_DAIRY): oat/soy/almond/coconut milk must never
   // resolve to dairy whole_cow_milk. Return null so the pipeline falls through to an
   // honest fallback instead of confident-wrong dairy numbers. "X with milk" (oats
@@ -506,24 +498,24 @@ export function lookupCanonicalBaseFood(name: string): any | null {
   const isPlantMilk = /\b(oat|soy|soya|almond|coconut|cashew|rice|pea|hemp)\s*milks?\b/i.test(rawLower)
     && !/\bwith\b[^.]*\bmilks?\b/i.test(rawLower);
   if (isPlantMilk) return null;
-  if (!clean.includes('cheese') && !clean.includes('mozzarella') && !clean.includes('ricotta') && (clean.includes('milk') || clean.includes('whole_cow_milk') || clean.includes('steamed_milk') || clean.includes('cow_milk') || clean.includes('whole_milk'))) return CANONICAL_BASE_FOODS.whole_cow_milk;
-  if (clean.includes('jam') || clean.includes('preserves') || clean.includes('marmalade') || clean.includes('jelly_spread') || (clean.includes('fruit') && clean.includes('spread'))) return CANONICAL_BASE_FOODS.fruit_jam;
-  if (tokens.includes('grapes') || tokens.includes('grape') || clean.includes('red_grapes') || clean.includes('green_grapes')) return CANONICAL_BASE_FOODS.grapes;
-  if (tokens.includes('banana') || tokens.includes('bananas')) return CANONICAL_BASE_FOODS.banana;
-  if (tokens.includes('nectarine') || tokens.includes('nectarines')) return CANONICAL_BASE_FOODS.nectarine;
-  if (tokens.includes('oat') || tokens.includes('oats') || tokens.includes('oatmeal') || clean.includes('porridge')) return CANONICAL_BASE_FOODS.rolled_oats;
-  if (tokens.includes('tangerine') || tokens.includes('tangerines') || tokens.includes('mandarin') || tokens.includes('mandarins') || tokens.includes('clementine') || tokens.includes('clementines')) return CANONICAL_BASE_FOODS.tangerine;
-  if (tokens.includes('apple') || tokens.includes('apples')) return CANONICAL_BASE_FOODS.apple;
-  if (tokens.includes('orange') || tokens.includes('oranges')) return CANONICAL_BASE_FOODS.orange;
-  if (tokens.includes('peach') || tokens.includes('peaches')) return CANONICAL_BASE_FOODS.peach;
-  if (tokens.includes('strawberry') || tokens.includes('strawberries')) return CANONICAL_BASE_FOODS.strawberry;
-  if (tokens.includes('blueberry') || tokens.includes('blueberries')) return CANONICAL_BASE_FOODS.blueberry;
-  if (tokens.includes('pear') || tokens.includes('pears')) return CANONICAL_BASE_FOODS.pear;
-  if (tokens.includes('plum') || tokens.includes('plums')) return CANONICAL_BASE_FOODS.plum;
-  if (tokens.includes('kiwi') || tokens.includes('kiwis')) return CANONICAL_BASE_FOODS.kiwi;
-  if (tokens.includes('pineapple') || tokens.includes('pineapples')) return CANONICAL_BASE_FOODS.pineapple;
-  if (tokens.includes('mango') || tokens.includes('mangoes') || tokens.includes('mangos')) return CANONICAL_BASE_FOODS.mango;
-  if (clean.includes('mushroom') || tokens.includes('mushrooms') || tokens.includes('mushroom')) return CANONICAL_BASE_FOODS.cooked_mushrooms;
+  if (!clean.includes('cheese') && !clean.includes('mozzarella') && !clean.includes('ricotta') && (clean.includes('milk') || clean.includes('whole_cow_milk') || clean.includes('steamed_milk') || clean.includes('cow_milk') || clean.includes('whole_milk'))) return resolve(CANONICAL_BASE_FOODS.whole_cow_milk);
+  if (clean.includes('jam') || clean.includes('preserves') || clean.includes('marmalade') || clean.includes('jelly_spread') || (clean.includes('fruit') && clean.includes('spread'))) return resolve(CANONICAL_BASE_FOODS.fruit_jam);
+  if (tokens.includes('grapes') || tokens.includes('grape') || clean.includes('red_grapes') || clean.includes('green_grapes')) return resolve(CANONICAL_BASE_FOODS.grapes);
+  if (tokens.includes('banana') || tokens.includes('bananas')) return resolve(CANONICAL_BASE_FOODS.banana);
+  if (tokens.includes('nectarine') || tokens.includes('nectarines')) return resolve(CANONICAL_BASE_FOODS.nectarine);
+  if (tokens.includes('oat') || tokens.includes('oats') || tokens.includes('oatmeal') || clean.includes('porridge')) return resolve(CANONICAL_BASE_FOODS.rolled_oats);
+  if (tokens.includes('tangerine') || tokens.includes('tangerines') || tokens.includes('mandarin') || tokens.includes('mandarins') || tokens.includes('clementine') || tokens.includes('clementines')) return resolve(CANONICAL_BASE_FOODS.tangerine);
+  if (tokens.includes('apple') || tokens.includes('apples')) return resolve(CANONICAL_BASE_FOODS.apple);
+  if (tokens.includes('orange') || tokens.includes('oranges')) return resolve(CANONICAL_BASE_FOODS.orange);
+  if (tokens.includes('peach') || tokens.includes('peaches')) return resolve(CANONICAL_BASE_FOODS.peach);
+  if (tokens.includes('strawberry') || tokens.includes('strawberries')) return resolve(CANONICAL_BASE_FOODS.strawberry);
+  if (tokens.includes('blueberry') || tokens.includes('blueberries')) return resolve(CANONICAL_BASE_FOODS.blueberry);
+  if (tokens.includes('pear') || tokens.includes('pears')) return resolve(CANONICAL_BASE_FOODS.pear);
+  if (tokens.includes('plum') || tokens.includes('plums')) return resolve(CANONICAL_BASE_FOODS.plum);
+  if (tokens.includes('kiwi') || tokens.includes('kiwis')) return resolve(CANONICAL_BASE_FOODS.kiwi);
+  if (tokens.includes('pineapple') || tokens.includes('pineapples')) return resolve(CANONICAL_BASE_FOODS.pineapple);
+  if (tokens.includes('mango') || tokens.includes('mangoes') || tokens.includes('mangos')) return resolve(CANONICAL_BASE_FOODS.mango);
+  if (clean.includes('mushroom') || tokens.includes('mushrooms') || tokens.includes('mushroom')) return resolve(CANONICAL_BASE_FOODS.cooked_mushrooms);
   return null;
 }
 
