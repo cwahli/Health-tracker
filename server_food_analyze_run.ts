@@ -226,7 +226,6 @@ export function createAnalyzeRunContext(
     isPureWeightModification,
     isWeightModification,
     portionClarify: null,
-    verifiedFdcHintMap: new Map<string, any>(),
     effectiveActiveMeal,
     hasUploadedNewImages,
   };

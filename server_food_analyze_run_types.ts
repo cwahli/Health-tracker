@@ -18,6 +18,6 @@ export interface AnalyzeRunContext {
   diningEnvironment: string; visionScoutRanAndReturnedItems: boolean; queriesToSearch: string[];
   scoutOriginalQueries: string[]; refineDecision: { skip: boolean; reason?: string };
   weightRefineIntent: { isRefine: boolean; weightGrams?: number }; isPureWeightModification: boolean;
-  isWeightModification: boolean; portionClarify: any; verifiedFdcHintMap: Map<string, any>;
+  isWeightModification: boolean; portionClarify: any;
   effectiveActiveMeal: any; hasUploadedNewImages: boolean;
 }

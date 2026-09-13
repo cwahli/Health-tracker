@@ -974,7 +974,11 @@ function evaluateFoodAgentOutput(tree: CanonicalRunTree, isFoodPack: boolean): C
     na('Edit patch: components & nutrients preserved', 'Single-turn create, no edit turns');
   } else {
     const pfl = tree.pendingFoodLog;
-    const dishes: any[] = Array.isArray(pfl?.dishes) ? pfl.dishes : [];
+    const dishes: any[] = Array.isArray(pfl?.dishes) && pfl.dishes.length > 0
+      ? pfl.dishes
+      : (Array.isArray(pfl?.itemsBreakdown) && pfl.itemsBreakdown.length > 0
+        ? pfl.itemsBreakdown
+        : (Array.isArray(pfl?.items) ? pfl.items : []));
 
     const collapsedDishes = dishes.filter((d) => {
       const foods = Array.isArray(d?.foods) ? d.foods : (Array.isArray(d?.components) ? d.components : []);
@@ -984,8 +988,9 @@ function evaluateFoodAgentOutput(tree: CanonicalRunTree, isFoodPack: boolean): C
 
     const dishesWithEmptyNutrients = dishes.filter((d) => {
       const nuts = d?.nutrients || d?.dishNutrients;
-      if (!nuts || typeof nuts !== 'object') return true;
-      return !Number.isFinite(Number(nuts.calories)) || !Number.isFinite(Number(nuts.protein));
+      const cal = nuts?.calories ?? d?.calories;
+      const pro = nuts?.protein ?? d?.protein;
+      return !Number.isFinite(Number(cal)) || !Number.isFinite(Number(pro));
     });
 
     if (dishes.length === 0 && !/remove_item|deleted all/i.test(tree.backendLogs || '')) {

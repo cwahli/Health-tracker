@@ -249,4 +249,86 @@ test.describe('Q-8.3: Dialog Inventory & Job Process Tier 2 Stubs', () => {
     expect(telemetryLaw.result).toBe('PASS');
   });
 
+  test('API: /api/jobs/debug evaluates multi-turn edit contract for merged dishes with label truth', async ({ request }) => {
+    const rawLabel = {
+      servingSize: '40g',
+      calories: 160,
+      protein: 5,
+      carbohydrates: 27,
+      totalFat: 3,
+      saturatedFat: 0.5,
+      sodium: 0,
+    };
+    const res = await request.post('/api/jobs/debug', {
+      data: {
+        jobId: 'job_e2e_merged_dish_verify',
+        format: 'json',
+        dialogInventory: {
+          open: true,
+          title: 'Quaker Whole Rolled Oats',
+          on_card: { kcal: 400, protein: 12.5, carbs: 67.5, fat: 7.5 },
+          visible: ['View Analysis', 'Download Debug'],
+          hidden: ['Retry', 'Attempt 1 of 3'],
+          composer: { photo: 1, add_image: 1, paste: 1, send: 1 },
+        },
+        dispatches: [
+          { id: 't1/scout', agent: 'scout', model: 'gemini-3.5-flash-lite', latency_ms: 1100 },
+          { id: 't2/scout', agent: 'scout', model: 'gemini-3.5-flash-lite', latency_ms: 950 },
+        ],
+        backendLogs: 'merge_dishes: combined "Quaker Whole Rolled Oats" and "Rolled Oats Porridge" into "Quaker Whole Rolled Oats" (100g, label truth preserved: 400 kcal)',
+        result: {
+          pendingFoodLog: {
+            itemsBreakdown: [
+              {
+                name: 'Quaker Whole Rolled Oats',
+                weightGrams: 100,
+                calories: 400,
+                nutrients: { calories: 400, protein: 12.5, carbohydrates: 67.5, totalFat: 7.5 },
+                rawNutritionLabel: rawLabel,
+                components: [
+                  {
+                    name: 'Quaker Whole Rolled Oats',
+                    weightGrams: 100,
+                    calories: 400,
+                    nutrients: { calories: 400, protein: 12.5, carbohydrates: 67.5, totalFat: 7.5 },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        pendingFoodLog: {
+          itemsBreakdown: [
+            {
+              name: 'Quaker Whole Rolled Oats',
+              weightGrams: 100,
+              calories: 400,
+              nutrients: { calories: 400, protein: 12.5, carbohydrates: 67.5, totalFat: 7.5 },
+              rawNutritionLabel: rawLabel,
+              components: [
+                {
+                  name: 'Quaker Whole Rolled Oats',
+                  weightGrams: 100,
+                  calories: 400,
+                  nutrients: { calories: 400, protein: 12.5, carbohydrates: 67.5, totalFat: 7.5 },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.ok()).toBeTruthy();
+    const tree = await res.json();
+    expect(tree).toHaveProperty('jobId', 'job_e2e_merged_dish_verify');
+    const byLaw = (name: string) => tree.contract?.find((c: any) => c.law === name);
+    const editPatchLaw = byLaw('Edit patch: components & nutrients preserved');
+    if (editPatchLaw && editPatchLaw.result !== 'PASS') {
+      console.error('editPatchLaw diagnostic:', editPatchLaw);
+    }
+    expect(editPatchLaw).toBeTruthy();
+    expect(editPatchLaw.result).toBe('PASS');
+  });
+
 });

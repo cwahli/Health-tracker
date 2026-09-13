@@ -3,13 +3,11 @@ import { runDatabaseSearchStage } from './server_food_db_search';
 
 function stubSetup(overrides: Record<string, any> = {}) {
   const logs: string[] = [];
-  const calls: { usda: string[] } = { usda: [] };
   const deps: Record<string, any> = {
     sendStreamEvent: () => {},
     flushRes: () => {},
     sendLog: () => {},
     addDebugLog: (m: string) => logs.push(m),
-    searchUSDA: async (q: string) => { calls.usda.push(q); return []; },
     searchOpenFoodFacts: async () => [],
     searchBrandMenuItems: async () => [],
     isKnownDatabaseBrand: async () => false,
@@ -25,7 +23,6 @@ function stubSetup(overrides: Record<string, any> = {}) {
     writeAliasIfHitUnique: async () => {},
     sanitizeDishTitle: (q: string) => q,
     normalizeFoodKey: (q: string) => String(q || '').toLowerCase().trim(),
-    fetchUSDAFoodById: async () => null,
     fetchOFFProductByBarcode: async () => null,
     getFallbackCategoryProfile: () => ({ calories: 50, protein: 1 }),
     recordFoodObservation: () => {},
@@ -37,7 +34,7 @@ function stubSetup(overrides: Record<string, any> = {}) {
     selfCleanBrandDatabase: async () => ({ removedUnofficialCount: 0, deletedDuplicatesCount: 0 }),
     ...overrides,
   };
-  return { logs, calls, deps };
+  return { logs, deps };
 }
 
 function baseInput(overrides: Record<string, any> = {}) {
@@ -56,31 +53,32 @@ function baseInput(overrides: Record<string, any> = {}) {
 }
 
 describe('F-8.10 shard 14 — database search stage (stubbed services)', () => {
-  it('shapes USDA hits and skips the fallback when a real match exists', async () => {
+  // F-12.1: USDA feed deleted — brand hits shape without any USDA call.
+  it('shapes brand hits with no USDA search', async () => {
     const { deps } = stubSetup({
-      searchUSDA: async () => [{ fdcId: '111', description: 'Rice', foodNutrients: [] }],
-      extractUSDANutrientsPer100g: () => ({ calories: 100, protein: 2, totalFat: 0 }),
+      searchBrandMenuItems: async () => [{ id: 'b1', chainName: 'Test Chain', name: 'Rice Bowl', calories: 200, protein: 5 }],
     });
-    const input = baseInput();
+    const input = baseInput({ detectedChainKey: 'test-chain' });
     const text = await runDatabaseSearchStage(input, deps as any);
-    expect(text).toContain('[USDA]');
-    expect(input.databaseMatchesArray.some((m: any) => m.source === 'usda' && m.id === '111')).toBe(true);
+    expect(text).toContain('[Brand Menu (Official)]');
+    expect(text).not.toContain('[USDA]');
+    expect(input.databaseMatchesArray.some((m: any) => m.searchQuery === 'rice' && m.chainName === 'Test Chain')).toBe(true);
+    expect(input.databaseMatchesArray.some((m: any) => m.source === 'usda')).toBe(false);
     expect(input.databaseMatchesArray.some((m: any) => m.source === 'category_fallback')).toBe(false);
-    expect(input.dbMatchMap.get('111').calories).toBe(100);
   });
 
   it('retries loosened queries after zero results', async () => {
     const seen: string[] = [];
     const { deps } = stubSetup({
-      searchUSDA: async (q: string) => {
+      searchBrandMenuItems: async (q: string) => {
         seen.push(q);
-        return q === 'strawberry' ? [{ fdcId: '222', description: 'Strawberries', foodNutrients: [] }] : [];
+        return q === 'strawberry' ? [{ id: 'b2', chainName: 'Test Chain', name: 'Strawberry Cup', calories: 50, protein: 1 }] : [];
       },
     });
     const input = baseInput({ uniqueQueries: ['fresh strawberries'] });
     await runDatabaseSearchStage(input, deps as any);
     expect(seen).toEqual(['fresh strawberries', 'strawberry']);
-    expect(input.databaseMatchesArray.some((m: any) => m.id === '222')).toBe(true);
+    expect(input.databaseMatchesArray.some((m: any) => m.id === 'b2')).toBe(true);
   });
 
   it('falls back honestly with BIND-style category entries when everything misses', async () => {
