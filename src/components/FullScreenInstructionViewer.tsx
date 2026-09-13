@@ -229,7 +229,7 @@ Your objective is to dynamically group EVERY biomarker into logical clinical con
 3. DETAILED BULLETS: Provide 3-4 distinct scholarly insights with bold titles, summaries, and relevant citation links.`;
       defaultVariableData = defaultVarData;
     } else if (key === 'food_scout' || key === 'food') {
-      title = "Meal Agent (Vision & Nutrition Analysis)";
+      title = "Diet (Vision & Nutrition Analysis)";
       subtitle = "Extracts food items, estimates portion weights, derives nutritional breakdown, and delivers personalized clinical advice.";
       icon = BrainCircuit;
 
@@ -245,7 +245,7 @@ Your objective is to dynamically group EVERY biomarker into logical clinical con
 
       defaultSystemInstruction = `CURRENT_ACTIVE_MEAL_STATE: ${mealStr}
 
-You are the unified Meal Agent (Vision & Nutrition Analyzer) operating within an automated personalized health ecosystem. Your response must be an exact single structured JSON object matching the requested structure. Never add markdown formatting wrappers like \`\`\`json unless instructed.
+You are the unified Diet (Vision & Nutrition Analyzer) operating within an automated personalized health ecosystem. Your response must be an exact single structured JSON object matching the requested structure. Never add markdown formatting wrappers like \`\`\`json unless instructed.
 
 === PATIENT CONTEXT PAYLOAD ===
 CRITICAL PATIENT BIOMARKER WARNINGS & NUTRITIONAL DIRECTIVES:
@@ -999,7 +999,7 @@ For each matched group, determine:
       {(agentType === 'food' || agentType === 'food_scout') && (
         <div className="px-6 py-2 bg-slate-900 border-b border-slate-800/60 flex items-center gap-2 font-sans">
           <div className="px-3 py-1 text-xs font-semibold text-indigo-400 bg-indigo-950/50 rounded-lg border border-indigo-800/40">
-            Unified Meal Agent (Scout)
+            Unified Diet (Scout)
           </div>
         </div>
       )}
@@ -1031,7 +1031,7 @@ For each matched group, determine:
                   </div>
                   <textarea
                     ref={systemTextareaRef}
-                    value={loadingInstruction ? "Loading real-time instructions from Meal Agent..." : sysInstruction}
+                    value={loadingInstruction ? "Loading real-time instructions from Diet..." : sysInstruction}
                     disabled={loadingInstruction}
                     onChange={(e) => handleTextareaInput(e, 'system')}
                     onKeyDown={(e) => handleKeyDown(e, 'system')}

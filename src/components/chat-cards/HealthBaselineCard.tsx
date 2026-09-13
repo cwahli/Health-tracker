@@ -231,7 +231,7 @@ export const HealthBaselineCard: React.FC<AgentCardProps> = ({
           )}
 
           {displayScratchpad && (
-            <AgentThoughtBox dietitianScratchpad={displayScratchpad} isLive={false} hasImage={false} />
+            <AgentThoughtBox dietScratchpad={displayScratchpad} isLive={false} hasImage={false} />
           )}
 
           <div 

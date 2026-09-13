@@ -122,7 +122,7 @@ export function determinePack(input: Partial<DebugReportInput>): 'food' | 'recep
 }
 
 /**
- * Single Meal Agent: food runs have no narrator or dietitian — the scout leg is
+ * Single diet agent: food runs have no narrator or second agent — the scout leg is
  * the only dispatch.
  */
 export function isCompareRunTree(input: Partial<DebugReportInput>, dispatchList: Array<{ agent?: string; received?: any }> = []): boolean {
@@ -410,7 +410,7 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
 
     if (pack === 'food') {
       if (isCompareRunTree(input, enriched)) {
-        enriched = enriched.filter(d => d.agent !== 'narrator' && d.agent !== 'dietitian');
+        enriched = enriched.filter(d => d.agent !== 'narrator' && d.agent !== 'dietitian' && d.agent !== 'diet');
       }
       const hasScout = enriched.some(d => d.agent === 'scout');
       if (!hasScout) {

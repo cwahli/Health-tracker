@@ -171,7 +171,7 @@ export async function* executeMedicalAgent(input: MedicalAgentExecutorInput): As
     if (!reader) throw new Error("No stream reader available");
     const decoder = new TextDecoder();
     let accumulatedText = "";
-    let accumulatedByStage = { scout: "", dietitian: "" };
+    let accumulatedByStage = { scout: "", diet: "" };
 
     try {
       while (true) {
@@ -191,18 +191,18 @@ export async function* executeMedicalAgent(input: MedicalAgentExecutorInput): As
               const data = JSON.parse(ev.slice(6));
               if (data.chunk) {
                 accumulatedText += data.chunk;
-                const stage = data.stage === 'scout' ? 'scout' : 'dietitian';
+                const stage = data.stage === 'scout' ? 'scout' : 'diet';
                 accumulatedByStage[stage] += data.chunk;
 
                 const scoutMatch = accumulatedByStage.scout.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/);
-                const dietMatch = accumulatedByStage.dietitian.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/);
+                const dietMatch = accumulatedByStage.diet.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/);
 
                 const partialThoughts: any = {};
                 if (scoutMatch) {
                   partialThoughts.scout = scoutMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\"");
                 }
                 if (dietMatch) {
-                  partialThoughts.dietitian = dietMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\"");
+                  partialThoughts.diet = dietMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\"");
                 }
 
                 yield {

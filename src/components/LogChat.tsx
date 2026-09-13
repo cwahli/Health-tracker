@@ -551,7 +551,7 @@ export default function LogChat({
   const [debugLogs, setDebugLogs] = useState<{ timestamp: string, message: string }[]>([]);
   const [isDebugSendingLogs, setIsDebugSendingLogs] = useState(false);
   const [debugLogsSendStatus, setDebugLogsSendStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [liveThoughts, setLiveThoughts] = useState<{scout?: string, dietitian?: string, dbSearchLog?: string, activeStage?: string, backendLogs?: string, globalLiveLogs?: string}>({});
+  const [liveThoughts, setLiveThoughts] = useState<{scout?: string, diet?: string, dbSearchLog?: string, activeStage?: string, backendLogs?: string, globalLiveLogs?: string}>({});
   const safeParseResponse = async (res: Response, fallback: any = {}) => {
     try {
       const contentType = res.headers.get("content-type");
@@ -1600,7 +1600,7 @@ ${logsText}`);
               hasImage: (job.inputSnapshot as any)?.hasImage || false,
               agentResult: {
                 scoutScratchpad: job.liveThoughts?.scout || job.statusMessage || '',
-                dietitianScratchpad: job.liveThoughts?.dietitian || '',
+                dietScratchpad: job.liveThoughts?.diet || job.liveThoughts?.dietitian || '',
                 backendLogs: job.liveThoughts?.backendLogs || '',
                 globalLiveLogs: job.liveThoughts?.globalLiveLogs || '',
                 dbSearchLog: job.liveThoughts?.dbSearchLog || ''
@@ -1647,7 +1647,7 @@ ${logsText}`);
                 proposal: raw.proposal || raw.agentResult?.proposal || null,
                 reply: raw.reply || raw.text,
                 scoutScratchpad: raw.agentResult?.scoutScratchpad || raw.scoutScratchpad || job.liveThoughts?.scout || '',
-                dietitianScratchpad: raw.agentResult?.dietitianScratchpad || raw.dietitianScratchpad || job.liveThoughts?.dietitian || '',
+                dietScratchpad: raw.agentResult?.dietScratchpad || raw.agentResult?.dietitianScratchpad || raw.dietScratchpad || raw.dietitianScratchpad || job.liveThoughts?.diet || job.liveThoughts?.dietitian || '',
                 backendLogs: raw.agentResult?.backendLogs || raw.backendLogs || job.liveThoughts?.backendLogs || '',
                 globalLiveLogs: raw.agentResult?.globalLiveLogs || raw.globalLiveLogs || job.liveThoughts?.globalLiveLogs || '',
                 dbSearchLog: raw.agentResult?.dbSearchLog || raw.dbSearchLog || job.liveThoughts?.dbSearchLog || ''
@@ -1789,7 +1789,7 @@ ${logsText}`);
                 proposal: raw.proposal || raw.agentResult?.proposal || null,
                 reply: raw.reply || raw.text,
                 scoutScratchpad: raw.agentResult?.scoutScratchpad || raw.scoutScratchpad || job.liveThoughts?.scout || '',
-                dietitianScratchpad: raw.agentResult?.dietitianScratchpad || raw.dietitianScratchpad || job.liveThoughts?.dietitian || '',
+                dietScratchpad: raw.agentResult?.dietScratchpad || raw.agentResult?.dietitianScratchpad || raw.dietScratchpad || raw.dietitianScratchpad || job.liveThoughts?.diet || job.liveThoughts?.dietitian || '',
                 backendLogs: raw.agentResult?.backendLogs || raw.backendLogs || job.liveThoughts?.backendLogs || '',
                 globalLiveLogs: raw.agentResult?.globalLiveLogs || raw.globalLiveLogs || job.liveThoughts?.globalLiveLogs || '',
                 dbSearchLog: raw.agentResult?.dbSearchLog || raw.dbSearchLog || job.liveThoughts?.dbSearchLog || ''
@@ -1918,7 +1918,7 @@ ${logsText}`);
               hasImage: (job.inputSnapshot as any)?.hasImage || false,
               agentResult: {
                 scoutScratchpad: job.liveThoughts?.scout || job.statusMessage || '',
-                dietitianScratchpad: job.liveThoughts?.dietitian || '',
+                dietScratchpad: job.liveThoughts?.diet || job.liveThoughts?.dietitian || '',
                 backendLogs: job.liveThoughts?.backendLogs || '',
                 globalLiveLogs: job.liveThoughts?.globalLiveLogs || '',
                 dbSearchLog: job.liveThoughts?.dbSearchLog || ''
@@ -2728,7 +2728,7 @@ ${logsText}`);
             hasImage: finalImages.length > 0,
             agentResult: {
               scoutScratchpad: 'Analysis queued...',
-              dietitianScratchpad: ''
+              dietScratchpad: ''
             }
           }
         };
@@ -2751,7 +2751,7 @@ ${logsText}`);
               hasImage: finalImages.length > 0,
               agentResult: {
                 scoutScratchpad: 'Applying portion selection...',
-                dietitianScratchpad: ''
+                dietScratchpad: ''
               }
             }
           };
@@ -2876,7 +2876,7 @@ ${logsText}`);
             engine: selectedModelId || 'gemini-3.5-flash-lite',
             // Personalization must ride the server-job path, not just the
             // direct-executor path: empty biomarkers/logs (and a missing
-            // targets key) is what left scout + dietitian generic — no
+            // targets key) is what left scout + diet generic — no
             // NUTRITIONAL TARGET STATUS, no patient-context block, and a
             // non-personalised verdict/advice on every turn including edits.
             biomarkersNeedingImprovement: (outOfRangeBiomarkers || [])
@@ -3209,7 +3209,7 @@ ${logsText}`);
             hasImage: false,
             agentResult: {
               scoutScratchpad: 'Analysis queued...',
-              dietitianScratchpad: ''
+              dietScratchpad: ''
             }
           }
         };
@@ -3286,7 +3286,7 @@ ${logsText}`);
           hasImage: false,
           agentResult: {
             scoutScratchpad: '',
-            dietitianScratchpad: ''
+            dietScratchpad: ''
           }
         }
       };
@@ -3316,7 +3316,7 @@ ${logsText}`);
           hasImage: finalImages.length > 0,
           agentResult: {
             scoutScratchpad: '',
-            dietitianScratchpad: ''
+            dietScratchpad: ''
           }
         }
       };
@@ -3420,7 +3420,7 @@ ${logsText}`);
              setLiveThoughts(prev => ({
                 ...prev,
                 scout: thoughts.scout !== undefined ? thoughts.scout : prev.scout,
-                dietitian: thoughts.dietitian !== undefined ? thoughts.dietitian : prev.dietitian,
+                diet: (thoughts as any).diet !== undefined ? (thoughts as any).diet : ((thoughts as any).dietitian !== undefined ? (thoughts as any).dietitian : (prev as any).diet),
                 dbSearchLog: thoughts.dbSearchLog !== undefined ? thoughts.dbSearchLog : prev.dbSearchLog,
                 backendLogs: thoughts.backendLogs !== undefined ? thoughts.backendLogs : prev.backendLogs
              }));
@@ -3432,7 +3432,8 @@ ${logsText}`);
                    const updatedAgentResult = updatedData.agentResult ? { ...updatedData.agentResult } : {};
                    if (thoughts.activeStage) updatedAgentResult.activeStage = thoughts.activeStage;
                    if (thoughts.scout !== undefined) updatedAgentResult.scoutScratchpad = thoughts.scout;
-                   if (thoughts.dietitian !== undefined) updatedAgentResult.dietitianScratchpad = thoughts.dietitian;
+                   if ((thoughts as any).diet !== undefined) updatedAgentResult.dietScratchpad = (thoughts as any).diet;
+                   else if ((thoughts as any).dietitian !== undefined) updatedAgentResult.dietScratchpad = (thoughts as any).dietitian;
                    if (thoughts.backendLogs !== undefined) updatedAgentResult.backendLogs = thoughts.backendLogs;
                    if (thoughts.dbSearchLog !== undefined) updatedAgentResult.dbSearchLog = thoughts.dbSearchLog;
                    return [
@@ -3485,7 +3486,7 @@ ${logsText}`);
             scoutItems: clarifiedScoutItems,
             activeStage: isPortionClarifyResult ? 'portion_clarify' : (resData.agentResult?.activeStage || ''),
             scoutScratchpad: resData.agentResult?.scoutScratchpad || '',
-            dietitianScratchpad: resData.agentResult?.dietitianScratchpad || '',
+            dietScratchpad: resData.agentResult?.dietScratchpad || resData.agentResult?.dietitianScratchpad || '',
             backendLogs: resData.agentResult?.backendLogs || liveThoughts.backendLogs || '',
             globalLiveLogs: globalLiveLogsRef.current || undefined
           }
@@ -3689,7 +3690,7 @@ ${logsText}`);
         }
         bodyData.userSelectedMode = mappedMode;
         isManualModeRef.current = true;
-        // Pass the active scout items to the backend so the Dietitian can resolve warnings
+        // Pass the active scout items to the backend so Diet can resolve warnings
         const lastScoutMsg = [...messages].reverse().find(m => m.data?.scoutItems && m.data.scoutItems.length > 0);
         if (lastScoutMsg) {
           bodyData.activeScoutItems = lastScoutMsg.data.scoutItems;
@@ -4113,19 +4114,19 @@ ${logsText}`);
           throw new Error("No stream reader available");
         }
         const decoder = new TextDecoder();
-        const accumulatedByStage: Record<string, string> = { scout: "", dietitian: "" };
+        const accumulatedByStage: Record<string, string> = { scout: "", diet: "" };
         // Full (not delta) current values for scratchpad/log display text. These persist across
         // flush cycles (unlike accumulatedAgentResult/accumulatedThoughts, which are cleared on
         // every flush) so that every patch applied to React state is a complete, correct
         // replacement — never an append-on-top-of-an-already-cumulative-value, which was
         // previously causing duplicated/exponentially growing scratchpad text.
-        const scratchpadFullByStage: Record<string, string> = { scout: "", dietitian: "" };
+        const scratchpadFullByStage: Record<string, string> = { scout: "", diet: "" };
         let dbSearchLogFull = "";
         let lineBuffer = "";
         // --- NEW BATCHING LOGIC START ---
         let pendingPatch = false;
         let accumulatedAgentResult: any = {};
-        let accumulatedThoughts: {scout?: string, dietitian?: string, dbSearchLog?: string, activeStage?: string, backendLogs?: string} = {};
+        let accumulatedThoughts: {scout?: string, diet?: string, dbSearchLog?: string, activeStage?: string, backendLogs?: string} = {};
         let animationFrameId: number | null = null;
         const flushPatches = () => {
           if (!pendingPatch) { animationFrameId = null; return; }
@@ -4145,7 +4146,8 @@ ${logsText}`);
                   // thoughtsToMerge values are always the full current value (see
                   // scratchpadFullByStage above) — replace, don't append.
                   if (thoughtsToMerge.scout !== undefined) next.scout = thoughtsToMerge.scout;
-                  if (thoughtsToMerge.dietitian !== undefined) next.dietitian = thoughtsToMerge.dietitian;
+                  if ((thoughtsToMerge as any).diet !== undefined) (next as any).diet = (thoughtsToMerge as any).diet;
+                  else if ((thoughtsToMerge as any).dietitian !== undefined) (next as any).diet = (thoughtsToMerge as any).dietitian;
                   if (thoughtsToMerge.dbSearchLog !== undefined) next.dbSearchLog = thoughtsToMerge.dbSearchLog;
                   if (thoughtsToMerge.backendLogs !== undefined) next.backendLogs = thoughtsToMerge.backendLogs;
                   return next;
@@ -4277,22 +4279,22 @@ ${logsText}`);
                   }
                   if (data.logType === 'food_resolver_instruction') accumulatedAgentResult.foodResolverInstruction = data.message;
                   if (data.logType === 'food_resolver_answer') accumulatedAgentResult.foodResolverAnswer = data.message;
-                  if (data.logType === 'dietitian_instruction') accumulatedAgentResult.dietitianInstruction = data.message;
-                  if (data.logType === 'dietitian_answer') accumulatedAgentResult.dietitianAnswer = data.message;
+                  if (data.logType === 'dietitian_instruction' || data.logType === 'diet_instruction') accumulatedAgentResult.dietInstruction = data.message;
+                  if (data.logType === 'dietitian_answer' || data.logType === 'diet_answer') accumulatedAgentResult.dietAnswer = data.message;
                 } else if (data.chunk || data.thought || data.text || data.type === 'stream' || data.type === 'thought') {
-                  const stage: string = data.stage === 'scout' ? 'scout' : 'dietitian';
+                  const stage: string = data.stage === 'scout' ? 'scout' : 'diet';
                   const chunkText = data.chunk || data.thought || data.text || '';
                   if (data.thought || data.text || data.type === 'thought') {
-                    scratchpadFullByStage[stage as 'scout' | 'dietitian'] += chunkText;
-                    accumulatedThoughts[stage as 'scout' | 'dietitian'] = scratchpadFullByStage[stage as 'scout' | 'dietitian'];
-                    accumulatedAgentResult[`${stage}Scratchpad`] = scratchpadFullByStage[stage as 'scout' | 'dietitian'];
+                    scratchpadFullByStage[stage as 'scout' | 'diet'] += chunkText;
+                    accumulatedThoughts[stage as 'scout' | 'diet'] = scratchpadFullByStage[stage as 'scout' | 'diet'];
+                    accumulatedAgentResult[`${stage}Scratchpad`] = scratchpadFullByStage[stage as 'scout' | 'diet'];
                   } else if (data.chunk) {
-                    accumulatedByStage[stage as 'scout' | 'dietitian'] += data.chunk;
-                    const text = extractScratchpadText(accumulatedByStage[stage as 'scout' | 'dietitian']);
+                    accumulatedByStage[stage as 'scout' | 'diet'] += data.chunk;
+                    const text = extractScratchpadText(accumulatedByStage[stage as 'scout' | 'diet']);
                     if (text) {
-                      scratchpadFullByStage[stage as 'scout' | 'dietitian'] = text;
+                      scratchpadFullByStage[stage as 'scout' | 'diet'] = text;
                       accumulatedAgentResult[`${stage}Scratchpad`] = text;
-                      accumulatedThoughts[stage as 'scout' | 'dietitian'] = text;
+                      accumulatedThoughts[stage as 'scout' | 'diet'] = text;
                     }
                   }
                 } else if (data.final) {
@@ -4507,7 +4509,7 @@ ${logsText}`);
               ...resData,
               modificationCommand: reviewCmds,
               scoutScratchpad: resData.scoutScratchpad || liveThoughts.scout || '',
-              dietitianScratchpad: resData.dietitianScratchpad || liveThoughts.dietitian || '',
+              dietScratchpad: resData.dietScratchpad || (resData as any).dietitianScratchpad || liveThoughts.diet || (liveThoughts as any).dietitian || '',
               backendLogs: resData.backendLogs || backendLogsFull || liveThoughts.backendLogs || '',
               globalLiveLogs: resData.globalLiveLogs || globalLiveLogsRef.current || liveThoughts.globalLiveLogs || liveThoughts.backendLogs || '',
               dbSearchLog: resData.dbSearchLog || liveThoughts.dbSearchLog || ''
@@ -4672,7 +4674,7 @@ ${logsText}`);
                       ...m.data?.pendingFoodLog,
                       ...(resData.data || {}),
                       message: resData.text || resData.message || m.data?.pendingFoodLog?.message || '',
-                      dietitianUpdateSentence: resData.text || resData.message || m.data?.pendingFoodLog?.dietitianUpdateSentence || '',
+                      dietUpdateSentence: resData.text || resData.message || m.data?.pendingFoodLog?.dietUpdateSentence || m.data?.pendingFoodLog?.dietitianUpdateSentence || '',
                       imageUrls: (resData.data?.imageUrls && resData.data.imageUrls.length > 0)
                         ? resData.data.imageUrls
                         : (m.data?.pendingFoodLog?.imageUrls || m.imageUrls || []),
@@ -4701,7 +4703,7 @@ ${logsText}`);
           }
           // If we successfully merged the update into the existing meal card, do NOT
           // also append a second assistant message — that previously caused the
-          // dietitian's response text and "Meal composition" list to render twice.
+          // diet's response text and "Meal composition" list to render twice.
           if (wasMerged) {
             return newPrev;
           }
@@ -5084,7 +5086,7 @@ ${logsText}`);
         const errText = await response.text();
         throw new Error(`Server returned ${response.status}: ${errText}`);
       }
-      const contentType = response.headers.get("content-type"); let resData: any = {}; if (contentType && contentType.includes("text/event-stream")) { const reader = response.body?.getReader(); if (!reader) throw new Error("No stream reader available"); const decoder = new TextDecoder(); let accumulatedText = ""; let accumulatedByStage: { scout: string, dietitian: string } = { scout: "", dietitian: "" }; while (true) { const { done, value } = await reader.read(); if (done) break; const chunkStr = decoder.decode(value, { stream: true }); const events = chunkStr.split("\n\n"); for (const ev of events) { if (ev.startsWith("data: ")) { try { const data = JSON.parse(ev.slice(6)); if (data.chunk) { accumulatedText += data.chunk; const stage: string = data.stage === 'scout' ? 'scout' : 'dietitian'; accumulatedByStage[stage as keyof typeof accumulatedByStage] += data.chunk; const scoutMatch = accumulatedByStage.scout.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/); const dietMatch = accumulatedByStage.dietitian.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/); setMessages(prev => { const newMsgs = [...prev]; const lastMsg = newMsgs[newMsgs.length - 1]; if (lastMsg && lastMsg.role === "assistant" && lastMsg.isLive) { const updatedData = lastMsg.data ? { ...lastMsg.data } : {}; const updatedAgentResult = updatedData.agentResult ? { ...updatedData.agentResult } : {}; let hasChanges = false; if (scoutMatch) { updatedAgentResult.scoutScratchpad = scoutMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\""); hasChanges = true; } if (dietMatch) { updatedAgentResult.dietitianScratchpad = dietMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\""); hasChanges = true; } if (hasChanges) { return [ ...newMsgs.slice(0, newMsgs.length - 1), { ...lastMsg, data: { ...updatedData, agentResult: updatedAgentResult } } ]; } } return prev; }); } else if (data.final) { resData = data.result; } } catch (e) {} } } } } else {
+      const contentType = response.headers.get("content-type"); let resData: any = {}; if (contentType && contentType.includes("text/event-stream")) { const reader = response.body?.getReader(); if (!reader) throw new Error("No stream reader available"); const decoder = new TextDecoder(); let accumulatedText = ""; let accumulatedByStage: { scout: string, diet: string } = { scout: "", diet: "" }; while (true) { const { done, value } = await reader.read(); if (done) break; const chunkStr = decoder.decode(value, { stream: true }); const events = chunkStr.split("\n\n"); for (const ev of events) { if (ev.startsWith("data: ")) { try { const data = JSON.parse(ev.slice(6)); if (data.chunk) { accumulatedText += data.chunk; const stage: string = data.stage === 'scout' ? 'scout' : 'diet'; accumulatedByStage[stage as keyof typeof accumulatedByStage] += data.chunk; const scoutMatch = accumulatedByStage.scout.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/); const dietMatch = accumulatedByStage.diet.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/); setMessages(prev => { const newMsgs = [...prev]; const lastMsg = newMsgs[newMsgs.length - 1]; if (lastMsg && lastMsg.role === "assistant" && lastMsg.isLive) { const updatedData = lastMsg.data ? { ...lastMsg.data } : {}; const updatedAgentResult = updatedData.agentResult ? { ...updatedData.agentResult } : {}; let hasChanges = false; if (scoutMatch) { updatedAgentResult.scoutScratchpad = scoutMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\""); hasChanges = true; } if (dietMatch) { updatedAgentResult.dietScratchpad = dietMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\""); hasChanges = true; } if (hasChanges) { return [ ...newMsgs.slice(0, newMsgs.length - 1), { ...lastMsg, data: { ...updatedData, agentResult: updatedAgentResult } } ]; } } return prev; }); } else if (data.final) { resData = data.result; } } catch (e) {} } } } } else {
         const responseContentType = response.headers.get("content-type");
         if (responseContentType && responseContentType.includes("application/json")) {
           resData = await response.json();
@@ -5312,7 +5314,7 @@ ${logsText}`);
         const errText = await response.text();
         throw new Error(`Server returned ${response.status}: ${errText}`);
       }
-      const contentType = response.headers.get("content-type"); let resData: any = {}; if (contentType && contentType.includes("text/event-stream")) { const reader = response.body?.getReader(); if (!reader) throw new Error("No stream reader available"); const decoder = new TextDecoder(); let accumulatedText = ""; let accumulatedByStage: { scout: string, dietitian: string } = { scout: "", dietitian: "" }; while (true) { const { done, value } = await reader.read(); if (done) break; const chunkStr = decoder.decode(value, { stream: true }); const events = chunkStr.split("\n\n"); for (const ev of events) { if (ev.startsWith("data: ")) { try { const data = JSON.parse(ev.slice(6)); if (data.chunk) { accumulatedText += data.chunk; const stage: string = data.stage === 'scout' ? 'scout' : 'dietitian'; accumulatedByStage[stage as keyof typeof accumulatedByStage] += data.chunk; const scoutMatch = accumulatedByStage.scout.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/); const dietMatch = accumulatedByStage.dietitian.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/); setMessages(prev => { const newMsgs = [...prev]; const lastMsg = newMsgs[newMsgs.length - 1]; if (lastMsg && lastMsg.role === "assistant" && lastMsg.isLive) { const updatedData = lastMsg.data ? { ...lastMsg.data } : {}; const updatedAgentResult = updatedData.agentResult ? { ...updatedData.agentResult } : {}; let hasChanges = false; if (scoutMatch) { updatedAgentResult.scoutScratchpad = scoutMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\""); hasChanges = true; } if (dietMatch) { updatedAgentResult.dietitianScratchpad = dietMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\""); hasChanges = true; } if (hasChanges) { return [ ...newMsgs.slice(0, newMsgs.length - 1), { ...lastMsg, data: { ...updatedData, agentResult: updatedAgentResult } } ]; } } return prev; }); } else if (data.final) { resData = data.result; } } catch (e) {} } } } } else {
+      const contentType = response.headers.get("content-type"); let resData: any = {}; if (contentType && contentType.includes("text/event-stream")) { const reader = response.body?.getReader(); if (!reader) throw new Error("No stream reader available"); const decoder = new TextDecoder(); let accumulatedText = ""; let accumulatedByStage: { scout: string, diet: string } = { scout: "", diet: "" }; while (true) { const { done, value } = await reader.read(); if (done) break; const chunkStr = decoder.decode(value, { stream: true }); const events = chunkStr.split("\n\n"); for (const ev of events) { if (ev.startsWith("data: ")) { try { const data = JSON.parse(ev.slice(6)); if (data.chunk) { accumulatedText += data.chunk; const stage: string = data.stage === 'scout' ? 'scout' : 'diet'; accumulatedByStage[stage as keyof typeof accumulatedByStage] += data.chunk; const scoutMatch = accumulatedByStage.scout.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/); const dietMatch = accumulatedByStage.diet.match(/"(?:scratchpad|_internalReasoning)"\s*:\s*"([^]*?)("|$)/); setMessages(prev => { const newMsgs = [...prev]; const lastMsg = newMsgs[newMsgs.length - 1]; if (lastMsg && lastMsg.role === "assistant" && lastMsg.isLive) { const updatedData = lastMsg.data ? { ...lastMsg.data } : {}; const updatedAgentResult = updatedData.agentResult ? { ...updatedData.agentResult } : {}; let hasChanges = false; if (scoutMatch) { updatedAgentResult.scoutScratchpad = scoutMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\""); hasChanges = true; } if (dietMatch) { updatedAgentResult.dietScratchpad = dietMatch[1].replace(/\\n/g, "\n").replace(/\\\"/g, "\""); hasChanges = true; } if (hasChanges) { return [ ...newMsgs.slice(0, newMsgs.length - 1), { ...lastMsg, data: { ...updatedData, agentResult: updatedAgentResult } } ]; } } return prev; }); } else if (data.final) { resData = data.result; } } catch (e) {} } } } } else {
         const responseContentType = response.headers.get("content-type");
         if (responseContentType && responseContentType.includes("application/json")) {
           resData = await response.json();
@@ -6310,7 +6312,7 @@ ${logsText}`);
                           <AgentThoughtBox
                             globalLiveLogs={(msg.agentType === 'agent1' || msg.agentType === 'medical_extract') ? undefined : (msg.isLive ? (globalLiveLogs || liveThoughts.globalLiveLogs || liveThoughts.backendLogs || (jobId ? JobStore.getJob(jobId)?.liveThoughts?.globalLiveLogs || JobStore.getJob(jobId)?.liveThoughts?.backendLogs : undefined)) : (msg.data?.agentResult?.globalLiveLogs || msg.data?.agentResult?.backendLogs || (jobId ? JobStore.getJob(jobId)?.liveThoughts?.globalLiveLogs || JobStore.getJob(jobId)?.liveThoughts?.backendLogs || JobStore.getJob(jobId)?.result?.backendLogs : undefined)))}
                             scoutScratchpad={msg.isLive ? (liveThoughts.scout || msg.data?.agentResult?.scoutScratchpad) : msg.data?.agentResult?.scoutScratchpad}
-                            dietitianScratchpad={msg.isLive ? (liveThoughts.dietitian || msg.data?.agentResult?.dietitianScratchpad) : msg.data?.agentResult?.dietitianScratchpad}
+                            dietScratchpad={msg.isLive ? (liveThoughts.diet || (liveThoughts as any).dietitian || msg.data?.agentResult?.dietScratchpad || msg.data?.agentResult?.dietitianScratchpad) : (msg.data?.agentResult?.dietScratchpad || msg.data?.agentResult?.dietitianScratchpad)}
                             isLive={msg.isLive}
                             placeholderStep={undefined}
                             hasImage={msg.data?.hasImage}
@@ -6319,8 +6321,8 @@ ${logsText}`);
                             scoutAnswer={msg.data?.agentResult?.scoutAnswer}
                             dbSearchLog={msg.isLive ? (liveThoughts.dbSearchLog || msg.data?.agentResult?.dbSearchLog) : msg.data?.agentResult?.dbSearchLog}
                             backendLogs={msg.isLive ? (liveThoughts.backendLogs || msg.data?.agentResult?.backendLogs) : msg.data?.agentResult?.backendLogs}
-                            dietitianInstruction={msg.data?.agentResult?.dietitianInstruction}
-                            dietitianAnswer={msg.data?.agentResult?.dietitianAnswer}
+                            dietInstruction={msg.data?.agentResult?.dietInstruction || msg.data?.agentResult?.dietitianInstruction}
+                            dietAnswer={msg.data?.agentResult?.dietAnswer || msg.data?.agentResult?.dietitianAnswer}
                             activeStage={msg.isLive ? (liveThoughts.activeStage || msg.data?.agentResult?.activeStage) : msg.data?.agentResult?.activeStage}
                             stageStatus={msg.data?.agentResult?.stageStatus}
                             warnings={msg.data?.agentResult?.warnings || (msg.data as any)?.warnings}

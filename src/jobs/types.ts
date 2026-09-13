@@ -39,6 +39,8 @@ export interface AgentJob {
   resumeStage?: string;
   liveThoughts?: {
     scout?: string;
+    diet?: string;
+    /** Backcompat: pre-rename stored jobs carry dietitian. */
     dietitian?: string;
     backendLogs?: string;
     dbSearchLog?: string;

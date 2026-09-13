@@ -595,17 +595,18 @@ const LiveBackendStreamViewer = ({ logs }: { logs: string }) => {
 
   // Classify a raw logType into one of the three agent buckets used for tabs.
   // Substring-based so it recognizes both Stream 2's curated tags
-  // (scout_instruction, db_search, dietitian_answer, ...) and Stream 1's own
+  // (scout_instruction, db_search, diet_answer, ...) and Stream 1's own
   // raw tags (Vision Scout, Database Search, RouteAgent Chat, Nutrient,
   // First-Principles Injection, and any future "UnifiedLLM-Prompt:scout" /
-  // "...:dietitian" style tags) without keeping two lists in sync.
-  const classifyLogType = (logType?: string): 'scout' | 'db' | 'resolver' | 'dietitian' | 'other' => {
+  // "...:diet" style tags) without keeping two lists in sync.
+  // Old `dietitian*` tags (Supabase history) classify into the same bucket.
+  const classifyLogType = (logType?: string): 'scout' | 'db' | 'resolver' | 'diet' | 'other' => {
     if (!logType) return 'other';
     const t = logType.toLowerCase();
     if (t.includes('scout') || t.includes('vision')) return 'scout';
     if (t.includes('db_') || t.includes('database') || t.includes('usda') || t.includes('openfoodfacts')) return 'db';
     if (t.includes('resolver') || t.includes('food_resolver')) return 'resolver';
-    if (t.includes('dietitian') || t.includes('routeagent') || t.includes('nutrient') || t.includes('first-principles') || t.includes('first_principles')) return 'dietitian';
+    if (t.includes('dietitian') || t === 'diet' || t.includes('diet_') || t.includes('routeagent') || t.includes('nutrient') || t.includes('first-principles') || t.includes('first_principles')) return 'diet';
     return 'other';
   };
 
@@ -614,13 +615,13 @@ const LiveBackendStreamViewer = ({ logs }: { logs: string }) => {
     const hasScout = parsedLines.some((l) => classifyLogType(l.logType) === 'scout');
     const hasDb = parsedLines.some((l) => classifyLogType(l.logType) === 'db');
     const hasResolver = parsedLines.some((l) => classifyLogType(l.logType) === 'resolver');
-    const hasDietitian = parsedLines.some((l) => classifyLogType(l.logType) === 'dietitian');
+    const hasDiet = parsedLines.some((l) => classifyLogType(l.logType) === 'diet');
     const hasErrors = parsedLines.some((l) => ERROR_PATTERN.test(l.display));
     const hasWarnings = parsedLines.some((l) => WARNING_PATTERN.test(l.display));
     if (hasScout) tabs.push({ id: 'scout', label: 'Vision Scout' });
     if (hasDb) tabs.push({ id: 'db', label: 'DB Search' });
     if (hasResolver) tabs.push({ id: 'resolver', label: 'Food Resolver' });
-    if (hasDietitian) tabs.push({ id: 'dietitian', label: 'Meal Agent' });
+    if (hasDiet) tabs.push({ id: 'diet', label: 'Diet' });
     if (hasErrors) tabs.push({ id: 'errors', label: 'Errors' });
     if (hasWarnings) tabs.push({ id: 'warnings', label: 'Warnings' });
 
@@ -634,7 +635,7 @@ const LiveBackendStreamViewer = ({ logs }: { logs: string }) => {
       if (activeTab === 'all') return true;
       if (activeTab === 'scout') return classifyLogType(l.logType) === 'scout';
       if (activeTab === 'db') return classifyLogType(l.logType) === 'db';
-      if (activeTab === 'dietitian') return classifyLogType(l.logType) === 'dietitian';
+      if (activeTab === 'diet') return classifyLogType(l.logType) === 'diet';
       if (activeTab === 'errors') return ERROR_PATTERN.test(l.display);
       if (activeTab === 'warnings') return WARNING_PATTERN.test(l.display);
       return true;
@@ -855,15 +856,18 @@ const LiveBackendStreamViewer = ({ logs }: { logs: string }) => {
 export const AgentThoughtBox = ({
   language = "en",
   scoutScratchpad,
-  dietitianScratchpad,
+  dietScratchpad,
+  dietitianScratchpad: dietitianScratchpadLegacy,
   isLive,
   placeholderStep,
   hasImage,
   scoutInstruction,
   scoutAnswer,
   dbSearchLog,
-  dietitianInstruction,
-  dietitianAnswer,
+  dietInstruction,
+  dietitianInstruction: dietitianInstructionLegacy,
+  dietAnswer,
+  dietitianAnswer: dietitianAnswerLegacy,
   activeStage,
   stageStatus,
   backendLogs,
@@ -871,6 +875,7 @@ export const AgentThoughtBox = ({
   warnings
 }: {
   scoutScratchpad?: string,
+  dietScratchpad?: string,
   dietitianScratchpad?: string,
   isLive?: boolean,
   placeholderStep?: string,
@@ -878,7 +883,9 @@ export const AgentThoughtBox = ({
   scoutInstruction?: string,
   scoutAnswer?: string,
   dbSearchLog?: string,
+  dietInstruction?: string,
   dietitianInstruction?: string,
+  dietAnswer?: string,
   dietitianAnswer?: string,
   activeStage?: string,
   stageStatus?: string;
@@ -887,6 +894,10 @@ export const AgentThoughtBox = ({
   globalLiveLogs?: string;
   warnings?: string[];
 }) => {
+  // Dual-accept: new `diet*` props win, legacy `dietitian*` props (stored history) fall back.
+  const dietitianScratchpad = dietScratchpad ?? dietitianScratchpadLegacy;
+  const dietitianInstruction = dietInstruction ?? dietitianInstructionLegacy;
+  const dietitianAnswer = dietAnswer ?? dietitianAnswerLegacy;
   const t = translations[language || "en"] || translations.en;
   const [isExpanded, setIsExpanded] = React.useState(!!isLive);
 
@@ -911,7 +922,7 @@ export const AgentThoughtBox = ({
     step3Status = 'completed';
     step4Status = 'completed';
   } else {
-    const currentStage = activeStage || (dietitianScratchpad ? 'dietitian' : (dbSearchLog && dbSearchLog.includes('[Database Search]')) ? 'db_search' : 'scout');
+    const currentStage = activeStage || (dietitianScratchpad ? 'diet' : (dbSearchLog && dbSearchLog.includes('[Database Search]')) ? 'db_search' : 'scout');
     if (isImageAnalysis) {
       if (currentStage === 'scout') {
         step1Status = stageStatus === 'completed' ? 'completed' : 'active';
@@ -1017,14 +1028,14 @@ export const AgentThoughtBox = ({
 
                 {dietitianInstruction && (
                   <div className="flex flex-col gap-1 mt-1">
-                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">{t.dietitianInstruction}</span>
+                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">{t.dietInstruction}</span>
                     <ScratchpadMarkdownViewer content={dietitianInstruction} />
                   </div>
                 )}
 
                 {dietitianScratchpad && (
                   <div className="flex flex-col gap-1 mt-1">
-                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">{t.dietitianScratchpad}</span>
+                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">{t.dietScratchpad}</span>
                     <ScratchpadMarkdownViewer content={dietitianScratchpad} />
                   </div>
                 )}
@@ -1040,13 +1051,13 @@ export const AgentThoughtBox = ({
                 {/* Render live streaming progress chunks cleanly without generic titles */}
                 {dietitianInstruction && (
                   <div className="flex flex-col gap-1 mt-1">
-                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">{t.dietitianInstruction}</span>
+                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">{t.dietInstruction}</span>
                     <ScratchpadMarkdownViewer content={dietitianInstruction} />
                   </div>
                 )}
                 {dietitianScratchpad && (
                   <div className="flex flex-col gap-1 mt-1">
-                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">{t.dietitianScratchpad}</span>
+                    <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">{t.dietScratchpad}</span>
                     <ScratchpadMarkdownViewer content={dietitianScratchpad} />
                   </div>
                 )}

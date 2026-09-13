@@ -95,11 +95,11 @@ describe('dumpContract — Soto capture classifies without Gemini', () => {
   const facts = parseDebugMarkdown(md);
   const fails = classifyDump(facts);
 
-  it('reads job still running after ledger + dietitian 503', () => {
+  it('reads job still running after ledger + diet 503', () => {
     expect(facts.jobId).toBe('job_1788538012316_m9wm9cs9a');
     expect(facts.status).toBe('running');
     expect(facts.hasFinalizedLedger).toBe(true);
-    expect(facts.dietitianFailedPermanently).toBe(true);
+    expect(facts.dietFailedPermanently).toBe(true);
     expect(fails.some((f) => f.id === 'JOB_TERMINAL_IF_LEDGER')).toBe(true);
   });
 
@@ -735,9 +735,9 @@ describe('Agent-output verification rows (15-19)', () => {
       pack: 'food', jobId: 'j_edit_verdict', status: 'succeeded',
       pendingFoodLog: { nutrients: fullNuts({ calories: 1332 }) },
       dispatches: [
-        { id: 't2/scout', received: { mode: 'edit' }, output: { dishes: [], verdict: { label: 'Increased Carbohydrate Load', level: 'warning' } } },
+        { id: 't2/scout', agent: 'scout', received: { mode: 'edit' }, output: { dishes: [], verdict: { label: 'Increased Carbohydrate Load', level: 'warning' } } },
         {
-          id: 't2/dietitian', received: { mode: 'edit' },
+          id: 't2/diet', agent: 'diet', received: { mode: 'edit' },
           output: {
             verdict: { label: 'Increased Carbohydrate Load', level: 'warning' },
             message: 'You got 78g of quality protein from the meat soups and steady energy from the 130g cereal portion totalling 1332 kcal. The added sugars reach 19g against your daily target, so balance the rest of the day with fiber rich greens and lean sides. Enjoy a gentle 20 minute post meal walk to support digestion and circulation.',

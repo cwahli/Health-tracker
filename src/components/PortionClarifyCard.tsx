@@ -23,7 +23,7 @@ type Props = {
 };
 
 /**
- * B1 — Ask how much of a multi-serve pack the user ate before dietitian runs.
+ * B1 — Ask how much of a multi-serve pack the user ate before diet runs.
  */
 export function PortionClarifyCard({ portionClarify, onConfirm, disabled, language = 'en' }: Props) {
   const t = translations[language || 'en'] || translations.en;

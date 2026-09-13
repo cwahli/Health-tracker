@@ -34,7 +34,7 @@ if (capturePath.endsWith('.json') || raw.trim().startsWith('{')) {
         jobId: json.jobId,
         status: json.status,
         hasFinalizedLedger: Boolean(json.pendingFoodLog) || /\[Budget\]\s*Finalized ledger/i.test(json.backendLogs || ''),
-        dietitianFailedPermanently: /Dietitian Failed Permanently/i.test(json.backendLogs || ''),
+        dietFailedPermanently: /Dietitian Failed Permanently|Diet failed permanently/i.test(json.backendLogs || ''),
       };
     }
   } catch {}
@@ -46,7 +46,7 @@ if (!facts) {
 }
 
 console.log(`capture: ${path.relative(root, capturePath)}`);
-console.log(`job: ${facts.jobId || '?'}  status=${facts.status || '?'}  ledger=${facts.hasFinalizedLedger}  dietitianFail=${facts.dietitianFailedPermanently}`);
+console.log(`job: ${facts.jobId || '?'}  status=${facts.status || '?'}  ledger=${facts.hasFinalizedLedger}  dietFail=${facts.dietFailedPermanently}`);
 console.log('');
 console.log('classified (this dump — historical red is expected until a new live confirm):');
 console.log(formatOracleFails(classified) || '(none)');

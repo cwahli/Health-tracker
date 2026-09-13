@@ -203,9 +203,9 @@ export async function* executeFoodAgent(input: FoodAgentExecutorInput): AsyncGen
       }
 
       const decoder = new TextDecoder();
-      let accumulatedThoughts: any = { scout: '', dietitian: '', dbSearchLog: '', activeStage: '', backendLogs: '' };
-      const accumulatedByStage: Record<string, string> = { scout: "", dietitian: "" };
-      const scratchpadFullByStage: Record<string, string> = { scout: "", dietitian: "" };
+      let accumulatedThoughts: any = { scout: '', diet: '', dbSearchLog: '', activeStage: '', backendLogs: '' };
+      const accumulatedByStage: Record<string, string> = { scout: "", diet: "" };
+      const scratchpadFullByStage: Record<string, string> = { scout: "", diet: "" };
       let dbSearchLogFull = "";
       let backendLogsFull = "";
       let lineBuffer = "";
@@ -255,7 +255,7 @@ export async function* executeFoodAgent(input: FoodAgentExecutorInput): AsyncGen
                 }
                 yield { type: 'partial', partialThoughts: { ...accumulatedThoughts } };
               } else if (data.chunk || data.thought || data.type === 'stream') {
-                const stage: string = data.stage === 'scout' ? 'scout' : 'dietitian';
+                const stage: string = data.stage === 'scout' ? 'scout' : 'diet';
                 const chunkText = data.chunk || data.thought || '';
                 if (data.thought) {
                   scratchpadFullByStage[stage] += chunkText;
@@ -296,7 +296,8 @@ export async function* executeFoodAgent(input: FoodAgentExecutorInput): AsyncGen
       if (!resData.agentResult) resData.agentResult = {};
       resData.agentResult.backendLogs = backendLogsFull;
       resData.agentResult.scoutScratchpad = scratchpadFullByStage.scout;
-      resData.agentResult.dietitianScratchpad = scratchpadFullByStage.dietitian;
+      resData.agentResult.dietScratchpad = scratchpadFullByStage.diet;
+      resData.agentResult.dietitianScratchpad = scratchpadFullByStage.diet;
     } else if (contentType && contentType.includes("application/json")) {
        const rawText = await response.text().catch(() => "");
        resData = rawText ? JSON.parse(rawText) : {};

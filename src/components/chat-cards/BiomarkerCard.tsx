@@ -46,9 +46,11 @@ export const BiomarkerCard: React.FC<AgentCardProps> = (props) => {
 
     const keys = Object.keys(res).filter(k => 
       k !== 'scoutScratchpad' && 
+      k !== 'dietScratchpad' && 
       k !== 'dietitianScratchpad' && 
       k !== 'agentPrompt' && 
       k !== 'scoutInstruction' && 
+      k !== 'dietInstruction' && 
       k !== 'dietitianInstruction'
     );
     return keys.length > 0;

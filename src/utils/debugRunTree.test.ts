@@ -137,6 +137,23 @@ it('compare runs emit scout only — no narrator backfill (single-agent compare)
   expect(isCompareRunTree({ mode: 'new_log' } as any)).toBe(false);
 });
 
+it('compare filter drops legacy dietitian AND new diet dispatches (backcompat)', () => {
+  const tree = buildCanonicalRunTree(foodInput({
+    mode: 'compare',
+    pendingFoodLog: undefined,
+    dispatches: [
+      { id: 't1/scout', parent: null, turn: 1, agent: 'scout', user: '', received: {}, systemInstruction: '', userPrompt: '', model: 'm', latency_ms: 1 },
+      { id: 't1/dietitian', parent: null, turn: 1, agent: 'dietitian', user: '', received: {}, systemInstruction: '', userPrompt: '', model: 'm', latency_ms: 1 },
+      { id: 't1/diet', parent: null, turn: 1, agent: 'diet', user: '', received: {}, systemInstruction: '', userPrompt: '', model: 'm', latency_ms: 1 },
+    ],
+    result: { message: 'x' },
+  }) as any);
+  const agents = tree.dispatches.map((d: any) => d.agent);
+  expect(agents).toContain('scout');
+  expect(agents).not.toContain('dietitian');
+  expect(agents).not.toContain('diet');
+});
+
 function foodInput(over: any = {}) {
   return {
     jobId: JOB,

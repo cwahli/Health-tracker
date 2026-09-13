@@ -18,7 +18,7 @@ export type DumpFacts = {
   jobId: string | null;
   status: string | null;
   hasFinalizedLedger: boolean;
-  dietitianFailedPermanently: boolean;
+  dietFailedPermanently: boolean;
   matrixCalcStandby: boolean;
   breadcrumbDuplicateRows: number;
   headingDup: string[];
@@ -54,7 +54,7 @@ export function parseDebugMarkdown(md: string): DumpFacts {
 
   const status = text.match(/\*\*Status:\*\*\s*(\S+)/)?.[1] || null;
   const hasFinalizedLedger = /\[Budget\]\s*Finalized ledger/i.test(text);
-  const dietitianFailedPermanently = /Dietitian Failed Permanently/i.test(text);
+  const dietFailedPermanently = /Dietitian Failed Permanently|Diet failed permanently/i.test(text);
   const matrixCalcStandby = /\*\*5\.\s*Mathematical Calculation Engine\*\*[^\n]*Standby/i.test(text);
   const diag5AutoSend = /\[DIAG5\]\s*auto-send effect fired/i.test(text);
   const hasHappyPath = /\[MealBuild\]\s*happy-path/i.test(text);
@@ -120,7 +120,7 @@ export function parseDebugMarkdown(md: string): DumpFacts {
     jobId,
     status,
     hasFinalizedLedger,
-    dietitianFailedPermanently,
+    dietFailedPermanently,
     matrixCalcStandby,
     breadcrumbDuplicateRows,
     headingDup,
@@ -833,7 +833,7 @@ function evaluateFoodAgentOutput(tree: CanonicalRunTree, isFoodPack: boolean): C
   // to the tN id prefix; rows with no determinable turn are ignored (legacy
   // and synthetic rows carry none). Discussion/evaluation turns show no meal
   // card and are skipped. Agent-agnostic: scout, narrator, or projector rows
-  // all count — there is no dietitian agent.
+  // all count — there is no second agent.
   const NON_MEAL_TURN_MODES = new Set(['discussion', 'evaluation', 'compare', 'compare_menu', 'compare_shelf']);
   const turnOf = (d: any): number | null => {
     if (Number.isInteger(d?.turn) && (d.turn as number) > 0) return d.turn as number;
@@ -974,7 +974,11 @@ function evaluateFoodAgentOutput(tree: CanonicalRunTree, isFoodPack: boolean): C
     na('Edit patch: components & nutrients preserved', 'Single-turn create, no edit turns');
   } else {
     const pfl = tree.pendingFoodLog;
-    const dishes: any[] = Array.isArray(pfl?.dishes) ? pfl.dishes : [];
+    const dishes: any[] = Array.isArray(pfl?.dishes) && pfl.dishes.length > 0
+      ? pfl.dishes
+      : (Array.isArray(pfl?.itemsBreakdown) && pfl.itemsBreakdown.length > 0
+        ? pfl.itemsBreakdown
+        : (Array.isArray(pfl?.items) ? pfl.items : []));
 
     const collapsedDishes = dishes.filter((d) => {
       const foods = Array.isArray(d?.foods) ? d.foods : (Array.isArray(d?.components) ? d.components : []);
@@ -984,8 +988,9 @@ function evaluateFoodAgentOutput(tree: CanonicalRunTree, isFoodPack: boolean): C
 
     const dishesWithEmptyNutrients = dishes.filter((d) => {
       const nuts = d?.nutrients || d?.dishNutrients;
-      if (!nuts || typeof nuts !== 'object') return true;
-      return !Number.isFinite(Number(nuts.calories)) || !Number.isFinite(Number(nuts.protein));
+      const cal = nuts?.calories ?? d?.calories;
+      const pro = nuts?.protein ?? d?.protein;
+      return !Number.isFinite(Number(cal)) || !Number.isFinite(Number(pro));
     });
 
     if (dishes.length === 0 && !/remove_item|deleted all/i.test(tree.backendLogs || '')) {
@@ -1020,15 +1025,15 @@ export function classifyDump(factsOrTree: DumpFacts | CanonicalRunTree): OracleF
     const tree = factsOrTree;
     const logs = tree.backendLogs || '';
     const hasFinalizedLedger = Boolean(tree.pendingFoodLog) || /\[Budget\]\s*Finalized ledger/i.test(logs);
-    const dietitianFailedPermanently = /Dietitian Failed Permanently/i.test(logs);
+    const dietFailedPermanently = /Dietitian Failed Permanently|Diet failed permanently/i.test(logs);
     const hasExtracted = Boolean(tree.extractedData);
     const stillRunning = Boolean(tree.status && /running|queued|processing/i.test(tree.status));
 
-    if (hasFinalizedLedger && dietitianFailedPermanently && stillRunning) {
+    if (hasFinalizedLedger && dietFailedPermanently && stillRunning) {
       fails.push({
         class: 'DEGRADE_NOT_TERMINAL',
         id: 'JOB_TERMINAL_IF_LEDGER',
-        detail: `status=${tree.status} after Finalized ledger + Dietitian Failed Permanently`,
+        detail: `status=${tree.status} after Finalized ledger + Diet Failed Permanently`,
         file: 'server_food_analyze_run.ts, server_sse_json.ts, serverJobs.ts persist',
         doNot: 'expected.json, ReceptionistCard, LogChat rewrite, FoodCard',
       });
@@ -1159,11 +1164,11 @@ export function classifyDump(factsOrTree: DumpFacts | CanonicalRunTree): OracleF
 
   // Fallback for legacy DumpFacts (e.g. from historical captures)
   const facts = factsOrTree;
-  if (facts.hasFinalizedLedger && facts.dietitianFailedPermanently && facts.status && /running|queued|processing/i.test(facts.status)) {
+  if (facts.hasFinalizedLedger && facts.dietFailedPermanently && facts.status && /running|queued|processing/i.test(facts.status)) {
     fails.push({
       class: 'DEGRADE_NOT_TERMINAL',
       id: 'JOB_TERMINAL_IF_LEDGER',
-      detail: `status=${facts.status} after Finalized ledger + Dietitian Failed Permanently`,
+      detail: `status=${facts.status} after Finalized ledger + Diet Failed Permanently`,
       file: 'server_food_analyze_run.ts, server_sse_json.ts, serverJobs.ts persist',
       doNot: 'expected.json, ReceptionistCard, LogChat rewrite, FoodCard',
     });

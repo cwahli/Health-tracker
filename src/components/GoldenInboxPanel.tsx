@@ -92,7 +92,7 @@ export default function GoldenInboxPanel() {
           ? 'Replayed saved tape (no agent)'
           : mode === 'catalog'
             ? 'Replayed catalog (dictionary only, no agent)'
-            : 'Pipeline finished (may have called Curator/Meal Agent)';
+            : 'Pipeline finished (may have called Curator/Diet)';
       setLoopMsg(`${label} · ${j.passCount ?? '—'} pass / ${j.failCount ?? '—'} fail`);
       await load();
       await refreshCase(id);
@@ -262,7 +262,7 @@ export default function GoldenInboxPanel() {
             {domainTab === 'food' ? (
               <>
                 <span className="text-emerald-300 font-semibold">No agent:</span> Replay log (re-score the saved tape) · Replay catalog (dictionary only).{' '}
-                <span className="text-amber-300 font-semibold">May call Curator/Meal Agent (quota):</span> Pipeline · Run until green.
+                <span className="text-amber-300 font-semibold">May call Curator/Diet (quota):</span> Pipeline · Run until green.
               </>
             ) : (
               <>
@@ -639,7 +639,7 @@ export default function GoldenInboxPanel() {
                       </span>
                     ) : (
                       <span className="text-amber-300">
-                        Last replay: {detail.board.replayMode} (live resolve) · may have called Curator/Meal Agent
+                        Last replay: {detail.board.replayMode} (live resolve) · may have called Curator/Diet
                       </span>
                     )}
                   </p>

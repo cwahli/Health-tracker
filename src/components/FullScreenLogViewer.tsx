@@ -116,8 +116,8 @@ const ALL_AGENT_DEFS: AgentDef[] = [
   },
   {
     id: 'food',
-    name: 'Meal Agent',
-    test: (l) => (l.includes('agenttype: food') || l.includes('agenttype:food') || l.includes('meal agent') || l.includes('clinical dietitian ai') || l.includes('food & nutrition agent') || l.includes('[food_analysis]') || l.includes('food analyze agent') || l.includes('dietitian')) && !l.includes('food_resolver')
+    name: 'Diet',
+    test: (l) => (l.includes('agenttype: food') || l.includes('agenttype:food') || l.includes('meal agent') || l.includes('clinical dietitian ai') || l.includes('food & nutrition agent') || l.includes('[food_analysis]') || l.includes('food analyze agent') || l.includes('dietitian') || l.includes('diet_answer') || l.includes('diet_instruction')) && !l.includes('food_resolver')
   }
 ];
 
@@ -252,7 +252,7 @@ export const AGENT_COLOR_MAP: Record<string, {
     borderColor: 'border-red-500/40',
     bgBadge: 'bg-red-950/70 text-red-300 border-red-500/40',
     dotColor: 'bg-red-400',
-    name: 'Clinical Dietitian AI'
+    name: 'Clinical Diet AI'
   },
   scout_ai: {
     textColor: 'text-pink-300 dark:text-pink-300',
@@ -261,12 +261,12 @@ export const AGENT_COLOR_MAP: Record<string, {
     dotColor: 'bg-pink-400',
     name: 'Scout AI'
   },
-  dietitian_ai: {
+  diet_ai: {
     textColor: 'text-red-300 dark:text-red-300',
     borderColor: 'border-red-500/40',
     bgBadge: 'bg-red-950/70 text-red-300 border-red-500/40',
     dotColor: 'bg-red-400',
-    name: 'Meal Agent'
+    name: 'Diet'
   },
   medical_ai: {
     textColor: 'text-cyan-300 dark:text-cyan-300',
@@ -353,7 +353,7 @@ export function getChunkAgentId(chunk: string): string {
      if (tag.includes('error') || tag.includes('fail') || tag.includes('timeout')) return 'error';
      if (tag.includes('food_resolver')) return 'food_resolver_ai';
      if (tag.includes('scout') || tag.includes('vision')) return 'scout_ai';
-     if ((tag.includes('dietitian') || tag.includes('food')) && !tag.includes('food_resolver')) return 'dietitian_ai';
+     if ((tag.includes('dietitian') || tag.includes('diet_answer') || tag.includes('diet_instruction') || tag.includes('food')) && !tag.includes('food_resolver')) return 'diet_ai';
      if (tag.includes('health_coach') || tag.includes('health coach')) return 'health_coach';
      if (tag.includes('medical') || tag.includes('biomarker')) return 'medical_ai';
      if (tag.includes('db_') || tag.includes('database') || tag.includes('nutrient') || tag.includes('conversion') || tag.includes('extraction') || tag.includes('multiplier')) return 'database';
@@ -362,7 +362,7 @@ export function getChunkAgentId(chunk: string): string {
 
   if (lower.includes('error:') || lower.includes('failed to') || lower.includes('timeout')) return 'error';
   if ((lower.includes('scout') || lower.includes('vision scout')) && !lower.includes('food_resolver')) return 'scout_ai';
-  if ((lower.includes('dietitian') || lower.includes('food')) && !lower.includes('food_resolver')) return 'dietitian_ai';
+  if ((lower.includes('dietitian') || lower.includes('diet_answer') || lower.includes('diet_instruction') || lower.includes('food')) && !lower.includes('food_resolver')) return 'diet_ai';
   if (lower.includes('health_coach') || lower.includes('health coach')) return 'health_coach';
   if (lower.includes('medical') || lower.includes('biomarker')) return 'medical_ai';
   if (lower.includes('db_') || lower.includes('database search') || lower.includes('nutrient')) return 'database';
@@ -479,11 +479,11 @@ function FormattedLogChunk({
   agentId?: string;
 }) {
   const agentStyle = AGENT_COLOR_MAP[agentId] || AGENT_COLOR_MAP['other'];
-  const agentPrefix = agentId === 'scout_ai' ? 'scout' : agentId === 'dietitian_ai' ? 'dietitian' : agentId === 'medical_ai' ? 'medical' : 'agent';
+  const agentPrefix = agentId === 'scout_ai' ? 'scout' : agentId === 'diet_ai' ? 'diet' : agentId === 'medical_ai' ? 'medical' : 'agent';
 
   const lowerChunk = chunk.toLowerCase();
-  const isInstructionChunk = lowerChunk.includes('dispatched system instruction') || lowerChunk.includes('[scout_instruction]') || lowerChunk.includes('[dietitian_instruction]');
-  const isResponseChunk = lowerChunk.includes('[unifiedllm-response:') || lowerChunk.includes('[scout_answer]') || lowerChunk.includes('[dietitian_answer]') || lowerChunk.includes('complete response returned from agent');
+  const isInstructionChunk = lowerChunk.includes('dispatched system instruction') || lowerChunk.includes('[scout_instruction]') || lowerChunk.includes('[dietitian_instruction]') || lowerChunk.includes('[diet_instruction]');
+  const isResponseChunk = lowerChunk.includes('[unifiedllm-response:') || lowerChunk.includes('[scout_answer]') || lowerChunk.includes('[dietitian_answer]') || lowerChunk.includes('[diet_answer]') || lowerChunk.includes('complete response returned from agent');
 
   // Point 4: Strip out the [UnifiedLLM] Successfully completed content generation... lines so they don't render visually
   const cleanedChunk = chunk.split('\n')
@@ -639,11 +639,11 @@ function FormattedLogChunk({
     let sectionAnchorId: string | undefined = undefined;
 
     // Check for output JSON keys or exact section headers, ignoring mentions inside system prompts!
-    if (isInstructionChunk && (lowerLineVal.includes('[scout_instruction]') || lowerLineVal.includes('[dietitian_instruction]') || lowerLineVal.includes('[medical analyze agent] dispatched system instruction'))) {
+    if (isInstructionChunk && (lowerLineVal.includes('[scout_instruction]') || lowerLineVal.includes('[dietitian_instruction]') || lowerLineVal.includes('[diet_instruction]') || lowerLineVal.includes('[medical analyze agent] dispatched system instruction'))) {
       sectionAnchorId = `${agentId}-sec-instruction`;
-    } else if (isResponseChunk && ((lowerLineVal.includes('"_internalreasoning":') || lowerLineVal.includes('[dietitian internal reasoning]')) && !lowerLineVal.includes('step 1:') && !lowerLineVal.includes('rationale here'))) {
+    } else if (isResponseChunk && ((lowerLineVal.includes('"_internalreasoning":') || lowerLineVal.includes('[dietitian internal reasoning]') || lowerLineVal.includes('[diet internal reasoning]')) && !lowerLineVal.includes('step 1:') && !lowerLineVal.includes('rationale here'))) {
       sectionAnchorId = `${agentId}-sec-thought`;
-    } else if (isResponseChunk && (lowerLineVal.includes('[scout_answer]') || lowerLineVal.includes('[dietitian_answer]') || lowerLineVal.includes('[medical_answer]') || lowerLineVal.includes('[unifiedllm-response:'))) {
+    } else if (isResponseChunk && (lowerLineVal.includes('[scout_answer]') || lowerLineVal.includes('[dietitian_answer]') || lowerLineVal.includes('[diet_answer]') || lowerLineVal.includes('[medical_answer]') || lowerLineVal.includes('[unifiedllm-response:'))) {
       sectionAnchorId = `${agentId}-sec-response`;
     }
 
@@ -911,7 +911,7 @@ export default function FullScreenLogViewer({
       'scout_ai': { id: 'scout_ai', name: 'Scout AI', shortLabel: 'Scout' },
       'food_resolver': { id: 'food_resolver', name: 'Food Resolver AI', shortLabel: 'Resolver' },
       'food_resolver_ai': { id: 'food_resolver_ai', name: 'Food Resolver AI', shortLabel: 'Resolver' },
-      'dietitian_ai': { id: 'dietitian_ai', name: 'Meal Agent', shortLabel: 'Meal Agent' },
+      'diet_ai': { id: 'diet_ai', name: 'Diet', shortLabel: 'Diet' },
       'medical_ai': { id: 'medical_ai', name: 'Medical AI', shortLabel: 'Medical' },
       'database': { id: 'database', name: 'Database & Extraction', shortLabel: 'Database' },
       'system': { id: 'system', name: 'System', shortLabel: 'System' },
@@ -959,7 +959,7 @@ export default function FullScreenLogViewer({
          else if (tagsString.includes('frontdesk') || tagsString.includes('front_desk') || tagsString.includes('receptionist') || tagsString.includes('health preparation')) assignedBucket = 'front_desk';
          else if (tagsString.includes('food_resolver') || tagsString.includes('food resolver')) assignedBucket = 'food_resolver_ai';
          else if (tagsString.includes('scout') || tagsString.includes('vision')) assignedBucket = 'scout_ai';
-         else if (tagsString.includes('dietitian') || (tagsString.includes('food') && !tagsString.includes('food_resolver'))) assignedBucket = 'dietitian_ai';
+         else if (tagsString.includes('dietitian') || tagsString.includes('diet_answer') || tagsString.includes('diet_instruction') || (tagsString.includes('food') && !tagsString.includes('food_resolver'))) assignedBucket = 'diet_ai';
          else if (tagsString.includes('health_coach') || tagsString.includes('health coach')) assignedBucket = 'health_coach';
          else if (tagsString.includes('medical') || tagsString.includes('biomarker')) assignedBucket = 'medical_ai';
          else if (tagsString.includes('db_') || tagsString.includes('database') || tagsString.includes('nutrient') || tagsString.includes('duckduckgo') || tagsString.includes('usda') || tagsString.includes('openfoodfacts') || tagsString.includes('conversion') || tagsString.includes('extraction') || tagsString.includes('multiplier')) assignedBucket = 'database';
@@ -974,7 +974,7 @@ export default function FullScreenLogViewer({
          else if (firstLine.includes('frontdesk') || firstLine.includes('front_desk') || firstLine.includes('receptionist') || firstLine.includes('health preparation')) assignedBucket = 'front_desk';
          else if (firstLine.includes('food_resolver') || firstLine.includes('food resolver')) assignedBucket = 'food_resolver_ai';
          else if (firstLine.includes('scout') || firstLine.includes('vision scout')) assignedBucket = 'scout_ai';
-         else if (firstLine.includes('dietitian') || (firstLine.includes('food') && !firstLine.includes('food_resolver'))) assignedBucket = 'dietitian_ai';
+         else if (firstLine.includes('dietitian') || firstLine.includes('diet_answer') || firstLine.includes('diet_instruction') || (firstLine.includes('food') && !firstLine.includes('food_resolver'))) assignedBucket = 'diet_ai';
          else if (firstLine.includes('health_coach') || firstLine.includes('health coach')) assignedBucket = 'health_coach';
          else if (firstLine.includes('medical') || firstLine.includes('biomarker')) assignedBucket = 'medical_ai';
          else if (firstLine.includes('db_') || firstLine.includes('database search') || firstLine.includes('nutrient') || firstLine.includes('duckduckgo') || firstLine.includes('usda') || firstLine.includes('openfoodfacts')) assignedBucket = 'database';
@@ -1609,8 +1609,8 @@ export default function FullScreenLogViewer({
 
             const getSubNavSections = (fullText: string, agentId: string) => {
               const lower = fullText.toLowerCase();
-              const isInstructionChunk = lower.includes('dispatched system instruction') || lower.includes('[scout_instruction]') || lower.includes('[dietitian_instruction]') || lower.includes('[food_resolver_instruction]') || lower.includes('food_resolver_instruction');
-              const isResponseChunk = lower.includes('[unifiedllm-response:') || lower.includes('[scout_answer]') || lower.includes('[dietitian_answer]') || lower.includes('complete response returned from agent') || lower.includes('[food_resolver_answer]') || lower.includes('food_resolver_answer');
+              const isInstructionChunk = lower.includes('dispatched system instruction') || lower.includes('[scout_instruction]') || lower.includes('[dietitian_instruction]') || lower.includes('[diet_instruction]') || lower.includes('[food_resolver_instruction]') || lower.includes('food_resolver_instruction');
+              const isResponseChunk = lower.includes('[unifiedllm-response:') || lower.includes('[scout_answer]') || lower.includes('[dietitian_answer]') || lower.includes('[diet_answer]') || lower.includes('complete response returned from agent') || lower.includes('[food_resolver_answer]') || lower.includes('food_resolver_answer');
 
               const instructionIdx = 0;
               
@@ -1620,11 +1620,11 @@ export default function FullScreenLogViewer({
                 // Use lastIndexOf to skip JSON schema templates inside system prompts and grab actual model response output!
                 thoughtIdx = lower.lastIndexOf('"_internalreasoning"');
                 if (thoughtIdx === -1) {
-                  thoughtIdx = lower.search(/\[dietitian internal reasoning\]|\[dietitian scratchpad\]/);
+                  thoughtIdx = lower.search(/\[dietitian internal reasoning\]|\[dietitian scratchpad\]|\[diet internal reasoning\]|\[diet scratchpad\]/);
                 }
               }
               
-              const responseIdx = isResponseChunk ? lower.search(/\[(scout_answer|dietitian_answer|medical_answer|food_resolver_answer|unifiedllm-response:.*)\]/) : -1;
+              const responseIdx = isResponseChunk ? lower.search(/\[(scout_answer|dietitian_answer|diet_answer|medical_answer|food_resolver_answer|unifiedllm-response:.*)\]/) : -1;
 
               const sections = [
                 ...(isInstructionChunk ? [{ type: 'Instruction', index: instructionIdx }] : []),
@@ -1632,7 +1632,7 @@ export default function FullScreenLogViewer({
                 ...(responseIdx !== -1 ? [{ type: 'Response', index: responseIdx }] : [])
               ].sort((a, b) => a.index - b.index);
 
-              const agentDisplayName = agentId.includes('food_resolver') ? 'Resolver' : (AGENT_COLOR_MAP[agentId]?.name || 'Agent').split(' ')[0]; // 'Scout', 'Dietitian', 'Medical', 'Resolver'
+              const agentDisplayName = agentId.includes('food_resolver') ? 'Resolver' : (AGENT_COLOR_MAP[agentId]?.name || 'Agent').split(' ')[0]; // 'Scout', 'Diet', 'Medical', 'Resolver'
 
               return sections.map((sec, idx) => {
                 const nextSec = sections[idx + 1];
@@ -1658,7 +1658,7 @@ export default function FullScreenLogViewer({
               });
             });
 
-            // Reorder tags: Agent Answer buttons first (Scout Answer, then Dietitian Answer, then other answers),
+            // Reorder tags: Agent Answer buttons first (Scout Answer, then Diet Answer, then other answers),
             // followed by the remaining anchor buttons (Instructions, Thoughts, etc.).
             const answerTags = generatedTags.filter(t => t.type === 'Response');
             const remainingTags = generatedTags.filter(t => t.type !== 'Response');
@@ -1667,7 +1667,7 @@ export default function FullScreenLogViewer({
               const priorityMap: Record<string, number> = {
                 'scout_ai': 1,
                 'scout': 1,
-                'dietitian_ai': 2,
+                'diet_ai': 2,
                 'food': 2,
               };
               const prioA = priorityMap[a.agentId] ?? 3;
@@ -1763,12 +1763,12 @@ export default function FullScreenLogViewer({
                  else if (isResponse) currentAgentName = 'Resolver - Response';
                  else if (isThought) currentAgentName = 'Resolver - Thought';
                  else currentAgentName = 'Resolver';
-              } else if (chunkAgentId === 'dietitian_ai') {
-                 if (isFullExecution) currentAgentName = 'Meal Agent - Execution';
-                 else if (isInstruction) currentAgentName = 'Meal Agent - Instruction';
-                 else if (isResponse) currentAgentName = 'Meal Agent - Response';
-                 else if (isThought) currentAgentName = 'Meal Agent - Thought';
-                 else currentAgentName = 'Meal Agent';
+              } else if (chunkAgentId === 'diet_ai') {
+                 if (isFullExecution) currentAgentName = 'Diet - Execution';
+                 else if (isInstruction) currentAgentName = 'Diet - Instruction';
+                 else if (isResponse) currentAgentName = 'Diet - Response';
+                 else if (isThought) currentAgentName = 'Diet - Thought';
+                 else currentAgentName = 'Diet';
               } else if (chunkAgentId === 'medical_ai') {
                  if (isFullExecution) currentAgentName = 'Medical - Execution';
                  else if (isInstruction) currentAgentName = 'Medical - Instruction';

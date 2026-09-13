@@ -2148,7 +2148,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                         language={language}
                       />
                       {(() => {
-                        const sentence = (msg.data?.pendingFoodLog.mealAgentUpdateSentence || msg.data?.pendingFoodLog.dietitianUpdateSentence || '').trim();
+                        const sentence = (msg.data?.pendingFoodLog.dietUpdateSentence || msg.data?.pendingFoodLog.mealAgentUpdateSentence || msg.data?.pendingFoodLog.dietitianUpdateSentence || '').trim();
                         const mainMsg = (msg.content || msg.data?.agentResult?.message || '').trim();
                         if (!sentence) return null;
                         // Deduplicate: if the update sentence is identical or already fully contained in the main message, skip the duplicate bubble
@@ -2159,7 +2159,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                           <div className="bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/50 rounded-xl p-3 text-left font-sans text-xs text-indigo-800 dark:text-indigo-300 mb-2 flex items-start gap-2">
                             <span className="text-sm">💬</span>
                             <div className="flex-1">
-                              <span className="font-bold text-indigo-900 dark:text-indigo-200 block mb-0.5">{t.dietitianUpdate}</span>
+                              <span className="font-bold text-indigo-900 dark:text-indigo-200 block mb-0.5">{t.dietUpdate}</span>
                               <span className="leading-relaxed whitespace-pre-line">{sentence}</span>
                             </div>
                           </div>
@@ -2976,7 +2976,7 @@ export const FoodCard: React.FC<AgentCardProps & {
           return null;
         }
 
-        const rawText = msg.content || msg.data?.agentResult?.message || msg.data?.agentResult?.text || msg.data?.agentResult?.mealAgentAnswer || msg.data?.agentResult?.dietitianAnswer || msg.data?.agentResult?.scoutAnswer || (msg as any).text || (msg as any).message;
+        const rawText = msg.content || msg.data?.agentResult?.message || msg.data?.agentResult?.text || msg.data?.agentResult?.dietAnswer || msg.data?.agentResult?.mealAgentAnswer || msg.data?.agentResult?.dietitianAnswer || msg.data?.agentResult?.scoutAnswer || (msg as any).text || (msg as any).message;
         let formattedText = '';
         if (rawText) {
           formattedText = formatMessageContent(rawText, msg);
@@ -3069,7 +3069,7 @@ export const FoodCard: React.FC<AgentCardProps & {
               </div>
             )}
 
-            {/* Meal Agent Update / Response */}
+            {/* Diet Update / Response */}
             {fallbackText && (
               <div className="text-[12px] text-slate-800 dark:text-slate-100 font-sans leading-relaxed whitespace-pre-line break-words space-y-2">
                 {fallbackText}

@@ -1356,11 +1356,11 @@ export default function App() {
                         : (Array.isArray(rawCmds) ? rawCmds : null))
                     : null;
                   const agentResult = {
-                    scoutScratchpad: cleanResult.dietitianScratchpad ? undefined : cleanResult.scoutScratchpad,
-                    dietitianScratchpad: cleanResult.dietitianScratchpad || '',
+                    scoutScratchpad: (cleanResult.dietScratchpad || cleanResult.dietitianScratchpad) ? undefined : cleanResult.scoutScratchpad,
+                    dietScratchpad: cleanResult.dietScratchpad || cleanResult.dietitianScratchpad || '',
                     backendLogs: cleanResult.backendLogs || '',
                     globalLiveLogs: cleanResult.backendLogs || '',
-                    dietitianAnswer: cleanResult.message || cleanResult.text || '',
+                    dietAnswer: cleanResult.message || cleanResult.text || '',
                     scoutItems: cleanResult.scoutItems,
                     // Mode D boundary (App.tsx poller finalize): the whitelist
                     // used to drop `comparison`, so group cards never rendered
@@ -1625,7 +1625,7 @@ export default function App() {
                     agentResult: {
                       backendLogs: cleanResult.backendLogs || '',
                       globalLiveLogs: cleanResult.backendLogs || '',
-                      dietitianAnswer: messageText,
+                      dietAnswer: messageText,
                     },
                   },
                 };
