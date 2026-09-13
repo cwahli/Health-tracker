@@ -781,7 +781,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
       risks: food.risks || '',
       health_impact: food.healthImpact || '',
       recommendation: food.recommendation || null,
-      verdict: food.verdict || null,
+      verdict: typeof food.verdict === 'object' && food.verdict !== null ? JSON.stringify(food.verdict) : (food.verdict || null),
       description: food.description || '',
       message: food.message || '',
       debug_url: food.debugUrl || '',

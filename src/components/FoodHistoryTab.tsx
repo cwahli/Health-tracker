@@ -14,6 +14,7 @@ import ImageSlider from './ImageSlider';
 import { resolveFoodImage, resolveFoodImages } from '../utils/imageResolver';
 import { mergeFoodLogsDeduped, foodLogFingerprint } from '../utils/foodLogDedupe';
 import { fetchFoodLogDetail } from '../utils/syncUtils';
+import { resolveMealVerdict } from '../utils/verdictUtils';
 
 /** B13 — only this many history rows mount image sliders at once */
 export const FOOD_HISTORY_PAGE_SIZE = 15;
@@ -1756,11 +1757,11 @@ export default function FoodHistoryTab({
                               <Calendar className="w-3 h-3" /> {formatLogDate(log.date)}
                             </span>
                             {(() => {
-                              const vLabel = log.verdict?.label || (log.recommendation && log.recommendation !== 'neutral' ? log.recommendation : null);
-                              if (!vLabel) return null;
+                              const v = resolveMealVerdict(log, profile?.language);
+                              if (!v?.label) return null;
                               return (
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize tracking-wide ${getRecommendationColorClass(vLabel, log.verdict?.level || (typeof log.recommendation === 'string' ? log.recommendation : undefined))}`}>
-                                  {vLabel}
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize tracking-wide ${getRecommendationColorClass(v.label, v.level)}`}>
+                                  {v.label}
                                 </span>
                               );
                             })()}

@@ -65,7 +65,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
         f.risks || '',
         f.health_impact || '',
         f.recommendation || null,
-        f.verdict || null,
+        typeof f.verdict === 'object' && f.verdict !== null ? JSON.stringify(f.verdict) : (f.verdict || null),
         f.description || '',
         f.message || '',
         f.debug_url || '',
