@@ -15,4 +15,4 @@
 
 Cloudflare **go-live** is **R-13**, written in [RELIABILITY.md](./RELIABILITY.md) **§12** + `specs/active/R-13.md`. Do not add a `plan/CLOUDFLARE.md`.
 
-There is **no** `studio/` folder. IDs live on [ROADMAP.md](./ROADMAP.md). AI Studio works that file’s **Current work**. Method: [QUALITY.md](./QUALITY.md) §1.4. `FOOD_SINGLE_PATH.md` is leftover F-8.10/12/13. F-9.5 is App poller only. F-1/F-2 USDA **parked**. Root `ROADMAP.md` is a stub.
+There is **no** `studio/` folder. IDs live on [ROADMAP.md](./ROADMAP.md). AI Studio works that file’s **Current work**. Method: [QUALITY.md](./QUALITY.md) §1.4. `FOOD_SINGLE_PATH.md` is leftover F-8.10/12/13. F-9.5 is App poller only. F-1/F-2 USDA **abandoned** (delete is **F-12**). Brand-catalog self-clean is **F-11** ([FOOD.md](./FOOD.md) Part A). Root `ROADMAP.md` is a stub.

@@ -6,7 +6,7 @@
  * Empty commands = Q&A (card unchanged).
  */
 
-import { finalizeDishLedger } from './server_dish_finalize.js';
+import { finalizeDishLedger, parseOcrLabel } from './server_dish_finalize.js';
 import { applyNutrientModifiers, computeCaloriesFromMacros, computeSolubleFibre } from './server_derivation.js';
 import { findItemIndexInList, formatMealReceiptTable, synthesizeEditCommandsFromBreakdown, itemsMatchByName } from './server_pure_helpers.js';
 import { NUTRIENT_KEYS } from './src/utils/nutrients.js';
@@ -14,7 +14,10 @@ import { sumItemNutrients } from './server_meal_from_finalize.js';
 import {
   applyUserLockedSlots,
   diffScoutToEditCommands,
+  displayName,
   invalidateStaleIdentityMetadata,
+  itemsReferSame,
+  itemsShareSubstance,
   mergeLocksFromCommands,
   reaggregateDishWeightFromComponents,
   type UserLockedSlot,
@@ -43,6 +46,8 @@ export type MealEditCommand = {
   itemName?: string;
   newItemName?: string;
   replacementItemName?: string;
+  targetItemName?: string;
+  sourceItemName?: string;
   newWeightGrams?: number | null;
   targetDbId?: string | null;
   componentName?: string | null;
@@ -382,6 +387,30 @@ export function coalesceLegacyCommands(commands: MealEditCommand[], items: any[]
     }
   }
 
+  if (removes.length === 1 && adds.length === 0 && items.length >= 2) {
+    const removeIdx = findItemIndexInList(items, removes[0].itemName || '', removes[0].targetDbId || null);
+    if (removeIdx >= 0) {
+      const itemToRemove = items[removeIdx];
+      const otherItem = items.find((_, i) => i !== removeIdx);
+      const isSameMeal = /\b(same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|same\s+food|duplicate|all\s+(?:the\s+)?same\s+meal|it'?s\s+(?:all\s+)?the\s+same|only\s+(?:had\s+)?(?:1|one)\s+dish)\b/i.test(userMessage || '');
+      const sharesFood = otherItem && (itemsReferSame(itemToRemove, otherItem) || itemsShareSubstance(itemToRemove, otherItem));
+      if (otherItem && (isSameMeal || sharesFood || Boolean(itemToRemove.rawNutritionLabel))) {
+        return [
+          ...others,
+          {
+            action: 'merge_dishes',
+            itemName: displayName(itemToRemove),
+            targetItemName: displayName(otherItem),
+            newItemName: displayName(otherItem),
+            newWeightGrams: removes[0].newWeightGrams ?? null,
+            targetDbId: removes[0].targetDbId || null,
+            sourceImageIndex: removes[0].sourceImageIndex,
+          },
+        ];
+      }
+    }
+  }
+
   return commands;
 }
 
@@ -391,6 +420,7 @@ function normalizeAction(action: string): string {
   if (a === 'update_modifier') return 'set_modifier';
   if (a === 'replace_item') return 'replace_identity';
   if (a === 'update_count' || a === 'set_count') return 'set_count';
+  if (a === 'combine_dishes' || a === 'combine_items' || a === 'merge_items') return 'merge_dishes';
   return a;
 }
 
@@ -598,10 +628,204 @@ export async function applyMealEdits(opts: {
 
       items[idx] = item;
       notes.push(`set_modifier "${itemName}" → ${newName}`);
+    } else if (action === 'merge_dishes') {
+      const sourceName = raw.itemName || raw.sourceItemName || '';
+      const targetName = raw.targetItemName || raw.newItemName || '';
+      let srcIdx = findItemIndexInList(items, sourceName, raw.targetDbId || null);
+      let tgtIdx = targetName ? findItemIndexInList(items, targetName, null) : -1;
+      if (tgtIdx < 0 && items.length === 2 && srcIdx >= 0) {
+        tgtIdx = items.findIndex((_, i) => i !== srcIdx);
+      }
+      if (srcIdx < 0 && items.length === 2 && tgtIdx >= 0) {
+        srcIdx = items.findIndex((_, i) => i !== tgtIdx);
+      }
+      if (srcIdx < 0 && tgtIdx < 0 && items.length === 2) {
+        srcIdx = 0;
+        tgtIdx = 1;
+      }
+      if (srcIdx < 0 || tgtIdx < 0 || srcIdx === tgtIdx) {
+        notes.push(`merge_dishes: unable to locate distinct source ("${sourceName}") and target ("${targetName}")`);
+        continue;
+      }
+
+      const itemA = items[srcIdx];
+      const itemB = items[tgtIdx];
+
+      // Prioritize rawNutritionLabel: identify which item has the label truth
+      const hasLabelA = Boolean(itemA.rawNutritionLabel && typeof itemA.rawNutritionLabel === 'object' && Object.keys(itemA.rawNutritionLabel).length > 0);
+      const hasLabelB = Boolean(itemB.rawNutritionLabel && typeof itemB.rawNutritionLabel === 'object' && Object.keys(itemB.rawNutritionLabel).length > 0);
+      const labelItem = hasLabelA ? itemA : (hasLabelB ? itemB : itemA);
+      const nonLabelItem = labelItem === itemA ? itemB : itemA;
+
+      // Determine merged weight without summing weights (never weightA + weightB)
+      let mergedWeight = 0;
+      if (Number(raw.newWeightGrams) > 0) {
+        mergedWeight = Number(raw.newWeightGrams);
+      } else if (opts.userMessage) {
+        const wMatch = opts.userMessage.match(/\b(\d+(?:\.\d+)?)\s*g(?:rams)?\b/i);
+        if (wMatch && Number(wMatch[1]) > 0) {
+          mergedWeight = Math.round(Number(wMatch[1]));
+        }
+      }
+      if (!mergedWeight && Array.isArray(opts.priorLocks) && opts.priorLocks.length > 0) {
+        const lock = opts.priorLocks.find((l) => (l.scoutIndex === itemA.scoutIndex || l.scoutIndex === itemB.scoutIndex) && l.field === 'weightGrams');
+        if (lock && Number(lock.value) > 0) {
+          mergedWeight = Math.round(Number(lock.value));
+        }
+      }
+      if (!mergedWeight) {
+        // If labelItem has non-zero weight (e.g. user-selected 100g portion), preserve it as user basis
+        mergedWeight = Number(labelItem.weightGrams) || Number(nonLabelItem.weightGrams) || 100;
+      }
+
+      // Compute nutrients for merged dish prioritizing rawNutritionLabel
+      let mergedNutrients: Record<string, number> = {};
+      let lockedNutrientKeys: string[] = [];
+      const rawLabel = labelItem.rawNutritionLabel;
+      if (rawLabel && typeof rawLabel === 'object' && Object.keys(rawLabel).length > 0) {
+        const parsed = parseOcrLabel(rawLabel, mergedWeight, 1);
+        if (parsed.ocrNutrients && Object.keys(parsed.ocrNutrients).length > 0) {
+          mergedNutrients = { ...(labelItem.nutrients || {}), ...parsed.ocrNutrients };
+          lockedNutrientKeys = parsed.lockedKeys;
+        }
+      }
+      if (Object.keys(mergedNutrients).length === 0 || !mergedNutrients.calories) {
+        const baseW = Number(labelItem.weightGrams) || mergedWeight || 100;
+        const ratio = mergedWeight / baseW;
+        const scaled = scaleItemNutrients(labelItem, ratio, mergedWeight);
+        mergedNutrients = scaled.nutrients || {};
+        lockedNutrientKeys = Array.isArray(labelItem.lockedNutrientKeys) ? labelItem.lockedNutrientKeys : [];
+      }
+
+      if (!lockedNutrientKeys.includes('calories') && mergedNutrients.protein != null) {
+        mergedNutrients.calories = computeCaloriesFromMacros(mergedNutrients.protein, mergedNutrients.carbohydrates, mergedNutrients.totalFat);
+      }
+
+      // Dish name: combine brand from labelItem with prepared name
+      let mergedName = nonLabelItem.name || labelItem.name || 'Dish';
+      const brandToken = (labelItem.brandLock ? labelItem.name.split(/\s+/)[0] : '') || (labelItem.name.match(/\b(Quaker|Lidl|Kellogg|Nestle|Indomie)\b/i)?.[0]);
+      if (brandToken && !mergedName.toLowerCase().includes(brandToken.toLowerCase())) {
+        mergedName = `${brandToken} ${mergedName}`;
+      }
+
+      let mergedComps = componentsOf(nonLabelItem);
+      if (mergedComps.length > 1) {
+        const pIdx = mergedComps.findIndex((c) => itemsReferSame(c, labelItem) || itemsShareSubstance(c, labelItem));
+        if (pIdx >= 0) {
+          mergedComps[pIdx] = {
+            ...mergedComps[pIdx],
+            name: labelItem.name,
+            weightGrams: mergedWeight,
+            nutrients: mergedNutrients,
+            calories: mergedNutrients.calories,
+            protein: mergedNutrients.protein,
+            carbohydrates: mergedNutrients.carbohydrates,
+            totalFat: mergedNutrients.totalFat,
+            rawNutritionLabel: labelItem.rawNutritionLabel,
+          };
+        }
+      } else {
+        mergedComps = [{
+          name: mergedName,
+          canonicalDbName: labelItem.canonicalDbName || mergedName,
+          originalName: mergedName,
+          keyword: mergedName.toLowerCase(),
+          weightGrams: mergedWeight,
+          calories: mergedNutrients.calories ?? 0,
+          protein: mergedNutrients.protein ?? 0,
+          totalFat: mergedNutrients.totalFat ?? 0,
+          saturatedFat: mergedNutrients.saturatedFat ?? 0,
+          carbohydrates: mergedNutrients.carbohydrates ?? 0,
+          sodium: mergedNutrients.sodium ?? 0,
+          nutrients: mergedNutrients,
+          rawNutritionLabel: labelItem.rawNutritionLabel,
+        }];
+      }
+
+      const mergedItem = {
+        ...nonLabelItem,
+        ...labelItem,
+        name: mergedName,
+        canonicalDbName: labelItem.canonicalDbName || mergedName,
+        originalName: mergedName,
+        keyword: mergedName.toLowerCase(),
+        weightGrams: mergedWeight,
+        estimatedWeightGrams: mergedWeight,
+        calories: mergedNutrients.calories ?? 0,
+        protein: mergedNutrients.protein ?? 0,
+        totalFat: mergedNutrients.totalFat ?? 0,
+        saturatedFat: mergedNutrients.saturatedFat ?? 0,
+        carbohydrates: mergedNutrients.carbohydrates ?? 0,
+        sodium: mergedNutrients.sodium ?? 0,
+        addedSugar: mergedNutrients.addedSugar ?? 0,
+        sugar: mergedNutrients.sugar ?? 0,
+        nutrients: mergedNutrients,
+        rawNutritionLabel: labelItem.rawNutritionLabel,
+        packageLabelText: labelItem.packageLabelText || nonLabelItem.packageLabelText || null,
+        brandLock: labelItem.brandLock || nonLabelItem.brandLock || null,
+        dbSource: labelItem.dbSource || 'brand_official',
+        lockedNutrientKeys,
+        components: mergedComps,
+        componentsDetailList: mergedComps,
+        hasComponents: mergedComps.length > 1,
+        sourceImageIndex: nonLabelItem.sourceImageIndex ?? labelItem.sourceImageIndex ?? null,
+      };
+
+      const survivingIdx = Math.min(srcIdx, tgtIdx);
+      const redundantIdx = Math.max(srcIdx, tgtIdx);
+      items = items.filter((_, i) => i !== redundantIdx);
+      items[survivingIdx] = mergedItem;
+      notes.push(`merge_dishes: combined "${itemA.name}" and "${itemB.name}" into "${mergedName}" (${mergedWeight}g, label truth preserved: ${mergedItem.calories} kcal)`);
     } else if (action === 'remove_item') {
       if (idx < 0) { notes.push(`remove_item: no item "${itemName}"`); continue; }
-      notes.push(`remove_item "${items[idx].name}"`);
-      items = items.filter((_, i) => i !== idx);
+      const itemToRemove = items[idx];
+      const otherItem = items.find((_, i) => i !== idx);
+      const isSameMeal = /\b(same\s+(?:as\s+(?:the\s+)?)?package|same\s+meal|same\s+dish|same\s+food|duplicate|all\s+(?:the\s+)?same\s+meal|it'?s\s+(?:all\s+)?the\s+same|only\s+(?:had\s+)?(?:1|one)\s+dish)\b/i.test(opts.userMessage || '');
+      const sharesFood = otherItem && (itemsReferSame(itemToRemove, otherItem) || itemsShareSubstance(itemToRemove, otherItem));
+      if (otherItem && (isSameMeal || sharesFood || Boolean(itemToRemove.rawNutritionLabel))) {
+        // Fallback: merge dishes rather than discarding label truth
+        const labelItem = itemToRemove.rawNutritionLabel ? itemToRemove : otherItem;
+        const nonLabelItem = labelItem === itemToRemove ? otherItem : itemToRemove;
+        let mergedWeight = 0;
+        if (opts.userMessage) {
+          const wMatch = opts.userMessage.match(/\b(\d+(?:\.\d+)?)\s*g(?:rams)?\b/i);
+          if (wMatch && Number(wMatch[1]) > 0) mergedWeight = Math.round(Number(wMatch[1]));
+        }
+        if (!mergedWeight && Array.isArray(opts.priorLocks) && opts.priorLocks.length > 0) {
+          const lock = opts.priorLocks.find((l) => (l.scoutIndex === itemToRemove.scoutIndex || l.scoutIndex === otherItem.scoutIndex) && l.field === 'weightGrams');
+          if (lock && Number(lock.value) > 0) mergedWeight = Math.round(Number(lock.value));
+        }
+        if (!mergedWeight) mergedWeight = Number(labelItem.weightGrams) || Number(nonLabelItem.weightGrams) || 100;
+
+        let mergedNutrients = { ...(labelItem.nutrients || {}) };
+        let lockedNutrientKeys = Array.isArray(labelItem.lockedNutrientKeys) ? [...labelItem.lockedNutrientKeys] : [];
+        if (labelItem.rawNutritionLabel && typeof labelItem.rawNutritionLabel === 'object') {
+          const parsed = parseOcrLabel(labelItem.rawNutritionLabel, mergedWeight, 1);
+          if (parsed.ocrNutrients && Object.keys(parsed.ocrNutrients).length > 0) {
+            mergedNutrients = { ...mergedNutrients, ...parsed.ocrNutrients };
+            lockedNutrientKeys = parsed.lockedKeys;
+          }
+        }
+        const oIdx = items.indexOf(otherItem);
+        items[oIdx] = {
+          ...otherItem,
+          ...labelItem,
+          name: otherItem.name,
+          weightGrams: mergedWeight,
+          calories: mergedNutrients.calories ?? otherItem.calories,
+          nutrients: mergedNutrients,
+          rawNutritionLabel: labelItem.rawNutritionLabel,
+          packageLabelText: labelItem.packageLabelText || otherItem.packageLabelText,
+          brandLock: labelItem.brandLock || otherItem.brandLock,
+          dbSource: labelItem.dbSource || 'brand_official',
+          lockedNutrientKeys,
+        };
+        items = items.filter((_, i) => i !== idx);
+        notes.push(`remove_item (merged into "${otherItem.name}"): preserved label truth from "${itemToRemove.name}" (${mergedWeight}g, ${items[items.indexOf(otherItem)].calories} kcal)`);
+      } else {
+        notes.push(`remove_item "${items[idx].name}"`);
+        items = items.filter((_, i) => i !== idx);
+      }
     } else if (action === 'replace_identity') {
       if (idx < 0) { notes.push(`replace_identity: no item "${itemName}"`); continue; }
       const prev = items[idx];
