@@ -139,7 +139,7 @@ function firestoreReadGuard(label: string, docCount: number = 1): boolean {
 }
 import { runCleanupMigration } from './utils/migrationTask';
 import { supabase, isSupabaseConfigured, cleanupAuthUrlParams } from './utils/supabaseClient';
-import { syncLogsWithTimeBuckets, fetchAllConsolidatedLogs, subscribeToSupabaseLogs, upsertProfileToSupabase, mergeByRecency, mergeActions, mergeBenefits, mergeFoodIdeas, mergeReports, mergeProfiles, mergeBiomarkerHistory, mergeDeleteMaps, supabaseRowToFoodLog, supabaseRowToBiomarkerLog } from "./utils/syncUtils";
+import { syncLogsWithTimeBuckets, fetchAllConsolidatedLogs, subscribeToSupabaseLogs, upsertProfileToSupabase, pushLogsToServer, mergeByRecency, mergeActions, mergeBenefits, mergeFoodIdeas, mergeReports, mergeProfiles, mergeBiomarkerHistory, mergeDeleteMaps, supabaseRowToFoodLog, supabaseRowToBiomarkerLog } from "./utils/syncUtils";
 import { mergeFoodLogsDeduped, rehydrateFoodImagesFromDonors, foodLogFingerprint } from "./utils/foodLogDedupe";
 import { isUsableImageUrl, uniqueMealImageUrls } from "./utils/foodImageSources";
 import { sanitizeBiomarkerHistoryOnLoad } from "./utils/biomarkers";
@@ -2531,40 +2531,24 @@ export default function App() {
         } else {
           if (forcePull && !forceReplaceLocal) {
             console.log("[Sync] Force pull (Manual Sync) active. Pushing local unsynced logs and profile first.");
-            // 1. Push local unsynced logs with tombstones
-            await syncLogsWithTimeBuckets(
-              db, 
-              uid, 
-              localFoods, 
-              localBioHistory, 
-              deletedFoods || localProfile?.deletedFoodLogIds || {}, 
-              deletedBioLogs || localProfile?.deletedBiomarkerLogIds || {}, 
-              (sf, sb) => {
-                localFoods = sf;
-                localBioHistory = sb;
-              }
-            );
-
-            // 2. Push local profile immediately to ensure tombstones are on cloud before pull
-            if (localProfile) {
-              try {
-                await fetch('/api/sync/supabase-push', {
-                  method: 'POST',
-                  headers: { 
-                    'Content-Type': 'application/json',
-                    ...(auth.currentUser ? { Authorization: `Bearer ${await auth.currentUser.getIdToken()}` } : {})
-                  },
-                  body: JSON.stringify({
-                    uid,
-                    profile: {
-                      ...localProfile,
-                      lastUpdatedAt: localProfile.lastUpdatedAt || Date.now()
-                    }
-                  })
-                });
-              } catch (profPushErr) {
-                console.warn("[Sync] Pre-pull profile push warning:", profPushErr);
-              }
+            // Push local foods, biomarkers, and profile to D1 before pulling so Device B's
+            // data is available on Device A after the subsequent pull.
+            try {
+              const idToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => undefined) : undefined;
+              const pushResult = await pushLogsToServer({
+                uid,
+                email: localProfile?.email || activeEmail || undefined,
+                foods: localFoods.filter(f => f.sync_state !== 'delete'),
+                biomarkers: localBioHistory.filter(b => b.sync_state !== 'delete'),
+                profile: localProfile ? {
+                  ...localProfile,
+                  lastUpdatedAt: localProfile.lastUpdatedAt || Date.now()
+                } : undefined,
+                idToken
+              });
+              console.log(`[Sync] Pre-pull push complete: ${pushResult.foodCount ?? 0} foods, ${pushResult.bioCount ?? 0} bios`);
+            } catch (prePushErr) {
+              console.warn("[Sync] Pre-pull push warning:", prePushErr);
             }
           }
           // Trigger job hydration: immediate on manual pull, deferred on background check past first paint (R-9)
@@ -3959,6 +3943,15 @@ export default function App() {
         } else if ((specificUpdate.type === 'foodLog' || specificUpdate.type === 'deleteFood') && specificUpdate.targetId) {
           const deletedFoods = updatedProfile?.deletedFoodLogIds || profile?.deletedFoodLogIds || {};
           const deletedBioLogs = updatedProfile?.deletedBiomarkerLogIds || profile?.deletedBiomarkerLogIds || {};
+          // Push the changed/deleted food log to D1 before the pull so the server has Device A's version
+          const idTokenFood = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => undefined) : undefined;
+          pushLogsToServer({
+            uid,
+            email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined,
+            foods: currFoods.filter(f => f.id === specificUpdate.targetId || f.sync_state !== 'synced'),
+            profile: profileForCloud ?? undefined,
+            idToken: idTokenFood
+          }).catch(() => {});
           await syncLogsWithTimeBuckets(db, uid, currFoods, currBioHistory, deletedFoods, deletedBioLogs, async (sf, sb) => {
             finalFoodsToSave = sf; finalBioToSave = sb; setFoodLogs(sf);
             setBiomarkerHistory(sb);
@@ -3974,6 +3967,17 @@ export default function App() {
         } else if (specificUpdate.type === 'biomarkerLog' || specificUpdate.type === 'biomarkerLogsBatch' || specificUpdate.type === 'deleteBiomarker') {
           const deletedFoods = updatedProfile?.deletedFoodLogIds || profile?.deletedFoodLogIds || {};
           const deletedBioLogs = updatedProfile?.deletedBiomarkerLogIds || profile?.deletedBiomarkerLogIds || {};
+          // Push changed biomarker logs to D1
+          const idTokenBio = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => undefined) : undefined;
+          pushLogsToServer({
+            uid,
+            email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined,
+            biomarkers: specificUpdate.type === 'biomarkerLogsBatch'
+              ? currBioHistory.filter(b => b.sync_state !== 'delete')
+              : currBioHistory.filter(b => b.id === specificUpdate.targetId || b.sync_state !== 'synced'),
+            profile: profileForCloud ?? undefined,
+            idToken: idTokenBio
+          }).catch(() => {});
           await syncLogsWithTimeBuckets(db, uid, currFoods, currBioHistory, deletedFoods, deletedBioLogs, async (sf, sb) => {
             finalFoodsToSave = sf; finalBioToSave = sb; setFoodLogs(sf); setBiomarkerHistory(sb);
             const updatedBundle = {
@@ -4008,14 +4012,20 @@ export default function App() {
           upsertProfileToSupabase(profileForCloud, uid, { actions: currActions, dailyBenefits: currBenefits, report: currReport, email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined });
         }
       } else if (specificUpdate && specificUpdate.type === 'fullPush') {
-        // Supabase first (full profile + homepage + report). Firebase is best-effort only.
-        await upsertProfileToSupabase(profileForCloud, uid, {
+        // Push all local foods, biomarkers, and profile to D1 first (Device A → server)
+        const idTokenFull = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => undefined) : undefined;
+        await pushLogsToServer({
+          uid,
+          email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined,
+          foods: currFoods.filter(f => f.sync_state !== 'delete'),
+          biomarkers: currBioHistory.filter(b => b.sync_state !== 'delete'),
+          profile: profileForCloud ?? undefined,
           actions: currActions,
           dailyBenefits: currBenefits,
-          report: currReport,
-          email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined,
-          forceOverwrite: true
-        });
+          report: currReport ?? null,
+          forceOverwrite: true,
+          idToken: idTokenFull
+        }).catch(() => {});
 
         const deletedFoods = currProfile?.deletedFoodLogIds || profile?.deletedFoodLogIds || {};
         const deletedBioLogs = currProfile?.deletedBiomarkerLogIds || profile?.deletedBiomarkerLogIds || {};

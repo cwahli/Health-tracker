@@ -397,16 +397,79 @@ export function subscribeToSupabaseLogs(
   }
 }
 
-export async function upsertProfileToSupabase(profile: UserProfile): Promise<void> {
-  if (!isSupabaseConfigured || !supabase || !profile) return;
+// Firebase backup writes for food/biomarker logs removed — all food/biomarker
+// persistence goes through Cloudflare D1 via /api/sync/supabase-push (D1-backed).
+/**
+ * Push food and/or biomarker logs to the server (Cloudflare D1 via /api/sync/supabase-push).
+ * This is the write-side counterpart to fetchAllConsolidatedLogs.
+ * Called after every local mutation so Device B can pull Device A's changes.
+ */
+export async function pushLogsToServer(opts: {
+  uid: string;
+  email?: string | null;
+  foods?: FoodLog[];
+  biomarkers?: BiomarkerLog[];
+  profile?: UserProfile | null;
+  actions?: HealthAction[];
+  dailyBenefits?: DailyBenefit[];
+  report?: RecommendationReport | null;
+  forceOverwrite?: boolean;
+  idToken?: string | null;
+}): Promise<{ success: boolean; foodCount?: number; bioCount?: number; error?: string }> {
+  const { uid, email, foods, biomarkers, profile, actions, dailyBenefits, report, forceOverwrite, idToken } = opts;
+  if (!uid) return { success: false, error: 'uid required' };
   try {
-    await supabase.from('profiles').upsert({
-      email: profile.email,
-      nickname: profile.nickname,
-      updated_at: new Date().toISOString(),
-      raw_profile: profile
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const resp = await fetch('/api/sync/supabase-push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify({ uid, email, foods, biomarkers, profile, actions, dailyBenefits, report, forceOverwrite }),
+      signal: controller.signal
     });
-  } catch (err) {
-    console.warn('[syncUtils] upsertProfileToSupabase failed:', err);
+    clearTimeout(timeoutId);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      console.warn(`[syncUtils] pushLogsToServer HTTP ${resp.status}:`, text);
+      return { success: false, error: `HTTP ${resp.status}` };
+    }
+    const data = await resp.json();
+    return { success: data.success ?? true, foodCount: data.foodCount, bioCount: data.bioCount };
+  } catch (err: any) {
+    console.warn('[syncUtils] pushLogsToServer error:', err?.message || err);
+    return { success: false, error: err?.message || String(err) };
   }
+}
+
+/**
+ * Push profile (and optional dashboard data) to the server via /api/sync/supabase-push.
+ * uid and opts are used; the legacy no-arg form is kept for compatibility.
+ */
+export async function upsertProfileToSupabase(
+  profile: UserProfile,
+  uid?: string,
+  opts?: {
+    actions?: HealthAction[];
+    dailyBenefits?: DailyBenefit[];
+    report?: RecommendationReport | null;
+    email?: string | null;
+    forceOverwrite?: boolean;
+  }
+): Promise<void> {
+  if (!profile) return;
+  const effectiveUid = uid || (profile as any).uid || (profile as any).firebaseUid;
+  if (!effectiveUid) return;
+  // Fire-and-forget: profile push is best-effort (food logs are pushed via pushLogsToServer)
+  pushLogsToServer({
+    uid: effectiveUid,
+    email: opts?.email || profile.email,
+    profile,
+    actions: opts?.actions,
+    dailyBenefits: opts?.dailyBenefits,
+    report: opts?.report ?? null,
+    forceOverwrite: opts?.forceOverwrite
+  }).catch((err: any) => console.warn('[syncUtils] upsertProfileToSupabase push failed:', err));
 }
