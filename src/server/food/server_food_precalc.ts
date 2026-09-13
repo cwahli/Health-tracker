@@ -2,7 +2,7 @@ import { applyNutrientModifiers } from '../../../server_derivation.js';
 
 /**
  * F-8.10 shard 12 — pre-finalize preparation, extracted verbatim from
- * runFoodAnalyze. Portion pause, brand lock, FDC hints, ledger mapping,
+ * runFoodAnalyze. Portion pause, brand lock, ledger mapping,
  * and modifier application. Async finalize/DB calls stay in the pipeline.
  */
 
@@ -57,30 +57,6 @@ export function detectDominantBrand(args: { message?: string; visionScoutItems: 
     }
   }
   return dominantBrand;
-}
-
-/** Collects scout suggestedFdcId hint tasks from components. */
-export function collectFdcHintTasks(visionScoutItems: any): Array<{ key: string; fdcId: string; query: string }> {
-  const hintFetchTasks: Array<{ key: string; fdcId: string; query: string }> = [];
-  (visionScoutItems || []).forEach((item: any, itemIdx: number) => {
-    (item.components || []).forEach((comp: any, cIdx: number) => {
-      const hintId = comp.suggestedFdcId;
-      if (hintId && String(hintId).trim()) {
-        const q = comp.searchQuery || comp.name || comp.keyword || "";
-        hintFetchTasks.push({ key: `${itemIdx}:${cIdx}`, fdcId: String(hintId).trim(), query: q });
-      }
-    });
-  });
-  return hintFetchTasks;
-}
-
-const HINT_STOPWORDS = new Set(['cheese', 'canned', 'sauce', 'sauces', 'salad', 'dressing', 'cream', 'sliced', 'chopped', 'mixed', 'fresh', 'cooked', 'raw', 'shredded', 'grated', 'diced', 'whole', 'baked', 'fried', 'roasted', 'steamed', 'boiled', 'grilled', 'style', 'flavored', 'flavoured', 'plain', 'organic', 'natural', 'sweet', 'spicy', 'crushed', 'minced', 'topping', 'toppings', 'spread', 'filling', 'blend', 'garnish', 'crumbs', 'chunks', 'pieces', 'with', 'and', 'leaf', 'leaves', 'seed', 'seeds', 'green']);
-
-/** Relevance check for scout FDC hints (same stopword gate as the safety net). */
-export function isFdcHintRelevant(query: string, description: string): boolean {
-  const qTokens = String(query || '').toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter((t: string) => t.length > 3 && !HINT_STOPWORDS.has(t));
-  const fNameLow = String(description || '').toLowerCase();
-  return qTokens.length === 0 || qTokens.some((t: string) => fNameLow.includes(t));
 }
 
 export interface LedgerMapArgs {

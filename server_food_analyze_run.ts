@@ -4,9 +4,9 @@
  *
  * Architecture:
  * 1. Setup & Context (server_food_analyze_run_setup.ts + createAnalyzeRunContext)
- * 2. Scout Phase / Meal Agent (server_food_analyze_run_scout.ts)
+ * 2. Scout Phase / Diet (server_food_analyze_run_scout.ts)
  * 3. Precalc & Finalize Dish Ledger (server_food_analyze_run_precalc.ts)
- * 4. Scout Compose — single Meal Agent owns response composition, no dietitian,
+ * 4. Scout Compose — single diet agent owns response composition, no second agent,
  *    no narrator (server_food_analyze_run_scout_compose.ts, pure TS)
  * 5. Finalize Meal Assemble & Gate (server_food_analyze_run_finalize.ts)
  *
@@ -226,7 +226,6 @@ export function createAnalyzeRunContext(
     isPureWeightModification,
     isWeightModification,
     portionClarify: null,
-    verifiedFdcHintMap: new Map<string, any>(),
     effectiveActiveMeal,
     hasUploadedNewImages,
   };
@@ -242,13 +241,13 @@ export async function runFoodAnalyze(req: any, res: any) {
   try {
     ctx = createAnalyzeRunContext(req, res, setup as any);
 
-    // 1. Scout Phase (Vision Scout / Meal Agent create or compare)
+    // 1. Scout Phase (Vision Scout / Diet create or compare)
     await executeScoutPhase(ctx);
 
     // 2. Precalc & Finalize Dish Ledger (Single writer of calories)
     await executePrecalcPhase(ctx);
 
-    // 3. Scout Compose (single Meal Agent; pure TS, no second agent)
+    // 3. Scout Compose (single diet agent; pure TS, no second agent)
     const { textOutput, rawParsed } = await executeScoutComposePhase(ctx);
 
     // 4. Finalize Meal Assemble & Gate

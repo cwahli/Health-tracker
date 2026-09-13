@@ -3,8 +3,6 @@ import {
   shouldPauseForPortionClarify,
   filterPortionCarryCandidates,
   detectDominantBrand,
-  collectFdcHintTasks,
-  isFdcHintRelevant,
   mapLedgersToPrecalcItems,
   applyMealModifiers,
 } from './server_food_precalc';
@@ -35,24 +33,12 @@ describe('F-8.10 shard 12 — portion pause and carry candidates', () => {
   });
 });
 
-describe('F-8.10 shard 12 — brand lock and FDC hints', () => {
+describe('F-8.10 shard 12 — brand lock (FDC hints deleted in F-12.2)', () => {
   it('detects the dominant brand in scene context', () => {
     const logs: string[] = [];
     expect(detectDominantBrand({ message: 'kfc lunch', visionScoutItems: [], onLog: (m) => logs.push(m) })).toBe('kfc');
     expect(detectDominantBrand({ message: 'home rice', visionScoutItems: [], onLog: () => {} })).toBe('');
     expect(logs.some((m) => m.includes('Environment Locking'))).toBe(true);
-  });
-
-  it('collects hint tasks and judges relevance with the stopword gate', () => {
-    const tasks = collectFdcHintTasks([
-      { components: [{ searchQuery: 'cheddar cheese', suggestedFdcId: ' 173410 ' }] },
-      { components: [{ searchQuery: 'rice' }] },
-    ]);
-    expect(tasks).toEqual([{ key: '0:0', fdcId: '173410', query: 'cheddar cheese' }]);
-    expect(isFdcHintRelevant('cheddar cheese', 'Cheese, cheddar')).toBe(true);
-    expect(isFdcHintRelevant('cheddar cheese', 'Bread, white')).toBe(false);
-    // All-stopword queries pass through (nothing to contradict)
-    expect(isFdcHintRelevant('fresh mixed salad', 'Beef stew')).toBe(true);
   });
 });
 
