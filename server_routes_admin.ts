@@ -287,9 +287,13 @@ adminRouter.post('/api/admin/food-catalog/update-serving', async (req, res) => {
 });
 
 adminRouter.get('/api/admin/food-catalog-sync-status', async (req, res) => {
-  const result = await getCatalogSyncStatus();
-  if (!result.success) return res.status(500).json(result);
-  res.json(result);
+  try {
+    const result = await getCatalogSyncStatus();
+    if (!result.success) return res.status(200).json({ ...result, success: true, unavailable: true });
+    res.json(result);
+  } catch (err: any) {
+    res.status(200).json({ success: true, unavailable: true, error: err?.message || String(err) });
+  }
 });
 
 adminRouter.post('/api/admin/food-catalog/merge', async (req, res) => {

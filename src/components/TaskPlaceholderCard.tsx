@@ -14,6 +14,12 @@ import { toPendingFoodLog } from '../mealBuild/adapters';
 import { translations } from '../utils/translations';
 import { normalizeMealImageUrl, nextPhotoFallbackUrl, isUsableImageUrl, uniqueMealImageUrls } from '../utils/foodImageSources';
 
+function hasDegradedDietStage(job: AgentJob): boolean {
+  const stages = job?.result?.degradedStages;
+  if (!Array.isArray(stages)) return false;
+  return stages.includes('diet') || stages.includes('dietitian');
+}
+
 interface TaskPlaceholderCardProps {
   job: AgentJob;
   onView: (jobId: string) => void;
@@ -427,7 +433,7 @@ export default function TaskPlaceholderCard({
   };
 
   const getStatusColorClass = () => {
-    if (effectiveStatus === 'succeeded' && Array.isArray(job.result?.degradedStages) && job.result.degradedStages.includes('diet') || job.result.degradedStages.includes('dietitian')) {
+    if (effectiveStatus === 'succeeded' && hasDegradedDietStage(job)) {
       return 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700';
     }
     if (isFailedOrTimedOut) {
@@ -809,11 +815,11 @@ export default function TaskPlaceholderCard({
             )}
 
             {/* Retry Button for Failed, Cancelled, or Timed-out Jobs (or stuck jobs) */}
-            {(isFailedOrTimedOut || job.status === 'failed' || job.status === 'cancelled' || job.status === 'cancel_requested' || (Array.isArray(job.result?.degradedStages) && job.result.degradedStages.includes('diet') || job.result.degradedStages.includes('dietitian')) || elapsedIsLong) && (!isActivelyRetryingOrRunning || elapsedIsLong) && (
+            {(isFailedOrTimedOut || job.status === 'failed' || job.status === 'cancelled' || job.status === 'cancel_requested' || hasDegradedDietStage(job) || elapsedIsLong) && (!isActivelyRetryingOrRunning || elapsedIsLong) && (
               <button
                 type="button"
                 onClick={() => {
-                  const isDegraded = Array.isArray(job.result?.degradedStages) && job.result.degradedStages.includes('diet') || job.result.degradedStages.includes('dietitian');
+                  const isDegraded = hasDegradedDietStage(job);
                   const nextAttempt = (job.attemptCount || 1) + 1;
                   JobStore.updateJob(job.id, {
                     status: 'queued',
@@ -829,13 +835,13 @@ export default function TaskPlaceholderCard({
                   JobQueueRunner.wake();
                 }}
                 className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer ${
-                  (Array.isArray(job.result?.degradedStages) && job.result.degradedStages.includes('diet') || job.result.degradedStages.includes('dietitian'))
+                  hasDegradedDietStage(job)
                     ? 'text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/20'
                     : 'text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20'
                 }`}
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                {(Array.isArray(job.result?.degradedStages) && job.result.degradedStages.includes('diet') || job.result.degradedStages.includes('dietitian')) ? (t.retryAdvice || 'Retry Advice') : (t.retry || 'Retry')}
+                {hasDegradedDietStage(job) ? (t.retryAdvice || 'Retry Advice') : (t.retry || 'Retry')}
               </button>
             )}
 

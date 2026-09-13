@@ -24,6 +24,9 @@ import {
   getBrandMenuItemById,
   brandHitFitsQuery,
   sanitizeDishTitle,
+  normalizeChainKey,
+  resolveMealCountry,
+  enqueueBrandClean,
   selfCleanBrandDatabase,
 } from './serverBrandMenu.js';
 import {
@@ -197,6 +200,31 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
     visionScoutItems: ctx.visionScoutItems,
     onLog: ctx.addDebugLog,
   });
+
+  // F-11.1: brand catalog self-clean — per chain+country, throttled inside
+  // cleanBrandChain, fire-and-forget so the meal never waits. Unlocked from
+  // the dish-estimate skip: runs on every analyzed meal with a chain.
+  // (Compare mode enqueues from runEvaluationFinalize instead.)
+  if (ctx.userSelectedMode !== 'compare') {
+    try {
+      const country = resolveMealCountry((ctx as any).userProfile);
+      const chains = new Map<string, Set<string>>();
+      ledgers.forEach((l: any, idx: number) => {
+        const vItem = ctx.visionScoutItems?.[l?.scoutIndex ?? idx];
+        const ck = normalizeChainKey(l?.chainName || vItem?.chainName || '');
+        if (!ck) return;
+        if (!chains.has(ck)) chains.set(ck, new Set());
+        if (l?.dbSource === 'brand_official' && l?.dbId != null) {
+          chains.get(ck)!.add(String(l.dbId));
+        }
+      });
+      for (const [ck, ids] of chains) {
+        enqueueBrandClean({ chainKey: ck, countryCode: country, usedRowIds: [...ids], onLog: ctx.addDebugLog });
+      }
+    } catch (e: any) {
+      ctx.addDebugLog(`[BrandClean] enqueue skipped (${e?.message || e}).`);
+    }
+  }
 
   if (ctx.preCalculatedItems.length > 0) {
     ctx.preCalculatedItems.reduce((acc: any, it: any) => {

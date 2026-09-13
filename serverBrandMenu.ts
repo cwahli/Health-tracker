@@ -148,180 +148,331 @@ export function isUnofficialOrCompositeDish(
   return { isUnofficial: false };
 }
 
-let lastSelfCleanTime = 0;
-const SELF_CLEAN_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+/**
+ * F-11.1 — brand catalog self-clean (Layer 1, TypeScript only).
+ *
+ * Replaces the old whole-country hard-delete pass. Scope is ONE chain in ONE
+ * country, throttled per chain+country, soft-quarantine only (status column —
+ * see supabase/migrations/20260913_brand_menu_items_status.sql), and it never
+ * touches the row the current meal locked (usedRowIds).
+ *
+ * Provenance assumption (verify against live rows when Supabase is reachable):
+ * every writer marks non-official rows (ocr_auto / ocr_partial / user_prompt /
+ * estimate / computed / ...). Unmarked (null/empty) rows are therefore treated
+ * as official imports: immune to regex quarantine and preferred in ties.
+ */
+
+export type BrandCleanCounts = {
+  removedUnofficialCount: number;
+  deletedDuplicatesCount: number;
+  updatedChainsCount: number;
+  details: string[];
+};
+
+const CHAIN_CLEAN_THROTTLE_MS = 60 * 60 * 1000; // 1 hour, per chain+country
+const chainCleanLastRun = new Map<string, number>();
+
+/** Meal/profile country with documented fallbacks (diary is ID + GB). */
+export function resolveMealCountry(userProfile?: any): string {
+  const explicit = String(userProfile?.country || userProfile?.countryCode || '').trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(explicit)) return explicit;
+  const tz = String(userProfile?.timezone || '');
+  if (/jakarta|jayapura|makassar|pontianak/i.test(tz)) return 'ID';
+  if (/london/i.test(tz)) return 'GB';
+  const lang = String(userProfile?.language || '').toLowerCase();
+  if (lang === 'id' || lang.startsWith('id-') || lang === 'in') return 'ID';
+  return 'GB'; // legacy default until profiles carry an explicit country
+}
+
+function provenanceRank(p: unknown): number {
+  const s = String(p || '').toLowerCase();
+  if (!s) return 0; // unmarked: presumed official import (see assumption above)
+  if (s.includes('official') || s.includes('verified') || s.includes('brand')) return 0;
+  if (s.startsWith('ocr')) return 1;
+  if (s.includes('user') || s.includes('prompt') || s.includes('estimate') || s.includes('computed')) return 2;
+  return 3;
+}
+
+function isJunkMarked(p: unknown): boolean {
+  const s = String(p || '').toLowerCase();
+  return (
+    s.includes('user') ||
+    s.includes('prompt') ||
+    s.includes('estimate') ||
+    s.includes('computed') ||
+    s.includes('decomposed') ||
+    s.includes('composite')
+  );
+}
+
+/** Official-immune rows: explicit official markers or unmarked (never junk-marked). */
+function isProtectedOfficial(p: unknown): boolean {
+  const s = String(p || '').toLowerCase();
+  if (!s) return true;
+  if (isJunkMarked(p)) return false;
+  return s.includes('official') || s.includes('verified') || s.includes('brand');
+}
+
+export interface ChainCleanArgs {
+  supabaseAdmin?: any;
+  chainKey: string;
+  countryCode?: string;
+  usedRowIds?: Array<string | number>;
+  onLog?: (msg: string) => void;
+  bypassThrottle?: boolean;
+}
+
+const EMPTY_COUNTS: BrandCleanCounts = {
+  removedUnofficialCount: 0,
+  deletedDuplicatesCount: 0,
+  updatedChainsCount: 0,
+  details: [],
+};
+
+export async function cleanBrandChain(args: ChainCleanArgs): Promise<BrandCleanCounts> {
+  const chainKey = normalizeChainKey(args.chainKey || '');
+  if (!chainKey) return { ...EMPTY_COUNTS };
+  const country = String(args.countryCode || 'GB').toUpperCase();
+  const log = args.onLog || console.log;
+  const scope = `${country}:${chainKey}`;
+  const now = Date.now();
+  if (!args.bypassThrottle) {
+    const last = chainCleanLastRun.get(scope) || 0;
+    if (now - last < CHAIN_CLEAN_THROTTLE_MS) return { ...EMPTY_COUNTS };
+  }
+  let admin = args.supabaseAdmin;
+  if (!admin) {
+    try {
+      const mod: any = await import('./supabaseAdmin.js');
+      admin = mod?.supabaseAdmin;
+    } catch {
+      return { ...EMPTY_COUNTS };
+    }
+  }
+  if (!admin) return { ...EMPTY_COUNTS };
+
+  // Status-column probe is implicit: this select fails when the F-11.1
+  // migration has not run yet. Skip writes AND do not mark throttle.
+  let items: any[];
+  try {
+    const { data, error } = await admin
+      .from('brand_menu_items')
+      .select(
+        'id, country_code, chain_key, dish_name, dish_name_key, nutrients, capture_count, confidence, provenance, notes, updated_at, status'
+      )
+      .eq('country_code', country)
+      .eq('chain_key', chainKey);
+    if (error) throw error;
+    items = Array.isArray(data) ? data : [];
+  } catch (e: any) {
+    log(
+      `[BrandClean] ${scope}: cannot scan (${e?.message || e}). Run supabase/migrations/20260913_brand_menu_items_status.sql, then retry.`
+    );
+    return { ...EMPTY_COUNTS };
+  }
+  chainCleanLastRun.set(scope, now);
+
+  const used = new Set((args.usedRowIds || []).map((v) => String(v)));
+  const quarantineIds = new Set<string>();
+  const details: string[] = [];
+  const mark = (id: any, why: string) => {
+    const sid = String(id);
+    if (used.has(sid) || quarantineIds.has(sid)) return;
+    quarantineIds.add(sid);
+    if (details.length < 20) details.push(why);
+  };
+
+  const quarantine = async (ids: string[], what: string): Promise<number> => {
+    if (ids.length === 0) return 0;
+    try {
+      const { error } = await admin
+        .from('brand_menu_items')
+        .update({ status: 'quarantined', updated_at: new Date().toISOString() })
+        .in('id', ids);
+      if (error) throw error;
+      log(`[BrandClean] ${scope}: quarantined ${ids.length} ${what} row(s).`);
+      return ids.length;
+    } catch (e: any) {
+      log(`[BrandClean] ${scope}: quarantine write failed (${e?.message || e}).`);
+      return 0;
+    }
+  };
+
+  // 1. Stale dish_name_key rewrite (data repair, no status change).
+  for (const item of items) {
+    const cleanTitle = sanitizeDishTitle(item.dish_name);
+    const cleanKey = normalizeDishKey(cleanTitle);
+    if (item.dish_name !== cleanTitle || item.dish_name_key !== cleanKey) {
+      try {
+        const { error } = await admin
+          .from('brand_menu_items')
+          .update({ dish_name: cleanTitle, dish_name_key: cleanKey })
+          .eq('id', item.id);
+        if (error) throw error;
+        item.dish_name = cleanTitle;
+        item.dish_name_key = cleanKey;
+      } catch (e: any) {
+        log(`[BrandClean] ${scope}: sanitize failed for ${item.id} (${e?.message || e}).`);
+      }
+    }
+  }
+
+  // 2. Quarantine unofficial / junk / empty rows (soft; official-immune; never usedRowId).
+  for (const item of items) {
+    const sid = String(item.id);
+    if (used.has(sid)) continue;
+    if (item.status === 'quarantined' || item.status === 'merged') continue;
+    const kcal = Number(item?.nutrients?.calories ?? item?.nutrients?.energy ?? NaN);
+    const hasMacros = ['protein', 'totalFat', 'carbohydrates'].some(
+      (k) => Number(item?.nutrients?.[k] ?? 0) > 0
+    );
+    const emptyRow = !Number.isFinite(kcal) || kcal <= 0;
+    const flagged = isUnofficialOrCompositeDish(
+      item.dish_name,
+      item.chain_key,
+      item.provenance,
+      item.notes,
+      item
+    );
+    if ((emptyRow && !hasMacros) || (flagged.isUnofficial && !isProtectedOfficial(item.provenance))) {
+      mark(item.id, `Quarantined unofficial "${item.dish_name}" (${item.chain_key}): ${flagged.isUnofficial ? flagged.reason : 'empty/0-kcal, no macros'}`);
+    }
+  }
+
+  // 3. Same-key collapse: one live row per chain+country+dish key.
+  const groups = new Map<string, any[]>();
+  for (const item of items) {
+    if (item.status === 'quarantined' || item.status === 'merged') continue;
+    if (quarantineIds.has(String(item.id))) continue;
+    const k = item.dish_name_key;
+    if (!k) continue;
+    const list = groups.get(k) || [];
+    list.push(item);
+    groups.set(k, list);
+  }
+  const rankRow = (r: any): number[] => [
+    provenanceRank(r.provenance),
+    -(Number(r.capture_count) || 0),
+    -(Number(r.confidence) || 0),
+    -(r.updated_at ? Date.parse(String(r.updated_at)) || 0 : 0),
+  ];
+  const rankCompare = (a: any, b: any): number => {
+    const ra = rankRow(a);
+    const rb = rankRow(b);
+    for (let i = 0; i < ra.length; i++) {
+      if (ra[i] !== rb[i]) return ra[i] - rb[i];
+    }
+    return String(a.id).localeCompare(String(b.id));
+  };
+  for (const [dkey, group] of groups.entries()) {
+    if (group.length <= 1) continue;
+    const usedInGroup = group.filter((g) => used.has(String(g.id)));
+    let winner: any = null;
+    if (usedInGroup.length > 0) {
+      // Meal truth wins — unless it is junk-marked while a protected official
+      // twin exists. Then skip the group: both rows must survive.
+      const u = usedInGroup[0];
+      const officialTwin = group.find(
+        (g) => !used.has(String(g.id)) && isProtectedOfficial(g.provenance)
+      );
+      if (isJunkMarked(u.provenance) && officialTwin) {
+        log(`[BrandClean] ${scope}: key "${dkey}" skipped — used row ${u.id} is unofficial, official twin ${officialTwin.id} must survive.`);
+        continue;
+      }
+      winner = u;
+    } else {
+      const sorted = [...group].sort(rankCompare);
+      const top = sorted[0];
+      const officialLoser = sorted
+        .slice(1)
+        .find((g) => isProtectedOfficial(g.provenance));
+      if (isJunkMarked(top.provenance) && officialLoser) {
+        log(`[BrandClean] ${scope}: key "${dkey}" skipped — winner ${top.id} is unofficial, official row ${officialLoser.id} must survive.`);
+        continue;
+      }
+      winner = top;
+    }
+    for (const loser of group) {
+      if (String(loser.id) === String(winner.id)) continue;
+      mark(loser.id, `Collapsed duplicate "${loser.dish_name}" (key ${dkey}, keeping ${winner.id})`);
+    }
+  }
+
+  const ids = [...quarantineIds];
+  const quarantined = await quarantine(ids, 'unofficial/duplicate');
+  const counts: BrandCleanCounts = {
+    removedUnofficialCount: quarantined,
+    deletedDuplicatesCount: quarantined,
+    updatedChainsCount: quarantined > 0 ? 1 : 0,
+    details,
+  };
+  if (quarantined > 0) {
+    log(`[BrandClean] ${scope}: complete — quarantined ${quarantined} row(s).`);
+  }
+  return counts;
+}
+
+/** Fire-and-forget wrapper: the meal never waits on the clean. */
+export function enqueueBrandClean(args: {
+  chainKey?: string | null;
+  countryCode?: string;
+  usedRowIds?: Array<string | number>;
+  onLog?: (msg: string) => void;
+}): void {
+  const chainKey = normalizeChainKey(args.chainKey || '');
+  if (!chainKey) return;
+  void cleanBrandChain({
+    chainKey,
+    countryCode: args.countryCode,
+    usedRowIds: args.usedRowIds,
+    onLog: args.onLog,
+  }).catch((e: any) =>
+    (args.onLog || console.log)(`[BrandClean] background error for ${chainKey}: ${e?.message || e}`)
+  );
+}
 
 export async function selfCleanBrandDatabase(
   supabaseAdmin: any,
   countryCode: string = 'GB',
   addDebugLog?: (msg: string) => void
-): Promise<{
-  removedUnofficialCount: number;
-  deletedDuplicatesCount: number;
-  updatedChainsCount: number;
-  details: string[];
-}> {
-  const now = Date.now();
-  if (now - lastSelfCleanTime < SELF_CLEAN_THROTTLE_MS) {
-    return { removedUnofficialCount: 0, deletedDuplicatesCount: 0, updatedChainsCount: 0, details: [] };
-  }
-  lastSelfCleanTime = now;
+): Promise<BrandCleanCounts> {
+  // F-11.1: soft per-chain clean (was: whole-country hard delete).
+  // Admin "Clean now" bypasses the per-chain throttle.
   const log = addDebugLog || console.log;
-  let removedUnofficialCount = 0;
-  let deletedDuplicatesCount = 0;
-  const details: string[] = [];
-
+  const country = String(countryCode || 'GB').toUpperCase();
+  const agg: BrandCleanCounts = {
+    removedUnofficialCount: 0,
+    deletedDuplicatesCount: 0,
+    updatedChainsCount: 0,
+    details: [],
+  };
+  let chains: string[] = [];
   try {
-    let query = supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('brand_menu_items')
-      .select('id, country_code, chain_key, dish_name, dish_name_key, nutrients, ingredients, capture_count, confidence, provenance, notes, updated_at');
-
-    if (countryCode) {
-      query = query.eq('country_code', countryCode);
-    }
-
-    const { data: items, error } = await query;
-    if (error || !items || items.length === 0) {
-      return { removedUnofficialCount: 0, deletedDuplicatesCount: 0, updatedChainsCount: 0, details: [] };
-    }
-
-    const unofficialIds: string[] = [];
-    const validItems: typeof items = [];
-
-    for (const item of items) {
-      const check = isUnofficialOrCompositeDish(item.dish_name, item.chain_key, item.provenance, item.notes, item);
-      if (check.isUnofficial) {
-        log(`[SelfClean] Flagged unofficial/decomposed item "${item.dish_name}" (ID ${item.id}, Chain "${item.chain_key}") for removal: ${check.reason}`);
-        unofficialIds.push(item.id);
-        details.push(`Removed unofficial item "${item.dish_name}" (${item.chain_key}): ${check.reason}`);
-      } else {
-        validItems.push(item);
-      }
-    }
-
-    if (unofficialIds.length > 0) {
-      const { error: delErr } = await supabaseAdmin
-        .from('brand_menu_items')
-        .delete()
-        .in('id', unofficialIds);
-      if (!delErr) {
-        removedUnofficialCount = unofficialIds.length;
-        log(`[SelfClean] Successfully purged ${removedUnofficialCount} unofficial/decomposed item(s) from brand database.`);
-      } else {
-        log(`[SelfClean] Warning: Failed to delete unofficial IDs: ${delErr.message}`);
-      }
-    }
-
-    const chainGroups = new Map<string, typeof validItems>();
-    for (const item of validItems) {
-      const key = `${item.country_code || 'GB'}:${item.chain_key}`;
-      const list = chainGroups.get(key) || [];
-      list.push(item);
-      chainGroups.set(key, list);
-    }
-
-    let updatedChainsCount = 0;
-    for (const [groupKey] of chainGroups.entries()) {
-      const [cCode, cKey] = groupKey.split(':');
-      const delCount = await cleanupDuplicateBrandMenuItems(supabaseAdmin, cCode, cKey, log);
-      if (delCount > 0) {
-        deletedDuplicatesCount += delCount;
-        updatedChainsCount++;
-      }
-    }
-
-    log(`[SelfClean] Complete! Removed ${removedUnofficialCount} unofficial item(s), deleted ${deletedDuplicatesCount} duplicate(s) across ${updatedChainsCount} chain(s).`);
-
-    return {
-      removedUnofficialCount,
-      deletedDuplicatesCount,
-      updatedChainsCount,
-      details,
-    };
+      .select('chain_key')
+      .eq('country_code', country);
+    if (error) throw error;
+    chains = [...new Set((Array.isArray(data) ? data : []).map((r: any) => r.chain_key).filter(Boolean))];
   } catch (e: any) {
-    log(`[SelfClean] Error during self-cleaning: ${e?.message || e}`);
-    return {
-      removedUnofficialCount,
-      deletedDuplicatesCount,
-      updatedChainsCount: 0,
-      details: [`Error: ${e?.message || e}`],
-    };
+    log(`[BrandClean] ${country}: cannot list chains (${e?.message || e}).`);
+    return agg;
   }
-}
-
-export async function cleanupDuplicateBrandMenuItems(
-  supabaseAdmin: any,
-  countryCode: string,
-  chainKey: string,
-  addDebugLog?: (msg: string) => void
-): Promise<number> {
-  const log = addDebugLog || console.log;
-  try {
-    const { data: items, error } = await supabaseAdmin
-      .from('brand_menu_items')
-      .select('id, dish_name, dish_name_key, nutrients, ingredients, capture_count, confidence, updated_at')
-      .eq('country_code', countryCode)
-      .eq('chain_key', chainKey);
-
-    if (error || !items || items.length === 0) return 0;
-
-    let deletedCount = 0;
-    const groups = new Map<string, typeof items>();
-
-    for (const item of items) {
-      const cleanTitle = sanitizeDishTitle(item.dish_name);
-      const cleanKey = normalizeDishKey(cleanTitle);
-
-      if (item.dish_name !== cleanTitle || item.dish_name_key !== cleanKey) {
-        log(`[Cleanup] Sanitizing malformed dish title "${item.dish_name}" -> "${cleanTitle}" (${cleanKey})`);
-        await supabaseAdmin
-          .from('brand_menu_items')
-          .update({ dish_name: cleanTitle, dish_name_key: cleanKey })
-          .eq('id', item.id);
-        item.dish_name = cleanTitle;
-        item.dish_name_key = cleanKey;
-      }
-
-      const list = groups.get(cleanKey) || [];
-      list.push(item);
-      groups.set(cleanKey, list);
-    }
-
-    for (const [key, group] of groups.entries()) {
-      if (group.length <= 1) continue;
-
-      group.sort((a, b) => {
-        const cDiff = (b.capture_count || 1) - (a.capture_count || 1);
-        if (cDiff !== 0) return cDiff;
-        const confDiff = (b.confidence || 0) - (a.confidence || 0);
-        if (confDiff !== 0) return confDiff;
-        return String(a.id).localeCompare(String(b.id));
-      });
-
-      const primary = group[0];
-      const duplicates = group.slice(1);
-      const duplicateIds = duplicates.map(d => d.id).filter(Boolean);
-
-      if (duplicateIds.length > 0) {
-        log(`[Cleanup] Deleting ${duplicateIds.length} duplicate record(s) for dish key "${key}" under chain "${chainKey}" (keeping ID ${primary.id}).`);
-        const { error: delErr } = await supabaseAdmin
-          .from('brand_menu_items')
-          .delete()
-          .in('id', duplicateIds);
-
-        if (!delErr) {
-          deletedCount += duplicateIds.length;
-        } else {
-          log(`[Cleanup] Warning: Failed to delete duplicate IDs: ${delErr.message}`);
-        }
-      }
-    }
-
-    return deletedCount;
-  } catch (e: any) {
-    log(`[Cleanup] Error during brand menu cleanup: ${e?.message || e}`);
-    return 0;
+  for (const chainKey of chains) {
+    const r = await cleanBrandChain({
+      supabaseAdmin,
+      chainKey,
+      countryCode: country,
+      onLog: log,
+      bypassThrottle: true,
+    });
+    agg.removedUnofficialCount += r.removedUnofficialCount;
+    agg.deletedDuplicatesCount += r.deletedDuplicatesCount;
+    agg.updatedChainsCount += r.updatedChainsCount;
+    agg.details.push(...r.details);
   }
+  log(`[BrandClean] ${country}: complete — quarantined ${agg.removedUnofficialCount} row(s) across ${agg.updatedChainsCount} chain(s).`);
+  return agg;
 }
 
 export async function autoRegisterChainMenuItem(
@@ -556,7 +707,7 @@ export async function autoRegisterChainMenuItem(
         }
       }
 
-      cleanupDuplicateBrandMenuItems(supabaseAdmin, countryCode, chain_key, addDebugLog).catch(() => {});
+      cleanBrandChain({ supabaseAdmin, chainKey: chain_key, countryCode, onLog: addDebugLog }).catch(() => {});
     } finally {
       inFlightRegisterLocks.delete(lockKey);
     }
@@ -2122,7 +2273,10 @@ const GENERIC_COMMODITY_FOODS = new Set([
 ]);
 
 /** Reject dry-cured / snack hits for generic cooked-ham queries. */
-export function brandHitFitsQuery(query: string, hit: { name?: string; dish_name?: string }): boolean {
+export function brandHitFitsQuery(query: string, hit: { name?: string; dish_name?: string; status?: string }): boolean {
+  // F-11.1: quarantined/merged rows never match (soft-quarantine takes effect on reads).
+  const st = String((hit as any)?.status || '').toLowerCase();
+  if (st === 'quarantined' || st === 'merged') return false;
   const q = String(query || '').toLowerCase();
   const n = String(hit?.name || hit?.dish_name || '').toLowerCase();
   if (!q || !n) return true;
@@ -2307,6 +2461,8 @@ export async function searchBrandMenuItems(query: string, explicitChainKey?: str
 
   for (const it of allItems) {
     if (!it.dish_name) continue;
+    const st = String(it.status || '').toLowerCase();
+    if (st === 'quarantined' || st === 'merged') continue;
 
     const normItemKey = it.dish_name_key || normalizeDishKey(it.dish_name);
     const itemChainKey = (it.chain_key || it.chain_name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');

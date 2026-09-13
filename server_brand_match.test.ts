@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { matchBrandMenu, isPackagedBindItem, inferChainNameFromPackageLabel } from "./server_brand_match";
+import { brandHitFitsQuery } from "./serverBrandMenu";
 
 describe("server_brand_match", () => {
   it("matches known brand item from local database", async () => {
@@ -28,6 +29,14 @@ describe("server_brand_match", () => {
     expect(result.lockedKeys).toContain("vitaminC");
     expect(Number(result.valuesAtBasis?.vitaminC)).toBeGreaterThan(0);
     expect(Number(result.valuesAtBasis?.vitaminC)).not.toBe(1000);
+  });
+});
+
+describe("F-11.1 quarantined rows never match", () => {
+  it("brandHitFitsQuery rejects quarantined and merged status", () => {
+    expect(brandHitFitsQuery("Big Mac", { dish_name: "Big Mac", status: "quarantined" })).toBe(false);
+    expect(brandHitFitsQuery("Big Mac", { dish_name: "Big Mac", status: "merged" })).toBe(false);
+    expect(brandHitFitsQuery("Big Mac", { dish_name: "Big Mac", status: "ready" })).toBe(true);
   });
 });
 

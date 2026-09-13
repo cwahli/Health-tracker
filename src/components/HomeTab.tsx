@@ -1290,8 +1290,8 @@ export default function HomeTab({
             const label = displayNutrientName(profile.language, key) || nutDef?.labels?.en || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 
             const isLimit = ['calories', 'saturatedFat', 'sodium', 'addedSugar', 'totalFat', 'transFat', 'cholesterol'].includes(key);
-            const isOver = isLimit && adjustedTarget > 0 && actual > adjustedTarget;
-            const isMet = !isLimit && adjustedTarget > 0 && actual >= adjustedTarget;
+            const isOver = isLimit && adjustedTarget > 0 && actualRaw > adjustedTarget;
+            const isMet = !isLimit && adjustedTarget > 0 && actualRaw >= adjustedTarget;
 
             return (
               <div key={key} className="space-y-1">

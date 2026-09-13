@@ -63,22 +63,46 @@ export function extractNutrientValue(nutrients: any, key: string): number {
   return 0;
 }
 
+function collectNutrientKeyList(raw: any): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item: any) => (typeof item === 'string' ? item : item?.nutrientKey || item?.key || item?.nutrient))
+      .filter((k: any) => typeof k === 'string' && k.length > 0);
+  }
+  if (typeof raw === 'object') return Object.keys(raw).filter(Boolean);
+  return [];
+}
+
+function keysFromHealthCategories(report?: any): string[] {
+  const cats = report?.healthBaselineCategories || report?.riskCategories || [];
+  if (!Array.isArray(cats)) return [];
+  const out: string[] = [];
+  for (const cat of cats) {
+    const nts = cat?.priorityNutrientTargets || cat?.nutrientTargets || [];
+    out.push(...collectNutrientKeyList(nts));
+  }
+  return out;
+}
+
+/** Home / cards / scout share this list. Core nutrients only; never `steps`. */
 export function getTopTargetNutrientKeys(report?: any, profile?: any): string[] {
-  if (Array.isArray(profile?.topTargetNutrientKeys) && profile.topTargetNutrientKeys.length > 0) {
-    return profile.topTargetNutrientKeys;
+  const ranked = [
+    ...collectNutrientKeyList(report?.topNutrientTargets),
+    ...keysFromHealthCategories(report),
+    ...collectNutrientKeyList(profile?.topNutrientsToMonitor),
+  ];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of ranked) {
+    if (!k || String(k).toLowerCase() === 'steps') continue;
+    if (!isCoreNutrient(k)) continue;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(k);
   }
-  if (Array.isArray(report?.topTargetNutrientKeys) && report.topTargetNutrientKeys.length > 0) {
-    return report.topTargetNutrientKeys;
-  }
-  if (report?.dailyNutrientTargets && typeof report.dailyNutrientTargets === 'object') {
-    const keys = Object.keys(report.dailyNutrientTargets).filter(Boolean);
-    if (keys.length > 0) return keys.slice(0, 5);
-  }
-  if (profile?.targets && typeof profile.targets === 'object') {
-    const keys = Object.keys(profile.targets).filter(Boolean);
-    if (keys.length > 0) return keys.slice(0, 5);
-  }
-  return [...PRIMARY_NUTRIENTS];
+  if (out.length > 0) return out;
+  return PRIMARY_NUTRIENTS.filter((k) => k.toLowerCase() !== 'steps');
 }
 
 

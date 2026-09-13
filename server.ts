@@ -38,7 +38,7 @@ import { ensureFoodCatalogSchema, resetFoodCatalogSchemaEnsure } from "./server_
 import { ensureD1Schema } from "./server_d1_schema.js";
 import { reconcileIngredientsToComponents } from './server_vision_scout.js';
 import { resolveInternalFood, resolveDishCache, upsertFoodItemCandidate, upsertFoodAlias, upsertDishCacheCandidate, recordFoodObservation, recordSyncEvent, normalizeFoodKey, normalizeDishKey, getCatalogSyncStatus, mergeFoodCatalogItems, quarantineAtwaterFailures, checkAtwaterValidity, getFallbackCategoryProfile } from './server_food_catalog.js';
-import { sanitizeDishTitle, cleanupDuplicateBrandMenuItems, isGroceryBrandSync, selfCleanBrandDatabase, isUnofficialOrCompositeDish } from './serverBrandMenu.js';
+import { sanitizeDishTitle, isGroceryBrandSync, selfCleanBrandDatabase, isUnofficialOrCompositeDish } from './serverBrandMenu.js';
 import {
   computeItemBudget,
   reconcileNutrients,

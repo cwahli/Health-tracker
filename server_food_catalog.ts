@@ -786,7 +786,20 @@ export function getFallbackCategoryProfile(query: string): Record<string, number
   return fullProfile;
 }
 
+const EMPTY_CATALOG_SYNC = {
+  success: true,
+  food_items: { total: 0, active: 0, candidate: 0 },
+  dish_cache: { total: 0, active: 0 },
+  open_deferred_gaps: 0,
+  sync_failures: 0,
+  resolver_call_count: 0,
+  latest_sync_events: [] as any[],
+};
+
 export async function getCatalogSyncStatus(): Promise<any> {
+  if (!isSupabaseConfigured) {
+    return { ...EMPTY_CATALOG_SYNC, offline: true };
+  }
   try {
     const ens = await ensureFoodCatalogSchema();
     if (!ens.ok && /schema cache|does not exist|Could not find the table/i.test(ens.error || '')) {
@@ -817,7 +830,13 @@ export async function getCatalogSyncStatus(): Promise<any> {
       latest_sync_events: latestEvents || []
     };
   } catch (err: any) {
-    if (/schema cache|does not exist|Could not find the table/i.test(err.message || String(err))) { console.error("[CatalogSchema] Write failed because schema is missing. Run SQL: supabase/migrations/20260805_food_catalog_schema.sql or set DATABASE_URL and POST /api/admin/food-catalog/ensure-schema"); resetFoodCatalogSchemaEnsure(); } return { success: false, error: err.message || String(err) };
+    const msg = err?.message || String(err);
+    if (/schema cache|does not exist|Could not find the table/i.test(msg)) {
+      console.error("[CatalogSchema] Write failed because schema is missing. Run SQL: supabase/migrations/20260805_food_catalog_schema.sql or set DATABASE_URL and POST /api/admin/food-catalog/ensure-schema");
+      resetFoodCatalogSchemaEnsure();
+      return { ...EMPTY_CATALOG_SYNC, schemaMissing: true };
+    }
+    return { success: false, error: msg };
   }
 }
 
