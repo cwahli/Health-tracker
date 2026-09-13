@@ -44,10 +44,13 @@ export function takeUnifiedTiming(key: string): number | null {
   return timing;
 }
 
-export function formatUnifiedUsage(usage?: LLMUsage | null): string {
-  if (!usage) return 'Tokens: N/A';
+export function formatUnifiedUsage(stageOrUsage?: string | LLMUsage | null, usageOrNull?: LLMUsage | null): string {
+  const usage = (typeof stageOrUsage === 'object' ? stageOrUsage : usageOrNull) || null;
+  const stage = typeof stageOrUsage === 'string' ? stageOrUsage : null;
+  if (!usage) return stage ? `[${stage}] Tokens: N/A` : 'Tokens: N/A';
   const prompt = usage.promptTokens ?? usage.prompt_tokens ?? 0;
   const candidates = usage.candidatesTokens ?? usage.completion_tokens ?? 0;
   const total = usage.totalTokens ?? usage.total_tokens ?? (prompt + candidates);
-  return `Prompt: ${prompt}, Completion: ${candidates}, Total: ${total}`;
+  const text = `Prompt: ${prompt}, Completion: ${candidates}, Total: ${total}`;
+  return stage ? `[${stage}] ${text}` : text;
 }

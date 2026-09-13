@@ -167,6 +167,10 @@ export default function UserManagementTab() {
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const updated: AdminSettings = {
+      defaultCredits: adminSettings?.defaultCredits ?? 100,
+      maintenanceMode: adminSettings?.maintenanceMode ?? false,
+      allowGuestMode: adminSettings?.allowGuestMode ?? true,
+      ...adminSettings,
       flashLiteCost: Number(editFlashLiteCost),
       standardCost: Number(editStandardCost),
       quotaDemo: Number(editQuotaDemo),

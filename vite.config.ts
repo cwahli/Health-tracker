@@ -1,40 +1,11 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { execSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
 import {defineConfig} from 'vite';
 
-function getGitInfo() {
-  // Primary: read from the pre-generated file committed to the repo.
-  // This works in Docker builds where .git is excluded from the build context.
-  const generatedPath = path.resolve(__dirname, 'src/git-version.generated.ts');
-  if (existsSync(generatedPath)) {
-    const src = readFileSync(generatedPath, 'utf-8');
-    const hashMatch = src.match(/GIT_COMMIT_HASH\s*=\s*"([^"]+)"/);
-    const timeMatch = src.match(/GIT_COMMIT_TIME\s*=\s*"([^"]+)"/);
-    if (hashMatch && hashMatch[1] !== 'unknown') {
-      return { hash: hashMatch[1], time: timeMatch ? timeMatch[1] : new Date().toISOString() };
-    }
-  }
-  // Fallback: run git directly (works locally when .git is present).
-  try {
-    const hash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
-    const time = execSync('git log -1 --format=%cI', { encoding: 'utf-8' }).trim();
-    return { hash, time };
-  } catch {
-    return { hash: 'unknown', time: new Date().toISOString() };
-  }
-}
-
 export default defineConfig(() => {
-  const git = getGitInfo();
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      __GIT_COMMIT_HASH__: JSON.stringify(git.hash),
-      __GIT_COMMIT_TIME__: JSON.stringify(git.time),
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

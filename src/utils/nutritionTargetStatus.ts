@@ -24,22 +24,6 @@ const STATUS_KEYS: Array<{ key: string; label: string; unit: string }> = [
   { key: 'transFat', label: 'Trans Fat', unit: 'g' },
 ];
 
-const ALL_NUTRIENT_METADATA: Record<string, { label: string; unit: string }> = {
-  saturatedFat: { label: 'Sat fat', unit: 'g' },
-  calories: { label: 'Calorie', unit: 'kcal' },
-  sodium: { label: 'Sodium', unit: 'mg' },
-  protein: { label: 'Protein', unit: 'g' },
-  carbohydrates: { label: 'Carbohydrates', unit: 'g' },
-  totalFibre: { label: 'Total Fibre', unit: 'g' },
-  potassium: { label: 'Potassium', unit: 'mg' },
-  solubleFibre: { label: 'Soluble Fibre', unit: 'g' },
-  addedSugar: { label: 'Added Sugar', unit: 'g' },
-  transFat: { label: 'Trans Fat', unit: 'g' },
-  totalFat: { label: 'Total Fat', unit: 'g' },
-  sugar: { label: 'Sugar', unit: 'g' },
-  unsaturatedFat: { label: 'Unsat Fat', unit: 'g' },
-};
-
 function num(v: any): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -50,8 +34,7 @@ function fmtAvg(v: number): string {
   return Number.isInteger(r) ? String(r) : String(r);
 }
 
-function shiftDate(todayStr: string, back: number): string {
-  const p = String(todayStr || '').split('-').map(Number);
+function shiftDate(todayStr: string, back: number): string {  const p = String(todayStr || '').split('-').map(Number);
   if (p.length !== 3 || p.some((n) => !Number.isFinite(n))) return '';
   const d = new Date(p[0], p[1] - 1, p[2]);
   d.setDate(d.getDate() - back);
@@ -64,25 +47,11 @@ export function buildNutritionTargetStatus(args: {
   logs?: StatusDayLog[] | null;
   targets?: Record<string, any> | null;
   todayStr?: string;
-  targetKeys?: string[];
 }): string {
   const logs = Array.isArray(args.logs) ? args.logs : [];
   const todayStr = args.todayStr || '';
   if (!todayStr) return '';
   const targets = args.targets || {};
-
-  const activeStatusKeys: Array<{ key: string; label: string; unit: string }> =
-    Array.isArray(args.targetKeys) && args.targetKeys.length > 0
-      ? args.targetKeys.map((k) => ({
-          key: k,
-          label:
-            ALL_NUTRIENT_METADATA[k]?.label ||
-            k.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase()),
-          unit:
-            ALL_NUTRIENT_METADATA[k]?.unit ||
-            (k === 'calories' ? 'kcal' : k === 'sodium' || k === 'potassium' ? 'mg' : 'g'),
-        }))
-      : STATUS_KEYS;
 
   const windowDates: string[] = [];
   for (let back = 0; back < 7; back++) {
@@ -98,23 +67,23 @@ export function buildNutritionTargetStatus(args: {
     if (!inWindow.has(ds)) continue;
     const agg = byDate.get(ds) || {};
     const nuts = log?.nutrients || {};
-    for (const { key } of activeStatusKeys) {
+    for (const { key } of STATUS_KEYS) {
       agg[key] = (agg[key] || 0) + num(nuts[key]);
     }
     byDate.set(ds, agg);
   }
   const activeDays = [...byDate.entries()].filter(([, agg]) =>
-    activeStatusKeys.some(({ key }) => (agg[key] || 0) > 0)
+    STATUS_KEYS.some(({ key }) => (agg[key] || 0) > 0)
   );
   if (activeDays.length === 0) return '';
 
   const n = activeDays.length;
   const sums: Record<string, number> = {};
-  for (const { key } of activeStatusKeys) sums[key] = 0;
+  for (const { key } of STATUS_KEYS) sums[key] = 0;
   for (const [, agg] of activeDays) {
-    for (const { key } of activeStatusKeys) sums[key] += agg[key] || 0;
+    for (const { key } of STATUS_KEYS) sums[key] += agg[key] || 0;
   }
-  const items = activeStatusKeys.map(({ key, label, unit }) => {
+  const items = STATUS_KEYS.map(({ key, label, unit }) => {
     const avg = sums[key] / n;
     const t = num(targets[key]);
     let suffix = '';
@@ -129,17 +98,13 @@ export function buildNutritionTargetStatus(args: {
 
 /**
  * Explicit daily targets only (no fallbacks): percent shows solely where the
- * user has a real target. Returns targetable keys present and finite.
+ * user has a real target. Returns the 5 targetable keys present and finite.
  */
-export function pickExplicitTargets(daily: any, allowedKeys?: string[]): Record<string, number> {
+export function pickExplicitTargets(daily: any): Record<string, number> {
   const out: Record<string, number> = {};
-  const keysToCheck = Array.isArray(allowedKeys) && allowedKeys.length > 0
-    ? allowedKeys
-    : ['calories', 'saturatedFat', 'sodium', 'protein', 'carbohydrates'];
-  for (const key of keysToCheck) {
+  for (const key of ['calories', 'saturatedFat', 'sodium', 'protein', 'carbohydrates']) {
     const v = Number(daily?.[key]);
     if (Number.isFinite(v) && v > 0) out[key] = v;
   }
   return out;
 }
-

@@ -65,21 +65,24 @@ export function reverseStandardizeUnit(
   key: string,
   value: number | string,
   targetUnit?: string
-): number | string {
-  if (value === '' || value === null || value === undefined) return value;
+): { newValue: number | string; newUnit: string } {
+  if (value === '' || value === null || value === undefined) {
+    return { newValue: value, newUnit: targetUnit || '' };
+  }
   const num = typeof value === 'number' ? value : parseFloat(String(value));
-  if (isNaN(num)) return value;
+  if (isNaN(num)) return { newValue: value, newUnit: targetUnit || '' };
 
   const normKey = key.toLowerCase();
   const conv = CONVERSION_FACTORS[normKey];
   const target = (targetUnit || '').toLowerCase().trim();
 
-  if (conv && target === conv.from.toLowerCase()) {
+  if (conv && (target === conv.to.toLowerCase() || target === conv.from.toLowerCase() || !target)) {
     const reversed = num / conv.multiplier;
-    return Number(reversed.toFixed(conv.decimals !== undefined ? conv.decimals : 2));
+    const rounded = Number(reversed.toFixed(conv.decimals !== undefined ? conv.decimals : 2));
+    return { newValue: rounded, newUnit: conv.from };
   }
 
-  return num;
+  return { newValue: num, newUnit: targetUnit || '' };
 }
 
 export function formatNormalRange(

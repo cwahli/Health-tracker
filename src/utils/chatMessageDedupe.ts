@@ -43,7 +43,7 @@ export function isPortionClarifyAnswered(m: any): boolean {
 
 /** First-pass picker is in this thread; hide the post-log Adjust-portion chip. */
 export function threadHasUnansweredPortionClarify(
-  messages: Array<{ data?: any; pendingFoodLog?: any; portionClarify?: any; portionClarifyAnswered?: any }>
+  messages: Array<{ data?: any; pendingFoodLog?: any; portionClarify?: any; portionClarifyAnswered?: any; [key: string]: any }>
 ): boolean {
   if (!Array.isArray(messages)) return false;
   return messages.some((m: any) => hasPortionClarifyPayload(m) && !isPortionClarifyAnswered(m));
@@ -58,7 +58,7 @@ export function threadHasUnansweredPortionClarify(
  * the only card, is never removed). Locally-answered bubbles (portionClarify
  * nulled at confirm time) are unaffected — they carry no payload to match.
  */
-export function dropAnsweredClarifyMessages<T extends { role?: string; data?: any; pendingFoodLog?: any; portionClarify?: any }>(
+export function dropAnsweredClarifyMessages<T extends { role?: string; data?: any; pendingFoodLog?: any; portionClarify?: any; [key: string]: any }>(
   messages: T[],
   answered: boolean,
 ): T[] {
@@ -75,14 +75,14 @@ export function dropAnsweredClarifyMessages<T extends { role?: string; data?: an
   return messages.filter((m, idx) => !(idx < lastLedgerIdx && hasClarifyPayload(m)));
 }
 
-export function firstPortionClarifyMessageIndex(messages: Array<{ data?: any; pendingFoodLog?: any; portionClarify?: any }>): number {
+export function firstPortionClarifyMessageIndex(messages: Array<{ data?: any; pendingFoodLog?: any; portionClarify?: any; [key: string]: any }>): number {
   if (!Array.isArray(messages)) return -1;
   return messages.findIndex((m: any) => hasPortionClarifyPayload(m));
 }
 
 /** Rebuilds must not add a second question card when one payload already exists. */
 export function shouldInjectPortionClarifyMessage(
-  messages: Array<{ data?: any; pendingFoodLog?: any; portionClarify?: any }>,
+  messages: Array<{ data?: any; pendingFoodLog?: any; portionClarify?: any; [key: string]: any }>,
   answered: boolean,
 ): boolean {
   if (answered) return false;

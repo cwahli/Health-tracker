@@ -49,77 +49,37 @@ export function formatNutrientDisplayValue(val: any, unit: string = ''): string 
   return unit ? `${cleaned} ${unit}` : `${cleaned}`;
 }
 
-/**
- * Single source of truth for Top Target nutrient keys across the application.
- * Extracts prioritized core nutrients from report and user profile, strictly
- * excluding non-nutrient activity metrics (e.g. 'steps').
- */
-export function getTopTargetNutrientKeys(report?: any, profile?: any): string[] {
-  const rawKeys: string[] = [];
-  if (Array.isArray(report?.topNutrientTargets) && report.topNutrientTargets.length > 0) {
-    report.topNutrientTargets.forEach((k: any) => {
-      const strKey = typeof k === 'string' ? k : (k?.nutrientKey || k?.key);
-      if (strKey && !rawKeys.includes(strKey)) rawKeys.push(strKey);
-    });
+export function extractNutrientValue(nutrients: any, key: string): number {
+  if (!nutrients || typeof nutrients !== 'object' || !key) return 0;
+  if (nutrients[key] !== undefined && nutrients[key] !== null) {
+    return cleanNutrientVal(nutrients[key]);
   }
-  const cats = report?.healthBaselineCategories || (report as any)?.riskCategories || [];
-  if (Array.isArray(cats)) {
-    cats.forEach((cat: any) => {
-      if (Array.isArray(cat.nutrientTargets) || Array.isArray(cat.priorityNutrientTargets)) {
-        (cat.priorityNutrientTargets || cat.nutrientTargets).forEach((nt: any) => {
-          const strKey = typeof nt === 'string' ? nt : (nt?.nutrientKey || nt?.key);
-          if (strKey && isCoreNutrient(strKey) && !rawKeys.includes(strKey)) rawKeys.push(strKey);
-        });
-      }
-    });
-  }
-  if (profile?.topNutrientsToMonitor && profile.topNutrientsToMonitor.length > 0) {
-    profile.topNutrientsToMonitor.forEach((k: any) => {
-      if (typeof k === 'string' && !rawKeys.includes(k)) rawKeys.push(k);
-    });
-  }
-  if (rawKeys.length === 0) {
-    PRIMARY_NUTRIENTS.forEach(k => rawKeys.push(k));
-  }
-  // Filter strictly to core nutrients while maintaining rank order, excluding non-nutrients like steps
-  const coreOnly = rawKeys.filter(k => isCoreNutrient(k) && k.toLowerCase() !== 'steps');
-  const set = new Set<string>();
-  coreOnly.forEach(k => set.add(k));
-  if (set.size === 0) {
-    PRIMARY_NUTRIENTS.forEach(k => set.add(k));
-  }
-  return Array.from(set);
-}
-
-/**
- * Safely extracts numeric nutrient value from a food/meal nutrients record,
- * handling case differences, special characters, and common alias fallbacks.
- */
-export function extractNutrientValue(nutrients: Record<string, any> | undefined | null, targetKey: string): number {
-  if (!nutrients || typeof nutrients !== 'object') return 0;
-  if (nutrients[targetKey] !== undefined && nutrients[targetKey] !== null) {
-    const v = Number(nutrients[targetKey]);
-    return Number.isFinite(v) ? v : 0;
-  }
-  const cleanTarget = targetKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const clean = key.toLowerCase().replace(/[^a-z0-9]/g, '');
   for (const [k, v] of Object.entries(nutrients)) {
-    if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTarget) {
-      const num = Number(v);
-      return Number.isFinite(num) ? num : 0;
+    if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === clean) {
+      return cleanNutrientVal(v);
     }
-  }
-  // Common aliases
-  if (cleanTarget === 'saturatedfat' && nutrients['satFat'] !== undefined) {
-    const v = Number(nutrients['satFat']);
-    return Number.isFinite(v) ? v : 0;
-  }
-  if (cleanTarget === 'totalfibre' && (nutrients['dietaryFiber'] !== undefined || nutrients['fiber'] !== undefined)) {
-    const v = Number(nutrients['dietaryFiber'] ?? nutrients['fiber']);
-    return Number.isFinite(v) ? v : 0;
-  }
-  if (cleanTarget === 'carbohydrates' && nutrients['carbs'] !== undefined) {
-    const v = Number(nutrients['carbs']);
-    return Number.isFinite(v) ? v : 0;
   }
   return 0;
 }
+
+export function getTopTargetNutrientKeys(report?: any, profile?: any): string[] {
+  if (Array.isArray(profile?.topTargetNutrientKeys) && profile.topTargetNutrientKeys.length > 0) {
+    return profile.topTargetNutrientKeys;
+  }
+  if (Array.isArray(report?.topTargetNutrientKeys) && report.topTargetNutrientKeys.length > 0) {
+    return report.topTargetNutrientKeys;
+  }
+  if (report?.dailyNutrientTargets && typeof report.dailyNutrientTargets === 'object') {
+    const keys = Object.keys(report.dailyNutrientTargets).filter(Boolean);
+    if (keys.length > 0) return keys.slice(0, 5);
+  }
+  if (profile?.targets && typeof profile.targets === 'object') {
+    const keys = Object.keys(profile.targets).filter(Boolean);
+    if (keys.length > 0) return keys.slice(0, 5);
+  }
+  return [...PRIMARY_NUTRIENTS];
+}
+
+
+

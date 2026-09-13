@@ -47,9 +47,9 @@ export function getAvailableCredits(profile: UserProfile, customCosts?: any): {
   const isDemo = userType === 'Demo';
 
   const settings = getAdminSettings();
-  const defaultQuota = userType === 'Admin' 
+  const defaultQuota = (userType === 'Admin' 
     ? settings.quotaAdmin 
-    : (userType === 'Demo' ? settings.quotaDemo : settings.quotaStandard);
+    : (userType === 'Demo' ? settings.quotaDemo : settings.quotaStandard)) ?? (DEFAULT_DAILY_QUOTA[userType] || 100);
   
   const credits: AgentCreditsState = profile.agentCredits || {
     totalUsed: 0,
@@ -61,11 +61,11 @@ export function getAvailableCredits(profile: UserProfile, customCosts?: any): {
   };
 
   const now = new Date();
-  const lastReset = new Date(credits.lastResetTime);
-  const isDifferentDay = now.toDateString() !== lastReset.toDateString();
+  const lastReset = credits.lastResetTime ? new Date(credits.lastResetTime) : new Date(0);
+  const isDifferentDay = isNaN(lastReset.getTime()) || now.toDateString() !== lastReset.toDateString();
 
-  let remaining = credits.remaining;
-  let lastResetTime = credits.lastResetTime;
+  let remaining = typeof credits.remaining === 'number' && !isNaN(credits.remaining) ? credits.remaining : defaultQuota;
+  let lastResetTime = credits.lastResetTime || now.toISOString();
 
   if (isDifferentDay) {
     remaining = defaultQuota;
@@ -74,10 +74,10 @@ export function getAvailableCredits(profile: UserProfile, customCosts?: any): {
 
   // Filter out expired granted credits
   const validGranted = (credits.grantedCredits || []).filter(g => {
-    return new Date(g.expiresAt) > now;
+    return g && typeof g.amount === 'number' && !isNaN(g.amount) && new Date(g.expiresAt) > now;
   });
 
-  const grantedTotal = validGranted.reduce((sum, g) => sum + g.amount, 0);
+  const grantedTotal = validGranted.reduce((sum, g) => sum + (Number(g.amount) || 0), 0);
 
   // Time remaining to next reset (midnight)
   const tomorrow = new Date();
@@ -88,10 +88,13 @@ export function getAvailableCredits(profile: UserProfile, customCosts?: any): {
   const minutes = Math.floor((msToReset % (1000 * 60 * 60)) / (1000 * 60));
   const nextResetStr = `${hours}h ${minutes}m`;
 
+  const safeDaily = Number(remaining) || 0;
+  const safeGranted = Number(grantedTotal) || 0;
+
   return {
-    total: remaining + grantedTotal,
-    daily: remaining,
-    granted: grantedTotal,
+    total: safeDaily + safeGranted,
+    daily: safeDaily,
+    granted: safeGranted,
     nextResetStr,
     grantedDetails: validGranted,
     isDemo,
@@ -106,12 +109,12 @@ export function deductAgentCredits(profile: UserProfile, modelId: string, custom
   const userType = profile.userType || (profile.email?.toLowerCase().trim() === 'cwah.liu@gmail.com' ? 'Admin' : (profile.email?.toLowerCase().trim() === 'demo@healthcockpit.com' ? 'Demo' : 'Standard'));
   
   const settings = getAdminSettings();
-  const defaultQuota = userType === 'Admin' 
+  const defaultQuota = (userType === 'Admin' 
     ? settings.quotaAdmin 
-    : (userType === 'Demo' ? settings.quotaDemo : settings.quotaStandard);
+    : (userType === 'Demo' ? settings.quotaDemo : settings.quotaStandard)) ?? (DEFAULT_DAILY_QUOTA[userType] || 100);
 
   const isFlashLite = modelId === 'gemini-3.5-flash-lite' || modelId === 'gemini-3.8-flash' || modelId.toLowerCase().includes('flash-lite');
-  const cost = isFlashLite ? settings.flashLiteCost : settings.standardCost;
+  const cost = (isFlashLite ? settings.flashLiteCost : settings.standardCost) ?? (isFlashLite ? 1 : 20);
 
   const updated = { ...profile };
   

@@ -42,16 +42,13 @@ export async function downloadJobDebugReport(args: {
 }): Promise<void> {
   const { jobIdToDownload, msg, messages } = args;
   const format = args.format || 'markdown';
-  const rawIdCandidate =
+  const resolvedJobId =
     msg?.data?.jobId ||
-    (msg?.id?.startsWith('msg_assistant_timeout_') ? msg.id.replace('msg_assistant_timeout_', '') : '') ||
     (msg?.id?.startsWith('msg_assistant_job_') ? msg.id.replace('msg_assistant_job_', 'job_') : '') ||
     (msg?.id?.startsWith('msg_assistant_') && !msg.id.includes('fail') && !msg.id.includes('clarify') && !/^\d+$/.test(msg.id.replace('msg_assistant_', '')) ? msg.id.replace('msg_assistant_', '') : '') ||
     (msg?.pendingFoodLog?.jobId || msg?.data?.pendingFoodLog?.jobId) ||
     jobIdToDownload ||
     args.fallbackJobId;
-
-  const resolvedJobId = rawIdCandidate ? rawIdCandidate.replace(/^(?:timeout_|clarify_)/, '') : rawIdCandidate;
 
   const msgIndexForHistory = messages.findIndex((m: any) => m.id === msg?.id);
   const conversationHistory = (msgIndexForHistory >= 0 ? messages.slice(0, msgIndexForHistory) : [])
@@ -269,7 +266,7 @@ export async function downloadJobDebugReport(args: {
 
     const mdContent = buildDebugMarkdownReport({
       jobId: resolvedJobId,
-      status: job?.status || (msg?.isError || msg?.agentUnavailable || (msg?.id && msg.id.includes('timeout')) ? 'failed' : 'unknown'),
+      status: job?.status || (msg?.isError || msg?.agentUnavailable ? 'failed' : 'unknown'),
       mode: job?.result?.mode,
       agentType: job?.result?.agentType || msg?.data?.agentResult?.agentType || msg?.data?.agentType || msg?.agentType || 'front_desk',
       message: job?.result?.message || msg?.content,

@@ -15,9 +15,14 @@ self.addEventListener('fetch', (event) => {
     url.origin === self.location.origin &&
     !url.pathname.startsWith('/api/')
   ) {
+    // Let navigation requests pass through with standard network fetch
+    if (event.request.mode === 'navigate') {
+      return;
+    }
+
     event.respondWith((async () => {
       let attempts = 0;
-      const maxAttempts = 5;
+      const maxAttempts = 3;
       while (attempts < maxAttempts) {
         attempts++;
         try {
@@ -35,10 +40,17 @@ self.addEventListener('fetch', (event) => {
             await new Promise((resolve) => setTimeout(resolve, delay));
             continue;
           }
-          throw err;
+          break;
         }
       }
-      return fetch(event.request);
+      try {
+        return await fetch(event.request);
+      } catch (finalErr) {
+        return new Response('Network error occurred. Please reload.', {
+          status: 503,
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      }
     })());
   }
 });

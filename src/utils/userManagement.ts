@@ -6,6 +6,11 @@ export interface AdminSettings {
   allowGuestMode: boolean;
   modelOverrides?: Record<string, string>;
   apiBudgetLimit?: number;
+  flashLiteCost: number;
+  standardCost: number;
+  quotaDemo: number;
+  quotaStandard: number;
+  quotaAdmin: number;
   [key: string]: any;
 }
 
@@ -15,6 +20,11 @@ const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   allowGuestMode: true,
   modelOverrides: {},
   apiBudgetLimit: 50,
+  flashLiteCost: 1,
+  standardCost: 20,
+  quotaDemo: 20,
+  quotaStandard: 100,
+  quotaAdmin: 500,
 };
 
 const USERS_STORAGE_KEY = 'health_app_all_users';
@@ -33,14 +43,16 @@ export function getAllLocalUsers(): UserProfile[] {
   return [];
 }
 
-export async function updateUserProfile(profile: UserProfile): Promise<void> {
-  if (!profile || !profile.email) return;
+export async function updateUserProfile(profileOrEmail: UserProfile | string, maybeProfile?: UserProfile): Promise<void> {
+  const profile = typeof profileOrEmail === 'string' ? maybeProfile : profileOrEmail;
+  const email = typeof profileOrEmail === 'string' ? profileOrEmail : profile?.email;
+  if (!profile || !email) return;
   const users = getAllLocalUsers();
-  const existingIdx = users.findIndex(u => u.email.toLowerCase() === profile.email.toLowerCase());
+  const existingIdx = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
   if (existingIdx >= 0) {
     users[existingIdx] = { ...users[existingIdx], ...profile };
   } else {
-    users.push(profile);
+    users.push({ ...profile, email });
   }
   try {
     localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));

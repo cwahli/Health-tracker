@@ -61,8 +61,23 @@ export function mergeProfiles(a?: UserProfile | null, b?: UserProfile | null): U
   return { ...a, ...b };
 }
 
-export function mergeBiomarkerHistory(a: BiomarkerLog[] = [], b: BiomarkerLog[] = []): BiomarkerLog[] {
-  return mergeByRecency(a, b) as BiomarkerLog[];
+export function mergeBiomarkerHistory(
+  a: BiomarkerLog[] = [],
+  b: BiomarkerLog[] = [],
+  deletedMap?: Record<string, number>
+): BiomarkerLog[] {
+  const merged = mergeByRecency(a, b) as BiomarkerLog[];
+  if (!deletedMap || Object.keys(deletedMap).length === 0) {
+    return merged;
+  }
+  return merged.filter(item => {
+    if (!item.id) return true;
+    const tombstone = deletedMap[item.id];
+    if (!tombstone) return true;
+    const itemTime = item.updated_at || item.date || 0;
+    const t = typeof itemTime === 'number' ? itemTime : new Date(itemTime).getTime();
+    return t > tombstone;
+  });
 }
 
 export function mergeDeleteMaps(a: Record<string, number> = {}, b: Record<string, number> = {}): Record<string, number> {
@@ -353,7 +368,8 @@ export async function syncLogsWithTimeBuckets(
   localBiomarkers: BiomarkerLog[],
   deleteMapFoods: Record<string, number> = {},
   deleteMapBiomarkers: Record<string, number> = {},
-  onSyncComplete?: (syncedFoods: FoodLog[], syncedBiomarkers: BiomarkerLog[]) => void
+  onSyncComplete?: (syncedFoods: FoodLog[], syncedBiomarkers: BiomarkerLog[]) => void,
+  options?: { forceAllBiomarkers?: boolean; forceAllFoods?: boolean }
 ): Promise<void> {
   const { serverFoods, serverBiomarkers } = await fetchAllConsolidatedLogs(
     db,
@@ -397,79 +413,76 @@ export function subscribeToSupabaseLogs(
   }
 }
 
-// Firebase backup writes for food/biomarker logs removed — all food/biomarker
-// persistence goes through Cloudflare D1 via /api/sync/supabase-push (D1-backed).
-/**
- * Push food and/or biomarker logs to the server (Cloudflare D1 via /api/sync/supabase-push).
- * This is the write-side counterpart to fetchAllConsolidatedLogs.
- * Called after every local mutation so Device B can pull Device A's changes.
- */
-export async function pushLogsToServer(opts: {
-  uid: string;
-  email?: string | null;
-  foods?: FoodLog[];
-  biomarkers?: BiomarkerLog[];
-  profile?: UserProfile | null;
-  actions?: HealthAction[];
-  dailyBenefits?: DailyBenefit[];
-  report?: RecommendationReport | null;
-  forceOverwrite?: boolean;
-  idToken?: string | null;
-}): Promise<{ success: boolean; foodCount?: number; bioCount?: number; error?: string }> {
-  const { uid, email, foods, biomarkers, profile, actions, dailyBenefits, report, forceOverwrite, idToken } = opts;
-  if (!uid) return { success: false, error: 'uid required' };
+export async function upsertProfileToSupabase(
+  profile: any,
+  uid?: string,
+  extra?: { actions?: any[]; dailyBenefits?: any[]; report?: any; email?: string }
+): Promise<void> {
+  if (!isSupabaseConfigured || !supabase || !profile) return;
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    const resp = await fetch('/api/sync/supabase-push', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
-      },
-      body: JSON.stringify({ uid, email, foods, biomarkers, profile, actions, dailyBenefits, report, forceOverwrite }),
-      signal: controller.signal
+    const userUid = uid || profile.uid || profile.firebase_uid;
+    await supabase.from('profiles').upsert({
+      firebase_uid: userUid,
+      email: extra?.email || profile.email,
+      nickname: profile.nickname,
+      updated_at: new Date().toISOString(),
+      data: {
+        profile,
+        actions: extra?.actions,
+        dailyBenefits: extra?.dailyBenefits,
+        report: extra?.report
+      }
     });
-    clearTimeout(timeoutId);
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      console.warn(`[syncUtils] pushLogsToServer HTTP ${resp.status}:`, text);
-      return { success: false, error: `HTTP ${resp.status}` };
-    }
-    const data = await resp.json();
-    return { success: data.success ?? true, foodCount: data.foodCount, bioCount: data.bioCount };
-  } catch (err: any) {
-    console.warn('[syncUtils] pushLogsToServer error:', err?.message || err);
-    return { success: false, error: err?.message || String(err) };
+  } catch (err) {
+    console.warn('[syncUtils] upsertProfileToSupabase failed:', err);
   }
 }
 
-/**
- * Push profile (and optional dashboard data) to the server via /api/sync/supabase-push.
- * uid and opts are used; the legacy no-arg form is kept for compatibility.
- */
-export async function upsertProfileToSupabase(
-  profile: UserProfile,
-  uid?: string,
-  opts?: {
-    actions?: HealthAction[];
-    dailyBenefits?: DailyBenefit[];
-    report?: RecommendationReport | null;
-    email?: string | null;
-    forceOverwrite?: boolean;
+export async function pushLogsToServer(params: {
+  uid: string;
+  email?: string;
+  foods?: FoodLog[];
+  biomarkers?: BiomarkerLog[];
+  profile?: any;
+  actions?: any[];
+  dailyBenefits?: any[];
+  report?: any;
+  forceOverwrite?: boolean;
+  idToken?: string;
+  deletedFoodLogIds?: Record<string, number> | string[];
+  deletedBiomarkerLogIds?: Record<string, number> | string[];
+}): Promise<{ success: boolean; foodCount?: number; bioCount?: number; error?: string }> {
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (params.idToken) {
+      headers['Authorization'] = `Bearer ${params.idToken}`;
+    }
+    const res = await fetch('/api/sync/supabase-push', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        uid: params.uid,
+        email: params.email,
+        foods: params.foods,
+        biomarkers: params.biomarkers,
+        profile: params.profile,
+        actions: params.actions,
+        dailyBenefits: params.dailyBenefits,
+        report: params.report,
+        forceOverwrite: params.forceOverwrite,
+        deletedFoodLogIds: params.deletedFoodLogIds,
+        deletedBiomarkerLogIds: params.deletedBiomarkerLogIds
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      return { success: false, error: err.error || res.statusText };
+    }
+    const data = await res.json();
+    return { success: true, foodCount: data.foodCount, bioCount: data.bioCount };
+  } catch (err: any) {
+    return { success: false, error: err.message || String(err) };
   }
-): Promise<void> {
-  if (!profile) return;
-  const effectiveUid = uid || (profile as any).uid || (profile as any).firebaseUid;
-  if (!effectiveUid) return;
-  // Fire-and-forget: profile push is best-effort (food logs are pushed via pushLogsToServer)
-  pushLogsToServer({
-    uid: effectiveUid,
-    email: opts?.email || profile.email,
-    profile,
-    actions: opts?.actions,
-    dailyBenefits: opts?.dailyBenefits,
-    report: opts?.report ?? null,
-    forceOverwrite: opts?.forceOverwrite
-  }).catch((err: any) => console.warn('[syncUtils] upsertProfileToSupabase push failed:', err));
 }

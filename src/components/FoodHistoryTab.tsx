@@ -73,7 +73,17 @@ const formatLogDate = (dateStr: string) => {
   return dateStr;
 };
 
-const getRecommendationColorClass = (rec: string) => {
+const getRecommendationColorClass = (rec: string, level?: string) => {
+  const lvl = String(level || '').toLowerCase();
+  if (lvl === 'alert' || lvl === 'bad' || lvl === 'avoid' || lvl === 'danger' || lvl === 'severe') {
+    return 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300';
+  }
+  if (lvl === 'warning' || lvl === 'caution' || lvl === 'moderate') {
+    return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
+  }
+  if (lvl === 'good' || lvl === 'safe' || lvl === 'healthy' || lvl === 'best') {
+    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
+  }
   const lower = String(rec || '').toLowerCase();
   if (lower.includes('good') || lower.includes('safe') || lower.includes('best') || lower.includes('perfect') || lower.includes('healthy')) {
     return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
@@ -1749,7 +1759,7 @@ export default function FoodHistoryTab({
                               const vLabel = log.verdict?.label || (log.recommendation && log.recommendation !== 'neutral' ? log.recommendation : null);
                               if (!vLabel) return null;
                               return (
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize tracking-wide ${getRecommendationColorClass(vLabel)}`}>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize tracking-wide ${getRecommendationColorClass(vLabel, log.verdict?.level || (typeof log.recommendation === 'string' ? log.recommendation : undefined))}`}>
                                   {vLabel}
                                 </span>
                               );

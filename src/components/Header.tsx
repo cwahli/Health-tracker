@@ -30,19 +30,10 @@ const BackupRestoreTab = lazyWithRetry(() => import('./BackupRestoreTab'));
 const FoodCatalogAdminTab = lazyWithRetry(() => import('./FoodCatalogAdminTab').then(m => ({ default: m.FoodCatalogAdminTab })));
 import { Activity, Stethoscope, X, ChevronRight, Database, Bug, Loader } from 'lucide-react';
 import { JobStore, isJobBlank } from '../jobs/JobStore';
-import {
-  getGoogleAccessToken,
-  hasGoogleToken,
-  runBackupWorkflow,
-  listBackupsFromDrive,
-  downloadFileFromDrive,
-  previewBackupZip,
-  restoreAccountToFirestore,
-  clearGoogleToken
-} from '../utils/googleBackup';
 import { compressImage } from '../utils/imageCompressor';
 import { checkQuotaFlag } from '../utils/firestoreUtils';
 import { auditColors, auditFonts, auditDesignTokens, auditComponents, auditElements } from '../utils/themeRegistry';
+import { GIT_COMMIT_HASH, GIT_COMMIT_TIME } from '../git-version.generated';
 
 export const parseColorAndOpacity = (val: string) => {
   let v = (val || '').trim();
@@ -821,7 +812,7 @@ export default function Header({
     if (profile.themePalette) {
       Object.entries(profile.themePalette).forEach(([key, val]) => {
         const defaultColor = auditColors.find((c: any) => c.key === key);
-        if (defaultColor && val && defaultColor.defaultHex !== val) {
+        if (defaultColor && val && (defaultColor as any).defaultValue !== val) {
           count++;
         }
       });
@@ -1065,147 +1056,6 @@ export default function Header({
     setLastSyncTime(localStorage.getItem(`ghealth_${email}_last_sync`));
   }, [profile?.email]);
 
-  // Google Drive & Sheets Backup / Restore States
-  const [googleAuthorized, setGoogleAuthorized] = useState(() => hasGoogleToken());
-  const [showBackupModal, setShowBackupModal] = useState(false);
-  const [showRestoreModal, setShowRestoreModal] = useState(false);
-
-  const [backupVersion, setBackupVersion] = useState('V1');
-  const [backupPassword, setBackupPassword] = useState('');
-  const [backupComment, setBackupComment] = useState('');
-  const [backupStatus, setBackupStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
-  const [backupError, setBackupError] = useState('');
-  const [backupResult, setBackupResult] = useState<any>(null);
-
-  const [restoreFiles, setRestoreFiles] = useState<any[]>([]);
-  const [selectedRestoreFile, setSelectedRestoreFile] = useState<any>(null);
-  const [restorePassword, setRestorePassword] = useState('');
-  const [restoreStatus, setRestoreStatus] = useState<'idle' | 'listing' | 'downloading' | 'preview' | 'restoring' | 'success' | 'error'>('idle');
-  const [restoreError, setRestoreError] = useState('');
-  const [restorePreviewData, setRestorePreviewData] = useState<any[]>([]);
-  const [restoreTargetAccount, setRestoreTargetAccount] = useState<string>('all'); // 'all' or specific account email
-  const [restoreTargetFileBlob, setRestoreTargetFileBlob] = useState<Blob | null>(null);
-
-  const handleOpenBackup = async () => {
-    try {
-      const token = await getGoogleAccessToken();
-      setGoogleAuthorized(true);
-      setBackupStatus('idle');
-      setBackupError('');
-      setBackupResult(null);
-      setBackupPassword('');
-      setBackupComment('');
-      setShowBackupModal(true);
-    } catch (err: any) {
-      console.error("Google Auth failed:", err);
-    }
-  };
-
-  const handleExecuteBackup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!backupPassword) {
-      setBackupError("An encryption password is required to secure your backup ZIP file.");
-      return;
-    }
-    setBackupStatus('processing');
-    setBackupError('');
-    try {
-      const token = await getGoogleAccessToken();
-      const result = await runBackupWorkflow(token, backupVersion, backupComment, backupPassword);
-      setBackupResult(result);
-      setBackupStatus('success');
-    } catch (err: any) {
-      console.error("Backup failed:", err);
-      setBackupError(err.message || String(err));
-      setBackupStatus('error');
-    }
-  };
-
-  const handleOpenRestore = async () => {
-    setRestoreStatus('listing');
-    setRestoreError('');
-    setRestoreFiles([]);
-    setSelectedRestoreFile(null);
-    setRestorePassword('');
-    setRestorePreviewData([]);
-    setRestoreTargetAccount('all');
-    setRestoreTargetFileBlob(null);
-    setShowRestoreModal(true);
-
-    try {
-      const token = await getGoogleAccessToken();
-      setGoogleAuthorized(true);
-      const files = await listBackupsFromDrive(token);
-      setRestoreFiles(files);
-      setRestoreStatus('idle');
-    } catch (err: any) {
-      console.error("Failed to list backups:", err);
-      setRestoreError(err.message || "Failed to list backups from Google Drive.");
-      setRestoreStatus('error');
-    }
-  };
-
-  const handleSelectRestoreFile = (file: any) => {
-    setSelectedRestoreFile(file);
-    setRestorePassword('');
-    setRestoreError('');
-    setRestorePreviewData([]);
-    setRestoreTargetFileBlob(null);
-    setRestoreStatus('idle');
-  };
-
-  const handleLoadAndDecryptBackup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedRestoreFile) return;
-    setRestoreStatus('downloading');
-    setRestoreError('');
-
-    try {
-      const token = await getGoogleAccessToken();
-      const blob = await downloadFileFromDrive(token, selectedRestoreFile.id);
-      setRestoreTargetFileBlob(blob);
-
-      const preview = await previewBackupZip(blob, restorePassword);
-      setRestorePreviewData(preview);
-      setRestoreStatus('preview');
-    } catch (err: any) {
-      console.error("Unzip/Decrypt failed:", err);
-      setRestoreError(err.message || "Decryption failed. Please verify your backup password.");
-      setRestoreStatus('idle');
-    }
-  };
-
-  const handleExecuteRestore = async () => {
-    if (!restoreTargetFileBlob) return;
-    if (!window.confirm("This will restore the selected records back to Firestore. Are you sure you want to proceed?")) {
-      return;
-    }
-
-    setRestoreStatus('restoring');
-    setRestoreError('');
-    try {
-      if (restoreTargetAccount === 'all') {
-        for (const account of restorePreviewData) {
-          if (account.jsonData) {
-            await restoreAccountToFirestore(account.jsonData.uid, account.jsonData);
-          }
-        }
-      } else {
-        const account = restorePreviewData.find(acc => acc.email === restoreTargetAccount);
-        if (account && account.jsonData) {
-          await restoreAccountToFirestore(account.jsonData.uid, account.jsonData);
-        } else {
-          throw new Error("Selected account data not found in archive.");
-        }
-      }
-      setRestoreStatus('success');
-    } catch (err: any) {
-      console.error("Restore failed:", err);
-      setRestoreError(err.message || String(err));
-      setRestoreStatus('error');
-    }
-  };
-
   const handleToggleDebugMode = (enabled: boolean) => {
     setDebugMode(enabled);
     localStorage.setItem('agent_debug_mode', enabled ? 'true' : 'false');
@@ -1312,10 +1162,11 @@ export default function Header({
                 </span>
                 {(() => {
                   const info = getAvailableCredits(profile);
+                  const safeTotal = Number.isFinite(info?.total) ? info.total : 0;
                   return (
-                    <span className="text-[9px] bg-indigo-50 dark:bg-indigo-950/45 text-indigo-600 dark:text-indigo-400 border border-indigo-100/30 dark:border-indigo-900/30 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5" title={interpolate(t.agentCreditsLeftTitle, { n: info.total })}>
+                    <span className="text-[9px] bg-indigo-50 dark:bg-indigo-950/45 text-indigo-600 dark:text-indigo-400 border border-indigo-100/30 dark:border-indigo-900/30 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5" title={interpolate(t.agentCreditsLeftTitle, { n: safeTotal })}>
                       <Coins className="w-2.5 h-2.5" />
-                      {info.total}
+                      {safeTotal}
                     </span>
                   );
                 })()}
@@ -1394,7 +1245,7 @@ export default function Header({
             className="text-[10px] font-mono font-bold text-slate-400 dark:text-slate-500 cursor-pointer hover:underline hover:text-indigo-600 transition-colors"
             title={t.syncClickToOpen}
           >
-            {t.syncLabelPrefix} {lastSyncTime || t.syncReady}
+            {lastSyncTime ? `${t.syncLabelPrefix ? `${t.syncLabelPrefix} ` : ''}${lastSyncTime}` : t.syncReady}
           </span>
 
           {isAdmin && (
@@ -1874,7 +1725,6 @@ export default function Header({
                   id="profile-modal-bottom-signout-btn"
                   onClick={() => {
                     setIsEditing(false);
-                    clearGoogleToken();
                     onSignOut();
                   }}
                   className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-900/40 rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
@@ -3307,8 +3157,8 @@ export default function Header({
                 <div>
                   <h2 className="text-base sm:text-lg font-bold text-theme-text leading-none">Settings</h2>
                   <span className="text-[10px] sm:text-xs font-normal text-slate-400 block mt-0.5 font-mono">
-                    {__GIT_COMMIT_HASH__} · {(() => {
-                      const commitMs = new Date(__GIT_COMMIT_TIME__).getTime();
+                    {GIT_COMMIT_HASH} · {(() => {
+                      const commitMs = new Date(GIT_COMMIT_TIME).getTime();
                       const diffMs = Date.now() - commitMs;
                       const diffMin = Math.floor(diffMs / 60_000);
                       const diffHr = Math.floor(diffMin / 60);
@@ -3478,33 +3328,6 @@ export default function Header({
                 </React.Suspense>
               ) : dbOverlayViewMode === 'admin' && activeAdminTab === 'backup' ? (
                 <div className="space-y-6 max-h-[75vh] overflow-y-auto pb-8">
-                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl mx-4 mt-4 space-y-3">
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                        <Archive className="w-4.5 h-4.5 text-indigo-500" />
-                        <span>Google Workspace Backups</span>
-                      </h4>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <button
-                        type="button"
-                        onClick={handleOpenBackup}
-                        className="p-3 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer hover:scale-[1.01]"
-                      >
-                        <CloudUpload className="w-4.5 h-4.5" />
-                        <span>Backup Data</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleOpenRestore}
-                        className="p-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold rounded-xl text-xs flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer hover:scale-[1.01]"
-                      >
-                        <CloudDownload className="w-4.5 h-4.5" />
-                        <span>Restore Data</span>
-                      </button>
-                    </div>
-                  </div>
                   <React.Suspense fallback={null}>
                   <BackupRestoreTab 
                      profile={profile} 
@@ -4043,486 +3866,6 @@ export default function Header({
                       )}
                     </div>
                   )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ), document.body)}
-
-      {/* Backup Modal Overlay */}
-      {showBackupModal && createPortal((
-        <div id="backup-modal-overlay" className="fixed inset-0 z-[10000] bg-slate-900/75 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] animation-fade-in text-slate-800 dark:text-slate-100">
-            {/* Header */}
-            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-indigo-50/50 dark:bg-indigo-950/25">
-              <div className="flex items-center gap-2.5">
-                <CloudUpload className="w-5.5 h-5.5 text-indigo-600 dark:text-indigo-400" />
-                <div>
-                  <h2 className="text-lg font-bold text-theme-text">Create Secured Cloud Backup</h2>
-                  <span className="text-[10px] text-slate-500 font-medium block mt-0.5">Saves all patient logs and metadata in a password-secured ZIP archive</span>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowBackupModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-850 transition-colors cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Content Area */}
-            <div className="p-6 overflow-y-auto space-y-5 text-left flex-1">
-              {backupStatus === 'idle' && (
-                <form onSubmit={handleExecuteBackup} className="space-y-4">
-                  {/* Version */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-                      Backup Version Name
-                    </label>
-                    <input
-                      type="text"
-                      value={backupVersion}
-                      onChange={(e) => setBackupVersion(e.target.value)}
-                      placeholder="e.g., V1, V2, V1-initial"
-                      className="w-full text-sm px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
-                      required
-                    />
-                  </div>
-
-                  {/* Password */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <KeyRound className="w-3.5 h-3.5 text-indigo-500" />
-                      <span>ZIP Encryption Password</span>
-                    </label>
-                    <input
-                      type="password"
-                      value={backupPassword}
-                      onChange={(e) => setBackupPassword(e.target.value)}
-                      placeholder="Enter a secure password to encrypt files"
-                      className="w-full text-sm px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
-                      required
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1">This password will be required to decrypt and restore the records.</p>
-                  </div>
-
-                  {/* Comment */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-                      Backup Comments / Notes
-                    </label>
-                    <textarea
-                      value={backupComment}
-                      onChange={(e) => setBackupComment(e.target.value)}
-                      placeholder="Add an optional comment to log in the Sheets registry..."
-                      rows={3}
-                      className="w-full text-sm px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100 resize-none"
-                    />
-                  </div>
-
-                  {backupError && (
-                    <div className="p-3.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-250 dark:border-rose-900/30 rounded-2xl flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
-                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{backupError}</span>
-                    </div>
-                  )}
-
-                  <div className="pt-2 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowBackupModal(false)}
-                      className="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs transition-colors cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="w-1/2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs transition-colors cursor-pointer shadow-md"
-                    >
-                      Execute Secured Backup
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {backupStatus === 'processing' && (
-                <div className="py-12 flex flex-col items-center justify-center space-y-4 text-center">
-                  <div className="w-12 h-12 rounded-full border-4 border-indigo-600/25 border-t-indigo-600 animate-spin" />
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Creating secure cloud backup archive...</h3>
-                    <p className="text-xs text-slate-500 max-w-sm mx-auto">Fetching account records, serializing biomarker history, resolving meal photos, compiling spreadsheet, encrypting with AES, and syncing with Google Workspace...</p>
-                  </div>
-                </div>
-              )}
-
-              {backupStatus === 'success' && backupResult && (
-                <div className="space-y-5 py-2">
-                  <div className="p-4 bg-emerald-50/60 dark:bg-emerald-950/25 border border-emerald-250 dark:border-emerald-900/40 rounded-3xl flex items-start gap-3">
-                    <div className="p-2 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-2xl shrink-0">
-                      <Check className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-emerald-800 dark:text-emerald-400">Secure Backup Completed Successfully!</h3>
-                      <p className="text-xs text-emerald-600 dark:text-emerald-500/80 mt-1 font-medium">
-                        The encrypted archive has been saved to your Google Drive and logged in the 'Health Cockpit Backup Registry' Sheet.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-150 dark:border-slate-850 rounded-2xl space-y-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Archive Metadata & Stats</span>
-                    <div className="grid grid-cols-2 gap-4 text-xs font-medium">
-                      <div>
-                        <span className="text-slate-500 block">Backup Filename</span>
-                        <span className="font-mono text-slate-850 dark:text-slate-200 font-semibold">{backupResult.filename}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block">Accounts Snapped</span>
-                        <span className="text-slate-850 dark:text-slate-200 font-bold">{backupResult.stats.accountsCount}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block">Total Biomarkers</span>
-                        <span className="text-slate-850 dark:text-slate-200 font-bold">{backupResult.stats.totalBiomarkers}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block">Total meal pictures</span>
-                        <span className="text-slate-850 dark:text-slate-200 font-bold">{backupResult.stats.totalImages}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Individual breakdown list */}
-                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Individual Accounts Details</span>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-850 border border-slate-150 dark:border-slate-850 rounded-2xl overflow-hidden">
-                      {backupResult.stats.details?.map((item: any, idx: number) => (
-                        <div key={idx} className="p-3 bg-white dark:bg-slate-900 flex justify-between items-center text-xs">
-                          <div>
-                            <span className="font-bold text-slate-800 dark:text-slate-200 block">{item.nickname}</span>
-                            <span className="text-[10px] text-slate-500 block font-mono">{item.email}</span>
-                          </div>
-                          <div className="text-right space-y-0.5">
-                            <span className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">{item.biomarkers} biomarkers</span>
-                            <span className="block text-[10px] text-slate-500">{item.images} photos</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => setShowBackupModal(false)}
-                    className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs transition-colors cursor-pointer shadow-md"
-                  >
-                    Close Backup Panel
-                  </button>
-                </div>
-              )}
-
-              {backupStatus === 'error' && (
-                <div className="space-y-4 py-2 text-center">
-                  <div className="w-12 h-12 bg-rose-100 dark:bg-rose-950/45 text-rose-600 dark:text-rose-400 rounded-full flex items-center justify-center mx-auto">
-                    <AlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Backup Generation Failed</h3>
-                    <p className="text-xs text-rose-600 dark:text-rose-400/80 max-w-sm mx-auto">{backupError}</p>
-                  </div>
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      onClick={() => setBackupStatus('idle')}
-                      className="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs transition-colors cursor-pointer"
-                    >
-                      Try Again
-                    </button>
-                    <button
-                      onClick={() => setShowBackupModal(false)}
-                      className="w-1/2 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs transition-colors cursor-pointer"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ), document.body)}
-
-      {/* Restore Modal Overlay */}
-      {showRestoreModal && createPortal((
-        <div id="restore-modal-overlay" className="fixed inset-0 z-[10000] bg-slate-900/75 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] animation-fade-in text-slate-800 dark:text-slate-100">
-            {/* Header */}
-            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-indigo-50/50 dark:bg-indigo-950/25">
-              <div className="flex items-center gap-2.5">
-                <CloudDownload className="w-5.5 h-5.5 text-indigo-600 dark:text-indigo-400" />
-                <div>
-                  <h2 className="text-lg font-bold text-theme-text">Restore Database Records</h2>
-                  <span className="text-[10px] text-slate-500 font-medium block mt-0.5">Restore data structures from Google Drive encrypted ZIP archives</span>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowRestoreModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-850 transition-colors cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Content Area */}
-            <div className="p-6 overflow-y-auto space-y-4 text-left flex-1">
-              {restoreStatus === 'listing' && (
-                <div className="py-12 flex flex-col items-center justify-center space-y-4 text-center">
-                  <div className="w-12 h-12 rounded-full border-4 border-indigo-600/25 border-t-indigo-600 animate-spin" />
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Listing Google Drive snapshots...</h3>
-                    <p className="text-xs text-slate-500">Querying backup files matching encryption schema from your Drive...</p>
-                  </div>
-                </div>
-              )}
-
-              {restoreStatus === 'downloading' && (
-                <div className="py-12 flex flex-col items-center justify-center space-y-4 text-center">
-                  <div className="w-12 h-12 rounded-full border-4 border-indigo-600/25 border-t-indigo-600 animate-spin" />
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Downloading archive payload...</h3>
-                    <p className="text-xs text-slate-500">Retrieving full encrypted snapshot binary from Google Drive safely...</p>
-                  </div>
-                </div>
-              )}
-
-              {restoreStatus === 'restoring' && (
-                <div className="py-12 flex flex-col items-center justify-center space-y-4 text-center">
-                  <div className="w-12 h-12 rounded-full border-4 border-indigo-600/25 border-t-indigo-600 animate-spin" />
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Rebuilding records in Firestore...</h3>
-                    <p className="text-xs text-slate-500">Overwriting subcollections, setting biomarkers, and committing batch mutations to Firebase.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Stage 1: Select Archive file */}
-              {restoreStatus === 'idle' && selectedRestoreFile === null && (
-                <div className="space-y-4">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Available Backup Archives</span>
-                  {restoreFiles.length === 0 ? (
-                    <div className="text-center py-10 text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50">
-                      No matching backup archives found in your Google Drive. Ensure you have run a backup first.
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                      {restoreFiles.map((file) => (
-                        <button
-                          key={file.id}
-                          onClick={() => handleSelectRestoreFile(file)}
-                          className="w-full text-left p-3.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-950 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex items-center justify-between cursor-pointer group transition-all"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Archive className="w-5 h-5 text-indigo-500 group-hover:scale-105 transition-transform" />
-                            <div>
-                              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block truncate max-w-[280px]">{file.name}</span>
-                              <span className="text-[10px] text-slate-400 block">{new Date(file.createdTime).toLocaleString()}</span>
-                            </div>
-                          </div>
-                          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100/60 dark:bg-indigo-950/50 px-2 py-1 rounded-lg">Select</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <button
-                    onClick={() => setShowRestoreModal(false)}
-                    className="w-full py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-
-              {/* Stage 2: Decrypt with password */}
-              {selectedRestoreFile !== null && restoreStatus !== 'preview' && restoreStatus !== 'success' && restoreStatus !== 'restoring' && restoreStatus !== 'downloading' && (
-                <form onSubmit={handleLoadAndDecryptBackup} className="space-y-4">
-                  <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-150 dark:border-indigo-900/30 rounded-2xl flex items-start gap-2.5 text-xs">
-                    <Archive className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold text-slate-850 dark:text-slate-200 block">Selected Snapshot Archive</span>
-                      <span className="font-mono text-slate-500 block mt-0.5">{selectedRestoreFile.name}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <KeyRound className="w-3.5 h-3.5 text-indigo-500" />
-                      <span>Archive Decryption Password</span>
-                    </label>
-                    <input
-                      type="password"
-                      value={restorePassword}
-                      onChange={(e) => setRestorePassword(e.target.value)}
-                      placeholder="Enter the secure password used for this backup"
-                      className="w-full text-sm px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
-                      required
-                    />
-                  </div>
-
-                  {restoreError && (
-                    <div className="p-3.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-250 dark:border-rose-900/30 rounded-2xl flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
-                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{restoreError}</span>
-                    </div>
-                  )}
-
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSelectRestoreFile(null)}
-                      className="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs transition-colors cursor-pointer"
-                    >
-                      Change File
-                    </button>
-                    <button
-                      type="submit"
-                      className="w-1/2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs transition-colors cursor-pointer shadow-md"
-                    >
-                      Decrypt & Load Preview
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Stage 3: Preview list & Target options */}
-              {restoreStatus === 'preview' && (
-                <div className="space-y-4">
-                  <div className="p-4 bg-amber-50/60 dark:bg-amber-950/20 border border-amber-250 dark:border-amber-900/30 rounded-2xl">
-                    <span className="text-[10px] font-bold text-amber-800 dark:text-amber-400 uppercase tracking-wider block">Decryption Preview Verified</span>
-                    <div className="grid grid-cols-3 gap-3 text-center text-xs mt-2.5 font-bold text-slate-800 dark:text-slate-100">
-                      <div className="p-2 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 rounded-xl">
-                        <span className="text-[10px] text-slate-400 block font-normal">Accounts</span>
-                        {restorePreviewData.length}
-                      </div>
-                      <div className="p-2 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 rounded-xl">
-                        <span className="text-[10px] text-slate-400 block font-normal">Biomarkers</span>
-                        {restorePreviewData.reduce((sum, a) => sum + a.biomarkerCount, 0)}
-                      </div>
-                      <div className="p-2 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 rounded-xl">
-                        <span className="text-[10px] text-slate-400 block font-normal">Images</span>
-                        {restorePreviewData.reduce((sum, a) => sum + a.imageCount, 0)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Restorable Accounts Table */}
-                  <div className="space-y-1.5">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Archive Accounts Contents</span>
-                    <div className="border border-slate-150 dark:border-slate-800 rounded-2xl overflow-hidden max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-850">
-                      {restorePreviewData.map((item, idx) => (
-                        <div key={idx} className="p-3 bg-slate-50/50 dark:bg-slate-950/30 flex justify-between items-center text-xs">
-                          <div>
-                            <span className="font-bold text-slate-850 dark:text-slate-200 block">{item.nickname}</span>
-                            <span className="text-[10px] text-slate-500 block font-mono">{item.email}</span>
-                          </div>
-                          <div className="text-right text-[10px] text-slate-550 dark:text-slate-400 space-y-0.5">
-                            <span className="block font-semibold">{item.biomarkerCount} biomarkers</span>
-                            <span className="block">{item.imageCount} images</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Restoration Target Dropdown */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-                      Restoration Scope
-                    </label>
-                    <select
-                      value={restoreTargetAccount}
-                      onChange={(e) => setRestoreTargetAccount(e.target.value)}
-                      className="w-full text-xs px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-850 dark:text-slate-100 font-medium"
-                    >
-                      <option value="all">Restore All Accounts in Backup File</option>
-                      {restorePreviewData.map((item, idx) => (
-                        <option key={idx} value={item.email}>
-                          Only Restore Specific Account: {item.nickname} ({item.email})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {restoreError && (
-                    <div className="p-3.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-250 dark:border-rose-900/30 rounded-2xl flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
-                      <AlertTriangle className="w-4 h-4 shrink-0" />
-                      <span>{restoreError}</span>
-                    </div>
-                  )}
-
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRestoreStatus('idle');
-                        setSelectedRestoreFile(null);
-                        setRestorePreviewData([]);
-                      }}
-                      className="w-1/3 py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs transition-colors cursor-pointer"
-                    >
-                      Go Back
-                    </button>
-                    <button
-                      onClick={handleExecuteRestore}
-                      className="w-2/3 py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs transition-colors cursor-pointer shadow-md flex items-center justify-center gap-1.5"
-                    >
-                      <Unlock className="w-4 h-4" />
-                      <span>Execute Restore Operation</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Stage 5: Success */}
-              {restoreStatus === 'success' && (
-                <div className="space-y-4 py-2 text-center">
-                  <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-950/45 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
-                    <Check className="w-6 h-6" />
-                  </div>
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Database Restored Successfully!</h3>
-                    <p className="text-xs text-slate-500 max-w-sm mx-auto">All medical profiles, biomarker logs, actions, and meal logs have been fully recovered in Firestore and local databases.</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowRestoreModal(false);
-                      // Refresh dashboard state
-                      window.location.reload();
-                    }}
-                    className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs transition-colors cursor-pointer"
-                  >
-                    Close & Reload Application
-                  </button>
-                </div>
-              )}
-
-              {/* Stage 6: Error */}
-              {restoreStatus === 'error' && (
-                <div className="space-y-4 py-2 text-center">
-                  <div className="w-12 h-12 bg-rose-100 dark:bg-rose-950/45 text-rose-600 dark:text-rose-400 rounded-full flex items-center justify-center mx-auto">
-                    <AlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Restoration Operation Failed</h3>
-                    <p className="text-xs text-rose-600 dark:text-rose-400/80 max-w-sm mx-auto">{restoreError}</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setRestoreStatus('idle');
-                      setSelectedRestoreFile(null);
-                      setRestorePreviewData([]);
-                    }}
-                    className="w-full py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs transition-colors cursor-pointer"
-                  >
-                    Go Back to File Selection
-                  </button>
                 </div>
               )}
             </div>

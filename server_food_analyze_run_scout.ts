@@ -72,9 +72,8 @@ export async function executeScoutPhase(ctx: AnalyzeRunContext): Promise<void> {
           : getTopTargetNutrientKeys(ctx.req.body?.report, ctx.req.body?.userProfile || ctx.userProfile);
         const nutritionTargetStatus = buildNutritionTargetStatus({
           logs: ctx.req.body.foodLogs,
-          targets: pickExplicitTargets(ctx.req.body.dailyNutrientTargets, topTargetKeys),
+          targets: pickExplicitTargets(ctx.req.body.dailyNutrientTargets),
           todayStr: getCurrentDateInTimezone(ctx.userProfile?.timezone),
-          targetKeys: topTargetKeys
         });
         const resolvedScoutSystemInstruction = (ctx.userSelectedMode === 'compare'
           ? withScoutLanguage(scoutOnlyCompareSystemInstruction, ctx.userProfile?.language)
