@@ -405,6 +405,7 @@ jobsRouter.all('/api/jobs/debug', async (req, res) => {
             jobId: cleanJobId,
             status: req.body?.status || (cleanJobId.includes('timeout') ? 'failed' : 'unknown'),
             result: req.body?.result || {},
+            pendingFoodLog: req.body?.pendingFoodLog || req.body?.result?.pendingFoodLog,
             dialogInventory: req.body?.dialogInventory,
             dispatches: req.body?.dispatches,
             backendLogs: req.body?.backendLogs || '',
