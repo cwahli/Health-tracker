@@ -20,6 +20,10 @@ const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   allowGuestMode: true,
   modelOverrides: {},
   apiBudgetLimit: 50,
+  // Fallback credit/quota configuration. These are only used until an admin
+  // explicitly saves values via the User Management tab, and as a safety net
+  // if a device's stored settings are ever missing/corrupted (see
+  // creditManager.ts, which also falls back to these same numbers).
   flashLiteCost: 1,
   standardCost: 20,
   quotaDemo: 20,

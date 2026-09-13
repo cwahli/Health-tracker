@@ -32,7 +32,7 @@ import {
   saveAdminSettings, 
   AdminSettings 
 } from '../utils/userManagement';
-import { getAvailableCredits } from '../utils/creditManager';
+import { getAvailableCredits, DEFAULT_AGENT_COSTS, DEFAULT_DAILY_QUOTA } from '../utils/creditManager';
 import { auth } from '../firebase';
 import { t, normalizeLocale } from '../utils/i18n';
 
@@ -171,11 +171,11 @@ export default function UserManagementTab() {
       maintenanceMode: adminSettings?.maintenanceMode ?? false,
       allowGuestMode: adminSettings?.allowGuestMode ?? true,
       ...adminSettings,
-      flashLiteCost: Number(editFlashLiteCost),
-      standardCost: Number(editStandardCost),
-      quotaDemo: Number(editQuotaDemo),
-      quotaStandard: Number(editQuotaStandard),
-      quotaAdmin: Number(editQuotaAdmin)
+      flashLiteCost: Number(editFlashLiteCost) || DEFAULT_AGENT_COSTS['gemini-3.5-flash-lite'],
+      standardCost: Number(editStandardCost) || DEFAULT_AGENT_COSTS['default'],
+      quotaDemo: Number(editQuotaDemo) || DEFAULT_DAILY_QUOTA.Demo,
+      quotaStandard: Number(editQuotaStandard) || DEFAULT_DAILY_QUOTA.Standard,
+      quotaAdmin: Number(editQuotaAdmin) || DEFAULT_DAILY_QUOTA.Admin
     };
     saveAdminSettings(updated);
     setAdminSettings(updated);
@@ -611,6 +611,9 @@ export default function UserManagementTab() {
                     </p>
                     <p className="font-semibold text-theme-neutral">
                       Demo Accounts: <span className="text-amber-500 font-bold font-mono">{adminSettings.quotaDemo} / day</span>
+                    </p>
+                    <p className="font-semibold text-theme-neutral">
+                      Admin Accounts: <span className="text-indigo-500 font-bold font-mono">{adminSettings.quotaAdmin} / day</span>
                     </p>
                   </div>
                   <Activity className="w-8 h-8 text-emerald-500/20" />
