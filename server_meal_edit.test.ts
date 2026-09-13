@@ -3443,4 +3443,115 @@ describe('golden', () => {
     expect(result.notes.some((n) => /set_weight "Cakalang"/.test(n))).toBe(true);
     expect(mealItemsHaveAtwaterCalories(result.items)).toBe(true);
   });
+
+  it('golden: merge_dishes preserves rawNutritionLabel truth and user portion weight without summing weights', async () => {
+    const rawLabel = {
+      servingSize: '40g',
+      calories: 160,
+      protein: 5,
+      carbohydrates: 27,
+      totalFat: 3,
+      saturatedFat: 0.5,
+      sodium: 0,
+    };
+    const items = [
+      {
+        scoutIndex: 0,
+        name: 'Quaker Whole Rolled Oats',
+        canonicalDbName: 'Quaker Whole Rolled Oats',
+        weightGrams: 100,
+        calories: 400,
+        nutrients: { calories: 400, protein: 12.5, carbohydrates: 67.5, totalFat: 7.5, saturatedFat: 1.25, sodium: 0 },
+        rawNutritionLabel: rawLabel,
+        brandLock: 'Quaker',
+        dbSource: 'brand_official',
+      },
+      {
+        scoutIndex: 1,
+        name: 'Rolled Oats Porridge',
+        canonicalDbName: 'Rolled Oats Porridge',
+        weightGrams: 250,
+        calories: 164,
+        nutrients: { calories: 164, protein: 6, carbohydrates: 28, totalFat: 3, saturatedFat: 0.5, sodium: 115 },
+        dbSource: 'estimated',
+      },
+    ];
+
+    const result = await applyMealEdits({
+      items,
+      userMessage: "I only had 1 dish. It's the same dish",
+      commands: [
+        {
+          action: 'merge_dishes',
+          itemName: 'Quaker Whole Rolled Oats',
+          targetItemName: 'Rolled Oats Porridge',
+          newWeightGrams: 100,
+        },
+      ],
+    });
+
+    expect(result.items).toHaveLength(1);
+    const merged = result.items[0];
+    // Weight must be 100g, NOT 100 + 250 = 350g
+    expect(merged.weightGrams).toBe(100);
+    expect(result.weightGrams).toBe(100);
+    // Nutrition label truth must be preserved: 100g @ 160 kcal / 40g = 400 kcal
+    expect(merged.rawNutritionLabel).toEqual(rawLabel);
+    expect(merged.calories).toBe(400);
+    expect(result.nutrients.calories).toBe(400);
+    expect(merged.dbSource).toBe('brand_official');
+  });
+
+  it('golden: remove_item on labeled package when user says "same dish" falls back to merge preserving label truth', async () => {
+    const rawLabel = {
+      servingSize: '40g',
+      calories: 160,
+      protein: 5,
+      carbohydrates: 27,
+      totalFat: 3,
+      saturatedFat: 0.5,
+      sodium: 0,
+    };
+    const items = [
+      {
+        scoutIndex: 0,
+        name: 'Quaker Whole Rolled Oats',
+        canonicalDbName: 'Quaker Whole Rolled Oats',
+        weightGrams: 100,
+        calories: 400,
+        nutrients: { calories: 400, protein: 12.5, carbohydrates: 67.5, totalFat: 7.5, saturatedFat: 1.25, sodium: 0 },
+        rawNutritionLabel: rawLabel,
+        brandLock: 'Quaker',
+        dbSource: 'brand_official',
+      },
+      {
+        scoutIndex: 1,
+        name: 'Rolled Oats Porridge',
+        canonicalDbName: 'Rolled Oats Porridge',
+        weightGrams: 250,
+        calories: 164,
+        nutrients: { calories: 164, protein: 6, carbohydrates: 28, totalFat: 3, saturatedFat: 0.5, sodium: 115 },
+        dbSource: 'estimated',
+      },
+    ];
+
+    const result = await applyMealEdits({
+      items,
+      userMessage: "I only had 1 dish. It's the same dish",
+      commands: [
+        {
+          action: 'remove_item',
+          itemName: 'Quaker Whole Rolled Oats',
+        },
+      ],
+    });
+
+    expect(result.items).toHaveLength(1);
+    const merged = result.items[0];
+    expect(merged.weightGrams).toBe(100);
+    expect(result.weightGrams).toBe(100);
+    expect(merged.rawNutritionLabel).toEqual(rawLabel);
+    expect(merged.calories).toBe(400);
+    expect(result.nutrients.calories).toBe(400);
+  });
 });
