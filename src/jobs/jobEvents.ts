@@ -28,7 +28,7 @@ export type JobEvent = {
   messages?: any[];
 } & (
   | { type: 'SubmitStarted'; id: string; mode?: string; inputSnapshot?: any; messages?: any[]; statusMessage?: string; currentTurn?: number; clientSubmitPending?: boolean }
-  | { type: 'ServerStatus'; id: string; status: AgentJob['status']; statusMessage?: string }
+  | { type: 'ServerStatus'; id: string; status: AgentJob['status']; statusMessage?: string; messages?: any[] }
   | { type: 'PollerPayload'; id: string; status: AgentJob['status']; result?: any; messages?: any[]; currentTurn?: number; updatedAt?: string }
   | { type: 'RealtimeRow'; id: string; status: AgentJob['status']; result?: any; currentTurn?: number; updatedAt?: string; statusMessage?: string; progressPercent?: number }
   | { type: 'AnalyzeFinished'; id: string; result?: any; messages?: any[]; currentTurn?: number }
