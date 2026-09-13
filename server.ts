@@ -447,7 +447,8 @@ export function addDebugLog(msg: string, explicitSessionId?: string) {
 
 export async function lookupChainMenuSources(chainKey: string, countryCode = 'GB') {
   try {
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
+    const { supabaseAdmin, isSupabaseConfigured } = await import('./supabaseAdmin.js');
+    if (!isSupabaseConfigured || !supabaseAdmin) return [];
     const { data, error } = await supabaseAdmin
       .from('chain_menu_sources')
       .select('*')
@@ -456,12 +457,22 @@ export async function lookupChainMenuSources(chainKey: string, countryCode = 'GB
       .eq('enabled', true)
       .order('priority', { ascending: true });
     if (error) {
-      addDebugLog(`[ChainSource] lookup error for ${chainKey}: ${error.message}`);
+      const errMsg = error.message || String(error);
+      if (/exceed_egress_quota|quota|restricted/i.test(errMsg)) {
+        addDebugLog(`[ChainSource] Supabase egress quota exceeded, bypassing chain lookup for ${chainKey}`);
+      } else {
+        addDebugLog(`[ChainSource] lookup error for ${chainKey}: ${errMsg}`);
+      }
       return [];
     }
     return data || [];
   } catch (e: any) {
-    addDebugLog(`[ChainSource] lookup exception: ${e?.message || e}`);
+    const errMsg = e?.message || String(e);
+    if (/exceed_egress_quota|quota|restricted/i.test(errMsg)) {
+      addDebugLog(`[ChainSource] Supabase egress quota exceeded, bypassing chain lookup for ${chainKey}`);
+    } else {
+      addDebugLog(`[ChainSource] lookup exception: ${errMsg}`);
+    }
     return [];
   }
 }
