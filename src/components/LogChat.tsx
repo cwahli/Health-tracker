@@ -2907,6 +2907,29 @@ ${logsText}`);
           })
           .then(data => {
             console.log('[LogChat] Job successfully submitted to server:', data);
+            // B-sync: the placeholder text written in persistMessages above only
+            // survives locally (this device still has the real base64 in React
+            // state). Other devices only ever see the persisted message, so once
+            // the server confirms the durable R2 URL(s), patch the placeholder
+            // before it syncs anywhere else.
+            let messagesPatch: ChatMessage[] | undefined;
+            if (Array.isArray(data?.imageUrls) && data.imageUrls.length > 0) {
+              const currentMessages = JobStore.getJob(currentJobId)?.messages;
+              if (Array.isArray(currentMessages)) {
+                messagesPatch = currentMessages.map(m => {
+                  const hasPlaceholder = m.imageUrl === 'Image reference preserved'
+                    || (Array.isArray(m.imageUrls) && m.imageUrls.includes('Image reference preserved'));
+                  if (m.id === userMsg.id && hasPlaceholder) {
+                    return {
+                      ...m,
+                      imageUrl: data.imageUrls[0],
+                      imageUrls: data.imageUrls,
+                    };
+                  }
+                  return m;
+                });
+              }
+            }
             JobStore.apply({
               type: 'ServerStatus',
               id: currentJobId,
@@ -2914,6 +2937,7 @@ ${logsText}`);
               statusMessage: submissionMode === 'edit' ? 'Updating meal...' : 'Analyzing on server...',
               serverSubmittedAt: Date.now(),
               clientSubmitPending: false,
+              ...(messagesPatch ? { messages: messagesPatch } : {}),
             });
             JobQueueRunner.wake();
           })

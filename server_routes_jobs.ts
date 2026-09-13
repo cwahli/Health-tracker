@@ -134,7 +134,15 @@ jobsRouter.post('/api/jobs/submit', async (req, res) => {
       jobId,
       userId: userId || 'anonymous',
     });
-    res.json({ success: true, jobId, status: 'running' });
+    res.json({
+      success: true,
+      jobId,
+      status: 'running',
+      // B-sync: durable R2 URLs for the image(s) just uploaded above, so the client
+      // can replace the stripped "Image reference preserved" placeholder in the
+      // persisted chat message with a URL that resolves on other devices too.
+      imageUrls: Array.isArray(imageUrls) && imageUrls.length > 0 ? imageUrls : undefined,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to submit job to cloud' });
   }
