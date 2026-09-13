@@ -108,7 +108,7 @@ import { recordBreadcrumb, setActiveJobScope } from '../utils/breadcrumbTracker'
 import { consumeGoldenAnalyzeToken, GOLDEN_NEW_ANALYZE_EVENT } from '../utils/goldenIngestClient';
 import { PRIMARY_NUTRIENTS, formatNutrientDisplayValue, getTopTargetNutrientKeys } from '../utils/nutrients';
 import { AgentType, AGENT_REGISTRY, getAgentRolloutStatus } from '../utils/agentConfig';
-import { getAvailableCredits, deductAgentCredits } from '../utils/creditManager';
+import { getAvailableCredits, deductAgentCredits, DEFAULT_AGENT_COSTS } from '../utils/creditManager';
 import { getAdminSettings } from '../utils/userManagement';
 const isValidValue = (v: unknown): boolean =>
   v !== null && v !== undefined && v !== '' && v !== 'N/A' && v !== 'null';
@@ -2422,7 +2422,9 @@ ${logsText}`);
       const creditInfo = getAvailableCredits(profile);
       const settings = getAdminSettings();
       const isFlashLite = selectedModelId === 'gemini-3.5-flash-lite' || selectedModelId === 'gemini-3.8-flash' || selectedModelId.toLowerCase().includes('flash-lite');
-      const cost = isFlashLite ? settings.flashLiteCost : settings.standardCost;
+      const cost = isFlashLite
+        ? (settings.flashLiteCost ?? DEFAULT_AGENT_COSTS['gemini-3.5-flash-lite'])
+        : (settings.standardCost ?? DEFAULT_AGENT_COSTS['default']);
       if (creditInfo.total < cost) {
         const errorMsg: ChatMessage = {
           id: `msg_err_${Date.now()}`,
