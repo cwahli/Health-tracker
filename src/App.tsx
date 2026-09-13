@@ -2547,6 +2547,12 @@ export default function App() {
                 idToken
               });
               console.log(`[Sync] Pre-pull push complete: ${pushResult.foodCount ?? 0} foods, ${pushResult.bioCount ?? 0} bios`);
+              if (pushResult.success) {
+                localFoods = localFoods.map(f => f.sync_state === 'delete' ? f : { ...f, sync_state: 'synced' as const });
+                localBioHistory = localBioHistory.map(b => b.sync_state === 'delete' ? b : { ...b, sync_state: 'synced' as const });
+                setFoodLogs(localFoods);
+                setBiomarkerHistory(localBioHistory);
+              }
             } catch (prePushErr) {
               console.warn("[Sync] Pre-pull push warning:", prePushErr);
             }
@@ -3945,13 +3951,21 @@ export default function App() {
           const deletedBioLogs = updatedProfile?.deletedBiomarkerLogIds || profile?.deletedBiomarkerLogIds || {};
           // Push the changed/deleted food log to D1 before the pull so the server has Device A's version
           const idTokenFood = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => undefined) : undefined;
-          pushLogsToServer({
-            uid,
-            email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined,
-            foods: currFoods.filter(f => f.id === specificUpdate.targetId || f.sync_state !== 'synced'),
-            profile: profileForCloud ?? undefined,
-            idToken: idTokenFood
-          }).catch(() => {});
+          try {
+            const pushRes = await pushLogsToServer({
+              uid,
+              email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined,
+              foods: currFoods.filter(f => f.id === specificUpdate.targetId || f.sync_state !== 'synced'),
+              profile: profileForCloud ?? undefined,
+              idToken: idTokenFood
+            });
+            if (pushRes.success) {
+              currFoods = currFoods.map(f => (f.id === specificUpdate.targetId && f.sync_state !== 'delete') ? { ...f, sync_state: 'synced' as const } : f);
+              setFoodLogs(currFoods);
+            }
+          } catch (e) {
+            console.warn('[saveAndSync] Food push error:', e);
+          }
           await syncLogsWithTimeBuckets(db, uid, currFoods, currBioHistory, deletedFoods, deletedBioLogs, async (sf, sb) => {
             finalFoodsToSave = sf; finalBioToSave = sb; setFoodLogs(sf);
             setBiomarkerHistory(sb);
@@ -3969,15 +3983,27 @@ export default function App() {
           const deletedBioLogs = updatedProfile?.deletedBiomarkerLogIds || profile?.deletedBiomarkerLogIds || {};
           // Push changed biomarker logs to D1
           const idTokenBio = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => undefined) : undefined;
-          pushLogsToServer({
-            uid,
-            email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined,
-            biomarkers: specificUpdate.type === 'biomarkerLogsBatch'
-              ? currBioHistory.filter(b => b.sync_state !== 'delete')
-              : currBioHistory.filter(b => b.id === specificUpdate.targetId || b.sync_state !== 'synced'),
-            profile: profileForCloud ?? undefined,
-            idToken: idTokenBio
-          }).catch(() => {});
+          try {
+            const pushRes = await pushLogsToServer({
+              uid,
+              email: updatedProfile?.email || profile?.email || auth.currentUser?.email || undefined,
+              biomarkers: specificUpdate.type === 'biomarkerLogsBatch'
+                ? currBioHistory.filter(b => b.sync_state !== 'delete')
+                : currBioHistory.filter(b => b.id === specificUpdate.targetId || b.sync_state !== 'synced'),
+              profile: profileForCloud ?? undefined,
+              idToken: idTokenBio
+            });
+            if (pushRes.success) {
+              currBioHistory = currBioHistory.map(b => (
+                (specificUpdate.type === 'biomarkerLogsBatch' || b.id === specificUpdate.targetId) && b.sync_state !== 'delete'
+                  ? { ...b, sync_state: 'synced' as const }
+                  : b
+              ));
+              setBiomarkerHistory(currBioHistory);
+            }
+          } catch (e) {
+            console.warn('[saveAndSync] Biomarker push error:', e);
+          }
           await syncLogsWithTimeBuckets(db, uid, currFoods, currBioHistory, deletedFoods, deletedBioLogs, async (sf, sb) => {
             finalFoodsToSave = sf; finalBioToSave = sb; setFoodLogs(sf); setBiomarkerHistory(sb);
             const updatedBundle = {

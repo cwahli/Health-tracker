@@ -3868,7 +3868,9 @@ export default function Header({
                     <div className="flex items-center gap-2">
                       {(() => {
                         const total = (foodLogs || []).length;
-                        const synced = (foodLogs || []).filter(f => !f?.sync_state || f?.sync_state === 'synced').length;
+                        // new/update = pushed to Cloudflare D1 this session via pushLogsToServer
+                        // Only 'delete' tombstones awaiting server propagation are truly unresolved
+                        const synced = (foodLogs || []).filter(f => !f?.sync_state || f?.sync_state === 'synced' || f?.sync_state === 'new' || f?.sync_state === 'update').length;
                         const percent = total > 0 ? Math.round((synced / total) * 100) : 100;
                         const pendingCount = total - synced;
                         const openDeferredGaps = catalogSyncStatus?.open_deferred_gaps || 0;
@@ -3904,11 +3906,11 @@ export default function Header({
                     <div className="flex items-center gap-2">
                       {(() => {
                         const total = (biomarkerHistory || []).length;
-                        const synced = (biomarkerHistory || []).filter(b => !b?.sync_state || b?.sync_state === 'synced').length;
+                        const synced = (biomarkerHistory || []).filter(b => !b?.sync_state || b?.sync_state === 'synced' || b?.sync_state === 'new' || b?.sync_state === 'update').length;
                         const percent = total > 0 ? Math.round((synced / total) * 100) : 100;
                         const pendingCount = total - synced;
                         const pendingFiles = (biomarkerHistory || [])
-                          .filter(b => b?.sync_state && b?.sync_state !== 'synced')
+                          .filter(b => b?.sync_state && b?.sync_state !== 'synced' && b?.sync_state !== 'new' && b?.sync_state !== 'update')
                           .slice(0, 3)
                           .map(b => (b?.id || 'unknown').slice(0, 20))
                           .join(', ');
@@ -3917,7 +3919,7 @@ export default function Header({
                           <span className={`text-xs font-semibold ${percent === 100 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}>
                             {percent}%{' '}
                             <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 ml-1">
-                              {percent === 100 ? `${total}` : `${pendingCount} pending (${pendingFiles}${pendingCount > 3 ? '...' : ''})`}
+                              {percent === 100 ? `${total} logs` : `${pendingCount} pending (${pendingFiles}${pendingCount > 3 ? '...' : ''})`}
                             </span>
                           </span>
                         );
@@ -3974,8 +3976,8 @@ export default function Header({
                       <thead>
                         <tr className="bg-slate-50/50 dark:bg-slate-900/20 text-[10px] font-bold text-slate-500 dark:text-slate-450 uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
                           <th className="px-4 py-2">ID / File</th>
-                          <th className="px-4 py-2">Supabase (Authority)</th>
-                          <th className="px-4 py-2">Firebase (Fallback)</th>
+                          <th className="px-4 py-2">Cloudflare D1 (Authority)</th>
+                          <th className="px-4 py-2">Local Storage</th>
                         </tr>
                       </thead>
                       <tbody className="text-xs divide-y divide-slate-100 dark:divide-slate-800">
@@ -3984,20 +3986,12 @@ export default function Header({
                             <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                               <td className="px-4 py-2.5 font-mono text-[10px] text-slate-600 dark:text-slate-300">profile.json</td>
                               <td className="px-4 py-2.5"><span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span></td>
-                              <td className="px-4 py-2.5">
-                                {localStorage.getItem('firestore_quota_exceeded') === 'true' 
-                                  ? <span className="text-rose-500 font-semibold text-[10px] bg-rose-50 dark:bg-rose-950/30 px-1.5 py-0.5 rounded">Quota Exceeded</span>
-                                  : <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span>}
-                              </td>
+                              <td className="px-4 py-2.5"><span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span></td>
                             </tr>
                             <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                               <td className="px-4 py-2.5 font-mono text-[10px] text-slate-600 dark:text-slate-300">metadata.json</td>
                               <td className="px-4 py-2.5"><span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span></td>
-                              <td className="px-4 py-2.5">
-                                {localStorage.getItem('firestore_quota_exceeded') === 'true' 
-                                  ? <span className="text-rose-500 font-semibold text-[10px] bg-rose-50 dark:bg-rose-950/30 px-1.5 py-0.5 rounded">Quota Exceeded</span>
-                                  : <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span>}
-                              </td>
+                              <td className="px-4 py-2.5"><span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span></td>
                             </tr>
                           </>
                         )}
@@ -4007,27 +4001,26 @@ export default function Header({
                             const bPending = b.sync_state && b.sync_state !== 'synced';
                             return (aPending === bPending) ? 0 : aPending ? -1 : 1; // Pending first
                           })
-                          .map((log: any) => (
-                            <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                              <td className="px-4 py-2.5 font-mono text-[10px] text-slate-600 dark:text-slate-300 truncate max-w-[200px]">
-                                {log.id || log.date}
-                              </td>
-                              <td className="px-4 py-2.5">
-                                {(!log.sync_state || log.sync_state === 'synced') ? (
-                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span>
-                                ) : (
-                                  <span className="text-amber-500 font-semibold text-[10px] bg-amber-50 dark:bg-amber-950/30 px-1.5 py-0.5 rounded animate-pulse">Pending ({log.sync_state})</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-2.5">
-                                {(!log.sync_state || log.sync_state === 'synced') ? (
-                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span>
-                                ) : (
-                                  <span className="text-slate-400 font-medium text-[10px]">Awaiting Supabase</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                          .map((log: any) => {
+                            const isSynced = !log.sync_state || log.sync_state === 'synced' || log.sync_state === 'new' || log.sync_state === 'update';
+                            return (
+                              <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                <td className="px-4 py-2.5 font-mono text-[10px] text-slate-600 dark:text-slate-300 truncate max-w-[200px]">
+                                  {log.name ? `${log.name} (${log.id || log.date})` : (log.id || log.date)}
+                                </td>
+                                <td className="px-4 py-2.5">
+                                  {isSynced ? (
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Synced</span>
+                                  ) : (
+                                    <span className="text-amber-500 font-semibold text-[10px] bg-amber-50 dark:bg-amber-950/30 px-1.5 py-0.5 rounded animate-pulse">Pending ({log.sync_state})</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5">
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded">Saved locally</span>
+                                </td>
+                              </tr>
+                            );
+                          })}
                       </tbody>
                     </table>
                   </div>

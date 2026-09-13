@@ -161,9 +161,21 @@ function pickBetter<T extends DedupableFoodLog>(a: T, b: T): T {
       ].filter(Boolean) as string[],
     }),
   );
-  if (candidates.length === 0) return winner;
-  return {
+  // If either side is confirmed synced from server, and no subsequent local edits exist, mark as synced
+  const isServerSynced = a.sync_state === 'synced' || b.sync_state === 'synced';
+  const aTime = a.updated_at || 0;
+  const bTime = b.updated_at || 0;
+  const hasSubsequentLocalEdit = (winner.sync_state === 'update' || loser.sync_state === 'update') &&
+    Math.abs(aTime - bTime) > 3000;
+  const resolvedSyncState = isServerSynced && !hasSubsequentLocalEdit ? 'synced' : winner.sync_state;
+
+  const resolved = {
     ...winner,
+    sync_state: resolvedSyncState,
+  };
+  if (candidates.length === 0) return resolved;
+  return {
+    ...resolved,
     imageUrl: candidates[0],
     imageUrls: candidates,
   };
