@@ -43,7 +43,7 @@ function scoutItems(scout: any): any[] {
 
 function isForbidden(rule: NonNullable<InboxCase['neverMatch']>[number], hit: { fdcId?: string; name?: string } | null) {
   if (!hit) return false;
-  const id = String(hit.id || hit.fdcId || '');
+  const id = String(hit.fdcId || '');
   const name = String(hit.name || '').toLowerCase();
   if ((rule.forbiddenIds || []).some((x) => String(x) === id)) return true;
   return (rule.forbiddenNames || []).some((n) => name.includes(n.toLowerCase()));

@@ -13,7 +13,6 @@ import {
 } from './goldenJourney';
 
 export type CatalogHit = {
-  id?: string | null;
   fdcId?: string | number | null;
   name?: string | null;
   foodType?: string | null;
@@ -32,9 +31,9 @@ function slug(s: string): string {
 }
 
 export function classifyCatalogHit(query: string, hit: CatalogHit | null | undefined): JourneyPhase {
-  if (!hit || (hit.id == null && hit.fdcId == null && !hit.name && !hit.foodType)) return 'no_match';
+  if (!hit || hit.fdcId == null && !hit.name) return 'no_match';
   const name = String(hit.name || '');
-  const id = String(hit.id || hit.fdcId || '');
+  const id = hit.fdcId != null ? String(hit.fdcId) : '';
   if (isForbiddenHit(id, name)) return 'mismatch';
   if (name && needsBroaderBase(query, name, 'internal_catalog')) return 'broad_base';
   return 'catalog';
@@ -57,8 +56,8 @@ export function replayScoutAgainstCatalog(
     comps.forEach((comp: any, cIdx: number) => {
       const query = String(comp.searchQuery || comp.name || comp.keyword || dish).trim();
       const hit = lookup(query);
-      const matchName = hit ? String(hit.name || hit.foodType || hit.id || hit.fdcId || '') : null;
-      const matchId = hit?.id != null ? String(hit.id) : (hit?.fdcId != null ? String(hit.fdcId) : null);
+      const matchName = hit ? String(hit.name || hit.foodType || hit.fdcId || '') : null;
+      const matchId = hit?.fdcId != null ? String(hit.fdcId) : null;
       const phase = classifyCatalogHit(query, hit);
       rows.push({
         id: `j_${i}_${cIdx}_${slug(query)}`,

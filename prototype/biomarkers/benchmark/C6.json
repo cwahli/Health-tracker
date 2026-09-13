@@ -3,7 +3,7 @@
   "dry": false,
   "insightSize": 20,
   "draftSize": 12,
-  "instruction": "You are an expert clinical laboratory AI reviewing a patient's biomarker panel.\nPatient Profile: 43-year-old Chinese male, Unit Preference: SI.\nFor each biomarker:\n- id: matching id\n- medicalInsight: Provide a concise, clinically accurate insight for every row (including optimal/normal baseline markers). Cite trend if previous values exist. Consider patient ethnography (e.g. for Chinese patients, HbA1c >=39 indicates elevated prediabetes risk). Never write Critical.\n- customRangeOverlay: If agreeing with range, return null. If missing thresholds or ethnic demographics, provide FULL multi-bracket range specifying the profile source and clinical names. Format MUST be \"[Profile] Clinical Name: Range; Clinical Name: Range\". Example: \"[Chinese Ethnicity] Elevated (Diabetes): >=48; Elevated: >=39; Optimal: <39\" or \"[Western Standard] High: >104; Normal: 64-104; Low: <64\". If multiple demographic profiles exist, provide all of them.\n- optimalValue: If existing is accurate, return \"\". Otherwise provide 1 single ideal target value without inequalities or ranges (e.g. \"33 mmol/mol\", \"80 umol/L\", \"95 mL/min/1.73m2\"; note 60 for eGFR is naive CKD G2, correct it).\n- editReason: If replacing/correcting existing user values or suboptimal optimalValue, explain why. Otherwise \"\". For eGFR, if correcting optimal from naive 60 to >= 90, you MUST provide an editReason explaining correction of naive normal eGFR.\n- logs: Extract all logs with standardized \"YYYY-MM-DD\" dates, labName if mentioned (e.g. \"US lab\", \"GP Clinic\"), and comments. Convert US units to patient's unitPreference with standard clinical integer rounding (e.g. 1.1 mg/dL creatinine → 97 umol/L, not decimals like 97.24). Standardize scientific units (e.g. 10^9/L).\n- DICTIONARY CORRECTION: If dictionary info has typos/errors (e.g. Total Protein 6-8 g/L instead of 60-80 g/L), output dictionaryCorrection: { field, correctedValue, reason }. Otherwise null.\n- UNCATALOGED (MISS): If not in dictionary, output match=\"none\", writeTarget=\"pending\", key=null, and newCatalogDraft: { suggestedKey, name, unit, aliases, normalRange, description, riskCategories }. NOTE: normalRange MUST follow the same bracketed profile format with clinical names, e.g., \"[Western Standard] High: >1.4; Optimal: 0.5-1.4; Low: <0.5\".\nJSON { \"rows\": [...] }.",
+  "instruction": "You are an expert clinical laboratory AI reviewing a patient's biomarker panel.\nPatient Profile: 43-year-old Chinese male, Unit Preference: SI.\nFor each biomarker:\n- id: matching id\n- medicalInsight: Provide a concise, clinically accurate insight for every row (including optimal/normal baseline markers). Cite trend if previous values exist. Consider patient ethnography (e.g. for Chinese patients, HbA1c >=39 indicates elevated prediabetes risk). Never write Critical.\n- customRangeOverlay: If agreeing with range, return null. If missing thresholds or ethnic demographics, provide FULL multi-bracket range specifying the profile source and clinical names. Format MUST be \"[Profile] Clinical Name: Range; Clinical Name: Range\". Example: \"[Chinese Ethnicity] Elevated (Diabetes): >=48; Elevated: >=39; Optimal: <39\" or \"[Western Standard] High: >104; Normal: 64-104; Low: <64\". If multiple demographic profiles exist, provide all of them.\n- optimalValue: If existing is accurate, return \"\". Otherwise provide 1 single ideal target value without inequalities or ranges (e.g. \"33 mmol/mol\", \"80 umol/L\", \"95 mL/min/1.73m2\"; note 60 for eGFR is naive CKD G2, correct it). NEVER output a range with a dash like \"20 - 41\".\n- editReason: If replacing/correcting existing user values or suboptimal optimalValue, explain why. Otherwise \"\". For eGFR, if correcting optimal from naive 60 to >= 90, you MUST provide an editReason explaining correction of naive normal eGFR.\n- logs: Extract all logs with standardized \"YYYY-MM-DD\" dates, labName if mentioned (e.g. \"US lab\", \"GP Clinic\"), and comments. Convert US units to patient's unitPreference with standard clinical integer rounding (e.g. 1.1 mg/dL creatinine → 97 umol/L, not decimals like 97.24). Standardize scientific units (e.g. 10^9/L).\n- DICTIONARY CORRECTION: If dictionary info has typos/errors (e.g. Total Protein 6-8 g/L instead of 60-80 g/L), output dictionaryCorrection: { field, correctedValue, reason }. Otherwise null.\n- UNCATALOGED (MISS): If not in dictionary, output match=\"none\", writeTarget=\"pending\", key=null, and newCatalogDraft: { suggestedKey, name, unit, aliases, normalRange, description, riskCategories }. NOTE: normalRange MUST follow the same bracketed profile format with clinical names, e.g., \"[Western Standard] High: >1.4; Optimal: 0.5-1.4; Low: <0.5\".\nJSON { \"rows\": [...] }.",
   "turns": [
     {
       "turn": 1,
@@ -30,15 +30,15 @@
         "img_29",
         "img_30"
       ],
-      "ms": 7088,
+      "ms": 7900,
       "n": 20,
-      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"img_1\",\n      \"medicalInsight\": \"HbA1c is 40 mmol/mol, indicating an elevated prediabetes risk for a Chinese male (threshold >=39 mmol/mol).\",\n      \"optimalValue\": \"35 mmol/mol\",\n      \"editReason\": \"Adjusted optimal value to reflect optimal metabolic health for Chinese ethnicity.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 40,\n          \"unit\": \"mmol/mol\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": \"[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39\",\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_5\",\n      \"medicalInsight\": \"Serum creatinine is 100 umol/L, which falls within the standard normal laboratory range.\",\n      \"optimalValue\": \"80 umol/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 100,\n          \"unit\": \"umol/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_6\",\n      \"medicalInsight\": \"Your eGFR of 80 mL/min/1.73m2 is slightly below optimal, though within general laboratory reference parameters.\",\n      \"optimalValue\": \"95 mL/min/1.73m2\",\n      \"editReason\": \"Corrected naive normal eGFR from 60 to optimal clinical target of >=90.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 80,\n          \"unit\": \"mL/min/1.73m2\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": \"[Western Standard] Optimal: >=90; Low: <90\",\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_7\",\n      \"medicalInsight\": \"Serum albumin is 46 g/L, which is slightly above the standard lab reference ceiling of 45 g/L but generally clinically benign.\",\n      \"optimalValue\": \"43 g/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 46,\n          \"unit\": \"g/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_8\",\n      \"medicalInsight\": \"ALT is 41 U/L, sitting just at the upper margin of normal hepatic enzyme activity.\",\n      \"optimalValue\": \"25 U/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 41,\n          \"unit\": \"U/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_10\",\n      \"medicalInsight\": \"AST is 27 U/L, well within normal limits for liver and muscle tissue function.\",\n      \"optimalValue\": \"20 U/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 27,\n          \"unit\": \"U/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_12\",\n      \"medicalInsight\": \"Total protein is 81 g/L, which is normal when accounting for dictionary unit correction.\",\n      \"optimalValue\": \"70 g/L\",\n      \"editReason\": \"Corrected dictionary range from 6-8 g/L to 60-80 g/L.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 81,\n          \"unit\": \"g/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": \"[Western Standard] High: >80; Normal: 60-80; Low: <60\",\n      \"dictionaryCorrection\": {\n        \"field\": \"normalRange\",\n        \"correctedValue\": \"60 - 80\",\n        \"reason\": \"Standard units for Total Protein are g/L, making 6-8 a typographical error for 60-80.\"\n      }\n    },\n    {\n      \"id\": \"img_17\",\n      \"medicalInsight\": \"White blood cell count is 5.7 10^9/L, reflecting a healthy immune cell profile.\",\n      \"optimalValue\": \"6.5 10^9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 5.7,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_18\",\n      \"medicalInsight\": \"Red blood cell count is 5.47 10^12/L, indicating normal erythropoiesis and oxygen-carrying capacity.\",\n      \"optimalValue\": \"5.00 10^12/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 5.47,\n          \"unit\": \"10*12/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_19\",\n      \"medicalInsight\": \"Hemoglobin is 166 g/L, nicely situated within the optimal physiological reference range.\",\n      \"optimalValue\": \"150 g/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 166,\n          \"unit\": \"g/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_20\",\n      \"medicalInsight\": \"Hematocrit is 0.48 L/L, showing normal blood volume distribution of red cells.\",\n      \"optimalValue\": \"0.44 L/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 0.48,\n          \"unit\": \"L/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_21\",\n      \"medicalInsight\": \"MCV is 88 fL, denoting normocytic red blood cells.\",\n      \"optimalValue\": \"90 fL\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 88,\n          \"unit\": \"fL\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_22\",\n      \"medicalInsight\": \"MCH is 30.3 pg, reflecting normal hemoglobin content per red blood cell.\",\n      \"optimalValue\": \"30.0 pg\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 30.3,\n          \"unit\": \"pg\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_23\",\n      \"medicalInsight\": \"MCHC is 346 g/L, indicating normal intracellular hemoglobin concentration.\",\n      \"optimalValue\": \"340 g/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 346,\n          \"unit\": \"g/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_24\",\n      \"medicalInsight\": \"RDW is 11.8 %, demonstrating uniform red blood cell sizing.\",\n      \"optimalValue\": \"13.0 %\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 11.8,\n          \"unit\": \"%\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_25\",\n      \"medicalInsight\": \"Platelet count is 227 10^9/L, which is optimal for coagulation function.\",\n      \"optimalValue\": \"250 10^9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 227,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_26\",\n      \"medicalInsight\": \"MPV is 10.6 fL, falling within normal thrombocyte volume parameters.\",\n      \"optimalValue\": \"9.5 fL\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 10.6,\n          \"unit\": \"fL\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_28\",\n      \"medicalInsight\": \"Neutrophil count is 3.18 10^9/L, supporting healthy antibacterial immune defenses.\",\n      \"optimalValue\": \"4.00 10^9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 3.18,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_29\",\n      \"medicalInsight\": \"Eosinophil count is 0.07 10^9/L, which is normal.\",\n      \"optimalValue\": \"0.15 10^9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 0.07,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_30\",\n      \"medicalInsight\": \"Basophil count is 0.04 10^9/L, well within expected basophil ranges.\",\n      \"optimalValue\": \"0.02 10^9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 0.04,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    }\n  ]\n}",
+      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"img_1\",\n      \"medicalInsight\": \"Your HbA1c is 40 mmol/mol, which is within the optimal range for glycemic control.\",\n      \"optimalValue\": \"35 mmol/mol\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 40,\n          \"unit\": \"mmol/mol\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": \"[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; Low: <20\",\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_5\",\n      \"medicalInsight\": \"Serum creatinine is 100 umol/L, within the normal laboratory range.\",\n      \"optimalValue\": \"80 umol/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 100,\n          \"unit\": \"umol/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_6\",\n      \"medicalInsight\": \"Your eGFR of 80 mL/min/1.73m2 indicates mild reduction in filtration capacity relative to optimal young adult baselines.\",\n      \"optimalValue\": \"95 mL/min/1.73m2\",\n      \"editReason\": \"Corrected naive optimal threshold of 60 to optimal target >=90 for young adults.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 80,\n          \"unit\": \"mL/min/1.73m2\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": \"[Western Standard] Optimal: >=90; Normal: 60-89; Low: <60\",\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_7\",\n      \"medicalInsight\": \"Serum albumin is 46 g/L, reflecting normal hepatic protein synthesis and hydration status.\",\n      \"optimalValue\": \"45 g/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 46,\n          \"unit\": \"g/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_8\",\n      \"medicalInsight\": \"ALT is 41 U/L, sitting slightly above standard optimal thresholds but within broad normal ranges.\",\n      \"optimalValue\": \"25 U/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 41,\n          \"unit\": \"U/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_10\",\n      \"medicalInsight\": \"AST is 27 U/L, well within normal limits indicating healthy hepatic and muscular tissue.\",\n      \"optimalValue\": \"22 U/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 27,\n          \"unit\": \"U/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_12\",\n      \"medicalInsight\": \"Total Protein is 81 g/L, marginally above the standard reference range.\",\n      \"optimalValue\": \"70 g/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 81,\n          \"unit\": \"g/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": \"[Western Standard] High: >80; Normal: 60-80; Low: <60\",\n      \"dictionaryCorrection\": {\n        \"field\": \"normalRange\",\n        \"correctedValue\": \"60 - 80\",\n        \"reason\": \"Dictionary had a severe typo specifying 6-8 g/L instead of physiological 60-80 g/L.\"\n      }\n    },\n    {\n      \"id\": \"img_17\",\n      \"medicalInsight\": \"White blood cell count is 5.7 10*9/L, representing normal immune function.\",\n      \"optimalValue\": \"6.0 10*9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 5.7,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_18\",\n      \"medicalInsight\": \"Red blood cell count is 5.47 10*12/L, indicating normal erythropoiesis.\",\n      \"optimalValue\": \"5.00 10*12/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 5.47,\n          \"unit\": \"10*12/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_19\",\n      \"medicalInsight\": \"Hemoglobin is 166 g/L, within the normal range for adult males.\",\n      \"optimalValue\": \"150 g/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 166,\n          \"unit\": \"g/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_20\",\n      \"medicalInsight\": \"Hematocrit is 0.48 L/L, showing normal proportion of red blood cells in circulation.\",\n      \"optimalValue\": \"0.45 L/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 0.48,\n          \"unit\": \"L/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_21\",\n      \"medicalInsight\": \"Mean Corpuscular Volume is 88 fL, reflecting normal red blood cell sizing.\",\n      \"optimalValue\": \"90 fL\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 88,\n          \"unit\": \"fL\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_22\",\n      \"medicalInsight\": \"Mean Corpuscular Hemoglobin is 30.3 pg, normal for hemoglobin content per cell.\",\n      \"optimalValue\": \"30.0 pg\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 30.3,\n          \"unit\": \"pg\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_23\",\n      \"medicalInsight\": \"Mean Corpuscular Hemoglobin Concentration is 346 g/L, well within reference limits.\",\n      \"optimalValue\": \"340 g/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 346,\n          \"unit\": \"g/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_24\",\n      \"medicalInsight\": \"Red Cell Distribution Width is 11.8 %, indicating uniform red blood cell volume.\",\n      \"optimalValue\": \"12.5 %\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 11.8,\n          \"unit\": \"%\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_25\",\n      \"medicalInsight\": \"Platelet count is 227 10*9/L, showing normal clotting function.\",\n      \"optimalValue\": \"250 10*9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 227,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_26\",\n      \"medicalInsight\": \"Mean Platelet Volume is 10.6 fL, which is within the normal range.\",\n      \"optimalValue\": \"9.5 fL\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 10.6,\n          \"unit\": \"fL\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_28\",\n      \"medicalInsight\": \"Neutrophil count is 3.18 10*9/L, reflecting normal antibacterial defense.\",\n      \"optimalValue\": \"3.50 10*9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 3.18,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_29\",\n      \"medicalInsight\": \"Eosinophil count is 0.07 10*9/L, within normal baseline limits.\",\n      \"optimalValue\": \"0.15 10*9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 0.07,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_30\",\n      \"medicalInsight\": \"Basophil count is 0.04 10*9/L, normal for inflammatory regulation.\",\n      \"optimalValue\": \"0.02 10*9/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 0.04,\n          \"unit\": \"10*9/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    }\n  ]\n}",
       "rows": [
         {
           "id": "img_1",
-          "medicalInsight": "HbA1c is 40 mmol/mol, indicating an elevated prediabetes risk for a Chinese male (threshold >=39 mmol/mol).",
+          "medicalInsight": "Your HbA1c is 40 mmol/mol, which is within the optimal range for glycemic control.",
           "optimalValue": "35 mmol/mol",
-          "editReason": "Adjusted optimal value to reflect optimal metabolic health for Chinese ethnicity.",
+          "editReason": "",
           "logs": [
             {
               "date": "2026-06-05",
@@ -47,12 +47,12 @@
               "comment": null
             }
           ],
-          "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39",
+          "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; Low: <20",
           "dictionaryCorrection": null
         },
         {
           "id": "img_5",
-          "medicalInsight": "Serum creatinine is 100 umol/L, which falls within the standard normal laboratory range.",
+          "medicalInsight": "Serum creatinine is 100 umol/L, within the normal laboratory range.",
           "optimalValue": "80 umol/L",
           "editReason": "",
           "logs": [
@@ -68,9 +68,9 @@
         },
         {
           "id": "img_6",
-          "medicalInsight": "Your eGFR of 80 mL/min/1.73m2 is slightly below optimal, though within general laboratory reference parameters.",
+          "medicalInsight": "Your eGFR of 80 mL/min/1.73m2 indicates mild reduction in filtration capacity relative to optimal young adult baselines.",
           "optimalValue": "95 mL/min/1.73m2",
-          "editReason": "Corrected naive normal eGFR from 60 to optimal clinical target of >=90.",
+          "editReason": "Corrected naive optimal threshold of 60 to optimal target >=90 for young adults.",
           "logs": [
             {
               "date": "2026-06-05",
@@ -79,13 +79,13 @@
               "comment": null
             }
           ],
-          "customRangeOverlay": "[Western Standard] Optimal: >=90; Low: <90",
+          "customRangeOverlay": "[Western Standard] Optimal: >=90; Normal: 60-89; Low: <60",
           "dictionaryCorrection": null
         },
         {
           "id": "img_7",
-          "medicalInsight": "Serum albumin is 46 g/L, which is slightly above the standard lab reference ceiling of 45 g/L but generally clinically benign.",
-          "optimalValue": "43 g/L",
+          "medicalInsight": "Serum albumin is 46 g/L, reflecting normal hepatic protein synthesis and hydration status.",
+          "optimalValue": "45 g/L",
           "editReason": "",
           "logs": [
             {
@@ -100,7 +100,7 @@
         },
         {
           "id": "img_8",
-          "medicalInsight": "ALT is 41 U/L, sitting just at the upper margin of normal hepatic enzyme activity.",
+          "medicalInsight": "ALT is 41 U/L, sitting slightly above standard optimal thresholds but within broad normal ranges.",
           "optimalValue": "25 U/L",
           "editReason": "",
           "logs": [
@@ -116,8 +116,8 @@
         },
         {
           "id": "img_10",
-          "medicalInsight": "AST is 27 U/L, well within normal limits for liver and muscle tissue function.",
-          "optimalValue": "20 U/L",
+          "medicalInsight": "AST is 27 U/L, well within normal limits indicating healthy hepatic and muscular tissue.",
+          "optimalValue": "22 U/L",
           "editReason": "",
           "logs": [
             {
@@ -132,9 +132,9 @@
         },
         {
           "id": "img_12",
-          "medicalInsight": "Total protein is 81 g/L, which is normal when accounting for dictionary unit correction.",
+          "medicalInsight": "Total Protein is 81 g/L, marginally above the standard reference range.",
           "optimalValue": "70 g/L",
-          "editReason": "Corrected dictionary range from 6-8 g/L to 60-80 g/L.",
+          "editReason": "",
           "logs": [
             {
               "date": "2026-06-05",
@@ -147,13 +147,13 @@
           "dictionaryCorrection": {
             "field": "normalRange",
             "correctedValue": "60 - 80",
-            "reason": "Standard units for Total Protein are g/L, making 6-8 a typographical error for 60-80."
+            "reason": "Dictionary had a severe typo specifying 6-8 g/L instead of physiological 60-80 g/L."
           }
         },
         {
           "id": "img_17",
-          "medicalInsight": "White blood cell count is 5.7 10^9/L, reflecting a healthy immune cell profile.",
-          "optimalValue": "6.5 10^9/L",
+          "medicalInsight": "White blood cell count is 5.7 10*9/L, representing normal immune function.",
+          "optimalValue": "6.0 10*9/L",
           "editReason": "",
           "logs": [
             {
@@ -168,8 +168,8 @@
         },
         {
           "id": "img_18",
-          "medicalInsight": "Red blood cell count is 5.47 10^12/L, indicating normal erythropoiesis and oxygen-carrying capacity.",
-          "optimalValue": "5.00 10^12/L",
+          "medicalInsight": "Red blood cell count is 5.47 10*12/L, indicating normal erythropoiesis.",
+          "optimalValue": "5.00 10*12/L",
           "editReason": "",
           "logs": [
             {
@@ -184,7 +184,7 @@
         },
         {
           "id": "img_19",
-          "medicalInsight": "Hemoglobin is 166 g/L, nicely situated within the optimal physiological reference range.",
+          "medicalInsight": "Hemoglobin is 166 g/L, within the normal range for adult males.",
           "optimalValue": "150 g/L",
           "editReason": "",
           "logs": [
@@ -200,8 +200,8 @@
         },
         {
           "id": "img_20",
-          "medicalInsight": "Hematocrit is 0.48 L/L, showing normal blood volume distribution of red cells.",
-          "optimalValue": "0.44 L/L",
+          "medicalInsight": "Hematocrit is 0.48 L/L, showing normal proportion of red blood cells in circulation.",
+          "optimalValue": "0.45 L/L",
           "editReason": "",
           "logs": [
             {
@@ -216,7 +216,7 @@
         },
         {
           "id": "img_21",
-          "medicalInsight": "MCV is 88 fL, denoting normocytic red blood cells.",
+          "medicalInsight": "Mean Corpuscular Volume is 88 fL, reflecting normal red blood cell sizing.",
           "optimalValue": "90 fL",
           "editReason": "",
           "logs": [
@@ -232,7 +232,7 @@
         },
         {
           "id": "img_22",
-          "medicalInsight": "MCH is 30.3 pg, reflecting normal hemoglobin content per red blood cell.",
+          "medicalInsight": "Mean Corpuscular Hemoglobin is 30.3 pg, normal for hemoglobin content per cell.",
           "optimalValue": "30.0 pg",
           "editReason": "",
           "logs": [
@@ -248,7 +248,7 @@
         },
         {
           "id": "img_23",
-          "medicalInsight": "MCHC is 346 g/L, indicating normal intracellular hemoglobin concentration.",
+          "medicalInsight": "Mean Corpuscular Hemoglobin Concentration is 346 g/L, well within reference limits.",
           "optimalValue": "340 g/L",
           "editReason": "",
           "logs": [
@@ -264,8 +264,8 @@
         },
         {
           "id": "img_24",
-          "medicalInsight": "RDW is 11.8 %, demonstrating uniform red blood cell sizing.",
-          "optimalValue": "13.0 %",
+          "medicalInsight": "Red Cell Distribution Width is 11.8 %, indicating uniform red blood cell volume.",
+          "optimalValue": "12.5 %",
           "editReason": "",
           "logs": [
             {
@@ -280,8 +280,8 @@
         },
         {
           "id": "img_25",
-          "medicalInsight": "Platelet count is 227 10^9/L, which is optimal for coagulation function.",
-          "optimalValue": "250 10^9/L",
+          "medicalInsight": "Platelet count is 227 10*9/L, showing normal clotting function.",
+          "optimalValue": "250 10*9/L",
           "editReason": "",
           "logs": [
             {
@@ -296,7 +296,7 @@
         },
         {
           "id": "img_26",
-          "medicalInsight": "MPV is 10.6 fL, falling within normal thrombocyte volume parameters.",
+          "medicalInsight": "Mean Platelet Volume is 10.6 fL, which is within the normal range.",
           "optimalValue": "9.5 fL",
           "editReason": "",
           "logs": [
@@ -312,8 +312,8 @@
         },
         {
           "id": "img_28",
-          "medicalInsight": "Neutrophil count is 3.18 10^9/L, supporting healthy antibacterial immune defenses.",
-          "optimalValue": "4.00 10^9/L",
+          "medicalInsight": "Neutrophil count is 3.18 10*9/L, reflecting normal antibacterial defense.",
+          "optimalValue": "3.50 10*9/L",
           "editReason": "",
           "logs": [
             {
@@ -328,8 +328,8 @@
         },
         {
           "id": "img_29",
-          "medicalInsight": "Eosinophil count is 0.07 10^9/L, which is normal.",
-          "optimalValue": "0.15 10^9/L",
+          "medicalInsight": "Eosinophil count is 0.07 10*9/L, within normal baseline limits.",
+          "optimalValue": "0.15 10*9/L",
           "editReason": "",
           "logs": [
             {
@@ -344,8 +344,8 @@
         },
         {
           "id": "img_30",
-          "medicalInsight": "Basophil count is 0.04 10^9/L, well within expected basophil ranges.",
-          "optimalValue": "0.02 10^9/L",
+          "medicalInsight": "Basophil count is 0.04 10*9/L, normal for inflammatory regulation.",
+          "optimalValue": "0.02 10*9/L",
           "editReason": "",
           "logs": [
             {
@@ -692,15 +692,15 @@
         "img_35",
         "img_38"
       ],
-      "ms": 2486,
+      "ms": 5187,
       "n": 4,
-      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"img_33\",\n      \"medicalInsight\": \"Total cholesterol is elevated at 6.5 mmol/L, increasing long-term cardiovascular risk for a 43-year-old male. Lifestyle modification and dietary review are recommended.\",\n      \"optimalValue\": \"4.5 mmol/L\",\n      \"editReason\": \"Provided a specific clinical optimal target below 5.0 mmol/L.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 6.5,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP results\"\n        }\n      ],\n      \"customRangeOverlay\": \"[All patients] Very High: >6.2; Elevated: >5; Optimal: <=5\",\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_34\",\n      \"medicalInsight\": \"HDL-C is optimal at 1.5 mmol/L, providing a cardioprotective lipid clearance profile.\",\n      \"optimalValue\": \"1.4 mmol/L\",\n      \"editReason\": \"Set a precise optimal target within the normal reference range.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 1.5,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP results\"\n        }\n      ],\n      \"customRangeOverlay\": \"[All patients] Normal: 0.9-1.7; Low: <0.9\",\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_35\",\n      \"medicalInsight\": \"Triglycerides are at the borderline threshold of 1.7 mmol/L, indicating potential metabolic stress.\",\n      \"optimalValue\": \"1.2 mmol/L\",\n      \"editReason\": \"Target optimal value set well below the elevated cutoff.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 1.7,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP results\"\n        }\n      ],\n      \"customRangeOverlay\": \"[All patients] Very High: >=5.6; Elevated: >=1.7; Optimal: <1.7\",\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_38\",\n      \"medicalInsight\": \"LDL-C is elevated at 4.3 mmol/L, a primary driver of atherosclerotic cardiovascular disease requiring proactive management.\",\n      \"optimalValue\": \"2.0 mmol/L\",\n      \"editReason\": \"Set a robust cardiovascular risk reduction target for LDL-C.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 4.3,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP results\"\n        }\n      ],\n      \"customRangeOverlay\": \"[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6\",\n      \"dictionaryCorrection\": null\n    }\n  ]\n}",
+      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"img_33\",\n      \"medicalInsight\": \"Total cholesterol is elevated at 6.5 mmol/L, indicating increased cardiovascular risk for a 43-year-old male. Lifestyle modification and further lipid profile evaluation are recommended.\",\n      \"optimalValue\": \"4.5 mmol/L\",\n      \"editReason\": \"Corrected optimal target to a clinically robust cardiovascular prevention goal.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 6.5,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP results\"\n        }\n      ],\n      \"customRangeOverlay\": \"[All patients] Very High: >6.2; Elevated: >5.0; Optimal: <=5.0\",\n      \"dictionaryCorrection\": {\n        \"field\": \"normalRange\",\n        \"correctedValue\": \"[All patients] Very High: >6.2; Elevated: >5.0; Optimal: <=5.0\",\n        \"reason\": \"Standardize dictionary format to structured multi-bracket clinical thresholds.\"\n      }\n    },\n    {\n      \"id\": \"img_34\",\n      \"medicalInsight\": \"HDL-C is optimal at 1.5 mmol/L, providing a protective cardiovascular effect.\",\n      \"optimalValue\": \"1.6 mmol/L\",\n      \"editReason\": \"Added optimal target for cardioprotection.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 1.5,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP results\"\n        }\n      ],\n      \"customRangeOverlay\": \"[All patients] High: >1.7; Normal: 0.9-1.7; Low: <0.9\",\n      \"dictionaryCorrection\": {\n        \"field\": \"normalRange\",\n        \"correctedValue\": \"[All patients] High: >1.7; Normal: 0.9-1.7; Low: <0.9\",\n        \"reason\": \"Standardize unstructured range into multi-bracket format.\"\n      }\n    },\n    {\n      \"id\": \"img_35\",\n      \"medicalInsight\": \"Triglycerides are borderline elevated at 1.7 mmol/L, which warrants monitoring alongside dietary patterns and physical activity.\",\n      \"optimalValue\": \"1.2 mmol/L\",\n      \"editReason\": \"Set optimal target below the standard threshold for cardiovascular wellness.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 1.7,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP results\"\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"img_38\",\n      \"medicalInsight\": \"LDL-C is elevated at 4.3 mmol/L, representing the primary atherogenic driver requiring targeted management.\",\n      \"optimalValue\": \"2.5 mmol/L\",\n      \"editReason\": \"Set optimal target to reflect primary prevention goals for male adults.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 4.3,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP results\"\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    }\n  ]\n}",
       "rows": [
         {
           "id": "img_33",
-          "medicalInsight": "Total cholesterol is elevated at 6.5 mmol/L, increasing long-term cardiovascular risk for a 43-year-old male. Lifestyle modification and dietary review are recommended.",
+          "medicalInsight": "Total cholesterol is elevated at 6.5 mmol/L, indicating increased cardiovascular risk for a 43-year-old male. Lifestyle modification and further lipid profile evaluation are recommended.",
           "optimalValue": "4.5 mmol/L",
-          "editReason": "Provided a specific clinical optimal target below 5.0 mmol/L.",
+          "editReason": "Corrected optimal target to a clinically robust cardiovascular prevention goal.",
           "logs": [
             {
               "date": "2026-06-03",
@@ -709,14 +709,18 @@
               "comment": "GP results"
             }
           ],
-          "customRangeOverlay": "[All patients] Very High: >6.2; Elevated: >5; Optimal: <=5",
-          "dictionaryCorrection": null
+          "customRangeOverlay": "[All patients] Very High: >6.2; Elevated: >5.0; Optimal: <=5.0",
+          "dictionaryCorrection": {
+            "field": "normalRange",
+            "correctedValue": "[All patients] Very High: >6.2; Elevated: >5.0; Optimal: <=5.0",
+            "reason": "Standardize dictionary format to structured multi-bracket clinical thresholds."
+          }
         },
         {
           "id": "img_34",
-          "medicalInsight": "HDL-C is optimal at 1.5 mmol/L, providing a cardioprotective lipid clearance profile.",
-          "optimalValue": "1.4 mmol/L",
-          "editReason": "Set a precise optimal target within the normal reference range.",
+          "medicalInsight": "HDL-C is optimal at 1.5 mmol/L, providing a protective cardiovascular effect.",
+          "optimalValue": "1.6 mmol/L",
+          "editReason": "Added optimal target for cardioprotection.",
           "logs": [
             {
               "date": "2026-06-03",
@@ -725,14 +729,18 @@
               "comment": "GP results"
             }
           ],
-          "customRangeOverlay": "[All patients] Normal: 0.9-1.7; Low: <0.9",
-          "dictionaryCorrection": null
+          "customRangeOverlay": "[All patients] High: >1.7; Normal: 0.9-1.7; Low: <0.9",
+          "dictionaryCorrection": {
+            "field": "normalRange",
+            "correctedValue": "[All patients] High: >1.7; Normal: 0.9-1.7; Low: <0.9",
+            "reason": "Standardize unstructured range into multi-bracket format."
+          }
         },
         {
           "id": "img_35",
-          "medicalInsight": "Triglycerides are at the borderline threshold of 1.7 mmol/L, indicating potential metabolic stress.",
+          "medicalInsight": "Triglycerides are borderline elevated at 1.7 mmol/L, which warrants monitoring alongside dietary patterns and physical activity.",
           "optimalValue": "1.2 mmol/L",
-          "editReason": "Target optimal value set well below the elevated cutoff.",
+          "editReason": "Set optimal target below the standard threshold for cardiovascular wellness.",
           "logs": [
             {
               "date": "2026-06-03",
@@ -741,14 +749,14 @@
               "comment": "GP results"
             }
           ],
-          "customRangeOverlay": "[All patients] Very High: >=5.6; Elevated: >=1.7; Optimal: <1.7",
+          "customRangeOverlay": null,
           "dictionaryCorrection": null
         },
         {
           "id": "img_38",
-          "medicalInsight": "LDL-C is elevated at 4.3 mmol/L, a primary driver of atherosclerotic cardiovascular disease requiring proactive management.",
-          "optimalValue": "2.0 mmol/L",
-          "editReason": "Set a robust cardiovascular risk reduction target for LDL-C.",
+          "medicalInsight": "LDL-C is elevated at 4.3 mmol/L, representing the primary atherogenic driver requiring targeted management.",
+          "optimalValue": "2.5 mmol/L",
+          "editReason": "Set optimal target to reflect primary prevention goals for male adults.",
           "logs": [
             {
               "date": "2026-06-03",
@@ -757,7 +765,7 @@
               "comment": "GP results"
             }
           ],
-          "customRangeOverlay": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
+          "customRangeOverlay": null,
           "dictionaryCorrection": null
         }
       ],
@@ -846,13 +854,13 @@
         "img_31",
         "img_32"
       ],
-      "ms": 7976,
+      "ms": 9569,
       "n": 12,
-      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"img_2\",\n      \"medicalInsight\": \"Prostate-specific antigen is within the normal reference range, indicating low immediate risk for prostate pathology in this 43-year-old male.\",\n      \"optimalValue\": \"1.0 ug/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 1.41,\n          \"unit\": \"ug/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_psa\",\n        \"name\": \"Se prostate specific Ag level\",\n        \"unit\": \"ug/L\",\n        \"aliases\": [\"PSA\", \"Prostate Specific Antigen\"],\n        \"normalRange\": \"[Western Standard] High: >2.49; Normal: <=2.49\",\n        \"description\": \"Biomarker used primarily to screen for prostate cancer and monitor prostate health.\",\n        \"riskCategories\": [\"Prostate Health\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >2.49; Normal: <=2.49\"\n    },\n    {\n      \"id\": \"img_3\",\n      \"medicalInsight\": \"Serum sodium level is optimal, reflecting normal fluid and electrolyte balance.\",\n      \"optimalValue\": \"140 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 143,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_sodium\",\n        \"name\": \"Serum sodium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Sodium\", \"Na\"],\n        \"normalRange\": \"[Western Standard] High: >146; Normal: 133-146; Low: <133\",\n        \"description\": \"Electrolyte vital for fluid balance, nerve conduction, and muscle function.\",\n        \"riskCategories\": [\"Electrolytes\"]\n      },\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"img_4\",\n      \"medicalInsight\": \"Serum potassium concentration is well within standard limits, supporting healthy cardiac and neuromuscular function.\",\n      \"optimalValue\": \"4.2 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 4.3,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_potassium\",\n        \"name\": \"Serum potassium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Potassium\", \"K\"],\n        \"normalRange\": \"[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5\",\n        \"description\": \"Essential mineral and electrolyte for cellular function and heart rhythm.\",\n        \"riskCategories\": [\"Electrolytes\"]\n      },\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"img_9\",\n      \"medicalInsight\": \"Alkaline phosphatase is within the normal reference range, signifying healthy liver and bone metabolism.\",\n      \"optimalValue\": \"70 U/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 39,\n          \"unit\": \"U/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_alkaline_phosphatase\",\n        \"name\": \"Serum alkaline phosphatase\",\n        \"unit\": \"U/L\",\n        \"aliases\": [\"ALP\", \"Alkaline Phosphatase\"],\n        \"normalRange\": \"[Western Standard] High: >130; Normal: 30-130; Low: <30\",\n        \"description\": \"Enzyme associated with liver, biliary tract, and bone.\",\n        \"riskCategories\": [\"Liver Function\"]\n      },\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"img_11\",\n      \"medicalInsight\": \"Total bilirubin is normal, indicating healthy hepatic processing and clearance of red blood cell breakdown products.\",\n      \"optimalValue\": \"10 umol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 16,\n          \"unit\": \"umol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_total_bilirubin\",\n        \"name\": \"Serum total bilirubin level\",\n        \"unit\": \"umol/L\",\n        \"aliases\": [\"Total Bilirubin\", \"Bilirubin\"],\n        \"normalRange\": \"[Western Standard] High: >21; Normal: <=21\",\n        \"description\": \"Waste product from hemoglobin breakdown processed by the liver.\",\n        \"riskCategories\": [\"Liver Function\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >21; Normal: <=21\"\n    },\n    {\n      \"id\": \"img_13\",\n      \"medicalInsight\": \"Serum globulin levels are optimal, reflecting normal immune and protein synthesis status.\",\n      \"optimalValue\": \"28 g/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 35,\n          \"unit\": \"g/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_globulin\",\n        \"name\": \"Serum globulin\",\n        \"unit\": \"g/L\",\n        \"aliases\": [\"Globulin\"],\n        \"normalRange\": \"[Western Standard] High: >38; Normal: 22-38; Low: <22\",\n        \"description\": \"Group of proteins in the blood including antibodies and transport proteins.\",\n        \"riskCategories\": [\"Protein Status\"]\n      },\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"img_14\",\n      \"medicalInsight\": \"Serum calcium is normal, supporting healthy bone structure and cellular signaling.\",\n      \"optimalValue\": \"2.35 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 2.47,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_calcium\",\n        \"name\": \"Serum calcium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Calcium\", \"Ca\"],\n        \"normalRange\": \"[Western Standard] Normal: 2.10-2.55\",\n        \"description\": \"Essential mineral for bone health, muscle contraction, and nerve function.\",\n        \"riskCategories\": [\"Bone & Mineral\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >2.55; Normal: 2.10-2.55; Low: <2.10\"\n    },\n    {\n      \"id\": \"img_15\",\n      \"medicalInsight\": \"Adjusted calcium is within the expected range, accounting for protein binding to accurately reflect true calcium status.\",\n      \"optimalValue\": \"2.30 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 2.37,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_adjusted_calcium\",\n        \"name\": \"Serum adjusted calcium conc\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Adjusted Calcium\", \"Corrected Calcium\"],\n        \"normalRange\": \"[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08\",\n        \"description\": \"Calcium level corrected for variations in serum albumin concentration.\",\n        \"riskCategories\": [\"Bone & Mineral\"]\n      },\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"img_16\",\n      \"medicalInsight\": \"Inorganic phosphate is optimal, indicating appropriate mineral metabolism and renal filtration.\",\n      \"optimalValue\": \"1.10 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 1.12,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_inorganic_phosphate\",\n        \"name\": \"Serum inorganic phosphate\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Phosphate\", \"Phosphorus\"],\n        \"normalRange\": \"[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80\",\n        \"description\": \"Mineral essential for energy transfer, bone formation, and cellular integrity.\",\n        \"riskCategories\": [\"Bone & Mineral\"]\n      },\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"img_27\",\n      \"medicalInsight\": \"Platelet distribution width is normal, suggesting uniform platelet sizing and steady bone marrow production.\",\n      \"optimalValue\": \"12.0 fL\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 12.9,\n          \"unit\": \"fL\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"platelet_distribution_width\",\n        \"name\": \"Platelet distribution width\",\n        \"unit\": \"fL\",\n        \"aliases\": [\"PDW\"],\n        \"normalRange\": \"[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3\",\n        \"description\": \"Measures variation in platelet size within the circulating blood.\",\n        \"riskCategories\": [\"Hematology\"]\n      },\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"img_31\",\n      \"medicalInsight\": \"Absence of nucleated red blood cells is normal for peripheral blood findings in healthy adults.\",\n      \"optimalValue\": \"0.00 10*9/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 0,\n          \"unit\": \"10*9/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"nucleated_red_blood_cell_count\",\n        \"name\": \"Nucleated red blood cell count\",\n        \"unit\": \"10*9/L\",\n        \"aliases\": [\"NRBC\", \"Nucleated RBC\"],\n        \"normalRange\": \"[Western Standard] High: >0.01; Normal: 0.00-0.01\",\n        \"description\": \"Immature red blood cells occasionally released into circulation under extreme physiological demand.\",\n        \"riskCategories\": [\"Hematology\"]\n      },\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"img_32\",\n      \"medicalInsight\": \"QRISK2 10-year cardiovascular disease risk score is low (1.2%), reflecting favorable cardiovascular health for a 43-year-old male.\",\n      \"optimalValue\": \"<1.0 %\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-04\",\n          \"value\": 1.2,\n          \"unit\": \"%\",\n          \"comment\": \"GP risk assessment\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"qrisk2_cvd_risk_score\",\n        \"name\": \"QRISK2 cardiovascular disease 10 year risk score\",\n        \"unit\": \"%\",\n        \"aliases\": [\"QRISK2\", \"CVD Risk Score\"],\n        \"normalRange\": \"[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Low: <5.0\",\n        \"description\": \"Calculates the percentage risk of developing a cardiovascular event over the next 10 years.\",\n        \"riskCategories\": [\"Cardiovascular\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Low: <5.0\"\n    }\n  ]\n}",
+      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"img_2\",\n      \"medicalInsight\": \"Prostate specific antigen level is within the optimal reference range, indicating low risk of prostate pathology for a 43-year-old male.\",\n      \"optimalValue\": \"1.0 ug/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 1.41,\n          \"unit\": \"ug/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"se_prostate_specific_ag_level\",\n        \"name\": \"Se prostate specific Ag level\",\n        \"unit\": \"ug/L\",\n        \"aliases\": [\"PSA\", \"Prostate Specific Antigen\"],\n        \"normalRange\": \"[Western Standard] High: >2.49; Optimal: <=2.49; Low: <0.0\",\n        \"description\": \"Measures the concentration of prostate-specific antigen in the blood, used for prostate health screening.\",\n        \"riskCategories\": [\"Prostate Health\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >2.49; Optimal: 0.0-2.49\"\n    },\n    {\n      \"id\": \"img_3\",\n      \"medicalInsight\": \"Serum sodium is well within normal physiological limits, reflecting normal hydration and electrolyte balance.\",\n      \"optimalValue\": \"140 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 143,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_sodium\",\n        \"name\": \"Serum sodium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Sodium\", \"Na+\"],\n        \"normalRange\": \"[Western Standard] High: >146; Normal: 133-146; Low: <133\",\n        \"description\": \"Primary extracellular electrolyte crucial for fluid balance, nerve conduction, and muscle function.\",\n        \"riskCategories\": [\"Electrolytes\", \"Hydration\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >146; Normal: 133-146; Low: <133\"\n    },\n    {\n      \"id\": \"img_4\",\n      \"medicalInsight\": \"Serum potassium level is optimal, supporting normal cardiac and neuromuscular function.\",\n      \"optimalValue\": \"4.2 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 4.3,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_potassium\",\n        \"name\": \"Serum potassium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Potassium\", \"K+\"],\n        \"normalRange\": \"[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5\",\n        \"description\": \"Primary intracellular electrolyte vital for maintaining normal cardiac rhythm and cellular potential.\",\n        \"riskCategories\": [\"Electrolytes\", \"Cardiovascular\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5\"\n    },\n    {\n      \"id\": \"img_9\",\n      \"medicalInsight\": \"Alkaline phosphatase is within the normal range, indicating healthy liver and bone metabolism.\",\n      \"optimalValue\": \"70 U/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 39,\n          \"unit\": \"U/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_alkaline_phosphatase\",\n        \"name\": \"Serum alkaline phosphatase\",\n        \"unit\": \"U/L\",\n        \"aliases\": [\"ALP\", \"Alkaline Phosphatase\"],\n        \"normalRange\": \"[Western Standard] High: >130; Normal: 30-130; Low: <30\",\n        \"description\": \"Enzyme associated with the biliary tract, liver, and bone tissue turnover.\",\n        \"riskCategories\": [\"Liver Function\", \"Bone Health\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >130; Normal: 30-130; Low: <30\"\n    },\n    {\n      \"id\": \"img_11\",\n      \"medicalInsight\": \"Total bilirubin level is normal, suggesting healthy hepatic processing and red blood cell turnover.\",\n      \"optimalValue\": \"10 umol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 16,\n          \"unit\": \"umol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_total_bilirubin_level\",\n        \"name\": \"Serum total bilirubin level\",\n        \"unit\": \"umol/L\",\n        \"aliases\": [\"Total Bilirubin\", \"Bilirubin\"],\n        \"normalRange\": \"[Western Standard] High: >21; Optimal: <=21; Low: <0\",\n        \"description\": \"Yellow breakdown product of normal heme catabolism, excreted by the liver.\",\n        \"riskCategories\": [\"Liver Function\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >21; Optimal: 0-21\"\n    },\n    {\n      \"id\": \"img_13\",\n      \"medicalInsight\": \"Serum globulin is within the normal range, indicating a well-balanced immune and protein status.\",\n      \"optimalValue\": \"28 g/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 35,\n          \"unit\": \"g/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_globulin\",\n        \"name\": \"Serum globulin\",\n        \"unit\": \"g/L\",\n        \"aliases\": [\"Globulins\"],\n        \"normalRange\": \"[Western Standard] High: >38; Normal: 22-38; Low: <22\",\n        \"description\": \"Group of blood proteins including enzymes, antibodies, and transport proteins.\",\n        \"riskCategories\": [\"Protein Status\", \"Liver Function\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >38; Normal: 22-38; Low: <22\"\n    },\n    {\n      \"id\": \"img_14\",\n      \"medicalInsight\": \"Serum calcium is normal, supporting optimal skeletal and cellular signaling functions.\",\n      \"optimalValue\": \"2.35 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 2.47,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_calcium\",\n        \"name\": \"Serum calcium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Calcium\", \"Ca\"],\n        \"normalRange\": \"[Western Standard] High: >2.60; Normal: 2.15-2.60; Low: <2.15\",\n        \"description\": \"Essential mineral for bone structure, vascular contraction, muscle function, and nerve transmission.\",\n        \"riskCategories\": [\"Bone Health\", \"Electrolytes\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >2.60; Normal: 2.15-2.60; Low: <2.15\"\n    },\n    {\n      \"id\": \"img_15\",\n      \"medicalInsight\": \"Adjusted calcium concentration is well within normal limits, reflecting stable protein-corrected calcium balance.\",\n      \"optimalValue\": \"2.30 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 2.37,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_adjusted_calcium_conc\",\n        \"name\": \"Serum adjusted calcium conc\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Corrected Calcium\", \"Adjusted Calcium\"],\n        \"normalRange\": \"[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08\",\n        \"description\": \"Total serum calcium adjusted for variations in serum albumin levels.\",\n        \"riskCategories\": [\"Bone Health\", \"Electrolytes\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08\"\n    },\n    {\n      \"id\": \"img_16\",\n      \"medicalInsight\": \"Serum inorganic phosphate is optimal, supporting energy metabolism and bone homeostasis.\",\n      \"optimalValue\": \"1.10 mmol/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 1.12,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_inorganic_phosphate\",\n        \"name\": \"Serum inorganic phosphate\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Phosphate\", \"Phosphorus\"],\n        \"normalRange\": \"[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80\",\n        \"description\": \"Essential mineral involved in bone mineralization, energy storage, and acid-base balance.\",\n        \"riskCategories\": [\"Bone Health\", \"Metabolism\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80\"\n    },\n    {\n      \"id\": \"img_27\",\n      \"medicalInsight\": \"Platelet distribution width is normal, suggesting uniform platelet production.\",\n      \"optimalValue\": \"12.0 fL\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 12.9,\n          \"unit\": \"fL\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"platelet_distribution_width\",\n        \"name\": \"Platelet distribution width\",\n        \"unit\": \"fL\",\n        \"aliases\": [\"PDW\"],\n        \"normalRange\": \"[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3\",\n        \"description\": \"Indicates variation in platelet size, useful in evaluating thrombopoiesis.\",\n        \"riskCategories\": [\"Hematology\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3\"\n    },\n    {\n      \"id\": \"img_31\",\n      \"medicalInsight\": \"Nucleated red blood cell count is within normal limits, showing effective bone marrow erythropoiesis.\",\n      \"optimalValue\": \"0.0 10*9/L\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 0.0,\n          \"unit\": \"10*9/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"nucleated_red_blood_cell_count\",\n        \"name\": \"Nucleated red blood cell count\",\n        \"unit\": \"10*9/L\",\n        \"aliases\": [\"NRBC\", \"Normoblast Count\"],\n        \"normalRange\": \"[Western Standard] High: >0.01; Normal: 0.00-0.01; Low: <0.00\",\n        \"description\": \"Immature red blood cells occasionally seen in peripheral blood during extreme marrow stress or hemolysis.\",\n        \"riskCategories\": [\"Hematology\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >0.01; Normal: 0.00-0.01; Low: <0.00\"\n    },\n    {\n      \"id\": \"img_32\",\n      \"medicalInsight\": \"QRISK2 cardiovascular disease 10-year risk score is low, indicating favorable long-term cardiovascular health.\",\n      \"optimalValue\": \"1.0 %\",\n      \"editReason\": null,\n      \"logs\": [\n        {\n          \"date\": \"2026-06-04\",\n          \"value\": 1.2,\n          \"unit\": \"%\",\n          \"comment\": \"GP cardiovascular assessment\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"qrisk2_cardiovascular_disease_10_year_risk_score\",\n        \"name\": \"QRISK2 cardiovascular disease 10 year risk score\",\n        \"unit\": \"%\",\n        \"aliases\": [\"QRISK2\", \"10-Year CVD Risk\"],\n        \"normalRange\": \"[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Optimal: <5.0\",\n        \"description\": \"Calculates the percentage risk of developing cardiovascular disease over a 10-year period.\",\n        \"riskCategories\": [\"Cardiovascular\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Optimal: <5.0\"\n    }\n  ]\n}",
       "rows": [
         {
           "id": "img_2",
-          "medicalInsight": "Prostate-specific antigen is within the normal reference range, indicating low immediate risk for prostate pathology in this 43-year-old male.",
+          "medicalInsight": "Prostate specific antigen level is within the optimal reference range, indicating low risk of prostate pathology for a 43-year-old male.",
           "optimalValue": "1.0 ug/L",
           "editReason": null,
           "logs": [
@@ -867,24 +875,24 @@
           "writeTarget": "pending",
           "key": null,
           "newCatalogDraft": {
-            "suggestedKey": "serum_psa",
+            "suggestedKey": "se_prostate_specific_ag_level",
             "name": "Se prostate specific Ag level",
             "unit": "ug/L",
             "aliases": [
               "PSA",
               "Prostate Specific Antigen"
             ],
-            "normalRange": "[Western Standard] High: >2.49; Normal: <=2.49",
-            "description": "Biomarker used primarily to screen for prostate cancer and monitor prostate health.",
+            "normalRange": "[Western Standard] High: >2.49; Optimal: <=2.49; Low: <0.0",
+            "description": "Measures the concentration of prostate-specific antigen in the blood, used for prostate health screening.",
             "riskCategories": [
               "Prostate Health"
             ]
           },
-          "customRangeOverlay": "[Western Standard] High: >2.49; Normal: <=2.49"
+          "customRangeOverlay": "[Western Standard] High: >2.49; Optimal: 0.0-2.49"
         },
         {
           "id": "img_3",
-          "medicalInsight": "Serum sodium level is optimal, reflecting normal fluid and electrolyte balance.",
+          "medicalInsight": "Serum sodium is well within normal physiological limits, reflecting normal hydration and electrolyte balance.",
           "optimalValue": "140 mmol/L",
           "editReason": null,
           "logs": [
@@ -904,19 +912,20 @@
             "unit": "mmol/L",
             "aliases": [
               "Sodium",
-              "Na"
+              "Na+"
             ],
             "normalRange": "[Western Standard] High: >146; Normal: 133-146; Low: <133",
-            "description": "Electrolyte vital for fluid balance, nerve conduction, and muscle function.",
+            "description": "Primary extracellular electrolyte crucial for fluid balance, nerve conduction, and muscle function.",
             "riskCategories": [
-              "Electrolytes"
+              "Electrolytes",
+              "Hydration"
             ]
           },
-          "customRangeOverlay": null
+          "customRangeOverlay": "[Western Standard] High: >146; Normal: 133-146; Low: <133"
         },
         {
           "id": "img_4",
-          "medicalInsight": "Serum potassium concentration is well within standard limits, supporting healthy cardiac and neuromuscular function.",
+          "medicalInsight": "Serum potassium level is optimal, supporting normal cardiac and neuromuscular function.",
           "optimalValue": "4.2 mmol/L",
           "editReason": null,
           "logs": [
@@ -936,19 +945,20 @@
             "unit": "mmol/L",
             "aliases": [
               "Potassium",
-              "K"
+              "K+"
             ],
             "normalRange": "[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5",
-            "description": "Essential mineral and electrolyte for cellular function and heart rhythm.",
+            "description": "Primary intracellular electrolyte vital for maintaining normal cardiac rhythm and cellular potential.",
             "riskCategories": [
-              "Electrolytes"
+              "Electrolytes",
+              "Cardiovascular"
             ]
           },
-          "customRangeOverlay": null
+          "customRangeOverlay": "[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5"
         },
         {
           "id": "img_9",
-          "medicalInsight": "Alkaline phosphatase is within the normal reference range, signifying healthy liver and bone metabolism.",
+          "medicalInsight": "Alkaline phosphatase is within the normal range, indicating healthy liver and bone metabolism.",
           "optimalValue": "70 U/L",
           "editReason": null,
           "logs": [
@@ -971,16 +981,17 @@
               "Alkaline Phosphatase"
             ],
             "normalRange": "[Western Standard] High: >130; Normal: 30-130; Low: <30",
-            "description": "Enzyme associated with liver, biliary tract, and bone.",
+            "description": "Enzyme associated with the biliary tract, liver, and bone tissue turnover.",
             "riskCategories": [
-              "Liver Function"
+              "Liver Function",
+              "Bone Health"
             ]
           },
-          "customRangeOverlay": null
+          "customRangeOverlay": "[Western Standard] High: >130; Normal: 30-130; Low: <30"
         },
         {
           "id": "img_11",
-          "medicalInsight": "Total bilirubin is normal, indicating healthy hepatic processing and clearance of red blood cell breakdown products.",
+          "medicalInsight": "Total bilirubin level is normal, suggesting healthy hepatic processing and red blood cell turnover.",
           "optimalValue": "10 umol/L",
           "editReason": null,
           "logs": [
@@ -995,24 +1006,24 @@
           "writeTarget": "pending",
           "key": null,
           "newCatalogDraft": {
-            "suggestedKey": "serum_total_bilirubin",
+            "suggestedKey": "serum_total_bilirubin_level",
             "name": "Serum total bilirubin level",
             "unit": "umol/L",
             "aliases": [
               "Total Bilirubin",
               "Bilirubin"
             ],
-            "normalRange": "[Western Standard] High: >21; Normal: <=21",
-            "description": "Waste product from hemoglobin breakdown processed by the liver.",
+            "normalRange": "[Western Standard] High: >21; Optimal: <=21; Low: <0",
+            "description": "Yellow breakdown product of normal heme catabolism, excreted by the liver.",
             "riskCategories": [
               "Liver Function"
             ]
           },
-          "customRangeOverlay": "[Western Standard] High: >21; Normal: <=21"
+          "customRangeOverlay": "[Western Standard] High: >21; Optimal: 0-21"
         },
         {
           "id": "img_13",
-          "medicalInsight": "Serum globulin levels are optimal, reflecting normal immune and protein synthesis status.",
+          "medicalInsight": "Serum globulin is within the normal range, indicating a well-balanced immune and protein status.",
           "optimalValue": "28 g/L",
           "editReason": null,
           "logs": [
@@ -1031,19 +1042,20 @@
             "name": "Serum globulin",
             "unit": "g/L",
             "aliases": [
-              "Globulin"
+              "Globulins"
             ],
             "normalRange": "[Western Standard] High: >38; Normal: 22-38; Low: <22",
-            "description": "Group of proteins in the blood including antibodies and transport proteins.",
+            "description": "Group of blood proteins including enzymes, antibodies, and transport proteins.",
             "riskCategories": [
-              "Protein Status"
+              "Protein Status",
+              "Liver Function"
             ]
           },
-          "customRangeOverlay": null
+          "customRangeOverlay": "[Western Standard] High: >38; Normal: 22-38; Low: <22"
         },
         {
           "id": "img_14",
-          "medicalInsight": "Serum calcium is normal, supporting healthy bone structure and cellular signaling.",
+          "medicalInsight": "Serum calcium is normal, supporting optimal skeletal and cellular signaling functions.",
           "optimalValue": "2.35 mmol/L",
           "editReason": null,
           "logs": [
@@ -1065,17 +1077,18 @@
               "Calcium",
               "Ca"
             ],
-            "normalRange": "[Western Standard] Normal: 2.10-2.55",
-            "description": "Essential mineral for bone health, muscle contraction, and nerve function.",
+            "normalRange": "[Western Standard] High: >2.60; Normal: 2.15-2.60; Low: <2.15",
+            "description": "Essential mineral for bone structure, vascular contraction, muscle function, and nerve transmission.",
             "riskCategories": [
-              "Bone & Mineral"
+              "Bone Health",
+              "Electrolytes"
             ]
           },
-          "customRangeOverlay": "[Western Standard] High: >2.55; Normal: 2.10-2.55; Low: <2.10"
+          "customRangeOverlay": "[Western Standard] High: >2.60; Normal: 2.15-2.60; Low: <2.15"
         },
         {
           "id": "img_15",
-          "medicalInsight": "Adjusted calcium is within the expected range, accounting for protein binding to accurately reflect true calcium status.",
+          "medicalInsight": "Adjusted calcium concentration is well within normal limits, reflecting stable protein-corrected calcium balance.",
           "optimalValue": "2.30 mmol/L",
           "editReason": null,
           "logs": [
@@ -1090,24 +1103,25 @@
           "writeTarget": "pending",
           "key": null,
           "newCatalogDraft": {
-            "suggestedKey": "serum_adjusted_calcium",
+            "suggestedKey": "serum_adjusted_calcium_conc",
             "name": "Serum adjusted calcium conc",
             "unit": "mmol/L",
             "aliases": [
-              "Adjusted Calcium",
-              "Corrected Calcium"
+              "Corrected Calcium",
+              "Adjusted Calcium"
             ],
             "normalRange": "[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08",
-            "description": "Calcium level corrected for variations in serum albumin concentration.",
+            "description": "Total serum calcium adjusted for variations in serum albumin levels.",
             "riskCategories": [
-              "Bone & Mineral"
+              "Bone Health",
+              "Electrolytes"
             ]
           },
-          "customRangeOverlay": null
+          "customRangeOverlay": "[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08"
         },
         {
           "id": "img_16",
-          "medicalInsight": "Inorganic phosphate is optimal, indicating appropriate mineral metabolism and renal filtration.",
+          "medicalInsight": "Serum inorganic phosphate is optimal, supporting energy metabolism and bone homeostasis.",
           "optimalValue": "1.10 mmol/L",
           "editReason": null,
           "logs": [
@@ -1130,16 +1144,17 @@
               "Phosphorus"
             ],
             "normalRange": "[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80",
-            "description": "Mineral essential for energy transfer, bone formation, and cellular integrity.",
+            "description": "Essential mineral involved in bone mineralization, energy storage, and acid-base balance.",
             "riskCategories": [
-              "Bone & Mineral"
+              "Bone Health",
+              "Metabolism"
             ]
           },
-          "customRangeOverlay": null
+          "customRangeOverlay": "[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80"
         },
         {
           "id": "img_27",
-          "medicalInsight": "Platelet distribution width is normal, suggesting uniform platelet sizing and steady bone marrow production.",
+          "medicalInsight": "Platelet distribution width is normal, suggesting uniform platelet production.",
           "optimalValue": "12.0 fL",
           "editReason": null,
           "logs": [
@@ -1161,17 +1176,17 @@
               "PDW"
             ],
             "normalRange": "[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3",
-            "description": "Measures variation in platelet size within the circulating blood.",
+            "description": "Indicates variation in platelet size, useful in evaluating thrombopoiesis.",
             "riskCategories": [
               "Hematology"
             ]
           },
-          "customRangeOverlay": null
+          "customRangeOverlay": "[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3"
         },
         {
           "id": "img_31",
-          "medicalInsight": "Absence of nucleated red blood cells is normal for peripheral blood findings in healthy adults.",
-          "optimalValue": "0.00 10*9/L",
+          "medicalInsight": "Nucleated red blood cell count is within normal limits, showing effective bone marrow erythropoiesis.",
+          "optimalValue": "0.0 10*9/L",
           "editReason": null,
           "logs": [
             {
@@ -1190,47 +1205,47 @@
             "unit": "10*9/L",
             "aliases": [
               "NRBC",
-              "Nucleated RBC"
+              "Normoblast Count"
             ],
-            "normalRange": "[Western Standard] High: >0.01; Normal: 0.00-0.01",
-            "description": "Immature red blood cells occasionally released into circulation under extreme physiological demand.",
+            "normalRange": "[Western Standard] High: >0.01; Normal: 0.00-0.01; Low: <0.00",
+            "description": "Immature red blood cells occasionally seen in peripheral blood during extreme marrow stress or hemolysis.",
             "riskCategories": [
               "Hematology"
             ]
           },
-          "customRangeOverlay": null
+          "customRangeOverlay": "[Western Standard] High: >0.01; Normal: 0.00-0.01; Low: <0.00"
         },
         {
           "id": "img_32",
-          "medicalInsight": "QRISK2 10-year cardiovascular disease risk score is low (1.2%), reflecting favorable cardiovascular health for a 43-year-old male.",
-          "optimalValue": "<1.0 %",
+          "medicalInsight": "QRISK2 cardiovascular disease 10-year risk score is low, indicating favorable long-term cardiovascular health.",
+          "optimalValue": "1.0 %",
           "editReason": null,
           "logs": [
             {
               "date": "2026-06-04",
               "value": 1.2,
               "unit": "%",
-              "comment": "GP risk assessment"
+              "comment": "GP cardiovascular assessment"
             }
           ],
           "match": "none",
           "writeTarget": "pending",
           "key": null,
           "newCatalogDraft": {
-            "suggestedKey": "qrisk2_cvd_risk_score",
+            "suggestedKey": "qrisk2_cardiovascular_disease_10_year_risk_score",
             "name": "QRISK2 cardiovascular disease 10 year risk score",
             "unit": "%",
             "aliases": [
               "QRISK2",
-              "CVD Risk Score"
+              "10-Year CVD Risk"
             ],
-            "normalRange": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Low: <5.0",
-            "description": "Calculates the percentage risk of developing a cardiovascular event over the next 10 years.",
+            "normalRange": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Optimal: <5.0",
+            "description": "Calculates the percentage risk of developing cardiovascular disease over a 10-year period.",
             "riskCategories": [
               "Cardiovascular"
             ]
           },
-          "customRangeOverlay": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Low: <5.0"
+          "customRangeOverlay": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Optimal: <5.0"
         }
       ],
       "user": "<user_upload>\nLog these GP results\n</user_upload>\n\nBiomarkers to review (misses - uncataloged, draft catalog entry):\n{\n  \"biomarkers\": [\n    {\n      \"id\": \"img_2\",\n      \"name\": \"Se prostate specific Ag level\",\n      \"value\": 1.41,\n      \"unit\": \"ug/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"- 2.49 ug/L\"\n    },\n    {\n      \"id\": \"img_3\",\n      \"name\": \"Serum sodium\",\n      \"value\": 143,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"133 - 146 mmol/L\"\n    },\n    {\n      \"id\": \"img_4\",\n      \"name\": \"Serum potassium\",\n      \"value\": 4.3,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"3.5 - 5.3 mmol/L\"\n    },\n    {\n      \"id\": \"img_9\",\n      \"name\": \"Serum alkaline phosphatase\",\n      \"value\": 39,\n      \"unit\": \"U/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"30 - 130 U/L\"\n    },\n    {\n      \"id\": \"img_11\",\n      \"name\": \"Serum total bilirubin level\",\n      \"value\": 16,\n      \"unit\": \"umol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"- 21 umol/L\"\n    },\n    {\n      \"id\": \"img_13\",\n      \"name\": \"Serum globulin\",\n      \"value\": 35,\n      \"unit\": \"g/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"22 - 38 g/L\"\n    },\n    {\n      \"id\": \"img_14\",\n      \"name\": \"Serum calcium\",\n      \"value\": 2.47,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"- mmol/L\"\n    },\n    {\n      \"id\": \"img_15\",\n      \"name\": \"Serum adjusted calcium conc\",\n      \"value\": 2.37,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"2.08 - 2.48 mmol/L\"\n    },\n    {\n      \"id\": \"img_16\",\n      \"name\": \"Serum inorganic phosphate\",\n      \"value\": 1.12,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"0.80 - 1.50 mmol/L\"\n    },\n    {\n      \"id\": \"img_27\",\n      \"name\": \"Platelet distribution width\",\n      \"value\": 12.9,\n      \"unit\": \"fL\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"8.3 - 18.0 fL\"\n    },\n    {\n      \"id\": \"img_31\",\n      \"name\": \"Nucleated red blood cell count\",\n      \"value\": 0,\n      \"unit\": \"10*9/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"0.00 - 0.01 10*9/L\"\n    },\n    {\n      \"id\": \"img_32\",\n      \"name\": \"QRISK2 cardiovascular disease 10 year risk score\",\n      \"value\": 1.2,\n      \"unit\": \"%\",\n      \"date\": \"2026-06-04\",\n      \"range\": \"- %\"\n    }\n  ]\n}",
@@ -1341,21 +1356,21 @@
         "img_37",
         "img_39"
       ],
-      "ms": 3055,
+      "ms": 3411,
       "n": 3,
-      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"img_36\",\n      \"medicalInsight\": \"Non-HDL cholesterol of 5 mmol/L is elevated, reflecting increased cardiovascular risk requiring lifestyle modification or potential intervention.\",\n      \"optimalValue\": \"2.6 mmol/L\",\n      \"editReason\": \"Target optimal level for non-HDL cholesterol is below 2.6 mmol/L for healthy adults.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 5,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP result\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_non_hdl_cholesterol\",\n        \"name\": \"Serum non-HDL cholesterol\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Non-HDL Cholesterol\", \"Se non HDL cholesterol level\"],\n        \"normalRange\": \"[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4\",\n        \"description\": \"Total cholesterol minus HDL cholesterol, representing atherogenic lipoproteins.\",\n        \"riskCategories\": [\"Cardiovascular\", \"Lipids\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4\"\n    },\n    {\n      \"id\": \"img_37\",\n      \"medicalInsight\": \"Cholesterol to HDL ratio of 4.3 falls within the average risk category for cardiovascular disease.\",\n      \"optimalValue\": \"3.0\",\n      \"editReason\": \"Optimal total cholesterol to HDL ratio is typically below 3.0 to minimize cardiovascular risk.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 4.3,\n          \"unit\": \"\",\n          \"comment\": \"GP result\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_cholesterol_hdl_ratio\",\n        \"name\": \"Serum cholesterol/HDL ratio\",\n        \"unit\": \"\",\n        \"aliases\": [\"Cholesterol/HDL Ratio\", \"Total/HDL Ratio\"],\n        \"normalRange\": \"[Western Standard] High: >5.0; Average: 3.5-5.0; Optimal: <3.5\",\n        \"description\": \"Ratio of total serum cholesterol to high-density lipoprotein cholesterol.\",\n        \"riskCategories\": [\"Cardiovascular\", \"Lipids\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >5.0; Average: 3.5-5.0; Optimal: <3.5\"\n    },\n    {\n      \"id\": \"img_39\",\n      \"medicalInsight\": \"QRISK2 10-year cardiovascular disease risk score of 1.2% indicates a low risk profile.\",\n      \"optimalValue\": \"1.0 %\",\n      \"editReason\": \"Target optimal QRISK2 score is as low as possible, ideally under 5.0%.\",\n      \"logs\": [\n        {\n          \"date\": \"2025-06-26\",\n          \"value\": 1.2,\n          \"unit\": \"%\",\n          \"comment\": \"GP result\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"qrisk2_cvd_10_year_risk\",\n        \"name\": \"QRISK2 cardiovascular disease 10 year risk score\",\n        \"unit\": \"%\",\n        \"aliases\": [\"QRISK2 Score\", \"10-year CVD Risk\"],\n        \"normalRange\": \"[Western Standard] High Risk: >=10.0; Moderate Risk: 5.0-9.9; Low Risk: <5.0\",\n        \"description\": \"Algorithm that calculates the 10-year risk of developing a cardiovascular event.\",\n        \"riskCategories\": [\"Cardiovascular\", \"Risk Assessment\"]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High Risk: >=10.0; Moderate Risk: 5.0-9.9; Low Risk: <5.0\"\n    }\n  ]\n}",
+      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"img_36\",\n      \"medicalInsight\": \"Non-HDL cholesterol of 5 mmol/L is elevated, representing total atherogenic particle burden and indicating increased cardiovascular risk for a 43-year-old male.\",\n      \"optimalValue\": \"2.6 mmol/L\",\n      \"editReason\": \"Target set below standard clinical threshold for optimal primary prevention.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 5,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_non_hdl_cholesterol\",\n        \"name\": \"Serum non-HDL cholesterol level\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\n          \"Non-HDL Cholesterol\",\n          \"Non-High-Density Lipoprotein Cholesterol\"\n        ],\n        \"normalRange\": \"[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4\",\n        \"description\": \"Calculated as total cholesterol minus HDL cholesterol, measuring all atherogenic lipoproteins.\",\n        \"riskCategories\": [\n          \"Cardiovascular Risk\",\n          \"Lipid Panel\"\n        ]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4\"\n    },\n    {\n      \"id\": \"img_37\",\n      \"medicalInsight\": \"The cholesterol to HDL ratio of 4.3 falls into a moderate risk category for cardiovascular disease development.\",\n      \"optimalValue\": \"3.0\",\n      \"editReason\": \"Target set to optimal physiological ratio for risk reduction.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-03\",\n          \"value\": 4.3,\n          \"unit\": \"\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_cholesterol_hdl_ratio\",\n        \"name\": \"Serum cholesterol/HDL ratio\",\n        \"unit\": \"\",\n        \"aliases\": [\n          \"Cholesterol to HDL Ratio\",\n          \"TC/HDL Ratio\"\n        ],\n        \"normalRange\": \"[Western Standard] High: >5.0; Moderate: 3.6-5.0; Optimal: <3.6\",\n        \"description\": \"Ratio comparing total cholesterol to high-density lipoprotein cholesterol to assess cardiovascular risk.\",\n        \"riskCategories\": [\n          \"Cardiovascular Risk\",\n          \"Lipid Panel\"\n        ]\n      },\n      \"customRangeOverlay\": \"[Western Standard] High: >5.0; Moderate: 3.6-5.0; Optimal: <3.6\"\n    },\n    {\n      \"id\": \"img_39\",\n      \"medicalInsight\": \"A QRISK2 10-year cardiovascular disease risk score of 1.2% indicates a low risk category over the next decade.\",\n      \"optimalValue\": \"< 5.0 %\",\n      \"editReason\": \"Target represents standard low-risk threshold.\",\n      \"logs\": [\n        {\n          \"date\": \"2025-06-26\",\n          \"value\": 1.2,\n          \"unit\": \"%\",\n          \"comment\": \"GP lab\"\n        }\n      ],\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"qrisk2_cvd_10_year_risk_score\",\n        \"name\": \"QRISK2 cardiovascular disease 10 year risk score\",\n        \"unit\": \"%\",\n        \"aliases\": [\n          \"QRISK2 Score\",\n          \"10-Year CVD Risk\"\n        ],\n        \"normalRange\": \"[UK Clinical Standard] High: >=20.0; Moderate: 10.0-19.9; Low: <10.0\",\n        \"description\": \"Algorithm predicting the risk of developing a cardiovascular event over a 10-year period.\",\n        \"riskCategories\": [\n          \"Cardiovascular Risk\"\n        ]\n      },\n      \"customRangeOverlay\": \"[UK Clinical Standard] High: >=20.0; Moderate: 10.0-19.9; Low: <10.0\"\n    }\n  ]\n}",
       "rows": [
         {
           "id": "img_36",
-          "medicalInsight": "Non-HDL cholesterol of 5 mmol/L is elevated, reflecting increased cardiovascular risk requiring lifestyle modification or potential intervention.",
+          "medicalInsight": "Non-HDL cholesterol of 5 mmol/L is elevated, representing total atherogenic particle burden and indicating increased cardiovascular risk for a 43-year-old male.",
           "optimalValue": "2.6 mmol/L",
-          "editReason": "Target optimal level for non-HDL cholesterol is below 2.6 mmol/L for healthy adults.",
+          "editReason": "Target set below standard clinical threshold for optimal primary prevention.",
           "logs": [
             {
               "date": "2026-06-03",
               "value": 5,
               "unit": "mmol/L",
-              "comment": "GP result"
+              "comment": "GP lab"
             }
           ],
           "match": "none",
@@ -1363,32 +1378,32 @@
           "key": null,
           "newCatalogDraft": {
             "suggestedKey": "serum_non_hdl_cholesterol",
-            "name": "Serum non-HDL cholesterol",
+            "name": "Serum non-HDL cholesterol level",
             "unit": "mmol/L",
             "aliases": [
               "Non-HDL Cholesterol",
-              "Se non HDL cholesterol level"
+              "Non-High-Density Lipoprotein Cholesterol"
             ],
             "normalRange": "[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4",
-            "description": "Total cholesterol minus HDL cholesterol, representing atherogenic lipoproteins.",
+            "description": "Calculated as total cholesterol minus HDL cholesterol, measuring all atherogenic lipoproteins.",
             "riskCategories": [
-              "Cardiovascular",
-              "Lipids"
+              "Cardiovascular Risk",
+              "Lipid Panel"
             ]
           },
           "customRangeOverlay": "[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4"
         },
         {
           "id": "img_37",
-          "medicalInsight": "Cholesterol to HDL ratio of 4.3 falls within the average risk category for cardiovascular disease.",
+          "medicalInsight": "The cholesterol to HDL ratio of 4.3 falls into a moderate risk category for cardiovascular disease development.",
           "optimalValue": "3.0",
-          "editReason": "Optimal total cholesterol to HDL ratio is typically below 3.0 to minimize cardiovascular risk.",
+          "editReason": "Target set to optimal physiological ratio for risk reduction.",
           "logs": [
             {
               "date": "2026-06-03",
               "value": 4.3,
               "unit": "",
-              "comment": "GP result"
+              "comment": "GP lab"
             }
           ],
           "match": "none",
@@ -1399,50 +1414,49 @@
             "name": "Serum cholesterol/HDL ratio",
             "unit": "",
             "aliases": [
-              "Cholesterol/HDL Ratio",
-              "Total/HDL Ratio"
+              "Cholesterol to HDL Ratio",
+              "TC/HDL Ratio"
             ],
-            "normalRange": "[Western Standard] High: >5.0; Average: 3.5-5.0; Optimal: <3.5",
-            "description": "Ratio of total serum cholesterol to high-density lipoprotein cholesterol.",
+            "normalRange": "[Western Standard] High: >5.0; Moderate: 3.6-5.0; Optimal: <3.6",
+            "description": "Ratio comparing total cholesterol to high-density lipoprotein cholesterol to assess cardiovascular risk.",
             "riskCategories": [
-              "Cardiovascular",
-              "Lipids"
+              "Cardiovascular Risk",
+              "Lipid Panel"
             ]
           },
-          "customRangeOverlay": "[Western Standard] High: >5.0; Average: 3.5-5.0; Optimal: <3.5"
+          "customRangeOverlay": "[Western Standard] High: >5.0; Moderate: 3.6-5.0; Optimal: <3.6"
         },
         {
           "id": "img_39",
-          "medicalInsight": "QRISK2 10-year cardiovascular disease risk score of 1.2% indicates a low risk profile.",
-          "optimalValue": "1.0 %",
-          "editReason": "Target optimal QRISK2 score is as low as possible, ideally under 5.0%.",
+          "medicalInsight": "A QRISK2 10-year cardiovascular disease risk score of 1.2% indicates a low risk category over the next decade.",
+          "optimalValue": "< 5.0 %",
+          "editReason": "Target represents standard low-risk threshold.",
           "logs": [
             {
               "date": "2025-06-26",
               "value": 1.2,
               "unit": "%",
-              "comment": "GP result"
+              "comment": "GP lab"
             }
           ],
           "match": "none",
           "writeTarget": "pending",
           "key": null,
           "newCatalogDraft": {
-            "suggestedKey": "qrisk2_cvd_10_year_risk",
+            "suggestedKey": "qrisk2_cvd_10_year_risk_score",
             "name": "QRISK2 cardiovascular disease 10 year risk score",
             "unit": "%",
             "aliases": [
               "QRISK2 Score",
-              "10-year CVD Risk"
+              "10-Year CVD Risk"
             ],
-            "normalRange": "[Western Standard] High Risk: >=10.0; Moderate Risk: 5.0-9.9; Low Risk: <5.0",
-            "description": "Algorithm that calculates the 10-year risk of developing a cardiovascular event.",
+            "normalRange": "[UK Clinical Standard] High: >=20.0; Moderate: 10.0-19.9; Low: <10.0",
+            "description": "Algorithm predicting the risk of developing a cardiovascular event over a 10-year period.",
             "riskCategories": [
-              "Cardiovascular",
-              "Risk Assessment"
+              "Cardiovascular Risk"
             ]
           },
-          "customRangeOverlay": "[Western Standard] High Risk: >=10.0; Moderate Risk: 5.0-9.9; Low Risk: <5.0"
+          "customRangeOverlay": "[UK Clinical Standard] High: >=20.0; Moderate: 10.0-19.9; Low: <10.0"
         }
       ],
       "user": "<user_upload>\nLog these GP results\n</user_upload>\n\nBiomarkers to review (misses - uncataloged, draft catalog entry):\n{\n  \"biomarkers\": [\n    {\n      \"id\": \"img_36\",\n      \"name\": \"Se non HDL cholesterol level\",\n      \"value\": 5,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-03\",\n      \"range\": \"- mmol/L\"\n    },\n    {\n      \"id\": \"img_37\",\n      \"name\": \"Serum cholesterol/HDL ratio\",\n      \"value\": 4.3,\n      \"unit\": \"\",\n      \"date\": \"2026-06-03\",\n      \"range\": \"\"\n    },\n    {\n      \"id\": \"img_39\",\n      \"name\": \"QRISK2 cardiovascular disease 10 year risk score\",\n      \"value\": 1.2,\n      \"unit\": \"%\",\n      \"date\": \"2025-06-26\",\n      \"range\": \"- %\"\n    }\n  ]\n}",
@@ -1816,9 +1830,9 @@
       "optimalValue": "35 mmol/mol",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Adjusted optimal value to reflect optimal metabolic health for Chinese ethnicity.",
-      "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39",
-      "medicalInsight": "HbA1c is 40 mmol/mol, indicating an elevated prediabetes risk for a Chinese male (threshold >=39 mmol/mol).",
+      "editReason": null,
+      "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; Low: <20",
+      "medicalInsight": "Your HbA1c is 40 mmol/mol, which is within the optimal range for glycemic control.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -1850,8 +1864,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": "[Western Standard] High: >2.49; Normal: <=2.49",
-      "medicalInsight": "Prostate-specific antigen is within the normal reference range, indicating low immediate risk for prostate pathology in this 43-year-old male.",
+      "customRangeOverlay": "[Western Standard] High: >2.49; Optimal: 0.0-2.49",
+      "medicalInsight": "Prostate specific antigen level is within the optimal reference range, indicating low risk of prostate pathology for a 43-year-old male.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -1862,15 +1876,15 @@
       ],
       "currentEvaluationStatus": "",
       "newCatalogDraft": {
-        "suggestedKey": "serum_psa",
+        "suggestedKey": "se_prostate_specific_ag_level",
         "name": "Se prostate specific Ag level",
         "unit": "ug/L",
         "aliases": [
           "PSA",
           "Prostate Specific Antigen"
         ],
-        "normalRange": "[Western Standard] High: >2.49; Normal: <=2.49",
-        "description": "Biomarker used primarily to screen for prostate cancer and monitor prostate health.",
+        "normalRange": "[Western Standard] High: >2.49; Optimal: <=2.49; Low: <0.0",
+        "description": "Measures the concentration of prostate-specific antigen in the blood, used for prostate health screening.",
         "riskCategories": [
           "Prostate Health"
         ]
@@ -1896,8 +1910,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": null,
-      "medicalInsight": "Serum sodium level is optimal, reflecting normal fluid and electrolyte balance.",
+      "customRangeOverlay": "[Western Standard] High: >146; Normal: 133-146; Low: <133",
+      "medicalInsight": "Serum sodium is well within normal physiological limits, reflecting normal hydration and electrolyte balance.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -1913,12 +1927,13 @@
         "unit": "mmol/L",
         "aliases": [
           "Sodium",
-          "Na"
+          "Na+"
         ],
         "normalRange": "[Western Standard] High: >146; Normal: 133-146; Low: <133",
-        "description": "Electrolyte vital for fluid balance, nerve conduction, and muscle function.",
+        "description": "Primary extracellular electrolyte crucial for fluid balance, nerve conduction, and muscle function.",
         "riskCategories": [
-          "Electrolytes"
+          "Electrolytes",
+          "Hydration"
         ]
       }
     },
@@ -1942,8 +1957,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": null,
-      "medicalInsight": "Serum potassium concentration is well within standard limits, supporting healthy cardiac and neuromuscular function.",
+      "customRangeOverlay": "[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5",
+      "medicalInsight": "Serum potassium level is optimal, supporting normal cardiac and neuromuscular function.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -1959,12 +1974,13 @@
         "unit": "mmol/L",
         "aliases": [
           "Potassium",
-          "K"
+          "K+"
         ],
         "normalRange": "[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5",
-        "description": "Essential mineral and electrolyte for cellular function and heart rhythm.",
+        "description": "Primary intracellular electrolyte vital for maintaining normal cardiac rhythm and cellular potential.",
         "riskCategories": [
-          "Electrolytes"
+          "Electrolytes",
+          "Cardiovascular"
         ]
       }
     },
@@ -1996,7 +2012,7 @@
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Serum creatinine is 100 umol/L, which falls within the standard normal laboratory range.",
+      "medicalInsight": "Serum creatinine is 100 umol/L, within the normal laboratory range.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2034,9 +2050,9 @@
       "optimalValue": "95 mL/min/1.73m2",
       "existingInsight": "Your eGFR of 80 is normal.",
       "existingCustomRange": null,
-      "editReason": "Corrected naive normal eGFR from 60 to optimal clinical target of >=90.",
-      "customRangeOverlay": "[Western Standard] Optimal: >=90; Low: <90",
-      "medicalInsight": "Your eGFR of 80 mL/min/1.73m2 is slightly below optimal, though within general laboratory reference parameters.",
+      "editReason": "Corrected naive optimal threshold of 60 to optimal target >=90 for young adults.",
+      "customRangeOverlay": "[Western Standard] Optimal: >=90; Normal: 60-89; Low: <60",
+      "medicalInsight": "Your eGFR of 80 mL/min/1.73m2 indicates mild reduction in filtration capacity relative to optimal young adult baselines.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2071,12 +2087,12 @@
       "customRangePopulation": "",
       "printedRange": "31 - 45 g/L",
       "assignedRange": "31 - 45 g/L",
-      "optimalValue": "43 g/L",
+      "optimalValue": "45 g/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Serum albumin is 46 g/L, which is slightly above the standard lab reference ceiling of 45 g/L but generally clinically benign.",
+      "medicalInsight": "Serum albumin is 46 g/L, reflecting normal hepatic protein synthesis and hydration status.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2116,7 +2132,7 @@
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "ALT is 41 U/L, sitting just at the upper margin of normal hepatic enzyme activity.",
+      "medicalInsight": "ALT is 41 U/L, sitting slightly above standard optimal thresholds but within broad normal ranges.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2148,8 +2164,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": null,
-      "medicalInsight": "Alkaline phosphatase is within the normal reference range, signifying healthy liver and bone metabolism.",
+      "customRangeOverlay": "[Western Standard] High: >130; Normal: 30-130; Low: <30",
+      "medicalInsight": "Alkaline phosphatase is within the normal range, indicating healthy liver and bone metabolism.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2168,9 +2184,10 @@
           "Alkaline Phosphatase"
         ],
         "normalRange": "[Western Standard] High: >130; Normal: 30-130; Low: <30",
-        "description": "Enzyme associated with liver, biliary tract, and bone.",
+        "description": "Enzyme associated with the biliary tract, liver, and bone tissue turnover.",
         "riskCategories": [
-          "Liver Function"
+          "Liver Function",
+          "Bone Health"
         ]
       }
     },
@@ -2197,12 +2214,12 @@
       "customRangePopulation": "",
       "printedRange": "5 - 34 U/L",
       "assignedRange": "5 - 34 U/L",
-      "optimalValue": "20 U/L",
+      "optimalValue": "22 U/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "AST is 27 U/L, well within normal limits for liver and muscle tissue function.",
+      "medicalInsight": "AST is 27 U/L, well within normal limits indicating healthy hepatic and muscular tissue.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2234,8 +2251,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": "[Western Standard] High: >21; Normal: <=21",
-      "medicalInsight": "Total bilirubin is normal, indicating healthy hepatic processing and clearance of red blood cell breakdown products.",
+      "customRangeOverlay": "[Western Standard] High: >21; Optimal: 0-21",
+      "medicalInsight": "Total bilirubin level is normal, suggesting healthy hepatic processing and red blood cell turnover.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2246,15 +2263,15 @@
       ],
       "currentEvaluationStatus": "",
       "newCatalogDraft": {
-        "suggestedKey": "serum_total_bilirubin",
+        "suggestedKey": "serum_total_bilirubin_level",
         "name": "Serum total bilirubin level",
         "unit": "umol/L",
         "aliases": [
           "Total Bilirubin",
           "Bilirubin"
         ],
-        "normalRange": "[Western Standard] High: >21; Normal: <=21",
-        "description": "Waste product from hemoglobin breakdown processed by the liver.",
+        "normalRange": "[Western Standard] High: >21; Optimal: <=21; Low: <0",
+        "description": "Yellow breakdown product of normal heme catabolism, excreted by the liver.",
         "riskCategories": [
           "Liver Function"
         ]
@@ -2286,9 +2303,9 @@
       "optimalValue": "70 g/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Corrected dictionary range from 6-8 g/L to 60-80 g/L.",
+      "editReason": null,
       "customRangeOverlay": "[Western Standard] High: >80; Normal: 60-80; Low: <60",
-      "medicalInsight": "Total protein is 81 g/L, which is normal when accounting for dictionary unit correction.",
+      "medicalInsight": "Total Protein is 81 g/L, marginally above the standard reference range.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2302,7 +2319,7 @@
       "dictionaryCorrection": {
         "field": "normalRange",
         "correctedValue": "60 - 80",
-        "reason": "Standard units for Total Protein are g/L, making 6-8 a typographical error for 60-80."
+        "reason": "Dictionary had a severe typo specifying 6-8 g/L instead of physiological 60-80 g/L."
       }
     },
     {
@@ -2325,8 +2342,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": null,
-      "medicalInsight": "Serum globulin levels are optimal, reflecting normal immune and protein synthesis status.",
+      "customRangeOverlay": "[Western Standard] High: >38; Normal: 22-38; Low: <22",
+      "medicalInsight": "Serum globulin is within the normal range, indicating a well-balanced immune and protein status.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2341,12 +2358,13 @@
         "name": "Serum globulin",
         "unit": "g/L",
         "aliases": [
-          "Globulin"
+          "Globulins"
         ],
         "normalRange": "[Western Standard] High: >38; Normal: 22-38; Low: <22",
-        "description": "Group of proteins in the blood including antibodies and transport proteins.",
+        "description": "Group of blood proteins including enzymes, antibodies, and transport proteins.",
         "riskCategories": [
-          "Protein Status"
+          "Protein Status",
+          "Liver Function"
         ]
       }
     },
@@ -2370,8 +2388,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": "[Western Standard] High: >2.55; Normal: 2.10-2.55; Low: <2.10",
-      "medicalInsight": "Serum calcium is normal, supporting healthy bone structure and cellular signaling.",
+      "customRangeOverlay": "[Western Standard] High: >2.60; Normal: 2.15-2.60; Low: <2.15",
+      "medicalInsight": "Serum calcium is normal, supporting optimal skeletal and cellular signaling functions.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2389,10 +2407,11 @@
           "Calcium",
           "Ca"
         ],
-        "normalRange": "[Western Standard] Normal: 2.10-2.55",
-        "description": "Essential mineral for bone health, muscle contraction, and nerve function.",
+        "normalRange": "[Western Standard] High: >2.60; Normal: 2.15-2.60; Low: <2.15",
+        "description": "Essential mineral for bone structure, vascular contraction, muscle function, and nerve transmission.",
         "riskCategories": [
-          "Bone & Mineral"
+          "Bone Health",
+          "Electrolytes"
         ]
       }
     },
@@ -2416,8 +2435,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": null,
-      "medicalInsight": "Adjusted calcium is within the expected range, accounting for protein binding to accurately reflect true calcium status.",
+      "customRangeOverlay": "[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08",
+      "medicalInsight": "Adjusted calcium concentration is well within normal limits, reflecting stable protein-corrected calcium balance.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2428,17 +2447,18 @@
       ],
       "currentEvaluationStatus": "",
       "newCatalogDraft": {
-        "suggestedKey": "serum_adjusted_calcium",
+        "suggestedKey": "serum_adjusted_calcium_conc",
         "name": "Serum adjusted calcium conc",
         "unit": "mmol/L",
         "aliases": [
-          "Adjusted Calcium",
-          "Corrected Calcium"
+          "Corrected Calcium",
+          "Adjusted Calcium"
         ],
         "normalRange": "[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08",
-        "description": "Calcium level corrected for variations in serum albumin concentration.",
+        "description": "Total serum calcium adjusted for variations in serum albumin levels.",
         "riskCategories": [
-          "Bone & Mineral"
+          "Bone Health",
+          "Electrolytes"
         ]
       }
     },
@@ -2462,8 +2482,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": null,
-      "medicalInsight": "Inorganic phosphate is optimal, indicating appropriate mineral metabolism and renal filtration.",
+      "customRangeOverlay": "[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80",
+      "medicalInsight": "Serum inorganic phosphate is optimal, supporting energy metabolism and bone homeostasis.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2482,9 +2502,10 @@
           "Phosphorus"
         ],
         "normalRange": "[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80",
-        "description": "Mineral essential for energy transfer, bone formation, and cellular integrity.",
+        "description": "Essential mineral involved in bone mineralization, energy storage, and acid-base balance.",
         "riskCategories": [
-          "Bone & Mineral"
+          "Bone Health",
+          "Metabolism"
         ]
       }
     },
@@ -2511,12 +2532,12 @@
       "customRangePopulation": "",
       "printedRange": "2.9 - 9.6 10*9/L",
       "assignedRange": "2.9 - 9.6 10*9/L",
-      "optimalValue": "6.5 10^9/L",
+      "optimalValue": "6.0 10*9/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "White blood cell count is 5.7 10^9/L, reflecting a healthy immune cell profile.",
+      "medicalInsight": "White blood cell count is 5.7 10*9/L, representing normal immune function.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2552,12 +2573,12 @@
       "customRangePopulation": "",
       "printedRange": "4.20 - 5.80 10*12/L",
       "assignedRange": "4.20 - 5.80 10*12/L",
-      "optimalValue": "5.00 10^12/L",
+      "optimalValue": "5.00 10*12/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Red blood cell count is 5.47 10^12/L, indicating normal erythropoiesis and oxygen-carrying capacity.",
+      "medicalInsight": "Red blood cell count is 5.47 10*12/L, indicating normal erythropoiesis.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2605,7 +2626,7 @@
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Hemoglobin is 166 g/L, nicely situated within the optimal physiological reference range.",
+      "medicalInsight": "Hemoglobin is 166 g/L, within the normal range for adult males.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2633,12 +2654,12 @@
       "customRangePopulation": "",
       "printedRange": "0.390 - 0.510 L/L",
       "assignedRange": "0.390 - 0.510 L/L",
-      "optimalValue": "0.44 L/L",
+      "optimalValue": "0.45 L/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Hematocrit is 0.48 L/L, showing normal blood volume distribution of red cells.",
+      "medicalInsight": "Hematocrit is 0.48 L/L, showing normal proportion of red blood cells in circulation.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2678,7 +2699,7 @@
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "MCV is 88 fL, denoting normocytic red blood cells.",
+      "medicalInsight": "Mean Corpuscular Volume is 88 fL, reflecting normal red blood cell sizing.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2720,7 +2741,7 @@
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "MCH is 30.3 pg, reflecting normal hemoglobin content per red blood cell.",
+      "medicalInsight": "Mean Corpuscular Hemoglobin is 30.3 pg, normal for hemoglobin content per cell.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2762,7 +2783,7 @@
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "MCHC is 346 g/L, indicating normal intracellular hemoglobin concentration.",
+      "medicalInsight": "Mean Corpuscular Hemoglobin Concentration is 346 g/L, well within reference limits.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2796,12 +2817,12 @@
       "customRangePopulation": "",
       "printedRange": "10.5 - 16.0 %",
       "assignedRange": "10.5 - 16.0 %",
-      "optimalValue": "13.0 %",
+      "optimalValue": "12.5 %",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "RDW is 11.8 %, demonstrating uniform red blood cell sizing.",
+      "medicalInsight": "Red Cell Distribution Width is 11.8 %, indicating uniform red blood cell volume.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2836,12 +2857,12 @@
       "customRangePopulation": "",
       "printedRange": "140 - 400 10*9/L",
       "assignedRange": "140 - 400 10*9/L",
-      "optimalValue": "250 10^9/L",
+      "optimalValue": "250 10*9/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Platelet count is 227 10^9/L, which is optimal for coagulation function.",
+      "medicalInsight": "Platelet count is 227 10*9/L, showing normal clotting function.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2882,7 +2903,7 @@
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "MPV is 10.6 fL, falling within normal thrombocyte volume parameters.",
+      "medicalInsight": "Mean Platelet Volume is 10.6 fL, which is within the normal range.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2914,8 +2935,8 @@
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": null,
-      "medicalInsight": "Platelet distribution width is normal, suggesting uniform platelet sizing and steady bone marrow production.",
+      "customRangeOverlay": "[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3",
+      "medicalInsight": "Platelet distribution width is normal, suggesting uniform platelet production.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -2933,7 +2954,7 @@
           "PDW"
         ],
         "normalRange": "[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3",
-        "description": "Measures variation in platelet size within the circulating blood.",
+        "description": "Indicates variation in platelet size, useful in evaluating thrombopoiesis.",
         "riskCategories": [
           "Hematology"
         ]
@@ -2963,12 +2984,12 @@
       "customRangePopulation": "",
       "printedRange": "1.50 - 6.10 10*9/L",
       "assignedRange": "1.50 - 6.10 10*9/L",
-      "optimalValue": "4.00 10^9/L",
+      "optimalValue": "3.50 10*9/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Neutrophil count is 3.18 10^9/L, supporting healthy antibacterial immune defenses.",
+      "medicalInsight": "Neutrophil count is 3.18 10*9/L, reflecting normal antibacterial defense.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -3004,12 +3025,12 @@
       "customRangePopulation": "",
       "printedRange": "0.00 - 0.40 10*9/L",
       "assignedRange": "0.00 - 0.40 10*9/L",
-      "optimalValue": "0.15 10^9/L",
+      "optimalValue": "0.15 10*9/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Eosinophil count is 0.07 10^9/L, which is normal.",
+      "medicalInsight": "Eosinophil count is 0.07 10*9/L, within normal baseline limits.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -3045,12 +3066,12 @@
       "customRangePopulation": "",
       "printedRange": "0.00 - 0.10 10*9/L",
       "assignedRange": "0.00 - 0.10 10*9/L",
-      "optimalValue": "0.02 10^9/L",
+      "optimalValue": "0.02 10*9/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
       "customRangeOverlay": null,
-      "medicalInsight": "Basophil count is 0.04 10^9/L, well within expected basophil ranges.",
+      "medicalInsight": "Basophil count is 0.04 10*9/L, normal for inflammatory regulation.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -3078,12 +3099,12 @@
       "customRangePopulation": "",
       "printedRange": "0.00 - 0.01 10*9/L",
       "assignedRange": "0.00 - 0.01 10*9/L",
-      "optimalValue": "0.00 10*9/L",
+      "optimalValue": "0.0 10*9/L",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": null,
-      "medicalInsight": "Absence of nucleated red blood cells is normal for peripheral blood findings in healthy adults.",
+      "customRangeOverlay": "[Western Standard] High: >0.01; Normal: 0.00-0.01; Low: <0.00",
+      "medicalInsight": "Nucleated red blood cell count is within normal limits, showing effective bone marrow erythropoiesis.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
@@ -3099,10 +3120,10 @@
         "unit": "10*9/L",
         "aliases": [
           "NRBC",
-          "Nucleated RBC"
+          "Normoblast Count"
         ],
-        "normalRange": "[Western Standard] High: >0.01; Normal: 0.00-0.01",
-        "description": "Immature red blood cells occasionally released into circulation under extreme physiological demand.",
+        "normalRange": "[Western Standard] High: >0.01; Normal: 0.00-0.01; Low: <0.00",
+        "description": "Immature red blood cells occasionally seen in peripheral blood during extreme marrow stress or hemolysis.",
         "riskCategories": [
           "Hematology"
         ]
@@ -3124,31 +3145,31 @@
       "customRangePopulation": "",
       "printedRange": "- %",
       "assignedRange": "- %",
-      "optimalValue": "<1.0 %",
+      "optimalValue": "1.0 %",
       "existingInsight": null,
       "existingCustomRange": null,
       "editReason": null,
-      "customRangeOverlay": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Low: <5.0",
-      "medicalInsight": "QRISK2 10-year cardiovascular disease risk score is low (1.2%), reflecting favorable cardiovascular health for a 43-year-old male.",
+      "customRangeOverlay": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Optimal: <5.0",
+      "medicalInsight": "QRISK2 cardiovascular disease 10-year risk score is low, indicating favorable long-term cardiovascular health.",
       "historicalLogs": [
         {
           "date": "2026-06-04",
           "value": 1.2,
           "unit": "%",
-          "comment": "GP risk assessment"
+          "comment": "GP cardiovascular assessment"
         }
       ],
       "currentEvaluationStatus": "",
       "newCatalogDraft": {
-        "suggestedKey": "qrisk2_cvd_risk_score",
+        "suggestedKey": "qrisk2_cardiovascular_disease_10_year_risk_score",
         "name": "QRISK2 cardiovascular disease 10 year risk score",
         "unit": "%",
         "aliases": [
           "QRISK2",
-          "CVD Risk Score"
+          "10-Year CVD Risk"
         ],
-        "normalRange": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Low: <5.0",
-        "description": "Calculates the percentage risk of developing a cardiovascular event over the next 10 years.",
+        "normalRange": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Optimal: <5.0",
+        "description": "Calculates the percentage risk of developing cardiovascular disease over a 10-year period.",
         "riskCategories": [
           "Cardiovascular"
         ]
@@ -3179,9 +3200,9 @@
       "optimalValue": "4.5 mmol/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Provided a specific clinical optimal target below 5.0 mmol/L.",
-      "customRangeOverlay": "[All patients] Very High: >6.2; Elevated: >5; Optimal: <=5",
-      "medicalInsight": "Total cholesterol is elevated at 6.5 mmol/L, increasing long-term cardiovascular risk for a 43-year-old male. Lifestyle modification and dietary review are recommended.",
+      "editReason": "Corrected optimal target to a clinically robust cardiovascular prevention goal.",
+      "customRangeOverlay": "[All patients] Very High: >6.2; Elevated: >5.0; Optimal: <=5.0",
+      "medicalInsight": "Total cholesterol is elevated at 6.5 mmol/L, indicating increased cardiovascular risk for a 43-year-old male. Lifestyle modification and further lipid profile evaluation are recommended.",
       "historicalLogs": [
         {
           "date": "2026-06-03",
@@ -3191,7 +3212,12 @@
         }
       ],
       "currentEvaluationStatus": "Very High",
-      "newCatalogDraft": null
+      "newCatalogDraft": null,
+      "dictionaryCorrection": {
+        "field": "normalRange",
+        "correctedValue": "[All patients] Very High: >6.2; Elevated: >5.0; Optimal: <=5.0",
+        "reason": "Standardize dictionary format to structured multi-bracket clinical thresholds."
+      }
     },
     {
       "id": "img_34",
@@ -3216,12 +3242,12 @@
       "customRangePopulation": "",
       "printedRange": "0.9 - 1.7 mmol/L",
       "assignedRange": "0.9 - 1.7 mmol/L",
-      "optimalValue": "1.4 mmol/L",
+      "optimalValue": "1.6 mmol/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Set a precise optimal target within the normal reference range.",
-      "customRangeOverlay": "[All patients] Normal: 0.9-1.7; Low: <0.9",
-      "medicalInsight": "HDL-C is optimal at 1.5 mmol/L, providing a cardioprotective lipid clearance profile.",
+      "editReason": "Added optimal target for cardioprotection.",
+      "customRangeOverlay": "[All patients] High: >1.7; Normal: 0.9-1.7; Low: <0.9",
+      "medicalInsight": "HDL-C is optimal at 1.5 mmol/L, providing a protective cardiovascular effect.",
       "historicalLogs": [
         {
           "date": "2026-06-03",
@@ -3231,7 +3257,12 @@
         }
       ],
       "currentEvaluationStatus": "Optimal",
-      "newCatalogDraft": null
+      "newCatalogDraft": null,
+      "dictionaryCorrection": {
+        "field": "normalRange",
+        "correctedValue": "[All patients] High: >1.7; Normal: 0.9-1.7; Low: <0.9",
+        "reason": "Standardize unstructured range into multi-bracket format."
+      }
     },
     {
       "id": "img_35",
@@ -3258,9 +3289,9 @@
       "optimalValue": "1.2 mmol/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Target optimal value set well below the elevated cutoff.",
-      "customRangeOverlay": "[All patients] Very High: >=5.6; Elevated: >=1.7; Optimal: <1.7",
-      "medicalInsight": "Triglycerides are at the borderline threshold of 1.7 mmol/L, indicating potential metabolic stress.",
+      "editReason": "Set optimal target below the standard threshold for cardiovascular wellness.",
+      "customRangeOverlay": null,
+      "medicalInsight": "Triglycerides are borderline elevated at 1.7 mmol/L, which warrants monitoring alongside dietary patterns and physical activity.",
       "historicalLogs": [
         {
           "date": "2026-06-03",
@@ -3291,31 +3322,31 @@
       "optimalValue": "2.6 mmol/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Target optimal level for non-HDL cholesterol is below 2.6 mmol/L for healthy adults.",
+      "editReason": "Target set below standard clinical threshold for optimal primary prevention.",
       "customRangeOverlay": "[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4",
-      "medicalInsight": "Non-HDL cholesterol of 5 mmol/L is elevated, reflecting increased cardiovascular risk requiring lifestyle modification or potential intervention.",
+      "medicalInsight": "Non-HDL cholesterol of 5 mmol/L is elevated, representing total atherogenic particle burden and indicating increased cardiovascular risk for a 43-year-old male.",
       "historicalLogs": [
         {
           "date": "2026-06-03",
           "value": 5,
           "unit": "mmol/L",
-          "comment": "GP result"
+          "comment": "GP lab"
         }
       ],
       "currentEvaluationStatus": "",
       "newCatalogDraft": {
         "suggestedKey": "serum_non_hdl_cholesterol",
-        "name": "Serum non-HDL cholesterol",
+        "name": "Serum non-HDL cholesterol level",
         "unit": "mmol/L",
         "aliases": [
           "Non-HDL Cholesterol",
-          "Se non HDL cholesterol level"
+          "Non-High-Density Lipoprotein Cholesterol"
         ],
         "normalRange": "[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4",
-        "description": "Total cholesterol minus HDL cholesterol, representing atherogenic lipoproteins.",
+        "description": "Calculated as total cholesterol minus HDL cholesterol, measuring all atherogenic lipoproteins.",
         "riskCategories": [
-          "Cardiovascular",
-          "Lipids"
+          "Cardiovascular Risk",
+          "Lipid Panel"
         ]
       }
     },
@@ -3338,15 +3369,15 @@
       "optimalValue": "3.0",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Optimal total cholesterol to HDL ratio is typically below 3.0 to minimize cardiovascular risk.",
-      "customRangeOverlay": "[Western Standard] High: >5.0; Average: 3.5-5.0; Optimal: <3.5",
-      "medicalInsight": "Cholesterol to HDL ratio of 4.3 falls within the average risk category for cardiovascular disease.",
+      "editReason": "Target set to optimal physiological ratio for risk reduction.",
+      "customRangeOverlay": "[Western Standard] High: >5.0; Moderate: 3.6-5.0; Optimal: <3.6",
+      "medicalInsight": "The cholesterol to HDL ratio of 4.3 falls into a moderate risk category for cardiovascular disease development.",
       "historicalLogs": [
         {
           "date": "2026-06-03",
           "value": 4.3,
           "unit": "",
-          "comment": "GP result"
+          "comment": "GP lab"
         }
       ],
       "currentEvaluationStatus": "",
@@ -3355,14 +3386,14 @@
         "name": "Serum cholesterol/HDL ratio",
         "unit": "",
         "aliases": [
-          "Cholesterol/HDL Ratio",
-          "Total/HDL Ratio"
+          "Cholesterol to HDL Ratio",
+          "TC/HDL Ratio"
         ],
-        "normalRange": "[Western Standard] High: >5.0; Average: 3.5-5.0; Optimal: <3.5",
-        "description": "Ratio of total serum cholesterol to high-density lipoprotein cholesterol.",
+        "normalRange": "[Western Standard] High: >5.0; Moderate: 3.6-5.0; Optimal: <3.6",
+        "description": "Ratio comparing total cholesterol to high-density lipoprotein cholesterol to assess cardiovascular risk.",
         "riskCategories": [
-          "Cardiovascular",
-          "Lipids"
+          "Cardiovascular Risk",
+          "Lipid Panel"
         ]
       }
     },
@@ -3391,12 +3422,12 @@
       "customRangePopulation": "[All patients] Very High: > 3.4; Elevated: > 2.6; Optimal: <= 2.6",
       "printedRange": "- mmol/L",
       "assignedRange": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
-      "optimalValue": "2.0 mmol/L",
+      "optimalValue": "2.5 mmol/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Set a robust cardiovascular risk reduction target for LDL-C.",
-      "customRangeOverlay": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
-      "medicalInsight": "LDL-C is elevated at 4.3 mmol/L, a primary driver of atherosclerotic cardiovascular disease requiring proactive management.",
+      "editReason": "Set optimal target to reflect primary prevention goals for male adults.",
+      "customRangeOverlay": null,
+      "medicalInsight": "LDL-C is elevated at 4.3 mmol/L, representing the primary atherogenic driver requiring targeted management.",
       "historicalLogs": [
         {
           "date": "2026-06-03",
@@ -3424,34 +3455,33 @@
       "customRangePopulation": "",
       "printedRange": "- %",
       "assignedRange": "- %",
-      "optimalValue": "1.0 %",
+      "optimalValue": "< 5.0 %",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Target optimal QRISK2 score is as low as possible, ideally under 5.0%.",
-      "customRangeOverlay": "[Western Standard] High Risk: >=10.0; Moderate Risk: 5.0-9.9; Low Risk: <5.0",
-      "medicalInsight": "QRISK2 10-year cardiovascular disease risk score of 1.2% indicates a low risk profile.",
+      "editReason": "Target represents standard low-risk threshold.",
+      "customRangeOverlay": "[UK Clinical Standard] High: >=20.0; Moderate: 10.0-19.9; Low: <10.0",
+      "medicalInsight": "A QRISK2 10-year cardiovascular disease risk score of 1.2% indicates a low risk category over the next decade.",
       "historicalLogs": [
         {
           "date": "2025-06-26",
           "value": 1.2,
           "unit": "%",
-          "comment": "GP result"
+          "comment": "GP lab"
         }
       ],
       "currentEvaluationStatus": "",
       "newCatalogDraft": {
-        "suggestedKey": "qrisk2_cvd_10_year_risk",
+        "suggestedKey": "qrisk2_cvd_10_year_risk_score",
         "name": "QRISK2 cardiovascular disease 10 year risk score",
         "unit": "%",
         "aliases": [
           "QRISK2 Score",
-          "10-year CVD Risk"
+          "10-Year CVD Risk"
         ],
-        "normalRange": "[Western Standard] High Risk: >=10.0; Moderate Risk: 5.0-9.9; Low Risk: <5.0",
-        "description": "Algorithm that calculates the 10-year risk of developing a cardiovascular event.",
+        "normalRange": "[UK Clinical Standard] High: >=20.0; Moderate: 10.0-19.9; Low: <10.0",
+        "description": "Algorithm predicting the risk of developing a cardiovascular event over a 10-year period.",
         "riskCategories": [
-          "Cardiovascular",
-          "Risk Assessment"
+          "Cardiovascular Risk"
         ]
       }
     }
@@ -3467,12 +3497,12 @@
       "printedRange": "20 - 41 mmol/mol",
       "assignedRange": "20 - 41 mmol/mol",
       "optimalValue": "35 mmol/mol",
-      "editReason": "Adjusted optimal value to reflect optimal metabolic health for Chinese ethnicity.",
+      "editReason": null,
       "match": "alias",
       "key": "hba1c",
       "writeTarget": "observation",
-      "medicalInsight": "HbA1c is 40 mmol/mol, indicating an elevated prediabetes risk for a Chinese male (threshold >=39 mmol/mol).",
-      "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39",
+      "medicalInsight": "Your HbA1c is 40 mmol/mol, which is within the optimal range for glycemic control.",
+      "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; Low: <20",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3497,8 +3527,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Prostate-specific antigen is within the normal reference range, indicating low immediate risk for prostate pathology in this 43-year-old male.",
-      "customRangeOverlay": "[Western Standard] High: >2.49; Normal: <=2.49",
+      "medicalInsight": "Prostate specific antigen level is within the optimal reference range, indicating low risk of prostate pathology for a 43-year-old male.",
+      "customRangeOverlay": "[Western Standard] High: >2.49; Optimal: 0.0-2.49",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3508,15 +3538,15 @@
         }
       ],
       "newCatalogDraft": {
-        "suggestedKey": "serum_psa",
+        "suggestedKey": "se_prostate_specific_ag_level",
         "name": "Se prostate specific Ag level",
         "unit": "ug/L",
         "aliases": [
           "PSA",
           "Prostate Specific Antigen"
         ],
-        "normalRange": "[Western Standard] High: >2.49; Normal: <=2.49",
-        "description": "Biomarker used primarily to screen for prostate cancer and monitor prostate health.",
+        "normalRange": "[Western Standard] High: >2.49; Optimal: <=2.49; Low: <0.0",
+        "description": "Measures the concentration of prostate-specific antigen in the blood, used for prostate health screening.",
         "riskCategories": [
           "Prostate Health"
         ]
@@ -3536,8 +3566,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Serum sodium level is optimal, reflecting normal fluid and electrolyte balance.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Serum sodium is well within normal physiological limits, reflecting normal hydration and electrolyte balance.",
+      "customRangeOverlay": "[Western Standard] High: >146; Normal: 133-146; Low: <133",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3552,12 +3582,13 @@
         "unit": "mmol/L",
         "aliases": [
           "Sodium",
-          "Na"
+          "Na+"
         ],
         "normalRange": "[Western Standard] High: >146; Normal: 133-146; Low: <133",
-        "description": "Electrolyte vital for fluid balance, nerve conduction, and muscle function.",
+        "description": "Primary extracellular electrolyte crucial for fluid balance, nerve conduction, and muscle function.",
         "riskCategories": [
-          "Electrolytes"
+          "Electrolytes",
+          "Hydration"
         ]
       }
     },
@@ -3575,8 +3606,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Serum potassium concentration is well within standard limits, supporting healthy cardiac and neuromuscular function.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Serum potassium level is optimal, supporting normal cardiac and neuromuscular function.",
+      "customRangeOverlay": "[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3591,12 +3622,13 @@
         "unit": "mmol/L",
         "aliases": [
           "Potassium",
-          "K"
+          "K+"
         ],
         "normalRange": "[Western Standard] High: >5.3; Normal: 3.5-5.3; Low: <3.5",
-        "description": "Essential mineral and electrolyte for cellular function and heart rhythm.",
+        "description": "Primary intracellular electrolyte vital for maintaining normal cardiac rhythm and cellular potential.",
         "riskCategories": [
-          "Electrolytes"
+          "Electrolytes",
+          "Cardiovascular"
         ]
       }
     },
@@ -3614,7 +3646,7 @@
       "match": "alias",
       "key": "creatinine",
       "writeTarget": "observation",
-      "medicalInsight": "Serum creatinine is 100 umol/L, which falls within the standard normal laboratory range.",
+      "medicalInsight": "Serum creatinine is 100 umol/L, within the normal laboratory range.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -3636,12 +3668,12 @@
       "printedRange": "- mL/min/1.73m2",
       "assignedRange": ">= 60 mL/min/1.73m2",
       "optimalValue": "95 mL/min/1.73m2",
-      "editReason": "Corrected naive normal eGFR from 60 to optimal clinical target of >=90.",
+      "editReason": "Corrected naive optimal threshold of 60 to optimal target >=90 for young adults.",
       "match": "alias",
       "key": "egfr",
       "writeTarget": "observation",
-      "medicalInsight": "Your eGFR of 80 mL/min/1.73m2 is slightly below optimal, though within general laboratory reference parameters.",
-      "customRangeOverlay": "[Western Standard] Optimal: >=90; Low: <90",
+      "medicalInsight": "Your eGFR of 80 mL/min/1.73m2 indicates mild reduction in filtration capacity relative to optimal young adult baselines.",
+      "customRangeOverlay": "[Western Standard] Optimal: >=90; Normal: 60-89; Low: <60",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3661,12 +3693,12 @@
       "date": "2026-06-05",
       "printedRange": "31 - 45 g/L",
       "assignedRange": "31 - 45 g/L",
-      "optimalValue": "43 g/L",
+      "optimalValue": "45 g/L",
       "editReason": null,
       "match": "key",
       "key": "serum_albumin",
       "writeTarget": "observation",
-      "medicalInsight": "Serum albumin is 46 g/L, which is slightly above the standard lab reference ceiling of 45 g/L but generally clinically benign.",
+      "medicalInsight": "Serum albumin is 46 g/L, reflecting normal hepatic protein synthesis and hydration status.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -3692,7 +3724,7 @@
       "match": "alias",
       "key": "alt",
       "writeTarget": "observation",
-      "medicalInsight": "ALT is 41 U/L, sitting just at the upper margin of normal hepatic enzyme activity.",
+      "medicalInsight": "ALT is 41 U/L, sitting slightly above standard optimal thresholds but within broad normal ranges.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -3718,8 +3750,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Alkaline phosphatase is within the normal reference range, signifying healthy liver and bone metabolism.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Alkaline phosphatase is within the normal range, indicating healthy liver and bone metabolism.",
+      "customRangeOverlay": "[Western Standard] High: >130; Normal: 30-130; Low: <30",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3737,9 +3769,10 @@
           "Alkaline Phosphatase"
         ],
         "normalRange": "[Western Standard] High: >130; Normal: 30-130; Low: <30",
-        "description": "Enzyme associated with liver, biliary tract, and bone.",
+        "description": "Enzyme associated with the biliary tract, liver, and bone tissue turnover.",
         "riskCategories": [
-          "Liver Function"
+          "Liver Function",
+          "Bone Health"
         ]
       }
     },
@@ -3752,12 +3785,12 @@
       "date": "2026-06-05",
       "printedRange": "5 - 34 U/L",
       "assignedRange": "5 - 34 U/L",
-      "optimalValue": "20 U/L",
+      "optimalValue": "22 U/L",
       "editReason": null,
       "match": "alias",
       "key": "ast",
       "writeTarget": "observation",
-      "medicalInsight": "AST is 27 U/L, well within normal limits for liver and muscle tissue function.",
+      "medicalInsight": "AST is 27 U/L, well within normal limits indicating healthy hepatic and muscular tissue.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -3783,8 +3816,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Total bilirubin is normal, indicating healthy hepatic processing and clearance of red blood cell breakdown products.",
-      "customRangeOverlay": "[Western Standard] High: >21; Normal: <=21",
+      "medicalInsight": "Total bilirubin level is normal, suggesting healthy hepatic processing and red blood cell turnover.",
+      "customRangeOverlay": "[Western Standard] High: >21; Optimal: 0-21",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3794,15 +3827,15 @@
         }
       ],
       "newCatalogDraft": {
-        "suggestedKey": "serum_total_bilirubin",
+        "suggestedKey": "serum_total_bilirubin_level",
         "name": "Serum total bilirubin level",
         "unit": "umol/L",
         "aliases": [
           "Total Bilirubin",
           "Bilirubin"
         ],
-        "normalRange": "[Western Standard] High: >21; Normal: <=21",
-        "description": "Waste product from hemoglobin breakdown processed by the liver.",
+        "normalRange": "[Western Standard] High: >21; Optimal: <=21; Low: <0",
+        "description": "Yellow breakdown product of normal heme catabolism, excreted by the liver.",
         "riskCategories": [
           "Liver Function"
         ]
@@ -3818,16 +3851,16 @@
       "printedRange": "60 - 80 g/L",
       "assignedRange": "6 - 8 g/L",
       "optimalValue": "70 g/L",
-      "editReason": "Corrected dictionary range from 6-8 g/L to 60-80 g/L.",
+      "editReason": null,
       "dictionaryCorrection": {
         "field": "normalRange",
         "correctedValue": "60 - 80",
-        "reason": "Standard units for Total Protein are g/L, making 6-8 a typographical error for 60-80."
+        "reason": "Dictionary had a severe typo specifying 6-8 g/L instead of physiological 60-80 g/L."
       },
       "match": "alias",
       "key": "total_protein",
       "writeTarget": "observation",
-      "medicalInsight": "Total protein is 81 g/L, which is normal when accounting for dictionary unit correction.",
+      "medicalInsight": "Total Protein is 81 g/L, marginally above the standard reference range.",
       "customRangeOverlay": "[Western Standard] High: >80; Normal: 60-80; Low: <60",
       "logs": [
         {
@@ -3853,8 +3886,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Serum globulin levels are optimal, reflecting normal immune and protein synthesis status.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Serum globulin is within the normal range, indicating a well-balanced immune and protein status.",
+      "customRangeOverlay": "[Western Standard] High: >38; Normal: 22-38; Low: <22",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3868,12 +3901,13 @@
         "name": "Serum globulin",
         "unit": "g/L",
         "aliases": [
-          "Globulin"
+          "Globulins"
         ],
         "normalRange": "[Western Standard] High: >38; Normal: 22-38; Low: <22",
-        "description": "Group of proteins in the blood including antibodies and transport proteins.",
+        "description": "Group of blood proteins including enzymes, antibodies, and transport proteins.",
         "riskCategories": [
-          "Protein Status"
+          "Protein Status",
+          "Liver Function"
         ]
       }
     },
@@ -3891,8 +3925,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Serum calcium is normal, supporting healthy bone structure and cellular signaling.",
-      "customRangeOverlay": "[Western Standard] High: >2.55; Normal: 2.10-2.55; Low: <2.10",
+      "medicalInsight": "Serum calcium is normal, supporting optimal skeletal and cellular signaling functions.",
+      "customRangeOverlay": "[Western Standard] High: >2.60; Normal: 2.15-2.60; Low: <2.15",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3909,10 +3943,11 @@
           "Calcium",
           "Ca"
         ],
-        "normalRange": "[Western Standard] Normal: 2.10-2.55",
-        "description": "Essential mineral for bone health, muscle contraction, and nerve function.",
+        "normalRange": "[Western Standard] High: >2.60; Normal: 2.15-2.60; Low: <2.15",
+        "description": "Essential mineral for bone structure, vascular contraction, muscle function, and nerve transmission.",
         "riskCategories": [
-          "Bone & Mineral"
+          "Bone Health",
+          "Electrolytes"
         ]
       }
     },
@@ -3930,8 +3965,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Adjusted calcium is within the expected range, accounting for protein binding to accurately reflect true calcium status.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Adjusted calcium concentration is well within normal limits, reflecting stable protein-corrected calcium balance.",
+      "customRangeOverlay": "[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3941,17 +3976,18 @@
         }
       ],
       "newCatalogDraft": {
-        "suggestedKey": "serum_adjusted_calcium",
+        "suggestedKey": "serum_adjusted_calcium_conc",
         "name": "Serum adjusted calcium conc",
         "unit": "mmol/L",
         "aliases": [
-          "Adjusted Calcium",
-          "Corrected Calcium"
+          "Corrected Calcium",
+          "Adjusted Calcium"
         ],
         "normalRange": "[Western Standard] High: >2.48; Normal: 2.08-2.48; Low: <2.08",
-        "description": "Calcium level corrected for variations in serum albumin concentration.",
+        "description": "Total serum calcium adjusted for variations in serum albumin levels.",
         "riskCategories": [
-          "Bone & Mineral"
+          "Bone Health",
+          "Electrolytes"
         ]
       }
     },
@@ -3969,8 +4005,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Inorganic phosphate is optimal, indicating appropriate mineral metabolism and renal filtration.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Serum inorganic phosphate is optimal, supporting energy metabolism and bone homeostasis.",
+      "customRangeOverlay": "[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80",
       "logs": [
         {
           "date": "2026-06-05",
@@ -3988,9 +4024,10 @@
           "Phosphorus"
         ],
         "normalRange": "[Western Standard] High: >1.50; Normal: 0.80-1.50; Low: <0.80",
-        "description": "Mineral essential for energy transfer, bone formation, and cellular integrity.",
+        "description": "Essential mineral involved in bone mineralization, energy storage, and acid-base balance.",
         "riskCategories": [
-          "Bone & Mineral"
+          "Bone Health",
+          "Metabolism"
         ]
       }
     },
@@ -4003,12 +4040,12 @@
       "date": "2026-06-05",
       "printedRange": "2.9 - 9.6 10*9/L",
       "assignedRange": "2.9 - 9.6 10*9/L",
-      "optimalValue": "6.5 10^9/L",
+      "optimalValue": "6.0 10*9/L",
       "editReason": null,
       "match": "alias",
       "key": "wbc",
       "writeTarget": "observation",
-      "medicalInsight": "White blood cell count is 5.7 10^9/L, reflecting a healthy immune cell profile.",
+      "medicalInsight": "White blood cell count is 5.7 10*9/L, representing normal immune function.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4029,12 +4066,12 @@
       "date": "2026-06-05",
       "printedRange": "4.20 - 5.80 10*12/L",
       "assignedRange": "4.20 - 5.80 10*12/L",
-      "optimalValue": "5.00 10^12/L",
+      "optimalValue": "5.00 10*12/L",
       "editReason": null,
       "match": "alias",
       "key": "rbc",
       "writeTarget": "observation",
-      "medicalInsight": "Red blood cell count is 5.47 10^12/L, indicating normal erythropoiesis and oxygen-carrying capacity.",
+      "medicalInsight": "Red blood cell count is 5.47 10*12/L, indicating normal erythropoiesis.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4060,7 +4097,7 @@
       "match": "alias",
       "key": "hemoglobin",
       "writeTarget": "observation",
-      "medicalInsight": "Hemoglobin is 166 g/L, nicely situated within the optimal physiological reference range.",
+      "medicalInsight": "Hemoglobin is 166 g/L, within the normal range for adult males.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4081,12 +4118,12 @@
       "date": "2026-06-05",
       "printedRange": "0.390 - 0.510 L/L",
       "assignedRange": "0.390 - 0.510 L/L",
-      "optimalValue": "0.44 L/L",
+      "optimalValue": "0.45 L/L",
       "editReason": null,
       "match": "alias",
       "key": "hematocrit",
       "writeTarget": "observation",
-      "medicalInsight": "Hematocrit is 0.48 L/L, showing normal blood volume distribution of red cells.",
+      "medicalInsight": "Hematocrit is 0.48 L/L, showing normal proportion of red blood cells in circulation.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4112,7 +4149,7 @@
       "match": "alias",
       "key": "mean_corpuscular_volume",
       "writeTarget": "observation",
-      "medicalInsight": "MCV is 88 fL, denoting normocytic red blood cells.",
+      "medicalInsight": "Mean Corpuscular Volume is 88 fL, reflecting normal red blood cell sizing.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4138,7 +4175,7 @@
       "match": "alias",
       "key": "mean_corpuscular_hemoglobin",
       "writeTarget": "observation",
-      "medicalInsight": "MCH is 30.3 pg, reflecting normal hemoglobin content per red blood cell.",
+      "medicalInsight": "Mean Corpuscular Hemoglobin is 30.3 pg, normal for hemoglobin content per cell.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4164,7 +4201,7 @@
       "match": "alias",
       "key": "mean_corpuscular_hemoglobin_concentration",
       "writeTarget": "observation",
-      "medicalInsight": "MCHC is 346 g/L, indicating normal intracellular hemoglobin concentration.",
+      "medicalInsight": "Mean Corpuscular Hemoglobin Concentration is 346 g/L, well within reference limits.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4185,12 +4222,12 @@
       "date": "2026-06-05",
       "printedRange": "10.5 - 16.0 %",
       "assignedRange": "10.5 - 16.0 %",
-      "optimalValue": "13.0 %",
+      "optimalValue": "12.5 %",
       "editReason": null,
       "match": "alias",
       "key": "rdw",
       "writeTarget": "observation",
-      "medicalInsight": "RDW is 11.8 %, demonstrating uniform red blood cell sizing.",
+      "medicalInsight": "Red Cell Distribution Width is 11.8 %, indicating uniform red blood cell volume.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4211,12 +4248,12 @@
       "date": "2026-06-05",
       "printedRange": "140 - 400 10*9/L",
       "assignedRange": "140 - 400 10*9/L",
-      "optimalValue": "250 10^9/L",
+      "optimalValue": "250 10*9/L",
       "editReason": null,
       "match": "alias",
       "key": "platelets",
       "writeTarget": "observation",
-      "medicalInsight": "Platelet count is 227 10^9/L, which is optimal for coagulation function.",
+      "medicalInsight": "Platelet count is 227 10*9/L, showing normal clotting function.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4242,7 +4279,7 @@
       "match": "alias",
       "key": "mpv",
       "writeTarget": "observation",
-      "medicalInsight": "MPV is 10.6 fL, falling within normal thrombocyte volume parameters.",
+      "medicalInsight": "Mean Platelet Volume is 10.6 fL, which is within the normal range.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4268,8 +4305,8 @@
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Platelet distribution width is normal, suggesting uniform platelet sizing and steady bone marrow production.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Platelet distribution width is normal, suggesting uniform platelet production.",
+      "customRangeOverlay": "[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3",
       "logs": [
         {
           "date": "2026-06-05",
@@ -4286,7 +4323,7 @@
           "PDW"
         ],
         "normalRange": "[Western Standard] High: >18.0; Normal: 8.3-18.0; Low: <8.3",
-        "description": "Measures variation in platelet size within the circulating blood.",
+        "description": "Indicates variation in platelet size, useful in evaluating thrombopoiesis.",
         "riskCategories": [
           "Hematology"
         ]
@@ -4301,12 +4338,12 @@
       "date": "2026-06-05",
       "printedRange": "1.50 - 6.10 10*9/L",
       "assignedRange": "1.50 - 6.10 10*9/L",
-      "optimalValue": "4.00 10^9/L",
+      "optimalValue": "3.50 10*9/L",
       "editReason": null,
       "match": "key",
       "key": "neutrophil_count",
       "writeTarget": "observation",
-      "medicalInsight": "Neutrophil count is 3.18 10^9/L, supporting healthy antibacterial immune defenses.",
+      "medicalInsight": "Neutrophil count is 3.18 10*9/L, reflecting normal antibacterial defense.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4327,12 +4364,12 @@
       "date": "2026-06-05",
       "printedRange": "0.00 - 0.40 10*9/L",
       "assignedRange": "0.00 - 0.40 10*9/L",
-      "optimalValue": "0.15 10^9/L",
+      "optimalValue": "0.15 10*9/L",
       "editReason": null,
       "match": "key",
       "key": "eosinophil_count",
       "writeTarget": "observation",
-      "medicalInsight": "Eosinophil count is 0.07 10^9/L, which is normal.",
+      "medicalInsight": "Eosinophil count is 0.07 10*9/L, within normal baseline limits.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4353,12 +4390,12 @@
       "date": "2026-06-05",
       "printedRange": "0.00 - 0.10 10*9/L",
       "assignedRange": "0.00 - 0.10 10*9/L",
-      "optimalValue": "0.02 10^9/L",
+      "optimalValue": "0.02 10*9/L",
       "editReason": null,
       "match": "key",
       "key": "basophil_count",
       "writeTarget": "observation",
-      "medicalInsight": "Basophil count is 0.04 10^9/L, well within expected basophil ranges.",
+      "medicalInsight": "Basophil count is 0.04 10*9/L, normal for inflammatory regulation.",
       "customRangeOverlay": null,
       "logs": [
         {
@@ -4379,13 +4416,13 @@
       "date": "2026-06-05",
       "printedRange": "0.00 - 0.01 10*9/L",
       "assignedRange": "0.00 - 0.01 10*9/L",
-      "optimalValue": "0.00 10*9/L",
+      "optimalValue": "0.0 10*9/L",
       "editReason": null,
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Absence of nucleated red blood cells is normal for peripheral blood findings in healthy adults.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Nucleated red blood cell count is within normal limits, showing effective bone marrow erythropoiesis.",
+      "customRangeOverlay": "[Western Standard] High: >0.01; Normal: 0.00-0.01; Low: <0.00",
       "logs": [
         {
           "date": "2026-06-05",
@@ -4400,10 +4437,10 @@
         "unit": "10*9/L",
         "aliases": [
           "NRBC",
-          "Nucleated RBC"
+          "Normoblast Count"
         ],
-        "normalRange": "[Western Standard] High: >0.01; Normal: 0.00-0.01",
-        "description": "Immature red blood cells occasionally released into circulation under extreme physiological demand.",
+        "normalRange": "[Western Standard] High: >0.01; Normal: 0.00-0.01; Low: <0.00",
+        "description": "Immature red blood cells occasionally seen in peripheral blood during extreme marrow stress or hemolysis.",
         "riskCategories": [
           "Hematology"
         ]
@@ -4418,31 +4455,31 @@
       "date": "2026-06-04",
       "printedRange": "- %",
       "assignedRange": "- %",
-      "optimalValue": "<1.0 %",
+      "optimalValue": "1.0 %",
       "editReason": null,
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "QRISK2 10-year cardiovascular disease risk score is low (1.2%), reflecting favorable cardiovascular health for a 43-year-old male.",
-      "customRangeOverlay": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Low: <5.0",
+      "medicalInsight": "QRISK2 cardiovascular disease 10-year risk score is low, indicating favorable long-term cardiovascular health.",
+      "customRangeOverlay": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Optimal: <5.0",
       "logs": [
         {
           "date": "2026-06-04",
           "value": 1.2,
           "unit": "%",
-          "comment": "GP risk assessment"
+          "comment": "GP cardiovascular assessment"
         }
       ],
       "newCatalogDraft": {
-        "suggestedKey": "qrisk2_cvd_risk_score",
+        "suggestedKey": "qrisk2_cardiovascular_disease_10_year_risk_score",
         "name": "QRISK2 cardiovascular disease 10 year risk score",
         "unit": "%",
         "aliases": [
           "QRISK2",
-          "CVD Risk Score"
+          "10-Year CVD Risk"
         ],
-        "normalRange": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Low: <5.0",
-        "description": "Calculates the percentage risk of developing a cardiovascular event over the next 10 years.",
+        "normalRange": "[Western Standard] High: >=10.0; Moderate: 5.0-9.9; Optimal: <5.0",
+        "description": "Calculates the percentage risk of developing cardiovascular disease over a 10-year period.",
         "riskCategories": [
           "Cardiovascular"
         ]
@@ -4458,12 +4495,17 @@
       "printedRange": "- mmol/L",
       "assignedRange": "[All patients] Very High: >6.2; Elevated: >5; Optimal: <=5",
       "optimalValue": "4.5 mmol/L",
-      "editReason": "Provided a specific clinical optimal target below 5.0 mmol/L.",
+      "editReason": "Corrected optimal target to a clinically robust cardiovascular prevention goal.",
+      "dictionaryCorrection": {
+        "field": "normalRange",
+        "correctedValue": "[All patients] Very High: >6.2; Elevated: >5.0; Optimal: <=5.0",
+        "reason": "Standardize dictionary format to structured multi-bracket clinical thresholds."
+      },
       "match": "alias",
       "key": "total_cholesterol",
       "writeTarget": "observation",
-      "medicalInsight": "Total cholesterol is elevated at 6.5 mmol/L, increasing long-term cardiovascular risk for a 43-year-old male. Lifestyle modification and dietary review are recommended.",
-      "customRangeOverlay": "[All patients] Very High: >6.2; Elevated: >5; Optimal: <=5",
+      "medicalInsight": "Total cholesterol is elevated at 6.5 mmol/L, indicating increased cardiovascular risk for a 43-year-old male. Lifestyle modification and further lipid profile evaluation are recommended.",
+      "customRangeOverlay": "[All patients] Very High: >6.2; Elevated: >5.0; Optimal: <=5.0",
       "logs": [
         {
           "date": "2026-06-03",
@@ -4483,13 +4525,18 @@
       "date": "2026-06-03",
       "printedRange": "0.9 - 1.7 mmol/L",
       "assignedRange": "0.9 - 1.7 mmol/L",
-      "optimalValue": "1.4 mmol/L",
-      "editReason": "Set a precise optimal target within the normal reference range.",
+      "optimalValue": "1.6 mmol/L",
+      "editReason": "Added optimal target for cardioprotection.",
+      "dictionaryCorrection": {
+        "field": "normalRange",
+        "correctedValue": "[All patients] High: >1.7; Normal: 0.9-1.7; Low: <0.9",
+        "reason": "Standardize unstructured range into multi-bracket format."
+      },
       "match": "alias",
       "key": "hdl",
       "writeTarget": "observation",
-      "medicalInsight": "HDL-C is optimal at 1.5 mmol/L, providing a cardioprotective lipid clearance profile.",
-      "customRangeOverlay": "[All patients] Normal: 0.9-1.7; Low: <0.9",
+      "medicalInsight": "HDL-C is optimal at 1.5 mmol/L, providing a protective cardiovascular effect.",
+      "customRangeOverlay": "[All patients] High: >1.7; Normal: 0.9-1.7; Low: <0.9",
       "logs": [
         {
           "date": "2026-06-03",
@@ -4510,12 +4557,12 @@
       "printedRange": "- mmol/L",
       "assignedRange": "[All patients] Very High: >=5.6; Elevated: >=1.7; Optimal: <1.7",
       "optimalValue": "1.2 mmol/L",
-      "editReason": "Target optimal value set well below the elevated cutoff.",
+      "editReason": "Set optimal target below the standard threshold for cardiovascular wellness.",
       "match": "alias",
       "key": "triglycerides",
       "writeTarget": "observation",
-      "medicalInsight": "Triglycerides are at the borderline threshold of 1.7 mmol/L, indicating potential metabolic stress.",
-      "customRangeOverlay": "[All patients] Very High: >=5.6; Elevated: >=1.7; Optimal: <1.7",
+      "medicalInsight": "Triglycerides are borderline elevated at 1.7 mmol/L, which warrants monitoring alongside dietary patterns and physical activity.",
+      "customRangeOverlay": null,
       "logs": [
         {
           "date": "2026-06-03",
@@ -4536,33 +4583,33 @@
       "printedRange": "- mmol/L",
       "assignedRange": "- mmol/L",
       "optimalValue": "2.6 mmol/L",
-      "editReason": "Target optimal level for non-HDL cholesterol is below 2.6 mmol/L for healthy adults.",
+      "editReason": "Target set below standard clinical threshold for optimal primary prevention.",
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Non-HDL cholesterol of 5 mmol/L is elevated, reflecting increased cardiovascular risk requiring lifestyle modification or potential intervention.",
+      "medicalInsight": "Non-HDL cholesterol of 5 mmol/L is elevated, representing total atherogenic particle burden and indicating increased cardiovascular risk for a 43-year-old male.",
       "customRangeOverlay": "[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4",
       "logs": [
         {
           "date": "2026-06-03",
           "value": 5,
           "unit": "mmol/L",
-          "comment": "GP result"
+          "comment": "GP lab"
         }
       ],
       "newCatalogDraft": {
         "suggestedKey": "serum_non_hdl_cholesterol",
-        "name": "Serum non-HDL cholesterol",
+        "name": "Serum non-HDL cholesterol level",
         "unit": "mmol/L",
         "aliases": [
           "Non-HDL Cholesterol",
-          "Se non HDL cholesterol level"
+          "Non-High-Density Lipoprotein Cholesterol"
         ],
         "normalRange": "[Western Standard] High: >=4.1; Borderline High: 3.4-4.0; Optimal: <3.4",
-        "description": "Total cholesterol minus HDL cholesterol, representing atherogenic lipoproteins.",
+        "description": "Calculated as total cholesterol minus HDL cholesterol, measuring all atherogenic lipoproteins.",
         "riskCategories": [
-          "Cardiovascular",
-          "Lipids"
+          "Cardiovascular Risk",
+          "Lipid Panel"
         ]
       }
     },
@@ -4576,18 +4623,18 @@
       "printedRange": "",
       "assignedRange": "",
       "optimalValue": "3.0",
-      "editReason": "Optimal total cholesterol to HDL ratio is typically below 3.0 to minimize cardiovascular risk.",
+      "editReason": "Target set to optimal physiological ratio for risk reduction.",
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "Cholesterol to HDL ratio of 4.3 falls within the average risk category for cardiovascular disease.",
-      "customRangeOverlay": "[Western Standard] High: >5.0; Average: 3.5-5.0; Optimal: <3.5",
+      "medicalInsight": "The cholesterol to HDL ratio of 4.3 falls into a moderate risk category for cardiovascular disease development.",
+      "customRangeOverlay": "[Western Standard] High: >5.0; Moderate: 3.6-5.0; Optimal: <3.6",
       "logs": [
         {
           "date": "2026-06-03",
           "value": 4.3,
           "unit": "",
-          "comment": "GP result"
+          "comment": "GP lab"
         }
       ],
       "newCatalogDraft": {
@@ -4595,14 +4642,14 @@
         "name": "Serum cholesterol/HDL ratio",
         "unit": "",
         "aliases": [
-          "Cholesterol/HDL Ratio",
-          "Total/HDL Ratio"
+          "Cholesterol to HDL Ratio",
+          "TC/HDL Ratio"
         ],
-        "normalRange": "[Western Standard] High: >5.0; Average: 3.5-5.0; Optimal: <3.5",
-        "description": "Ratio of total serum cholesterol to high-density lipoprotein cholesterol.",
+        "normalRange": "[Western Standard] High: >5.0; Moderate: 3.6-5.0; Optimal: <3.6",
+        "description": "Ratio comparing total cholesterol to high-density lipoprotein cholesterol to assess cardiovascular risk.",
         "riskCategories": [
-          "Cardiovascular",
-          "Lipids"
+          "Cardiovascular Risk",
+          "Lipid Panel"
         ]
       }
     },
@@ -4615,13 +4662,13 @@
       "date": "2026-06-03",
       "printedRange": "- mmol/L",
       "assignedRange": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
-      "optimalValue": "2.0 mmol/L",
-      "editReason": "Set a robust cardiovascular risk reduction target for LDL-C.",
+      "optimalValue": "2.5 mmol/L",
+      "editReason": "Set optimal target to reflect primary prevention goals for male adults.",
       "match": "alias",
       "key": "ldl",
       "writeTarget": "observation",
-      "medicalInsight": "LDL-C is elevated at 4.3 mmol/L, a primary driver of atherosclerotic cardiovascular disease requiring proactive management.",
-      "customRangeOverlay": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
+      "medicalInsight": "LDL-C is elevated at 4.3 mmol/L, representing the primary atherogenic driver requiring targeted management.",
+      "customRangeOverlay": null,
       "logs": [
         {
           "date": "2026-06-03",
@@ -4641,34 +4688,33 @@
       "date": "2025-06-26",
       "printedRange": "- %",
       "assignedRange": "- %",
-      "optimalValue": "1.0 %",
-      "editReason": "Target optimal QRISK2 score is as low as possible, ideally under 5.0%.",
+      "optimalValue": "< 5.0 %",
+      "editReason": "Target represents standard low-risk threshold.",
       "match": "none",
       "key": null,
       "writeTarget": "pending",
-      "medicalInsight": "QRISK2 10-year cardiovascular disease risk score of 1.2% indicates a low risk profile.",
-      "customRangeOverlay": "[Western Standard] High Risk: >=10.0; Moderate Risk: 5.0-9.9; Low Risk: <5.0",
+      "medicalInsight": "A QRISK2 10-year cardiovascular disease risk score of 1.2% indicates a low risk category over the next decade.",
+      "customRangeOverlay": "[UK Clinical Standard] High: >=20.0; Moderate: 10.0-19.9; Low: <10.0",
       "logs": [
         {
           "date": "2025-06-26",
           "value": 1.2,
           "unit": "%",
-          "comment": "GP result"
+          "comment": "GP lab"
         }
       ],
       "newCatalogDraft": {
-        "suggestedKey": "qrisk2_cvd_10_year_risk",
+        "suggestedKey": "qrisk2_cvd_10_year_risk_score",
         "name": "QRISK2 cardiovascular disease 10 year risk score",
         "unit": "%",
         "aliases": [
           "QRISK2 Score",
-          "10-year CVD Risk"
+          "10-Year CVD Risk"
         ],
-        "normalRange": "[Western Standard] High Risk: >=10.0; Moderate Risk: 5.0-9.9; Low Risk: <5.0",
-        "description": "Algorithm that calculates the 10-year risk of developing a cardiovascular event.",
+        "normalRange": "[UK Clinical Standard] High: >=20.0; Moderate: 10.0-19.9; Low: <10.0",
+        "description": "Algorithm predicting the risk of developing a cardiovascular event over a 10-year period.",
         "riskCategories": [
-          "Cardiovascular",
-          "Risk Assessment"
+          "Cardiovascular Risk"
         ]
       }
     }

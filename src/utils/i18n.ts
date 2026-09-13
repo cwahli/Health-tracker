@@ -1,6 +1,5 @@
 import { translations, type TranslationKey } from './translations';
 import { nutrientDefinitions } from './nutrition';
-import { canonicalNutrientKey } from './nutrients';
 
 export const SUPPORTED_LOCALES = ['en', 'id', 'fr', 'zh'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
@@ -198,15 +197,14 @@ export function displayEthnicityOption(lang: unknown, storedValue: string | null
 /** Nutrient chrome labels. Codes stay English; short form is for dense chips (Sat Fat). */
 export function displayNutrientName(lang: unknown, nutrientKey: string, opts?: { short?: boolean }): string {
   const locale = normalizeLocale(lang);
-  const canon = canonicalNutrientKey(nutrientKey);
   if (opts?.short) {
-    if (canon === 'calories') return t(locale, 'caloriesLabel');
-    if (canon === 'saturatedFat') return t(locale, 'satFatLabel');
-    if (canon === 'sodium') return t(locale, 'sodiumLabel');
+    if (nutrientKey === 'calories') return t(locale, 'caloriesLabel');
+    if (nutrientKey === 'saturatedFat') return t(locale, 'satFatLabel');
+    if (nutrientKey === 'sodium') return t(locale, 'sodiumLabel');
   }
-  const nut = nutrientDefinitions.find((n) => n.key === canon);
+  const nut = nutrientDefinitions.find((n) => n.key === nutrientKey);
   if (nut) return nut.labels[locale] || nut.labels.en;
-  return String(nutrientKey).replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase());
+  return nutrientKey.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase());
 }
 
 const CLINICAL_TYPE_KEYS: Record<string, TranslationKey> = {

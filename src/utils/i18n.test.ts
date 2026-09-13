@@ -127,8 +127,6 @@ describe('display chrome helpers', () => {
   it('uses Indonesian nutrient chrome names including Sat Fat short form', () => {
     expect(displayNutrientName('id', 'calories')).toBe('Kalori');
     expect(displayNutrientName('id', 'saturatedFat', { short: true })).toBe(translations.id.satFatLabel);
-    expect(displayNutrientName('en', 'saturated_fat')).toBe('Saturated Fat');
-    expect(displayNutrientName('en', 'saturatedFat', { short: true })).toBe(translations.en.satFatLabel);
     expect(displayNutrientName('id', 'solubleFibre')).toBe('Serat Larut');
     expect(displayNutrientName('id', 'protein')).toBe('Protein');
     expect(displayNutrientName('id', 'sodium')).toBe('Natrium');

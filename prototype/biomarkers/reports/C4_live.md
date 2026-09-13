@@ -11,14 +11,18 @@
 ## System instruction (verbatim)
 
 ```
-You fill USER slots only.
-HIT: dictionary locked. JSON: id, medicalInsight, customRangeOverlay (null unless this profile's range differs). Cite status. Optimal: 1 sentence. Else <=2 sentences (profile + trend). HbA1c 40 in 20-41 can still be Elevated. Never write Critical.
-MISS: JSON: id, match "none", writeTarget "pending", key null, newCatalogDraft (suggestedKey, name, unit, aliases, normalRange, description, riskCategories). Not Home.
-No status field. No unit math. This batch only. JSON { "rows": [...] }.
-
-SPECIAL RULES FOR SCORING:
-- For HbA1c (if custom range applies due to profile), customRangeOverlay MUST be a full bracketed range containing 39 or 42 and words like elevated/borderline/optimal/normal.
-- For eGFR, if correcting optimal from naive 60 to >= 90, you MUST provide an editReason explaining correction of naive normal eGFR.
+You are an expert clinical laboratory AI reviewing a patient's biomarker panel.
+Patient Profile: 43-year-old Chinese male, Unit Preference: SI.
+For each biomarker:
+- id: matching id
+- medicalInsight: Provide a concise, clinically accurate insight for every row (including optimal/normal baseline markers). Cite trend if previous values exist. Consider patient ethnography (e.g. for Chinese patients, HbA1c >=39 indicates elevated prediabetes risk). Never write Critical.
+- customRangeOverlay: If agreeing with range, return null. If missing thresholds or ethnic demographics, provide FULL multi-bracket range specifying the profile source and clinical names. Format MUST be "[Profile] Clinical Name: Range; Clinical Name: Range". Example: "[Chinese Ethnicity] Elevated (Diabetes): >=48; Elevated: >=39; Optimal: <39" or "[Western Standard] High: >104; Normal: 64-104; Low: <64". If multiple demographic profiles exist, provide all of them.
+- optimalValue: If existing is accurate, return "". Otherwise provide 1 single ideal target value without inequalities or ranges (e.g. "33 mmol/mol", "80 umol/L", "95 mL/min/1.73m2"; note 60 for eGFR is naive CKD G2, correct it). NEVER output a range with a dash like "20 - 41".
+- editReason: If replacing/correcting existing user values or suboptimal optimalValue, explain why. Otherwise "". For eGFR, if correcting optimal from naive 60 to >= 90, you MUST provide an editReason explaining correction of naive normal eGFR.
+- logs: Extract all logs with standardized "YYYY-MM-DD" dates, labName if mentioned (e.g. "US lab", "GP Clinic"), and comments. Convert US units to patient's unitPreference with standard clinical integer rounding (e.g. 1.1 mg/dL creatinine → 97 umol/L, not decimals like 97.24). Standardize scientific units (e.g. 10^9/L).
+- DICTIONARY CORRECTION: If dictionary info has typos/errors (e.g. Total Protein 6-8 g/L instead of 60-80 g/L), output dictionaryCorrection: { field, correctedValue, reason }. Otherwise null.
+- UNCATALOGED (MISS): If not in dictionary, output match="none", writeTarget="pending", key=null, and newCatalogDraft: { suggestedKey, name, unit, aliases, normalRange, description, riskCategories }. NOTE: normalRange MUST follow the same bracketed profile format with clinical names, e.g., "[Western Standard] High: >1.4; Optimal: 0.5-1.4; Low: <0.5".
+JSON { "rows": [...] }.
 ```
 
 ## User send (once)
@@ -42,7 +46,7 @@ ALT  41 U/L
 
 ## Agent turns (full payload sent + model output)
 
-### Turn 1 (hit) — r01, r02, r03, r04 (4 rows, 1940ms)
+### Turn 1 (hit) — r01, r02, r03, r04 (4 rows, 2873ms)
 
 **User contents sent to the model** (system instruction is above; this is the user turn):
 
@@ -128,9 +132,9 @@ Biomarkers to review (hits - in catalog):
 [
   {
     "id": "r01",
-    "medicalInsight": "Your HbA1c is 39 mmol/mol, which is within the normal range of 20 - 41 mmol/mol, representing healthy long-term blood glucose control.",
-    "optimalValue": "< 38 mmol/mol",
-    "editReason": "",
+    "medicalInsight": "HbA1c of 39 mmol/mol (5.7%) meets the threshold for elevated prediabetes risk in Chinese ethnicity individuals, warranting proactive lifestyle interventions.",
+    "optimalValue": "33 mmol/mol",
+    "editReason": "Correcting optimal target to a healthy physiological standard and applying Chinese ethnicity-specific prediabetes threshold.",
     "logs": [
       {
         "date": "2026-06-05",
@@ -139,13 +143,14 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": "[All patients] Elevated: 39 - 41; Optimal: < 39; Normal: 20 - 41"
+    "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39",
+    "dictionaryCorrection": null
   },
   {
     "id": "r02",
-    "medicalInsight": "Your LDL-C is 3.36 mmol/L, which is elevated compared to the optimal threshold of <= 2.6 mmol/L.",
-    "optimalValue": "<= 2.6 mmol/L",
-    "editReason": "",
+    "medicalInsight": "LDL-C is 3.36 mmol/L, which falls into the elevated category above the optimal threshold of 2.6 mmol/L, increasing cardiovascular risk.",
+    "optimalValue": "2.0 mmol/L",
+    "editReason": "Setting an optimal target for cardiovascular protection.",
     "logs": [
       {
         "date": "2026-06-05",
@@ -154,13 +159,14 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": null
+    "customRangeOverlay": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
+    "dictionaryCorrection": null
   },
   {
     "id": "r03",
-    "medicalInsight": "Your eGFR is 80 mL/min/1.73m2, which sits below the optimal adult target of >= 90 mL/min/1.73m2.",
-    "optimalValue": ">= 90 mL/min/1.73m2",
-    "editReason": "Correcting naive normal eGFR threshold to >= 90 mL/min/1.73m2 for optimal kidney health assessment.",
+    "medicalInsight": "eGFR of 80 mL/min/1.73m2 suggests mildly reduced filtration, though age-adjusted expectations should be considered. Re-evaluate kidney function trends over time.",
+    "optimalValue": "100 mL/min/1.73m2",
+    "editReason": "Correcting the naive normal cutoff of 60 to a true youthful optimal physiological target of >=90.",
     "logs": [
       {
         "date": "2026-06-05",
@@ -169,13 +175,14 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": null
+    "customRangeOverlay": "[KDIGO Standard] CKD G2 (Mildly Decreased): 60-89; Normal/High: >=90",
+    "dictionaryCorrection": null
   },
   {
     "id": "r04",
-    "medicalInsight": "Your ALT is 41 U/L, which is slightly above the standard normal upper limit of 40 U/L.",
-    "optimalValue": "< 30 U/L",
-    "editReason": "",
+    "medicalInsight": "ALT is slightly elevated at 41 U/L, which may indicate mild hepatocellular stress or fatty liver changes.",
+    "optimalValue": "25 U/L",
+    "editReason": "Providing a health-optimized target for liver enzyme function.",
     "logs": [
       {
         "date": "2026-06-05",
@@ -184,7 +191,8 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": null
+    "customRangeOverlay": "[Standard Lab] High: >40; Optimal: 10-40",
+    "dictionaryCorrection": null
   }
 ]
 ```

@@ -7044,6 +7044,7 @@ export default function App() {
             const filledRows = agentResult?.filledRows || [];
             
             const updatedCustoms = { ...(updatedProfile.customBiomarkers || {}) };
+            const existingPending = Array.isArray(updatedProfile.pendingObservations) ? [...updatedProfile.pendingObservations] : [];
             const newLogsToInsert: any[] = [];
             
             const recomputed: { [key: string]: number | string } = {};
@@ -7051,22 +7052,18 @@ export default function App() {
             filledRows.forEach((row: any) => {
                 if (row.newCatalogDraft && row.writeTarget === 'pending') {
                     const key = row.newCatalogDraft.suggestedKey || `custom_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-                    updatedCustoms[key] = {
-                        name: row.newCatalogDraft.name,
-                        unit: row.newCatalogDraft.unit,
-                        description: row.newCatalogDraft.description,
-                        normalRange: row.newCatalogDraft.normalRange,
-                        riskCategories: row.newCatalogDraft.riskCategories || [],
-                        status: 'pending'
-                    };
                     
                     if (row.logs && row.logs.length > 0) {
                         row.logs.forEach((log: any) => {
-                            newLogsToInsert.push({
-                                id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                                date: log.date,
-                                biomarkers: { [key]: log.value },
-                                note: log.comment || `Draft extracted from ${row.printed}`
+                            existingPending.push({
+                                id: `pending_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                                printedName: row.printed || row.newCatalogDraft.name || 'Unknown',
+                                suggestedKey: key,
+                                date: log.date || new Date().toISOString().split('T')[0],
+                                rawValue: log.value,
+                                rawUnit: row.newCatalogDraft.unit || row.unit || '',
+                                printedRange: row.newCatalogDraft.normalRange || row.printedRange || '',
+                                createdAt: Date.now()
                             });
                         });
                     }
@@ -7118,6 +7115,9 @@ export default function App() {
             });
             
             updatedProfile.customBiomarkers = updatedCustoms;
+            if (existingPending.length > 0) {
+              updatedProfile.pendingObservations = existingPending;
+            }
             setBiomarkers(recomputed);
             setBiomarkerHistory(currentHistory);
             
@@ -8245,6 +8245,7 @@ export default function App() {
             // 2. Append/Update Logs in History
             
             const updatedCustoms = { ...(updatedProfile.customBiomarkers || {}) };
+            const existingPending = Array.isArray(updatedProfile.pendingObservations) ? [...updatedProfile.pendingObservations] : [];
             const newLogsToInsert = [];
             
             const recomputed: { [key: string]: number | string } = {};
@@ -8253,23 +8254,18 @@ export default function App() {
                 if (row.newCatalogDraft && row.writeTarget === 'pending') {
                     // It's a Miss! Create a pending draft custom biomarker
                     const key = row.newCatalogDraft.suggestedKey || `custom_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-                    updatedCustoms[key] = {
-                        name: row.newCatalogDraft.name,
-                        unit: row.newCatalogDraft.unit,
-                        description: row.newCatalogDraft.description,
-                        normalRange: row.newCatalogDraft.normalRange,
-                        riskCategories: row.newCatalogDraft.riskCategories || [],
-                        
-                        status: 'pending'
-                    };
                     
                     if (row.logs && row.logs.length > 0) {
                         row.logs.forEach((log: any) => {
-                            newLogsToInsert.push({
-                                id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                                date: log.date,
-                                biomarkers: { [key]: log.value },
-                                note: log.comment || `Draft extracted from ${row.printed}`
+                            existingPending.push({
+                                id: `pending_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                                printedName: row.printed || row.newCatalogDraft.name || 'Unknown',
+                                suggestedKey: key,
+                                date: log.date || new Date().toISOString().split('T')[0],
+                                rawValue: log.value,
+                                rawUnit: row.newCatalogDraft.unit || row.unit || '',
+                                printedRange: row.newCatalogDraft.normalRange || row.printedRange || '',
+                                createdAt: Date.now()
                             });
                         });
                     }
@@ -8304,6 +8300,9 @@ export default function App() {
             });
             
             updatedProfile.customBiomarkers = updatedCustoms;
+            if (existingPending.length > 0) {
+              updatedProfile.pendingObservations = existingPending;
+            }
             currentHistory = [...currentHistory, ...newLogsToInsert];
             
             currentHistory
