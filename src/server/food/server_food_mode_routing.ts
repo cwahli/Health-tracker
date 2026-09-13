@@ -62,7 +62,7 @@ export interface FoodApiCallsArgs {
 }
 
 export function buildFoodApiCalls(args: FoodApiCallsArgs): Array<{ type: string; label: string }> {
-  // Dietitian LLM removed: the call list never includes it. Pure-scale and
+  // Second-agent LLM removed: the call list never includes it. Pure-scale and
   // single-agent creates use precalc math, not a model call.
   const { hasImage, queriesToSearch } = args;
   return [
@@ -71,7 +71,7 @@ export function buildFoodApiCalls(args: FoodApiCallsArgs): Array<{ type: string;
   ];
 }
 
-export interface PostDietitianNormArgs {
+export interface PostDietNormArgs {
   rawParsed: any;
   isExplicitModify: boolean;
   userSelectedMode?: string;
@@ -79,11 +79,11 @@ export interface PostDietitianNormArgs {
 }
 
 /**
- * F-8.10 shard 18 — post-dietitian response normalization, extracted
+ * F-8.10 shard 18 — post-diet response normalization, extracted
  * verbatim from runFoodAnalyze. Mutates rawParsed in place (mode fixups,
  * comparison breakdown backfill).
  */
-export function normalizeParsedPostDietitian(args: PostDietitianNormArgs): void {
+export function normalizeParsedPostDiet(args: PostDietNormArgs): void {
   const { rawParsed, isExplicitModify, userSelectedMode, visionScoutItems } = args;
   if (rawParsed && typeof rawParsed === 'object') {
     if (isExplicitModify) {
@@ -108,6 +108,6 @@ export function normalizeParsedPostDietitian(args: PostDietitianNormArgs): void 
   }
 }
 
-export type PostProjectorNormArgs = PostDietitianNormArgs;
-export const normalizeParsedPostProjector = normalizeParsedPostDietitian;
+export type PostProjectorNormArgs = PostDietNormArgs;
+export const normalizeParsedPostProjector = normalizeParsedPostDiet;
 

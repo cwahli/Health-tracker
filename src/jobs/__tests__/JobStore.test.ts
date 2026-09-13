@@ -211,7 +211,7 @@ describe('JobStore', () => {
       id: 'retry1',
       status: 'succeeded',
       attemptCount: 1,
-      result: { pendingFoodLog: { name: 'Soup', degradedStages: ['dietitian'] } },
+      result: { pendingFoodLog: { name: 'Soup', degradedStages: ['diet'] } },
     });
 
     JobStore.updateJob('retry1', {

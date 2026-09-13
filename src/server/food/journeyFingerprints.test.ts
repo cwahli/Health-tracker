@@ -42,7 +42,7 @@ describe('journey fingerprints (log vs compare; nutrition targets)', () => {
     expect((visionScoutResponseSchema.properties as any).allExtractedDishes).toBeUndefined();
   });
 
-  it('dietitian router keeps compare on PRODUCT EVALUATION', () => {
+  it('diet router keeps compare on PRODUCT EVALUATION', () => {
     const base = {
       isExplicitModify: false,
       effectiveActiveMeal: null,

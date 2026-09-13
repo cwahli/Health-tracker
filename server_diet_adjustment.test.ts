@@ -2,14 +2,14 @@ import { describe, it, expect } from "vitest";
 import { rebalanceNutrientProfile, applyNutrientModifiers } from "./server_derivation";
 import { sanitizeVerdictLabel, synchronizeNarrativeText, synthesizeEditCommandsFromBreakdown } from "./server_pure_helpers";
 
-describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
+describe("Diet Clinical Adjustment & Weight Calibration", () => {
   const NUTRIENT_KEYS = [
     'calories', 'protein', 'totalFat', 'saturatedFat', 'transFat', 'unsaturatedFat',
     'carbohydrates', 'sugar', 'addedSugar', 'totalFibre', 'sodium', 'potassium', 'salt'
   ];
 
-  function simulateDietitianInjection(preMatch: any, dietitianItem: any) {
-    const weight = dietitianItem.weightGrams;
+  function simulateDietInjection(preMatch: any, dietItem: any) {
+    const weight = dietItem.weightGrams;
     const originalBasisWeight = Number(preMatch.estimatedWeightGrams || preMatch.weightGrams || preMatch.nutrientBasisWeight || weight);
     const weightScaleFactor = (originalBasisWeight > 0 && Math.abs(weight - originalBasisWeight) > 0.01)
       ? (weight / originalBasisWeight)
@@ -24,8 +24,8 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
       });
     }
 
-    if (dietitianItem.correctedNutrients && typeof dietitianItem.correctedNutrients === 'object') {
-      Object.entries(dietitianItem.correctedNutrients).forEach(([k, v]) => {
+    if (dietItem.correctedNutrients && typeof dietItem.correctedNutrients === 'object') {
+      Object.entries(dietItem.correctedNutrients).forEach(([k, v]) => {
         if (v !== null && v !== undefined && Number.isFinite(Number(v))) {
           n[k] = Number(v);
         }
@@ -42,12 +42,12 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
     });
 
     return {
-      ...dietitianItem,
+      ...dietItem,
       weightGrams: weight,
       syntheticBase100g: injectedLabel,
       truthNutrients: n,
       nutrients: n,
-      clinicalCorrectionNote: dietitianItem.clinicalCorrectionNote || null
+      clinicalCorrectionNote: dietItem.clinicalCorrectionNote || null
     };
   }
 
@@ -71,14 +71,14 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
       }
     };
 
-    const dietitianItem = {
+    const dietItem = {
       scoutIndex: 1,
       canonicalDbName: "steamed chicken dumplings",
       weightGrams: 100,
       dbSource: "estimated"
     };
 
-    const finalized = simulateDietitianInjection(preMatch, dietitianItem);
+    const finalized = simulateDietInjection(preMatch, dietItem);
 
     expect(finalized.weightGrams).toBe(100);
     expect(finalized.nutrients.calories).toBe(186.67);
@@ -103,8 +103,8 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
       }
     };
 
-    // Dietitian observes deep-fried oil absorption undercounted -> adjusts totalFat to 22g and satFat to 5g
-    const dietitianItem = {
+    // Diet observes deep-fried oil absorption undercounted -> adjusts totalFat to 22g and satFat to 5g
+    const dietItem = {
       scoutIndex: 1,
       canonicalDbName: "Fried Fish Fillet",
       weightGrams: 200,
@@ -117,7 +117,7 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
       clinicalCorrectionNote: "Increased total fat by 10g for batter oil absorption and updated sodium."
     };
 
-    const finalized = simulateDietitianInjection(preMatch, dietitianItem);
+    const finalized = simulateDietInjection(preMatch, dietItem);
 
     expect(finalized.weightGrams).toBe(200);
     expect(finalized.nutrients.totalFat).toBe(22);
@@ -248,13 +248,13 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
       ]
     };
 
-    // Dietitian edited ONLY item at scoutIndex 3 (Sizzling Steak) into 2 sub-items
-    const dietitianItems = [
+    // Diet edited ONLY item at scoutIndex 3 (Sizzling Steak) into 2 sub-items
+    const dietItems = [
       { canonicalDbName: "Beef Steak", scoutIndex: 3, weightGrams: 250 },
       { canonicalDbName: "Potato Wedges", scoutIndex: 3, weightGrams: 150 }
     ];
 
-    const commands = synthesizeEditCommandsFromBreakdown(activeMeal, dietitianItems, "I replaced the steak combo with beef steak and potato wedges");
+    const commands = synthesizeEditCommandsFromBreakdown(activeMeal, dietItems, "I replaced the steak combo with beef steak and potato wedges");
 
     // Only item 3 should be removed
     const removals = commands.filter(c => c.action === "remove_item");
@@ -283,7 +283,7 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
       ]
     };
 
-    const dietitianItems = [
+    const dietItems = [
       { canonicalDbName: "Soft Serve Ice Cream Cone", scoutIndex: 0, weightGrams: 120 },
       { canonicalDbName: "Crispy Fried Chicken", scoutIndex: 1, weightGrams: 150 },
       { canonicalDbName: "Sweet Iced Tea", scoutIndex: 5, weightGrams: 120 },
@@ -293,7 +293,7 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
 
     const commands = synthesizeEditCommandsFromBreakdown(
       activeMeal,
-      dietitianItems,
+      dietItems,
       "the beef and chicken is 100g of beef steak and 100g of chicken steak"
     );
 
@@ -314,14 +314,14 @@ describe("Meal Agent Clinical Adjustment & Weight Calibration", () => {
       ]
     };
 
-    const dietitianItems = [
+    const dietItems = [
       { canonicalDbName: "Soft Serve Ice Cream Cone", scoutIndex: 0, weightGrams: 120 },
       { canonicalDbName: "Sweet Iced Tea", scoutIndex: 5, weightGrams: 120 }
     ];
 
     const commands = synthesizeEditCommandsFromBreakdown(
       activeMeal,
-      dietitianItems,
+      dietItems,
       "the tea is unsweatened"
     );
 

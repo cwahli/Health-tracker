@@ -38,9 +38,9 @@ describe('buildMealFromFinalizeLedgers', () => {
     expect(meal.items[0].boundingBox2D).toEqual([10, 20, 30, 40]);
   });
 
-  it('applies dietitian correctedNutrients without rebuilding the item list', () => {
+  it('applies diet correctedNutrients without rebuilding the item list', () => {
     const meal = buildMealFromFinalizeLedgers([iceCreamLedger], {
-      dietitianItems: [{
+      dietItems: [{
         scoutIndex: 0,
         canonicalDbName: 'Soft Serve Ice Cream Cone',
         weightGrams: 120,

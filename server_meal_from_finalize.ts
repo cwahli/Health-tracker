@@ -76,15 +76,16 @@ export function ledgerToFoodItem(ledger: any, extras: {
   };
 }
 
-function dietitianRowForLedger(dietitianItems: any[], ledger: any): any | null {
-  if (!Array.isArray(dietitianItems) || dietitianItems.length === 0) return null;
+function dietRowForLedger(dietItems: any[], ledger: any): any | null {
+  if (!Array.isArray(dietItems) || dietItems.length === 0) return null;
+
   if (ledger?.scoutIndex !== undefined && ledger?.scoutIndex !== null) {
-    const byIdx = dietitianItems.find((d: any) => d.scoutIndex === ledger.scoutIndex);
+    const byIdx = dietItems.find((d: any) => d.scoutIndex === ledger.scoutIndex);
     if (byIdx) return byIdx;
   }
   const ledgerName = String(ledger?.originalName || ledger?.keyword || ledger?.name || '').trim().toLowerCase();
   if (!ledgerName) return null;
-  return dietitianItems.find((d: any) => {
+  return dietItems.find((d: any) => {
     const n = String(d.canonicalDbName || d.name || '').trim().toLowerCase();
     return n && n === ledgerName;
   }) || null;
@@ -92,20 +93,20 @@ function dietitianRowForLedger(dietitianItems: any[], ledger: any): any | null {
 
 /**
  * Build the savable meal book from finalize ledgers.
- * Dietitian itemsBreakdown is optional: only correctedNutrients / clinical notes / names are read.
+ * Diet itemsBreakdown is optional: only correctedNutrients / clinical notes / names are read.
  */
 export function buildMealFromFinalizeLedgers(
   ledgers: any[],
   opts: {
-    dietitianItems?: any[] | null;
+    dietItems?: any[] | null;
     diningEnvironment?: string;
     mealName?: string;
     date?: string;
   } = {}
 ): { items: any[]; nutrients: Record<string, number>; weightGrams: number; name: string; receiptTable: string } {
-  const dietitianItems = Array.isArray(opts.dietitianItems) ? opts.dietitianItems : [];
+  const dietItems = Array.isArray(opts.dietItems) ? opts.dietItems : [];
   const items = (ledgers || []).map((ledger: any) => {
-    const dItem = dietitianRowForLedger(dietitianItems, ledger);
+    const dItem = dietRowForLedger(dietItems, ledger);
 
     const food = ledgerToFoodItem(ledger, {
       diningEnvironment: opts.diningEnvironment,

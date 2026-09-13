@@ -34,7 +34,7 @@ import { applyMealEdits } from './server_meal_edit.js';
 import { reconcileMessageWithLedger } from './src/mealBuild/narration.js';
 import { buildEditExpertDispatch } from './server_edit_patch_ledger.js';
 import { toPendingFoodLog } from './src/mealBuild/adapters.js';
-import { sumSalvagedAggregates, salvageLedgerPlausibility } from './src/server/food/server_food_dietitian_dispatch.js';
+import { sumSalvagedAggregates, salvageLedgerPlausibility } from './src/server/food/server_food_diet_dispatch.js';
 import { retrieveFoodImages } from './server.js';
 import { getInMemoryServerJob } from './serverJobs.js';
 import { sanitizeVerdictLabel } from './server_pure_helpers.js';
@@ -95,7 +95,7 @@ export async function executeFinalizePhase(
         portionClarify: degradeClarify,
       });
       ctx.addDebugLog(
-        `[Dietitian Degrade] Emitting salvaged meal (kcal=${payloadData?.nutrients?.calories ?? (payloadData as any)?.calories ?? '?'}) as succeeded.`
+        `[Diet Degrade] Emitting salvaged meal (kcal=${payloadData?.nutrients?.calories ?? (payloadData as any)?.calories ?? '?'}) as succeeded.`
       );
       return ctx.res.json(successPayload);
     }
@@ -244,7 +244,7 @@ export async function executeFinalizePhase(
       const updatedScoutItems = mergeModifyPathScoutItems({
         visionScoutItems: ctx.visionScoutItems,
         activeMealScoutItems: ctx.req.body?.activeMeal?.scoutItems,
-        dietitianScoutItems: rawParsed.scoutItems,
+        dietScoutItems: rawParsed.scoutItems,
         itemsBreakdown: parsedData.itemsBreakdown,
       });
       ctx.addDebugLog('[MealBuild] modify-path');
@@ -278,7 +278,7 @@ export async function executeFinalizePhase(
       );
       return ctx.res.json({
         mode: 'modify',
-        dietitianScratchpad: rawParsed._internalReasoning,
+        dietScratchpad: rawParsed._internalReasoning,
         text: rawParsed.message || `I have updated your meal to reflect the correction.`,
         message: rawParsed.message || `I have updated your meal to reflect the correction.`,
         data: pendingFoodLog || parsedData,
@@ -318,7 +318,7 @@ export async function executeFinalizePhase(
 
     const finalScoutItems = mergeFinalScoutItems({
       visionScoutItems: ctx.visionScoutItems,
-      dietitianScoutItems: rawParsed.scoutItems,
+      dietScoutItems: rawParsed.scoutItems,
       preCalculatedItems: ctx.preCalculatedItems,
       itemsBreakdown: parsedData.itemsBreakdown,
     });

@@ -150,10 +150,10 @@
       "label": "kcal/g > 9.2 is unsavable at any consumed weight",
       "asked": "repeated",
       "files_must_contain": {
-        "src/server/food/server_food_dietitian_dispatch.ts": [
+        "src/server/food/server_food_diet_dispatch.ts": [
           "g > 0 && density > 9.2"
         ],
-        "src/server/food/server_food_dietitian_dispatch.test.ts": [
+        "src/server/food/server_food_diet_dispatch.test.ts": [
           "6300 kcal / 70g"
         ],
         "docs/agent/domains/food-calc.md": [

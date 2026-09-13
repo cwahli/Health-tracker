@@ -1,6 +1,6 @@
 import { AnalyzeRunContext } from './server_food_analyze_run_types.js';
 import {
-  computeDietitianSkipGates,
+  computeDietSkipGates,
   isAcceptDefaultsWithinTolerance,
   composeAcceptDefaultsParsed,
   decideScoutVerdict,
@@ -9,17 +9,17 @@ import {
   sumPrecalcTotals,
   buildCreateSkipResponse,
   resolveCreateMealTitle,
-} from './src/server/food/server_food_dietitian_dispatch.js';
+} from './src/server/food/server_food_diet_dispatch.js';
 import { getCurrentDateInTimezone } from './src/utils/dateUtils.js';
 import { interpolate, t } from './src/utils/i18n.js';
 import { diffScoutToEditCommands } from './server_edit_patch_ledger.js';
-import { normalizeParsedPostDietitian } from './src/server/food/server_food_mode_routing.js';
+import { normalizeParsedPostDiet } from './src/server/food/server_food_mode_routing.js';
 import { applyServerAverageNutrients, enrichBilingualItemName } from './server_pure_helpers.js';
 
 /**
  * Scout compose phase (single diet agent owns response composition).
  *
- * Formerly the projector phase in the deleted dietitian owner file.
+ * Formerly the projector phase in the deleted diet owner file.
  * There is no second agent and no narrator: every branch below is pure TypeScript
  * composing rawParsed from scout outputs + the math engine. No narrator
  * dispatch is emitted anywhere; the scout leg is the only dispatch.
@@ -28,7 +28,7 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
   let textOutput: string = '';
   let rawParsed: any;
 
-  const { canSkipDietitianForPureScale } = computeDietitianSkipGates({
+  const { canSkipDietForPureScale } = computeDietSkipGates({
     isPureWeightModification: ctx.isPureWeightModification,
     activeMeal: ctx.activeMeal,
     userSelectedMode: ctx.userSelectedMode,
@@ -36,7 +36,7 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
     message: ctx.message,
   });
 
-  if (canSkipDietitianForPureScale && ctx.weightRefineIntent.isRefine && ctx.weightRefineIntent.weightGrams) {
+  if (canSkipDietForPureScale && ctx.weightRefineIntent.isRefine && ctx.weightRefineIntent.weightGrams) {
     const targetWeight = ctx.weightRefineIntent.weightGrams;
     ctx.addDebugLog(`[Refine] skip-agent: Scaled label-locked meal directly to ${targetWeight}g without LLM call.`);
     ctx.sendStreamEvent({
@@ -227,7 +227,7 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
   }
   ctx.sendStreamEvent({ type: 'status', stage: 'finalize', status: 'completed', message: 'Meal analysis finalized.' });
 
-  normalizeParsedPostDietitian({
+  normalizeParsedPostDiet({
     rawParsed,
     isExplicitModify: ctx.isExplicitModify,
     userSelectedMode: ctx.userSelectedMode,

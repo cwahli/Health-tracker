@@ -3,11 +3,11 @@ import { NUTRIENT_KEYS } from '../../utils/nutrients.js';
 import { reconcileMessageWithLedger } from '../../mealBuild/narration.js';
 
 /**
- * F-8.10 shard 4 — dietitian dispatch seams, extracted verbatim from
+ * F-8.10 shard 4 — diet dispatch seams, extracted verbatim from
  * runFoodAnalyze. Pure input→output units; streaming/LLM calls stay inline.
  */
 
-export interface DietitianSkipArgs {
+export interface DietSkipArgs {
   isPureWeightModification: boolean;
   activeMeal: any;
   userSelectedMode?: string;
@@ -16,10 +16,10 @@ export interface DietitianSkipArgs {
 }
 
 /** Pure-scale refine gate: label-locked weight refines scale without an LLM call.
- * (The single-agent-create gate is gone with the dietitian call — every create
+ * (The single-agent-create gate is gone with the second-agent call — every create
  * goes through the projector.) */
-export function computeDietitianSkipGates(args: DietitianSkipArgs): {
-  canSkipDietitianForPureScale: boolean;
+export function computeDietSkipGates(args: DietSkipArgs): {
+  canSkipDietForPureScale: boolean;
 } {
   const {
     isPureWeightModification,
@@ -28,7 +28,7 @@ export function computeDietitianSkipGates(args: DietitianSkipArgs): {
     weightRefineIntent,
     message,
   } = args;
-  const canSkipDietitianForPureScale = Boolean(
+  const canSkipDietForPureScale = Boolean(
     isPureWeightModification &&
     activeMeal &&
     userSelectedMode !== 'compare' &&
@@ -40,11 +40,11 @@ export function computeDietitianSkipGates(args: DietitianSkipArgs): {
     (!Array.isArray(activeMeal.itemsBreakdown) || activeMeal.itemsBreakdown.length <= 1) &&
     !/\b(only|remove|delete|without|except|no|instead|replace|add|plus|with|not|didn't|did\s+not)\b/i.test(message || '')
   );
-  return { canSkipDietitianForPureScale };
+  return { canSkipDietForPureScale };
 }
 
-export type PureScaleSkipArgs = DietitianSkipArgs;
-export const computePureScaleSkipGates = computeDietitianSkipGates;
+export type PureScaleSkipArgs = DietSkipArgs;
+export const computePureScaleSkipGates = computeDietSkipGates;
 
 export interface ScoutTotals {
   totalSugar: number;
@@ -186,11 +186,11 @@ export interface DensityCheckArgs {
 }
 
 /**
- * F-8.10 shard 19 — pre-dietitian density check, extracted verbatim from
+ * F-8.10 shard 19 — pre-diet density check, extracted verbatim from
  * runFoodAnalyze. Rescales implausible beverage calories and rolls up
  * aggregated nutrients. Mutates items in place, as inline.
  */
-export function applyPreDietitianDensityCheck(args: DensityCheckArgs): Record<string, number> {
+export function applyPreDietDensityCheck(args: DensityCheckArgs): Record<string, number> {
   const { preCalculatedItems, aggregatedNutrients: incoming, beveragePattern, onLog } = args;
   let aggregatedNutrients = incoming;
   if (Array.isArray(preCalculatedItems)) {
@@ -202,7 +202,7 @@ export function applyPreDietitianDensityCheck(args: DensityCheckArgs): Record<st
       if (isBeverage && it.weightGrams >= 150 && cals > 600) {
         const maxAllowedCals = Math.round((it.weightGrams / 100) * 110);
         const factor = maxAllowedCals / cals;
-        onLog(`[Pre-Dietitian Reality Check] Rescaling beverage item "${it.name}" from ${cals} kcal -> ${maxAllowedCals} kcal prior to Dietitian prompt payload.`);
+        onLog(`[Pre-Diet Reality Check] Rescaling beverage item "${it.name}" from ${cals} kcal -> ${maxAllowedCals} kcal prior to Diet prompt payload.`);
         NUTRIENT_KEYS.forEach(k => {
           if (it.nutrients[k] != null && typeof it.nutrients[k] === 'number') {
             it.nutrients[k] = Math.round(it.nutrients[k] * factor * 10) / 10;
@@ -223,7 +223,7 @@ export function applyPreDietitianDensityCheck(args: DensityCheckArgs): Record<st
   return aggregatedNutrients;
 }
 
-export const applyPreProjectorDensityCheck = applyPreDietitianDensityCheck;
+export const applyPreProjectorDensityCheck = applyPreDietDensityCheck;
 
 export interface CreateSkipSynthesisArgs {
   rawScoutData: any;
@@ -268,7 +268,7 @@ export function resolveCreateMealTitle(rawScoutData: any, visionScoutItems: any[
 /**
  * F-8.10 shard 28 — single-agent-create synthesis, extracted verbatim from
  * runFoodAnalyze. Reconciles the message with the ledger and serializes
- * the dietitian-shaped response (which the caller re-parses, as inline).
+ * the diet-shaped response (which the caller re-parses, as inline).
  */
 export function buildCreateSkipResponse(args: CreateSkipSynthesisArgs): {
   textOutput: string;

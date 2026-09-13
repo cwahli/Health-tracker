@@ -268,7 +268,7 @@ describe('F-8.10 shard 8 — new_log tail seams', () => {
   it('merges final scout items with precalc overlay and ledger renames', () => {
     const out = mergeFinalScoutItems({
       visionScoutItems: [{ scoutIndex: 0, keyword: 'rice', originalName: 'Rice', estimatedWeightGrams: 100 }],
-      dietitianScoutItems: [],
+      dietScoutItems: [],
       preCalculatedItems: [{ scoutIndex: 0, nutrients: { calories: 130 } }],
       itemsBreakdown: [{ scoutIndex: 0, canonicalDbName: 'Steamed Rice', weightGrams: 200 }],
     });
@@ -317,14 +317,14 @@ describe('F-8.10 shard 19 — finalize-to-meal mapping', () => {
 });
 
 describe('F-8.10 shard 20 — modify-path scout merge', () => {
-  it('merges dietitian items, prunes to ledger indices, and renames', () => {
+  it('merges diet items, prunes to ledger indices, and renames', () => {
     const out = mergeModifyPathScoutItems({
       visionScoutItems: [
         { scoutIndex: 0, keyword: 'rice', originalName: 'Rice', estimatedWeightGrams: 100 },
         { scoutIndex: 1, keyword: 'soda', originalName: 'Soda', estimatedWeightGrams: 200 },
       ],
       activeMealScoutItems: [],
-      dietitianScoutItems: [],
+      dietScoutItems: [],
       itemsBreakdown: [{ scoutIndex: 0, canonicalDbName: 'Steamed Rice', weightGrams: 200 }],
     });
     expect(out).toHaveLength(1);
@@ -336,7 +336,7 @@ describe('F-8.10 shard 20 — modify-path scout merge', () => {
     const out = mergeModifyPathScoutItems({
       visionScoutItems: [],
       activeMealScoutItems: [{ scoutIndex: 5, keyword: 'tea' }],
-      dietitianScoutItems: [],
+      dietScoutItems: [],
       itemsBreakdown: [],
     });
     expect(out).toHaveLength(1);
@@ -351,7 +351,7 @@ describe('F-8.10 shard 20 — modify-path scout merge', () => {
       activeMealScoutItems: [
         { scoutIndex: 4, keyword: 'Cereal', originalName: 'Granola / Cereal Packet', estimatedWeightGrams: 35, boundingBox2D: [10, 20, 900, 950], sourceImageIndex: 0 },
       ],
-      dietitianScoutItems: [],
+      dietScoutItems: [],
       itemsBreakdown: [],
     });
     expect(out).toHaveLength(1);
@@ -367,7 +367,7 @@ describe('F-8.10 shard 20 — modify-path scout merge', () => {
       activeMealScoutItems: [
         { scoutIndex: 1, keyword: 'Soup', originalName: 'Sop', estimatedWeightGrams: 400, boundingBox2D: [5, 5, 50, 50], sourceImageIndex: 1 },
       ],
-      dietitianScoutItems: [],
+      dietScoutItems: [],
       itemsBreakdown: [],
     });
     expect(out[0].boundingBox2D).toEqual([100, 50, 920, 960]);

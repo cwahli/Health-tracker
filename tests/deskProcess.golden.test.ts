@@ -170,7 +170,7 @@ describe('Q-8.5 receptionist process board — §1.3.1 desk exits', () => {
       pendingFoodLog: { nutrients: { calories: 420 } },
       dispatches: [
         { id: 't1/scout', agent: 'scout', model: 'gemini-3.5-flash-lite', latency_ms: 1000 },
-        { id: 't1/dietitian', agent: 'dietitian', model: 'gemini-3.5-flash-lite', latency_ms: 2000 },
+        { id: 't1/diet', agent: 'diet', model: 'gemini-3.5-flash-lite', latency_ms: 2000 },
       ],
     };
     expect(determinePack(foodInput)).toBe('food');

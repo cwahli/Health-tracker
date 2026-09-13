@@ -180,7 +180,7 @@ export function assembleParsedMealHeader(args: ParsedMealHeaderArgs): {
   parsedData.cookingMethod = sanitizeString(rawFoodData.cookingMethod, scoutCookingMethod || t(language, 'cookingMethodUnknown'));
   parsedData.scoutConfidenceRating = sanitizeString(rawFoodData.scoutConfidenceRating, scoutConfidenceRating || "High (>90%)");
   parsedData.scoutConfidenceComment = rawFoodData.scoutConfidenceComment !== undefined ? sanitizeString(rawFoodData.scoutConfidenceComment, "") : (scoutConfidenceComment || "");
-  // diningEnvironment is intentionally NOT re-read from the Dietitian's output.
+  // diningEnvironment is intentionally NOT re-read from the diet agent's output.
   // The Vision Scout is the sole source of truth for this classification (server.ts:2528).
   if ((!diningEnvironment || diningEnvironment === 'unknown') && activeMeal?.diningEnvironment) {
     diningEnvironment = activeMeal.diningEnvironment;
@@ -515,15 +515,15 @@ export function resolveMealImageUrls(args: MealImageArgs): void {
 
 export interface FinalScoutMergeArgs {
   visionScoutItems: any;
-  dietitianScoutItems: any;
+  dietScoutItems: any;
   preCalculatedItems: any;
   itemsBreakdown: any;
 }
 
-/** Merges scout items with dietitian output, overlays precalc nutrients, renames to ledger names. */
+/** Merges scout items with diet output, overlays precalc nutrients, renames to ledger names. */
 export function mergeFinalScoutItems(args: FinalScoutMergeArgs): any[] {
-  const { visionScoutItems, dietitianScoutItems, preCalculatedItems, itemsBreakdown } = args;
-  let finalScoutItems = mergeScoutItems(visionScoutItems, dietitianScoutItems);
+  const { visionScoutItems, dietScoutItems, preCalculatedItems, itemsBreakdown } = args;
+  let finalScoutItems = mergeScoutItems(visionScoutItems, dietScoutItems);
   if (preCalculatedItems && Array.isArray(preCalculatedItems)) {
     finalScoutItems = finalScoutItems.map((sItem: any) => {
       const preCalc = preCalculatedItems.find((p: any) => p.scoutIndex === sItem.scoutIndex);
@@ -613,7 +613,7 @@ export function mapFinalizeToMeal(args: FinalizeMapArgs): void {
   if (useFinalizeDirectMap) {
     onLog('[Single-Path] Meal items = finalizeDishLedger.');
     const mapped = buildMealFromFinalizeLedgers(preCalculatedItems, {
-      dietitianItems: rawFoodData.itemsBreakdown,
+      dietItems: rawFoodData.itemsBreakdown,
       diningEnvironment,
       mealName: parsedData.name,
       date: parsedData.date,
@@ -637,21 +637,21 @@ export function mapFinalizeToMeal(args: FinalizeMapArgs): void {
 export interface ModifyScoutMergeArgs {
   visionScoutItems: any;
   activeMealScoutItems: any;
-  dietitianScoutItems: any;
+  dietScoutItems: any;
   itemsBreakdown: any;
 }
 
 /**
  * F-8.10 shard 20 — modify-path scout merge, extracted verbatim from
- * runFoodAnalyze. Merges dietitian items over the base list, prunes to
+ * runFoodAnalyze. Merges diet items over the base list, prunes to
  * ledger indices, and renames to ledger names.
  */
 export function mergeModifyPathScoutItems(args: ModifyScoutMergeArgs): any[] {
-  const { visionScoutItems, activeMealScoutItems, dietitianScoutItems, itemsBreakdown } = args;
+  const { visionScoutItems, activeMealScoutItems, dietScoutItems, itemsBreakdown } = args;
   const baseScoutItems = (visionScoutItems && visionScoutItems.length > 0)
     ? visionScoutItems
     : (activeMealScoutItems || []);
-  let updatedScoutItems = mergeScoutItems(baseScoutItems, dietitianScoutItems);
+  let updatedScoutItems = mergeScoutItems(baseScoutItems, dietScoutItems);
   // Patch precedence: a re-emitted/patch box that is a dummy placeholder must
   // never downgrade locked coordinates. Adopt the prior item's box when the
   // current one is dummy and the prior one is real.

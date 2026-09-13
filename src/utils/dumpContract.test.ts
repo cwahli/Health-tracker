@@ -198,7 +198,7 @@ describe('Canonical JSON Run Tree & Contract Scorer (Q-8 / F-8.13)', () => {
       },
       dispatches: [
         { id: 't1/scout', agent: 'scout', model: 'gemini-3.5-flash-lite', latency_ms: 1200 },
-        { id: 't1/dietitian', agent: 'dietitian', model: 'gemini-3.5-flash-lite', latency_ms: 2100, output: stdEmission() },
+        { id: 't1/diet', agent: 'diet', model: 'gemini-3.5-flash-lite', latency_ms: 2100, output: stdEmission() },
       ],
     });
 
@@ -468,8 +468,8 @@ describe('Canonical JSON Run Tree & Contract Scorer (Q-8 / F-8.13)', () => {
       status: 'succeeded',
       dispatches: [
         { id: 't1/scout', agent: 'scout', model: 'gemini-3.5-flash-lite', latency_ms: 1200 },
-        { id: 't1/dietitian', agent: 'dietitian', model: 'gemini-3.5-flash-lite', latency_ms: 2100 },
-        { id: 't1/dietitian-2', agent: 'dietitian', model: 'gemini-3.5-flash-lite', latency_ms: 900 },
+        { id: 't1/diet', agent: 'diet', model: 'gemini-3.5-flash-lite', latency_ms: 2100 },
+        { id: 't1/diet-2', agent: 'diet', model: 'gemini-3.5-flash-lite', latency_ms: 900 },
       ],
     });
 
@@ -483,7 +483,7 @@ describe('Canonical JSON Run Tree & Contract Scorer (Q-8 / F-8.13)', () => {
       dispatches: [
         { id: 't1/scout', agent: 'scout', model: 'gemini-3.5-flash-lite', latency_ms: 1200 },
         { id: 't1/dietitian', agent: 'dietitian', model: 'gemini-3.5-flash-lite' },
-        { id: 't1/dietitian-2', agent: 'dietitian', model: 'gemini-3.5-flash-lite', latency_ms: 900 },
+        { id: 't1/diet-2', agent: 'diet', model: 'gemini-3.5-flash-lite', latency_ms: 900 },
       ],
     });
 
@@ -549,7 +549,7 @@ describe('Canonical JSON Run Tree & Contract Scorer (Q-8 / F-8.13)', () => {
       pendingFoodLog: { nutrients: fullNuts({ calories: 420, protein: 30 }) },
       dispatches: [
         { id: 't1/scout', agent: 'scout', model: 'gemini-3.5-flash-lite', latency_ms: 1200 },
-        { id: 't1/dietitian', agent: 'dietitian', model: 'gemini-3.5-flash-lite', latency_ms: 2100, output: stdEmission() },
+        { id: 't1/diet', agent: 'diet', model: 'gemini-3.5-flash-lite', latency_ms: 2100, output: stdEmission() },
       ],
     });
 
@@ -700,7 +700,7 @@ describe('Agent-output verification rows (15-19)', () => {
         { id: 't1/scout', turn: 1, agent: 'scout', received: { mode: 'review' }, output: { verdict: { label: 'High Sugar Load', level: 'warning' }, dishes: [stdDish()] } },
         // T2 edit covered by the projector row.
         {
-          id: 't2/dietitian', turn: 2, agent: 'dietitian', received: { mode: 'edit' },
+          id: 't2/diet', turn: 2, agent: 'diet', received: { mode: 'edit' },
           output: { verdict: { label: 'Sugar Over Limit', level: 'alert' }, message: stdAdvice() },
         },
       ],

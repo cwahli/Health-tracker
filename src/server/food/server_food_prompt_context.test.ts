@@ -97,7 +97,7 @@ describe('F-8.10 shard 3 — prompt context builders', () => {
   });
 });
 
-describe('F-8.10 shard 3 — dietitian schema grammar invariants (food-calc §1b)', () => {
+describe('F-8.10 shard 3 — diet schema grammar invariants (food-calc §1b)', () => {
   it('top level requires reasoning, verdict, and message', () => {
     const schema: any = foodAnalyzeSchema;
     expect(schema.required).toEqual(['_internalReasoning', 'verdict', 'message']);
@@ -151,6 +151,6 @@ describe('F-8.10 shard 23 — precalc prompt block', () => {
     expect(out.promptText.startsWith('PROMPT')).toBe(true);
     expect(out.promptText.length).toBeGreaterThan('PROMPT'.length);
     expect(out.fullPromptSent.startsWith('FULL')).toBe(true);
-    expect(logs.some((m) => m.includes('projector dietitian applied'))).toBe(true);
+    expect(logs.some((m) => m.includes('projector diet applied'))).toBe(true);
   });
 });

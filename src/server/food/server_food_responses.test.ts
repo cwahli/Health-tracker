@@ -75,18 +75,18 @@ describe('F-8.10 shard 26 — mode response payloads', () => {
 
 describe('F-8.10 shard 28 — degrade response', () => {
   it('emits the salvaged meal as succeeded without clinical advice', () => {
-    const meal = { name: 'Lunch', degradedStages: ['dietitian'] };
+    const meal = { name: 'Lunch', degradedStages: ['diet'] };
     const d = buildDegradeResponse({
       payloadData: meal, degradedMeal: meal, visionScoutItems: [],
       scoutContentType: 'visual', apiCalls: [],
     });
     expect(d.mode).toBe('new_log');
     expect(d.message).toContain('core databases');
-    expect(d.degradedStages).toEqual(['dietitian']);
+    expect(d.degradedStages).toEqual(['diet']);
   });
 
   it('carries the portion-clarify payload so the card question still renders on degrade', () => {
-    const meal = { name: 'Lunch', degradedStages: ['dietitian'] };
+    const meal = { name: 'Lunch', degradedStages: ['diet'] };
     const clarify = { promptMessage: 'How much?', items: [{ name: 'Cereal Pack' }] };
     const d = buildDegradeResponse({
       payloadData: meal, degradedMeal: meal, visionScoutItems: [],

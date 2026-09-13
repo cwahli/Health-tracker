@@ -26,7 +26,7 @@ vi.mock('idb-keyval', () => {
 export const FOOD_PROCESS_EXITS = [
   { exit: 'Submit JSON is running once worker started', class: 'QUEUE_LIE' },
   { exit: 'Food SSE res.json is {final:true,result}', class: 'DEGRADE_NOT_TERMINAL' },
-  { exit: 'Ledger exists + dietitian/scout dead → job terminal', class: 'DEGRADE_NOT_TERMINAL' },
+  { exit: 'Ledger exists + diet/scout dead → job terminal', class: 'DEGRADE_NOT_TERMINAL' },
   { exit: 'pendingFoodLog → in-memory succeeded before R2', class: 'DISPLAY_LAG' },
   { exit: 'getQueue includes running with no meal', class: 'DISPLAY_LAG' },
   { exit: 'Empty prior meal key is not a stale-edit echo', class: 'STALE_TURN' },
@@ -71,7 +71,7 @@ function dummyHappySotoTree(overrides: Record<string, unknown> = {}) {
     },
     dispatches: [
       { id: 't1/scout', agent: 'scout', model: 'gemini-3.5-flash-lite', latency_ms: 1200 },
-      { id: 't1/dietitian', agent: 'dietitian', model: 'gemini-3.1-flash-lite', latency_ms: 800 },
+      { id: 't1/diet', agent: 'diet', model: 'gemini-3.1-flash-lite', latency_ms: 800 },
     ],
     clientConsoleLogs: ['[job_dummy_soto] AnalyzeFinished succeeded'],
     networkErrors: [],
@@ -126,14 +126,14 @@ describe('Q-8.1 food process audit board', () => {
     const writes: string[] = [];
     const res: any = { headersSent: true, write: (c: string) => writes.push(c), end: () => {} };
     attachSseJsonResponder(res);
-    res.json({ pendingFoodLog: { name: 'Soto', nutrients: { calories: SOTO_KCAL } }, degradedStages: ['dietitian'] });
+    res.json({ pendingFoodLog: { name: 'Soto', nutrients: { calories: SOTO_KCAL } }, degradedStages: ['diet'] });
     expect(writes[0]).toMatch(/"final":true/);
     const result = parseSseFinalResult(writes[0]);
     expect(result.pendingFoodLog.nutrients.calories).toBe(SOTO_KCAL);
-    expect(result.degradedStages).toEqual(['dietitian']);
+    expect(result.degradedStages).toEqual(['diet']);
   });
 
-  it('DEGRADE_NOT_TERMINAL: ledger + dietitian dead still publishes terminal succeeded', () => {
+  it('DEGRADE_NOT_TERMINAL: ledger + diet dead still publishes terminal succeeded', () => {
     inMemoryServerJobs.set('job_degrade', {
       id: 'job_degrade',
       status: 'running',
@@ -143,7 +143,7 @@ describe('Q-8.1 food process audit board', () => {
     expect(
       publishResultReady('job_degrade', {
         pendingFoodLog: { name: 'Soto', nutrients: { calories: SOTO_KCAL } },
-        degradedStages: ['dietitian'],
+        degradedStages: ['diet'],
       })
     ).toBe(true);
     expect(getInMemoryServerJob('job_degrade').status).toBe('succeeded');

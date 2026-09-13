@@ -1,21 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import {
-  computeDietitianSkipGates,
+  computeDietSkipGates,
   decideScoutVerdict,
   decideScoutAdvice,
   buildPureScaleResponse,
   sumPrecalcTotals,
-  applyPreDietitianDensityCheck,
+  applyPreDietDensityCheck,
   buildCreateSkipResponse,
   sumSalvagedAggregates,
   resolveCreateMealTitle,
   salvageLedgerPlausibility,
   isAcceptDefaultsWithinTolerance,
   composeAcceptDefaultsParsed,
-} from './server_food_dietitian_dispatch';
+} from './server_food_diet_dispatch';
 import { NUTRIENT_KEYS } from '../../utils/nutrients';
 
-describe('F-8.10 shard 4 — dietitian skip gates (pure-scale refine)', () => {
+describe('F-8.10 shard 4 — diet skip gates (pure-scale refine)', () => {
   const baseArgs = {
     isPureWeightModification: false,
     activeMeal: null,
@@ -25,32 +25,32 @@ describe('F-8.10 shard 4 — dietitian skip gates (pure-scale refine)', () => {
   };
 
   it('allows pure-scale refine skip only for clean single-item absolute grams', () => {
-    const ok = computeDietitianSkipGates({
+    const ok = computeDietSkipGates({
       ...baseArgs,
       isPureWeightModification: true,
       activeMeal: { itemsBreakdown: [{ name: 'oats' }] },
       weightRefineIntent: { isRefine: true, weightGrams: 150, kind: 'absolute_grams' },
       message: 'make it 150g',
     });
-    expect(ok.canSkipDietitianForPureScale).toBe(true);
+    expect(ok.canSkipDietForPureScale).toBe(true);
 
-    const withVerb = computeDietitianSkipGates({
+    const withVerb = computeDietSkipGates({
       ...baseArgs,
       isPureWeightModification: true,
       activeMeal: { itemsBreakdown: [{ name: 'oats' }] },
       weightRefineIntent: { isRefine: true, weightGrams: 150, kind: 'absolute_grams' },
       message: 'remove the oats',
     });
-    expect(withVerb.canSkipDietitianForPureScale).toBe(false);
+    expect(withVerb.canSkipDietForPureScale).toBe(false);
 
-    const multiItem = computeDietitianSkipGates({
+    const multiItem = computeDietSkipGates({
       ...baseArgs,
       isPureWeightModification: true,
       activeMeal: { itemsBreakdown: [{ name: 'oats' }, { name: 'milk' }] },
       weightRefineIntent: { isRefine: true, weightGrams: 150, kind: 'absolute_grams' },
       message: 'make it 150g',
     });
-    expect(multiItem.canSkipDietitianForPureScale).toBe(false);
+    expect(multiItem.canSkipDietForPureScale).toBe(false);
   });
 });
 
@@ -107,14 +107,14 @@ describe('F-8.10 shard 18 — skip-path builders', () => {
   });
 });
 
-describe('F-8.10 shard 19 — pre-dietitian density check', () => {
+describe('F-8.10 shard 19 — pre-diet density check', () => {
   it('rescales implausible beverage calories and rolls up aggregates', () => {
     const logs: string[] = [];
     const items: any[] = [{
       name: 'Cola Drink', weightGrams: 500,
       nutrients: { calories: 2000, protein: 0, carbohydrates: 130, totalFat: 0, sodium: 10 },
     }];
-    const agg = applyPreDietitianDensityCheck({
+    const agg = applyPreDietDensityCheck({
       preCalculatedItems: items, aggregatedNutrients: null,
       beveragePattern: /cola|drink/i, onLog: (m) => logs.push(m),
     });
@@ -269,7 +269,7 @@ describe('accept-defaults gate (portion choices within 30%, no agent)', () => {
     expect(out.clinicalAdvice).toContain('72g protein');
     expect(out.clinicalAdvice).toContain('0.1g trans fat');
     expect(out.clinicalAdvice).toContain('\n\n');
-    expect(out.verdict.label).toBe('High Glycemic Impact (Elevated Sugar)');
+    expect(out.verdict.label).toBe('High Glycemic Load');
     expect(out.verdict.level).toBe('warning');
     expect(out.message).toBe(out.clinicalAdvice);
   });
