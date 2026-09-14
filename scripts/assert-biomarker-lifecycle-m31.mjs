@@ -82,6 +82,13 @@ ok(lifeTest.includes('routes name_consolidation to remap proposal'), 'P3', 'miss
 ok(life.includes('export function overlayFingerprint'), 'P4', 'missing overlayFingerprint');
 ok(life.includes('export function shouldRunCalibrator'), 'P4', 'missing shouldRunCalibrator');
 ok(lifeTest.includes('runs calibrator for 25-yo female'), 'P4', 'missing calibrator rerun lifecycle test');
+// P4b — B7.5 Silent Calibrator product path: every full-profile write routes
+// through the fingerprint-guarded helper (Header, Dictionary updates,
+// front-desk ×3, sync merge, conflict resolve, sanitize apply).
+ok(app.includes('maybeRecalibrateDemographicOverlays'), 'P4', 'App does not route profile writes through the silent calibrator');
+const recalSites = (app.match(/maybeRecalibrateDemographicOverlays\(profile, /g) || []).length;
+ok(recalSites >= 6, 'P4', `silent calibrator covers ${recalSites} product paths, want >= 6`);
+ok(!app.includes('profile?.age !== updatedProfile.age'), 'P4', 'raw demographic diff still present (must be fingerprint diff)');
 
 // P5 — Flagged isolation
 ok(life.includes('export function filterHistoryForUse'), 'P5', 'missing filterHistoryForUse');

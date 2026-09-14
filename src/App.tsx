@@ -127,6 +127,18 @@ import { formatOptimalTargetValue } from './utils/agentCalibration';
 import { standardizeUnit, CONVERSION_FACTORS } from './utils/unitConversion';
 import { get, set, pruneLocalStorageToFreeSpace, getStorageKey, getSnapshotKey, saveLocalSnapshot, loadLocalSnapshots, deleteLocalSnapshot, safeSaveToLocalStorage, getAggregatedAppData, clearCachedAppData, clearChatMemoryKeys } from './utils/storageUtils';
 const FIRESTORE_READ_BUDGET = 3000; // generous for one real session; a runaway loop hits this fast
+// B7.5 Silent Calibrator: re-run the demographic overlay whenever the
+// fingerprint (ageBand|gender|ethnicity) changes — on every product path that
+// writes a full profile, not just the Header edit form. Stamp-only (range
+// recompute stays agent-side); no-op unless demographics are present + moved.
+function maybeRecalibrateDemographicOverlays(prevProfile: any, nextProfile: any): any {
+  if (!prevProfile || !nextProfile) return nextProfile;
+  if (nextProfile.age === undefined || nextProfile.gender === undefined || nextProfile.ethnicity === undefined) return nextProfile;
+  if (overlayFingerprint(prevProfile) === overlayFingerprint(nextProfile)) return nextProfile;
+  const { updatedCustomBiomarkers, recalibratedCount } = recalibrateProfileOverlays(nextProfile);
+  if (recalibratedCount === 0) return nextProfile;
+  return { ...nextProfile, customBiomarkers: updatedCustomBiomarkers };
+}
 // B7.4 Real Pending store: unknown printed names route here with dedup
 // (printedName + date + rawValue). Never become catalog keys.
 function pushPendingObservation(existing: any[] | undefined, item: any): any[] {
@@ -3159,6 +3171,8 @@ export default function App() {
           });
         }
 
+        // B7.5: merged or authority-swapped profiles can carry new demographics.
+        mergedProfile = maybeRecalibrateDemographicOverlays(profile, mergedProfile);
         const cleanedMerged = cleanupInventedBiomarkerCatalog(mergedProfile, mergedBioHistory);
         mergedProfile = cleanedMerged.profile as UserProfile;
         setProfile(sanitizeProfile(mergedProfile, activeEmail));
@@ -4267,6 +4281,8 @@ export default function App() {
       resolvedBenefits = [...conflictData.cloudBenefits];
       resolvedReport = conflictData.cloudReport;
     }
+    // B7.5: the winning side can carry new demographics.
+    resolvedProfile = maybeRecalibrateDemographicOverlays(profile, resolvedProfile);
 
     // 2. Resolve Food Log
     let resolvedFoods: FoodLog[];
@@ -6467,13 +6483,8 @@ export default function App() {
           });
         }}
         onSaveProfile={async (p) => {
-          let updatedProfile = { ...p };
-          if (profile?.age !== updatedProfile.age || profile?.gender !== updatedProfile.gender || profile?.ethnicity !== updatedProfile.ethnicity) {
-            const { updatedCustomBiomarkers, recalibratedCount } = recalibrateProfileOverlays(updatedProfile);
-            if (recalibratedCount > 0) {
-              updatedProfile.customBiomarkers = updatedCustomBiomarkers;
-            }
-          }
+          // B7.5: fingerprint diff (ageBand|gender|ethnicity), not raw fields.
+          let updatedProfile = maybeRecalibrateDemographicOverlays(profile, { ...p });
           const { updatedHistory, updatedBiomarkers, changed } = logBmiIfProfileWeightHeightChanged(profile, updatedProfile, biomarkerHistory, biomarkers);
           setProfile(updatedProfile);
           if (changed) {
@@ -6692,7 +6703,8 @@ export default function App() {
                     biomarkerHistory,
                     foodLogs,
                   });
-                  const nextProfile = { ...profile, ...result.profileUpdates };
+                  // B7.5: no-op unless sanitize shifted demographics (guarded).
+                  const nextProfile = maybeRecalibrateDemographicOverlays(profile, { ...profile, ...result.profileUpdates });
                   setProfile(nextProfile);
                   setFoodLogs(result.foodLogs);
                   setBiomarkerHistory(result.biomarkerHistory);
@@ -6710,14 +6722,8 @@ export default function App() {
                 }}
                 onDeleteEmptyBiomarkers={handleDeleteEmptyBiomarkers}
                 onUpdateProfile={async (updates) => {
-                  let updatedProfile = { ...profile, ...updates };
+                  let updatedProfile = maybeRecalibrateDemographicOverlays(profile, { ...profile, ...updates });
                   // B7.5: Demographic Overlay Auto-Calibrator
-                  if (updates.age !== undefined || updates.gender !== undefined || updates.ethnicity !== undefined) {
-                    const { updatedCustomBiomarkers, recalibratedCount } = recalibrateProfileOverlays(updatedProfile);
-                    if (recalibratedCount > 0) {
-                      updatedProfile.customBiomarkers = updatedCustomBiomarkers;
-                    }
-                  }
                   setProfile(updatedProfile);
                   await saveAndSync(updatedProfile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
                 }}
@@ -7973,8 +7979,10 @@ export default function App() {
             onAgentAnalysisSaved={handleAgentAnalysisSaved}
             onAgentFinish={handleAgentFinish}
             onSaveProfile={async (updatedP) => {
-              setProfile(updatedP);
-              await saveAndSync(updatedP, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
+              // B7.5: agent-returned profiles can carry new demographics.
+              const recalibratedP = maybeRecalibrateDemographicOverlays(profile, updatedP);
+              setProfile(recalibratedP);
+              await saveAndSync(recalibratedP, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
             }}
             onAddBiomarkerLogs={async (logs) => {
               let updatedBiomarkers = { ...biomarkers };
@@ -8068,8 +8076,10 @@ export default function App() {
         report={report}
         isFirestoreQuotaExceeded={isFirestoreQuotaExceeded}
         onSaveProfile={async (updatedP) => {
-          setProfile(updatedP);
-          await saveAndSync(updatedP, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
+          // B7.5: agent-returned profiles can carry new demographics.
+          const recalibratedP = maybeRecalibrateDemographicOverlays(profile, updatedP);
+          setProfile(recalibratedP);
+          await saveAndSync(recalibratedP, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
         }}
         onGoToManualEdit={(errorMsg) => {
           setActiveJobId(null);
@@ -8128,8 +8138,10 @@ export default function App() {
         actions={actions}
         isFirestoreQuotaExceeded={isFirestoreQuotaExceeded}
         onSaveProfile={async (updatedP) => {
-          setProfile(updatedP);
-          await saveAndSync(updatedP, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
+          // B7.5: agent-returned profiles can carry new demographics.
+          const recalibratedP = maybeRecalibrateDemographicOverlays(profile, updatedP);
+          setProfile(recalibratedP);
+          await saveAndSync(recalibratedP, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'profile' });
         }}
         agentType={activeAgentType}
         reviewBiomarkerKey={activeReviewBiomarkerKey}
