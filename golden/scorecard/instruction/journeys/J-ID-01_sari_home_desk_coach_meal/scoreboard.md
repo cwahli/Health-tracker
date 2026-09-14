@@ -12,6 +12,12 @@
 
 ## Gate Evaluation Matrix
 
+### Gate SINGLE_DISH_FLATTEN (Meal Log — same journey, not a new pack)
+- **Condition**: If scout returns **one** dish with multiple `foods[]` (e.g. Mie Ayam → Mie Kuning, Ayam Kecap, Sawi Hijau, broth), heal must unroll them to **top-level** log items with `hasComponents=false`. Each item keeps `boundingBox2D` so FoodCard `ZoomableImage` can crop/zoom. Do not leave ingredients nested inside the bowl name.
+- **PASS Criteria**: `parseAndHealVisionScout` on `job_1789414917685` shape yields 4 items named Mie Kuning / Ayam Kecap / Sawi Hijau / Minyak Ayam dan Kaldu. Named gate: `server_vision_scout.test.ts` (already on the Meal Log scorecard).
+- **FAIL Criteria**: Ledger shows `1 dishes` titled Mie Ayam with nested foods; no per-item image preview.
+- **Status**: **INNER GATE** (named vitest). Live soak of this photo is NOT COVERED until re-run.
+
 ### Gate 1: Anthropometry & Persona Profile Gate
 - **Condition**: Persona profile height must evaluate strictly to `140 cm`. No rounding or default fallbacks to 160/170 cm allowed.
 - **PASS Criteria**: Height field renders `140 cm`, Mifflin-St Jeor formula calculates basal rate of 1145 kcal/day based on 140 cm / 40 kg / 42y female.

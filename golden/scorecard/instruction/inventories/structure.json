@@ -73,6 +73,9 @@
     ],
     "finalizeDishLedger": [
       "server_dish_finalize.ts"
+    ],
+    "isSoleEligibleDish": [
+      "server_vision_scout.ts"
     ]
   },
   "forbidden": [

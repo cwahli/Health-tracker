@@ -22,6 +22,7 @@
   "catalogGaps": [],
   "neverMatch": [],
   "invariants": [
+    "SINGLE_DISH_FLATTEN: a sole bowl (Mie Ayam) with nested foods must unroll to top-level items (Mie Kuning, Ayam Kecap, …) with boundingBox2D for ZoomableImage — gated on server_vision_scout.test.ts job_1789414917685, not a new journey",
     "Meal-06 numbers vs GT: Scout kcal 587 vs Truth 780 (-25% undercount)",
     "Scout P 20.5g vs Truth 27g (-24%)",
     "Scout C 83g vs Truth 111g (-25%)",

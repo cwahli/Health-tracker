@@ -24,14 +24,16 @@ Until `6c25141`, `npm test` also executed Playwright specs and printed **18 fake
 
 ## OVERALL VERDICT: **NOT ALL GREEN**
 
+Dump (`current/MASTER_SCORECARD_DEBUG.md`, as of `d105b0c` work): **666 pass / 1 fail**. Trust that dump over this table if they diverge. `result_summary/` empty until exit 0.
+
 | Area | Inner | Live / E2E | Verdict |
 |---|---|---|---|
-| Localization | i18n packs PASS; `AppModal` `closeDialog` **FAIL**; keys have been wiped **≥5 times** | J-ID-01/02/03 debug-contract LIVE PASS; Gate I18N-A11Y **never run** | ⚠️ INCOMPLETE + ratchet |
-| Meal Log | `PORTION_FUNNEL` invert; golden fixture crash; polarity + same-meal **PASS + standing** | 3 Indo journeys happy-path; Meal_04 cases 10/11 under-extract | 🔴 FAIL + ratchet |
-| Compare | thin unit PASS; Mode D took a **6-commit** repair series | J-ID-02 LIVE PASS (wrong fixtures); 6-case spec untracked | ⚠️ PARTIAL + ratchet |
-| Biomarkers | helper units PASS; **G-B1–G-B9 fixtures deleted** so `golden_biomarker.test.ts` **skips 9 tests and still reports PASS** | zero Playwright; B0 Apply is Current work | 🔴 FALSE-GREEN on goldens |
+| Localization | `closeDialog`/`modalDialog`/`analyzingMeal` in packs; **242 `t()` callsite keys** still missing | J-ID debug-contract LIVE PASS; Gate I18N-A11Y **never run** | ⚠️ INCOMPLETE + ratchet |
+| Meal Log | portion, polarity, goldens, same-meal **PASS**; **`SINGLE_DISH_FLATTEN`** now gated (Mie Ayam unroll) | 3 Indo journeys happy-path; live `job_1789414917685` was 1 nested dish | ⚠️ inner green after unroll fix; live re-soak not done |
+| Compare | named units PASS | J-ID-02 LIVE PASS (wrong fixtures); 6-case spec untracked | ⚠️ PARTIAL + ratchet |
+| Biomarkers | G-B1–G-B9 fixtures restored; **0 skip** | zero Playwright; B0 Apply is Current work | ⚠️ units green; live Apply not done |
 | Receptionist | 5 named files PASS | stub specs only | ⚠️ PARTIAL |
-| Reliability | vitest/Playwright exclude fixed; golden scorer **FAIL**; no second-device test; **live contract required** | photo-sync class still untested; Render must serve `/api/scorecard/contract` | 🔴 FAIL + ratchet |
+| Reliability | scorer + tsc + Guard + live contract **PASS**; `LOAD_HACK` ratchet | photo-sync untested; Render commit may lag HEAD | ⚠️ structural green; second-device untested |
 
 ---
 
@@ -67,13 +69,10 @@ GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1**
 
 | Class | Area | Kind | Named gate |
 |---|---|---|---|
-| `LEAK_KEY` | Localization | missing `closeDialog` / `modalDialog` in `localePacks` | `npx vitest run src/components/ui/AppModal.test.tsx src/utils/i18n.test.ts` |
-| `PORTION_FUNNEL` | Meal Log | ask/adopt inverted after S-10 COMPLETE | `npx vitest run server_portion_clarify.test.ts` |
-| `GOLDEN_SCORER_DRIFT` | Reliability | `failCount` 1≠0; title keeps `50% Duroc Breed`; blob split 13≠3 | `npx vitest run src/utils/goldenScoreboard.test.ts` |
-| `GOLDEN_FIXTURE_ROT` | Meal Log | `tests/Golden_meal/1. Multi-food log/expected.json` ENOENT | `npx vitest run tests/golden_meals.test.ts` |
-| `GOLDEN_FIXTURE_ROT` | Biomarkers | `tests/Golden_biomarker` **missing**; 9 G-B* tests **skipped**, file still PASS | `npx vitest run tests/golden_biomarker.test.ts` (must not treat skip as green) |
-| `I18N_A11Y_UNRUN` | Localization | `_live_a11y/` does not exist | live Playwright, quota |
+| `LEAK_KEY` | Localization | 242 `t()` callsites missing from packs (chrome keys `closeDialog`/`modalDialog` restored) | `npm run scorecard:debug` law `i18n_required_chrome` |
+| `I18N_A11Y_UNRUN` | Localization | `current/a11y/` empty | live Playwright, quota |
 | `CROSS_DEVICE_SYNC` | Reliability | no second-device test | none yet |
+| `SINGLE_DISH_FLATTEN` | Meal Log | live Mie Ayam stayed 1 nested dish; inner unroll now gated | `npx vitest run server_vision_scout.test.ts` (J-ID-01 / G8 journey, not a new pack) |
 
 ---
 
@@ -83,11 +82,10 @@ Gemini Current work remains **B0**. Do **not** start F-11.2, Q-9, Track L-2–L-
 
 | # | Do | Why it is next | Done when |
 |---|---|---|---|
-| **1** | Add `closeDialog` + `modalDialog` en+id | Smallest `LEAK_KEY`; 8th restore in the translation-wipe class | AppModal + i18n parity green |
-| **2** | Root-cause `PORTION_FUNNEL` invert vs `158dc14` bulk-pack | Reappeared after COMPLETE | lines 422/466/472/479 green; law user>label>visual; no silent clamp |
-| **3** | Stop biomarker **false green**: restore `tests/Golden_biomarker/examples/G-B*` **or** fail the suite when the dir is missing (no `it.skip` of the whole describe) | Claude’s “8/8 pass” hid deleted G-B1–G-B9 | either fixtures back or collection **fails** |
-| **4** | Quarantine or restore `tests/Golden_meal/**/expected.json`; retarget `expectFdcId` → local `id` | Same wipe as #3 (`bca0f80`) | `golden_meals.test.ts` collects |
-| **5** | Repair `goldenScoreboard` (`d5a600e` drift) | QA scorer lies | `goldenScoreboard.test.ts` green |
+| **1–5** | i18n chrome keys, portion restore, G-B fixtures, meal goldens, scorer | `d105b0c` | inner gates green in dump |
+| **6** | `SINGLE_DISH_FLATTEN` (this change) | live Mie Ayam nested 4 foods in 1 dish | `server_vision_scout.test.ts` Mie Ayam case green; standing `single_dish_flatten` |
+| **7** | Remaining 242 `t()` callsite keys | last Localization inner fail | `i18n_required_chrome` PASS |
+| **8** | Run Gate I18N-A11Y live | 3 helper commits, still unsoaked | `current/a11y/` + checklist all PASS |
 | **6** | Run Gate I18N-A11Y live; fill `_live_a11y/` | 3 helper commits, still unsoaked | SCOREBOARD_LIVE_RESULTS checklist all PASS |
 | **7** | Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL |
 | **8** | Record Meal_03 6-case + Meal_04 live specs | Compare/log benches exist and are untracked | PASS/FAIL + date in §E2E |
@@ -171,17 +169,18 @@ npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server
 
 | Check | Status | Evidence |
 |---|---|---|
-| S-10 portion funnel | 🔴 invert | re-run 2026-09-14; likely `158dc14` after COMPLETE |
+| S-10 portion funnel | PASS after `d105b0c` restore | `quantityText.ts` + `server_portion_clarify.test.ts` |
 | Home polarity | PASS + ratchet | `isLimitNutrient`; `nutrients.test.ts` |
 | Same-meal package+prepared | PASS + standing | `588154c` |
+| **Single-dish flatten** | INNER GATE (was live FAIL `job_1789414917685`) | `server_vision_scout.test.ts` Mie Ayam unroll; J-ID-01 + G8. Sole dish with `foods[]` must become top-level items + `boundingBox2D` for zoom |
 | F-12 USDA | shipped / do-not-reopen | F-12.1–12.4 |
 | F-10.7 expand | ⚠️ helper exists, **not on analyze hot path** | `shouldExpandMealAgent` is unit-tested and exported from `src/mealBuild/`; no import from `server_food_analyze_run*.ts`. Complex meals do not spawn workers yet. Do not copy prototype DELEGATE. |
-| Layer B goldens | 🔴 crash | ENOENT expected.json |
+| Layer B goldens | PASS collect | restored G1–G9; identity/lock fixtures, not 32-key ledgers |
 | Meal_04 live 10/11 | under-extract / continuity fail | `golden/meal/Meal_04_log/benchmark_result.md` |
 | Verdict serialize | claimed fixed | `9ff1da2` |
 | kcal one writer | standing | `finalizeDishLedger` |
 
-Ratchets: `PORTION_FUNNEL`, `SAME_MEAL_PACKAGE_PREPARED`, `NUTRIENT_POLARITY`, `KCAL_ONE_WRITER`, `VERDICT_CORRUPT`, `GOLDEN_FIXTURE_ROT`.
+Ratchets: `PORTION_FUNNEL`, `SAME_MEAL_PACKAGE_PREPARED`, `SINGLE_DISH_FLATTEN`, `NUTRIENT_POLARITY`, `KCAL_ONE_WRITER`, `VERDICT_CORRUPT`, `GOLDEN_FIXTURE_ROT`.
 
 ---
 

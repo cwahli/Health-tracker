@@ -238,14 +238,10 @@ describe("server_vision_scout", () => {
         ],
       };
       const result = parseAndHealVisionScout(mockOutput, () => {});
-      expect(result.items).toHaveLength(1);
-      const dish = result.items[0];
-      const comps = dish.components || dish.componentsDetailList || [];
-      expect(comps.length).toBe(2);
-      const sumFat = comps.reduce((acc: number, c: any) => acc + Number(c.totalFat || 0), 0);
+      expect(result.items.length).toBeGreaterThanOrEqual(2);
+      const sumFat = result.items.reduce((acc: number, it: any) => acc + Number(it.nutrients?.totalFat || 0), 0);
       expect(sumFat).toBeCloseTo(28, 0);
-      expect(dish.nutrients.calories == null || dish.nutrients.calories === undefined).toBe(true);
-      expect(comps.every((c: any) => c.calories == null)).toBe(true);
+      expect(result.items.every((it: any) => it.nutrients.calories == null || it.nutrients.calories === undefined)).toBe(true);
     });
 
     it("applies the fat overflow correction to raw nutrition label", () => {
@@ -959,6 +955,74 @@ describe("server_vision_scout", () => {
       expect(result.items[1].hasComponents).toBe(false);
       expect(result.items[1].components).toBeUndefined();
       expect(result.items[1].nutrients.protein).toBe(26);
+    });
+
+    it("unrolls a sole Mie Ayam bowl (job_1789414917685) even when the dish name does not contain the food names", () => {
+      const mockScout = {
+        dishes: [
+          {
+            dishName: "Mie Ayam",
+            genericEnglishName: "chicken noodles",
+            estimatedWeightGrams: 350,
+            cookingMethod: "boiled",
+            sourceImageIndex: 0,
+            boundingBox2D: [190, 0, 960, 1000],
+            foods: [
+              {
+                foodName: "Mie Kuning",
+                genericEnglishName: "yellow wheat noodles",
+                weightGrams: 150,
+                sourceImageIndex: 0,
+                nutrients: { protein: 6, saturatedFat: 0.5, addedSugar: 0, totalFibre: 2, sodium: 300, carbohydrates: 45 },
+              },
+              {
+                foodName: "Ayam Kecap",
+                genericEnglishName: "sweet soy chicken",
+                weightGrams: 100,
+                sourceImageIndex: 0,
+                nutrients: { protein: 18, saturatedFat: 2.5, addedSugar: 4, totalFibre: 0.5, sodium: 450, carbohydrates: 5 },
+              },
+              {
+                foodName: "Sawi Hijau",
+                genericEnglishName: "choy sum",
+                weightGrams: 50,
+                sourceImageIndex: 0,
+                nutrients: { protein: 1, saturatedFat: 0, addedSugar: 0, totalFibre: 1.5, sodium: 20, carbohydrates: 2 },
+              },
+              {
+                foodName: "Minyak Ayam dan Kaldu",
+                genericEnglishName: "chicken oil and broth",
+                weightGrams: 50,
+                sourceImageIndex: 0,
+                nutrients: { protein: 1, saturatedFat: 3.5, addedSugar: 0, totalFibre: 0, sodium: 250, carbohydrates: 0.5 },
+              },
+            ],
+            dishNutrients: {
+              saturatedFat: 6.5,
+              totalFat: 14,
+              protein: 26,
+              sodium: 1020,
+              carbohydrates: 52.5,
+              totalFibre: 4,
+            },
+          },
+        ],
+      };
+
+      const result = parseAndHealVisionScout(mockScout, () => {});
+      expect(result.items.map((it: any) => it.originalName)).toEqual([
+        "Mie Kuning",
+        "Ayam Kecap",
+        "Sawi Hijau",
+        "Minyak Ayam dan Kaldu",
+      ]);
+      for (const it of result.items) {
+        expect(it.hasComponents).toBe(false);
+        expect(it.components).toBeUndefined();
+        expect(it.boundingBox2D).toEqual([190, 0, 960, 1000]);
+      }
+      expect(result.items[0].estimatedWeightGrams).toBe(150);
+      expect(result.items[1].estimatedWeightGrams).toBe(100);
     });
   });
 });

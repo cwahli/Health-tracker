@@ -243,6 +243,23 @@
       }
     },
     {
+      "id": "single_dish_flatten",
+      "label": "A sole scout dish with multiple foods unrolls to top-level items (no nested Mie Ayam components); each item keeps boundingBox2D for ZoomableImage",
+      "asked": "repeated",
+      "files_must_contain": {
+        "server_vision_scout.ts": [
+          "isSoleEligibleDish",
+          "unrolledFromSoleDish",
+          "unrolledItem"
+        ],
+        "server_vision_scout.test.ts": [
+          "Mie Kuning",
+          "Ayam Kecap",
+          "job_1789414917685"
+        ]
+      }
+    },
+    {
       "id": "same_meal_package_prepared",
       "label": "Package + prepared views of the same food collapse to one dish; combine-language edits emit merge_dishes",
       "asked": "repeated",

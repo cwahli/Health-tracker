@@ -656,6 +656,9 @@ export function clusterSpatialCompositeDishes(
       if (primary.source === 'spreadsheet' || other.source === 'spreadsheet' || primary.isSpreadsheet || other.isSpreadsheet) {
         continue;
       }
+      if (primary.unrolledFromSoleDish || other.unrolledFromSoleDish) {
+        continue;
+      }
       // Same source image check
       const sameImg = (primary.sourceImageIndex ?? 0) === (other.sourceImageIndex ?? 0);
       if (!sameImg) continue;
@@ -1016,6 +1019,19 @@ export function parseAndHealVisionScout(
     // Ingest hierarchical dishes if returned by Scout
     if (Array.isArray(parsedScout.dishes) && parsedScout.dishes.length > 0) {
       if (!parsedScout.items) parsedScout.items = [];
+      const eligibleDishes = parsedScout.dishes.filter((d: any) => {
+        const dName = String(d.dishName || '').toLowerCase().trim();
+        const isBracketRefDish = bracketNames.some((b) => b && (dName === b || dName.includes(b) || b.includes(dName)));
+        if (isBracketRefDish) return false;
+        if (/^(empty(\s+context)?|none|no\s*food(\s*detected)?|empty\s*plate)$/i.test(dName)) return false;
+        const dishFoods = Array.isArray(d.foods) ? d.foods : [];
+        const hasOnlyPlaceholderFoods = dishFoods.length > 0 && dishFoods.every((f: any) => {
+          const fn = String(f?.foodName || '').toLowerCase().trim();
+          return /^(none|empty(\s+context)?|no\s*food(\s*detected)?)$/i.test(fn);
+        });
+        return !hasOnlyPlaceholderFoods;
+      });
+      const isSoleEligibleDish = eligibleDishes.length === 1;
       parsedScout.dishes.forEach((d: any) => {
         const dName = String(d.dishName || '').toLowerCase().trim();
         const isBracketRefDish = bracketNames.some(b => b && (dName === b || dName.includes(b) || b.includes(dName)));
@@ -1219,9 +1235,10 @@ export function parseAndHealVisionScout(
         const isCompoundDishName = /\b(dan|and|\&|\+|\/)\b/i.test(d.dishName || '') ||
           (components.length > 1 && compNames.length > 1 && compNames.every(cn => cn.length > 2 && (d.dishName || '').toLowerCase().includes(cn.toLowerCase())));
 
-        if (components.length > 1 && isCompoundDishName) {
-          // Unroll each distinct food component directly into a standalone scout item
-          // so there are no sub-items under a synthetic compound dish name.
+        if (components.length > 1 && (isCompoundDishName || isSoleEligibleDish)) {
+          // Unroll each distinct food component into a standalone scout item
+          // (compound name OR the scout returned only one dish — Mie Ayam bowl).
+          // Top-level items each get boundingBox2D so FoodCard ZoomableImage can crop/zoom.
           components.forEach((c: any) => {
             const compSugarResult = deduceSugarBreakdown({
               totalSugar: c.nutrients?.totalSugar != null ? Number(c.nutrients.totalSugar) : null,
@@ -1281,6 +1298,7 @@ export function parseAndHealVisionScout(
               keyword: c.name,
               originalName: c.name,
               name: c.name,
+              unrolledFromSoleDish: !!isSoleEligibleDish,
               genericEnglishName: c.searchQuery && c.searchQuery !== c.name.toLowerCase() ? c.searchQuery : null,
               chainName: d.chainName || null,
               packageLabelText: c.packageLabelText || null,
