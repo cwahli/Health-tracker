@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseAndHealVisionScout, checkScoutSanity, userSafeScoutFailureMessage, mergeScoutItems, canMergeScoutLabelIntoFood, resolvePackageAndContextItems, reconcileIngredientsToComponents, clusterSpatialCompositeDishes } from "./server_vision_scout";
+import { parseAndHealVisionScout, checkScoutSanity, userSafeScoutFailureMessage, mergeScoutItems, canMergeScoutLabelIntoFood, resolvePackageAndContextItems, reconcileIngredientsToComponents, clusterSpatialCompositeDishes, boxForUnrolledFood, sliceParentBoxByWeights } from "./server_vision_scout";
 
 describe("server_vision_scout", () => {
   it("heals unterminated string JSON from a truncated scout reply", () => {
@@ -1019,10 +1019,44 @@ describe("server_vision_scout", () => {
       for (const it of result.items) {
         expect(it.hasComponents).toBe(false);
         expect(it.components).toBeUndefined();
-        expect(it.boundingBox2D).toEqual([190, 0, 960, 1000]);
       }
       expect(result.items[0].estimatedWeightGrams).toBe(150);
       expect(result.items[1].estimatedWeightGrams).toBe(100);
+      const boxes = result.items.map((it: any) => it.boundingBox2D.join(','));
+      expect(new Set(boxes).size).toBe(4);
+      expect(result.items[0].boundingBox2D[0]).toBe(190);
+      expect(result.items[3].boundingBox2D[2]).toBe(960);
+      expect(result.items[0].boundingBox2D).not.toEqual([190, 0, 960, 1000]);
+    });
+
+    it("keeps diet-agent per-food boundingBox2D on unrolled top-level previews", () => {
+      const mockScout = {
+        dishes: [
+          {
+            dishName: "Mie Ayam",
+            estimatedWeightGrams: 350,
+            cookingMethod: "boiled",
+            sourceImageIndex: 0,
+            boundingBox2D: [190, 0, 960, 1000],
+            foods: [
+              { foodName: "Mie Kuning", weightGrams: 150, boundingBox2D: [200, 50, 500, 950], nutrients: { protein: 6, saturatedFat: 0.5, addedSugar: 0, totalFibre: 2, sodium: 300, carbohydrates: 45 } },
+              { foodName: "Ayam Kecap", weightGrams: 100, boundingBox2D: [480, 80, 720, 900], nutrients: { protein: 18, saturatedFat: 2.5, addedSugar: 4, totalFibre: 0.5, sodium: 450, carbohydrates: 5 } },
+              { foodName: "Sawi Hijau", weightGrams: 50, boundingBox2D: [700, 100, 900, 850], nutrients: { protein: 1, saturatedFat: 0, addedSugar: 0, totalFibre: 1.5, sodium: 20, carbohydrates: 2 } },
+            ],
+          },
+        ],
+      };
+      const result = parseAndHealVisionScout(mockScout, () => {});
+      expect(result.items.map((it: any) => it.originalName)).toEqual(["Mie Kuning", "Ayam Kecap", "Sawi Hijau"]);
+      expect(result.items[0].boundingBox2D).toEqual([200, 50, 500, 950]);
+      expect(result.items[1].boundingBox2D).toEqual([480, 80, 720, 900]);
+      expect(result.items[2].boundingBox2D).toEqual([700, 100, 900, 850]);
+    });
+
+    it("slices a parent crop by weight when the diet agent omits per-food boxes", () => {
+      expect(sliceParentBoxByWeights([0, 0, 100, 100], [50, 50], 0)[2]).toBe(50);
+      expect(boxForUnrolledFood(null, [190, 0, 960, 1000], [150, 100], 0)[0]).toBe(190);
+      expect(boxForUnrolledFood(null, [190, 0, 960, 1000], [150, 100], 1)[2]).toBe(960);
     });
   });
 });

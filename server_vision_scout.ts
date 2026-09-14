@@ -596,6 +596,55 @@ export function resolvePackageAndContextItems(
   }
   return items.filter((_, idx) => !contextItemIndices.has(idx));
 }
+
+/** Diet/Meal Agent boxes are [ymin, xmin, ymax, xmax] in 0–1000. */
+export function isUsableBoundingBox(box: any): box is number[] {
+  return Array.isArray(box) && box.length === 4 && box.every((n) => Number.isFinite(Number(n)));
+}
+
+export function isDummyFullFrameBox(box: number[]): boolean {
+  return (
+    (box[0] <= 10 && box[1] <= 10 && box[2] >= 990 && box[3] >= 990) ||
+    (box[0] === 100 && box[1] === 100 && box[2] === 900 && box[3] === 900)
+  );
+}
+
+/** Stack slices of a parent crop by weight so each unrolled top-level item has its own zoom box. */
+export function sliceParentBoxByWeights(parent: number[], weights: number[], index: number): number[] {
+  const ymin = Number(parent[0]) || 0;
+  const xmin = Number(parent[1]) || 0;
+  const ymax = Number(parent[2]) || 1000;
+  const xmax = Number(parent[3]) || 1000;
+  const safe = weights.map((w) => (Number(w) > 0 ? Number(w) : 1));
+  const total = safe.reduce((a, w) => a + w, 0) || 1;
+  let start = 0;
+  for (let i = 0; i < index; i++) start += safe[i];
+  const end = start + safe[index];
+  const h = Math.max(1, ymax - ymin);
+  return [
+    Math.round(ymin + (start / total) * h),
+    xmin,
+    Math.round(ymin + (end / total) * h),
+    xmax,
+  ];
+}
+
+export function boxForUnrolledFood(
+  foodBox: any,
+  parentBox: any,
+  weights: number[],
+  index: number,
+): number[] {
+  if (isUsableBoundingBox(foodBox) && !isDummyFullFrameBox(foodBox.map(Number))) {
+    return foodBox.map(Number);
+  }
+  if (isUsableBoundingBox(parentBox) && !isDummyFullFrameBox(parentBox.map(Number))) {
+    return sliceParentBoxByWeights(parentBox, weights, index);
+  }
+  if (isUsableBoundingBox(parentBox)) return parentBox.map(Number);
+  return [0, 0, 1000, 1000];
+}
+
 export function clusterSpatialCompositeDishes(
   items: any[],
   addDebugLog?: (msg: string) => void,
@@ -1125,6 +1174,7 @@ export function parseAndHealVisionScout(
             packGrams: f.packGrams ?? null,
             packageLabelText: f.packageLabelText ?? null,
             sourceImageIndex: f.sourceImageIndex ?? (d.sourceImageIndex ?? 0),
+            boundingBox2D: Array.isArray(f.boundingBox2D) ? f.boundingBox2D : null,
             rawNutritionLabel: f.rawNutritionLabel ?? null,
             nutrients: fnuts,
             ...(visualCal != null ? { calories: visualCal } : {}),
@@ -1260,6 +1310,13 @@ export function parseAndHealVisionScout(
               : Math.max(0, Math.round((c.totalFat - c.saturatedFat - compTransFat) * 10) / 10);
 
             const compWeight = c.weightGrams || 100;
+            const unrollWeights = components.map((x: any) => x.weightGrams || 100);
+            const unrollBox = boxForUnrolledFood(
+              c.boundingBox2D,
+              d.boundingBox2D,
+              unrollWeights,
+              components.indexOf(c),
+            );
             const compNutrients: Record<string, number> = {
               protein: Math.round((c.protein || 0) * 10) / 10,
               carbohydrates: Math.round((c.carbohydrates || c.carbs || 0) * 10) / 10,
@@ -1307,7 +1364,7 @@ export function parseAndHealVisionScout(
               packGrams: c.packGrams || null,
               cookingMethod: d.cookingMethod || "cooked",
               sourceImageIndex: c.sourceImageIndex ?? d.sourceImageIndex ?? 0,
-              boundingBox2D: c.boundingBox2D || d.boundingBox2D || [0, 0, 1000, 1000],
+              boundingBox2D: unrollBox,
               isStandaloneCondimentPacket: false,
               components: undefined,
               componentsDetailList: undefined,

@@ -250,7 +250,11 @@
         "server_vision_scout.ts": [
           "isSoleEligibleDish",
           "unrolledFromSoleDish",
+          "boxForUnrolledFood",
           "unrolledItem"
+        ],
+        "src/server/food/server_food_analyze_schema.ts": [
+          "Per-food crop"
         ],
         "server_vision_scout.test.ts": [
           "Mie Kuning",
