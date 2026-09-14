@@ -92,6 +92,7 @@ import { healthConnectRouter } from './server_routes_health_connect.js';
 import { r2Router, getS3Client, CLOUDFLARE_R2_BUCKET_NAME, CLOUDFLARE_R2_PUBLIC_URL } from './server_routes_r2.js';
 import { medicalGeminiRouter } from './server_routes_medical_gemini.js';
 import { foodAnalyzeRouter } from './server_routes_food_analyze.js';
+import { scorecardRouter } from './server_routes_scorecard.js';
 
 export const BEVERAGE_RAW_PATTERN = /\b(beverage|drink|water|juice|beer|wine|soda|cola|tea|coffee|cappuccino|espresso|latte|mocha|macchiato|boba|smoothie|shake|milk|oat\s*milk|oatmilk|almond\s*milk|almondmilk|soy\s*milk|soymilk|coconut\s*milk|dairy|yogurt|fruit|melon|watermelon|apple|orange|banana|berry|berries|grape|citrus|salad|raw|fresh|broth|soup)\b/i;
 
@@ -1325,6 +1326,7 @@ app.use(adminRouter);
 app.use(healthConnectRouter);
 app.use(medicalGeminiRouter);
 app.use(foodAnalyzeRouter);
+app.use(scorecardRouter);
 
 
 process.on('uncaughtException', (err) => {

@@ -1,0 +1,28 @@
+{
+  "origin": "https://health-tracker-backend-64gt.onrender.com",
+  "exportedAt": "2026-09-14T13:57:23.031Z",
+  "failed": 1,
+  "probes": [
+    {
+      "id": "origin_shell",
+      "result": "PASS",
+      "message": "HTTP 200"
+    },
+    {
+      "id": "food_health",
+      "result": "PASS",
+      "message": "HTTP 200"
+    },
+    {
+      "id": "biomarker_health",
+      "result": "PASS",
+      "message": "HTTP 200"
+    },
+    {
+      "id": "scorecard_contract",
+      "result": "FAIL",
+      "message": "live contract missing pack/inventories (old deploy or 404 HTML)"
+    }
+  ],
+  "contractCommit": null
+}

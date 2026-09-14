@@ -42,7 +42,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs`
 
-**Human ops (site live, not Gemini):** deploy current `main`; run `supabase/migrations/20260913_brand_menu_items_status.sql` on live Supabase; confirm Home Top Targets (sat fat over target is red, not green).
+**Human ops (site live, not Gemini):** deploy current `main` so Render serves `GET /api/scorecard/contract`; run `supabase/migrations/20260913_brand_menu_items_status.sql` on live Supabase; confirm Home Top Targets (sat fat over target is red, not green). Scorecard `live_origin` stays FAIL until that deploy.
 
 ```text
                     ┌─────────────────────┐

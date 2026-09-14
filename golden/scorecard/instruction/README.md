@@ -19,6 +19,8 @@ npm run scorecard:debug
 
 Exit 0 = all green. Exit 1 = not all green. Cite **all green** only on exit 0 **and** Contract `overall_named_gates` PASS in `current/MASTER_SCORECARD_DEBUG.json`.
 
+Live origin is `https://health-tracker-backend-64gt.onrender.com/`. Local named-gate green is **not** a pass. `scorecard-live` must hit that host; Render spin-up is waited, then FAIL. Skip is FAIL in every area.
+
 ## You must not
 
 - Edit `current/`, `result_summary/`, or `instruction/i18n/REQUIRED_CHROME.json` to look green.
@@ -26,6 +28,24 @@ Exit 0 = all green. Exit 1 = not all green. Cite **all green** only on exit 0 **
 - Claim Localization PASS because en/id key **parity** passed. Parity cannot see keys missing from **both** packs (`closeDialog`).
 - Fill Indonesian with English Title-Case leftovers (`analyzingMeal: "Analyzing Meal"`).
 - Hand-write `result_summary/LATEST.md`.
+- Treat a local vitest pass as live. Inventories (Top Targets, polarity, 32-key ledger, B0 converts) must match on Render `GET /api/scorecard/contract`.
+- Swap or drop a frozen list to make a surface look new (Top Targets, nutrient keys, biomarker multipliers).
+- Grow agent instruction files. Prompt edits stay net-zero (AGENTS L12). If a scorecard class needs more instruction tokens, stop and RFC.
+
+## All areas (cannot cheat)
+
+Frozen file: `instruction/inventories/structure.json`.
+
+| Cheat | How it is blocked |
+|---|---|
+| Skip / missing fixture | Skip in any area is FAIL |
+| Paint expects | Inner loop is named vitest + file parse, not expected.json |
+| Local-only green | Live probe required; `result_summary` only if live also PASS |
+| Swap Top Targets | `getTopTargetNutrientKeys` must stay on Home, NutrientTargetRow, LogChat, scout. Fallback locked to calories/saturatedFat/sodium. Forbidden `Object.keys(dailyNutrientTargets).slice` |
+| Swap polarity | `isLimitNutrient` on Home / pie / trends; LIMIT list frozen |
+| Drop ledger fields | 32 `NUTRIENT_KEYS`; kcal writer `finalizeDishLedger` |
+| Swap biomarker math | Locked multipliers + apply outputs (1.293 / 1.411 / 3.362 / 79.56 / 13.68) on live contract |
+| Parity-only i18n | `REQUIRED_CHROME.json` + `t()` callsite scan |
 
 ## Localization (cannot cheat)
 

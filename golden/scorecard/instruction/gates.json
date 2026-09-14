@@ -2,7 +2,14 @@
   "version": 1,
   "command": "node scripts/assert-master-scorecard.mjs",
   "skip_is_fail_files": ["tests/golden_biomarker.test.ts"],
-  "skip_is_fail_areas": ["Localization"],
+  "skip_is_fail_areas": [
+    "Localization",
+    "Meal Log",
+    "Compare",
+    "Biomarkers",
+    "Receptionist",
+    "Reliability"
+  ],
   "areas": {
     "Localization": [
       "src/utils/i18n.test.ts",
@@ -20,6 +27,7 @@
       "src/utils/nutrients.test.ts",
       "src/utils/nutritionTargetStatus.test.ts",
       "src/components/NutrientPieChart.test.tsx",
+      "src/components/NutrientTargetRow.test.tsx",
       "tests/golden_meals.test.ts"
     ],
     "Compare": [
@@ -52,6 +60,7 @@
       "src/utils/syncUtils.regression.test.ts",
       "src/utils/goldenScoreboard.test.ts",
       "src/utils/foodImageSources.test.ts",
+      "src/utils/scorecardContract.test.ts",
       "server_auth.test.ts"
     ]
   },
@@ -63,6 +72,13 @@
       "cmd": "node",
       "args": ["scripts/assert-biomarker-lifecycle-m31.mjs"],
       "area": "Biomarkers"
+    },
+    {
+      "id": "scorecard-live",
+      "cmd": "node",
+      "args": ["scripts/assert-scorecard-live.mjs"],
+      "area": "Reliability",
+      "timeout_ms": 200000
     }
   ]
 }

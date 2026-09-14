@@ -24,6 +24,7 @@ const RESULT = path.join(SCORECARD, 'result_summary');
 const GATES_PATH = path.join(INSTRUCTION, 'gates.json');
 const REQUIRED_CHROME_PATH = path.join(INSTRUCTION, 'i18n/REQUIRED_CHROME.json');
 const FORBIDDEN_CHROME_PATH = path.join(INSTRUCTION, 'i18n/FORBIDDEN_EN_CHROME.json');
+const STRUCTURE_PATH = path.join(INSTRUCTION, 'inventories/structure.json');
 const TRANSLATIONS_PATH = path.join(root, 'src/utils/translations.ts');
 
 const gates = JSON.parse(fs.readFileSync(GATES_PATH, 'utf8'));
@@ -101,11 +102,11 @@ function runVitest(files) {
   return { status: r.status ?? 1, stderr: r.stderr || '', stdout: r.stdout || '', report };
 }
 
-function runCmd(label, cmd, args, area) {
+function runCmd(label, cmd, args, area, timeoutMs) {
   const r = spawnSync(cmd, args, {
     cwd: root,
     encoding: 'utf8',
-    timeout: 120000,
+    timeout: timeoutMs || 120000,
     env: { ...process.env, FORCE_COLOR: '0' },
   });
   const pass = (r.status ?? 1) === 0;
@@ -370,6 +371,89 @@ function i18nRows() {
   };
 }
 
+function structureRows() {
+  const spec = JSON.parse(fs.readFileSync(STRUCTURE_PATH, 'utf8'));
+  const rows = [];
+  function push(id, area, pass, message) {
+    rows.push({
+      id,
+      kind: 'structure-contract',
+      file: 'golden/scorecard/instruction/inventories/structure.json',
+      area,
+      status: pass ? 'passed' : 'failed',
+      durationMs: 0,
+      message: pass ? '' : message,
+      title: id,
+    });
+  }
+
+  for (const [helper, files] of Object.entries(spec.call_sites || {})) {
+    const missing = [];
+    for (const f of files) {
+      const abs = path.join(root, f);
+      if (!fs.existsSync(abs) || !fs.readFileSync(abs, 'utf8').includes(helper)) missing.push(f);
+    }
+    const area =
+      helper === 'NutrientTargetRow' || helper === 'getTopTargetNutrientKeys' || helper === 'isLimitNutrient'
+        ? 'Meal Log'
+        : helper === 'finalizeDishLedger'
+          ? 'Meal Log'
+          : 'Reliability';
+    push(
+      `structure_callsites_${helper}`,
+      area,
+      missing.length === 0,
+      missing.length ? `${helper} missing from ${missing.join(', ')}` : '',
+    );
+  }
+
+  for (const ban of spec.forbidden || []) {
+    const abs = path.join(root, ban.file);
+    const text = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : '';
+    const hit = text.includes(ban.needle);
+    push(`structure_forbidden_${ban.id}`, ban.area || 'Reliability', !hit, hit ? `forbidden needle present: ${ban.needle}` : '');
+  }
+
+  const expected = spec.expected || {};
+  const nutrientsPath = path.join(root, 'src/utils/nutrients.ts');
+  const nutrients = fs.existsSync(nutrientsPath) ? fs.readFileSync(nutrientsPath, 'utf8') : '';
+  const fallback = (expected.top_targets?.fallback || []).map((k) => `"${k}"`).join(', ');
+  const fallbackNeedle = `PRIMARY_NUTRIENTS = [${fallback}]`;
+  push(
+    'structure_top_targets_fallback',
+    'Meal Log',
+    nutrients.includes(fallbackNeedle),
+    `PRIMARY_NUTRIENTS assignment missing or swapped (want ${fallbackNeedle})`,
+  );
+  for (const k of expected.top_targets?.limit_keys || []) {
+    if (!nutrients.includes(`"${k}"`)) {
+      push(`structure_limit_key_${k}`, 'Meal Log', false, `LIMIT_NUTRIENT_KEYS missing ${k}`);
+    }
+  }
+  const hasAllLimits = (expected.top_targets?.limit_keys || []).every((k) => nutrients.includes(`"${k}"`));
+  if (hasAllLimits) {
+    push('structure_limit_keys_present', 'Meal Log', true, '');
+  }
+
+  const convertSrc = fs.existsSync(path.join(root, 'src/utils/analyteConversions.ts'))
+    ? fs.readFileSync(path.join(root, 'src/utils/analyteConversions.ts'), 'utf8')
+    : '';
+  const mul = expected.biomarkers?.multiply || {};
+  const mulOk =
+    convertSrc.includes(String(mul.hdl)) &&
+    convertSrc.includes(String(mul.triglycerides)) &&
+    convertSrc.includes(String(mul.creatinine)) &&
+    convertSrc.includes(String(mul.total_bilirubin));
+  push(
+    'structure_biomarker_multipliers',
+    'Biomarkers',
+    mulOk,
+    mulOk ? '' : 'ANALYTE_CONVERSIONS multipliers swapped vs frozen locked_apply table',
+  );
+
+  return { rows, origin: spec.live?.origin };
+}
+
 function archiveCurrentIfInstructionChanged(instructionHash) {
   const runPath = path.join(CURRENT, 'RUN.json');
   if (!fs.existsSync(runPath)) return null;
@@ -401,6 +485,7 @@ const instructionHash = hashFiles([
   'golden/scorecard/instruction/MASTER_SCORECARD.md',
   'golden/scorecard/instruction/i18n/REQUIRED_CHROME.json',
   'golden/scorecard/instruction/i18n/FORBIDDEN_EN_CHROME.json',
+  'golden/scorecard/instruction/inventories/structure.json',
 ]);
 
 fs.mkdirSync(CURRENT, { recursive: true });
@@ -460,8 +545,11 @@ if (!vitest.report) {
   });
 }
 
-const commands = (gates.commands || []).map((c) => runCmd(c.id, c.cmd, c.args, c.area));
+const commands = (gates.commands || []).map((c) =>
+  runCmd(c.id, c.cmd, c.args, c.area, c.timeout_ms),
+);
 const i18n = i18nRows();
+const structure = structureRows();
 
 function normStatus(row) {
   if (row.status === 'skipped' && (SKIP_IS_FAIL.has(row.file) || SKIP_IS_FAIL_AREAS.has(row.area))) {
@@ -470,7 +558,7 @@ function normStatus(row) {
   return row.status;
 }
 
-const rows = [...tests, ...commands, ...i18n.rows].map((r) => {
+const rows = [...tests, ...commands, ...i18n.rows, ...structure.rows].map((r) => {
   const contractStatus = normStatus(r);
   const message = r.message ? shortMessage(r.message) : '';
   const out = { ...r, contractStatus, message };
@@ -541,6 +629,25 @@ const contract = [
             .filter((r) => r.status !== 'passed')
             .map((r) => r.message)
             .join('; '),
+  },
+  {
+    law: 'structure_inventories',
+    layer: 'process',
+    result: structure.rows.some((r) => r.status !== 'passed') ? 'FAIL' : 'PASS',
+    actual: structure.rows.some((r) => r.status !== 'passed')
+      ? structure.rows
+          .filter((r) => r.status !== 'passed')
+          .map((r) => r.message)
+          .join('; ')
+      : 'helpers present; fallback/polarity/converts not swapped',
+  },
+  {
+    law: 'live_origin',
+    layer: 'process',
+    result: commands.some((c) => c.id === 'scorecard-live' && c.status !== 'passed') ? 'FAIL' : 'PASS',
+    actual: commands.some((c) => c.id === 'scorecard-live' && c.status !== 'passed')
+      ? 'live Render probe failed (see current/live/)'
+      : `live origin ${structure.origin}`,
   },
   {
     law: 'result_summary_sealed',

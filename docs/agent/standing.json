@@ -189,6 +189,33 @@
       }
     },
     {
+      "id": "scorecard_live_structure",
+      "label": "Scorecard inventories (Top Targets, polarity, 32-key ledger, B0 converts) frozen; live Render must echo GET /api/scorecard/contract; skip is FAIL in every area",
+      "asked": "repeated",
+      "files_must_contain": {
+        "golden/scorecard/instruction/inventories/structure.json": [
+          "https://health-tracker-backend-64gt.onrender.com",
+          "getTopTargetNutrientKeys",
+          "1.293"
+        ],
+        "scripts/assert-scorecard-live.mjs": [
+          "still Render spin-up interstitial",
+          "/api/scorecard/contract"
+        ],
+        "src/utils/scorecardContract.ts": [
+          "getTopTargetNutrientKeys",
+          "ANALYTE_CONVERSIONS"
+        ],
+        "server.ts": [
+          "scorecardRouter"
+        ],
+        "src/components/HomeTab.tsx": [
+          "getTopTargetNutrientKeys",
+          "isLimitNutrient"
+        ]
+      }
+    },
+    {
       "id": "same_meal_package_prepared",
       "label": "Package + prepared views of the same food collapse to one dish; combine-language edits emit merge_dishes",
       "asked": "repeated",

@@ -8,6 +8,8 @@
 **Process:** [`README.md`](./README.md) · [`WORKFLOW.md`](./WORKFLOW.md) · [`gates.json`](./gates.json)  
 **Sister files:** [`../../past/SCOREBOARD_LIVE_RESULTS.md`](../../past/SCOREBOARD_LIVE_RESULTS.md) · [`i18n/GATE_I18N_A11Y_TREE.md`](./i18n/GATE_I18N_A11Y_TREE.md) · [`../../../plan/ROADMAP.md`](../../../plan/ROADMAP.md) · [`../../../docs/agent/DOMAIN_REGRESSION_MAP.md`](../../../docs/agent/DOMAIN_REGRESSION_MAP.md) · [`../../../docs/agent/standing.json`](../../../docs/agent/standing.json)
 
+**Live origin:** `https://health-tracker-backend-64gt.onrender.com` — `GET /api/scorecard/contract` must echo frozen inventories. Local green is not live green.
+
 **This moment:** [`../../current/MASTER_SCORECARD_DEBUG.md`](../../current/MASTER_SCORECARD_DEBUG.md) · [`../../current/MASTER_SCORECARD_DEBUG.json`](../../current/MASTER_SCORECARD_DEBUG.json). Contract table first. Skip is not PASS. Cite **all green** only from [`../../result_summary/LATEST.md`](../../result_summary/LATEST.md) after exit 0.
 
 Refresh:
@@ -29,7 +31,7 @@ Until `6c25141`, `npm test` also executed Playwright specs and printed **18 fake
 | Compare | thin unit PASS; Mode D took a **6-commit** repair series | J-ID-02 LIVE PASS (wrong fixtures); 6-case spec untracked | ⚠️ PARTIAL + ratchet |
 | Biomarkers | helper units PASS; **G-B1–G-B9 fixtures deleted** so `golden_biomarker.test.ts` **skips 9 tests and still reports PASS** | zero Playwright; B0 Apply is Current work | 🔴 FALSE-GREEN on goldens |
 | Receptionist | 5 named files PASS | stub specs only | ⚠️ PARTIAL |
-| Reliability | vitest/Playwright exclude fixed; golden scorer **FAIL**; no second-device test | photo-sync class still untested | 🔴 FAIL + ratchet |
+| Reliability | vitest/Playwright exclude fixed; golden scorer **FAIL**; no second-device test; **live contract required** | photo-sync class still untested; Render must serve `/api/scorecard/contract` | 🔴 FAIL + ratchet |
 
 ---
 

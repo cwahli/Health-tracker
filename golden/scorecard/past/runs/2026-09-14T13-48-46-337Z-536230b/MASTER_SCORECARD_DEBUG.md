@@ -2,46 +2,43 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-14T13:57:08.796Z
-**Commit:** `bab2d6c`
-**Instruction hash:** `544787499c26`
-**Seal:** `646433189d8ac96d9a3f96043194ef9764e131dd910ce381cf631ed0851379b4`
+**When:** 2026-09-14T13:48:46.337Z
+**Commit:** `536230b`
+**Instruction hash:** `0ba6b1c6e344`
+**Seal:** `fd7b67df79a8e7d4534e0e212105ddffaf4f8b9f8c707630103a8c9c55cd7e08`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **NOT ALL GREEN** — 614 pass / 25 fail / 0 skip
-**Archived previous current →** `golden/scorecard/past/runs/2026-09-14T13-48-46-337Z-536230b`
+**Overall:** **NOT ALL GREEN** — 600 pass / 24 fail / 0 skip
+**Archived previous current →** `golden/scorecard/past/runs/2026-09-14T13-46-52-715Z-536230b`
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | FAIL | 614 pass / 25 fail / 0 skip of 639 |
+| `overall_named_gates` | FAIL | 600 pass / 24 fail / 0 skip of 624 |
 | `skip_is_not_pass` | FAIL | 9 required skips scored FAIL (Localization or golden_biomarker) |
 | `collection_does_not_crash` | FAIL | tests/golden_meals.test.ts |
 | `i18n_required_chrome` | FAIL | missing en+id: closeDialog, modalDialog; id copy equals en: analyzingMeal; id is Title-Case leftover of key: analyzingMeal; 244 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
-| `structure_inventories` | PASS | helpers present; fallback/polarity/converts not swapped |
-| `live_origin` | FAIL | live Render probe failed (see current/live/) |
 | `result_summary_sealed` | PASS | will not write result_summary (not all green) |
 | `area_localization` | FAIL | 41 pass / 7 fail / 0 skip |
-| `area_meal_log` | FAIL | 165 pass / 5 fail / 0 skip |
+| `area_meal_log` | FAIL | 155 pass / 5 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
-| `area_biomarkers` | FAIL | 131 pass / 9 fail / 0 skip |
+| `area_biomarkers` | FAIL | 130 pass / 9 fail / 0 skip |
 | `area_receptionist` | PASS | 43 pass / 0 fail / 0 skip |
-| `area_reliability` | FAIL | 187 pass / 4 fail / 0 skip |
+| `area_reliability` | FAIL | 184 pass / 3 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
 | `journey-guard` | PASS | exit 0 |
 | `biomarker-lifecycle-m31` | PASS | exit 0 |
-| `scorecard-live` | FAIL | FAIL scorecard_contract: live contract missing pack/inventories (old deploy or 404 HTML) |
 
 ## Area rollup
 
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
 | Localization | FAIL | 41 | 7 | 0 | 48 |
-| Meal Log | FAIL | 165 | 5 | 0 | 170 |
+| Meal Log | FAIL | 155 | 5 | 0 | 160 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
-| Biomarkers | FAIL | 131 | 9 | 0 | 140 |
+| Biomarkers | FAIL | 130 | 9 | 0 | 139 |
 | Receptionist | PASS | 43 | 0 | 0 | 43 |
-| Reliability | FAIL | 187 | 4 | 0 | 191 |
+| Reliability | FAIL | 184 | 3 | 0 | 187 |
 
 ## All failed (red)
 
@@ -69,14 +66,13 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B8 Repaste Identity (UPSERT_IDENTITY) missing directory |
 | FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B9 Vision N/A (CONFORMANCE_SHAPE) missing directory |
 
-### Reliability (4)
+### Reliability (3)
 
 | Status | File | Test |
 |---|---|---|
 | FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser scoreGoldenRun scores expected meal lines against a new pipeline foodLog — AssertionError: expected 1 to be +0 // Object.is equality |
 | FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser names a golden from the dishes, not the job id — AssertionError: expected 'Prawn Layered Pasta Salad + Serrano H…' to be 'Prawn Layered Pasta Salad + Serrano H…' // Object.is equality |
 | FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser splits a mashed Gemini blob and does not keep weight/compare/brand extras on top of the auto overwrite — AssertionError: expected [ 'Portion', 'Weight', …(11) ] to have a length of 3 but got 13 |
-| FAIL | `node scripts/assert-scorecard-live.mjs` | scorecard-live — FAIL scorecard_contract: live contract missing pack/inventories (old deploy or 404 HTML) |
 
 ### Localization (7)
 
@@ -96,7 +92,7 @@ _none_
 
 ## All passed (green)
 
-### Reliability (187)
+### Reliability (184)
 
 | Status | File | Test |
 |---|---|---|
@@ -240,9 +236,6 @@ _none_
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser does not prefill stall when the meal finished, even if error fields still say stalled |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser does not surface leftover stall on a succeeded job whose log never stalled |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser keeps stall when the job actually failed with a stall in the log |
-| PASS | `src/utils/scorecardContract.test.ts` | scorecard live contract (cannot swap inventories) echoes frozen Top Targets fallback and polarity lists |
-| PASS | `src/utils/scorecardContract.test.ts` | scorecard live contract (cannot swap inventories) keeps the 32-key meal ledger and kcal writer name |
-| PASS | `src/utils/scorecardContract.test.ts` | scorecard live contract (cannot swap inventories) locks B0 convert multipliers and apply outputs |
 | PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer returns error immediately when uid is missing |
 | PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer POSTs to /api/sync/supabase-push with correct body |
 | PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer omits Authorization header when idToken is absent |
@@ -288,7 +281,7 @@ _none_
 | PASS | `npx tsc --noEmit` | tsc |
 | PASS | `node scripts/journey-guard.mjs` | journey-guard |
 
-### Meal Log (165)
+### Meal Log (155)
 
 | Status | File | Test |
 |---|---|---|
@@ -432,7 +425,6 @@ _none_
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling reconcileIngredientsToComponents gives injected ingredients valid non-zero nutrients and prevents duplicates |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling unrolls a single dish containing multiple distinct food components into separate top-level items without subitems |
 | PASS | `src/components/NutrientPieChart.test.tsx` | NutrientPieChart polarity wrap wraps sat-fat overage in rose, protein overage in emerald |
-| PASS | `src/components/NutrientTargetRow.test.tsx` | NutrientTargetRow renders all top target nutrients matching Home derivation |
 | PASS | `src/utils/nutrients.test.ts` | getTopTargetNutrientKeys never uses Object.keys(dailyNutrientTargets).slice(0, 5) |
 | PASS | `src/utils/nutrients.test.ts` | getTopTargetNutrientKeys uses report.topNutrientTargets with core filter |
 | PASS | `src/utils/nutrients.test.ts` | getTopTargetNutrientKeys falls through healthBaselineCategories then profile.topNutrientsToMonitor |
@@ -448,15 +440,6 @@ _none_
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) under-target and on-target wording; no percent without a target |
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) returns empty with no usable days |
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) pickExplicitTargets keeps only finite positive target keys |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_getTopTargetNutrientKeys |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_isLimitNutrient |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_NutrientTargetRow |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_finalizeDishLedger |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_forbidden_top_targets_slice5 |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_forbidden_top_targets_slice5_row |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_forbidden_polarity_includes_satfat |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_top_targets_fallback |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_limit_keys_present |
 
 ### Localization (41)
 
@@ -495,16 +478,16 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) keys the S-1 button/card chrome in en and id with differing copy |
 | PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) documents parked S-1 residuals without keying them yet |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not drop leak-class keys from the frozen list |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_id_not_incident_string |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_components_not_hardcoded_incident |
 
-### Biomarkers (131)
+### Biomarkers (130)
 
 | Status | File | Test |
 |---|---|---|
@@ -638,7 +621,6 @@ _none_
 | PASS | `src/utils/clinicalCalculators.test.ts` | Clinical Calculator Engine calculateCkdEpi2021 calculates decreased filtration for elevated creatinine |
 | PASS | `src/utils/clinicalCalculators.test.ts` | Clinical Calculator Engine CLINICAL_CALCULATOR_REGISTRY contains all core calculator definitions |
 | PASS | `node scripts/assert-biomarker-lifecycle-m31.mjs` | biomarker-lifecycle-m31 |
-| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_biomarker_multipliers |
 
 ### Receptionist (43)
 

@@ -11,5 +11,7 @@ description: Run the Health-tracker master scorecard (six areas). Use when the u
 4. Cite **all green** only on process exit 0 and `result_summary/LATEST.json` (script-written). If current is red, do not write result_summary.
 5. Do not edit `current/`, `result_summary/`, `instruction/i18n/REQUIRED_CHROME.json`, or `expected.json` to pass.
 6. Localization: frozen required-chrome list + callsite scan. Parity-only is not a pass.
+7. Live Render `https://health-tracker-backend-64gt.onrender.com` is required. Local green is not live green. Inventories (Top Targets, polarity, 32-key ledger, B0 converts) must match `GET /api/scorecard/contract`.
+8. Do not edit agent instruction files to pass. Prompt net-zero; RFC if not possible.
 
 Adding a gate: grow `instruction/gates.json` + MASTER_SCORECARD row, then re-run (archives current → past).

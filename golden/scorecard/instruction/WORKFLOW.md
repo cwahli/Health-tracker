@@ -35,9 +35,9 @@ Maker ≠ checker. The checker is `scripts/assert-master-scorecard.mjs`, not you
 |---|---|
 | PASS | Assertion ran and matched. |
 | FAIL | Assertion ran and missed, file missing, collection crash, or required skip. |
-| SKIP | Not PASS. Localization skips are FAIL. `golden_biomarker` skips are FAIL. |
+| SKIP | Not PASS. **Any** area skip is FAIL, including `golden_biomarker`. |
 
-`npm test` is not a scorecard run. Playwright live specs are quota; they do not flip named-gate Localization to PASS.
+`npm test` is not a scorecard run. Playwright journey soaks (I18N-A11Y / J-ID) are quota and stay NOT COVERED until run; they do not flip an area green. The **live origin probe** (`GET` Render `/api/scorecard/contract`) is required every scorecard run and cannot be skipped.
 
 ## Localization pass (all must hold)
 
@@ -58,6 +58,12 @@ When you add a named gate:
 2. Grow `REQUIRED_CHROME.json` if the class is leftover chrome.
 3. Run the script. It moves the previous current dump to `past/`.
 4. Old `result_summary/LATEST` is kept only if its `instructionHash` still matches. A new gate invalidates a previous green until the new run is all green.
+
+## Live (Render)
+
+Origin: `https://health-tracker-backend-64gt.onrender.com`. Evidence: `current/live/`. A local helper change that is not on Render is FAIL (`live_origin`). Inventories on the live JSON must equal `instruction/inventories/structure.json` (missing / extra / swapped = FAIL).
+
+**Agent instructions:** this process does not edit scout / diet / receptionist prompts. If a class cannot be gated in TypeScript, RFC (net-zero or human approval). Do not add instruction tokens to pass.
 
 ## Seal (cannot fake result_summary)
 

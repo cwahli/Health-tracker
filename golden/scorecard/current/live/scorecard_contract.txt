@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Biomarker and Nutrient Tracker</title>
+    <meta name="description" content="An Android Material-styled application for tracking health biomarkers, food nutrients, and receiving personalized health recommendations based on LLM analysis." />
+    <meta property="og:title" content="Biomarker and Nutrient Tracker" />
+    <meta property="og:description" content="An Android Material-styled application for tracking health biomarkers, food nutrients, and receiving personalized health recommendations based on LLM analysis." />
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(function() {});
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/index-DN3Gf1we.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-DCy0fwz4.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-firebase-BcHNMy-o.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-Cw0Hd-q5.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-motion-BTVCcmNx.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-BMY-EH1J.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+
