@@ -15,3 +15,6 @@ description: Run the Health-tracker master scorecard (six areas). Use when the u
 8. Do not edit agent instruction files to pass. Prompt net-zero; RFC if not possible.
 
 Adding a gate: grow `instruction/gates.json` + MASTER_SCORECARD row, then re-run (archives current → past).
+
+9. I18N-A11Y / journeys: read `golden/scorecard/instruction/i18n/GATE_I18N_A11Y_TREE.md`. Capture via `ariaSnapshot` only; `--list` before soak; restore i18n from known-good git (never invent); artifacts in `current/a11y/`; incomplete checklist = not complete.
+10. Do not parallel-edit helpers/specs across soaks; rebase before push.

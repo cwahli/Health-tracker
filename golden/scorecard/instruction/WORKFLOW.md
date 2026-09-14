@@ -59,6 +59,19 @@ When you add a named gate:
 3. Run the script. It moves the previous current dump to `past/`.
 4. Old `result_summary/LATEST` is kept only if its `instructionHash` still matches. A new gate invalidates a previous green until the new run is all green.
 
+## Journey / I18N-A11Y soak hygiene (agents)
+
+Learned 2026-09-14 (false greens + stuck helpers):
+
+1. Pin capture to **`locator.ariaSnapshot()`** (see `i18n/GATE_I18N_A11Y_TREE.md`). Never call `page.accessibility.snapshot`.
+2. Before a soak: `npx playwright test <spec> --list` must exit 0. Treat SyntaxError / No tests found as FAIL.
+3. Failure-path editors (aider/Vertex) must not rewrite `indo-journey-helpers.ts` mid-soak until `--list` is green.
+4. **Restore, do not invent** Indonesian chrome: pull prior copy from `i18n-en-id` / `4cd66d1` / documented restore commits. Grow `REQUIRED_CHROME.json`; never fill id with Title-Case leftovers.
+5. Write a11y evidence only to `golden/scorecard/current/a11y/`.
+6. If any coverage-checklist row is NOT COVERED/FAIL, overall journey status is **INCOMPLETE** (no LIVE PASS headline).
+7. Do not run overlapping agent jobs that edit the same helpers/specs; `git pull --rebase` before push after long soaks.
+8. Playwright journeys do **not** flip Localization all-green by themselves — `npm run scorecard:debug` + live contract still required.
+
 ## Live (Render)
 
 Origin: `https://health-tracker-backend-64gt.onrender.com`. Evidence: `current/live/`. A local helper change that is not on Render is FAIL (`live_origin`). Inventories on the live JSON must equal `instruction/inventories/structure.json` (missing / extra / swapped = FAIL).

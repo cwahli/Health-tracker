@@ -1,63 +1,65 @@
 # Gate I18N-A11Y — Accessibility-tree Indonesian chrome (locked)
 
-## Why Playwright missed this before
+## Why Playwright missed leftover chrome before
 - Auth/Home i18n used `expect.soft` → soft fail still green.
-- Specs never opened Food History empty state, food-chat overlay, photo-source sheet, analyzing card, or nutrition table chrome.
-- Checks looked for raw keys (`auth.*`) or a few strings, not the full visible/a11y name set.
+- Specs never opened Food History, food-chat overlay, photo-source sheet, analyzing card, or nutrition table chrome.
+- Checks looked for raw keys (`auth.*`) or a few strings, not the full a11y name set.
 - Demo / returning paths skipped full signup chrome.
+- Helper used removed API `page.accessibility.snapshot` (gone in Playwright 1.62+) and later self-corrupted mid-soak → SyntaxError / “No tests found” before any chrome assert ran.
+
+## Capture API (pinned)
+**Primary:** `page.locator('#root, body').first().ariaSnapshot()`  
+**Fallback:** DOM walk of `#root`/`body` (aria-label / title / placeholder / direct text).  
+**Forbidden:** `page.accessibility.snapshot` — undefined on Playwright ≥1.62; do not restore it.
+
+Artifacts: `golden/scorecard/current/a11y/J-ID-0X-<surface>.txt`
 
 ## PASS (all must hold when `preferred_language=id`)
-1. Capture Playwright `page.accessibility.snapshot({ interestingOnly: true })` (and/or `locator.ariaSnapshot()` on `#root` / main) on **each** required surface below.
-2. Flatten every node `name` + `role` + static text into one string set.
+1. Capture `ariaSnapshot` (or fallback) on **each** required surface below.
+2. Flatten every accessible name / quoted label into one string set.
 3. **HARD fail** (not soft) if any of:
    - Title-Case placeholder: `/\b[A-Z][A-Za-z0-9]*(?: [A-Z][A-Za-z0-9]*)* (Title|Desc|Label)\b/`
-   - Known bad chrome from incidents: `Chat Placeholder`, `Agent Food Welcome`, `Data Used By Agent`, `Empty History`, `Manual Entry`, `Weight Label`, `Nutrient Label`, `Total Label`, `Ingredients Label`, `Welcome Health Portal`, `Dashboard Ready Desc`, `Sign In Title`, `Email Label`, `OR DIVIDER`
-   - English chrome allowlist-exceptions only (see below) — any other common UI verbs in English fail: Log Meal, Compare, Health Info, Food History, View Analysis, Save Log, View Status, View More, Log This Food, Flag issue, Adjust portion, AI Estimated, Analysis completed, Analyzing Meal Photo, Select Photo Source, Solid Food (unless exact allowlisted technical token)
-4. Save snapshot artifact: `golden/scorecard/current/a11y/J-ID-0X-<surface>.txt` for evidence.
+   - Incident strings in `FORBIDDEN_EN_CHROME.json`
+   - Non-allowlisted English UI chrome verbs (Log Meal, Compare, Health Info, Food History, View Analysis, Save Log, View Status, View More, Log This Food, Flag issue, Adjust portion, AI Estimated, Analysis completed, Analyzing Meal Photo, Select Photo Source, Solid Food, …)
+4. Empty artifact or capture throw = FAIL (infra), not a chrome PASS.
 
-## Required surfaces (visit all in journey)
-| Surface | When |
+## Required surfaces
+| Surface slug | When |
 |---|---|
-| Auth (lang=id) | Before signup/signin |
-| Home empty / portal | After login, before meal |
-| Floating quick actions | Open sheet |
-| Food History empty | Open Food History tab |
-| Food chat composer | Catat Makanan open |
-| Photo source sheet | Open attach |
-| Analyzing / succeeded job card | During/after meal job |
-| Meal analysis / nutrition chrome | Open View Analysis |
+| `auth` | Before signup/signin, lang=id |
+| `home` | After login, before meal |
+| `quick-actions` | Floating sheet open |
+| `food-history` | Food History tab / empty state |
+| `food-chat` | Catat Makanan composer open |
+| `photo-source` | Attach / photo source sheet |
+| `analyzing-card` | Job card during/after meal |
+| `meal-analysis` | View Analysis / nutrition chrome |
 
 ## Allowlist (do NOT fail)
 - Food/dish/brand names as observed (OCR/scout)
-- Nutrient **codes** in tables: `calories`, `protein`, `totalFat`, … (machine keys); labels must still be localized when shown as chrome
+- Nutrient **codes** (`calories`, `protein`, …); chrome **labels** must still be localized
 - Units: `kcal`, `g`, `mg`, `mcg`, `%`
-- Proper nouns: Google, Facebook, Gemini model names in debug-only chrome if debug gated
-- Dates/times, emails, job ids
-- User-entered text
-- Agent free-text replies in Indonesian (or mixed food names) — not scored as chrome
-- Debug download already localized (`Unduh Log Debug`)
+- Proper nouns: Google, Facebook; debug-only model names if debug gated
+- Dates/times, emails, job ids, user-entered text
+- Agent free-text replies (not chrome)
+- Localized debug download (`Unduh Log Debug`)
 
-## Evidence columns for scoreboard
-| PASS | FAIL | Evidence |
-| Accessibility snapshot for surface S contains zero placeholder / non-allowlisted English chrome | Any forbidden string in snapshot names | `_live_a11y/J-ID-0X-S.txt` + Playwright hard expect |
+## Agent soak hygiene (required — learned 2026-09-14)
+Before claiming a journey soak green:
 
-## End-of-pass report completeness (required)
-Every green run must regenerate a report section **"Coverage checklist — all requirements"** that lists EVERY gate/surface below with status `PASS` | `FAIL` | `NOT COVERED`, plus artifact path (`_live_a11y/...` or debug dump). A journey may not be called complete unless every row is `PASS` (no NOT COVERED).
+1. **`--list` gate:** `npx playwright test <spec> --list` must exit 0. SyntaxError / “No tests found” = soak FAIL; fix helpers first.
+2. **No mid-soak self-edit** of `indo-journey-helpers.ts` / specs by failure-path aider until `--list` is green again.
+3. **Do not invent i18n copy.** On leftover English / missing keys: restore from known-good git (`i18n-en-id`, `4cd66d1`, or later restore commits). Grow `REQUIRED_CHROME.json` only; never invent Title-Case id values.
+4. **Headline honesty:** if any checklist row is `NOT COVERED` or `FAIL`, top verdict is **INCOMPLETE** — never skim as LIVE PASS.
+5. **One writer per file:** do not run parallel Vertex/Home-i18n/debug-green jobs that edit the same helpers/specs.
+6. **Push hygiene:** `git fetch && git pull --rebase` before push after long soaks.
+7. Artifacts land in `golden/scorecard/current/a11y/` (not a parallel `_live_a11y` tree).
 
-Include in:
-1. `golden/scorecard/past/SCOREBOARD_LIVE_RESULTS.md` (bottom; historical) and `golden/scorecard/current/` for a new soak
-2. `/workspace/gemini38-meal-review/tasks/FULL_THREE_JOURNEYS_FINAL_REPORT.md` (bottom)
-3. Each journey scoreboard's live results appendix when present
-
-Checklist rows (minimum):
-- Auth lang=id a11y chrome
-- Home empty/portal a11y chrome
-- Floating quick actions a11y chrome
-- Food History empty a11y chrome
-- Food chat composer a11y chrome
-- Photo source sheet a11y chrome
-- Analyzing / succeeded job card a11y chrome
-- Meal analysis / nutrition table chrome a11y
-- Debug contract classifyDump 0 fails (per journey)
-- Job waited until terminal (not 5%)
+## End-of-pass coverage checklist (required)
+Every green run regenerates **"Coverage checklist — all requirements"** with `PASS` | `FAIL` | `NOT COVERED` + artifact path for each surface above, plus:
+- Debug contract `classifyDump` 0 fails (per journey)
+- Job waited until terminal (not “Starting… 5%”)
 - Soft asserts banned for i18n/a11y (hard only)
+- `playwright --list` passed before soak
+
+A journey is **not complete** while any row is `NOT COVERED` or `FAIL`.

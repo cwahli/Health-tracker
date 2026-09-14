@@ -32,6 +32,11 @@ Live origin is `https://health-tracker-backend-64gt.onrender.com/`. Local named-
 - Swap or drop a frozen list to make a surface look new (Top Targets, nutrient keys, biomarker multipliers).
 - Grow agent instruction files. Prompt edits stay net-zero (AGENTS L12). If a scorecard class needs more instruction tokens, stop and RFC.
 
+- Call journeys **complete** while Gate I18N-A11Y checklist has NOT COVERED/FAIL, or while `playwright --list` fails.
+- Use `page.accessibility.snapshot` (removed in Playwright 1.62+). Use `locator.ariaSnapshot()` per `i18n/GATE_I18N_A11Y_TREE.md`.
+- Invent Indonesian chrome strings. Restore from known-good git (`i18n-en-id`, `4cd66d1`, …) and grow `REQUIRED_CHROME.json`.
+- Let failure-path agents rewrite `indo-journey-helpers.ts` mid-soak without a green `--list` gate.
+
 ## All areas (cannot cheat)
 
 Frozen file: `instruction/inventories/structure.json`.
