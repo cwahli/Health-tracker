@@ -13,7 +13,7 @@ import { normalizeChainKey } from '../serverBrandMenu.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, 'Golden_meal');
 
-type ResolveLock = { query: string; expectFdcId: string };
+type ResolveLock = { query: string; expectId: string };
 type NeverRule = {
   query: string;
   forbiddenIds?: string[];
@@ -79,13 +79,13 @@ describe('Golden meals — Layer B resolve locks & USDA never-match', () => {
   const manifest = loadManifest();
   const specs: GoldenSpec[] = manifest.goldens.map((g: { dir: string }) => loadSpec(g.dir));
 
-  it('dictionary locks resolve to the pinned FDC / canonical id', () => {
+  it('dictionary locks resolve to the pinned local canonical id', () => {
     const misses: string[] = [];
     for (const spec of specs) {
       for (const lock of spec.resolveLocks || []) {
         const hit = lookupCanonicalBaseFood(lock.query);
-        if (!hit || String(hit.fdcId) !== String(lock.expectFdcId)) {
-          misses.push(`${spec.id} "${lock.query}" -> ${hit?.fdcId ?? 'null'} (want ${lock.expectFdcId})`);
+        if (!hit || String(hit.id) !== String(lock.expectId)) {
+          misses.push(`${spec.id} "${lock.query}" -> ${hit?.id ?? 'null'} (want ${lock.expectId})`);
         }
       }
     }
@@ -97,7 +97,7 @@ describe('Golden meals — Layer B resolve locks & USDA never-match', () => {
     for (const spec of specs) {
       for (const q of spec.catalogGaps || []) {
         const hit = lookupCanonicalBaseFood(q);
-        if (hit) leaked.push(`${spec.id} gap "${q}" unexpectedly hit ${hit.fdcId}`);
+        if (hit) leaked.push(`${spec.id} gap "${q}" unexpectedly hit ${hit.id}`);
       }
     }
     expect(leaked).toEqual([]);

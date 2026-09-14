@@ -1,0 +1,36 @@
+{
+  "id": "G8",
+  "title": "Mie Gacoan (Mie Suit, Siomay, Es Petak Umpet)",
+  "mode": "new_log",
+  "passes": [
+    {
+      "id": "identify",
+      "prompt": "Analyze this Indonesian noodle meal and receipt from Mie Gacoan",
+      "photos": [
+        "06_indonesian_menu_page_1.jpg",
+        "06_indonesian_menu_page_2.jpg"
+      ]
+    }
+  ],
+  "expectedItems": [
+    { "key": "mie_suit", "names": ["Mie Suit"] },
+    { "key": "siomay", "names": ["Siomay"] },
+    { "key": "es_petak_umpet", "names": ["Es Petak Umpet", "Es Petak Umpet Drink"] }
+  ],
+  "resolveLocks": [],
+  "mustResolve": [],
+  "catalogGaps": [],
+  "neverMatch": [],
+  "invariants": [
+    "Meal-06 numbers vs GT: Scout kcal 587 vs Truth 780 (-25% undercount)",
+    "Scout P 20.5g vs Truth 27g (-24%)",
+    "Scout C 83g vs Truth 111g (-25%)",
+    "Scout F 19.2g vs Truth 25g (-23%)"
+  ],
+  "macroTotals": {
+    "calories": 587,
+    "protein": 20.5,
+    "carbohydrates": 83,
+    "totalFat": 19.2
+  }
+}

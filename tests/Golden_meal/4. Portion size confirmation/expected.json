@@ -1,0 +1,40 @@
+{
+  "id": "G4",
+  "title": "Picnic packs, ask quantity, stitch one meal",
+  "mode": "new_log",
+  "passes": [
+    {
+      "id": "scout_ask",
+      "prompt": "",
+      "photos": ["PXL_20260809_125003549 (1).jpg"],
+      "kind": "portion_clarify"
+    },
+    {
+      "id": "user_quantities",
+      "prompt": "(user picks how much of each pack they ate)",
+      "photos": [],
+      "kind": "portion_confirm",
+      "notes": "Turn 2 must reuse Turn 1 scout + candidates. skipScout=true. One stitched meal."
+    }
+  ],
+  "expectedItems": [
+    { "key": "baguette", "names": ["baguette", "french bread"], "source": "canonical" },
+    { "key": "cherry_tomatoes", "names": ["cherry tomatoes"], "source": "canonical" },
+    { "key": "pomegranate", "names": ["pomegranate"], "source": "canonical" },
+    { "key": "sliced_turkey", "names": ["sliced turkey", "turkey ham"], "source": "label_or_canonical" }
+  ],
+  "resolveLocks": [
+    { "query": "cherry tomato", "expectId": "cherry_tomato" }
+  ],
+  "catalogGaps": ["baguette", "sliced turkey", "turkey ham"],
+  "neverMatch": [
+    { "query": "cherry tomatoes", "forbiddenNames": ["tomato puree", "tomato products, canned"] },
+    { "query": "pomegranate", "forbiddenNames": ["sesame seed"] }
+  ],
+  "invariants": [
+    "Pass 1 asks quantity; it does not invent a consumed weight for a whole unopened pack",
+    "Pass 2 continues the same job — no missing scout items, no second USDA/curator pass",
+    "UI looks like one meal, not two disconnected jobs",
+    "Note: pomegranate currently aliases to sesame_seed FDC 170150 in CANONICAL_BASE_FOODS — that is a catalog defect this golden must not treat as success once filled"
+  ]
+}

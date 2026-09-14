@@ -1,0 +1,8 @@
+{
+  "trace": {
+    "sourceKind": "symptom",
+    "bucket": "skip",
+    "class": "WRONG_DOOR",
+    "reason": "Symptom diary routed away from lab parser"
+  }
+}

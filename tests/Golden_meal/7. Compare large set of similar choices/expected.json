@@ -1,0 +1,34 @@
+{
+  "id": "G7",
+  "title": "Chip aisle compact compare",
+  "mode": "evaluation",
+  "passes": [
+    {
+      "id": "compare",
+      "prompt": "",
+      "photos": ["Large_food_item_comparison_Up_to_50.jpg"],
+      "kind": "compare_shelf"
+    }
+  ],
+  "expectedItems": [
+    { "key": "happy_tos", "names": ["Happy Tos"] },
+    { "key": "chitato_lite", "names": ["Chitato Lite"] },
+    { "key": "lays", "names": ["Lay's"] },
+    { "key": "qtela", "names": ["Qtela"] },
+    { "key": "doritos", "names": ["Doritos"] },
+    { "key": "taro", "names": ["Taro"] }
+  ],
+  "resolveLocks": [],
+  "catalogGaps": [],
+  "neverMatch": [
+    { "query": "Taro chips", "forbiddenIds": ["170544", "168488"], "forbiddenNames": ["Taro, leaves"] }
+  ],
+  "invariants": [
+    "Mode D compact compare — group by brand / shelf row, do not explode 40–50 curator cases",
+    "Do not open portion-clarify",
+    "Do not live-search USDA for every bag",
+    "Taro the snack brand is not taro leaves"
+  ],
+  "maxResolverCases": 8,
+  "minVisibleBrands": 6
+}

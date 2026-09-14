@@ -2,31 +2,31 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-14T19:01:25.826Z
-**Commit:** `799adbc`
+**When:** 2026-09-14T19:39:03.427Z
+**Commit:** `67da7ca`
 **Instruction hash:** `544787499c26`
-**Seal:** `7786e326c464fccc1db468398b46ba8dec26aec39939444f0055a2b6a62825bc`
+**Seal:** `4a5511899ee624b16f2618d014d385ca4a4e9c2fd1e598616713407fc87d976b`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **NOT ALL GREEN** — 620 pass / 24 fail / 0 skip
+**Overall:** **NOT ALL GREEN** — 666 pass / 1 fail / 0 skip
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | FAIL | 620 pass / 24 fail / 0 skip of 644 |
-| `skip_is_not_pass` | FAIL | 9 required skips scored FAIL (Localization or golden_biomarker) |
-| `collection_does_not_crash` | FAIL | tests/golden_meals.test.ts |
-| `i18n_required_chrome` | FAIL | missing en+id: closeDialog, modalDialog; id copy equals en: analyzingMeal; id is Title-Case leftover of key: analyzingMeal; 244 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
+| `overall_named_gates` | FAIL | 666 pass / 1 fail / 0 skip of 667 |
+| `skip_is_not_pass` | PASS | no required-skip scored as pass |
+| `collection_does_not_crash` | PASS | all named files collected |
+| `i18n_required_chrome` | FAIL | 242 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
 | `structure_inventories` | PASS | helpers present; fallback/polarity/converts not swapped |
 | `load_hack_forbidden` | PASS | no @ts-nocheck; named gates on disk; Top Targets helper intact; contract not painted |
 | `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
 | `result_summary_sealed` | PASS | will not write result_summary (not all green) |
-| `area_localization` | FAIL | 41 pass / 7 fail / 0 skip |
-| `area_meal_log` | FAIL | 165 pass / 5 fail / 0 skip |
+| `area_localization` | FAIL | 47 pass / 1 fail / 0 skip |
+| `area_meal_log` | PASS | 188 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
-| `area_biomarkers` | FAIL | 131 pass / 9 fail / 0 skip |
+| `area_biomarkers` | PASS | 145 pass / 0 fail / 0 skip |
 | `area_receptionist` | PASS | 43 pass / 0 fail / 0 skip |
-| `area_reliability` | FAIL | 193 pass / 3 fail / 0 skip |
+| `area_reliability` | PASS | 196 pass / 0 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
 | `journey-guard` | PASS | exit 0 |
 | `biomarker-lifecycle-m31` | PASS | exit 0 |
@@ -36,58 +36,20 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
-| Localization | FAIL | 41 | 7 | 0 | 48 |
-| Meal Log | FAIL | 165 | 5 | 0 | 170 |
+| Localization | FAIL | 47 | 1 | 0 | 48 |
+| Meal Log | PASS | 188 | 0 | 0 | 188 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
-| Biomarkers | FAIL | 131 | 9 | 0 | 140 |
+| Biomarkers | PASS | 145 | 0 | 0 | 145 |
 | Receptionist | PASS | 43 | 0 | 0 | 43 |
-| Reliability | FAIL | 193 | 3 | 0 | 196 |
+| Reliability | PASS | 196 | 0 | 0 | 196 |
 
 ## All failed (red)
 
-### Meal Log (5)
+### Localization (1)
 
 | Status | File | Test |
 |---|---|---|
-| FAIL | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution case-2 shape: stated 100g matching est suppresses the picker — AssertionError: expected [ { scoutIndex: 2, …(6) } ] to have a length of +0 but got 1 |
-| FAIL | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution fraction without pack basis forces the question when options exist — AssertionError: expected [] to have a length of 1 but got +0 |
-| FAIL | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution fraction with known pack adopts without asking — AssertionError: expected [ { scoutIndex: 2, …(6) } ] to have a length of +0 but got 1 |
-| FAIL | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution diverged statement is adopted with overflow noted, never silently clamped — AssertionError: expected [ { scoutIndex: 2, …(6) } ] to have a length of +0 but got 1 |
-| FAIL | `tests/golden_meals.test.ts` | tests/golden_meals.test.ts — ENOENT: no such file or directory, open 'tests/Golden_meal/1. Multi-food log/expected.json' |
-
-### Biomarkers (9)
-
-| Status | File | Test |
-|---|---|---|
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification missing directory |
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B4 False Friend Guard missing directory |
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B2 EMIS / NHS Table Outer Regression missing directory |
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B3 Lexer Shape & Panel Skip (CONFORMANCE_SHAPE) missing directory |
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B5 Food in Medical (WRONG_DOOR) missing directory |
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B6 Symptom Diary (WRONG_DOOR) missing directory |
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B7 Incomplete Reading (COMPLETENESS) missing directory |
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B8 Repaste Identity (UPSERT_IDENTITY) missing directory |
-| FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B9 Vision N/A (CONFORMANCE_SHAPE) missing directory |
-
-### Reliability (3)
-
-| Status | File | Test |
-|---|---|---|
-| FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser scoreGoldenRun scores expected meal lines against a new pipeline foodLog — AssertionError: expected 1 to be +0 // Object.is equality |
-| FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser names a golden from the dishes, not the job id — AssertionError: expected 'Prawn Layered Pasta Salad + Serrano H…' to be 'Prawn Layered Pasta Salad + Serrano H…' // Object.is equality |
-| FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser splits a mashed Gemini blob and does not keep weight/compare/brand extras on top of the auto overwrite — AssertionError: expected [ 'Portion', 'Weight', …(11) ] to have a length of 3 but got 13 |
-
-### Localization (7)
-
-| Status | File | Test |
-|---|---|---|
-| FAIL | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) keeps every frozen leftover-chrome key in en and id — AssertionError: keys missing from en or id (parity cannot see keys absent from both): expected [ 'closeDialog', 'modalDialog' ] to deeply equal [] |
-| FAIL | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not leak raw keys or English-fill Indonesian chrome — AssertionError: id copy equals en (English-filled): expected [ 'analyzingMeal' ] to deeply equal [] |
-| FAIL | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button — AssertionError: expected '<div role="dialog" aria-modal="true" …' not to contain 'aria-label="closeDialog"' |
-| FAIL | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present — missing en+id: closeDialog, modalDialog |
-| FAIL | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en — id copy equals en: analyzingMeal |
-| FAIL | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_humanized_key — id is Title-Case leftover of key: analyzingMeal |
-| FAIL | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_callsite_keys_in_packs — 244 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
+| FAIL | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_callsite_keys_in_packs — 242 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
 
 ## All skipped (not green)
 
@@ -95,7 +57,7 @@ _none_
 
 ## All passed (green)
 
-### Reliability (193)
+### Reliability (196)
 
 | Status | File | Test |
 |---|---|---|
@@ -223,6 +185,7 @@ _none_
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d drops data: copies once the same captures exist on /photos/ |
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d keeps local data: URLs when nothing has been uploaded yet |
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d dedupes an all-dead list to zero (orphaned hero-slider root cause) |
+| PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser scoreGoldenRun scores expected meal lines against a new pipeline foodLog |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser does not keep leftover category-fallback as a fail when identity ended on labels |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser captures declared never-match and log events |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser surfaces scale / receipt tensions for investigation |
@@ -233,8 +196,10 @@ _none_
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser does not collapse four labeled dishes into the meal title |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser extracts meal lines from itemsBreakdown |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser counts label-locked journey rows when the log has no Component Resolution Diagnostic |
+| PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser names a golden from the dishes, not the job id |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser keeps a previously red check as passed instead of deleting it |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser user extra issues land as custom outcomes |
+| PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser splits a mashed Gemini blob and does not keep weight/compare/brand extras on top of the auto overwrite |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser treats the auto-filled stall block as leftover draft, not a user note |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser does not prefill stall when the meal finished, even if error fields still say stalled |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser does not surface leftover stall on a succeeded job whose log never stalled |
@@ -293,7 +258,7 @@ _none_
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_contract_not_painted |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_no_slice_scripts |
 
-### Meal Log (165)
+### Meal Log (188)
 
 | Status | File | Test |
 |---|---|---|
@@ -388,9 +353,13 @@ _none_
 | PASS | `server_portion_clarify.test.ts` | parseServingGramsFromLabel requires a g/ml unit so "1 serving (70g)" is 70, not 1 |
 | PASS | `server_portion_clarify.test.ts` | detectPortionAmbiguity brand names does not treat a brand name number as pack unit count (Pia 100 Nanas) |
 | PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution statedMatchesEstimate uses one named kitchen-rounding tolerance |
+| PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution case-2 shape: stated 100g matching est suppresses the picker |
 | PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution case-1 shape: 28g est on 180g pack with no statement still asks (half/quarter are real options) |
 | PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution parses Indonesian pack prints into packGrams (boundary data, not logic) |
 | PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution bare grams across dishes injects "You said" options instead of dying silently |
+| PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution fraction without pack basis forces the question when options exist |
+| PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution fraction with known pack adopts without asking |
+| PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution diverged statement is adopted with overflow noted, never silently clamped |
 | PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution questions and past references yield zero candidates (behavior unchanged) |
 | PASS | `server_portion_clarify.test.ts` | S-10 PORTION_FUNNEL quantity resolution ambiguous match across two items synthesizes disambiguation (no silent adopt) |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout heals unterminated string JSON from a truncated scout reply |
@@ -436,6 +405,25 @@ _none_
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling applies unsweetened modifier correctly to Indonesian iced tea (Es Manis / Es Tawar) |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling reconcileIngredientsToComponents gives injected ingredients valid non-zero nutrients and prevents duplicates |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling unrolls a single dish containing multiple distinct food components into separate top-level items without subitems |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set registers exactly the official goldens |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set each golden has Instruction.md, expected.json, and every listed photo |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match dictionary locks resolve to the pinned local canonical id |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match documented catalog gaps do not silently resolve today |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match never-match table rejects the known USDA / brand false friends |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match category gate still blocks water for a yogurt query |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G1 picnic query hygiene + edit searches wrap/salad components, not the parent dish title |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G1 picnic query hygiene + edit "I ate this croissant" is an item edit, not a half/pack refine |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G2 Sainsbury oats brand math normalizes Sainsbury to chain_key sainsbury |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G2 Sainsbury oats brand math scales official per-100g oats to the user 60g |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G2 Sainsbury oats brand math local brand catalog contains the Scottish rolled oats row |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G3 Yolk refine half-of-the-potatoes is a refine of potatoes only |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G3 Yolk refine does not treat the only local Yolk row as a match for the steak bowl |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G5 printed labels parses visible kcal from the labelled packs |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G5 printed labels parses serving grams from the Indonesian labels |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G5 printed labels pins the three calorie-labelled servings in expected.json |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — G4 / G6 / G7 mode contracts G4 first pass is portion_clarify; G6/G7 are compare, not portion |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — F-3 Multi-component regional dish decomposition decomposes a dim sum set into distinct searchable item queries without parent pollution |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — F-3 Multi-component regional dish decomposition decomposes a Japanese bento box into protein, carb, sides, and soup components |
 | PASS | `src/components/NutrientPieChart.test.tsx` | NutrientPieChart polarity wrap wraps sat-fat overage in rose, protein overage in emerald |
 | PASS | `src/components/NutrientTargetRow.test.tsx` | NutrientTargetRow renders all top target nutrients matching Home derivation |
 | PASS | `src/utils/nutrients.test.ts` | getTopTargetNutrientKeys never uses Object.keys(dailyNutrientTargets).slice(0, 5) |
@@ -463,7 +451,7 @@ _none_
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_top_targets_fallback |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_limit_keys_present |
 
-### Localization (41)
+### Localization (47)
 
 | Status | File | Test |
 |---|---|---|
@@ -500,16 +488,22 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) keys the S-1 button/card chrome in en and id with differing copy |
 | PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) documents parked S-1 residuals without keying them yet |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not drop leak-class keys from the frozen list |
+| PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) keeps every frozen leftover-chrome key in en and id |
+| PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not leak raw keys or English-fill Indonesian chrome |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
+| PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
+| PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |
+| PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_humanized_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_id_not_incident_string |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_components_not_hardcoded_incident |
 
-### Biomarkers (131)
+### Biomarkers (145)
 
 | Status | File | Test |
 |---|---|---|
@@ -522,8 +516,22 @@ _none_
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 biomarker process board — §1.3.1 bio exits DIAG5 auto-send does not fire on a lab chat |
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 biomarker process board — §1.3.1 bio exits shared stall hop still hops on 503 for a medical dummy tree |
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 in-memory medical publish isolation does not treat empty medical dummy as food ledger |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 case metadata and class bindings |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 five locked unit conversions match expected.json |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 review modification synthesis converts only non-SI row |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies B0.1-0.3 / G-B1 applyModificationCommands writes history and retains observationMeta raw while leaving older SI untouched |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies IngestTrace type contract and ClassId enums |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B4 False Friend Guard verifies false friends do not cross-map |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B2 EMIS / NHS Table Outer Regression verifies G-B2 assertions run lexTable and buildIngestBatch for class counts |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B2 EMIS / NHS Table Outer Regression splits a single-line quoted EMIS paste into records (production shape) |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B3 Lexer Shape & Panel Skip (CONFORMANCE_SHAPE) verifies G-B3 shape conformance, UK unit exponential handling, and panel skips |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B5 Food in Medical (WRONG_DOOR) verifies G-B5 class bindings and executes destination routing |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B6 Symptom Diary (WRONG_DOOR) verifies G-B6 symptom diary classification and executes routing helper |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B7 Incomplete Reading (COMPLETENESS) verifies G-B7 incomplete reading detection via lexTable and buildIngestBatch |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B8 Repaste Identity (UPSERT_IDENTITY) verifies G-B8 identity upsert class and verifies report deduplication match |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — Telemetry Multiplier & Auto-Fix Proposals correctly computes deterministic conversion proposals strictly for US <-> SI unit differences |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — Telemetry Multiplier & Auto-Fix Proposals detects flagged telemetry errors and correctly separates auto-fixable US/SI units from AI review cases |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B9 Vision N/A (CONFORMANCE_SHAPE) verifies G-B9 vision N/A image handling via shouldAbortTablePath helper |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — Multi-Panel Ingestion & Plausibility Validation Architecture resolves multi-panel NHS / UK laboratory print names correctly without alias collision |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — Multi-Panel Ingestion & Plausibility Validation Architecture verifies unit conversions in ANALYTE_CONVERSIONS for hematology and metabolic panels |
 | PASS | `src/utils/biomarkerIdentity.test.ts` | getMappedBiomarkerKey — identity maps empty to empty |
@@ -838,8 +846,6 @@ _none_
 - `delWarnDataB (src/components/UserManagementTab.tsx)`
 - `delWarnDataC (src/components/UserManagementTab.tsx)`
 - `delWarnDataD (src/components/UserManagementTab.tsx)`
-- `modalDialog (src/components/ui/AppModal.tsx)`
-- `closeDialog (src/components/ui/AppModal.tsx)`
 - `recepCurrentWeight (src/server/receptionist/call_agent.ts)`
 - `recepActivityLevel (src/server/receptionist/call_agent.ts)`
 - `recepTargetWeight (src/server/receptionist/call_agent.ts)`

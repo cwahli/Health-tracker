@@ -1,0 +1,13 @@
+{
+  "trace": {
+    "totalInputRows": 4,
+    "panelHeaderSkipped": 1,
+    "highConfidenceCount": 3,
+    "sourceKind": "table",
+    "class": "CONFORMANCE_SHAPE"
+  },
+  "ukUnitsNormalized": {
+    "10*9/L": "10^9/L",
+    "10^9/L": "10^9/L"
+  }
+}

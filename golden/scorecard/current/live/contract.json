@@ -1,7 +1,8 @@
 {
   "pack": "scorecard",
-  "commit": "799adbc",
-  "commitSource": "git-version.generated",
+  "commit": "67da7ca",
+  "commitSource": "env",
+  "time": "2026-09-14T19:39:35.911Z",
   "inventories": {
     "top_targets": {
       "helper": "getTopTargetNutrientKeys",
@@ -62,8 +63,7 @@
         "thiamine",
         "riboflavin",
         "niacin"
-      ],
-      "nutrient_key_count": 32
+      ]
     },
     "biomarkers": {
       "convert_via": "ANALYTE_CONVERSIONS",

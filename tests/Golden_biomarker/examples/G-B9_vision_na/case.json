@@ -1,0 +1,10 @@
+{
+  "id": "G-B9",
+  "class": "CONFORMANCE_SHAPE",
+  "classes": ["CONFORMANCE_SHAPE"],
+  "text": "[Image: blurry scenic photograph]",
+  "fixture": {
+    "sourceKind": "image",
+    "isNonMedicalImage": true
+  }
+}

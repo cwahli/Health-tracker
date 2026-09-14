@@ -1,0 +1,21 @@
+{
+  "id": "G-B8_repaste_identity",
+  "class": "UPSERT_IDENTITY",
+  "classes": [
+    "UPSERT_IDENTITY"
+  ],
+  "input": {
+    "sourceReportId": "report_nhs_2026_08_14",
+    "text": "Serum cholesterol\t5.2\tmmol/L\t[0.0-5.0]\tHigh",
+    "existingHistory": [
+      {
+        "id": "log_existing_1",
+        "date": "2026-08-14",
+        "sourceReportId": "report_nhs_2026_08_14",
+        "biomarkers": {
+          "cholesterol": 5.2
+        }
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 {
   "origin": "https://health-tracker-backend-64gt.onrender.com",
-  "exportedAt": "2026-09-14T19:01:58.475Z",
+  "exportedAt": "2026-09-14T19:39:35.814Z",
   "failed": 0,
   "probes": [
     {
@@ -21,8 +21,8 @@
     {
       "id": "scorecard_contract",
       "result": "PASS",
-      "message": "commit 799adbc (git-version.generated)"
+      "message": "commit 67da7ca (env)"
     }
   ],
-  "contractCommit": "799adbc"
+  "contractCommit": "67da7ca"
 }
