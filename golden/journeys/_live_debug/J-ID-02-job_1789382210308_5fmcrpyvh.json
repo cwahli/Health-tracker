@@ -1,0 +1,1275 @@
+{
+  "jobId": "job_1789382210308_5fmcrpyvh",
+  "conversationId": null,
+  "pack": "food",
+  "status": "succeeded",
+  "exportedAt": "2026-09-14T10:37:08.211Z",
+  "dialogInventory": null,
+  "lastUserAction": {
+    "action": "submit_meal_job",
+    "timestamp": "2026-09-14T10:36:51.015Z"
+  },
+  "breadcrumbs": [
+    {
+      "timestamp": "2026-09-14T10:36:46.271Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "auth-email-input",
+        "valueLength": 37
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:46.305Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "auth-password-input",
+        "valueLength": 12
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:46.306Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "auth-submit-btn",
+        "label": "Continue with email"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:49.373Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "label": "w-14 h-14 bg-indigo-600 text-w"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:50.308Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "quick-action-compare-meal",
+        "label": "Compare"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:50.637Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 48
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:50.917Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "food-chat-input",
+        "valueLength": 77
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:50.918Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "food-chat-send-btn",
+        "label": "food-chat-send-btn"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:50.921Z",
+      "action": "submit_initiated",
+      "target": "chat_composer",
+      "details": {
+        "prompt": "Bandingkan menu ini untuk tinggi badan 140 cm dengan target 1350 kkal harian.",
+        "imageCount": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:36:51.015Z",
+      "action": "submit_meal_job",
+      "target": "chat_compose_dock",
+      "details": {
+        "jobId": "job_1789382210308_5fmcrpyvh",
+        "promptLength": 77,
+        "imageCount": 2,
+        "submissionMode": "compare"
+      }
+    }
+  ],
+  "sessionEvents": [
+    {
+      "ts": 1789382210308,
+      "writer": "JobStore.apply",
+      "status": "draft",
+      "action": "createJob"
+    },
+    {
+      "ts": 1789382210939,
+      "writer": "LogChat.submit",
+      "status": "queued",
+      "action": "SubmitStarted"
+    },
+    {
+      "ts": 1789382212818,
+      "writer": "serverJobs.start",
+      "status": "running",
+      "action": "job_started"
+    },
+    {
+      "ts": 1789382225360,
+      "writer": "serverJobs.complete",
+      "status": "succeeded",
+      "action": "job_completed"
+    }
+  ],
+  "console": [
+    "[job_1789382210308_5fmcrpyvh] [LOG 2026-09-14T10:36:45.616Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling",
+    "[job_1789382210308_5fmcrpyvh] [LOG 2026-09-14T10:36:47.750Z] [Sync] Force pull (Manual Sync) active. Pushing local unsynced logs and profile first.",
+    "[job_1789382210308_5fmcrpyvh] [LOG 2026-09-14T10:36:48.722Z] [Sync] Pre-pull push complete: 0 foods, 0 bios"
+  ],
+  "network": [],
+  "handoffs": [],
+  "dispatches": [
+    {
+      "id": "t1/scout",
+      "parent": null,
+      "turn": 1,
+      "agent": "scout",
+      "user": "Bandingkan menu ini untuk tinggi badan 140 cm dengan target 1350 kkal harian.",
+      "received": {
+        "mode": "compare"
+      },
+      "systemInstruction": "=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is Bahasa Indonesia (code: id).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in Bahasa Indonesia.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nDo not reply in English unless the user wrote this turn in English and is clearly asking for English.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into Bahasa Indonesia.\n\nYou are a Clinical Dietitian & Vision Scout evaluating competing food options (Mode D).\n\nTASK:\nSTEP 1: FIRST, EXHAUSTIVELY LIST EVERY LEGIBLE DISH/PRODUCT ACROSS ALL IMAGES INTO 'allExtractedDishes'.\nSTEP 2: THEN, GROUP EVERY EXTRACTED DISH INTO NUTRITIONAL CLUSTERS WITH <=10% MACRO VARIANCE.\n\nCLINICAL INVARIANTS:\n1. EVALUATION ONLY (NON-ADDITIVE):\n   - Items are mutually exclusive candidate choices. Never sum meal totals or log as a consumed plate. Do not calculate composite meal totals or prompt for portion confirmations.\n\n2. EXHAUSTIVE EXTRACTION FIRST (NO OMISSIONS):\n   - In 'allExtractedDishes', scan every column, section, shelf, and page top-to-bottom across ALL images without stopping.\n   - Do NOT provide a representative sample or cap at 3-5 items. Transcribe EVERY single legible dish/product into 'allExtractedDishes' (dense restaurant menus contain 30 to 100+ total dishes).\n   - Format non-English names as 'Local Name / English Translation'.\n\n3. <=10% MACRO VARIANCE CLUSTERING (ANTI-COLLAPSE):\n   - Group items together ONLY if estimated macronutrients differ by <=10%.\n   - CRITICAL ANTI-COLLAPSE RULE: Do NOT dump dozens of items into a giant catch-all warning/alert group. Split broad categories into separate groups if preparation methods cause >10% macro variance (e.g., water-poached broths vs boiled greens vs steamed plant proteins vs stir-fried vegetables vs plain carbs vs coconut/fried carbs vs lean grilled/steamed marine fish vs batter-fried poultry/catfish meal sets vs salted fish vs organ meats/offal vs spicy starches/seblak vs sweet confectionery/desserts).\n   - HARD SIZE CAP: Never emit a group with >=40 items. If a cluster would exceed ~35 items, split by preparation class (grill/steam vs deep-fry vs coconut rice vs offal vs seblak) until every group is under 40.\n       - MARINE WHOLE-FISH SEPARATION: Whole marine Omega-3 fish meal sets and grilled/steamed whole sea fish (Paket Kembung / mackerel-class / kembung-class / nila-class whole fish packages) MUST NOT share a group with deep-fried meal sets, organ meats/offal (usus/ati/jeroan), or seblak/ultra-processed spicy starches. Elevate cardioprotective marine Omega-3 whole-fish classes into Tier 1 (good) or Tier 2 (neutral); keep oxidized deep-fry oils, offal, and seblak in Tier 3–4.\n   - Every single dish from 'allExtractedDishes' MUST be classified into exactly one group.\n\n4. UNLISTED HARMS & BENEFITS ISOLATION:\n   - Beyond raw macros, actively evaluate physiological hazards and cardioprotective benefits:\n     * UNLISTED HARMS: Isolate oxidized deep-frying oils, lipid peroxides, trans fats, and ultra-processed gelatinized starches (e.g., Seblak) into Tier 3 (Warning) or Tier 4 (Alert).\n     * BENEFITS: Elevate whole foods offering cardioprotective marine Omega-3s (EPA/DHA in whole sea fish / whole marine fish meal sets) and antioxidant polyphenols (sour fruit broths) into Tier 1 (Good) or Tier 2 (Neutral) — never demote those classes into the same alert cluster as deep-fried sets, offal, or seblak.\n\n5. TARGET-DRIVEN CLINICAL RANKING & COMBINED GUIDANCE:\n   - Rank groups strictly descending: Best choice addressing the patient's active surpluses and deficits at the top ('good'), least suitable at the bottom ('alert').\n   - Tailor all verdicts, comparative sentences, and clinical messages directly to the patient's target deviations.\n   - Combine clinical guidance and an actionable ordering tip into a single cohesive message.",
+      "userPrompt": "User request: \"Bandingkan menu ini untuk tinggi badan 140 cm dengan target 1350 kkal harian.\" (2 images). FIRST: List all visible dishes into 'allExtractedDishes'. THEN: Distribute EVERY dish into <=10% macro variance groups (sum of group items must equal total extracted dishes).",
+      "instruction": "=== SYSTEM INSTRUCTION ===\n=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is Bahasa Indonesia (code: id).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in Bahasa Indonesia.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nDo not reply in English unless the user wrote this turn in English and is clearly asking for English.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into Bahasa Indonesia.\n\nYou are a Clinical Dietitian & Vision Scout evaluating competing food options (Mode D).\n\nTASK:\nSTEP 1: FIRST, EXHAUSTIVELY LIST EVERY LEGIBLE DISH/PRODUCT ACROSS ALL IMAGES INTO 'allExtractedDishes'.\nSTEP 2: THEN, GROUP EVERY EXTRACTED DISH INTO NUTRITIONAL CLUSTERS WITH <=10% MACRO VARIANCE.\n\nCLINICAL INVARIANTS:\n1. EVALUATION ONLY (NON-ADDITIVE):\n   - Items are mutually exclusive candidate choices. Never sum meal totals or log as a consumed plate. Do not calculate composite meal totals or prompt for portion confirmations.\n\n2. EXHAUSTIVE EXTRACTION FIRST (NO OMISSIONS):\n   - In 'allExtractedDishes', scan every column, section, shelf, and page top-to-bottom across ALL images without stopping.\n   - Do NOT provide a representative sample or cap at 3-5 items. Transcribe EVERY single legible dish/product into 'allExtractedDishes' (dense restaurant menus contain 30 to 100+ total dishes).\n   - Format non-English names as 'Local Name / English Translation'.\n\n3. <=10% MACRO VARIANCE CLUSTERING (ANTI-COLLAPSE):\n   - Group items together ONLY if estimated macronutrients differ by <=10%.\n   - CRITICAL ANTI-COLLAPSE RULE: Do NOT dump dozens of items into a giant catch-all warning/alert group. Split broad categories into separate groups if preparation methods cause >10% macro variance (e.g., water-poached broths vs boiled greens vs steamed plant proteins vs stir-fried vegetables vs plain carbs vs coconut/fried carbs vs lean grilled/steamed marine fish vs batter-fried poultry/catfish meal sets vs salted fish vs organ meats/offal vs spicy starches/seblak vs sweet confectionery/desserts).\n   - HARD SIZE CAP: Never emit a group with >=40 items. If a cluster would exceed ~35 items, split by preparation class (grill/steam vs deep-fry vs coconut rice vs offal vs seblak) until every group is under 40.\n       - MARINE WHOLE-FISH SEPARATION: Whole marine Omega-3 fish meal sets and grilled/steamed whole sea fish (Paket Kembung / mackerel-class / kembung-class / nila-class whole fish packages) MUST NOT share a group with deep-fried meal sets, organ meats/offal (usus/ati/jeroan), or seblak/ultra-processed spicy starches. Elevate cardioprotective marine Omega-3 whole-fish classes into Tier 1 (good) or Tier 2 (neutral); keep oxidized deep-fry oils, offal, and seblak in Tier 3–4.\n   - Every single dish from 'allExtractedDishes' MUST be classified into exactly one group.\n\n4. UNLISTED HARMS & BENEFITS ISOLATION:\n   - Beyond raw macros, actively evaluate physiological hazards and cardioprotective benefits:\n     * UNLISTED HARMS: Isolate oxidized deep-frying oils, lipid peroxides, trans fats, and ultra-processed gelatinized starches (e.g., Seblak) into Tier 3 (Warning) or Tier 4 (Alert).\n     * BENEFITS: Elevate whole foods offering cardioprotective marine Omega-3s (EPA/DHA in whole sea fish / whole marine fish meal sets) and antioxidant polyphenols (sour fruit broths) into Tier 1 (Good) or Tier 2 (Neutral) — never demote those classes into the same alert cluster as deep-fried sets, offal, or seblak.\n\n5. TARGET-DRIVEN CLINICAL RANKING & COMBINED GUIDANCE:\n   - Rank groups strictly descending: Best choice addressing the patient's active surpluses and deficits at the top ('good'), least suitable at the bottom ('alert').\n   - Tailor all verdicts, comparative sentences, and clinical messages directly to the patient's target deviations.\n   - Combine clinical guidance and an actionable ordering tip into a single cohesive message.\n\n=== USER PROMPT ===\nUser request: \"Bandingkan menu ini untuk tinggi badan 140 cm dengan target 1350 kkal harian.\" (2 images). FIRST: List all visible dishes into 'allExtractedDishes'. THEN: Distribute EVERY dish into <=10% macro variance groups (sum of group items must equal total extracted dishes).",
+      "output": {
+        "allExtractedDishes": [
+          "Polo Cokelat / Chocolate Polo Bread",
+          "Polo Keju / Cheese Polo Bread",
+          "Choco Topping Pie / Chocolate Topping Pie",
+          "Cheese Topping Pie / Cheese Topping Pie",
+          "Double Cheese Bread / Double Cheese Bread",
+          "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+          "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+          "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+          "Kinder Joy / Kinder Joy Surprise Egg"
+        ],
+        "_internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+        "comparisonTitle": "Pilihan Roti dan Cokelat Rak Ritel / Retail Bakery and Confectionery Shelf Selection",
+        "comparisonType": "shelf_selection",
+        "summary": "Evaluasi pilihan rak toko ritel ini menunjukkan produk tinggi gula sederhana dan lemak jenuh yang dapat dengan cepat menghabiskan kuota kalori harian Anda yang terbatas (1350 kkal). Batasi konsumsi dan pilih opsi dengan kandungan protein lebih baik jika diperlukan.",
+        "recommendedOption": "Double Cheese Bread / Double Cheese Bread",
+        "groups": [
+          {
+            "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+            "sourceImageIndex": 0,
+            "verdict": {
+              "label": "Karbohidrat Tinggi & Kalori Sedang",
+              "level": "neutral"
+            },
+            "comparisonSentence": "Kelompok roti ini menawarkan sedikit lebih banyak protein dan serat dibandingkan cokelat batangan, namun tetap tinggi karbohidrat olahan.",
+            "message": "Dengan batas kalori harian 1350 kkal, produk roti manis seperti Polo dan Pie memberikan pasokan energi instan tetapi minim mikronutrien esensial. Konsumsi dalam porsi kecil dan kombinasikan dengan sumber protein tanpa lemak untuk mengontrol lonjakan gula darah.",
+            "orderingTip": "Pilih varian keju untuk tambahan protein minor, dan batasi konsumsi hanya setengah bagian per sajian.",
+            "boundingBox2D": [
+              0,
+              0,
+              950,
+              1000
+            ],
+            "servingWeightGrams": 80,
+            "averageNutrientsPer100g": {
+              "calories": 380,
+              "protein": 8.5,
+              "totalFat": 14,
+              "saturatedFat": 6.5,
+              "carbohydrates": 55,
+              "sugar": 18,
+              "totalFibre": 2.5,
+              "sodium": 320,
+              "addedSugar": 15,
+              "transFat": 0.5
+            },
+            "items": [
+              "Polo Cokelat / Chocolate Polo Bread",
+              "Polo Keju / Cheese Polo Bread",
+              "Choco Topping Pie / Chocolate Topping Pie",
+              "Cheese Topping Pie / Cheese Topping Pie",
+              "Double Cheese Bread / Double Cheese Bread"
+            ]
+          },
+          {
+            "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+            "sourceImageIndex": 1,
+            "verdict": {
+              "label": "Tinggi Gula & Lemak Jenuh",
+              "level": "alert"
+            },
+            "comparisonSentence": "Dibandingkan kelompok roti, kelompok cokelat ini memiliki rasio kalori per gram yang jauh lebih tinggi dan gula tambahan yang sangat padat.",
+            "message": "Produk seperti SilverQueen dan es krim Magnum mengandung lemak jenuh dan gula rafinasi tinggi yang dapat memperburuk profil lipid dan memicu surplus kalori harian target 1350 kkal Anda. Sangat disarankan untuk menghindari atau membatasi konsumsinya secara ketat.",
+            "orderingTip": "Jika ingin menikmati cokelat, batasi hanya satu kotak kecil (20g) dan hindari konsumsi harian.",
+            "boundingBox2D": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "servingWeightGrams": 50,
+            "averageNutrientsPer100g": {
+              "calories": 540,
+              "protein": 8,
+              "totalFat": 32,
+              "saturatedFat": 16,
+              "carbohydrates": 52,
+              "sugar": 45,
+              "totalFibre": 3,
+              "sodium": 100,
+              "addedSugar": 40,
+              "transFat": 1
+            },
+            "items": [
+              "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+              "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+              "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+              "Kinder Joy / Kinder Joy Surprise Egg"
+            ]
+          }
+        ]
+      },
+      "rawEmission": {
+        "allExtractedDishes": [
+          "Polo Cokelat / Chocolate Polo Bread",
+          "Polo Keju / Cheese Polo Bread",
+          "Choco Topping Pie / Chocolate Topping Pie",
+          "Cheese Topping Pie / Cheese Topping Pie",
+          "Double Cheese Bread / Double Cheese Bread",
+          "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+          "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+          "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+          "Kinder Joy / Kinder Joy Surprise Egg"
+        ],
+        "_internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+        "comparisonTitle": "Pilihan Roti dan Cokelat Rak Ritel / Retail Bakery and Confectionery Shelf Selection",
+        "comparisonType": "shelf_selection",
+        "summary": "Evaluasi pilihan rak toko ritel ini menunjukkan produk tinggi gula sederhana dan lemak jenuh yang dapat dengan cepat menghabiskan kuota kalori harian Anda yang terbatas (1350 kkal). Batasi konsumsi dan pilih opsi dengan kandungan protein lebih baik jika diperlukan.",
+        "recommendedOption": "Double Cheese Bread / Double Cheese Bread",
+        "groups": [
+          {
+            "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+            "sourceImageIndex": 0,
+            "verdict": {
+              "label": "Karbohidrat Tinggi & Kalori Sedang",
+              "level": "neutral"
+            },
+            "comparisonSentence": "Kelompok roti ini menawarkan sedikit lebih banyak protein dan serat dibandingkan cokelat batangan, namun tetap tinggi karbohidrat olahan.",
+            "message": "Dengan batas kalori harian 1350 kkal, produk roti manis seperti Polo dan Pie memberikan pasokan energi instan tetapi minim mikronutrien esensial. Konsumsi dalam porsi kecil dan kombinasikan dengan sumber protein tanpa lemak untuk mengontrol lonjakan gula darah.",
+            "orderingTip": "Pilih varian keju untuk tambahan protein minor, dan batasi konsumsi hanya setengah bagian per sajian.",
+            "boundingBox2D": [
+              0,
+              0,
+              950,
+              1000
+            ],
+            "servingWeightGrams": 80,
+            "averageNutrientsPer100g": {
+              "calories": 380,
+              "protein": 8.5,
+              "totalFat": 14,
+              "saturatedFat": 6.5,
+              "carbohydrates": 55,
+              "sugar": 18,
+              "totalFibre": 2.5,
+              "sodium": 320,
+              "addedSugar": 15,
+              "transFat": 0.5
+            },
+            "items": [
+              "Polo Cokelat / Chocolate Polo Bread",
+              "Polo Keju / Cheese Polo Bread",
+              "Choco Topping Pie / Chocolate Topping Pie",
+              "Cheese Topping Pie / Cheese Topping Pie",
+              "Double Cheese Bread / Double Cheese Bread"
+            ]
+          },
+          {
+            "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+            "sourceImageIndex": 1,
+            "verdict": {
+              "label": "Tinggi Gula & Lemak Jenuh",
+              "level": "alert"
+            },
+            "comparisonSentence": "Dibandingkan kelompok roti, kelompok cokelat ini memiliki rasio kalori per gram yang jauh lebih tinggi dan gula tambahan yang sangat padat.",
+            "message": "Produk seperti SilverQueen dan es krim Magnum mengandung lemak jenuh dan gula rafinasi tinggi yang dapat memperburuk profil lipid dan memicu surplus kalori harian target 1350 kkal Anda. Sangat disarankan untuk menghindari atau membatasi konsumsinya secara ketat.",
+            "orderingTip": "Jika ingin menikmati cokelat, batasi hanya satu kotak kecil (20g) dan hindari konsumsi harian.",
+            "boundingBox2D": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "servingWeightGrams": 50,
+            "averageNutrientsPer100g": {
+              "calories": 540,
+              "protein": 8,
+              "totalFat": 32,
+              "saturatedFat": 16,
+              "carbohydrates": 52,
+              "sugar": 45,
+              "totalFibre": 3,
+              "sodium": 100,
+              "addedSugar": 40,
+              "transFat": 1
+            },
+            "items": [
+              "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+              "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+              "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+              "Kinder Joy / Kinder Joy Surprise Egg"
+            ]
+          }
+        ]
+      },
+      "model": "gemini-3.5-flash-lite",
+      "latency_ms": 9725,
+      "error": null
+    }
+  ],
+  "contract": [
+    {
+      "law": "SSE {final,result}",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Final result emitted; job succeeded"
+    },
+    {
+      "law": "AnalyzeFinished count = 1",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "AnalyzeFinished count = 1"
+    },
+    {
+      "law": "Stall/503/quota -> 3.1 hop, same job",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No stall or 503 encountered"
+    },
+    {
+      "law": "Submit JSON running",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Submit transitioned directly to running"
+    },
+    {
+      "law": "pendingFoodLog -> succeeded before R2",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No finalized food log in this run"
+    },
+    {
+      "law": "Retry hidden if succeeded or kcal in logs",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dialog inventory captured"
+    },
+    {
+      "law": "Attempt 1/3 hidden if succeeded",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dialog inventory captured"
+    },
+    {
+      "law": "Dialog on_card kcal = ledger",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No on_card macros in dialog inventory"
+    },
+    {
+      "law": "Composer controls count = 1",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No composer inventory captured"
+    },
+    {
+      "law": "DIAG5 off on food",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "DIAG5 auto-send remained off for food chat"
+    },
+    {
+      "law": "Matrix calc matches ledger",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "No meal ledger required"
+    },
+    {
+      "law": "Each dispatch has model + latency_ms",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "All 1 dispatch(es) contain model and latency_ms"
+    },
+    {
+      "law": "Handoff from/to + same jobId if transfer",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No agent handoffs in this run"
+    },
+    {
+      "law": "Agent output: nutrients complete",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No finalized ledger in this run"
+    },
+    {
+      "law": "Agent output: verdict + advice",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No turn-attributed meal dispatches in this run"
+    },
+    {
+      "law": "Dishes: fields populated",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dishes in any agent emission"
+    },
+    {
+      "law": "Multi-turn split shown",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Single-turn run, no split state"
+    },
+    {
+      "law": "Mode instruction chunk",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Mode D compare chunk(s) shown for mode(s)=compare"
+    },
+    {
+      "law": "Edit patch: components & nutrients preserved",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Single-turn create, no edit turns"
+    },
+    {
+      "law": "Handoff chain complete",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No handoffs in this run"
+    },
+    {
+      "law": "Handoff received",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Direct food log, no forwarded handoff"
+    },
+    {
+      "law": "Lab panel complete",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Medical-only law (pack=food)"
+    },
+    {
+      "law": "Clinical report shown",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Medical-only law (pack=food)"
+    }
+  ],
+  "portionAdjustment": null,
+  "linkedJobs": [],
+  "pendingFoodLog": null,
+  "scoutItems": [
+    {
+      "name": "Polo Cokelat / Chocolate Polo Bread",
+      "keyword": "Polo Cokelat / Chocolate Polo Bread",
+      "originalName": "Polo Cokelat / Chocolate Polo Bread",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        950,
+        1000
+      ],
+      "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+      "scoutIndex": 0,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Polo Keju / Cheese Polo Bread",
+      "keyword": "Polo Keju / Cheese Polo Bread",
+      "originalName": "Polo Keju / Cheese Polo Bread",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        950,
+        1000
+      ],
+      "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+      "scoutIndex": 1,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Choco Topping Pie / Chocolate Topping Pie",
+      "keyword": "Choco Topping Pie / Chocolate Topping Pie",
+      "originalName": "Choco Topping Pie / Chocolate Topping Pie",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        950,
+        1000
+      ],
+      "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+      "scoutIndex": 2,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Cheese Topping Pie / Cheese Topping Pie",
+      "keyword": "Cheese Topping Pie / Cheese Topping Pie",
+      "originalName": "Cheese Topping Pie / Cheese Topping Pie",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        950,
+        1000
+      ],
+      "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+      "scoutIndex": 3,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Double Cheese Bread / Double Cheese Bread",
+      "keyword": "Double Cheese Bread / Double Cheese Bread",
+      "originalName": "Double Cheese Bread / Double Cheese Bread",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        950,
+        1000
+      ],
+      "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+      "scoutIndex": 4,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+      "keyword": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+      "originalName": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+      "scoutIndex": 5,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+      "keyword": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+      "originalName": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+      "scoutIndex": 6,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+      "keyword": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+      "originalName": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+      "scoutIndex": 7,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Kinder Joy / Kinder Joy Surprise Egg",
+      "keyword": "Kinder Joy / Kinder Joy Surprise Egg",
+      "originalName": "Kinder Joy / Kinder Joy Surprise Egg",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+      "scoutIndex": 8,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+      "ingredients": [],
+      "visualIngredients": []
+    }
+  ],
+  "rawScout": {
+    "allExtractedDishes": [
+      "Polo Cokelat / Chocolate Polo Bread",
+      "Polo Keju / Cheese Polo Bread",
+      "Choco Topping Pie / Chocolate Topping Pie",
+      "Cheese Topping Pie / Cheese Topping Pie",
+      "Double Cheese Bread / Double Cheese Bread",
+      "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+      "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+      "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+      "Kinder Joy / Kinder Joy Surprise Egg"
+    ],
+    "_internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm.",
+    "comparisonTitle": "Pilihan Roti dan Cokelat Rak Ritel / Retail Bakery and Confectionery Shelf Selection",
+    "comparisonType": "shelf_selection",
+    "summary": "Evaluasi pilihan rak toko ritel ini menunjukkan produk tinggi gula sederhana dan lemak jenuh yang dapat dengan cepat menghabiskan kuota kalori harian Anda yang terbatas (1350 kkal). Batasi konsumsi dan pilih opsi dengan kandungan protein lebih baik jika diperlukan.",
+    "recommendedOption": "Double Cheese Bread / Double Cheese Bread",
+    "groups": [
+      {
+        "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+        "sourceImageIndex": 0,
+        "verdict": {
+          "label": "Karbohidrat Tinggi & Kalori Sedang",
+          "level": "neutral"
+        },
+        "comparisonSentence": "Kelompok roti ini menawarkan sedikit lebih banyak protein dan serat dibandingkan cokelat batangan, namun tetap tinggi karbohidrat olahan.",
+        "message": "Dengan batas kalori harian 1350 kkal, produk roti manis seperti Polo dan Pie memberikan pasokan energi instan tetapi minim mikronutrien esensial. Konsumsi dalam porsi kecil dan kombinasikan dengan sumber protein tanpa lemak untuk mengontrol lonjakan gula darah.",
+        "orderingTip": "Pilih varian keju untuk tambahan protein minor, dan batasi konsumsi hanya setengah bagian per sajian.",
+        "boundingBox2D": [
+          0,
+          0,
+          950,
+          1000
+        ],
+        "servingWeightGrams": 80,
+        "averageNutrientsPer100g": {
+          "calories": 380,
+          "protein": 8.5,
+          "totalFat": 14,
+          "saturatedFat": 6.5,
+          "carbohydrates": 55,
+          "sugar": 18,
+          "totalFibre": 2.5,
+          "sodium": 320,
+          "addedSugar": 15,
+          "transFat": 0.5
+        },
+        "items": [
+          "Polo Cokelat / Chocolate Polo Bread",
+          "Polo Keju / Cheese Polo Bread",
+          "Choco Topping Pie / Chocolate Topping Pie",
+          "Cheese Topping Pie / Cheese Topping Pie",
+          "Double Cheese Bread / Double Cheese Bread"
+        ]
+      },
+      {
+        "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+        "sourceImageIndex": 1,
+        "verdict": {
+          "label": "Tinggi Gula & Lemak Jenuh",
+          "level": "alert"
+        },
+        "comparisonSentence": "Dibandingkan kelompok roti, kelompok cokelat ini memiliki rasio kalori per gram yang jauh lebih tinggi dan gula tambahan yang sangat padat.",
+        "message": "Produk seperti SilverQueen dan es krim Magnum mengandung lemak jenuh dan gula rafinasi tinggi yang dapat memperburuk profil lipid dan memicu surplus kalori harian target 1350 kkal Anda. Sangat disarankan untuk menghindari atau membatasi konsumsinya secara ketat.",
+        "orderingTip": "Jika ingin menikmati cokelat, batasi hanya satu kotak kecil (20g) dan hindari konsumsi harian.",
+        "boundingBox2D": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "servingWeightGrams": 50,
+        "averageNutrientsPer100g": {
+          "calories": 540,
+          "protein": 8,
+          "totalFat": 32,
+          "saturatedFat": 16,
+          "carbohydrates": 52,
+          "sugar": 45,
+          "totalFibre": 3,
+          "sodium": 100,
+          "addedSugar": 40,
+          "transFat": 1
+        },
+        "items": [
+          "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+          "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+          "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+          "Kinder Joy / Kinder Joy Surprise Egg"
+        ]
+      }
+    ]
+  },
+  "backendLogs": "[job_1789382210308_5fmcrpyvh] [scout_instruction] Vision Scout Instruction dispatched (model: gemini-3.5-flash-lite). Prompt length: 280 chars — see [UnifiedLLM-Prompt:scout] below for full text.\n[job_1789382210308_5fmcrpyvh] [scout_system_instruction] Vision Scout System Instruction dispatched (model: gemini-3.5-flash-lite) — see [UnifiedLLM-Prompt:scout] below for full text.\n[job_1789382210308_5fmcrpyvh] [scout_answer] Scout identified 9 item(s): Polo Cokelat / Chocolate Polo Bread (~100g), Polo Keju / Cheese Polo Bread (~100g), Choco Topping Pie / Chocolate Topping Pie (~100g), Cheese Topping Pie / Cheese Topping Pie (~100g), Double Cheese Bread / Double Cheese Bread (~100g), SilverQueen Cashew / SilverQueen Cashew Chocolate Bar (~100g), Magnum Pistachio / Magnum Pistachio Ice Cream Bar (~100g), Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer (~100g), Kinder Joy / Kinder Joy Surprise Egg (~100g)\n[job_1789382210308_5fmcrpyvh] [info] [scout] Prompt: 3345, Completion: 1087, Total: 5760\n[job_1789382210308_5fmcrpyvh] [info] [UnifiedLLM-Timing:scout] ms=9712",
+  "comparisonData": {
+    "comparisonTitle": "Pilihan Roti dan Cokelat Rak Ritel / Retail Bakery and Confectionery Shelf Selection",
+    "comparisonType": "shelf_selection",
+    "summary": "Evaluasi pilihan rak toko ritel ini menunjukkan produk tinggi gula sederhana dan lemak jenuh yang dapat dengan cepat menghabiskan kuota kalori harian Anda yang terbatas (1350 kkal). Batasi konsumsi dan pilih opsi dengan kandungan protein lebih baik jika diperlukan.",
+    "recommendedOption": "Double Cheese Bread / Double Cheese Bread",
+    "items": [
+      {
+        "name": "Polo Cokelat / Chocolate Polo Bread",
+        "keyword": "Polo Cokelat / Chocolate Polo Bread",
+        "originalName": "Polo Cokelat / Chocolate Polo Bread",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          950,
+          1000
+        ],
+        "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+        "scoutIndex": 0,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      },
+      {
+        "name": "Polo Keju / Cheese Polo Bread",
+        "keyword": "Polo Keju / Cheese Polo Bread",
+        "originalName": "Polo Keju / Cheese Polo Bread",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          950,
+          1000
+        ],
+        "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+        "scoutIndex": 1,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      },
+      {
+        "name": "Choco Topping Pie / Chocolate Topping Pie",
+        "keyword": "Choco Topping Pie / Chocolate Topping Pie",
+        "originalName": "Choco Topping Pie / Chocolate Topping Pie",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          950,
+          1000
+        ],
+        "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+        "scoutIndex": 2,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      },
+      {
+        "name": "Cheese Topping Pie / Cheese Topping Pie",
+        "keyword": "Cheese Topping Pie / Cheese Topping Pie",
+        "originalName": "Cheese Topping Pie / Cheese Topping Pie",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          950,
+          1000
+        ],
+        "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+        "scoutIndex": 3,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      },
+      {
+        "name": "Double Cheese Bread / Double Cheese Bread",
+        "keyword": "Double Cheese Bread / Double Cheese Bread",
+        "originalName": "Double Cheese Bread / Double Cheese Bread",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          950,
+          1000
+        ],
+        "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+        "scoutIndex": 4,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      },
+      {
+        "name": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+        "keyword": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+        "originalName": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+        "sourceImageIndex": 1,
+        "boundingBox2D": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+        "scoutIndex": 5,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      },
+      {
+        "name": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+        "keyword": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+        "originalName": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+        "sourceImageIndex": 1,
+        "boundingBox2D": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+        "scoutIndex": 6,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      },
+      {
+        "name": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+        "keyword": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+        "originalName": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+        "sourceImageIndex": 1,
+        "boundingBox2D": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+        "scoutIndex": 7,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      },
+      {
+        "name": "Kinder Joy / Kinder Joy Surprise Egg",
+        "keyword": "Kinder Joy / Kinder Joy Surprise Egg",
+        "originalName": "Kinder Joy / Kinder Joy Surprise Egg",
+        "sourceImageIndex": 1,
+        "boundingBox2D": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+        "scoutIndex": 8,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted 9 items from the bakery display and confectionery shelf. Grouped into two macro-consistent clusters (bakery pastries and chocolate/confectionery snacks) to evaluate against a 1350 kcal target for a patient with a height of 140 cm."
+      }
+    ],
+    "groups": [
+      {
+        "groupName": "Tier 2 - Pilihan Netral: Roti Manis & Pastry (Say Bread)",
+        "verdict": {
+          "label": "Karbohidrat Tinggi & Kalori Sedang",
+          "level": "neutral"
+        },
+        "message": "Dengan batas kalori harian 1350 kkal, produk roti manis seperti Polo dan Pie memberikan pasokan energi instan tetapi minim mikronutrien esensial. Konsumsi dalam porsi kecil dan kombinasikan dengan sumber protein tanpa lemak untuk mengontrol lonjakan gula darah.",
+        "comparisonSentence": "Kelompok roti ini menawarkan sedikit lebih banyak protein dan serat dibandingkan cokelat batangan, namun tetap tinggi karbohidrat olahan.",
+        "orderingTip": "Pilih varian keju untuk tambahan protein minor, dan batasi konsumsi hanya setengah bagian per sajian.",
+        "averageNutrients": {
+          "calories": 157,
+          "protein": 8,
+          "totalFat": 5,
+          "saturatedFat": 1,
+          "transFat": 0,
+          "unsaturatedFat": 4,
+          "carbohydrates": 20,
+          "sugar": 13.5,
+          "addedSugar": 6,
+          "totalFibre": 0,
+          "solubleFibre": 0.1,
+          "sodium": 200,
+          "potassium": 72.2,
+          "magnesium": 12.6,
+          "calcium": 160.1,
+          "iron": 0.7,
+          "zinc": 1.1,
+          "selenium": 6.9,
+          "iodine": 12.6,
+          "phosphorus": 128.7,
+          "vitaminD": 0.2,
+          "vitaminB12": 0.5,
+          "folate": 17.3,
+          "vitaminC": 0.1,
+          "vitaminE": 0.3,
+          "vitaminK": 1.4,
+          "vitaminA": 84.8,
+          "vitaminB6": 0,
+          "thiamine": 0.1,
+          "riboflavin": 0.2,
+          "niacin": 0.4,
+          "omega3": 0,
+          "salt": 0.5
+        },
+        "averageNutrientsPer100g": {
+          "calories": 380,
+          "protein": 8.5,
+          "totalFat": 14,
+          "saturatedFat": 6.5,
+          "carbohydrates": 55,
+          "sugar": 18,
+          "totalFibre": 2.5,
+          "sodium": 320,
+          "addedSugar": 15,
+          "transFat": 0.5
+        },
+        "boundingBox2D": [
+          0,
+          0,
+          950,
+          1000
+        ],
+        "scoutItemIndices": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "itemClinicalThreats": {},
+        "items": [
+          {
+            "name": "Polo Cokelat / Chocolate Polo Bread",
+            "keyword": "Polo Cokelat / Chocolate Polo Bread",
+            "originalName": "Polo Cokelat / Chocolate Polo Bread",
+            "boundingBox2D": [
+              0,
+              0,
+              950,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 0
+          },
+          {
+            "name": "Polo Keju / Cheese Polo Bread",
+            "keyword": "Polo Keju / Cheese Polo Bread",
+            "originalName": "Polo Keju / Cheese Polo Bread",
+            "boundingBox2D": [
+              0,
+              0,
+              950,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 1
+          },
+          {
+            "name": "Choco Topping Pie / Chocolate Topping Pie",
+            "keyword": "Choco Topping Pie / Chocolate Topping Pie",
+            "originalName": "Choco Topping Pie / Chocolate Topping Pie",
+            "boundingBox2D": [
+              0,
+              0,
+              950,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 2
+          },
+          {
+            "name": "Cheese Topping Pie / Cheese Topping Pie",
+            "keyword": "Cheese Topping Pie / Cheese Topping Pie",
+            "originalName": "Cheese Topping Pie / Cheese Topping Pie",
+            "boundingBox2D": [
+              0,
+              0,
+              950,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 3
+          },
+          {
+            "name": "Double Cheese Bread / Double Cheese Bread",
+            "keyword": "Double Cheese Bread / Double Cheese Bread",
+            "originalName": "Double Cheese Bread / Double Cheese Bread",
+            "boundingBox2D": [
+              0,
+              0,
+              950,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 4
+          }
+        ],
+        "servingWeightGrams": 41
+      },
+      {
+        "groupName": "Tier 4 - Peringatan: Cokelat Batangan & Makanan Manis Padat Energi",
+        "verdict": {
+          "label": "Tinggi Gula & Lemak Jenuh",
+          "level": "alert"
+        },
+        "message": "Produk seperti SilverQueen dan es krim Magnum mengandung lemak jenuh dan gula rafinasi tinggi yang dapat memperburuk profil lipid dan memicu surplus kalori harian target 1350 kkal Anda. Sangat disarankan untuk menghindari atau membatasi konsumsinya secara ketat.",
+        "comparisonSentence": "Dibandingkan kelompok roti, kelompok cokelat ini memiliki rasio kalori per gram yang jauh lebih tinggi dan gula tambahan yang sangat padat.",
+        "orderingTip": "Jika ingin menikmati cokelat, batasi hanya satu kotak kecil (20g) dan hindari konsumsi harian.",
+        "averageNutrients": {
+          "calories": 157,
+          "protein": 8,
+          "totalFat": 5,
+          "saturatedFat": 1,
+          "transFat": 0,
+          "unsaturatedFat": 4,
+          "carbohydrates": 20,
+          "sugar": 4.9,
+          "addedSugar": 3.8,
+          "totalFibre": 0,
+          "solubleFibre": 0.2,
+          "sodium": 200,
+          "potassium": 143.7,
+          "magnesium": 13.5,
+          "calcium": 60.4,
+          "iron": 0.8,
+          "zinc": 0.7,
+          "selenium": 11.6,
+          "iodine": 23.6,
+          "phosphorus": 101,
+          "vitaminD": 0.9,
+          "vitaminB12": 0.5,
+          "folate": 23.1,
+          "vitaminC": 1.3,
+          "vitaminE": 0.5,
+          "vitaminK": 2.5,
+          "vitaminA": 66.5,
+          "vitaminB6": 0.1,
+          "thiamine": 0.1,
+          "riboflavin": 0.2,
+          "niacin": 0.5,
+          "omega3": 0,
+          "salt": 0.5
+        },
+        "averageNutrientsPer100g": {
+          "calories": 540,
+          "protein": 8,
+          "totalFat": 32,
+          "saturatedFat": 16,
+          "carbohydrates": 52,
+          "sugar": 45,
+          "totalFibre": 3,
+          "sodium": 100,
+          "addedSugar": 40,
+          "transFat": 1
+        },
+        "boundingBox2D": [
+          100,
+          520,
+          480,
+          950
+        ],
+        "scoutItemIndices": [
+          5,
+          6,
+          7,
+          8
+        ],
+        "itemClinicalThreats": {},
+        "items": [
+          {
+            "name": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+            "keyword": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+            "originalName": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+            "boundingBox2D": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "sourceImageIndex": 1,
+            "scoutIndex": 5
+          },
+          {
+            "name": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+            "keyword": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+            "originalName": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+            "boundingBox2D": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "sourceImageIndex": 1,
+            "scoutIndex": 6
+          },
+          {
+            "name": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+            "keyword": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+            "originalName": "Aroma Sensasi Cinta / Aroma Sensasi Cinta Wafer",
+            "boundingBox2D": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "sourceImageIndex": 1,
+            "scoutIndex": 7
+          },
+          {
+            "name": "Kinder Joy / Kinder Joy Surprise Egg",
+            "keyword": "Kinder Joy / Kinder Joy Surprise Egg",
+            "originalName": "Kinder Joy / Kinder Joy Surprise Egg",
+            "boundingBox2D": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "sourceImageIndex": 1,
+            "scoutIndex": 8
+          }
+        ],
+        "servingWeightGrams": 29
+      }
+    ],
+    "isMenuScale": false
+  }
+}

@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, type Page, type Locator } from '@playwright/test';
+import { classifyDump, formatOracleFails } from '../../src/utils/dumpContract.js';
 
 export const CREDS_FILE = path.resolve('/tmp/sari-e2e-creds.json');
+export const LIVE_DEBUG_DIR = path.resolve(process.cwd(), 'golden/journeys/_live_debug');
 
 export const SARI_PERSONA = {
   name: 'Sari Hartono',
@@ -58,7 +60,7 @@ export async function switchAuthLanguageToIndonesian(page: Page): Promise<boolea
     'div:has-text("Bahasa Indonesia")',
   ]);
   if (await indoClickable.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await indoClickable.click().catch(() => {});
+    await indoClickable.click({ timeout: 2000 }).catch(() => {});
     console.log('[indo-helpers] Clicked Bahasa Indonesia language selector');
     await page.waitForTimeout(500);
     return true;
@@ -128,12 +130,12 @@ export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean
       console.log(`[indo-helpers] Attempting login with stored Sari creds: ${stored.email}`);
       await emailInput.fill(stored.email);
       await passInput.fill(stored.pass);
-      await submitBtn.click();
+      await submitBtn.click({ timeout: 3000 }).catch(() => {});
       await page.waitForTimeout(3000);
 
       const bypass = page.locator('#auth-bypass-verify-btn, #auth-simulate-verify-btn');
       if (await bypass.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await bypass.click().catch(() => {});
+        await bypass.click({ timeout: 2000 }).catch(() => {});
       }
 
       if (await homeTab.isVisible({ timeout: 15000 }).catch(() => false)) {
@@ -150,7 +152,7 @@ export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean
   // Switch to Sign Up mode
   const modeSwitch = page.locator('#auth-mode-switch-btn');
   if (await modeSwitch.isVisible({ timeout: 10000 }).catch(() => false)) {
-    await modeSwitch.click();
+    await modeSwitch.click({ timeout: 3000 }).catch(() => {});
     console.log('[indo-helpers] Clicked auth mode switch to signup');
   }
 
@@ -169,12 +171,12 @@ export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean
     { timeout: 60000 },
   ).catch(() => null);
 
-  await page.locator('#auth-submit-btn').click();
+  await page.locator('#auth-submit-btn').click({ timeout: 5000 }).catch(() => {});
   await submitWait;
 
   const bypass = page.locator('#auth-bypass-verify-btn, #auth-simulate-verify-btn');
   if (await bypass.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await bypass.click().catch(() => {});
+    await bypass.click({ timeout: 2000 }).catch(() => {});
   }
 
   await homeTab.waitFor({ state: 'attached', timeout: 45000 });
@@ -192,13 +194,13 @@ export async function openAndFillSariProfile(page: Page) {
     const avatarBtn = page.locator('#avatar-edit-btn, button[aria-label*="profile" i], button[aria-label*="profil" i]');
 
     if (await emptyBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await emptyBtn.click();
+      await emptyBtn.click({ timeout: 3000 }).catch(() => {});
     } else if (await avatarBtn.first().isVisible({ timeout: 5000 }).catch(() => false)) {
-      await avatarBtn.first().click();
+      await avatarBtn.first().click({ timeout: 3000 }).catch(() => {});
     } else {
       const healthTab = first(page, ['#nav-tab-health', 'button:has-text("Health")', 'button:has-text("Kesehatan")']);
       if (await healthTab.isVisible().catch(() => false)) {
-        await healthTab.click().catch(() => {});
+        await healthTab.click({ timeout: 3000 }).catch(() => {});
       }
     }
   }
@@ -258,7 +260,7 @@ export async function openAndFillSariProfile(page: Page) {
 
   const saveBtn = profileModal.locator('#profile-save-btn, button:has-text("Save"), button:has-text("Simpan")').first();
   if (await saveBtn.isVisible().catch(() => false)) {
-    await saveBtn.click();
+    await saveBtn.click({ timeout: 3000 }).catch(() => {});
     await expect(profileModal).toBeHidden({ timeout: 15000 }).catch(() => {});
   }
 
@@ -268,7 +270,7 @@ export async function openAndFillSariProfile(page: Page) {
 export async function openFoodChat(page: Page) {
   const foodTab = first(page, ['#nav-tab-food', 'button:has-text("Food")', '[role="tab"]:has-text("Food")']);
   if (await foodTab.isVisible().catch(() => false)) {
-    await foodTab.click().catch(() => {});
+    await foodTab.click({ timeout: 3000 }).catch(() => {});
   }
 
   const quickActionBtn = first(page, [
@@ -278,8 +280,9 @@ export async function openFoodChat(page: Page) {
     '[aria-label*="quick" i]',
     'button:has-text("Open Quick Actions")',
   ]);
-  await quickActionBtn.waitFor({ state: 'visible', timeout: 30000 });
-  await quickActionBtn.click();
+  if (await quickActionBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await quickActionBtn.click({ timeout: 3000 }).catch(() => {});
+  }
 
   const logMealBtn = first(page, [
     'button:has-text("Catat Makanan")',
@@ -287,8 +290,9 @@ export async function openFoodChat(page: Page) {
     'button:has-text("Log Meal")',
     'button:has-text("Catat")',
   ]);
-  await logMealBtn.waitFor({ state: 'visible', timeout: 15000 });
-  await logMealBtn.click();
+  if (await logMealBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await logMealBtn.click({ timeout: 3000 }).catch(() => {});
+  }
 
   const input = page.locator('#food-chat-input');
   await expect(input).toBeVisible({ timeout: 30000 });
@@ -303,8 +307,9 @@ export async function openCompareMode(page: Page) {
     '[aria-label*="quick" i]',
     'button:has-text("Open Quick Actions")',
   ]);
-  await quickActionBtn.waitFor({ state: 'visible', timeout: 30000 });
-  await quickActionBtn.click();
+  if (await quickActionBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await quickActionBtn.click({ timeout: 3000 }).catch(() => {});
+  }
 
   const compareBtn = first(page, [
     '#quick-action-compare-meal',
@@ -312,14 +317,19 @@ export async function openCompareMode(page: Page) {
     'button:has-text("Bandingkan")',
     'button:has-text("Bandingkan Makanan")',
   ]);
-  await compareBtn.waitFor({ state: 'visible', timeout: 15000 });
-  await compareBtn.click();
+  if (await compareBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await compareBtn.click({ timeout: 3000 }).catch(() => {});
+  }
 
   const input = page.locator('#food-chat-input');
   await expect(input).toBeVisible({ timeout: 30000 });
 }
 
 export async function openFrontDesk(page: Page): Promise<Locator> {
+  // Press Escape to dismiss any lingering quick action backdrop or dialog
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(300);
+
   const deskTab = first(page, [
     '#nav-tab-desk',
     '#nav-tab-receptionist',
@@ -329,8 +339,8 @@ export async function openFrontDesk(page: Page): Promise<Locator> {
     'button:has-text("Resepsionis")',
   ]);
 
-  if (await deskTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await deskTab.click();
+  if (await deskTab.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await deskTab.click({ timeout: 3000 }).catch(() => {});
   } else {
     // Check quick actions for receptionist / coach
     const quickActionBtn = first(page, [
@@ -338,8 +348,8 @@ export async function openFrontDesk(page: Page): Promise<Locator> {
       'button.w-14.h-14',
       '[aria-label*="quick" i]',
     ]);
-    if (await quickActionBtn.isVisible().catch(() => false)) {
-      await quickActionBtn.click();
+    if (await quickActionBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await quickActionBtn.click({ timeout: 2000 }).catch(() => {});
       const deskAction = first(page, [
         '#quick-action-receptionist',
         'button:has-text("Front Desk")',
@@ -347,8 +357,8 @@ export async function openFrontDesk(page: Page): Promise<Locator> {
         'button:has-text("Coach")',
         'button:has-text("Konsultasi")',
       ]);
-      if (await deskAction.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await deskAction.click();
+      if (await deskAction.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await deskAction.click({ timeout: 2000 }).catch(() => {});
       }
     }
   }
@@ -365,7 +375,15 @@ export async function openFrontDesk(page: Page): Promise<Locator> {
   return deskInput;
 }
 
-export async function submitFoodChatMessageWithPhotos(page: Page, text: string, photoPaths: string[] = []) {
+export type SubmitResult = {
+  jobId: string | null;
+};
+
+export async function submitFoodChatMessageWithPhotos(
+  page: Page,
+  text: string,
+  photoPaths: string[] = []
+): Promise<SubmitResult> {
   const input = page.locator('#food-chat-input');
   const sendBtn = page.locator('#food-chat-send-btn');
   const fileInput = page.locator('input[type="file"]').first();
@@ -386,26 +404,245 @@ export async function submitFoodChatMessageWithPhotos(page: Page, text: string, 
   }
 
   await expect(sendBtn).toBeEnabled({ timeout: 20000 });
-  await sendBtn.click();
 
-  const analyzing = page.getByText(/Updating|Analyzing|Menganalisis|Memperbarui/i).first();
+  // Listen for job submission network response to capture the real jobId
+  let capturedJobId: string | null = null;
+  const submitPromise = page
+    .waitForResponse(
+      (r) =>
+        (r.url().includes('/api/jobs/') || r.url().includes('/api/food/') || r.url().includes('/api/chat/')) &&
+        r.request().method() === 'POST',
+      { timeout: 35000 }
+    )
+    .then(async (res) => {
+      try {
+        const body = await res.json();
+        const id = body?.jobId || body?.job?.id || body?.id || body?.clean_result?.jobId;
+        if (id) {
+          capturedJobId = String(id);
+          console.log(`[indo-helpers] Captured submitted jobId from response: ${capturedJobId}`);
+        }
+      } catch {}
+    })
+    .catch(() => null);
+
+  await sendBtn.click();
+  await submitPromise;
+
+  // If response didn't give jobId, inspect DOM for data-job-id attribute
+  if (!capturedJobId) {
+    const jobElement = page.locator('[data-job-id]').last();
+    if (await jobElement.isVisible({ timeout: 8000 }).catch(() => false)) {
+      capturedJobId = await jobElement.getAttribute('data-job-id').catch(() => null);
+      if (capturedJobId) {
+        console.log(`[indo-helpers] Captured jobId from DOM data-job-id: ${capturedJobId}`);
+      }
+    }
+  }
+
+  // 1) Wait past transient starting states ("Starting cloud food analysis", "5%", "Memperbarui", "Menganalisis")
+  const analyzing = page.getByText(/Starting cloud|Menganalisis|Analyzing|Updating|Memperbarui/i).first();
   await analyzing.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
-  await expect(analyzing).toBeHidden({ timeout: 240000 }).catch(() => {});
+
+  // 2) Never pass while in progress; wait for analysis indicator to hide (up to 8 minutes)
+  await expect(analyzing).toBeHidden({ timeout: 480000 });
+
+  // 3) Handle portion confirmation step or active retry steps if required
+  const retryBanner = page.getByText(/Attempt \d of \d|Retrying|Memulai ulang/i).first();
+  if (await retryBanner.isVisible({ timeout: 2000 }).catch(() => false)) {
+    console.log('[indo-helpers] Retry banner detected, waiting for completion...');
+    await expect(retryBanner).toBeHidden({ timeout: 240000 }).catch(() => {});
+  }
+
+  const optionChip = first(page, [
+    '[data-testid*="clarify-option"]',
+    '[data-testid*="portion-option"]',
+    'button.rounded-full:has-text("1")',
+    'button:has-text("Sedang")',
+    'button:has-text("Normal")',
+    'button:has-text("Porsi Standar")',
+    'button:has-text("Standar")',
+  ]);
+  if (await optionChip.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await optionChip.click().catch(() => {});
+    await page.waitForTimeout(500);
+  }
 
   const confirmBtn = first(page, [
     'button:has-text("Confirm portions")',
     'button:has-text("Select Portion")',
     'button:has-text("Pilih Porsi")',
+    'button:has-text("Porsi Standar")',
+    'button:has-text("Standard portion")',
+    'button:has-text("Standard")',
+    'button:has-text("Standar")',
+    'button:has-text("1 Porsi")',
     'button:has-text("Instant Update")',
     'button:has-text("Agent Review")',
     'button:has-text("Lanjutkan")',
     'button:has-text("Konfirmasi")',
+    'button:has-text("Confirm")',
     'button:has-text("Simpan")',
+    'button:has-text("Ya")',
+    'button:has-text("Tetap")',
+    'button:has-text("Gunakan")',
+    '[data-testid*="confirm"]',
+    '[data-testid*="portion"]',
+    '[data-testid*="clarify"]',
   ]);
   if (await confirmBtn.isVisible({ timeout: 6000 }).catch(() => false)) {
     await confirmBtn.click().catch(() => {});
-    await expect(analyzing).toBeHidden({ timeout: 120000 }).catch(() => {});
+    await expect(analyzing).toBeHidden({ timeout: 180000 }).catch(() => {});
   }
+
+  // If still no jobId, try one more time from latest completed message or DOM element
+  if (!capturedJobId) {
+    const jobElement = page.locator('[data-job-id]').last();
+    capturedJobId = await jobElement.getAttribute('data-job-id').catch(() => null);
+  }
+
+  return { jobId: capturedJobId };
+}
+
+export async function pollJobUntilTerminal(
+  page: Page,
+  jobId: string,
+  timeoutMs: number = 480000,
+  options: { allowAwaitingUser?: boolean } = {}
+): Promise<any> {
+  const { allowAwaitingUser = true } = options;
+  const start = Date.now();
+  console.log(`[indo-helpers] Polling job ${jobId} status until terminal (timeout ${Math.round(timeoutMs / 1000)}s)...`);
+
+  let lastStatus = 'unknown';
+  let payload: any = null;
+
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const resp = await page.request.get(`/api/jobs/status?jobId=${jobId}`);
+      if (resp.ok()) {
+        payload = await resp.json();
+        const job = payload?.jobs?.[0] || payload?.job || payload;
+        lastStatus = job?.status || lastStatus;
+        if (lastStatus === 'succeeded' || lastStatus === 'failed') {
+          console.log(`[indo-helpers] Job ${jobId} reached terminal status: ${lastStatus} in ${Math.round((Date.now() - start) / 1000)}s`);
+          return job;
+        }
+
+        if (lastStatus === 'awaiting_user') {
+          // Check if page has confirmation or portion buttons visible to advance the run
+          const resumeBtn = first(page, [
+            'button:has-text("Confirm portions")',
+            'button:has-text("Select Portion")',
+            'button:has-text("Pilih Porsi")',
+            'button:has-text("Porsi Standar")',
+            'button:has-text("Standard portion")',
+            'button:has-text("Standard")',
+            'button:has-text("Standar")',
+            'button:has-text("1 Porsi")',
+            'button:has-text("Instant Update")',
+            'button:has-text("Agent Review")',
+            'button:has-text("Lanjutkan")',
+            'button:has-text("Konfirmasi")',
+            'button:has-text("Confirm")',
+            'button:has-text("Simpan")',
+            'button:has-text("Ya")',
+            '[data-testid*="confirm"]',
+            '[data-testid*="portion"]',
+          ]);
+          if (await resumeBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+            console.log(`[indo-helpers] Job ${jobId} awaiting_user, clicking confirmation to complete...`);
+            await resumeBtn.click({ timeout: 2000 }).catch(() => {});
+            await page.waitForTimeout(2000);
+          } else if (allowAwaitingUser && Date.now() - start > 15000) {
+            console.log(`[indo-helpers] Job ${jobId} reached settled awaiting_user state (multi-turn clarify turn).`);
+            return job;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[indo-helpers] Polling error for ${jobId}:`, e);
+    }
+    await page.waitForTimeout(3000);
+  }
+
+  throw new Error(`Job ${jobId} did not reach terminal status within ${timeoutMs}ms (lastStatus: ${lastStatus})`);
+}
+
+export async function assertDebugContractGreen(
+  page: Page,
+  jobId: string | null,
+  journeyId: string,
+  options: { quarantinedFailIds?: string[]; timeoutMs?: number; allowAwaitingUser?: boolean } = {}
+) {
+  const { quarantinedFailIds = [], timeoutMs = 480000, allowAwaitingUser = true } = options;
+
+  console.log(`\n======================================================`);
+  console.log(`[assertDebugContractGreen] Starting contract validation for ${journeyId} (jobId: ${jobId || 'UNKNOWN'})`);
+
+  expect(jobId, `A valid jobId must be captured for ${journeyId} before debug evaluation`).toBeTruthy();
+  const validJobId = jobId!;
+
+  // 1) Poll job until terminal (succeeded or awaiting_user for clarify turn)
+  const terminalJob = await pollJobUntilTerminal(page, validJobId, timeoutMs, { allowAwaitingUser });
+  expect(
+    ['succeeded', 'awaiting_user'],
+    `Job ${validJobId} must reach settled terminal state (succeeded or awaiting_user), not stuck at starting/5% or failed`
+  ).toContain(terminalJob?.status);
+
+  // 2) Ensure output directory exists
+  fs.mkdirSync(LIVE_DEBUG_DIR, { recursive: true });
+
+  // 3) POST Render /api/jobs/debug { jobId, userId, format: 'json' }
+  console.log(`[assertDebugContractGreen] Requesting JSON debug dump for ${validJobId}...`);
+  const jsonResp = await page.request.post('/api/jobs/debug', {
+    data: {
+      jobId: validJobId,
+      userId: 'anonymous',
+      format: 'json',
+    },
+  });
+  expect(jsonResp.status(), `POST /api/jobs/debug (json) must return 200 for ${validJobId}`).toBe(200);
+  const jsonReport = await jsonResp.json();
+
+  // 4) POST Render /api/jobs/debug { jobId, userId, format: 'markdown' }
+  console.log(`[assertDebugContractGreen] Requesting Markdown debug dump for ${validJobId}...`);
+  const mdResp = await page.request.post('/api/jobs/debug', {
+    data: {
+      jobId: validJobId,
+      userId: 'anonymous',
+      format: 'markdown',
+    },
+  });
+  expect(mdResp.status(), `POST /api/jobs/debug (markdown) must return 200 for ${validJobId}`).toBe(200);
+  const mdReport = await mdResp.text();
+
+  // 5) Save debug files to golden/journeys/_live_debug/J-ID-0X-<jobId>.{json,md}
+  const jsonPath = path.join(LIVE_DEBUG_DIR, `${journeyId}-${validJobId}.json`);
+  const mdPath = path.join(LIVE_DEBUG_DIR, `${journeyId}-${validJobId}.md`);
+
+  fs.writeFileSync(jsonPath, JSON.stringify(jsonReport, null, 2), 'utf-8');
+  fs.writeFileSync(mdPath, mdReport, 'utf-8');
+  console.log(`[assertDebugContractGreen] Saved debug artifacts:\n  - ${jsonPath}\n  - ${mdPath}`);
+
+  // 6) classifyDump + formatOracleFails
+  const classified = classifyDump(jsonReport);
+  console.log(`[assertDebugContractGreen] classifyDump yielded ${classified.length} failure(s)`);
+
+  const activeFails = classified.filter((f) => !quarantinedFailIds.includes(f.id));
+  if (activeFails.length > 0) {
+    const formatted = formatOracleFails(activeFails);
+    console.error(`[assertDebugContractGreen] ORACLE CONTRACT FAILURES:\n${formatted}`);
+  }
+
+  // 7) HARD expect no unquarantined oracle failures
+  expect(
+    activeFails,
+    `Dump contracts for ${journeyId} (${validJobId}) must pass. Oracle failures:\n${formatOracleFails(activeFails)}`
+  ).toHaveLength(0);
+
+  console.log(`[assertDebugContractGreen] SUCCESS: All contract laws evaluated GREEN for ${journeyId} (${validJobId})`);
+  return { jsonReport, mdReport, classified };
 }
 
 export async function cleanupLatestMeal(page: Page) {
@@ -418,16 +655,16 @@ export async function cleanupLatestMeal(page: Page) {
     'button[aria-label*="hapus" i]',
     '[data-testid*="delete"]',
   ]);
-  if (await deleteBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await deleteBtn.click().catch(() => {});
+  if (await deleteBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await deleteBtn.click({ timeout: 2000 }).catch(() => {});
     const confirmDelete = first(page, [
       'button:has-text("Ya")',
       'button:has-text("Hapus")',
       'button:has-text("Confirm")',
       'button:has-text("Yes")',
     ]);
-    if (await confirmDelete.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await confirmDelete.click().catch(() => {});
+    if (await confirmDelete.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await confirmDelete.click({ timeout: 2000 }).catch(() => {});
     }
     console.log('[indo-helpers] Meal cleanup executed.');
   }

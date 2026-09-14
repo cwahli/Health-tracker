@@ -1,0 +1,2060 @@
+{
+  "jobId": "job_1789382065415_aveviaomb",
+  "conversationId": null,
+  "pack": "food",
+  "status": "succeeded",
+  "exportedAt": "2026-09-14T10:34:33.910Z",
+  "dialogInventory": null,
+  "lastUserAction": {
+    "action": "submit_meal_job",
+    "timestamp": "2026-09-14T10:34:25.555Z",
+    "details": {
+      "jobId": "job_1789382065415_aveviaomb",
+      "promptLength": 74,
+      "imageCount": 0,
+      "submissionMode": "review"
+    }
+  },
+  "breadcrumbs": [
+    {
+      "timestamp": "2026-09-14T10:34:10.500Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "auth-email-input",
+        "valueLength": 37
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:10.549Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "auth-password-input",
+        "valueLength": 12
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:10.550Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "auth-submit-btn",
+        "label": "Continue with email"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.612Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "empty-state-profile-btn",
+        "label": "Atur Profil"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.612Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "avatar-edit-btn",
+        "label": "avatar-edit-btn"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.648Z",
+      "action": "input_change",
+      "target": "select",
+      "details": {
+        "name": "lang-selector",
+        "valueLength": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.684Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.703Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.720Z",
+      "action": "input_change",
+      "target": "select",
+      "details": {
+        "name": "input",
+        "valueLength": 6
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.733Z",
+      "action": "input_change",
+      "target": "select",
+      "details": {
+        "name": "input",
+        "valueLength": 15
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.747Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 3
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.797Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 12
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.798Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "profile-save-btn",
+        "label": "Save"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.862Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "nav-tab-food",
+        "label": "Food History"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:13.913Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "label": "w-14 h-14 bg-indigo-600 text-w"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:14.849Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "quick-action-log-meal",
+        "label": "Log Meal"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:15.183Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 32
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:15.322Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "food-chat-input",
+        "valueLength": 84
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:15.323Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "food-chat-send-btn",
+        "label": "food-chat-send-btn"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:15.326Z",
+      "action": "submit_initiated",
+      "target": "chat_composer",
+      "details": {
+        "prompt": "1 porsi standar Gado-Gado komplit (250g) dengan tahu, tempe, telur, dan bumbu kacang",
+        "imageCount": 1
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:34:15.366Z",
+      "action": "submit_meal_job",
+      "target": "chat_compose_dock",
+      "details": {
+        "jobId": "job_1789382054849_jd1irnqy7",
+        "promptLength": 84,
+        "imageCount": 1,
+        "submissionMode": "review"
+      }
+    }
+  ],
+  "sessionEvents": [
+    {
+      "ts": 1789382065415,
+      "writer": "JobStore.apply",
+      "status": "draft",
+      "action": "createJob"
+    },
+    {
+      "ts": 1789382065534,
+      "writer": "LogChat.submit",
+      "status": "queued",
+      "action": "SubmitStarted"
+    },
+    {
+      "ts": 1789382065682,
+      "writer": "serverJobs.start",
+      "status": "running",
+      "action": "job_started"
+    },
+    {
+      "ts": 1789382070691,
+      "writer": "serverJobs.publish",
+      "status": "succeeded",
+      "action": "result_ready"
+    }
+  ],
+  "console": [
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:09.838Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:11.238Z] [Sync] Force pull (Manual Sync) active. Pushing local unsynced logs and profile first.",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:11.519Z] [Sync] Pre-pull push complete: 0 foods, 0 bios",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:14.650Z] [DIAG3] Job upsert loop starting - 1 jobs queued to sync",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:14.651Z] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:14.721Z] [DIAG3] Job upsert loop starting - 1 jobs queued to sync",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:14.722Z] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.298Z] Firestore connection test: Backend unreachable or offline. Operating smoothly in local storage mode.",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.814Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 1092ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.814Z] [job_1789382054849_jd1irnqy7] [DIAG3] Chunk 1 (1 jobs) took 1092ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.814Z] [job_1789382054849_jd1irnqy7] [DIAG3] Job upsert loop finished - 1 jobs, total 1092ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.877Z] [job_1789382054849_jd1irnqy7] [DIAG3] Job upsert loop starting - 1 jobs queued to sync",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.877Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.954Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 1303ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.955Z] [job_1789382054849_jd1irnqy7] [DIAG3] Chunk 1 (1 jobs) took 1305ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:15.955Z] [job_1789382054849_jd1irnqy7] [DIAG3] Job upsert loop finished - 1 jobs, total 1305ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:16.567Z] [job_1789382054849_jd1irnqy7] [LogChat] Job successfully submitted to server: {\"success\":true,\"jobId\":\"job_1789382054849_jd1irnqy7\",\"status\":\"running\",\"imageUrls\":[\"https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/job_1789382054849_jd1irnqy7.jpg\"]}",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:16.576Z] [job_1789382054849_jd1irnqy7] [JobQueueRunner] Job job_1789382054849_jd1irnqy7 is server-owned. Polling /api/jobs/status...",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:17.083Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 1206ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:17.083Z] [job_1789382054849_jd1irnqy7] [DIAG3] Chunk 1 (1 jobs) took 1206ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:17.083Z] [job_1789382054849_jd1irnqy7] [DIAG3] Job upsert loop finished - 1 jobs, total 1206ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:18.553Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:19.695Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 1142ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:23.575Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382054849_jd1irnqy7",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:24.475Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382054849_jd1irnqy7 responded 200 in 900ms",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:24.475Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382054849_jd1irnqy7",
+    "[job_1789382065415_aveviaomb] [LOG 2026-09-14T10:34:25.303Z] [job_1789382054849_jd1irnqy7] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382054849_jd1irnqy7 responded 200 in 828ms"
+  ],
+  "network": [],
+  "handoffs": [],
+  "dispatches": [
+    {
+      "id": "t1/scout",
+      "parent": null,
+      "turn": 1,
+      "agent": "scout",
+      "user": "Saya baru saja mengedit porsi: saus kacang kurangi setengahnya (50%) saja.",
+      "received": {
+        "mode": "review"
+      },
+      "systemInstruction": "=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is Bahasa Indonesia (code: id).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in Bahasa Indonesia.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nDo not reply in English unless the user wrote this turn in English and is clearly asking for English.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into Bahasa Indonesia.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n",
+      "userPrompt": "Analyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"Saya baru saja mengedit porsi: saus kacang kurangi setengahnya (50%) saja.\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients.",
+      "instruction": "=== SYSTEM INSTRUCTION ===\n=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is Bahasa Indonesia (code: id).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in Bahasa Indonesia.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nDo not reply in English unless the user wrote this turn in English and is clearly asking for English.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into Bahasa Indonesia.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n\n\n=== USER PROMPT ===\nAnalyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"Saya baru saja mengedit porsi: saus kacang kurangi setengahnya (50%) saja.\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients.",
+      "output": {
+        "dishes": [
+          {
+            "dishName": "Sate Ayam",
+            "estimatedWeightGrams": 180,
+            "cookingMethod": "grilled",
+            "sourceImageIndex": 0,
+            "boundingBox2D": [
+              100,
+              100,
+              500,
+              500
+            ],
+            "foods": [
+              {
+                "foodName": "Daging Ayam Bakar",
+                "genericEnglishName": "grilled chicken",
+                "weightGrams": 120,
+                "nutrients": {
+                  "protein": 25,
+                  "saturatedFat": 2,
+                  "addedSugar": 1,
+                  "totalFibre": 0,
+                  "sodium": 300,
+                  "carbohydrates": 2
+                }
+              },
+              {
+                "foodName": "Saus Kacang",
+                "genericEnglishName": "peanut sauce",
+                "weightGrams": 60,
+                "nutrients": {
+                  "protein": 6,
+                  "saturatedFat": 3.5,
+                  "addedSugar": 4,
+                  "totalFibre": 1.5,
+                  "sodium": 250,
+                  "carbohydrates": 8
+                }
+              }
+            ],
+            "dishNutrients": {
+              "saturatedFat": 5.5,
+              "totalFat": 14,
+              "totalSugar": 5,
+              "vitaminD": 0,
+              "protein": 31,
+              "sodium": 550,
+              "totalFibre": 1.5
+            },
+            "targetDishIndex": null
+          }
+        ],
+        "contentType": "visual",
+        "diningEnvironment": "casual_restaurant",
+        "verdict": {
+          "label": "Protein Tinggi dengan Penyesuaian Lemak",
+          "level": "neutral"
+        },
+        "clinicalAdvice": "Sate ayam memberikan protein bersih yang sangat baik untuk massa otot Anda, namun saus kacang tetap menyumbang lemak dan sodium meskipun porsinya telah dikurangi setengah. Imbangi sisa hari ini dengan konsumsi air putih yang cukup dan perbanyak serat dari sayuran segar.",
+        "perImage": [
+          {
+            "imageIndex": 0,
+            "itemsFound": [
+              "Sate Ayam"
+            ]
+          }
+        ],
+        "_internalReasoning": "Extracted chicken satay and reduced peanut sauce based on user note."
+      },
+      "rawEmission": {
+        "dishes": [
+          {
+            "dishName": "Sate Ayam",
+            "estimatedWeightGrams": 180,
+            "cookingMethod": "grilled",
+            "sourceImageIndex": 0,
+            "boundingBox2D": [
+              100,
+              100,
+              500,
+              500
+            ],
+            "foods": [
+              {
+                "foodName": "Daging Ayam Bakar",
+                "genericEnglishName": "grilled chicken",
+                "weightGrams": 120,
+                "nutrients": {
+                  "protein": 25,
+                  "saturatedFat": 2,
+                  "addedSugar": 1,
+                  "totalFibre": 0,
+                  "sodium": 300,
+                  "carbohydrates": 2
+                }
+              },
+              {
+                "foodName": "Saus Kacang",
+                "genericEnglishName": "peanut sauce",
+                "weightGrams": 60,
+                "nutrients": {
+                  "protein": 6,
+                  "saturatedFat": 3.5,
+                  "addedSugar": 4,
+                  "totalFibre": 1.5,
+                  "sodium": 250,
+                  "carbohydrates": 8
+                }
+              }
+            ],
+            "dishNutrients": {
+              "saturatedFat": 5.5,
+              "totalFat": 14,
+              "totalSugar": 5,
+              "vitaminD": 0,
+              "protein": 31,
+              "sodium": 550,
+              "totalFibre": 1.5
+            },
+            "targetDishIndex": null
+          }
+        ],
+        "contentType": "visual",
+        "diningEnvironment": "casual_restaurant",
+        "verdict": {
+          "label": "Protein Tinggi dengan Penyesuaian Lemak",
+          "level": "neutral"
+        },
+        "clinicalAdvice": "Sate ayam memberikan protein bersih yang sangat baik untuk massa otot Anda, namun saus kacang tetap menyumbang lemak dan sodium meskipun porsinya telah dikurangi setengah. Imbangi sisa hari ini dengan konsumsi air putih yang cukup dan perbanyak serat dari sayuran segar.",
+        "perImage": [
+          {
+            "imageIndex": 0,
+            "itemsFound": [
+              "Sate Ayam"
+            ]
+          }
+        ],
+        "_internalReasoning": "Extracted chicken satay and reduced peanut sauce based on user note."
+      },
+      "model": "gemini-3.5-flash-lite",
+      "latency_ms": 4944,
+      "error": null
+    }
+  ],
+  "contract": [
+    {
+      "law": "SSE {final,result}",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Final result emitted; job succeeded"
+    },
+    {
+      "law": "AnalyzeFinished count = 1",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "AnalyzeFinished count = 1"
+    },
+    {
+      "law": "Stall/503/quota -> 3.1 hop, same job",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No stall or 503 encountered"
+    },
+    {
+      "law": "Submit JSON running",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Submit transitioned directly to running"
+    },
+    {
+      "law": "pendingFoodLog -> succeeded before R2",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Succeeded immediately upon finalized food log"
+    },
+    {
+      "law": "Retry hidden if succeeded or kcal in logs",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dialog inventory captured"
+    },
+    {
+      "law": "Attempt 1/3 hidden if succeeded",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dialog inventory captured"
+    },
+    {
+      "law": "Dialog on_card kcal = ledger",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No on_card macros in dialog inventory"
+    },
+    {
+      "law": "Composer controls count = 1",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No composer inventory captured"
+    },
+    {
+      "law": "DIAG5 off on food",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "DIAG5 auto-send remained off for food chat"
+    },
+    {
+      "law": "Matrix calc matches ledger",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Matrix connected and matches ledger"
+    },
+    {
+      "law": "Each dispatch has model + latency_ms",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "All 1 dispatch(es) contain model and latency_ms"
+    },
+    {
+      "law": "Handoff from/to + same jobId if transfer",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No agent handoffs in this run"
+    },
+    {
+      "law": "Agent output: nutrients complete",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "All 32 keys finite (2 legal zeros)"
+    },
+    {
+      "law": "Agent output: verdict + advice",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Every meal turn covered — t1: \"Protein Tinggi dengan Penyesuaian Lemak\" [neutral], 41 words, 0 figure(s)"
+    },
+    {
+      "law": "Dishes: fields populated",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "1/1 dish(es) fully populated (Sate Ayam)"
+    },
+    {
+      "law": "Multi-turn split shown",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Single-turn run, no split state"
+    },
+    {
+      "law": "Mode instruction chunk",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Meal scout chunk(s) shown for mode(s)=review"
+    },
+    {
+      "law": "Edit patch: components & nutrients preserved",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Single-turn create, no edit turns"
+    },
+    {
+      "law": "Handoff chain complete",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No handoffs in this run"
+    },
+    {
+      "law": "Handoff received",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Direct food log, no forwarded handoff"
+    },
+    {
+      "law": "Lab panel complete",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Medical-only law (pack=food)"
+    },
+    {
+      "law": "Clinical report shown",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Medical-only law (pack=food)"
+    }
+  ],
+  "portionAdjustment": null,
+  "linkedJobs": [],
+  "pendingFoodLog": {
+    "id": "meal_1789382070687",
+    "itemsBreakdown": [
+      {
+        "scoutIndex": 0,
+        "name": "Sate Ayam",
+        "canonicalDbName": "Sate Ayam",
+        "originalName": "Sate Ayam",
+        "keyword": "Sate Ayam",
+        "weightGrams": 180,
+        "calories": 290,
+        "protein": 31,
+        "totalFat": 14,
+        "saturatedFat": 5.5,
+        "carbohydrates": 10,
+        "sodium": 550,
+        "addedSugar": 5,
+        "nutrients": {
+          "calories": 290,
+          "protein": 31,
+          "totalFat": 14,
+          "saturatedFat": 5.5,
+          "transFat": 0,
+          "unsaturatedFat": 8.5,
+          "carbohydrates": 10,
+          "sugar": 5,
+          "addedSugar": 5,
+          "totalFibre": 1.5,
+          "solubleFibre": 0.4,
+          "sodium": 550,
+          "potassium": 396,
+          "magnesium": 36,
+          "calcium": 72,
+          "iron": 2.16,
+          "zinc": 1.44,
+          "selenium": 14.4,
+          "iodine": 18,
+          "phosphorus": 162,
+          "vitaminD": 0.18,
+          "vitaminB12": 0.54,
+          "folate": 45,
+          "vitaminC": 7.2,
+          "vitaminE": 1.08,
+          "vitaminK": 14.4,
+          "vitaminA": 63,
+          "vitaminB6": 0.22,
+          "thiamine": 0.14,
+          "riboflavin": 0.14,
+          "niacin": 2.16,
+          "omega3": 0,
+          "salt": 1.4
+        },
+        "lockedNutrientKeys": [
+          "calories",
+          "protein",
+          "totalFat",
+          "saturatedFat",
+          "carbohydrates",
+          "sodium"
+        ],
+        "dbSource": "estimated",
+        "dbId": null,
+        "brandLock": null,
+        "atwaterFlag": null,
+        "ingredientsList": "Daging Ayam Bakar, Saus Kacang",
+        "visualIngredients": [
+          "Daging Ayam Bakar",
+          "Saus Kacang"
+        ],
+        "components": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2,
+              "calories": 169,
+              "totalFat": 6.8,
+              "solubleFibre": 0
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 120,
+            "calories": 169,
+            "totalFibre": 0,
+            "solubleFibre": 0,
+            "baseNutrients100g": {
+              "calories": 141,
+              "protein": 20.8,
+              "totalFat": 5.7,
+              "saturatedFat": 1.7,
+              "carbohydrates": 1.7,
+              "sodium": 250,
+              "totalFibre": 0,
+              "solubleFibre": 0
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8,
+              "calories": 121,
+              "totalFat": 7.2,
+              "solubleFibre": 0.4
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 60,
+            "calories": 121,
+            "totalFibre": 1.5,
+            "solubleFibre": 0.4,
+            "baseNutrients100g": {
+              "calories": 202,
+              "protein": 10,
+              "totalFat": 12,
+              "saturatedFat": 5.8,
+              "carbohydrates": 13.3,
+              "sodium": 417,
+              "totalFibre": 2.5,
+              "solubleFibre": 0.7
+            }
+          }
+        ],
+        "componentsDetailList": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2,
+              "calories": 169,
+              "totalFat": 6.8,
+              "solubleFibre": 0
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 120,
+            "calories": 169,
+            "totalFibre": 0,
+            "solubleFibre": 0,
+            "baseNutrients100g": {
+              "calories": 141,
+              "protein": 20.8,
+              "totalFat": 5.7,
+              "saturatedFat": 1.7,
+              "carbohydrates": 1.7,
+              "sodium": 250,
+              "totalFibre": 0,
+              "solubleFibre": 0
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8,
+              "calories": 121,
+              "totalFat": 7.2,
+              "solubleFibre": 0.4
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 60,
+            "calories": 121,
+            "totalFibre": 1.5,
+            "solubleFibre": 0.4,
+            "baseNutrients100g": {
+              "calories": 202,
+              "protein": 10,
+              "totalFat": 12,
+              "saturatedFat": 5.8,
+              "carbohydrates": 13.3,
+              "sodium": 417,
+              "totalFibre": 2.5,
+              "solubleFibre": 0.7
+            }
+          }
+        ],
+        "compositeSiblings": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2,
+              "calories": 169,
+              "totalFat": 6.8,
+              "solubleFibre": 0
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 120,
+            "calories": 169,
+            "totalFibre": 0,
+            "solubleFibre": 0,
+            "baseNutrients100g": {
+              "calories": 141,
+              "protein": 20.8,
+              "totalFat": 5.7,
+              "saturatedFat": 1.7,
+              "carbohydrates": 1.7,
+              "sodium": 250,
+              "totalFibre": 0,
+              "solubleFibre": 0
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8,
+              "calories": 121,
+              "totalFat": 7.2,
+              "solubleFibre": 0.4
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 60,
+            "calories": 121,
+            "totalFibre": 1.5,
+            "solubleFibre": 0.4,
+            "baseNutrients100g": {
+              "calories": 202,
+              "protein": 10,
+              "totalFat": 12,
+              "saturatedFat": 5.8,
+              "carbohydrates": 13.3,
+              "sodium": 417,
+              "totalFibre": 2.5,
+              "solubleFibre": 0.7
+            }
+          }
+        ],
+        "hasComponents": true,
+        "boundingBox2D": [
+          100,
+          100,
+          500,
+          500
+        ],
+        "sourceImageIndex": 0,
+        "foodType": "composed",
+        "cookingMethod": null,
+        "diningEnvironment": "casual_restaurant",
+        "isDishEstimate": true
+      }
+    ],
+    "items": [
+      {
+        "scoutIndex": 0,
+        "name": "Sate Ayam",
+        "canonicalDbName": "Sate Ayam",
+        "originalName": "Sate Ayam",
+        "keyword": "Sate Ayam",
+        "weightGrams": 180,
+        "calories": 290,
+        "protein": 31,
+        "totalFat": 14,
+        "saturatedFat": 5.5,
+        "carbohydrates": 10,
+        "sodium": 550,
+        "addedSugar": 5,
+        "nutrients": {
+          "calories": 290,
+          "protein": 31,
+          "totalFat": 14,
+          "saturatedFat": 5.5,
+          "transFat": 0,
+          "unsaturatedFat": 8.5,
+          "carbohydrates": 10,
+          "sugar": 5,
+          "addedSugar": 5,
+          "totalFibre": 1.5,
+          "solubleFibre": 0.4,
+          "sodium": 550,
+          "potassium": 396,
+          "magnesium": 36,
+          "calcium": 72,
+          "iron": 2.16,
+          "zinc": 1.44,
+          "selenium": 14.4,
+          "iodine": 18,
+          "phosphorus": 162,
+          "vitaminD": 0.18,
+          "vitaminB12": 0.54,
+          "folate": 45,
+          "vitaminC": 7.2,
+          "vitaminE": 1.08,
+          "vitaminK": 14.4,
+          "vitaminA": 63,
+          "vitaminB6": 0.22,
+          "thiamine": 0.14,
+          "riboflavin": 0.14,
+          "niacin": 2.16,
+          "omega3": 0,
+          "salt": 1.4
+        },
+        "lockedNutrientKeys": [
+          "calories",
+          "protein",
+          "totalFat",
+          "saturatedFat",
+          "carbohydrates",
+          "sodium"
+        ],
+        "dbSource": "estimated",
+        "dbId": null,
+        "brandLock": null,
+        "atwaterFlag": null,
+        "ingredientsList": "Daging Ayam Bakar, Saus Kacang",
+        "visualIngredients": [
+          "Daging Ayam Bakar",
+          "Saus Kacang"
+        ],
+        "components": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2,
+              "calories": 169,
+              "totalFat": 6.8,
+              "solubleFibre": 0
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 120,
+            "calories": 169,
+            "totalFibre": 0,
+            "solubleFibre": 0,
+            "baseNutrients100g": {
+              "calories": 141,
+              "protein": 20.8,
+              "totalFat": 5.7,
+              "saturatedFat": 1.7,
+              "carbohydrates": 1.7,
+              "sodium": 250,
+              "totalFibre": 0,
+              "solubleFibre": 0
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8,
+              "calories": 121,
+              "totalFat": 7.2,
+              "solubleFibre": 0.4
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 60,
+            "calories": 121,
+            "totalFibre": 1.5,
+            "solubleFibre": 0.4,
+            "baseNutrients100g": {
+              "calories": 202,
+              "protein": 10,
+              "totalFat": 12,
+              "saturatedFat": 5.8,
+              "carbohydrates": 13.3,
+              "sodium": 417,
+              "totalFibre": 2.5,
+              "solubleFibre": 0.7
+            }
+          }
+        ],
+        "componentsDetailList": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2,
+              "calories": 169,
+              "totalFat": 6.8,
+              "solubleFibre": 0
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 120,
+            "calories": 169,
+            "totalFibre": 0,
+            "solubleFibre": 0,
+            "baseNutrients100g": {
+              "calories": 141,
+              "protein": 20.8,
+              "totalFat": 5.7,
+              "saturatedFat": 1.7,
+              "carbohydrates": 1.7,
+              "sodium": 250,
+              "totalFibre": 0,
+              "solubleFibre": 0
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8,
+              "calories": 121,
+              "totalFat": 7.2,
+              "solubleFibre": 0.4
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 60,
+            "calories": 121,
+            "totalFibre": 1.5,
+            "solubleFibre": 0.4,
+            "baseNutrients100g": {
+              "calories": 202,
+              "protein": 10,
+              "totalFat": 12,
+              "saturatedFat": 5.8,
+              "carbohydrates": 13.3,
+              "sodium": 417,
+              "totalFibre": 2.5,
+              "solubleFibre": 0.7
+            }
+          }
+        ],
+        "compositeSiblings": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2,
+              "calories": 169,
+              "totalFat": 6.8,
+              "solubleFibre": 0
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 120,
+            "calories": 169,
+            "totalFibre": 0,
+            "solubleFibre": 0,
+            "baseNutrients100g": {
+              "calories": 141,
+              "protein": 20.8,
+              "totalFat": 5.7,
+              "saturatedFat": 1.7,
+              "carbohydrates": 1.7,
+              "sodium": 250,
+              "totalFibre": 0,
+              "solubleFibre": 0
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8,
+              "calories": 121,
+              "totalFat": 7.2,
+              "solubleFibre": 0.4
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 60,
+            "calories": 121,
+            "totalFibre": 1.5,
+            "solubleFibre": 0.4,
+            "baseNutrients100g": {
+              "calories": 202,
+              "protein": 10,
+              "totalFat": 12,
+              "saturatedFat": 5.8,
+              "carbohydrates": 13.3,
+              "sodium": 417,
+              "totalFibre": 2.5,
+              "solubleFibre": 0.7
+            }
+          }
+        ],
+        "hasComponents": true,
+        "boundingBox2D": [
+          100,
+          100,
+          500,
+          500
+        ],
+        "sourceImageIndex": 0,
+        "foodType": "composed",
+        "cookingMethod": null,
+        "diningEnvironment": "casual_restaurant",
+        "isDishEstimate": true
+      }
+    ],
+    "nutrients": {
+      "calories": 290,
+      "protein": 31,
+      "totalFat": 14,
+      "saturatedFat": 5.5,
+      "transFat": 0,
+      "unsaturatedFat": 8.5,
+      "omega3": 0,
+      "carbohydrates": 10,
+      "sugar": 5,
+      "addedSugar": 5,
+      "totalFibre": 1.5,
+      "solubleFibre": 0.4,
+      "sodium": 550,
+      "potassium": 396,
+      "magnesium": 36,
+      "calcium": 72,
+      "iron": 2.2,
+      "zinc": 1.4,
+      "selenium": 14.4,
+      "iodine": 18,
+      "phosphorus": 162,
+      "vitaminD": 0.2,
+      "vitaminB12": 0.5,
+      "folate": 45,
+      "vitaminC": 7.2,
+      "vitaminE": 1.1,
+      "vitaminK": 14.4,
+      "vitaminA": 63,
+      "vitaminB6": 0.2,
+      "thiamine": 0.1,
+      "riboflavin": 0.1,
+      "niacin": 2.2,
+      "salt": 1.4
+    },
+    "name": "Sate Ayam",
+    "title": "Sate Ayam",
+    "message": "Sate ayam memberikan protein bersih yang sangat baik untuk massa otot Anda, namun saus kacang tetap menyumbang lemak dan sodium meskipun porsinya telah dikurangi setengah. Imbangi sisa hari ini dengan konsumsi air putih yang cukup dan perbanyak serat dari sayuran segar.",
+    "healthImpact": "",
+    "composition": "Sate Ayam (Daging Ayam Bakar, Saus Kacang)",
+    "benefits": [],
+    "risks": [],
+    "recommendation": "",
+    "verdict": {
+      "label": "Protein Tinggi dengan Penyesuaian Lemak",
+      "level": "neutral"
+    },
+    "imageUrls": [],
+    "weightGrams": 180,
+    "quantity": "1 serving",
+    "receiptTable": "### 🧾 Nutrition calculation\n\n| Item / Ingredient | Kcal | Protein | Sat Fat | Sodium |\n|---|---|---|---|---|\n| **1. Sate Ayam - 180g (Daging Ayam Bakar, Saus Kacang)** | - | - | - | - |\n| Daging Ayam Bakar - 120g | 169 | 25g | 2g | 300mg |\n| Saus Kacang - 60g | 121 | 6g | 3.5g | 250mg |\n| **Item Sub-Total - 180g** | **290** | **31g** | **5.5g** | **550mg** |\n| **🏆 GRAND MEAL TOTAL - 180g** | **290** | **31g** | **5.5g** | **550mg** |\n",
+    "savable": true,
+    "degradedStages": [],
+    "date": "2026-09-14",
+    "scoutItems": [
+      {
+        "keyword": "Sate Ayam",
+        "originalName": "Sate Ayam",
+        "name": "Sate Ayam",
+        "genericEnglishName": null,
+        "chainName": null,
+        "packageLabelText": null,
+        "estimatedWeightGrams": 180,
+        "nutrientBasisWeight": 180,
+        "packGrams": null,
+        "cookingMethod": "grilled",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          100,
+          100,
+          500,
+          500
+        ],
+        "isStandaloneCondimentPacket": false,
+        "components": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "componentsDetailList": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "compositeSiblings": [
+          {
+            "name": "Daging Ayam Bakar",
+            "searchQuery": "grilled chicken",
+            "weightGrams": 120,
+            "estimatedWeightGrams": 120,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2
+            },
+            "protein": 25,
+            "totalFat": 6.8,
+            "fat": 6.8,
+            "saturatedFat": 2,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 300,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 60,
+            "estimatedWeightGrams": 60,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8
+            },
+            "protein": 6,
+            "totalFat": 7.2,
+            "fat": 7.2,
+            "saturatedFat": 3.5,
+            "carbohydrates": 8,
+            "carbs": 8,
+            "sodium": 250,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "hasComponents": true,
+        "ingredients": [
+          "Daging Ayam Bakar",
+          "Saus Kacang"
+        ],
+        "visualIngredients": [],
+        "ingredientsList": "Daging Ayam Bakar, Saus Kacang",
+        "rawNutritionLabel": null,
+        "source": "estimated",
+        "dbSource": "estimated",
+        "nutrients": {
+          "calories": 290,
+          "protein": 31,
+          "totalFat": 14,
+          "saturatedFat": 5.5,
+          "transFat": 0,
+          "unsaturatedFat": 8.5,
+          "carbohydrates": 10,
+          "sugar": 5,
+          "addedSugar": 5,
+          "totalFibre": 1.5,
+          "solubleFibre": 0.4,
+          "sodium": 550,
+          "potassium": 396,
+          "magnesium": 36,
+          "calcium": 72,
+          "iron": 2.16,
+          "zinc": 1.44,
+          "selenium": 14.4,
+          "iodine": 18,
+          "phosphorus": 162,
+          "vitaminD": 0.18,
+          "vitaminB12": 0.54,
+          "folate": 45,
+          "vitaminC": 7.2,
+          "vitaminE": 1.08,
+          "vitaminK": 14.4,
+          "vitaminA": 63,
+          "vitaminB6": 0.22,
+          "thiamine": 0.14,
+          "riboflavin": 0.14,
+          "niacin": 2.16,
+          "omega3": 0,
+          "salt": 1.4
+        },
+        "truthNutrients": {
+          "protein": 31,
+          "carbohydrates": 10,
+          "totalFat": 14,
+          "saturatedFat": 5.5,
+          "transFat": 0,
+          "sugar": 5,
+          "addedSugar": 5,
+          "totalFibre": 1.5,
+          "sodium": 550,
+          "potassium": 0,
+          "omega3": 0,
+          "calcium": 0,
+          "iron": 0,
+          "magnesium": 0,
+          "vitaminD": 0,
+          "zinc": 0,
+          "selenium": 0,
+          "iodine": 0,
+          "phosphorus": 0,
+          "vitaminA": 0,
+          "vitaminC": 0,
+          "vitaminE": 0,
+          "vitaminK": 0,
+          "vitaminB12": 0,
+          "folate": 0,
+          "vitaminB6": 0,
+          "thiamine": 0,
+          "riboflavin": 0,
+          "niacin": 0,
+          "solubleFibre": 0.4,
+          "unsaturatedFat": 8.5
+        },
+        "scoutIndex": 0,
+        "internalReasoning": "Extracted chicken satay and reduced peanut sauce based on user note.",
+        "preCalcNutrients": {
+          "calories": 290,
+          "protein": 31,
+          "totalFat": 14,
+          "saturatedFat": 5.5,
+          "transFat": 0,
+          "unsaturatedFat": 8.5,
+          "carbohydrates": 10,
+          "sugar": 5,
+          "addedSugar": 5,
+          "totalFibre": 1.5,
+          "solubleFibre": 0.4,
+          "sodium": 550,
+          "potassium": 396,
+          "magnesium": 36,
+          "calcium": 72,
+          "iron": 2.16,
+          "zinc": 1.44,
+          "selenium": 14.4,
+          "iodine": 18,
+          "phosphorus": 162,
+          "vitaminD": 0.18,
+          "vitaminB12": 0.54,
+          "folate": 45,
+          "vitaminC": 7.2,
+          "vitaminE": 1.08,
+          "vitaminK": 14.4,
+          "vitaminA": 63,
+          "vitaminB6": 0.22,
+          "thiamine": 0.14,
+          "riboflavin": 0.14,
+          "niacin": 2.16,
+          "omega3": 0,
+          "salt": 1.4
+        }
+      }
+    ],
+    "historyLog": [
+      {
+        "type": "stage_complete",
+        "timestamp": "2026-09-14T10:34:30.687Z",
+        "stage": "calculation",
+        "message": "Happy-path meal attached (savable)",
+        "id": "w16ek69",
+        "seq": 1
+      }
+    ],
+    "userLockedSlots": [],
+    "quantityResolutions": [
+      {
+        "scoutIndex": 0,
+        "name": "Sate Ayam",
+        "candidates": [
+          {
+            "source": "visual",
+            "grams": 180,
+            "packGrams": null,
+            "confidence": "low",
+            "note": "uncorroborated scout guess"
+          }
+        ],
+        "decision": "accept-visual",
+        "why": "no statement, no pack divergence — visual estimate stands"
+      }
+    ]
+  },
+  "scoutItems": [
+    {
+      "keyword": "Sate Ayam",
+      "originalName": "Sate Ayam",
+      "name": "Sate Ayam",
+      "genericEnglishName": null,
+      "chainName": null,
+      "packageLabelText": null,
+      "estimatedWeightGrams": 180,
+      "nutrientBasisWeight": 180,
+      "packGrams": null,
+      "cookingMethod": "grilled",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        100,
+        100,
+        500,
+        500
+      ],
+      "isStandaloneCondimentPacket": false,
+      "components": [
+        {
+          "name": "Daging Ayam Bakar",
+          "searchQuery": "grilled chicken",
+          "weightGrams": 120,
+          "estimatedWeightGrams": 120,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 25,
+            "saturatedFat": 2,
+            "addedSugar": 1,
+            "totalFibre": 0,
+            "sodium": 300,
+            "carbohydrates": 2
+          },
+          "protein": 25,
+          "totalFat": 6.8,
+          "fat": 6.8,
+          "saturatedFat": 2,
+          "carbohydrates": 2,
+          "carbs": 2,
+          "sodium": 300,
+          "dbSource": "estimated",
+          "dbId": null
+        },
+        {
+          "name": "Saus Kacang",
+          "searchQuery": "peanut sauce",
+          "weightGrams": 60,
+          "estimatedWeightGrams": 60,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 6,
+            "saturatedFat": 3.5,
+            "addedSugar": 4,
+            "totalFibre": 1.5,
+            "sodium": 250,
+            "carbohydrates": 8
+          },
+          "protein": 6,
+          "totalFat": 7.2,
+          "fat": 7.2,
+          "saturatedFat": 3.5,
+          "carbohydrates": 8,
+          "carbs": 8,
+          "sodium": 250,
+          "dbSource": "estimated",
+          "dbId": null
+        }
+      ],
+      "componentsDetailList": [
+        {
+          "name": "Daging Ayam Bakar",
+          "searchQuery": "grilled chicken",
+          "weightGrams": 120,
+          "estimatedWeightGrams": 120,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 25,
+            "saturatedFat": 2,
+            "addedSugar": 1,
+            "totalFibre": 0,
+            "sodium": 300,
+            "carbohydrates": 2
+          },
+          "protein": 25,
+          "totalFat": 6.8,
+          "fat": 6.8,
+          "saturatedFat": 2,
+          "carbohydrates": 2,
+          "carbs": 2,
+          "sodium": 300,
+          "dbSource": "estimated",
+          "dbId": null
+        },
+        {
+          "name": "Saus Kacang",
+          "searchQuery": "peanut sauce",
+          "weightGrams": 60,
+          "estimatedWeightGrams": 60,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 6,
+            "saturatedFat": 3.5,
+            "addedSugar": 4,
+            "totalFibre": 1.5,
+            "sodium": 250,
+            "carbohydrates": 8
+          },
+          "protein": 6,
+          "totalFat": 7.2,
+          "fat": 7.2,
+          "saturatedFat": 3.5,
+          "carbohydrates": 8,
+          "carbs": 8,
+          "sodium": 250,
+          "dbSource": "estimated",
+          "dbId": null
+        }
+      ],
+      "compositeSiblings": [
+        {
+          "name": "Daging Ayam Bakar",
+          "searchQuery": "grilled chicken",
+          "weightGrams": 120,
+          "estimatedWeightGrams": 120,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 25,
+            "saturatedFat": 2,
+            "addedSugar": 1,
+            "totalFibre": 0,
+            "sodium": 300,
+            "carbohydrates": 2
+          },
+          "protein": 25,
+          "totalFat": 6.8,
+          "fat": 6.8,
+          "saturatedFat": 2,
+          "carbohydrates": 2,
+          "carbs": 2,
+          "sodium": 300,
+          "dbSource": "estimated",
+          "dbId": null
+        },
+        {
+          "name": "Saus Kacang",
+          "searchQuery": "peanut sauce",
+          "weightGrams": 60,
+          "estimatedWeightGrams": 60,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 6,
+            "saturatedFat": 3.5,
+            "addedSugar": 4,
+            "totalFibre": 1.5,
+            "sodium": 250,
+            "carbohydrates": 8
+          },
+          "protein": 6,
+          "totalFat": 7.2,
+          "fat": 7.2,
+          "saturatedFat": 3.5,
+          "carbohydrates": 8,
+          "carbs": 8,
+          "sodium": 250,
+          "dbSource": "estimated",
+          "dbId": null
+        }
+      ],
+      "hasComponents": true,
+      "ingredients": [
+        "Daging Ayam Bakar",
+        "Saus Kacang"
+      ],
+      "visualIngredients": [],
+      "ingredientsList": "Daging Ayam Bakar, Saus Kacang",
+      "rawNutritionLabel": null,
+      "source": "estimated",
+      "dbSource": "estimated",
+      "nutrients": {
+        "calories": 290,
+        "protein": 31,
+        "totalFat": 14,
+        "saturatedFat": 5.5,
+        "transFat": 0,
+        "unsaturatedFat": 8.5,
+        "carbohydrates": 10,
+        "sugar": 5,
+        "addedSugar": 5,
+        "totalFibre": 1.5,
+        "solubleFibre": 0.4,
+        "sodium": 550,
+        "potassium": 396,
+        "magnesium": 36,
+        "calcium": 72,
+        "iron": 2.16,
+        "zinc": 1.44,
+        "selenium": 14.4,
+        "iodine": 18,
+        "phosphorus": 162,
+        "vitaminD": 0.18,
+        "vitaminB12": 0.54,
+        "folate": 45,
+        "vitaminC": 7.2,
+        "vitaminE": 1.08,
+        "vitaminK": 14.4,
+        "vitaminA": 63,
+        "vitaminB6": 0.22,
+        "thiamine": 0.14,
+        "riboflavin": 0.14,
+        "niacin": 2.16,
+        "omega3": 0,
+        "salt": 1.4
+      },
+      "truthNutrients": {
+        "protein": 31,
+        "carbohydrates": 10,
+        "totalFat": 14,
+        "saturatedFat": 5.5,
+        "transFat": 0,
+        "sugar": 5,
+        "addedSugar": 5,
+        "totalFibre": 1.5,
+        "sodium": 550,
+        "potassium": 0,
+        "omega3": 0,
+        "calcium": 0,
+        "iron": 0,
+        "magnesium": 0,
+        "vitaminD": 0,
+        "zinc": 0,
+        "selenium": 0,
+        "iodine": 0,
+        "phosphorus": 0,
+        "vitaminA": 0,
+        "vitaminC": 0,
+        "vitaminE": 0,
+        "vitaminK": 0,
+        "vitaminB12": 0,
+        "folate": 0,
+        "vitaminB6": 0,
+        "thiamine": 0,
+        "riboflavin": 0,
+        "niacin": 0,
+        "solubleFibre": 0.4,
+        "unsaturatedFat": 8.5
+      },
+      "scoutIndex": 0,
+      "internalReasoning": "Extracted chicken satay and reduced peanut sauce based on user note.",
+      "preCalcNutrients": {
+        "calories": 290,
+        "protein": 31,
+        "totalFat": 14,
+        "saturatedFat": 5.5,
+        "transFat": 0,
+        "unsaturatedFat": 8.5,
+        "carbohydrates": 10,
+        "sugar": 5,
+        "addedSugar": 5,
+        "totalFibre": 1.5,
+        "solubleFibre": 0.4,
+        "sodium": 550,
+        "potassium": 396,
+        "magnesium": 36,
+        "calcium": 72,
+        "iron": 2.16,
+        "zinc": 1.44,
+        "selenium": 14.4,
+        "iodine": 18,
+        "phosphorus": 162,
+        "vitaminD": 0.18,
+        "vitaminB12": 0.54,
+        "folate": 45,
+        "vitaminC": 7.2,
+        "vitaminE": 1.08,
+        "vitaminK": 14.4,
+        "vitaminA": 63,
+        "vitaminB6": 0.22,
+        "thiamine": 0.14,
+        "riboflavin": 0.14,
+        "niacin": 2.16,
+        "omega3": 0,
+        "salt": 1.4
+      }
+    }
+  ],
+  "receiptTable": "### 🧾 Nutrition calculation\n\n| Item / Ingredient | Kcal | Protein | Sat Fat | Sodium |\n|---|---|---|---|---|\n| **1. Sate Ayam - 180g (Daging Ayam Bakar, Saus Kacang)** | - | - | - | - |\n| Daging Ayam Bakar - 120g | 169 | 25g | 2g | 300mg |\n| Saus Kacang - 60g | 121 | 6g | 3.5g | 250mg |\n| **Item Sub-Total - 180g** | **290** | **31g** | **5.5g** | **550mg** |\n| **🏆 GRAND MEAL TOTAL - 180g** | **290** | **31g** | **5.5g** | **550mg** |\n",
+  "rawScout": {
+    "dishes": [
+      {
+        "dishName": "Sate Ayam",
+        "estimatedWeightGrams": 180,
+        "cookingMethod": "grilled",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          100,
+          100,
+          500,
+          500
+        ],
+        "foods": [
+          {
+            "foodName": "Daging Ayam Bakar",
+            "genericEnglishName": "grilled chicken",
+            "weightGrams": 120,
+            "nutrients": {
+              "protein": 25,
+              "saturatedFat": 2,
+              "addedSugar": 1,
+              "totalFibre": 0,
+              "sodium": 300,
+              "carbohydrates": 2
+            }
+          },
+          {
+            "foodName": "Saus Kacang",
+            "genericEnglishName": "peanut sauce",
+            "weightGrams": 60,
+            "nutrients": {
+              "protein": 6,
+              "saturatedFat": 3.5,
+              "addedSugar": 4,
+              "totalFibre": 1.5,
+              "sodium": 250,
+              "carbohydrates": 8
+            }
+          }
+        ],
+        "dishNutrients": {
+          "saturatedFat": 5.5,
+          "totalFat": 14,
+          "totalSugar": 5,
+          "vitaminD": 0,
+          "protein": 31,
+          "sodium": 550,
+          "totalFibre": 1.5
+        },
+        "targetDishIndex": null
+      }
+    ],
+    "contentType": "visual",
+    "diningEnvironment": "casual_restaurant",
+    "verdict": {
+      "label": "Protein Tinggi dengan Penyesuaian Lemak",
+      "level": "neutral"
+    },
+    "clinicalAdvice": "Sate ayam memberikan protein bersih yang sangat baik untuk massa otot Anda, namun saus kacang tetap menyumbang lemak dan sodium meskipun porsinya telah dikurangi setengah. Imbangi sisa hari ini dengan konsumsi air putih yang cukup dan perbanyak serat dari sayuran segar.",
+    "perImage": [
+      {
+        "imageIndex": 0,
+        "itemsFound": [
+          "Sate Ayam"
+        ]
+      }
+    ],
+    "_internalReasoning": "Extracted chicken satay and reduced peanut sauce based on user note."
+  },
+  "backendLogs": "[job_1789382065415_aveviaomb] [scout_instruction] Vision Scout Instruction dispatched (model: gemini-3.5-flash-lite). Prompt length: 800 chars — see [UnifiedLLM-Prompt:scout] below for full text.\n[job_1789382065415_aveviaomb] [scout_system_instruction] Vision Scout System Instruction dispatched (model: gemini-3.5-flash-lite) — see [UnifiedLLM-Prompt:scout] below for full text.\n[job_1789382065415_aveviaomb] [scout_answer] Scout identified 1 item(s): Sate Ayam (~180g)\n[job_1789382065415_aveviaomb] [info] [scout] Prompt: 1752, Completion: 589, Total: 3020\n[job_1789382065415_aveviaomb] [info] [UnifiedLLM-Timing:scout] ms=4939\n[job_1789382065415_aveviaomb] [diet_answer] Sate ayam memberikan protein bersih yang sangat baik untuk massa otot Anda, namun saus kacang tetap menyumbang lemak dan sodium meskipun porsinya telah dikurangi setengah. Imbangi sisa hari ini dengan konsumsi air putih yang cukup dan perbanyak serat dari sayuran segar.",
+  "comparisonData": null
+}

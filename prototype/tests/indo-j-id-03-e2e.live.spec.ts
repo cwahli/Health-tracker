@@ -8,6 +8,8 @@ import {
   submitFoodChatMessageWithPhotos,
   openFrontDesk,
   cleanupLatestMeal,
+  assertDebugContractGreen,
+  pollJobUntilTerminal,
   first,
 } from './indo-journey-helpers.js';
 
@@ -20,6 +22,7 @@ import {
  * - Gate 3: UC-01 Deep Multi-Turn Desk Consultation Gate (3 deep consultation turns on meal edit)
  * - Gate 4: Real Meal Photo Fixture Gate (Authentic meal fixture attached)
  * - Gate 5: Bug Evidence Handling Gate (Fail-green resilient assertions for rounding bugs)
+ * - Debug Contract: Live job completion verification + classifyDump oracle validation in golden/journeys/_live_debug/
  */
 
 test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak', () => {
@@ -59,9 +62,17 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
     // -------------------------------------------------------------------------
     await openFoodChat(page);
 
-    const initialMealPrompt = 'Gado-Gado komplit dengan tahu, tempe, telur, dan bumbu kacang';
+    const initialMealPrompt = '1 porsi standar Gado-Gado komplit (250g) dengan tahu, tempe, telur, dan bumbu kacang';
     console.log(`[J-ID-03 Gate 1 Turn 1] Logging initial meal: "${initialMealPrompt}"`);
-    await submitFoodChatMessageWithPhotos(page, initialMealPrompt, [mealPhotos[0]]);
+    const initialSubmit = await submitFoodChatMessageWithPhotos(page, initialMealPrompt, [mealPhotos[0]]);
+
+    // Ensure Turn 1 initial meal job reaches terminal state before submitting edit turn
+    if (initialSubmit.jobId) {
+      console.log(`[J-ID-03 Gate 1 Turn 1] Waiting for initial meal job ${initialSubmit.jobId} to finish...`);
+      await pollJobUntilTerminal(page, initialSubmit.jobId, 180000, { allowAwaitingUser: true }).catch((e) => {
+        console.warn(`[J-ID-03 Gate 1 Turn 1] Initial poll warning:`, e);
+      });
+    }
 
     // Verify first turn rendered
     const turn1Msg = first(page, [
@@ -84,7 +95,7 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
 
     const editPrompt = 'Saya baru saja mengedit porsi: saus kacang kurangi setengahnya (50%) saja.';
     console.log(`[J-ID-03 Gate 1 Turn 2] Submitting edit: "${editPrompt}"`);
-    await submitFoodChatMessageWithPhotos(page, editPrompt, []);
+    const editSubmit = await submitFoodChatMessageWithPhotos(page, editPrompt, []);
 
     const turn2Msg = first(page, [
       '#last-food-message',
@@ -97,6 +108,12 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
     const turn2Text = await turn2Msg.innerText().catch(() => '');
     console.log(`[J-ID-03 Gate 1 Turn 2] Recalculated output: ${turn2Text.slice(0, 200)}`);
     expect.soft(turn2Text).toMatch(/kacang|porsi|kalori|kcal|g\b|gram|hemat/i);
+
+    // -------------------------------------------------------------------------
+    // Debug Contract Evaluation Gate: Edit Job Terminal Green
+    // -------------------------------------------------------------------------
+    const targetJobId = editSubmit.jobId || initialSubmit.jobId;
+    await assertDebugContractGreen(page, targetJobId, 'J-ID-03', { allowAwaitingUser: true });
 
     // -------------------------------------------------------------------------
     // Gate 3: UC-01 Deep Multi-Turn Desk Consultation Gate

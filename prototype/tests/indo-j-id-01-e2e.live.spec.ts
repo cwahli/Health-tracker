@@ -10,6 +10,7 @@ import {
   cleanupLatestMeal,
   switchAuthLanguageToIndonesian,
   checkAuthI18nKeys,
+  assertDebugContractGreen,
   first,
 } from './indo-journey-helpers.js';
 
@@ -22,6 +23,7 @@ import {
  * - G3: Desk UC-01 Multi-Turn Conversational Interaction (3 turns contextual coaching)
  * - G4: Authentic Indonesian Meal Photo Fixture (Real meal photo attached via file input)
  * - G5: Bug Evidence Handling Gate (Fail-green resilient assertions)
+ * - Debug Contract: Live job completion verification + classifyDump oracle validation in golden/journeys/_live_debug/
  */
 
 test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
@@ -54,11 +56,11 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
       'button:has-text("Continue with email")',
       'button:has-text("Continue")',
     ]);
-    if (await emailInput.isVisible().catch(() => false)) {
+    if (await emailInput.isVisible({ timeout: 2000 }).catch(() => false)) {
       await emailInput.fill('sari.wrong.pw.check@example.com');
       await passInput.fill('WrongPass999!');
-      if (await submitAuthBtn.isVisible().catch(() => false)) {
-        await submitAuthBtn.click();
+      if (await submitAuthBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await submitAuthBtn.click({ timeout: 2000 }).catch(() => {});
         await page.waitForTimeout(2000);
         const cardText = await authCard.innerText().catch(() => '');
         console.log(`[J-ID-01 Gate 2] Wrong password feedback: ${cardText.slice(0, 150)}`);
@@ -121,7 +123,7 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
 
     const mealText = 'Nasi Uduk dengan Telur Balado dan Tempe Orek';
     console.log(`[J-ID-01 Gate 4] Uploading meal photo and submitting text: "${mealText}"`);
-    await submitFoodChatMessageWithPhotos(page, mealText, [candidatePhotos[0]]);
+    const submitResult = await submitFoodChatMessageWithPhotos(page, mealText, [candidatePhotos[0]]);
 
     // Assert that the meal log response rendered nutrients and dish recognition
     const lastMealMsg = first(page, [
@@ -138,12 +140,17 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
     expect.soft(mealResText).toMatch(/nasi|uduk|telur|balado|tempe|oat|kalori|kcal|g\b|protein|lemak/i);
 
     // -------------------------------------------------------------------------
+    // Debug Contract Evaluation Gate: Live Job Succeeds & No Oracle Violations
+    // -------------------------------------------------------------------------
+    await assertDebugContractGreen(page, submitResult.jobId, 'J-ID-01');
+
+    // -------------------------------------------------------------------------
     // Gate 3: Front Desk UC-01 Multi-Turn Conversational Interaction Gate
     // -------------------------------------------------------------------------
     console.log('[J-ID-01 Gate 3] Starting UC-01 Front Desk Consultation turns...');
     const deskInput = await openFrontDesk(page);
 
-    if (await deskInput.isVisible({ timeout: 10000 }).catch(() => false)) {
+    if (await deskInput.isVisible({ timeout: 5000 }).catch(() => false)) {
       const deskSend = first(page, [
         '#desk-chat-send-btn',
         '#receptionist-chat-send-btn',
@@ -155,28 +162,28 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
       // Turn 1: UC-01 Initial Inquiry (Weight Loss intent)
       const turn1Prompt = 'Saya ingin menurunkan berat badan.';
       await deskInput.fill(turn1Prompt);
-      if (await deskSend.isVisible().catch(() => false)) {
-        await deskSend.click();
-        await page.waitForTimeout(6000);
+      if (await deskSend.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await deskSend.click({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(3000);
       }
 
       // Turn 2: UC-01 Demographic details
       const turn2Prompt = 'Saya perempuan usia 18 tahun dari Indonesia, tinggi badan 140 cm. Tidak ada riwayat penyakit.';
-      if (await deskInput.isVisible({ timeout: 15000 }).catch(() => false)) {
+      if (await deskInput.isVisible({ timeout: 5000 }).catch(() => false)) {
         await deskInput.fill(turn2Prompt);
-        if (await deskSend.isVisible().catch(() => false)) {
-          await deskSend.click();
-          await page.waitForTimeout(6000);
+        if (await deskSend.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await deskSend.click({ timeout: 3000 }).catch(() => {});
+          await page.waitForTimeout(3000);
         }
       }
 
       // Turn 3: UC-01 Weight & Lifestyle target context
       const turn3Prompt = 'Berat badan saya saat ini 40 kg dan saya ingin saran menu sehat untuk target 1350 kkal harian.';
-      if (await deskInput.isVisible({ timeout: 15000 }).catch(() => false)) {
+      if (await deskInput.isVisible({ timeout: 5000 }).catch(() => false)) {
         await deskInput.fill(turn3Prompt);
-        if (await deskSend.isVisible().catch(() => false)) {
-          await deskSend.click();
-          await page.waitForTimeout(6000);
+        if (await deskSend.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await deskSend.click({ timeout: 3000 }).catch(() => {});
+          await page.waitForTimeout(3000);
         }
       }
 

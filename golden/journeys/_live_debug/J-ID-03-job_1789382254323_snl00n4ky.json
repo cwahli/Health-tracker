@@ -1,0 +1,2087 @@
+{
+  "jobId": "job_1789382254323_snl00n4ky",
+  "conversationId": null,
+  "pack": "food",
+  "status": "succeeded",
+  "exportedAt": "2026-09-14T10:37:42.955Z",
+  "dialogInventory": null,
+  "lastUserAction": {
+    "action": "submit_meal_job",
+    "timestamp": "2026-09-14T10:37:34.544Z",
+    "details": {
+      "jobId": "job_1789382254323_snl00n4ky",
+      "promptLength": 74,
+      "imageCount": 0,
+      "submissionMode": "review"
+    }
+  },
+  "breadcrumbs": [
+    {
+      "timestamp": "2026-09-14T10:37:14.623Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "auth-email-input",
+        "valueLength": 37
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:14.655Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "auth-password-input",
+        "valueLength": 12
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:14.656Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "auth-submit-btn",
+        "label": "Continue with email"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:16.809Z",
+      "action": "network_slow",
+      "target": "/api/jobs/status",
+      "details": {
+        "duration": 2759,
+        "method": "GET"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.431Z",
+      "action": "network_slow",
+      "target": "/api/auth/login",
+      "details": {
+        "duration": 2774,
+        "method": "POST"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.705Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "avatar-edit-btn",
+        "label": "avatar-edit-btn"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.744Z",
+      "action": "input_change",
+      "target": "select",
+      "details": {
+        "name": "lang-selector",
+        "valueLength": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.793Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.808Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.826Z",
+      "action": "input_change",
+      "target": "select",
+      "details": {
+        "name": "input",
+        "valueLength": 6
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.838Z",
+      "action": "input_change",
+      "target": "select",
+      "details": {
+        "name": "input",
+        "valueLength": 15
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.851Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 3
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.899Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 12
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.900Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "profile-save-btn",
+        "label": "Save"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:17.954Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "nav-tab-food",
+        "label": "Food History"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:18.006Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "label": "w-14 h-14 bg-indigo-600 text-w"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:18.940Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "quick-action-log-meal",
+        "label": "Log Meal"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:19.068Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 32
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:19.181Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "food-chat-input",
+        "valueLength": 84
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:19.182Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "food-chat-send-btn",
+        "label": "food-chat-send-btn"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:19.185Z",
+      "action": "submit_initiated",
+      "target": "chat_composer",
+      "details": {
+        "prompt": "1 porsi standar Gado-Gado komplit (250g) dengan tahu, tempe, telur, dan bumbu kacang",
+        "imageCount": 1
+      }
+    },
+    {
+      "timestamp": "2026-09-14T10:37:19.215Z",
+      "action": "submit_meal_job",
+      "target": "chat_compose_dock",
+      "details": {
+        "jobId": "job_1789382238941_0pzoub1fk",
+        "promptLength": 84,
+        "imageCount": 1,
+        "submissionMode": "review"
+      }
+    }
+  ],
+  "sessionEvents": [
+    {
+      "ts": 1789382254323,
+      "writer": "JobStore.apply",
+      "status": "draft",
+      "action": "createJob"
+    },
+    {
+      "ts": 1789382254511,
+      "writer": "LogChat.submit",
+      "status": "queued",
+      "action": "SubmitStarted"
+    },
+    {
+      "ts": 1789382254674,
+      "writer": "serverJobs.start",
+      "status": "running",
+      "action": "job_started"
+    },
+    {
+      "ts": 1789382261386,
+      "writer": "serverJobs.publish",
+      "status": "succeeded",
+      "action": "result_ready"
+    }
+  ],
+  "console": [
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:13.989Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:17.461Z] [Sync] Force pull (Manual Sync) active. Pushing local unsynced logs and profile first.",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:18.224Z] [Sync] Pre-pull push complete: 0 foods, 0 bios",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.028Z] [DIAG3] Job upsert loop starting - 2 jobs queued to sync",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.029Z] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.032Z] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382210308_5fmcrpyvh",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.260Z] [job_1789382238941_0pzoub1fk] [DIAG3] Job upsert loop starting - 2 jobs queued to sync",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.260Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.263Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382210308_5fmcrpyvh",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.452Z] [job_1789382238941_0pzoub1fk] Firestore connection test: Backend unreachable or offline. Operating smoothly in local storage mode.",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.775Z] [job_1789382238941_0pzoub1fk] [DIAG3] Job upsert loop starting - 2 jobs queued to sync",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.775Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:19.779Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382210308_5fmcrpyvh",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.193Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 933ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.228Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 1199ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.814Z] [job_1789382238941_0pzoub1fk] [LogChat] Job successfully submitted to server: {\"success\":true,\"jobId\":\"job_1789382238941_0pzoub1fk\",\"status\":\"running\",\"imageUrls\":[\"https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/job_1789382238941_0pzoub1fk.jpg\"]}",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.824Z] [job_1789382238941_0pzoub1fk] [JobQueueRunner] Job job_1789382238941_0pzoub1fk is server-owned. Polling /api/jobs/status...",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.826Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382210308_5fmcrpyvh responded 200 in 1794ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.826Z] [job_1789382238941_0pzoub1fk] [DIAG3] Chunk 1 (2 jobs) took 1797ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.826Z] [job_1789382238941_0pzoub1fk] [DIAG3] Job upsert loop finished - 2 jobs, total 1797ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.908Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382210308_5fmcrpyvh responded 200 in 1645ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.908Z] [job_1789382238941_0pzoub1fk] [DIAG3] Chunk 1 (2 jobs) took 1648ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.908Z] [job_1789382238941_0pzoub1fk] [DIAG3] Job upsert loop finished - 2 jobs, total 1648ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.954Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382210308_5fmcrpyvh responded 200 in 1175ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.955Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 1180ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.955Z] [job_1789382238941_0pzoub1fk] [DIAG3] Chunk 1 (2 jobs) took 1180ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:20.955Z] [job_1789382238941_0pzoub1fk] [DIAG3] Job upsert loop finished - 2 jobs, total 1180ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:22.722Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:22.757Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382210308_5fmcrpyvh",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:23.536Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 814ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:23.709Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382210308_5fmcrpyvh responded 200 in 952ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:30.581Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382210308_5fmcrpyvh",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:30.595Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382028766_xsnul2pxn",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:31.432Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382028766_xsnul2pxn responded 200 in 837ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:31.766Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382210308_5fmcrpyvh responded 200 in 1185ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:32.504Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382238941_0pzoub1fk",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:32.983Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382238941_0pzoub1fk responded 200 in 479ms",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:32.983Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789382238941_0pzoub1fk",
+    "[job_1789382254323_snl00n4ky] [LOG 2026-09-14T10:37:34.221Z] [job_1789382238941_0pzoub1fk] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789382238941_0pzoub1fk responded 200 in 1238ms"
+  ],
+  "network": [
+    "[job_1789382254323_snl00n4ky] [2026-09-14T10:37:16.809Z] [NET LATENCY WARNING GET] /api/jobs/status (2759ms)",
+    "[job_1789382254323_snl00n4ky] [2026-09-14T10:37:17.431Z] [NET LATENCY WARNING POST] /api/auth/login (2774ms)"
+  ],
+  "handoffs": [],
+  "dispatches": [
+    {
+      "id": "t1/scout",
+      "parent": null,
+      "turn": 1,
+      "agent": "scout",
+      "user": "Saya baru saja mengedit porsi: saus kacang kurangi setengahnya (50%) saja.",
+      "received": {
+        "mode": "review"
+      },
+      "systemInstruction": "=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is Bahasa Indonesia (code: id).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in Bahasa Indonesia.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nDo not reply in English unless the user wrote this turn in English and is clearly asking for English.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into Bahasa Indonesia.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n",
+      "userPrompt": "Analyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"Saya baru saja mengedit porsi: saus kacang kurangi setengahnya (50%) saja.\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients.",
+      "instruction": "=== SYSTEM INSTRUCTION ===\n=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is Bahasa Indonesia (code: id).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in Bahasa Indonesia.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nDo not reply in English unless the user wrote this turn in English and is clearly asking for English.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into Bahasa Indonesia.\n\n- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.\n- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.\n- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.\n- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').\n- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.\n- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.\n- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.\n- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.\n- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person (\"You got...\"). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.\n\n=== REQUIRED OUTPUT JSON SCHEMA ===\nOutput exactly ONE JSON object matching this schema:\n{\n  \"_internalReasoning\": \"string (<15 words)\",\n  \"contentType\": \"visual | menu_or_poster | label | text\",\n  \"diningEnvironment\": \"home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown\",\n  \"verdict\": {\n    \"label\": \"Supports Gut Health with Added Sugar\",\n    \"level\": \"neutral\"\n  },\n  \"clinicalAdvice\": \"The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.\",\n  \"perImage\": [{ \"imageIndex\": 0, \"itemsFound\": [\"Vegetable and Beef Hotpot\"] }],\n  \"dishes\": [\n    {\n      \"dishName\": \"Vegetable and Beef Hotpot\",\n      \"genericEnglishName\": \"beef and vegetable stew\",\n      \"chainName\": null,\n      \"estimatedWeightGrams\": 650,\n      \"packGrams\": 650,\n      \"cookingMethod\": \"raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried\",\n      \"boundingBox2D\": [300, 200, 850, 900],\n      \"sourceImageIndex\": 1,\n      \"isStandaloneCondimentPacket\": false,\n      \"foods\": [\n        {\n          \"foodName\": \"Beef Blade\",\n          \"genericEnglishName\": \"beef\",\n          \"packageLabelText\": \"BEEF BLADE - Berat 0.110\",\n          \"weightGrams\": 110,\n          \"packGrams\": 110,\n          \"sourceImageIndex\": 0,\n          \"rawNutritionLabel\": null,\n          \"nutrients\": { \"protein\": 24.0, \"saturatedFat\": 2.5, \"addedSugar\": 0, \"totalFibre\": 0, \"sodium\": 65, \"carbohydrates\": 0 }\n        }\n      ],\n      \"dishNutrients\": { \"saturatedFat\": 5.8, \"totalFat\": 18.2, \"totalSugar\": 5.0, \"potassium\": 1450, \"omega3\": 0.15, \"calcium\": 190, \"iron\": 5.5, \"magnesium\": 120, \"vitaminD\": 0 }\n    }\n  ]\n}\n\n\n=== USER PROMPT ===\nAnalyze the provided meal image. Inspect all visible prepared dishes, cooking pots, grocery packages, and barcode labels. Read any visible OCR text on cups, wrappers, or menus to identify fast-food brands or commercial chains, and use these to anchor the nutritional estimation (e.g. calories and fat for commercial deep-fried items) to standard commercial nutrition tables. Ingest all visible foods and packages completely into dishes and constituent foods. User note: \"Saya baru saja mengedit porsi: saus kacang kurangi setengahnya (50%) saja.\". If the user note explicitly mentions additional foods consumed, you MUST extract them as well, even if not visible in the images. Extract all physical dishes and constituent foods into the hierarchical schema with weightGrams, packGrams, and nutrients.",
+      "output": {
+        "dishes": [
+          {
+            "dishName": "Gado-Gado",
+            "estimatedWeightGrams": 350,
+            "cookingMethod": "boiled",
+            "sourceImageIndex": 0,
+            "boundingBox2D": [
+              100,
+              100,
+              900,
+              900
+            ],
+            "foods": [
+              {
+                "foodName": "Tahu Rebus",
+                "genericEnglishName": "boiled tofu",
+                "weightGrams": 80,
+                "nutrients": {
+                  "protein": 8,
+                  "saturatedFat": 0.5,
+                  "addedSugar": 0,
+                  "totalFibre": 0.5,
+                  "sodium": 10,
+                  "carbohydrates": 2
+                }
+              },
+              {
+                "foodName": "Saus Kacang",
+                "genericEnglishName": "peanut sauce",
+                "weightGrams": 50,
+                "nutrients": {
+                  "protein": 4,
+                  "saturatedFat": 2,
+                  "addedSugar": 3,
+                  "totalFibre": 1,
+                  "sodium": 150,
+                  "carbohydrates": 6
+                },
+                "action": "replace"
+              }
+            ],
+            "dishNutrients": {
+              "saturatedFat": 2.5,
+              "totalFat": 12,
+              "totalSugar": 4.5,
+              "vitaminD": 0,
+              "protein": 12,
+              "sodium": 160,
+              "totalFibre": 4
+            },
+            "targetDishIndex": null
+          }
+        ],
+        "contentType": "visual",
+        "diningEnvironment": "home_cooked",
+        "verdict": {
+          "label": "Protein Baik dengan Saus Terkontrol",
+          "level": "good"
+        },
+        "clinicalAdvice": "Anda berhasil mengontrol asupan lemak jenuh dengan mengurangi porsi saus kacang setengahnya, menjaga kalori tetap terkendali. Kandungan protein dari sayuran dan tahu memberikan dukungan yang sangat baik untuk massa otot Anda. Pertahankan kebiasaan mengatur porsi ini untuk kesehatan optimal.",
+        "perImage": [
+          {
+            "imageIndex": 0,
+            "itemsFound": [
+              "Gado-Gado"
+            ]
+          }
+        ],
+        "_internalReasoning": "Extracted Gado-Gado with reduced peanut sauce per user notes."
+      },
+      "rawEmission": {
+        "dishes": [
+          {
+            "dishName": "Gado-Gado",
+            "estimatedWeightGrams": 350,
+            "cookingMethod": "boiled",
+            "sourceImageIndex": 0,
+            "boundingBox2D": [
+              100,
+              100,
+              900,
+              900
+            ],
+            "foods": [
+              {
+                "foodName": "Tahu Rebus",
+                "genericEnglishName": "boiled tofu",
+                "weightGrams": 80,
+                "nutrients": {
+                  "protein": 8,
+                  "saturatedFat": 0.5,
+                  "addedSugar": 0,
+                  "totalFibre": 0.5,
+                  "sodium": 10,
+                  "carbohydrates": 2
+                }
+              },
+              {
+                "foodName": "Saus Kacang",
+                "genericEnglishName": "peanut sauce",
+                "weightGrams": 50,
+                "nutrients": {
+                  "protein": 4,
+                  "saturatedFat": 2,
+                  "addedSugar": 3,
+                  "totalFibre": 1,
+                  "sodium": 150,
+                  "carbohydrates": 6
+                },
+                "action": "replace"
+              }
+            ],
+            "dishNutrients": {
+              "saturatedFat": 2.5,
+              "totalFat": 12,
+              "totalSugar": 4.5,
+              "vitaminD": 0,
+              "protein": 12,
+              "sodium": 160,
+              "totalFibre": 4
+            },
+            "targetDishIndex": null
+          }
+        ],
+        "contentType": "visual",
+        "diningEnvironment": "home_cooked",
+        "verdict": {
+          "label": "Protein Baik dengan Saus Terkontrol",
+          "level": "good"
+        },
+        "clinicalAdvice": "Anda berhasil mengontrol asupan lemak jenuh dengan mengurangi porsi saus kacang setengahnya, menjaga kalori tetap terkendali. Kandungan protein dari sayuran dan tahu memberikan dukungan yang sangat baik untuk massa otot Anda. Pertahankan kebiasaan mengatur porsi ini untuk kesehatan optimal.",
+        "perImage": [
+          {
+            "imageIndex": 0,
+            "itemsFound": [
+              "Gado-Gado"
+            ]
+          }
+        ],
+        "_internalReasoning": "Extracted Gado-Gado with reduced peanut sauce per user notes."
+      },
+      "model": "gemini-3.5-flash-lite",
+      "latency_ms": 6681,
+      "error": null
+    }
+  ],
+  "contract": [
+    {
+      "law": "SSE {final,result}",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Final result emitted; job succeeded"
+    },
+    {
+      "law": "AnalyzeFinished count = 1",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "AnalyzeFinished count = 1"
+    },
+    {
+      "law": "Stall/503/quota -> 3.1 hop, same job",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No stall or 503 encountered"
+    },
+    {
+      "law": "Submit JSON running",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Submit transitioned directly to running"
+    },
+    {
+      "law": "pendingFoodLog -> succeeded before R2",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Succeeded immediately upon finalized food log"
+    },
+    {
+      "law": "Retry hidden if succeeded or kcal in logs",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dialog inventory captured"
+    },
+    {
+      "law": "Attempt 1/3 hidden if succeeded",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dialog inventory captured"
+    },
+    {
+      "law": "Dialog on_card kcal = ledger",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No on_card macros in dialog inventory"
+    },
+    {
+      "law": "Composer controls count = 1",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No composer inventory captured"
+    },
+    {
+      "law": "DIAG5 off on food",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "DIAG5 auto-send remained off for food chat"
+    },
+    {
+      "law": "Matrix calc matches ledger",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Matrix connected and matches ledger"
+    },
+    {
+      "law": "Each dispatch has model + latency_ms",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "All 1 dispatch(es) contain model and latency_ms"
+    },
+    {
+      "law": "Handoff from/to + same jobId if transfer",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No agent handoffs in this run"
+    },
+    {
+      "law": "Agent output: nutrients complete",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "All 32 keys finite (2 legal zeros)"
+    },
+    {
+      "law": "Agent output: verdict + advice",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Every meal turn covered — t1: \"Protein Baik dengan Saus Terkontrol\" [good], 39 words, 0 figure(s)"
+    },
+    {
+      "law": "Dishes: fields populated",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "1/1 dish(es) fully populated (Gado-Gado)"
+    },
+    {
+      "law": "Multi-turn split shown",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Single-turn run, no split state"
+    },
+    {
+      "law": "Mode instruction chunk",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Meal scout chunk(s) shown for mode(s)=review"
+    },
+    {
+      "law": "Edit patch: components & nutrients preserved",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Single-turn create, no edit turns"
+    },
+    {
+      "law": "Handoff chain complete",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No handoffs in this run"
+    },
+    {
+      "law": "Handoff received",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Direct food log, no forwarded handoff"
+    },
+    {
+      "law": "Lab panel complete",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Medical-only law (pack=food)"
+    },
+    {
+      "law": "Clinical report shown",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Medical-only law (pack=food)"
+    }
+  ],
+  "portionAdjustment": null,
+  "linkedJobs": [],
+  "pendingFoodLog": {
+    "id": "meal_1789382261372",
+    "itemsBreakdown": [
+      {
+        "scoutIndex": 0,
+        "name": "Gado-Gado",
+        "canonicalDbName": "Gado-Gado",
+        "originalName": "Gado-Gado",
+        "keyword": "Gado-Gado",
+        "weightGrams": 350,
+        "calories": 188,
+        "protein": 12,
+        "totalFat": 12,
+        "saturatedFat": 2.5,
+        "carbohydrates": 8,
+        "sodium": 160,
+        "addedSugar": 3,
+        "nutrients": {
+          "calories": 188,
+          "protein": 12,
+          "totalFat": 12,
+          "saturatedFat": 2.5,
+          "transFat": 0,
+          "unsaturatedFat": 9.5,
+          "carbohydrates": 8,
+          "sugar": 4.5,
+          "addedSugar": 3,
+          "totalFibre": 1.5,
+          "solubleFibre": 0.4,
+          "sodium": 160,
+          "potassium": 413.6,
+          "magnesium": 37.6,
+          "calcium": 75.2,
+          "iron": 2.26,
+          "zinc": 1.5,
+          "selenium": 15.04,
+          "iodine": 18.8,
+          "phosphorus": 169.2,
+          "vitaminD": 0.19,
+          "vitaminB12": 0.56,
+          "folate": 47,
+          "vitaminC": 7.52,
+          "vitaminE": 1.13,
+          "vitaminK": 15.04,
+          "vitaminA": 65.8,
+          "vitaminB6": 0.23,
+          "thiamine": 0.15,
+          "riboflavin": 0.15,
+          "niacin": 2.26,
+          "omega3": 0,
+          "salt": 0.41
+        },
+        "lockedNutrientKeys": [
+          "calories",
+          "protein",
+          "totalFat",
+          "saturatedFat",
+          "carbohydrates",
+          "sodium"
+        ],
+        "dbSource": "estimated",
+        "dbId": null,
+        "brandLock": null,
+        "atwaterFlag": null,
+        "ingredientsList": "Tahu Rebus, Saus Kacang",
+        "visualIngredients": [
+          "Tahu Rebus",
+          "Saus Kacang"
+        ],
+        "components": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2,
+              "calories": 92,
+              "totalFat": 5.8,
+              "solubleFibre": 0.1
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 80,
+            "calories": 92,
+            "totalFibre": 0.5,
+            "solubleFibre": 0.1,
+            "baseNutrients100g": {
+              "calories": 115,
+              "protein": 10,
+              "totalFat": 7.2,
+              "saturatedFat": 0.6,
+              "carbohydrates": 2.5,
+              "sodium": 13,
+              "totalFibre": 0.6,
+              "solubleFibre": 0.1
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6,
+              "calories": 96,
+              "totalFat": 6.2,
+              "solubleFibre": 0.3
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 50,
+            "calories": 96,
+            "totalFibre": 1,
+            "solubleFibre": 0.3,
+            "baseNutrients100g": {
+              "calories": 192,
+              "protein": 8,
+              "totalFat": 12.4,
+              "saturatedFat": 4,
+              "carbohydrates": 12,
+              "sodium": 300,
+              "totalFibre": 2,
+              "solubleFibre": 0.6
+            }
+          }
+        ],
+        "componentsDetailList": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2,
+              "calories": 92,
+              "totalFat": 5.8,
+              "solubleFibre": 0.1
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 80,
+            "calories": 92,
+            "totalFibre": 0.5,
+            "solubleFibre": 0.1,
+            "baseNutrients100g": {
+              "calories": 115,
+              "protein": 10,
+              "totalFat": 7.2,
+              "saturatedFat": 0.6,
+              "carbohydrates": 2.5,
+              "sodium": 13,
+              "totalFibre": 0.6,
+              "solubleFibre": 0.1
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6,
+              "calories": 96,
+              "totalFat": 6.2,
+              "solubleFibre": 0.3
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 50,
+            "calories": 96,
+            "totalFibre": 1,
+            "solubleFibre": 0.3,
+            "baseNutrients100g": {
+              "calories": 192,
+              "protein": 8,
+              "totalFat": 12.4,
+              "saturatedFat": 4,
+              "carbohydrates": 12,
+              "sodium": 300,
+              "totalFibre": 2,
+              "solubleFibre": 0.6
+            }
+          }
+        ],
+        "compositeSiblings": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2,
+              "calories": 92,
+              "totalFat": 5.8,
+              "solubleFibre": 0.1
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 80,
+            "calories": 92,
+            "totalFibre": 0.5,
+            "solubleFibre": 0.1,
+            "baseNutrients100g": {
+              "calories": 115,
+              "protein": 10,
+              "totalFat": 7.2,
+              "saturatedFat": 0.6,
+              "carbohydrates": 2.5,
+              "sodium": 13,
+              "totalFibre": 0.6,
+              "solubleFibre": 0.1
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6,
+              "calories": 96,
+              "totalFat": 6.2,
+              "solubleFibre": 0.3
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 50,
+            "calories": 96,
+            "totalFibre": 1,
+            "solubleFibre": 0.3,
+            "baseNutrients100g": {
+              "calories": 192,
+              "protein": 8,
+              "totalFat": 12.4,
+              "saturatedFat": 4,
+              "carbohydrates": 12,
+              "sodium": 300,
+              "totalFibre": 2,
+              "solubleFibre": 0.6
+            }
+          }
+        ],
+        "hasComponents": true,
+        "boundingBox2D": [
+          100,
+          100,
+          900,
+          900
+        ],
+        "sourceImageIndex": 0,
+        "foodType": "composed",
+        "cookingMethod": null,
+        "diningEnvironment": "home_cooked",
+        "isDishEstimate": true
+      }
+    ],
+    "items": [
+      {
+        "scoutIndex": 0,
+        "name": "Gado-Gado",
+        "canonicalDbName": "Gado-Gado",
+        "originalName": "Gado-Gado",
+        "keyword": "Gado-Gado",
+        "weightGrams": 350,
+        "calories": 188,
+        "protein": 12,
+        "totalFat": 12,
+        "saturatedFat": 2.5,
+        "carbohydrates": 8,
+        "sodium": 160,
+        "addedSugar": 3,
+        "nutrients": {
+          "calories": 188,
+          "protein": 12,
+          "totalFat": 12,
+          "saturatedFat": 2.5,
+          "transFat": 0,
+          "unsaturatedFat": 9.5,
+          "carbohydrates": 8,
+          "sugar": 4.5,
+          "addedSugar": 3,
+          "totalFibre": 1.5,
+          "solubleFibre": 0.4,
+          "sodium": 160,
+          "potassium": 413.6,
+          "magnesium": 37.6,
+          "calcium": 75.2,
+          "iron": 2.26,
+          "zinc": 1.5,
+          "selenium": 15.04,
+          "iodine": 18.8,
+          "phosphorus": 169.2,
+          "vitaminD": 0.19,
+          "vitaminB12": 0.56,
+          "folate": 47,
+          "vitaminC": 7.52,
+          "vitaminE": 1.13,
+          "vitaminK": 15.04,
+          "vitaminA": 65.8,
+          "vitaminB6": 0.23,
+          "thiamine": 0.15,
+          "riboflavin": 0.15,
+          "niacin": 2.26,
+          "omega3": 0,
+          "salt": 0.41
+        },
+        "lockedNutrientKeys": [
+          "calories",
+          "protein",
+          "totalFat",
+          "saturatedFat",
+          "carbohydrates",
+          "sodium"
+        ],
+        "dbSource": "estimated",
+        "dbId": null,
+        "brandLock": null,
+        "atwaterFlag": null,
+        "ingredientsList": "Tahu Rebus, Saus Kacang",
+        "visualIngredients": [
+          "Tahu Rebus",
+          "Saus Kacang"
+        ],
+        "components": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2,
+              "calories": 92,
+              "totalFat": 5.8,
+              "solubleFibre": 0.1
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 80,
+            "calories": 92,
+            "totalFibre": 0.5,
+            "solubleFibre": 0.1,
+            "baseNutrients100g": {
+              "calories": 115,
+              "protein": 10,
+              "totalFat": 7.2,
+              "saturatedFat": 0.6,
+              "carbohydrates": 2.5,
+              "sodium": 13,
+              "totalFibre": 0.6,
+              "solubleFibre": 0.1
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6,
+              "calories": 96,
+              "totalFat": 6.2,
+              "solubleFibre": 0.3
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 50,
+            "calories": 96,
+            "totalFibre": 1,
+            "solubleFibre": 0.3,
+            "baseNutrients100g": {
+              "calories": 192,
+              "protein": 8,
+              "totalFat": 12.4,
+              "saturatedFat": 4,
+              "carbohydrates": 12,
+              "sodium": 300,
+              "totalFibre": 2,
+              "solubleFibre": 0.6
+            }
+          }
+        ],
+        "componentsDetailList": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2,
+              "calories": 92,
+              "totalFat": 5.8,
+              "solubleFibre": 0.1
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 80,
+            "calories": 92,
+            "totalFibre": 0.5,
+            "solubleFibre": 0.1,
+            "baseNutrients100g": {
+              "calories": 115,
+              "protein": 10,
+              "totalFat": 7.2,
+              "saturatedFat": 0.6,
+              "carbohydrates": 2.5,
+              "sodium": 13,
+              "totalFibre": 0.6,
+              "solubleFibre": 0.1
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6,
+              "calories": 96,
+              "totalFat": 6.2,
+              "solubleFibre": 0.3
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 50,
+            "calories": 96,
+            "totalFibre": 1,
+            "solubleFibre": 0.3,
+            "baseNutrients100g": {
+              "calories": 192,
+              "protein": 8,
+              "totalFat": 12.4,
+              "saturatedFat": 4,
+              "carbohydrates": 12,
+              "sodium": 300,
+              "totalFibre": 2,
+              "solubleFibre": 0.6
+            }
+          }
+        ],
+        "compositeSiblings": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2,
+              "calories": 92,
+              "totalFat": 5.8,
+              "solubleFibre": 0.1
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 80,
+            "calories": 92,
+            "totalFibre": 0.5,
+            "solubleFibre": 0.1,
+            "baseNutrients100g": {
+              "calories": 115,
+              "protein": 10,
+              "totalFat": 7.2,
+              "saturatedFat": 0.6,
+              "carbohydrates": 2.5,
+              "sodium": 13,
+              "totalFibre": 0.6,
+              "solubleFibre": 0.1
+            }
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6,
+              "calories": 96,
+              "totalFat": 6.2,
+              "solubleFibre": 0.3
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null,
+            "nutrientBasisWeight": 50,
+            "calories": 96,
+            "totalFibre": 1,
+            "solubleFibre": 0.3,
+            "baseNutrients100g": {
+              "calories": 192,
+              "protein": 8,
+              "totalFat": 12.4,
+              "saturatedFat": 4,
+              "carbohydrates": 12,
+              "sodium": 300,
+              "totalFibre": 2,
+              "solubleFibre": 0.6
+            }
+          }
+        ],
+        "hasComponents": true,
+        "boundingBox2D": [
+          100,
+          100,
+          900,
+          900
+        ],
+        "sourceImageIndex": 0,
+        "foodType": "composed",
+        "cookingMethod": null,
+        "diningEnvironment": "home_cooked",
+        "isDishEstimate": true
+      }
+    ],
+    "nutrients": {
+      "calories": 188,
+      "protein": 12,
+      "totalFat": 12,
+      "saturatedFat": 2.5,
+      "transFat": 0,
+      "unsaturatedFat": 9.5,
+      "omega3": 0,
+      "carbohydrates": 8,
+      "sugar": 4.5,
+      "addedSugar": 3,
+      "totalFibre": 1.5,
+      "solubleFibre": 0.4,
+      "sodium": 160,
+      "potassium": 413.6,
+      "magnesium": 37.6,
+      "calcium": 75.2,
+      "iron": 2.3,
+      "zinc": 1.5,
+      "selenium": 15,
+      "iodine": 18.8,
+      "phosphorus": 169.2,
+      "vitaminD": 0.2,
+      "vitaminB12": 0.6,
+      "folate": 47,
+      "vitaminC": 7.5,
+      "vitaminE": 1.1,
+      "vitaminK": 15,
+      "vitaminA": 65.8,
+      "vitaminB6": 0.2,
+      "thiamine": 0.2,
+      "riboflavin": 0.2,
+      "niacin": 2.3,
+      "salt": 0.41
+    },
+    "name": "Gado-Gado",
+    "title": "Gado-Gado",
+    "message": "Anda berhasil mengontrol asupan lemak jenuh dengan mengurangi porsi saus kacang setengahnya, menjaga kalori tetap terkendali. Kandungan protein dari sayuran dan tahu memberikan dukungan yang sangat baik untuk massa otot Anda. Pertahankan kebiasaan mengatur porsi ini untuk kesehatan optimal.",
+    "healthImpact": "",
+    "composition": "Gado-Gado (Tahu Rebus, Saus Kacang)",
+    "benefits": [],
+    "risks": [],
+    "recommendation": "",
+    "verdict": {
+      "label": "Protein Baik dengan Saus Terkontrol",
+      "level": "good"
+    },
+    "imageUrls": [],
+    "weightGrams": 350,
+    "quantity": "1 serving",
+    "receiptTable": "### 🧾 Nutrition calculation\n\n| Item / Ingredient | Kcal | Protein | Sat Fat | Sodium |\n|---|---|---|---|---|\n| **1. Gado-Gado - 350g (Tahu Rebus, Saus Kacang)** | - | - | - | - |\n| Tahu Rebus - 80g | 92 | 8g | 0.5g | 10mg |\n| Saus Kacang - 50g | 96 | 4g | 2g | 150mg |\n| **Item Sub-Total - 350g** | **188** | **12g** | **2.5g** | **160mg** |\n| **🏆 GRAND MEAL TOTAL - 350g** | **188** | **12g** | **2.5g** | **160mg** |\n",
+    "savable": true,
+    "degradedStages": [],
+    "date": "2026-09-14",
+    "scoutItems": [
+      {
+        "keyword": "Gado-Gado",
+        "originalName": "Gado-Gado",
+        "name": "Gado-Gado",
+        "genericEnglishName": null,
+        "chainName": null,
+        "packageLabelText": null,
+        "estimatedWeightGrams": 350,
+        "nutrientBasisWeight": 350,
+        "packGrams": null,
+        "cookingMethod": "boiled",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          100,
+          100,
+          900,
+          900
+        ],
+        "isStandaloneCondimentPacket": false,
+        "components": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "componentsDetailList": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "compositeSiblings": [
+          {
+            "name": "Tahu Rebus",
+            "searchQuery": "boiled tofu",
+            "weightGrams": 80,
+            "estimatedWeightGrams": 80,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2
+            },
+            "protein": 8,
+            "totalFat": 5.8,
+            "fat": 5.8,
+            "saturatedFat": 0.5,
+            "carbohydrates": 2,
+            "carbs": 2,
+            "sodium": 10,
+            "dbSource": "estimated",
+            "dbId": null
+          },
+          {
+            "name": "Saus Kacang",
+            "searchQuery": "peanut sauce",
+            "weightGrams": 50,
+            "estimatedWeightGrams": 50,
+            "packGrams": null,
+            "packageLabelText": null,
+            "sourceImageIndex": 0,
+            "rawNutritionLabel": null,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6
+            },
+            "protein": 4,
+            "totalFat": 6.2,
+            "fat": 6.2,
+            "saturatedFat": 2,
+            "carbohydrates": 6,
+            "carbs": 6,
+            "sodium": 150,
+            "dbSource": "estimated",
+            "dbId": null
+          }
+        ],
+        "hasComponents": true,
+        "ingredients": [
+          "Tahu Rebus",
+          "Saus Kacang"
+        ],
+        "visualIngredients": [],
+        "ingredientsList": "Tahu Rebus, Saus Kacang",
+        "rawNutritionLabel": null,
+        "source": "estimated",
+        "dbSource": "estimated",
+        "nutrients": {
+          "calories": 188,
+          "protein": 12,
+          "totalFat": 12,
+          "saturatedFat": 2.5,
+          "transFat": 0,
+          "unsaturatedFat": 9.5,
+          "carbohydrates": 8,
+          "sugar": 4.5,
+          "addedSugar": 3,
+          "totalFibre": 1.5,
+          "solubleFibre": 0.4,
+          "sodium": 160,
+          "potassium": 413.6,
+          "magnesium": 37.6,
+          "calcium": 75.2,
+          "iron": 2.26,
+          "zinc": 1.5,
+          "selenium": 15.04,
+          "iodine": 18.8,
+          "phosphorus": 169.2,
+          "vitaminD": 0.19,
+          "vitaminB12": 0.56,
+          "folate": 47,
+          "vitaminC": 7.52,
+          "vitaminE": 1.13,
+          "vitaminK": 15.04,
+          "vitaminA": 65.8,
+          "vitaminB6": 0.23,
+          "thiamine": 0.15,
+          "riboflavin": 0.15,
+          "niacin": 2.26,
+          "omega3": 0,
+          "salt": 0.41
+        },
+        "truthNutrients": {
+          "protein": 12,
+          "carbohydrates": 8,
+          "totalFat": 12,
+          "saturatedFat": 2.5,
+          "transFat": 0,
+          "sugar": 4.5,
+          "addedSugar": 3,
+          "totalFibre": 1.5,
+          "sodium": 160,
+          "potassium": 0,
+          "omega3": 0,
+          "calcium": 0,
+          "iron": 0,
+          "magnesium": 0,
+          "vitaminD": 0,
+          "zinc": 0,
+          "selenium": 0,
+          "iodine": 0,
+          "phosphorus": 0,
+          "vitaminA": 0,
+          "vitaminC": 0,
+          "vitaminE": 0,
+          "vitaminK": 0,
+          "vitaminB12": 0,
+          "folate": 0,
+          "vitaminB6": 0,
+          "thiamine": 0,
+          "riboflavin": 0,
+          "niacin": 0,
+          "solubleFibre": 0.4,
+          "unsaturatedFat": 9.5
+        },
+        "scoutIndex": 0,
+        "internalReasoning": "Extracted Gado-Gado with reduced peanut sauce per user notes.",
+        "preCalcNutrients": {
+          "calories": 188,
+          "protein": 12,
+          "totalFat": 12,
+          "saturatedFat": 2.5,
+          "transFat": 0,
+          "unsaturatedFat": 9.5,
+          "carbohydrates": 8,
+          "sugar": 4.5,
+          "addedSugar": 3,
+          "totalFibre": 1.5,
+          "solubleFibre": 0.4,
+          "sodium": 160,
+          "potassium": 413.6,
+          "magnesium": 37.6,
+          "calcium": 75.2,
+          "iron": 2.26,
+          "zinc": 1.5,
+          "selenium": 15.04,
+          "iodine": 18.8,
+          "phosphorus": 169.2,
+          "vitaminD": 0.19,
+          "vitaminB12": 0.56,
+          "folate": 47,
+          "vitaminC": 7.52,
+          "vitaminE": 1.13,
+          "vitaminK": 15.04,
+          "vitaminA": 65.8,
+          "vitaminB6": 0.23,
+          "thiamine": 0.15,
+          "riboflavin": 0.15,
+          "niacin": 2.26,
+          "omega3": 0,
+          "salt": 0.41
+        }
+      }
+    ],
+    "historyLog": [
+      {
+        "type": "stage_complete",
+        "timestamp": "2026-09-14T10:37:41.372Z",
+        "stage": "calculation",
+        "message": "Happy-path meal attached (savable)",
+        "id": "gokx5y1",
+        "seq": 1
+      }
+    ],
+    "userLockedSlots": [],
+    "quantityResolutions": [
+      {
+        "scoutIndex": 0,
+        "name": "Gado-Gado",
+        "candidates": [
+          {
+            "source": "visual",
+            "grams": 350,
+            "packGrams": null,
+            "confidence": "low",
+            "note": "uncorroborated scout guess"
+          }
+        ],
+        "decision": "accept-visual",
+        "why": "no statement, no pack divergence — visual estimate stands"
+      }
+    ]
+  },
+  "scoutItems": [
+    {
+      "keyword": "Gado-Gado",
+      "originalName": "Gado-Gado",
+      "name": "Gado-Gado",
+      "genericEnglishName": null,
+      "chainName": null,
+      "packageLabelText": null,
+      "estimatedWeightGrams": 350,
+      "nutrientBasisWeight": 350,
+      "packGrams": null,
+      "cookingMethod": "boiled",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        100,
+        100,
+        900,
+        900
+      ],
+      "isStandaloneCondimentPacket": false,
+      "components": [
+        {
+          "name": "Tahu Rebus",
+          "searchQuery": "boiled tofu",
+          "weightGrams": 80,
+          "estimatedWeightGrams": 80,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 8,
+            "saturatedFat": 0.5,
+            "addedSugar": 0,
+            "totalFibre": 0.5,
+            "sodium": 10,
+            "carbohydrates": 2
+          },
+          "protein": 8,
+          "totalFat": 5.8,
+          "fat": 5.8,
+          "saturatedFat": 0.5,
+          "carbohydrates": 2,
+          "carbs": 2,
+          "sodium": 10,
+          "dbSource": "estimated",
+          "dbId": null
+        },
+        {
+          "name": "Saus Kacang",
+          "searchQuery": "peanut sauce",
+          "weightGrams": 50,
+          "estimatedWeightGrams": 50,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 4,
+            "saturatedFat": 2,
+            "addedSugar": 3,
+            "totalFibre": 1,
+            "sodium": 150,
+            "carbohydrates": 6
+          },
+          "protein": 4,
+          "totalFat": 6.2,
+          "fat": 6.2,
+          "saturatedFat": 2,
+          "carbohydrates": 6,
+          "carbs": 6,
+          "sodium": 150,
+          "dbSource": "estimated",
+          "dbId": null
+        }
+      ],
+      "componentsDetailList": [
+        {
+          "name": "Tahu Rebus",
+          "searchQuery": "boiled tofu",
+          "weightGrams": 80,
+          "estimatedWeightGrams": 80,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 8,
+            "saturatedFat": 0.5,
+            "addedSugar": 0,
+            "totalFibre": 0.5,
+            "sodium": 10,
+            "carbohydrates": 2
+          },
+          "protein": 8,
+          "totalFat": 5.8,
+          "fat": 5.8,
+          "saturatedFat": 0.5,
+          "carbohydrates": 2,
+          "carbs": 2,
+          "sodium": 10,
+          "dbSource": "estimated",
+          "dbId": null
+        },
+        {
+          "name": "Saus Kacang",
+          "searchQuery": "peanut sauce",
+          "weightGrams": 50,
+          "estimatedWeightGrams": 50,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 4,
+            "saturatedFat": 2,
+            "addedSugar": 3,
+            "totalFibre": 1,
+            "sodium": 150,
+            "carbohydrates": 6
+          },
+          "protein": 4,
+          "totalFat": 6.2,
+          "fat": 6.2,
+          "saturatedFat": 2,
+          "carbohydrates": 6,
+          "carbs": 6,
+          "sodium": 150,
+          "dbSource": "estimated",
+          "dbId": null
+        }
+      ],
+      "compositeSiblings": [
+        {
+          "name": "Tahu Rebus",
+          "searchQuery": "boiled tofu",
+          "weightGrams": 80,
+          "estimatedWeightGrams": 80,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 8,
+            "saturatedFat": 0.5,
+            "addedSugar": 0,
+            "totalFibre": 0.5,
+            "sodium": 10,
+            "carbohydrates": 2
+          },
+          "protein": 8,
+          "totalFat": 5.8,
+          "fat": 5.8,
+          "saturatedFat": 0.5,
+          "carbohydrates": 2,
+          "carbs": 2,
+          "sodium": 10,
+          "dbSource": "estimated",
+          "dbId": null
+        },
+        {
+          "name": "Saus Kacang",
+          "searchQuery": "peanut sauce",
+          "weightGrams": 50,
+          "estimatedWeightGrams": 50,
+          "packGrams": null,
+          "packageLabelText": null,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": {
+            "protein": 4,
+            "saturatedFat": 2,
+            "addedSugar": 3,
+            "totalFibre": 1,
+            "sodium": 150,
+            "carbohydrates": 6
+          },
+          "protein": 4,
+          "totalFat": 6.2,
+          "fat": 6.2,
+          "saturatedFat": 2,
+          "carbohydrates": 6,
+          "carbs": 6,
+          "sodium": 150,
+          "dbSource": "estimated",
+          "dbId": null
+        }
+      ],
+      "hasComponents": true,
+      "ingredients": [
+        "Tahu Rebus",
+        "Saus Kacang"
+      ],
+      "visualIngredients": [],
+      "ingredientsList": "Tahu Rebus, Saus Kacang",
+      "rawNutritionLabel": null,
+      "source": "estimated",
+      "dbSource": "estimated",
+      "nutrients": {
+        "calories": 188,
+        "protein": 12,
+        "totalFat": 12,
+        "saturatedFat": 2.5,
+        "transFat": 0,
+        "unsaturatedFat": 9.5,
+        "carbohydrates": 8,
+        "sugar": 4.5,
+        "addedSugar": 3,
+        "totalFibre": 1.5,
+        "solubleFibre": 0.4,
+        "sodium": 160,
+        "potassium": 413.6,
+        "magnesium": 37.6,
+        "calcium": 75.2,
+        "iron": 2.26,
+        "zinc": 1.5,
+        "selenium": 15.04,
+        "iodine": 18.8,
+        "phosphorus": 169.2,
+        "vitaminD": 0.19,
+        "vitaminB12": 0.56,
+        "folate": 47,
+        "vitaminC": 7.52,
+        "vitaminE": 1.13,
+        "vitaminK": 15.04,
+        "vitaminA": 65.8,
+        "vitaminB6": 0.23,
+        "thiamine": 0.15,
+        "riboflavin": 0.15,
+        "niacin": 2.26,
+        "omega3": 0,
+        "salt": 0.41
+      },
+      "truthNutrients": {
+        "protein": 12,
+        "carbohydrates": 8,
+        "totalFat": 12,
+        "saturatedFat": 2.5,
+        "transFat": 0,
+        "sugar": 4.5,
+        "addedSugar": 3,
+        "totalFibre": 1.5,
+        "sodium": 160,
+        "potassium": 0,
+        "omega3": 0,
+        "calcium": 0,
+        "iron": 0,
+        "magnesium": 0,
+        "vitaminD": 0,
+        "zinc": 0,
+        "selenium": 0,
+        "iodine": 0,
+        "phosphorus": 0,
+        "vitaminA": 0,
+        "vitaminC": 0,
+        "vitaminE": 0,
+        "vitaminK": 0,
+        "vitaminB12": 0,
+        "folate": 0,
+        "vitaminB6": 0,
+        "thiamine": 0,
+        "riboflavin": 0,
+        "niacin": 0,
+        "solubleFibre": 0.4,
+        "unsaturatedFat": 9.5
+      },
+      "scoutIndex": 0,
+      "internalReasoning": "Extracted Gado-Gado with reduced peanut sauce per user notes.",
+      "preCalcNutrients": {
+        "calories": 188,
+        "protein": 12,
+        "totalFat": 12,
+        "saturatedFat": 2.5,
+        "transFat": 0,
+        "unsaturatedFat": 9.5,
+        "carbohydrates": 8,
+        "sugar": 4.5,
+        "addedSugar": 3,
+        "totalFibre": 1.5,
+        "solubleFibre": 0.4,
+        "sodium": 160,
+        "potassium": 413.6,
+        "magnesium": 37.6,
+        "calcium": 75.2,
+        "iron": 2.26,
+        "zinc": 1.5,
+        "selenium": 15.04,
+        "iodine": 18.8,
+        "phosphorus": 169.2,
+        "vitaminD": 0.19,
+        "vitaminB12": 0.56,
+        "folate": 47,
+        "vitaminC": 7.52,
+        "vitaminE": 1.13,
+        "vitaminK": 15.04,
+        "vitaminA": 65.8,
+        "vitaminB6": 0.23,
+        "thiamine": 0.15,
+        "riboflavin": 0.15,
+        "niacin": 2.26,
+        "omega3": 0,
+        "salt": 0.41
+      }
+    }
+  ],
+  "receiptTable": "### 🧾 Nutrition calculation\n\n| Item / Ingredient | Kcal | Protein | Sat Fat | Sodium |\n|---|---|---|---|---|\n| **1. Gado-Gado - 350g (Tahu Rebus, Saus Kacang)** | - | - | - | - |\n| Tahu Rebus - 80g | 92 | 8g | 0.5g | 10mg |\n| Saus Kacang - 50g | 96 | 4g | 2g | 150mg |\n| **Item Sub-Total - 350g** | **188** | **12g** | **2.5g** | **160mg** |\n| **🏆 GRAND MEAL TOTAL - 350g** | **188** | **12g** | **2.5g** | **160mg** |\n",
+  "rawScout": {
+    "dishes": [
+      {
+        "dishName": "Gado-Gado",
+        "estimatedWeightGrams": 350,
+        "cookingMethod": "boiled",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          100,
+          100,
+          900,
+          900
+        ],
+        "foods": [
+          {
+            "foodName": "Tahu Rebus",
+            "genericEnglishName": "boiled tofu",
+            "weightGrams": 80,
+            "nutrients": {
+              "protein": 8,
+              "saturatedFat": 0.5,
+              "addedSugar": 0,
+              "totalFibre": 0.5,
+              "sodium": 10,
+              "carbohydrates": 2
+            }
+          },
+          {
+            "foodName": "Saus Kacang",
+            "genericEnglishName": "peanut sauce",
+            "weightGrams": 50,
+            "nutrients": {
+              "protein": 4,
+              "saturatedFat": 2,
+              "addedSugar": 3,
+              "totalFibre": 1,
+              "sodium": 150,
+              "carbohydrates": 6
+            },
+            "action": "replace"
+          }
+        ],
+        "dishNutrients": {
+          "saturatedFat": 2.5,
+          "totalFat": 12,
+          "totalSugar": 4.5,
+          "vitaminD": 0,
+          "protein": 12,
+          "sodium": 160,
+          "totalFibre": 4
+        },
+        "targetDishIndex": null
+      }
+    ],
+    "contentType": "visual",
+    "diningEnvironment": "home_cooked",
+    "verdict": {
+      "label": "Protein Baik dengan Saus Terkontrol",
+      "level": "good"
+    },
+    "clinicalAdvice": "Anda berhasil mengontrol asupan lemak jenuh dengan mengurangi porsi saus kacang setengahnya, menjaga kalori tetap terkendali. Kandungan protein dari sayuran dan tahu memberikan dukungan yang sangat baik untuk massa otot Anda. Pertahankan kebiasaan mengatur porsi ini untuk kesehatan optimal.",
+    "perImage": [
+      {
+        "imageIndex": 0,
+        "itemsFound": [
+          "Gado-Gado"
+        ]
+      }
+    ],
+    "_internalReasoning": "Extracted Gado-Gado with reduced peanut sauce per user notes."
+  },
+  "backendLogs": "[job_1789382254323_snl00n4ky] [scout_instruction] Vision Scout Instruction dispatched (model: gemini-3.5-flash-lite). Prompt length: 800 chars — see [UnifiedLLM-Prompt:scout] below for full text.\n[job_1789382254323_snl00n4ky] [scout_system_instruction] Vision Scout System Instruction dispatched (model: gemini-3.5-flash-lite) — see [UnifiedLLM-Prompt:scout] below for full text.\n[job_1789382254323_snl00n4ky] [scout_answer] Scout identified 1 item(s): Gado-Gado (~350g)\n[job_1789382254323_snl00n4ky] [info] [scout] Prompt: 1752, Completion: 541, Total: 3738\n[job_1789382254323_snl00n4ky] [info] [UnifiedLLM-Timing:scout] ms=6678\n[job_1789382254323_snl00n4ky] [diet_answer] Anda berhasil mengontrol asupan lemak jenuh dengan mengurangi porsi saus kacang setengahnya, menjaga kalori tetap terkendali. Kandungan protein dari sayuran dan tahu memberikan dukungan yang sangat baik untuk massa otot Anda. Pertahankan kebiasaan mengatur porsi ini untuk kesehatan optimal.",
+  "comparisonData": null
+}

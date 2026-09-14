@@ -1,0 +1,1619 @@
+{
+  "jobId": "job_1789379810520_ay11vtx75",
+  "conversationId": null,
+  "pack": "food",
+  "status": "succeeded",
+  "exportedAt": "2026-09-14T09:57:10.814Z",
+  "dialogInventory": null,
+  "lastUserAction": {
+    "action": "submit_meal_job",
+    "timestamp": "2026-09-14T09:56:51.213Z"
+  },
+  "breadcrumbs": [
+    {
+      "timestamp": "2026-09-14T09:56:46.466Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "auth-email-input",
+        "valueLength": 36
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:46.502Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "auth-password-input",
+        "valueLength": 12
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:46.503Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "auth-submit-btn",
+        "label": "Continue with email"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:48.827Z",
+      "action": "network_slow",
+      "target": "/api/jobs/status",
+      "details": {
+        "duration": 2929,
+        "method": "GET"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:49.569Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "label": "w-14 h-14 bg-indigo-600 text-w"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:50.520Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "quick-action-compare-meal",
+        "label": "Compare"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:50.848Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "input",
+        "valueLength": 48
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:51.104Z",
+      "action": "input_change",
+      "target": "input",
+      "details": {
+        "name": "food-chat-input",
+        "valueLength": 77
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:51.105Z",
+      "action": "click",
+      "target": "button",
+      "details": {
+        "id": "food-chat-send-btn",
+        "label": "food-chat-send-btn"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:51.109Z",
+      "action": "submit_initiated",
+      "target": "chat_composer",
+      "details": {
+        "prompt": "Bandingkan menu ini untuk tinggi badan 140 cm dengan target 1350 kkal harian.",
+        "imageCount": 2
+      }
+    },
+    {
+      "timestamp": "2026-09-14T09:56:51.213Z",
+      "action": "submit_meal_job",
+      "target": "chat_compose_dock",
+      "details": {
+        "jobId": "job_1789379810520_ay11vtx75",
+        "promptLength": 77,
+        "imageCount": 2,
+        "submissionMode": "compare"
+      }
+    }
+  ],
+  "sessionEvents": [
+    {
+      "ts": 1789379810520,
+      "writer": "JobStore.apply",
+      "status": "draft",
+      "action": "createJob"
+    },
+    {
+      "ts": 1789379811128,
+      "writer": "LogChat.submit",
+      "status": "queued",
+      "action": "SubmitStarted"
+    },
+    {
+      "ts": 1789379813664,
+      "writer": "serverJobs.start",
+      "status": "running",
+      "action": "job_started"
+    },
+    {
+      "ts": 1789379827280,
+      "writer": "serverJobs.complete",
+      "status": "succeeded",
+      "action": "job_completed"
+    }
+  ],
+  "console": [
+    "[job_1789379810520_ay11vtx75] [LOG 2026-09-14T09:56:45.808Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling",
+    "[job_1789379810520_ay11vtx75] [LOG 2026-09-14T09:56:48.825Z] [Sync] Force pull (Manual Sync) active. Pushing local unsynced logs and profile first.",
+    "[job_1789379810520_ay11vtx75] [LOG 2026-09-14T09:56:49.516Z] [Sync] Pre-pull push complete: 0 foods, 0 bios"
+  ],
+  "network": [
+    "[job_1789379810520_ay11vtx75] [2026-09-14T09:56:48.827Z] [NET LATENCY WARNING GET] /api/jobs/status (2929ms)"
+  ],
+  "handoffs": [],
+  "dispatches": [
+    {
+      "id": "t1/scout",
+      "parent": null,
+      "turn": 1,
+      "agent": "scout",
+      "user": "Bandingkan menu ini untuk tinggi badan 140 cm dengan target 1350 kkal harian.",
+      "received": {
+        "mode": "compare"
+      },
+      "systemInstruction": "=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is Bahasa Indonesia (code: id).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in Bahasa Indonesia.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nDo not reply in English unless the user wrote this turn in English and is clearly asking for English.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into Bahasa Indonesia.\n\nYou are a Clinical Dietitian & Vision Scout evaluating competing food options (Mode D).\n\nTASK:\nSTEP 1: FIRST, EXHAUSTIVELY LIST EVERY LEGIBLE DISH/PRODUCT ACROSS ALL IMAGES INTO 'allExtractedDishes'.\nSTEP 2: THEN, GROUP EVERY EXTRACTED DISH INTO NUTRITIONAL CLUSTERS WITH <=10% MACRO VARIANCE.\n\nCLINICAL INVARIANTS:\n1. EVALUATION ONLY (NON-ADDITIVE):\n   - Items are mutually exclusive candidate choices. Never sum meal totals or log as a consumed plate. Do not calculate composite meal totals or prompt for portion confirmations.\n\n2. EXHAUSTIVE EXTRACTION FIRST (NO OMISSIONS):\n   - In 'allExtractedDishes', scan every column, section, shelf, and page top-to-bottom across ALL images without stopping.\n   - Do NOT provide a representative sample or cap at 3-5 items. Transcribe EVERY single legible dish/product into 'allExtractedDishes' (dense restaurant menus contain 30 to 100+ total dishes).\n   - Format non-English names as 'Local Name / English Translation'.\n\n3. <=10% MACRO VARIANCE CLUSTERING (ANTI-COLLAPSE):\n   - Group items together ONLY if estimated macronutrients differ by <=10%.\n   - CRITICAL ANTI-COLLAPSE RULE: Do NOT dump dozens of items into a giant catch-all warning/alert group. Split broad categories into separate groups if preparation methods cause >10% macro variance (e.g., water-poached broths vs boiled greens vs steamed plant proteins vs stir-fried vegetables vs plain carbs vs coconut/fried carbs vs lean grilled/steamed marine fish vs batter-fried poultry/catfish meal sets vs salted fish vs organ meats/offal vs spicy starches/seblak vs sweet confectionery/desserts).\n   - HARD SIZE CAP: Never emit a group with >=40 items. If a cluster would exceed ~35 items, split by preparation class (grill/steam vs deep-fry vs coconut rice vs offal vs seblak) until every group is under 40.\n       - MARINE WHOLE-FISH SEPARATION: Whole marine Omega-3 fish meal sets and grilled/steamed whole sea fish (Paket Kembung / mackerel-class / kembung-class / nila-class whole fish packages) MUST NOT share a group with deep-fried meal sets, organ meats/offal (usus/ati/jeroan), or seblak/ultra-processed spicy starches. Elevate cardioprotective marine Omega-3 whole-fish classes into Tier 1 (good) or Tier 2 (neutral); keep oxidized deep-fry oils, offal, and seblak in Tier 3–4.\n   - Every single dish from 'allExtractedDishes' MUST be classified into exactly one group.\n\n4. UNLISTED HARMS & BENEFITS ISOLATION:\n   - Beyond raw macros, actively evaluate physiological hazards and cardioprotective benefits:\n     * UNLISTED HARMS: Isolate oxidized deep-frying oils, lipid peroxides, trans fats, and ultra-processed gelatinized starches (e.g., Seblak) into Tier 3 (Warning) or Tier 4 (Alert).\n     * BENEFITS: Elevate whole foods offering cardioprotective marine Omega-3s (EPA/DHA in whole sea fish / whole marine fish meal sets) and antioxidant polyphenols (sour fruit broths) into Tier 1 (Good) or Tier 2 (Neutral) — never demote those classes into the same alert cluster as deep-fried sets, offal, or seblak.\n\n5. TARGET-DRIVEN CLINICAL RANKING & COMBINED GUIDANCE:\n   - Rank groups strictly descending: Best choice addressing the patient's active surpluses and deficits at the top ('good'), least suitable at the bottom ('alert').\n   - Tailor all verdicts, comparative sentences, and clinical messages directly to the patient's target deviations.\n   - Combine clinical guidance and an actionable ordering tip into a single cohesive message.",
+      "userPrompt": "User request: \"Bandingkan menu ini untuk tinggi badan 140 cm dengan target 1350 kkal harian.\" (2 images). FIRST: List all visible dishes into 'allExtractedDishes'. THEN: Distribute EVERY dish into <=10% macro variance groups (sum of group items must equal total extracted dishes).",
+      "instruction": "=== SYSTEM INSTRUCTION ===\n=== USER OUTPUT LANGUAGE ===\nThe patient's UI language is Bahasa Indonesia (code: id).\nWrite every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in Bahasa Indonesia.\nKeep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.\nKeep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.\nDo not reply in English unless the user wrote this turn in English and is clearly asking for English.\nFood identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into Bahasa Indonesia.\n\nYou are a Clinical Dietitian & Vision Scout evaluating competing food options (Mode D).\n\nTASK:\nSTEP 1: FIRST, EXHAUSTIVELY LIST EVERY LEGIBLE DISH/PRODUCT ACROSS ALL IMAGES INTO 'allExtractedDishes'.\nSTEP 2: THEN, GROUP EVERY EXTRACTED DISH INTO NUTRITIONAL CLUSTERS WITH <=10% MACRO VARIANCE.\n\nCLINICAL INVARIANTS:\n1. EVALUATION ONLY (NON-ADDITIVE):\n   - Items are mutually exclusive candidate choices. Never sum meal totals or log as a consumed plate. Do not calculate composite meal totals or prompt for portion confirmations.\n\n2. EXHAUSTIVE EXTRACTION FIRST (NO OMISSIONS):\n   - In 'allExtractedDishes', scan every column, section, shelf, and page top-to-bottom across ALL images without stopping.\n   - Do NOT provide a representative sample or cap at 3-5 items. Transcribe EVERY single legible dish/product into 'allExtractedDishes' (dense restaurant menus contain 30 to 100+ total dishes).\n   - Format non-English names as 'Local Name / English Translation'.\n\n3. <=10% MACRO VARIANCE CLUSTERING (ANTI-COLLAPSE):\n   - Group items together ONLY if estimated macronutrients differ by <=10%.\n   - CRITICAL ANTI-COLLAPSE RULE: Do NOT dump dozens of items into a giant catch-all warning/alert group. Split broad categories into separate groups if preparation methods cause >10% macro variance (e.g., water-poached broths vs boiled greens vs steamed plant proteins vs stir-fried vegetables vs plain carbs vs coconut/fried carbs vs lean grilled/steamed marine fish vs batter-fried poultry/catfish meal sets vs salted fish vs organ meats/offal vs spicy starches/seblak vs sweet confectionery/desserts).\n   - HARD SIZE CAP: Never emit a group with >=40 items. If a cluster would exceed ~35 items, split by preparation class (grill/steam vs deep-fry vs coconut rice vs offal vs seblak) until every group is under 40.\n       - MARINE WHOLE-FISH SEPARATION: Whole marine Omega-3 fish meal sets and grilled/steamed whole sea fish (Paket Kembung / mackerel-class / kembung-class / nila-class whole fish packages) MUST NOT share a group with deep-fried meal sets, organ meats/offal (usus/ati/jeroan), or seblak/ultra-processed spicy starches. Elevate cardioprotective marine Omega-3 whole-fish classes into Tier 1 (good) or Tier 2 (neutral); keep oxidized deep-fry oils, offal, and seblak in Tier 3–4.\n   - Every single dish from 'allExtractedDishes' MUST be classified into exactly one group.\n\n4. UNLISTED HARMS & BENEFITS ISOLATION:\n   - Beyond raw macros, actively evaluate physiological hazards and cardioprotective benefits:\n     * UNLISTED HARMS: Isolate oxidized deep-frying oils, lipid peroxides, trans fats, and ultra-processed gelatinized starches (e.g., Seblak) into Tier 3 (Warning) or Tier 4 (Alert).\n     * BENEFITS: Elevate whole foods offering cardioprotective marine Omega-3s (EPA/DHA in whole sea fish / whole marine fish meal sets) and antioxidant polyphenols (sour fruit broths) into Tier 1 (Good) or Tier 2 (Neutral) — never demote those classes into the same alert cluster as deep-fried sets, offal, or seblak.\n\n5. TARGET-DRIVEN CLINICAL RANKING & COMBINED GUIDANCE:\n   - Rank groups strictly descending: Best choice addressing the patient's active surpluses and deficits at the top ('good'), least suitable at the bottom ('alert').\n   - Tailor all verdicts, comparative sentences, and clinical messages directly to the patient's target deviations.\n   - Combine clinical guidance and an actionable ordering tip into a single cohesive message.\n\n=== USER PROMPT ===\nUser request: \"Bandingkan menu ini untuk tinggi badan 140 cm dengan target 1350 kkal harian.\" (2 images). FIRST: List all visible dishes into 'allExtractedDishes'. THEN: Distribute EVERY dish into <=10% macro variance groups (sum of group items must equal total extracted dishes).",
+      "output": {
+        "allExtractedDishes": [
+          "Polo Cokelat / Chocolate Polo Bun",
+          "Polo Keju / Cheese Polo Bun",
+          "Choco Topping Pie / Chocolate Topping Pie",
+          "Cheese Topping Pie / Cheese Topping Pie",
+          "Double Cheese Bread / Double Cheese Bread",
+          "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+          "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+          "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+          "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+          "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+          "Kinder Joy / Kinder Joy Chocolate Egg",
+          "Aroma Sensasi Cinta / Wafer Snack Box"
+        ],
+        "_internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+        "comparisonTitle": "Pilihan Roti dan Makanan Manis / Bakery and Sweet Snack Selection",
+        "comparisonType": "shelf_selection",
+        "summary": "Pilihan di rak ini didominasi oleh produk tinggi gula dan lemak yang dapat dengan cepat menghabiskan kuota 1350 kkal harian Anda. Pilihlah varian roti polos dengan porsi terkontrol jika harus mengonsumsinya.",
+        "recommendedOption": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+        "groups": [
+          {
+            "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+            "sourceImageIndex": 0,
+            "verdict": {
+              "label": "Kalori Paling Moderat",
+              "level": "neutral"
+            },
+            "comparisonSentence": "Dibandingkan kue kering berlemak atau cokelat batang, kelompok roti manis dasar memiliki kandungan lemak jenuh yang lebih rendah per 100 gram.",
+            "message": "Roti manis dasar memberikan asupan karbohidrat cepat dengan beban lemak yang lebih terkontrol dibandingkan produk ber-topping berat. Namun, karena target harian Anda 1350 kkal, konsumsi tetap harus dibatasi agar tidak memicu lonjakan glukosa darah.",
+            "orderingTip": "Konsumsi dalam porsi kecil dan batasi frekuensinya maksimal sekali sehari.",
+            "boundingBox2D": [
+              180,
+              0,
+              500,
+              1000
+            ],
+            "servingWeightGrams": 70,
+            "averageNutrientsPer100g": {
+              "calories": 310,
+              "protein": 8,
+              "totalFat": 10,
+              "saturatedFat": 4,
+              "carbohydrates": 48,
+              "sugar": 14,
+              "totalFibre": 2,
+              "sodium": 350
+            },
+            "items": [
+              "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+              "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+              "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)"
+            ]
+          },
+          {
+            "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+            "sourceImageIndex": 0,
+            "verdict": {
+              "label": "Tinggi Lemak & Mentega",
+              "level": "warning"
+            },
+            "comparisonSentence": "Kelompok pastry ini memiliki kandungan lemak total dan lemak jenuh yang jauh lebih tinggi akibat lapisan mentega tebal dibandingkan roti manis biasa.",
+            "message": "Pastry seperti polo bun dan pie keju/cokelat mengandung lemak jenuh tersembunyi yang dapat menghambat progres penurunan berat badan pada target 1350 kkal Anda. Konsumsi berlebih berisiko meningkatkan profil lipid darah.",
+            "orderingTip": "Hindari konsumsi rutin; pilih versi polos tanpa topping mentega tebal.",
+            "boundingBox2D": [
+              0,
+              0,
+              500,
+              1000
+            ],
+            "servingWeightGrams": 90,
+            "averageNutrientsPer100g": {
+              "calories": 390,
+              "protein": 7,
+              "totalFat": 20,
+              "saturatedFat": 10,
+              "carbohydrates": 45,
+              "sugar": 18,
+              "totalFibre": 1,
+              "sodium": 400
+            },
+            "items": [
+              "Polo Cokelat / Chocolate Polo Bun",
+              "Polo Keju / Cheese Polo Bun",
+              "Choco Topping Pie / Chocolate Topping Pie",
+              "Cheese Topping Pie / Cheese Topping Pie",
+              "Double Cheese Bread / Double Cheese Bread"
+            ]
+          },
+          {
+            "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+            "sourceImageIndex": 1,
+            "verdict": {
+              "label": "Gula & Kalori Ekstrem",
+              "level": "alert"
+            },
+            "comparisonSentence": "Dibandingkan produk roti, cokelat padat dan es krim memiliki densitas kalori dan gula rafinasi tertinggi yang paling cepat merusak defisit kalori Anda.",
+            "message": "Produk seperti SilverQueen dan Magnum menyumbang lonjakan gula dan lemak trans/jenuh yang tinggi per porsinya (110 kkal per 20g). Ini sangat bertentangan dengan target 1350 kkal dan manajemen metabolik tinggi badan 140 cm.",
+            "orderingTip": "Hindari sama sekali atau ganti dengan camilan buah segar yang tinggi serat.",
+            "boundingBox2D": [
+              0,
+              500,
+              1000,
+              1000
+            ],
+            "servingWeightGrams": 50,
+            "averageNutrientsPer100g": {
+              "calories": 550,
+              "protein": 10,
+              "totalFat": 35,
+              "saturatedFat": 18,
+              "carbohydrates": 50,
+              "sugar": 45,
+              "totalFibre": 3,
+              "sodium": 100
+            },
+            "items": [
+              "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+              "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+              "Kinder Joy / Kinder Joy Chocolate Egg",
+              "Aroma Sensasi Cinta / Wafer Snack Box"
+            ]
+          }
+        ]
+      },
+      "rawEmission": {
+        "allExtractedDishes": [
+          "Polo Cokelat / Chocolate Polo Bun",
+          "Polo Keju / Cheese Polo Bun",
+          "Choco Topping Pie / Chocolate Topping Pie",
+          "Cheese Topping Pie / Cheese Topping Pie",
+          "Double Cheese Bread / Double Cheese Bread",
+          "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+          "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+          "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+          "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+          "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+          "Kinder Joy / Kinder Joy Chocolate Egg",
+          "Aroma Sensasi Cinta / Wafer Snack Box"
+        ],
+        "_internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+        "comparisonTitle": "Pilihan Roti dan Makanan Manis / Bakery and Sweet Snack Selection",
+        "comparisonType": "shelf_selection",
+        "summary": "Pilihan di rak ini didominasi oleh produk tinggi gula dan lemak yang dapat dengan cepat menghabiskan kuota 1350 kkal harian Anda. Pilihlah varian roti polos dengan porsi terkontrol jika harus mengonsumsinya.",
+        "recommendedOption": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+        "groups": [
+          {
+            "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+            "sourceImageIndex": 0,
+            "verdict": {
+              "label": "Kalori Paling Moderat",
+              "level": "neutral"
+            },
+            "comparisonSentence": "Dibandingkan kue kering berlemak atau cokelat batang, kelompok roti manis dasar memiliki kandungan lemak jenuh yang lebih rendah per 100 gram.",
+            "message": "Roti manis dasar memberikan asupan karbohidrat cepat dengan beban lemak yang lebih terkontrol dibandingkan produk ber-topping berat. Namun, karena target harian Anda 1350 kkal, konsumsi tetap harus dibatasi agar tidak memicu lonjakan glukosa darah.",
+            "orderingTip": "Konsumsi dalam porsi kecil dan batasi frekuensinya maksimal sekali sehari.",
+            "boundingBox2D": [
+              180,
+              0,
+              500,
+              1000
+            ],
+            "servingWeightGrams": 70,
+            "averageNutrientsPer100g": {
+              "calories": 310,
+              "protein": 8,
+              "totalFat": 10,
+              "saturatedFat": 4,
+              "carbohydrates": 48,
+              "sugar": 14,
+              "totalFibre": 2,
+              "sodium": 350
+            },
+            "items": [
+              "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+              "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+              "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)"
+            ]
+          },
+          {
+            "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+            "sourceImageIndex": 0,
+            "verdict": {
+              "label": "Tinggi Lemak & Mentega",
+              "level": "warning"
+            },
+            "comparisonSentence": "Kelompok pastry ini memiliki kandungan lemak total dan lemak jenuh yang jauh lebih tinggi akibat lapisan mentega tebal dibandingkan roti manis biasa.",
+            "message": "Pastry seperti polo bun dan pie keju/cokelat mengandung lemak jenuh tersembunyi yang dapat menghambat progres penurunan berat badan pada target 1350 kkal Anda. Konsumsi berlebih berisiko meningkatkan profil lipid darah.",
+            "orderingTip": "Hindari konsumsi rutin; pilih versi polos tanpa topping mentega tebal.",
+            "boundingBox2D": [
+              0,
+              0,
+              500,
+              1000
+            ],
+            "servingWeightGrams": 90,
+            "averageNutrientsPer100g": {
+              "calories": 390,
+              "protein": 7,
+              "totalFat": 20,
+              "saturatedFat": 10,
+              "carbohydrates": 45,
+              "sugar": 18,
+              "totalFibre": 1,
+              "sodium": 400
+            },
+            "items": [
+              "Polo Cokelat / Chocolate Polo Bun",
+              "Polo Keju / Cheese Polo Bun",
+              "Choco Topping Pie / Chocolate Topping Pie",
+              "Cheese Topping Pie / Cheese Topping Pie",
+              "Double Cheese Bread / Double Cheese Bread"
+            ]
+          },
+          {
+            "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+            "sourceImageIndex": 1,
+            "verdict": {
+              "label": "Gula & Kalori Ekstrem",
+              "level": "alert"
+            },
+            "comparisonSentence": "Dibandingkan produk roti, cokelat padat dan es krim memiliki densitas kalori dan gula rafinasi tertinggi yang paling cepat merusak defisit kalori Anda.",
+            "message": "Produk seperti SilverQueen dan Magnum menyumbang lonjakan gula dan lemak trans/jenuh yang tinggi per porsinya (110 kkal per 20g). Ini sangat bertentangan dengan target 1350 kkal dan manajemen metabolik tinggi badan 140 cm.",
+            "orderingTip": "Hindari sama sekali atau ganti dengan camilan buah segar yang tinggi serat.",
+            "boundingBox2D": [
+              0,
+              500,
+              1000,
+              1000
+            ],
+            "servingWeightGrams": 50,
+            "averageNutrientsPer100g": {
+              "calories": 550,
+              "protein": 10,
+              "totalFat": 35,
+              "saturatedFat": 18,
+              "carbohydrates": 50,
+              "sugar": 45,
+              "totalFibre": 3,
+              "sodium": 100
+            },
+            "items": [
+              "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+              "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+              "Kinder Joy / Kinder Joy Chocolate Egg",
+              "Aroma Sensasi Cinta / Wafer Snack Box"
+            ]
+          }
+        ]
+      },
+      "model": "gemini-3.5-flash-lite",
+      "latency_ms": 10629,
+      "error": null
+    }
+  ],
+  "contract": [
+    {
+      "law": "SSE {final,result}",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Final result emitted; job succeeded"
+    },
+    {
+      "law": "AnalyzeFinished count = 1",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "AnalyzeFinished count = 1"
+    },
+    {
+      "law": "Stall/503/quota -> 3.1 hop, same job",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No stall or 503 encountered"
+    },
+    {
+      "law": "Submit JSON running",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Submit transitioned directly to running"
+    },
+    {
+      "law": "pendingFoodLog -> succeeded before R2",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No finalized food log in this run"
+    },
+    {
+      "law": "Retry hidden if succeeded or kcal in logs",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dialog inventory captured"
+    },
+    {
+      "law": "Attempt 1/3 hidden if succeeded",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dialog inventory captured"
+    },
+    {
+      "law": "Dialog on_card kcal = ledger",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No on_card macros in dialog inventory"
+    },
+    {
+      "law": "Composer controls count = 1",
+      "layer": "ui",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No composer inventory captured"
+    },
+    {
+      "law": "DIAG5 off on food",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "DIAG5 auto-send remained off for food chat"
+    },
+    {
+      "law": "Matrix calc matches ledger",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "No meal ledger required"
+    },
+    {
+      "law": "Each dispatch has model + latency_ms",
+      "layer": "process",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "All 1 dispatch(es) contain model and latency_ms"
+    },
+    {
+      "law": "Handoff from/to + same jobId if transfer",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No agent handoffs in this run"
+    },
+    {
+      "law": "Agent output: nutrients complete",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No finalized ledger in this run"
+    },
+    {
+      "law": "Agent output: verdict + advice",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No turn-attributed meal dispatches in this run"
+    },
+    {
+      "law": "Dishes: fields populated",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No dishes in any agent emission"
+    },
+    {
+      "law": "Multi-turn split shown",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Single-turn run, no split state"
+    },
+    {
+      "law": "Mode instruction chunk",
+      "layer": "content",
+      "fault": "none",
+      "result": "PASS",
+      "actual": "Mode D compare chunk(s) shown for mode(s)=compare"
+    },
+    {
+      "law": "Edit patch: components & nutrients preserved",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Single-turn create, no edit turns"
+    },
+    {
+      "law": "Handoff chain complete",
+      "layer": "process",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "No handoffs in this run"
+    },
+    {
+      "law": "Handoff received",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Direct food log, no forwarded handoff"
+    },
+    {
+      "law": "Lab panel complete",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Medical-only law (pack=food)"
+    },
+    {
+      "law": "Clinical report shown",
+      "layer": "content",
+      "fault": "none",
+      "result": "n/a",
+      "actual": "Medical-only law (pack=food)"
+    }
+  ],
+  "portionAdjustment": null,
+  "linkedJobs": [],
+  "pendingFoodLog": null,
+  "scoutItems": [
+    {
+      "name": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+      "keyword": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+      "originalName": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        180,
+        0,
+        500,
+        1000
+      ],
+      "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+      "scoutIndex": 0,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+      "keyword": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+      "originalName": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        180,
+        0,
+        500,
+        1000
+      ],
+      "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+      "scoutIndex": 1,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+      "keyword": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+      "originalName": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        180,
+        0,
+        500,
+        1000
+      ],
+      "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+      "scoutIndex": 2,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Polo Cokelat / Chocolate Polo Bun",
+      "keyword": "Polo Cokelat / Chocolate Polo Bun",
+      "originalName": "Polo Cokelat / Chocolate Polo Bun",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        500,
+        1000
+      ],
+      "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+      "scoutIndex": 3,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Polo Keju / Cheese Polo Bun",
+      "keyword": "Polo Keju / Cheese Polo Bun",
+      "originalName": "Polo Keju / Cheese Polo Bun",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        500,
+        1000
+      ],
+      "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+      "scoutIndex": 4,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Choco Topping Pie / Chocolate Topping Pie",
+      "keyword": "Choco Topping Pie / Chocolate Topping Pie",
+      "originalName": "Choco Topping Pie / Chocolate Topping Pie",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        500,
+        1000
+      ],
+      "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+      "scoutIndex": 5,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Cheese Topping Pie / Cheese Topping Pie",
+      "keyword": "Cheese Topping Pie / Cheese Topping Pie",
+      "originalName": "Cheese Topping Pie / Cheese Topping Pie",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        500,
+        1000
+      ],
+      "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+      "scoutIndex": 6,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Double Cheese Bread / Double Cheese Bread",
+      "keyword": "Double Cheese Bread / Double Cheese Bread",
+      "originalName": "Double Cheese Bread / Double Cheese Bread",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        500,
+        1000
+      ],
+      "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+      "scoutIndex": 7,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+      "keyword": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+      "originalName": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [
+        0,
+        500,
+        1000,
+        1000
+      ],
+      "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+      "scoutIndex": 8,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+      "keyword": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+      "originalName": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [
+        0,
+        500,
+        1000,
+        1000
+      ],
+      "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+      "scoutIndex": 9,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Kinder Joy / Kinder Joy Chocolate Egg",
+      "keyword": "Kinder Joy / Kinder Joy Chocolate Egg",
+      "originalName": "Kinder Joy / Kinder Joy Chocolate Egg",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [
+        0,
+        500,
+        1000,
+        1000
+      ],
+      "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+      "scoutIndex": 10,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    },
+    {
+      "name": "Aroma Sensasi Cinta / Wafer Snack Box",
+      "keyword": "Aroma Sensasi Cinta / Wafer Snack Box",
+      "originalName": "Aroma Sensasi Cinta / Wafer Snack Box",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [
+        0,
+        500,
+        1000,
+        1000
+      ],
+      "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+      "scoutIndex": 11,
+      "estimatedWeightGrams": 100,
+      "nutrientBasisWeight": 100,
+      "source": "visual",
+      "rawNutritionLabel": null,
+      "nutrients": null,
+      "per100g": {},
+      "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+      "ingredients": [],
+      "visualIngredients": []
+    }
+  ],
+  "rawScout": {
+    "allExtractedDishes": [
+      "Polo Cokelat / Chocolate Polo Bun",
+      "Polo Keju / Cheese Polo Bun",
+      "Choco Topping Pie / Chocolate Topping Pie",
+      "Cheese Topping Pie / Cheese Topping Pie",
+      "Double Cheese Bread / Double Cheese Bread",
+      "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+      "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+      "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+      "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+      "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+      "Kinder Joy / Kinder Joy Chocolate Egg",
+      "Aroma Sensasi Cinta / Wafer Snack Box"
+    ],
+    "_internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target.",
+    "comparisonTitle": "Pilihan Roti dan Makanan Manis / Bakery and Sweet Snack Selection",
+    "comparisonType": "shelf_selection",
+    "summary": "Pilihan di rak ini didominasi oleh produk tinggi gula dan lemak yang dapat dengan cepat menghabiskan kuota 1350 kkal harian Anda. Pilihlah varian roti polos dengan porsi terkontrol jika harus mengonsumsinya.",
+    "recommendedOption": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+    "groups": [
+      {
+        "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+        "sourceImageIndex": 0,
+        "verdict": {
+          "label": "Kalori Paling Moderat",
+          "level": "neutral"
+        },
+        "comparisonSentence": "Dibandingkan kue kering berlemak atau cokelat batang, kelompok roti manis dasar memiliki kandungan lemak jenuh yang lebih rendah per 100 gram.",
+        "message": "Roti manis dasar memberikan asupan karbohidrat cepat dengan beban lemak yang lebih terkontrol dibandingkan produk ber-topping berat. Namun, karena target harian Anda 1350 kkal, konsumsi tetap harus dibatasi agar tidak memicu lonjakan glukosa darah.",
+        "orderingTip": "Konsumsi dalam porsi kecil dan batasi frekuensinya maksimal sekali sehari.",
+        "boundingBox2D": [
+          180,
+          0,
+          500,
+          1000
+        ],
+        "servingWeightGrams": 70,
+        "averageNutrientsPer100g": {
+          "calories": 310,
+          "protein": 8,
+          "totalFat": 10,
+          "saturatedFat": 4,
+          "carbohydrates": 48,
+          "sugar": 14,
+          "totalFibre": 2,
+          "sodium": 350
+        },
+        "items": [
+          "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+          "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+          "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)"
+        ]
+      },
+      {
+        "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+        "sourceImageIndex": 0,
+        "verdict": {
+          "label": "Tinggi Lemak & Mentega",
+          "level": "warning"
+        },
+        "comparisonSentence": "Kelompok pastry ini memiliki kandungan lemak total dan lemak jenuh yang jauh lebih tinggi akibat lapisan mentega tebal dibandingkan roti manis biasa.",
+        "message": "Pastry seperti polo bun dan pie keju/cokelat mengandung lemak jenuh tersembunyi yang dapat menghambat progres penurunan berat badan pada target 1350 kkal Anda. Konsumsi berlebih berisiko meningkatkan profil lipid darah.",
+        "orderingTip": "Hindari konsumsi rutin; pilih versi polos tanpa topping mentega tebal.",
+        "boundingBox2D": [
+          0,
+          0,
+          500,
+          1000
+        ],
+        "servingWeightGrams": 90,
+        "averageNutrientsPer100g": {
+          "calories": 390,
+          "protein": 7,
+          "totalFat": 20,
+          "saturatedFat": 10,
+          "carbohydrates": 45,
+          "sugar": 18,
+          "totalFibre": 1,
+          "sodium": 400
+        },
+        "items": [
+          "Polo Cokelat / Chocolate Polo Bun",
+          "Polo Keju / Cheese Polo Bun",
+          "Choco Topping Pie / Chocolate Topping Pie",
+          "Cheese Topping Pie / Cheese Topping Pie",
+          "Double Cheese Bread / Double Cheese Bread"
+        ]
+      },
+      {
+        "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+        "sourceImageIndex": 1,
+        "verdict": {
+          "label": "Gula & Kalori Ekstrem",
+          "level": "alert"
+        },
+        "comparisonSentence": "Dibandingkan produk roti, cokelat padat dan es krim memiliki densitas kalori dan gula rafinasi tertinggi yang paling cepat merusak defisit kalori Anda.",
+        "message": "Produk seperti SilverQueen dan Magnum menyumbang lonjakan gula dan lemak trans/jenuh yang tinggi per porsinya (110 kkal per 20g). Ini sangat bertentangan dengan target 1350 kkal dan manajemen metabolik tinggi badan 140 cm.",
+        "orderingTip": "Hindari sama sekali atau ganti dengan camilan buah segar yang tinggi serat.",
+        "boundingBox2D": [
+          0,
+          500,
+          1000,
+          1000
+        ],
+        "servingWeightGrams": 50,
+        "averageNutrientsPer100g": {
+          "calories": 550,
+          "protein": 10,
+          "totalFat": 35,
+          "saturatedFat": 18,
+          "carbohydrates": 50,
+          "sugar": 45,
+          "totalFibre": 3,
+          "sodium": 100
+        },
+        "items": [
+          "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+          "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+          "Kinder Joy / Kinder Joy Chocolate Egg",
+          "Aroma Sensasi Cinta / Wafer Snack Box"
+        ]
+      }
+    ]
+  },
+  "backendLogs": "[job_1789379810520_ay11vtx75] [scout_instruction] Vision Scout Instruction dispatched (model: gemini-3.5-flash-lite). Prompt length: 280 chars — see [UnifiedLLM-Prompt:scout] below for full text.\n[job_1789379810520_ay11vtx75] [scout_system_instruction] Vision Scout System Instruction dispatched (model: gemini-3.5-flash-lite) — see [UnifiedLLM-Prompt:scout] below for full text.\n[job_1789379810520_ay11vtx75] [scout_answer] Scout identified 12 item(s): Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain) (~100g), Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate) (~100g), Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese) (~100g), Polo Cokelat / Chocolate Polo Bun (~100g), Polo Keju / Cheese Polo Bun (~100g), Choco Topping Pie / Chocolate Topping Pie (~100g), Cheese Topping Pie / Cheese Topping Pie (~100g), Double Cheese Bread / Double Cheese Bread (~100g), SilverQueen Cashew / SilverQueen Cashew Chocolate Bar (~100g), Magnum Pistachio / Magnum Pistachio Ice Cream Bar (~100g), Kinder Joy / Kinder Joy Chocolate Egg (~100g), Aroma Sensasi Cinta / Wafer Snack Box (~100g)\n[job_1789379810520_ay11vtx75] [info] [scout] Prompt: 3345, Completion: 1466, Total: 5971\n[job_1789379810520_ay11vtx75] [info] [UnifiedLLM-Timing:scout] ms=10621",
+  "comparisonData": {
+    "comparisonTitle": "Pilihan Roti dan Makanan Manis / Bakery and Sweet Snack Selection",
+    "comparisonType": "shelf_selection",
+    "summary": "Pilihan di rak ini didominasi oleh produk tinggi gula dan lemak yang dapat dengan cepat menghabiskan kuota 1350 kkal harian Anda. Pilihlah varian roti polos dengan porsi terkontrol jika harus mengonsumsinya.",
+    "recommendedOption": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+    "items": [
+      {
+        "name": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+        "keyword": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+        "originalName": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          180,
+          0,
+          500,
+          1000
+        ],
+        "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+        "scoutIndex": 0,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+        "keyword": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+        "originalName": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          180,
+          0,
+          500,
+          1000
+        ],
+        "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+        "scoutIndex": 1,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+        "keyword": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+        "originalName": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          180,
+          0,
+          500,
+          1000
+        ],
+        "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+        "scoutIndex": 2,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Polo Cokelat / Chocolate Polo Bun",
+        "keyword": "Polo Cokelat / Chocolate Polo Bun",
+        "originalName": "Polo Cokelat / Chocolate Polo Bun",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          500,
+          1000
+        ],
+        "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+        "scoutIndex": 3,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Polo Keju / Cheese Polo Bun",
+        "keyword": "Polo Keju / Cheese Polo Bun",
+        "originalName": "Polo Keju / Cheese Polo Bun",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          500,
+          1000
+        ],
+        "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+        "scoutIndex": 4,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Choco Topping Pie / Chocolate Topping Pie",
+        "keyword": "Choco Topping Pie / Chocolate Topping Pie",
+        "originalName": "Choco Topping Pie / Chocolate Topping Pie",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          500,
+          1000
+        ],
+        "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+        "scoutIndex": 5,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Cheese Topping Pie / Cheese Topping Pie",
+        "keyword": "Cheese Topping Pie / Cheese Topping Pie",
+        "originalName": "Cheese Topping Pie / Cheese Topping Pie",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          500,
+          1000
+        ],
+        "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+        "scoutIndex": 6,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Double Cheese Bread / Double Cheese Bread",
+        "keyword": "Double Cheese Bread / Double Cheese Bread",
+        "originalName": "Double Cheese Bread / Double Cheese Bread",
+        "sourceImageIndex": 0,
+        "boundingBox2D": [
+          0,
+          0,
+          500,
+          1000
+        ],
+        "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+        "scoutIndex": 7,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+        "keyword": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+        "originalName": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+        "sourceImageIndex": 1,
+        "boundingBox2D": [
+          0,
+          500,
+          1000,
+          1000
+        ],
+        "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+        "scoutIndex": 8,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+        "keyword": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+        "originalName": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+        "sourceImageIndex": 1,
+        "boundingBox2D": [
+          0,
+          500,
+          1000,
+          1000
+        ],
+        "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+        "scoutIndex": 9,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Kinder Joy / Kinder Joy Chocolate Egg",
+        "keyword": "Kinder Joy / Kinder Joy Chocolate Egg",
+        "originalName": "Kinder Joy / Kinder Joy Chocolate Egg",
+        "sourceImageIndex": 1,
+        "boundingBox2D": [
+          0,
+          500,
+          1000,
+          1000
+        ],
+        "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+        "scoutIndex": 10,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      },
+      {
+        "name": "Aroma Sensasi Cinta / Wafer Snack Box",
+        "keyword": "Aroma Sensasi Cinta / Wafer Snack Box",
+        "originalName": "Aroma Sensasi Cinta / Wafer Snack Box",
+        "sourceImageIndex": 1,
+        "boundingBox2D": [
+          0,
+          500,
+          1000,
+          1000
+        ],
+        "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+        "scoutIndex": 11,
+        "estimatedWeightGrams": 100,
+        "nutrientBasisWeight": 100,
+        "source": "visual",
+        "rawNutritionLabel": null,
+        "nutrients": null,
+        "per100g": {},
+        "internalReasoning": "Exhaustively extracted all visible baked goods and packaged confectionery across the two shelf images. Grouped into distinct nutritional clusters based on macro density: simple sweet buns with moderate calories, heavy butter-crust polo/pie pastries with high saturated fat, and ultra-dense chocolate/confectionery bars with very high sugar and trans/saturated fats. Aligned recommendations with the patient's low 1350 kkal target."
+      }
+    ],
+    "groups": [
+      {
+        "groupName": "Tier 2 - Neutral Choice: Roti Manis Dasar / Basic Sweet Buns",
+        "verdict": {
+          "label": "Kalori Paling Moderat",
+          "level": "neutral"
+        },
+        "message": "Roti manis dasar memberikan asupan karbohidrat cepat dengan beban lemak yang lebih terkontrol dibandingkan produk ber-topping berat. Namun, karena target harian Anda 1350 kkal, konsumsi tetap harus dibatasi agar tidak memicu lonjakan glukosa darah.",
+        "comparisonSentence": "Dibandingkan kue kering berlemak atau cokelat batang, kelompok roti manis dasar memiliki kandungan lemak jenuh yang lebih rendah per 100 gram.",
+        "orderingTip": "Konsumsi dalam porsi kecil dan batasi frekuensinya maksimal sekali sehari.",
+        "averageNutrients": {
+          "calories": 157,
+          "protein": 8,
+          "totalFat": 5,
+          "saturatedFat": 1,
+          "transFat": 0,
+          "unsaturatedFat": 4,
+          "carbohydrates": 20,
+          "sugar": 9.3,
+          "addedSugar": 5,
+          "totalFibre": 0,
+          "solubleFibre": 0.2,
+          "sodium": 200,
+          "potassium": 83.7,
+          "magnesium": 13.1,
+          "calcium": 31.4,
+          "iron": 0.9,
+          "zinc": 0.4,
+          "selenium": 4.2,
+          "iodine": 5.2,
+          "phosphorus": 47.1,
+          "vitaminD": 0.1,
+          "vitaminB12": 0.1,
+          "folate": 18.3,
+          "vitaminC": 0.1,
+          "vitaminE": 0.4,
+          "vitaminK": 1.3,
+          "vitaminA": 47.1,
+          "vitaminB6": 0,
+          "thiamine": 0.1,
+          "riboflavin": 0.1,
+          "niacin": 0.6,
+          "omega3": 0,
+          "salt": 0.5
+        },
+        "averageNutrientsPer100g": {
+          "calories": 310,
+          "protein": 8,
+          "totalFat": 10,
+          "saturatedFat": 4,
+          "carbohydrates": 48,
+          "sugar": 14,
+          "totalFibre": 2,
+          "sodium": 350
+        },
+        "boundingBox2D": [
+          180,
+          0,
+          500,
+          1000
+        ],
+        "scoutItemIndices": [
+          0,
+          1,
+          2
+        ],
+        "itemClinicalThreats": {},
+        "items": [
+          {
+            "name": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+            "keyword": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+            "originalName": "Say Bread Sweet Bun (Plain) / Say Bread Sweet Bun (Plain)",
+            "boundingBox2D": [
+              180,
+              0,
+              500,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 0
+          },
+          {
+            "name": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+            "keyword": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+            "originalName": "Say Bread Sweet Bun (Chocolate) / Say Bread Sweet Bun (Chocolate)",
+            "boundingBox2D": [
+              180,
+              0,
+              500,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 1
+          },
+          {
+            "name": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+            "keyword": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+            "originalName": "Say Bread Sweet Bun (Cheese) / Say Bread Sweet Bun (Cheese)",
+            "boundingBox2D": [
+              180,
+              0,
+              500,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 2
+          }
+        ],
+        "servingWeightGrams": 51
+      },
+      {
+        "groupName": "Tier 3 - Warning: Pastry Polo & Pie / Rich Polo Buns and Pies",
+        "verdict": {
+          "label": "Tinggi Lemak & Mentega",
+          "level": "warning"
+        },
+        "message": "Pastry seperti polo bun dan pie keju/cokelat mengandung lemak jenuh tersembunyi yang dapat menghambat progres penurunan berat badan pada target 1350 kkal Anda. Konsumsi berlebih berisiko meningkatkan profil lipid darah.",
+        "comparisonSentence": "Kelompok pastry ini memiliki kandungan lemak total dan lemak jenuh yang jauh lebih tinggi akibat lapisan mentega tebal dibandingkan roti manis biasa.",
+        "orderingTip": "Hindari konsumsi rutin; pilih versi polos tanpa topping mentega tebal.",
+        "averageNutrients": {
+          "calories": 157,
+          "protein": 8,
+          "totalFat": 5,
+          "saturatedFat": 1,
+          "transFat": 0,
+          "unsaturatedFat": 4,
+          "carbohydrates": 20,
+          "sugar": 13.5,
+          "addedSugar": 6,
+          "totalFibre": 0,
+          "solubleFibre": 0.1,
+          "sodium": 200,
+          "potassium": 72.2,
+          "magnesium": 12.6,
+          "calcium": 160.1,
+          "iron": 0.7,
+          "zinc": 1.1,
+          "selenium": 6.9,
+          "iodine": 12.6,
+          "phosphorus": 128.7,
+          "vitaminD": 0.2,
+          "vitaminB12": 0.5,
+          "folate": 17.3,
+          "vitaminC": 0.1,
+          "vitaminE": 0.3,
+          "vitaminK": 1.4,
+          "vitaminA": 84.8,
+          "vitaminB6": 0,
+          "thiamine": 0.1,
+          "riboflavin": 0.2,
+          "niacin": 0.4,
+          "omega3": 0,
+          "salt": 0.5
+        },
+        "averageNutrientsPer100g": {
+          "calories": 390,
+          "protein": 7,
+          "totalFat": 20,
+          "saturatedFat": 10,
+          "carbohydrates": 45,
+          "sugar": 18,
+          "totalFibre": 1,
+          "sodium": 400
+        },
+        "boundingBox2D": [
+          0,
+          0,
+          500,
+          1000
+        ],
+        "scoutItemIndices": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "itemClinicalThreats": {},
+        "items": [
+          {
+            "name": "Polo Cokelat / Chocolate Polo Bun",
+            "keyword": "Polo Cokelat / Chocolate Polo Bun",
+            "originalName": "Polo Cokelat / Chocolate Polo Bun",
+            "boundingBox2D": [
+              0,
+              0,
+              500,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 3
+          },
+          {
+            "name": "Polo Keju / Cheese Polo Bun",
+            "keyword": "Polo Keju / Cheese Polo Bun",
+            "originalName": "Polo Keju / Cheese Polo Bun",
+            "boundingBox2D": [
+              0,
+              0,
+              500,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 4
+          },
+          {
+            "name": "Choco Topping Pie / Chocolate Topping Pie",
+            "keyword": "Choco Topping Pie / Chocolate Topping Pie",
+            "originalName": "Choco Topping Pie / Chocolate Topping Pie",
+            "boundingBox2D": [
+              0,
+              0,
+              500,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 5
+          },
+          {
+            "name": "Cheese Topping Pie / Cheese Topping Pie",
+            "keyword": "Cheese Topping Pie / Cheese Topping Pie",
+            "originalName": "Cheese Topping Pie / Cheese Topping Pie",
+            "boundingBox2D": [
+              0,
+              0,
+              500,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 6
+          },
+          {
+            "name": "Double Cheese Bread / Double Cheese Bread",
+            "keyword": "Double Cheese Bread / Double Cheese Bread",
+            "originalName": "Double Cheese Bread / Double Cheese Bread",
+            "boundingBox2D": [
+              0,
+              0,
+              500,
+              1000
+            ],
+            "sourceImageIndex": 0,
+            "scoutIndex": 7
+          }
+        ],
+        "servingWeightGrams": 40
+      },
+      {
+        "groupName": "Tier 4 - Alert: Cokelat & Confectionery Padat / Dense Chocolates and Snacks",
+        "verdict": {
+          "label": "Gula & Kalori Ekstrem",
+          "level": "alert"
+        },
+        "message": "Produk seperti SilverQueen dan Magnum menyumbang lonjakan gula dan lemak trans/jenuh yang tinggi per porsinya (110 kkal per 20g). Ini sangat bertentangan dengan target 1350 kkal dan manajemen metabolik tinggi badan 140 cm.",
+        "comparisonSentence": "Dibandingkan produk roti, cokelat padat dan es krim memiliki densitas kalori dan gula rafinasi tertinggi yang paling cepat merusak defisit kalori Anda.",
+        "orderingTip": "Hindari sama sekali atau ganti dengan camilan buah segar yang tinggi serat.",
+        "averageNutrients": {
+          "calories": 157,
+          "protein": 8,
+          "totalFat": 5,
+          "saturatedFat": 1,
+          "transFat": 0,
+          "unsaturatedFat": 4,
+          "carbohydrates": 20,
+          "sugar": 8.5,
+          "addedSugar": 7.5,
+          "totalFibre": 0,
+          "solubleFibre": 0.2,
+          "sodium": 200,
+          "potassium": 133.1,
+          "magnesium": 14.3,
+          "calcium": 55.7,
+          "iron": 0.8,
+          "zinc": 0.5,
+          "selenium": 5,
+          "iodine": 12.6,
+          "phosphorus": 69.8,
+          "vitaminD": 0.4,
+          "vitaminB12": 0.2,
+          "folate": 16.7,
+          "vitaminC": 1.3,
+          "vitaminE": 0.4,
+          "vitaminK": 2.7,
+          "vitaminA": 41.1,
+          "vitaminB6": 0.1,
+          "thiamine": 0.1,
+          "riboflavin": 0.1,
+          "niacin": 0.6,
+          "omega3": 0,
+          "salt": 0.5
+        },
+        "averageNutrientsPer100g": {
+          "calories": 550,
+          "protein": 10,
+          "totalFat": 35,
+          "saturatedFat": 18,
+          "carbohydrates": 50,
+          "sugar": 45,
+          "totalFibre": 3,
+          "sodium": 100
+        },
+        "boundingBox2D": [
+          0,
+          500,
+          1000,
+          1000
+        ],
+        "scoutItemIndices": [
+          8,
+          9,
+          10,
+          11
+        ],
+        "itemClinicalThreats": {},
+        "items": [
+          {
+            "name": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+            "keyword": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+            "originalName": "SilverQueen Cashew / SilverQueen Cashew Chocolate Bar",
+            "boundingBox2D": [
+              0,
+              500,
+              1000,
+              1000
+            ],
+            "sourceImageIndex": 1,
+            "scoutIndex": 8
+          },
+          {
+            "name": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+            "keyword": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+            "originalName": "Magnum Pistachio / Magnum Pistachio Ice Cream Bar",
+            "boundingBox2D": [
+              0,
+              500,
+              1000,
+              1000
+            ],
+            "sourceImageIndex": 1,
+            "scoutIndex": 9
+          },
+          {
+            "name": "Kinder Joy / Kinder Joy Chocolate Egg",
+            "keyword": "Kinder Joy / Kinder Joy Chocolate Egg",
+            "originalName": "Kinder Joy / Kinder Joy Chocolate Egg",
+            "boundingBox2D": [
+              0,
+              500,
+              1000,
+              1000
+            ],
+            "sourceImageIndex": 1,
+            "scoutIndex": 10
+          },
+          {
+            "name": "Aroma Sensasi Cinta / Wafer Snack Box",
+            "keyword": "Aroma Sensasi Cinta / Wafer Snack Box",
+            "originalName": "Aroma Sensasi Cinta / Wafer Snack Box",
+            "boundingBox2D": [
+              0,
+              500,
+              1000,
+              1000
+            ],
+            "sourceImageIndex": 1,
+            "scoutIndex": 11
+          }
+        ],
+        "servingWeightGrams": 29
+      }
+    ],
+    "isMenuScale": false
+  }
+}
