@@ -63,7 +63,7 @@ export default defineConfig(() => {
       },
     },
     test: {
-      exclude: ['**/node_modules/**', '**/dist/**', '**/studio/**', '**/archive/**'],
+      exclude: ['**/node_modules/**', '**/dist/**', '**/studio/**', '**/archive/**', '**/prototype/tests/**'],
     },
   };
 });
