@@ -59,7 +59,7 @@ Rule for this table: count **distinct fix commits / documented retries**, not ch
 | `APPLY_MISS` / B0 converts | HDL 50→1.293 etc. not applied to Home | B0 is Current work; G-B1 fixtures **deleted** so the outer lock is skip-pass | N/A (never proven live) | ⚠️ Current work | **YES — Biomarkers.** Do not treat skip-pass as G-B1 green. |
 | Credits / admin quota 0 | Admin `NaN`/0; quota copy `\n\n` | PR #3 + PR #4 (**2**, not >3) | No | ✅ `creditManager.test.ts` | **Thin yes** — keep the known-fixed row; not a ratchet driver. |
 | Deploy git-hash in Settings | Docker has no `.git` | `0d40406` `7093718` `613aa03` `eebbdc8` `930f0aa` `f12b296` (**>3**) | Infra churn | ops | **NO** on the product scorecard. Not a patient-facing class. |
-| Track L-2–L-5 leftovers | 1 serving / Preparation: / diagnostic logs | Parked 2026-09-02 | Parked, not a reappear | parked | **NO as open work.** Mention under Localization leftovers only. Do not unpark. |
+| Track L-2–L-5 leftovers | seed/outlier/admin chrome + catalog + live meal id | Unparked 2026-09-15 | Active Track L | active | Restore from `85ce58b`/`95c5640`; L-5 waits named locale. |
 
 GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1** portion WRONG_BASIS · **#2** photo second-device · **#3** quota copy · **#4** admin quota · **#5** scorecard + vitest exclude.
 
@@ -78,13 +78,13 @@ GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1**
 
 ## Ordered actions
 
-Gemini Current work remains **B0**. Do **not** start F-11.2, Q-9, Track L-2–L-5, or USDA.
+Gemini Current work remains **B0**. Do **not** start F-11.2, Q-9, or USDA. Track L was **unparked 2026-09-15** — restore EN/ID only, no invent.
 
 | # | Do | Why it is next | Done when |
 |---|---|---|---|
 | **1–5** | i18n chrome keys, portion restore, G-B fixtures, meal goldens, scorer | `d105b0c` | inner gates green in dump |
 | **6** | `SINGLE_DISH_FLATTEN` (this change) | live Mie Ayam nested 4 foods in 1 dish | `server_vision_scout.test.ts` Mie Ayam case green; standing `single_dish_flatten` |
-| **7** | Remaining 238 `t()` callsite keys — ALL parked Track L (seed*/outlier* = L-2, dict/table/batch/img/del/backup/sanitize/audit = L-4; recep* 4 fixed) | needs human unpark of L-2/L-4, not a back-door dump | `i18n_required_chrome` PASS after unpark |
+| **7** | Remaining 238 `t()` callsite keys — Track L unparked (seed*/outlier* = L-2, dict/table/batch/img/del/backup/sanitize/audit = L-4) | restore from `85ce58b` (no invent) | `i18n_required_chrome` PASS |
 | **8** | Run Gate I18N-A11Y live | 3 helper commits, still unsoaked | `current/a11y/` + SCOREBOARD_LIVE_RESULTS checklist all PASS |
 | **9** | Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL |
 | **10** | Record Meal_03 6-case + Meal_04 live specs | Compare/log benches exist and are untracked | PASS/FAIL + date in §E2E |
@@ -152,7 +152,7 @@ npx vitest run src/utils/i18n.test.ts agents/dietitianInstructions.i18n.test.ts 
 | Gate I18N-A11Y | 🔴 NEVER RUN; helper rewritten then repaired | `_live_a11y/` missing |
 | Persona | **P-ID-WL-01 F18 / 140 cm / 40 kg / 1350 kcal**. Consolidation 58kg/age42 is stale | live-results header |
 | Planned Indo dish photos | never added; live used oats / Silverqueen | FIXTURE NOTE |
-| Track L-2–L-5 | parked | ROADMAP |
+| Track L-2–L-5 | **active** (unparked 2026-09-15) | ROADMAP |
 
 Ratchet: `TRANSLATION_DUMP` (table above). Next: actions #1 then #6.
 

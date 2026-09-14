@@ -2,26 +2,27 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-14T20:29:14.237Z
-**Commit:** `9a399c9`
-**Instruction hash:** `bd4c673081a1`
-**Seal:** `a012eb998b48fc2b48ffa6a11263a382f1c3fe2b454baeef63f4c0a7872e5456`
+**When:** 2026-09-14T20:01:56.984Z
+**Commit:** `9ad8aab`
+**Instruction hash:** `99ed172e1212`
+**Seal:** `2866704c6578c179d04ae5dab3529254580fbe7d6a84646bb5223ddcc6e90f3e`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **ALL GREEN** — 671 pass / 0 fail / 0 skip
+**Overall:** **NOT ALL GREEN** — 670 pass / 1 fail / 0 skip
+**Archived previous current →** `golden/scorecard/past/runs/2026-09-14T19-59-24-261Z-9ad8aab`
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | PASS | 671 pass / 0 fail / 0 skip of 671 |
+| `overall_named_gates` | FAIL | 670 pass / 1 fail / 0 skip of 671 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
-| `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
+| `i18n_required_chrome` | FAIL | 238 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
 | `structure_inventories` | PASS | helpers present; fallback/polarity/converts not swapped |
 | `load_hack_forbidden` | PASS | no @ts-nocheck; named gates on disk; Top Targets helper intact; contract not painted |
 | `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
-| `result_summary_sealed` | PASS | will write result_summary (overallPass) |
-| `area_localization` | PASS | 48 pass / 0 fail / 0 skip |
+| `result_summary_sealed` | PASS | will not write result_summary (not all green) |
+| `area_localization` | FAIL | 47 pass / 1 fail / 0 skip |
 | `area_meal_log` | PASS | 191 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
 | `area_biomarkers` | PASS | 145 pass / 0 fail / 0 skip |
@@ -36,7 +37,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
-| Localization | PASS | 48 | 0 | 0 | 48 |
+| Localization | FAIL | 47 | 1 | 0 | 48 |
 | Meal Log | PASS | 191 | 0 | 0 | 191 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
 | Biomarkers | PASS | 145 | 0 | 0 | 145 |
@@ -45,7 +46,11 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 
 ## All failed (red)
 
-_none_
+### Localization (1)
+
+| Status | File | Test |
+|---|---|---|
+| FAIL | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_callsite_keys_in_packs — 238 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
 
 ## All skipped (not green)
 
@@ -451,7 +456,7 @@ _none_
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_top_targets_fallback |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_limit_keys_present |
 
-### Localization (48)
+### Localization (47)
 
 | Status | File | Test |
 |---|---|---|
@@ -490,17 +495,16 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not drop leak-class keys from the frozen list |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) keeps every frozen leftover-chrome key in en and id |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not leak raw keys or English-fill Indonesian chrome |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_humanized_key |
-| PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_callsite_keys_in_packs |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_id_not_incident_string |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_components_not_hardcoded_incident |
 
@@ -756,7 +760,244 @@ _none_
 
 ## i18n t() keys missing from packs (complete)
 
-_none_
+- `tableShowing (src/components/AgentResultTable.tsx)`
+- `tablePrev50 (src/components/AgentResultTable.tsx)`
+- `tableNext50 (src/components/AgentResultTable.tsx)`
+- `tableExtracting (src/components/AgentResultTable.tsx)`
+- `tableComplete (src/components/AgentResultTable.tsx)`
+- `tableShowLess (src/components/AgentResultTable.tsx)`
+- `tableExpand (src/components/AgentResultTable.tsx)`
+- `tableSearching (src/components/AgentResultTable.tsx)`
+- `tableUnmapped (src/components/AgentResultTable.tsx)`
+- `tableNoChanges (src/components/AgentResultTable.tsx)`
+- `tableContinueBatch (src/components/AgentResultTable.tsx)`
+- `tableApplying (src/components/AgentResultTable.tsx)`
+- `tableApplied (src/components/AgentResultTable.tsx)`
+- `tableApplyN (src/components/AgentResultTable.tsx)`
+- `alertResumePipeline (src/components/AgentResultTable.tsx)`
+- `tableContinueAnalysis (src/components/AgentResultTable.tsx)`
+- `tableContinueStep (src/components/AgentResultTable.tsx)`
+- `alertBackupCreate (src/components/BackupRestoreTab.tsx)`
+- `backupStReading (src/components/BackupRestoreTab.tsx)`
+- `backupStFoods (src/components/BackupRestoreTab.tsx)`
+- `backupStBio (src/components/BackupRestoreTab.tsx)`
+- `backupStImages (src/components/BackupRestoreTab.tsx)`
+- `backupStConflicts (src/components/BackupRestoreTab.tsx)`
+- `backupStNoChanges (src/components/BackupRestoreTab.tsx)`
+- `alertBackupRead (src/components/BackupRestoreTab.tsx)`
+- `backupStSaving (src/components/BackupRestoreTab.tsx)`
+- `backupStSynced (src/components/BackupRestoreTab.tsx)`
+- `backupStLocalOnly (src/components/BackupRestoreTab.tsx)`
+- `backupStNoCloud (src/components/BackupRestoreTab.tsx)`
+- `batchApprove (src/components/BatchNavigator.tsx)`
+- `batchApproveAll (src/components/BatchNavigator.tsx)`
+- `batchOf (src/components/BatchNavigator.tsx)`
+- `batchRange (src/components/BatchNavigator.tsx)`
+- `batchPerPage (src/components/BatchNavigator.tsx)`
+- `batchPrev (src/components/BatchNavigator.tsx)`
+- `batchApproved (src/components/BatchNavigator.tsx)`
+- `batchNext (src/components/BatchNavigator.tsx)`
+- `auditFilterAuto (src/components/BiomarkerAuditModal.tsx)`
+- `auditFilterAgentReview (src/components/BiomarkerAuditModal.tsx)`
+- `auditFilterCatalog (src/components/BiomarkerAuditModal.tsx)`
+- `auditFilterCalibrate (src/components/BiomarkerAuditModal.tsx)`
+- `auditFilterCategory (src/components/BiomarkerAuditModal.tsx)`
+- `dictAlertConsolidated (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertMappingError (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertSelectUpdate (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictChatAccuracyApplied (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertDictUpdated (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertApplyUpdates (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertBatchDone (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertOpFailed (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertAgentError (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertApplyError (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertConsolidateError (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictChatConsolidateError (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertConsolidateApplyError (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertJsonCopied (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictCopyJson (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictAlertCopiedN (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictCopyAll (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictKeyLabel (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictCloseLogs (src/components/BiomarkerDictionaryModal.tsx)`
+- `dictNoLogs (src/components/BiomarkerDictionaryModal.tsx)`
+- `alertNoReadyBugs (src/components/BugTrackerModal.tsx)`
+- `sanitizeTitle (src/components/DataSanitizeApprovalModal.tsx)`
+- `sanitizeNothing (src/components/DataSanitizeApprovalModal.tsx)`
+- `sanitizeNoPhantoms (src/components/DataSanitizeApprovalModal.tsx)`
+- `sanitizeApprovalTitle (src/components/DataSanitizeApprovalModal.tsx)`
+- `sanitizeReview (src/components/DataSanitizeApprovalModal.tsx)`
+- `sanitizeDeselect (src/components/DataSanitizeApprovalModal.tsx)`
+- `sanitizeSelect (src/components/DataSanitizeApprovalModal.tsx)`
+- `sanitizeApplying (src/components/DataSanitizeApprovalModal.tsx)`
+- `sanitizeApplyN (src/components/DataSanitizeApprovalModal.tsx)`
+- `imgUnavailable (src/components/ImageSlider.tsx)`
+- `imgPrev (src/components/ImageSlider.tsx)`
+- `imgNext (src/components/ImageSlider.tsx)`
+- `imgGoTo (src/components/ImageSlider.tsx)`
+- `imgClose (src/components/ImageSlider.tsx)`
+- `imgSwipeHint (src/components/ImageSlider.tsx)`
+- `delAuthTitle (src/components/UserManagementTab.tsx)`
+- `delConfirmAuth (src/components/UserManagementTab.tsx)`
+- `delWarnAuthA (src/components/UserManagementTab.tsx)`
+- `delWarnAuthB (src/components/UserManagementTab.tsx)`
+- `delWarnAuthC (src/components/UserManagementTab.tsx)`
+- `delWarnAuthD (src/components/UserManagementTab.tsx)`
+- `delTypeEmail (src/components/UserManagementTab.tsx)`
+- `delDataTitle (src/components/UserManagementTab.tsx)`
+- `delConfirmData (src/components/UserManagementTab.tsx)`
+- `delWarnDataA (src/components/UserManagementTab.tsx)`
+- `delWarnDataB (src/components/UserManagementTab.tsx)`
+- `delWarnDataC (src/components/UserManagementTab.tsx)`
+- `delWarnDataD (src/components/UserManagementTab.tsx)`
+- `auditTitleUnitCorrect (src/utils/biomarkerAuditEngine.ts)`
+- `auditFixUnitCorrect (src/utils/biomarkerAuditEngine.ts)`
+- `auditBadgeUnitCorrect (src/utils/biomarkerAuditEngine.ts)`
+- `auditTitleScaleMismatch (src/utils/biomarkerAuditEngine.ts)`
+- `auditBadgeScaleMismatch (src/utils/biomarkerAuditEngine.ts)`
+- `auditCauseCorrupt (src/utils/biomarkerAuditEngine.ts)`
+- `auditCauseMissingUnit (src/utils/biomarkerAuditEngine.ts)`
+- `auditBadgeMissingUnit (src/utils/biomarkerAuditEngine.ts)`
+- `outlierTitleWbcCells (src/utils/biomarkers.ts)`
+- `outlierWbcCellsCause (src/utils/biomarkers.ts)`
+- `outlierFixWbcCells (src/utils/biomarkers.ts)`
+- `outlierBadgeWbcCells (src/utils/biomarkers.ts)`
+- `outlierTitleWbcPct (src/utils/biomarkers.ts)`
+- `outlierWbcPctCause (src/utils/biomarkers.ts)`
+- `outlierFixWbcPct (src/utils/biomarkers.ts)`
+- `outlierBadgeWbcPct (src/utils/biomarkers.ts)`
+- `outlierTitleRatioPct (src/utils/biomarkers.ts)`
+- `outlierRatioPctCause (src/utils/biomarkers.ts)`
+- `outlierFixRatioPct (src/utils/biomarkers.ts)`
+- `outlierBadgeRatioPct (src/utils/biomarkers.ts)`
+- `outlierTitleRatioDec (src/utils/biomarkers.ts)`
+- `outlierRatioDecCause (src/utils/biomarkers.ts)`
+- `outlierFixRatioDec (src/utils/biomarkers.ts)`
+- `outlierBadgeRatioDec (src/utils/biomarkers.ts)`
+- `outlierTitleTenX (src/utils/biomarkers.ts)`
+- `outlierTenXCause (src/utils/biomarkers.ts)`
+- `outlierFixTenX (src/utils/biomarkers.ts)`
+- `outlierBadgeTenX (src/utils/biomarkers.ts)`
+- `outlierTitleHigh (src/utils/biomarkers.ts)`
+- `outlierHighCause (src/utils/biomarkers.ts)`
+- `outlierFixHigh (src/utils/biomarkers.ts)`
+- `outlierBadgeHigh (src/utils/biomarkers.ts)`
+- `outlierTitleLow (src/utils/biomarkers.ts)`
+- `outlierLowCause (src/utils/biomarkers.ts)`
+- `outlierFixLow (src/utils/biomarkers.ts)`
+- `outlierBadgeLow (src/utils/biomarkers.ts)`
+- `outlierTitleHistory (src/utils/biomarkers.ts)`
+- `outlierHistoryCause (src/utils/biomarkers.ts)`
+- `outlierFixHistory (src/utils/biomarkers.ts)`
+- `outlierBadgeHistory (src/utils/biomarkers.ts)`
+- `outlierTitleGeneric (src/utils/biomarkers.ts)`
+- `outlierGenericCause (src/utils/biomarkers.ts)`
+- `outlierFixGeneric (src/utils/biomarkers.ts)`
+- `outlierBadgeGeneric (src/utils/biomarkers.ts)`
+- `auditFixConverted (src/utils/biomarkers.ts)`
+- `auditFixConvertedBack (src/utils/biomarkers.ts)`
+- `auditFixAmbiguous (src/utils/biomarkers.ts)`
+- `auditSampleCorruptUnit (src/utils/biomarkers.ts)`
+- `auditFixNeedsReviewReason (src/utils/biomarkers.ts)`
+- `seedEmptyNext (src/utils/demoData.ts)`
+- `seedEmptyWelcomeTitle (src/utils/demoData.ts)`
+- `seedEmptyWelcomeSummary (src/utils/demoData.ts)`
+- `seedEmptyFc5 (src/utils/demoData.ts)`
+- `seedEmptyFc10 (src/utils/demoData.ts)`
+- `seedEmptyFc20 (src/utils/demoData.ts)`
+- `seedEmptyFcOpt5 (src/utils/demoData.ts)`
+- `seedEmptyFcOpt10 (src/utils/demoData.ts)`
+- `seedEmptyFcOpt20 (src/utils/demoData.ts)`
+- `seedEmptyRationale (src/utils/demoData.ts)`
+- `seedComplexNext (src/utils/demoData.ts)`
+- `seedComplexActionSodiumTask (src/utils/demoData.ts)`
+- `seedComplexActionSodiumExpl (src/utils/demoData.ts)`
+- `seedComplexActionGlycemicTask (src/utils/demoData.ts)`
+- `seedComplexActionGlycemicExpl (src/utils/demoData.ts)`
+- `seedComplexActionVitDHighTask (src/utils/demoData.ts)`
+- `seedComplexActionVitDHighExpl (src/utils/demoData.ts)`
+- `seedComplexActionNephroTask (src/utils/demoData.ts)`
+- `seedComplexActionNephroExpl (src/utils/demoData.ts)`
+- `seedComplexBenefitSodium (src/utils/demoData.ts)`
+- `seedBenefitTargetDaily (src/utils/demoData.ts)`
+- `seedComplexBenefitCarbs (src/utils/demoData.ts)`
+- `seedComplexBenefitBP (src/utils/demoData.ts)`
+- `seedComplexInsightCardioTitle (src/utils/demoData.ts)`
+- `seedComplexInsightCardioSummary (src/utils/demoData.ts)`
+- `seedComplexInsightDashTitle (src/utils/demoData.ts)`
+- `seedComplexInsightDashSummary (src/utils/demoData.ts)`
+- `seedComplexFc5 (src/utils/demoData.ts)`
+- `seedComplexFc10 (src/utils/demoData.ts)`
+- `seedComplexFc20 (src/utils/demoData.ts)`
+- `seedComplexFcOpt5 (src/utils/demoData.ts)`
+- `seedComplexFcOpt10 (src/utils/demoData.ts)`
+- `seedComplexFcOpt20 (src/utils/demoData.ts)`
+- `seedComplexRationale (src/utils/demoData.ts)`
+- `seedDemoNext (src/utils/demoData.ts)`
+- `seedDemoActionVitDTask (src/utils/demoData.ts)`
+- `seedDemoActionVitDExpl (src/utils/demoData.ts)`
+- `seedDemoActionFiberTask (src/utils/demoData.ts)`
+- `seedDemoActionFiberExpl (src/utils/demoData.ts)`
+- `seedDemoActionLipidTask (src/utils/demoData.ts)`
+- `seedDemoActionLipidExpl (src/utils/demoData.ts)`
+- `seedDemoBenefitVitD (src/utils/demoData.ts)`
+- `seedDemoBenefitFiber (src/utils/demoData.ts)`
+- `seedDemoBenefitSatFat (src/utils/demoData.ts)`
+- `seedDemoInsightFiberTitle (src/utils/demoData.ts)`
+- `seedDemoInsightFiberSummary (src/utils/demoData.ts)`
+- `seedDemoInsightVitDTitle (src/utils/demoData.ts)`
+- `seedDemoInsightVitDSummary (src/utils/demoData.ts)`
+- `seedDemoFc5 (src/utils/demoData.ts)`
+- `seedDemoFc10 (src/utils/demoData.ts)`
+- `seedDemoFc20 (src/utils/demoData.ts)`
+- `seedDemoFcOpt5 (src/utils/demoData.ts)`
+- `seedDemoFcOpt10 (src/utils/demoData.ts)`
+- `seedDemoFcOpt20 (src/utils/demoData.ts)`
+- `seedDemoRationale (src/utils/demoData.ts)`
+- `seedFbNext (src/utils/fallbackReport.ts)`
+- `seedFbActionStatinTask (src/utils/fallbackReport.ts)`
+- `seedFbActionStatinExpl (src/utils/fallbackReport.ts)`
+- `seedFbActionHba1cTask (src/utils/fallbackReport.ts)`
+- `seedFbActionHba1cExpl (src/utils/fallbackReport.ts)`
+- `seedFbActionKidneyTask (src/utils/fallbackReport.ts)`
+- `seedFbActionKidneyExpl (src/utils/fallbackReport.ts)`
+- `seedFbActionVitDTask (src/utils/fallbackReport.ts)`
+- `seedFbActionVitDExpl (src/utils/fallbackReport.ts)`
+- `seedFbActionOilTask (src/utils/fallbackReport.ts)`
+- `seedFbActionOilExpl (src/utils/fallbackReport.ts)`
+- `seedFbBenefitWalk (src/utils/fallbackReport.ts)`
+- `seedFbTargetWeekly (src/utils/fallbackReport.ts)`
+- `seedFbBenefitFlax (src/utils/fallbackReport.ts)`
+- `seedFbBenefitSatFat (src/utils/fallbackReport.ts)`
+- `seedFbBenefitFibre (src/utils/fallbackReport.ts)`
+- `seedFbInsightStatinTitle (src/utils/fallbackReport.ts)`
+- `seedFbInsightStatinSummary (src/utils/fallbackReport.ts)`
+- `seedFbInsightFibreTitle (src/utils/fallbackReport.ts)`
+- `seedFbInsightFibreSummary (src/utils/fallbackReport.ts)`
+- `seedFbFc5 (src/utils/fallbackReport.ts)`
+- `seedFbFc10 (src/utils/fallbackReport.ts)`
+- `seedFbFc20 (src/utils/fallbackReport.ts)`
+- `seedFbFcOpt5 (src/utils/fallbackReport.ts)`
+- `seedFbFcOpt10 (src/utils/fallbackReport.ts)`
+- `seedFbFcOpt20 (src/utils/fallbackReport.ts)`
+- `seedFbRationale (src/utils/fallbackReport.ts)`
+- `seedFbGenNext (src/utils/fallbackReport.ts)`
+- `seedFbGenActionScreeningTask (src/utils/fallbackReport.ts)`
+- `seedFbGenActionScreeningExpl (src/utils/fallbackReport.ts)`
+- `seedFbGenActionHba1cTask (src/utils/fallbackReport.ts)`
+- `seedFbGenActionHba1cExpl (src/utils/fallbackReport.ts)`
+- `seedFbGenBenefitWalk (src/utils/fallbackReport.ts)`
+- `seedFbGenBenefitOil (src/utils/fallbackReport.ts)`
+- `seedFbGenInsightFiberTitle (src/utils/fallbackReport.ts)`
+- `seedFbGenInsightFiberSummary (src/utils/fallbackReport.ts)`
+- `seedFbGenFc5 (src/utils/fallbackReport.ts)`
+- `seedFbGenFc10 (src/utils/fallbackReport.ts)`
+- `seedFbGenFc20 (src/utils/fallbackReport.ts)`
+- `seedFbGenFcOpt5 (src/utils/fallbackReport.ts)`
+- `seedFbGenFcOpt10 (src/utils/fallbackReport.ts)`
+- `seedFbGenFcOpt20 (src/utils/fallbackReport.ts)`
+- `seedFbGenRationale (src/utils/fallbackReport.ts)`
 ## Notes
 
 - Named gates only. Playwright live specs are not in this dump (quota).

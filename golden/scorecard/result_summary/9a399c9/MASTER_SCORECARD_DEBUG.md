@@ -1,6 +1,6 @@
 # Master Scorecard Debug
 
-Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
+Canonical JSON: [`LATEST.json`](./LATEST.json). Sealed all-green copy of current/. Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
 **When:** 2026-09-14T20:29:14.237Z
 **Commit:** `9a399c9`
@@ -754,9 +754,6 @@ _none_
 | PASS | `src/server/food/server_food_scout_source.test.ts` | Turn 2 Portion Selection — multi-dish preservation applyScoutResultState promotes allExtractedDishes when compare items is empty (Mode D heal) |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | Turn 2 Portion Selection — multi-dish preservation applyScoutResultState leaves populated compare items untouched (heal is empty-only) |
 
-## i18n t() keys missing from packs (complete)
-
-_none_
 ## Notes
 
 - Named gates only. Playwright live specs are not in this dump (quota).

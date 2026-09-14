@@ -13,7 +13,7 @@
 Laws: `docs/agent/domains/{biomarkers,food-calc,sync}.md`  
 WIP: `AI_HANDOVER.md` (header only) · Completed: `archive/` · `plan/archive/`
 
-**As of 2026-09-13.** F-8.1–F-8.13, F-9, F-10.1–10.7 shipped. Meal Agent is `diet`. Live USDA/FDC cut (F-12.1–12.3). Brand TS self-clean (F-11.1). EN/ID chrome shipped; leftover localisation is **Track L (parked)** except live leftover chrome in **Track S**. Do not reopen FDC or put curator back on Analyze.
+**As of 2026-09-13.** F-8.1–F-8.13, F-9, F-10.1–10.7 shipped. Meal Agent is `diet`. Live USDA/FDC cut (F-12.1–12.3). Brand TS self-clean (F-11.1). EN/ID chrome shipped; leftover localisation is **Track L (active, unparked 2026-09-15)**; live leftover chrome also in **Track S**. Do not reopen FDC or put curator back on Analyze.
 
 ---
 
@@ -80,11 +80,11 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
 | Make the site live / Cloudflare | **R-13** — [RELIABILITY.md](./RELIABILITY.md) **§12**. Draft spec `specs/active/R-13.md`. Wait for **go**. Not R-2. Not Pages Functions importing `server.ts`. |
-| Localisation leftover | **Parked** except live leftover chrome then **S-1**. Do not start L-2 to L-5 until the human reopens Track L. |
+| Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: putting curator back on Analyze, reopening FDC, B7.5 before B7.4, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, **Track L-2 to L-5** (parked), a 10-case live replay queue, **R-13** until the human locks `specs/active/R-13.md`, **F-11.2 / F-11.3** (curator LLM) until **go**, **Q-9** rewrite binge.  
+Do **not** start: putting curator back on Analyze, reopening FDC, B7.5 before B7.4, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, ~~**Track L-2 to L-5**~~ (unparked 2026-09-15), a 10-case live replay queue, **R-13** until the human locks `specs/active/R-13.md`, **F-11.2 / F-11.3** (curator LLM) until **go**, **Q-9** rewrite binge.  
 Do **not** add a sixth plan file. F-10 lives here + [FOOD.md](./FOOD.md) Process.
 
 ---
@@ -437,9 +437,9 @@ Do **not** open Q-4 or a Dictionary/FoodCard/`App.tsx` breakup unless Q-1 is red
 
 ---
 
-## Track L — Localisation (parked)
+## Track L — Localisation (active)
 
-**Parked 2026-09-02.** Human said park remaining localisation. Do **not** start L-* while Current work is F-10, or until the human reopens this track.
+**Unparked 2026-09-15.** Human: do L-1…L-5. Restore strings from known-good git (`85ce58b` / `95c5640` / `4cd66d1`) — do **not** invent copy. L-5 still needs a named milestone locale before growing `fr`/`zh` to complete.
 
 **Architecture:** `src/utils/translations.ts` (`en` source of truth, `id` key-parity) · `src/utils/i18n.ts` (`t()`, English fallback, `withAgentLanguage` / `withScoutLanguage`) · named gates `src/utils/i18n.test.ts` and `agents/dietitianInstructions.i18n.test.ts`.
 **Scope:** English + Indonesian only. `fr` / `zh` stay incomplete and fall back to English. More languages later.
@@ -448,17 +448,17 @@ Do **not** open Q-4 or a Dictionary/FoodCard/`App.tsx` breakup unless Q-1 is red
 
 EN/ID UI chrome for login, home, chat, food history, insights, trends/health, profile menu; status badges; nutrient display names; health category headings; BMI/BMR panel; Insights step blurbs; job Ready/Active/Queued chip; chat empty-state; demo/credits; skip-dietitian verdict/advice templates; agent instructions follow `profile.language`. Food identity names stay untranslated. Native file-picker chrome cannot be translated.
 
-### Still to do (parked)
+### Still to do (active)
 
-- **L-1 Live Indonesian meal-log proof.** One demo meal on id UI: verdict/advice is Indonesian, not English Supports Sustained Metabolic Energy. Food names may stay English. Do not treat old saved analyses as a chrome bug.
-- **L-2 Seeded / demo content.** Clinical-action item texts, daily-benefit item texts, Insights literature card titles/blurbs, outlier preciseCause sentences follow profile.language or are stored per-locale. Do not translate food names or expand fr/zh.
-- **L-3 Catalog display names.** Biomarker catalog names and medical-condition names have en+id display labels; stored keys stay English. Do not change catalog keys or enums.
-- **L-4 Admin / leftover widgets.** Theme editor titles; nutrition-browser admin; audit FilterPills labels; ImageSlider / BatchNavigator / AgentResultTable Previous; AppModal callers pass language. Patient chrome already shipped.
-- **L-5 More languages.** New locale in SUPPORTED_LOCALES; pack in translations.ts; add to REQUIRED_COMPLETE_LOCALES only when that language is a milestone. Do not make fr/zh complete as a side quest.
+- **L-1 Live Indonesian meal-log proof.** One demo meal on id UI: verdict/advice is Indonesian, not English Supports Sustained Metabolic Energy. Food names may stay English. Do not treat old saved analyses as a chrome bug. *(next)*
+- **L-2 Seeded / demo content.** Pack restore from `85ce58b` landed 2026-09-15 (seed*/outlier*/clinicalActionDesc/dailyBenefitsDesc). Confirm live Insights literature + outlier preciseCause still follow profile.language.
+- **L-3 Catalog display names.** `displayBiomarkerName` / `displayConditionName` already wired (MedicalHistoryTab, dictionary, audit). Keep keys English; vitest gates in `i18n.test.ts`.
+- **L-4 Admin / leftover widgets.** Pack restore from `85ce58b` landed 2026-09-15 (table*/backup*/audit*/dict*/sanitize*/batch*/img*/del*). Scorecard `i18n_required_chrome` ALL GREEN.
+- **L-5 More languages.** New locale in SUPPORTED_LOCALES; pack in translations.ts; add to REQUIRED_COMPLETE_LOCALES only when that language is a milestone. Do not make fr/zh complete as a side quest. *(needs named locale from human)*
 
 **Out of Track L:** dish/brand names, JSON keys / nutrient codes / biomarker keys, native Choose File, old saved meal-analysis sentences (re-log to refresh).
 
-**Gates when reopened:** named i18n vitest only (i18n.test.ts and dietitianInstructions.i18n.test.ts).
+**Gates while active:** `npm run scorecard:debug` (`i18n_required_chrome` PASS) + named i18n vitest (`i18n.test.ts`, `dietitianInstructions.i18n.test.ts`) + I18N-A11Y soak into `golden/scorecard/current/a11y/` when chrome changes.
 
 ## Gates (named rows, not a pile)
 
