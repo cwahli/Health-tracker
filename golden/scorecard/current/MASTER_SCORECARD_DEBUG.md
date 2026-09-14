@@ -2,31 +2,32 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-14T19:39:03.427Z
-**Commit:** `67da7ca`
-**Instruction hash:** `544787499c26`
-**Seal:** `4a5511899ee624b16f2618d014d385ca4a4e9c2fd1e598616713407fc87d976b`
+**When:** 2026-09-14T20:01:56.984Z
+**Commit:** `9ad8aab`
+**Instruction hash:** `99ed172e1212`
+**Seal:** `2866704c6578c179d04ae5dab3529254580fbe7d6a84646bb5223ddcc6e90f3e`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **NOT ALL GREEN** — 666 pass / 1 fail / 0 skip
+**Overall:** **NOT ALL GREEN** — 670 pass / 1 fail / 0 skip
+**Archived previous current →** `golden/scorecard/past/runs/2026-09-14T19-59-24-261Z-9ad8aab`
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | FAIL | 666 pass / 1 fail / 0 skip of 667 |
+| `overall_named_gates` | FAIL | 670 pass / 1 fail / 0 skip of 671 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
-| `i18n_required_chrome` | FAIL | 242 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
+| `i18n_required_chrome` | FAIL | 238 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
 | `structure_inventories` | PASS | helpers present; fallback/polarity/converts not swapped |
 | `load_hack_forbidden` | PASS | no @ts-nocheck; named gates on disk; Top Targets helper intact; contract not painted |
 | `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
 | `result_summary_sealed` | PASS | will not write result_summary (not all green) |
 | `area_localization` | FAIL | 47 pass / 1 fail / 0 skip |
-| `area_meal_log` | PASS | 188 pass / 0 fail / 0 skip |
+| `area_meal_log` | PASS | 191 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
 | `area_biomarkers` | PASS | 145 pass / 0 fail / 0 skip |
 | `area_receptionist` | PASS | 43 pass / 0 fail / 0 skip |
-| `area_reliability` | PASS | 196 pass / 0 fail / 0 skip |
+| `area_reliability` | PASS | 197 pass / 0 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
 | `journey-guard` | PASS | exit 0 |
 | `biomarker-lifecycle-m31` | PASS | exit 0 |
@@ -37,11 +38,11 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
 | Localization | FAIL | 47 | 1 | 0 | 48 |
-| Meal Log | PASS | 188 | 0 | 0 | 188 |
+| Meal Log | PASS | 191 | 0 | 0 | 191 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
 | Biomarkers | PASS | 145 | 0 | 0 | 145 |
 | Receptionist | PASS | 43 | 0 | 0 | 43 |
-| Reliability | PASS | 196 | 0 | 0 | 196 |
+| Reliability | PASS | 197 | 0 | 0 | 197 |
 
 ## All failed (red)
 
@@ -49,7 +50,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 
 | Status | File | Test |
 |---|---|---|
-| FAIL | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_callsite_keys_in_packs — 242 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
+| FAIL | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_callsite_keys_in_packs — 238 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
 
 ## All skipped (not green)
 
@@ -57,7 +58,7 @@ _none_
 
 ## All passed (green)
 
-### Reliability (196)
+### Reliability (197)
 
 | Status | File | Test |
 |---|---|---|
@@ -252,13 +253,14 @@ _none_
 | PASS | `npx tsc --noEmit` | tsc |
 | PASS | `node scripts/journey-guard.mjs` | journey-guard |
 | PASS | `node scripts/assert-scorecard-live.mjs` | scorecard-live |
+| PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_isSoleEligibleDish |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_ts_nocheck |
 | PASS | `golden/scorecard/instruction/gates.json` | named_gate_files_exist |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_top_targets_helper |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_contract_not_painted |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_no_slice_scripts |
 
-### Meal Log (188)
+### Meal Log (191)
 
 | Status | File | Test |
 |---|---|---|
@@ -405,6 +407,9 @@ _none_
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling applies unsweetened modifier correctly to Indonesian iced tea (Es Manis / Es Tawar) |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling reconcileIngredientsToComponents gives injected ingredients valid non-zero nutrients and prevents duplicates |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling unrolls a single dish containing multiple distinct food components into separate top-level items without subitems |
+| PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling unrolls a sole Mie Ayam bowl (job_1789414917685) even when the dish name does not contain the food names |
+| PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling keeps diet-agent per-food boundingBox2D on unrolled top-level previews |
+| PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling slices a parent crop by weight when the diet agent omits per-food boxes |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set registers exactly the official goldens |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set each golden has Instruction.md, expected.json, and every listed photo |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match dictionary locks resolve to the pinned local canonical id |
@@ -846,10 +851,6 @@ _none_
 - `delWarnDataB (src/components/UserManagementTab.tsx)`
 - `delWarnDataC (src/components/UserManagementTab.tsx)`
 - `delWarnDataD (src/components/UserManagementTab.tsx)`
-- `recepCurrentWeight (src/server/receptionist/call_agent.ts)`
-- `recepActivityLevel (src/server/receptionist/call_agent.ts)`
-- `recepTargetWeight (src/server/receptionist/call_agent.ts)`
-- `recepFormDescription (src/server/receptionist/call_agent.ts)`
 - `auditTitleUnitCorrect (src/utils/biomarkerAuditEngine.ts)`
 - `auditFixUnitCorrect (src/utils/biomarkerAuditEngine.ts)`
 - `auditBadgeUnitCorrect (src/utils/biomarkerAuditEngine.ts)`

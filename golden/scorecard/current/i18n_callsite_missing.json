@@ -1,6 +1,6 @@
 {
   "law": "Every t(lang, 'key') in src/ and agents/ (non-test) must exist in localePacks.en and localePacks.id. Missing keys render as raw camelCase (LEAK_KEY).",
-  "count": 242,
+  "count": 238,
   "keys": [
     "tableShowing (src/components/AgentResultTable.tsx)",
     "tablePrev50 (src/components/AgentResultTable.tsx)",
@@ -93,10 +93,6 @@
     "delWarnDataB (src/components/UserManagementTab.tsx)",
     "delWarnDataC (src/components/UserManagementTab.tsx)",
     "delWarnDataD (src/components/UserManagementTab.tsx)",
-    "recepCurrentWeight (src/server/receptionist/call_agent.ts)",
-    "recepActivityLevel (src/server/receptionist/call_agent.ts)",
-    "recepTargetWeight (src/server/receptionist/call_agent.ts)",
-    "recepFormDescription (src/server/receptionist/call_agent.ts)",
     "auditTitleUnitCorrect (src/utils/biomarkerAuditEngine.ts)",
     "auditFixUnitCorrect (src/utils/biomarkerAuditEngine.ts)",
     "auditBadgeUnitCorrect (src/utils/biomarkerAuditEngine.ts)",

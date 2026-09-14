@@ -84,12 +84,11 @@ Gemini Current work remains **B0**. Do **not** start F-11.2, Q-9, Track L-2–L-
 |---|---|---|---|
 | **1–5** | i18n chrome keys, portion restore, G-B fixtures, meal goldens, scorer | `d105b0c` | inner gates green in dump |
 | **6** | `SINGLE_DISH_FLATTEN` (this change) | live Mie Ayam nested 4 foods in 1 dish | `server_vision_scout.test.ts` Mie Ayam case green; standing `single_dish_flatten` |
-| **7** | Remaining 242 `t()` callsite keys | last Localization inner fail | `i18n_required_chrome` PASS |
-| **8** | Run Gate I18N-A11Y live | 3 helper commits, still unsoaked | `current/a11y/` + checklist all PASS |
-| **6** | Run Gate I18N-A11Y live; fill `_live_a11y/` | 3 helper commits, still unsoaked | SCOREBOARD_LIVE_RESULTS checklist all PASS |
-| **7** | Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL |
-| **8** | Record Meal_03 6-case + Meal_04 live specs | Compare/log benches exist and are untracked | PASS/FAIL + date in §E2E |
-| **9** | B0 Apply smoke (Gemini) | Current work; locked converts | HDL 1.293 / TG 1.411 / LDL 3.362 / creat 79.56 / bili 13.68 on Home |
+| **7** | Remaining 238 `t()` callsite keys — ALL parked Track L (seed*/outlier* = L-2, dict/table/batch/img/del/backup/sanitize/audit = L-4; recep* 4 fixed) | needs human unpark of L-2/L-4, not a back-door dump | `i18n_required_chrome` PASS after unpark |
+| **8** | Run Gate I18N-A11Y live | 3 helper commits, still unsoaked | `current/a11y/` + SCOREBOARD_LIVE_RESULTS checklist all PASS |
+| **9** | Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL |
+| **10** | Record Meal_03 6-case + Meal_04 live specs | Compare/log benches exist and are untracked | PASS/FAIL + date in §E2E |
+| **11** | B0 Apply smoke (Gemini) | Current work; locked converts | HDL 1.293 / TG 1.411 / LDL 3.362 / creat 79.56 / bili 13.68 on Home |
 
 **Human ops:** deploy current `main`; confirm sat fat over target is red. Brand `status` migration `20260913_brand_menu_items_status.sql` is **cited in ROADMAP but not in the repo** (`supabase/` has no that file) — recover or apply by hand before claiming F-11.1 live.
 
