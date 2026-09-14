@@ -454,6 +454,82 @@ function structureRows() {
   return { rows, origin: spec.live?.origin };
 }
 
+function loadHackRows() {
+  const rows = [];
+  function push(id, pass, message) {
+    rows.push({
+      id,
+      kind: 'load-hack',
+      file: 'golden/scorecard/instruction/gates.json',
+      area: 'Reliability',
+      status: pass ? 'passed' : 'failed',
+      durationMs: 0,
+      message: pass ? '' : message,
+      title: id,
+    });
+  }
+
+  const nocheck = [];
+  for (const file of [
+    ...walkFiles(path.join(root, 'src')),
+    ...fs.readdirSync(root)
+      .filter((n) => /^server.*\.(ts|tsx)$/.test(n))
+      .map((n) => path.join(root, n)),
+  ]) {
+    if (file.includes('.generated.') || /\.test\.|\.spec\./.test(file)) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    if (text.includes('@ts-nocheck')) nocheck.push(rel(file));
+  }
+  push(
+    'load_hack_ts_nocheck',
+    nocheck.length === 0,
+    nocheck.length ? `@ts-nocheck in ${nocheck.slice(0, 8).join(', ')}` : '',
+  );
+
+  const missingGates = vitestFiles.filter((f) => !fs.existsSync(path.join(root, f)));
+  push(
+    'named_gate_files_exist',
+    missingGates.length === 0,
+    missingGates.length ? `deleted named gates: ${missingGates.join(', ')}` : '',
+  );
+
+  const nutrients = fs.existsSync(TRANSLATIONS_PATH.replace('translations.ts', 'nutrients.ts'))
+    ? fs.readFileSync(path.join(root, 'src/utils/nutrients.ts'), 'utf8')
+    : '';
+  const helperOk =
+    nutrients.includes('export function getTopTargetNutrientKeys') &&
+    nutrients.includes('isCoreNutrient') &&
+    nutrients.includes('canonicalNutrientKey') &&
+    nutrients.includes('steps') &&
+    !nutrients.includes('profile?.topTargetNutrientKeys');
+  push(
+    'load_hack_top_targets_helper',
+    helperOk,
+    helperOk ? '' : 'getTopTargetNutrientKeys gutted (core/steps/canonical missing or swapped to raw profile list)',
+  );
+
+  const contractSrc = fs.existsSync(path.join(root, 'src/utils/scorecardContract.ts'))
+    ? fs.readFileSync(path.join(root, 'src/utils/scorecardContract.ts'), 'utf8')
+    : '';
+  const painted = /locked_apply:\s*\{[^}]*hdl:\s*1\.293/.test(contractSrc);
+  const computed = contractSrc.includes('50 * hdlMul') && contractSrc.includes('ANALYTE_CONVERSIONS');
+  push(
+    'load_hack_contract_not_painted',
+    computed && !painted,
+    painted || !computed ? 'scorecardContract locked_apply is hardcoded; must compute from ANALYTE_CONVERSIONS' : '',
+  );
+
+  const junk = ['fix-slice-all.cjs', 'fix-slice-home.cjs', 'fix-slice-logchat.cjs', 'fix-slice.cjs', 'fix-slice.js', 'schema_dump.ts']
+    .filter((f) => fs.existsSync(path.join(root, f)));
+  push(
+    'load_hack_no_slice_scripts',
+    junk.length === 0,
+    junk.length ? `LOAD_HACK leftovers: ${junk.join(', ')}` : '',
+  );
+
+  return { rows };
+}
+
 function archiveCurrentIfInstructionChanged(instructionHash) {
   const runPath = path.join(CURRENT, 'RUN.json');
   if (!fs.existsSync(runPath)) return null;
@@ -550,6 +626,7 @@ const commands = (gates.commands || []).map((c) =>
 );
 const i18n = i18nRows();
 const structure = structureRows();
+const loadHack = loadHackRows();
 
 function normStatus(row) {
   if (row.status === 'skipped' && (SKIP_IS_FAIL.has(row.file) || SKIP_IS_FAIL_AREAS.has(row.area))) {
@@ -558,7 +635,7 @@ function normStatus(row) {
   return row.status;
 }
 
-const rows = [...tests, ...commands, ...i18n.rows, ...structure.rows].map((r) => {
+const rows = [...tests, ...commands, ...i18n.rows, ...structure.rows, ...loadHack.rows].map((r) => {
   const contractStatus = normStatus(r);
   const message = r.message ? shortMessage(r.message) : '';
   const out = { ...r, contractStatus, message };
@@ -640,6 +717,17 @@ const contract = [
           .map((r) => r.message)
           .join('; ')
       : 'helpers present; fallback/polarity/converts not swapped',
+  },
+  {
+    law: 'load_hack_forbidden',
+    layer: 'process',
+    result: loadHack.rows.some((r) => r.status !== 'passed') ? 'FAIL' : 'PASS',
+    actual: loadHack.rows.some((r) => r.status !== 'passed')
+      ? loadHack.rows
+          .filter((r) => r.status !== 'passed')
+          .map((r) => r.message)
+          .join('; ')
+      : 'no @ts-nocheck; named gates on disk; Top Targets helper intact; contract not painted',
   },
   {
     law: 'live_origin',

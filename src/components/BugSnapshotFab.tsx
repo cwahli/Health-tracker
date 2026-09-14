@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Floating bug snapshot control (admin-only).
  * Multi-shot capture → assign bug tag → R2 /bugs/ pack via POST /api/bugs/snapshot

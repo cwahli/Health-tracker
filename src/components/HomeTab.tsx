@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { UserProfile, FoodLog, HealthAction, DailyBenefit, RecommendationReport, BiomarkerLog, ChatMessage, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
@@ -1280,7 +1279,7 @@ export default function HomeTab({
         <div className="space-y-4">
           {/* Dynamic Top Monitored Nutrient Bars */}
           {(() => {
-            const sortedKeys = sortNutrientKeys(topMonitoredKeys).filter(k => canonicalNutrientKey(k) !== 'steps');
+            const sortedKeys = sortNutrientKeys(topMonitoredKeys);
 
             return sortedKeys.map((key) => {
               const reportTargetRaw = lookupTargetRaw(key);

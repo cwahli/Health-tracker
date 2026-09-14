@@ -765,7 +765,7 @@ export const FoodCard: React.FC<AgentCardProps & {
       });
       const data = await response.json();
       if (data.images && data.images.length > 0) {
-        setSearchResults(prev => ({ ...prev, [itemKey]: (data.images || []).slice(0, 5) }));
+        setSearchResults(prev => ({ ...prev, [itemKey]: data.images.slice(0, 5) }));
       } else {
         setSearchResults(prev => ({ ...prev, [itemKey]: [] }));
         setSearchErrors(prev => ({ ...prev, [itemKey]: data.error || "No images returned." }));

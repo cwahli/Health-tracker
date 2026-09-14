@@ -1,4 +1,3 @@
-// @ts-nocheck
 import dns from 'node:dns';
 import compression from "compression";
 try {

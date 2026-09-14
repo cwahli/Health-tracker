@@ -15,6 +15,7 @@
 5. **Follow `plan/ROADMAP.md`.** There is no `studio/` pack folder. “Work on the roadmap” = **Current work**, then the next open ID. Do not invent a pack file. Do not mix F-9.5 (`App.tsx`) with F-10.
 6. **Journey:** `docs/agent/JOURNEY.md`. Planner → Guard → **go** → Builder → Guard. Reviewer only after a second Guard fail or if asked — writes `specs/learnings/`, never standing/Guard/`src/` in that turn. **promote** = new packet. Standing: `docs/agent/standing.json` (do not drop rows to pass). Unattended night runs: only `scripts/discover-gated-work.mjs` items (must have a gate). Class S and questions skip.
 7. **i18n (durable).** User-visible UI copy goes in `src/utils/translations.ts`. `en` is the source of truth; `id` must have the same keys (parity test). New languages: add a locale and fill keys; missing keys fall back to English. Agent system instructions must include `userProfile.language` and tell the model to write **user-visible answers** in that language (JSON keys, nutrient codes, biomarker keys stay English). Do not hardcode English chrome in new UI.
+8. **Load (AI Studio).** If preview or `tsc` does not start: restore the last green commit for that file. Forbidden class `LOAD_HACK`: `@ts-nocheck`, deleting a file in `golden/scorecard/instruction/gates.json`, gutting `getTopTargetNutrientKeys`. Do not delete tests to make the app load.
 
 ```text
 plan/ROADMAP.md     = remaining work (the only execute file)

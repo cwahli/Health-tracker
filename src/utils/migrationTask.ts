@@ -21,12 +21,12 @@ export const runCleanupMigration = async (uid: string, email?: string) => {
     // 1. Check LocalStorage (done above)
     // 2. Secondary check in Firestore under UID
     const migrationRef = doc(db, 'users', uid, 'metadata', 'migration');
-    trackApiCall('firebase_read', 'Firebase Read', 'Firestore Read - Migration Check: Fetch July 5th cleanup metadata (checks if database schema migration is already applied)');
+    trackApiCall('firebase_read', 'Firestore Read - Migration Check: Fetch July 5th cleanup metadata (checks if database schema migration is already applied)');
       const migrationSnap = await getDoc(migrationRef);
     
     // Check old flag in profile as well for backwards compatibility
     const profileRef = doc(db, 'users', uid);
-    trackApiCall('firebase_read', 'Firebase Read', 'Firestore Read - Migration Check: Read User Profile (backwards compatibility check for july 5th migration)');
+    trackApiCall('firebase_read', 'Firestore Read - Migration Check: Read User Profile (backwards compatibility check for july 5th migration)');
       const profileSnap = await getDoc(profileRef);
 
     let isAlreadyDone = false;
@@ -50,7 +50,7 @@ export const runCleanupMigration = async (uid: string, email?: string) => {
     
     // Clean history logs under UID
     const historyRef = collection(db, 'users', uid, 'biomarkerHistory');
-    trackApiCall('firebase_read', 'Firebase Read', 'Firestore Read - Migration Exec: Fetch biomarker history list (loads full logs to perform July 5th key duplicates cleanup)');
+    trackApiCall('firebase_read', 'Firestore Read - Migration Exec: Fetch biomarker history list (loads full logs to perform July 5th key duplicates cleanup)');
       const snapshot = await getDocs(historyRef);
     
     for (const docSnap of snapshot.docs) {

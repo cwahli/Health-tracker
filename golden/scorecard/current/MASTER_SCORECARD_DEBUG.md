@@ -2,35 +2,35 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-14T13:57:08.796Z
-**Commit:** `bab2d6c`
+**When:** 2026-09-14T19:01:25.826Z
+**Commit:** `799adbc`
 **Instruction hash:** `544787499c26`
-**Seal:** `646433189d8ac96d9a3f96043194ef9764e131dd910ce381cf631ed0851379b4`
+**Seal:** `7786e326c464fccc1db468398b46ba8dec26aec39939444f0055a2b6a62825bc`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **NOT ALL GREEN** — 614 pass / 25 fail / 0 skip
-**Archived previous current →** `golden/scorecard/past/runs/2026-09-14T13-48-46-337Z-536230b`
+**Overall:** **NOT ALL GREEN** — 620 pass / 24 fail / 0 skip
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | FAIL | 614 pass / 25 fail / 0 skip of 639 |
+| `overall_named_gates` | FAIL | 620 pass / 24 fail / 0 skip of 644 |
 | `skip_is_not_pass` | FAIL | 9 required skips scored FAIL (Localization or golden_biomarker) |
 | `collection_does_not_crash` | FAIL | tests/golden_meals.test.ts |
 | `i18n_required_chrome` | FAIL | missing en+id: closeDialog, modalDialog; id copy equals en: analyzingMeal; id is Title-Case leftover of key: analyzingMeal; 244 t() keys missing from packs (full list in current/i18n_callsite_missing.json) |
 | `structure_inventories` | PASS | helpers present; fallback/polarity/converts not swapped |
-| `live_origin` | FAIL | live Render probe failed (see current/live/) |
+| `load_hack_forbidden` | PASS | no @ts-nocheck; named gates on disk; Top Targets helper intact; contract not painted |
+| `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
 | `result_summary_sealed` | PASS | will not write result_summary (not all green) |
 | `area_localization` | FAIL | 41 pass / 7 fail / 0 skip |
 | `area_meal_log` | FAIL | 165 pass / 5 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
 | `area_biomarkers` | FAIL | 131 pass / 9 fail / 0 skip |
 | `area_receptionist` | PASS | 43 pass / 0 fail / 0 skip |
-| `area_reliability` | FAIL | 187 pass / 4 fail / 0 skip |
+| `area_reliability` | FAIL | 193 pass / 3 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
 | `journey-guard` | PASS | exit 0 |
 | `biomarker-lifecycle-m31` | PASS | exit 0 |
-| `scorecard-live` | FAIL | FAIL scorecard_contract: live contract missing pack/inventories (old deploy or 404 HTML) |
+| `scorecard-live` | PASS | exit 0 |
 
 ## Area rollup
 
@@ -41,7 +41,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | Compare | PASS | 47 | 0 | 0 | 47 |
 | Biomarkers | FAIL | 131 | 9 | 0 | 140 |
 | Receptionist | PASS | 43 | 0 | 0 | 43 |
-| Reliability | FAIL | 187 | 4 | 0 | 191 |
+| Reliability | FAIL | 193 | 3 | 0 | 196 |
 
 ## All failed (red)
 
@@ -69,14 +69,13 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B8 Repaste Identity (UPSERT_IDENTITY) missing directory |
 | FAIL | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B9 Vision N/A (CONFORMANCE_SHAPE) missing directory |
 
-### Reliability (4)
+### Reliability (3)
 
 | Status | File | Test |
 |---|---|---|
 | FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser scoreGoldenRun scores expected meal lines against a new pipeline foodLog — AssertionError: expected 1 to be +0 // Object.is equality |
 | FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser names a golden from the dishes, not the job id — AssertionError: expected 'Prawn Layered Pasta Salad + Serrano H…' to be 'Prawn Layered Pasta Salad + Serrano H…' // Object.is equality |
 | FAIL | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser splits a mashed Gemini blob and does not keep weight/compare/brand extras on top of the auto overwrite — AssertionError: expected [ 'Portion', 'Weight', …(11) ] to have a length of 3 but got 13 |
-| FAIL | `node scripts/assert-scorecard-live.mjs` | scorecard-live — FAIL scorecard_contract: live contract missing pack/inventories (old deploy or 404 HTML) |
 
 ### Localization (7)
 
@@ -96,7 +95,7 @@ _none_
 
 ## All passed (green)
 
-### Reliability (187)
+### Reliability (193)
 
 | Status | File | Test |
 |---|---|---|
@@ -287,6 +286,12 @@ _none_
 | PASS | `src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts` | scheduleCoalescedJobUpsert runs a lone schedule exactly once |
 | PASS | `npx tsc --noEmit` | tsc |
 | PASS | `node scripts/journey-guard.mjs` | journey-guard |
+| PASS | `node scripts/assert-scorecard-live.mjs` | scorecard-live |
+| PASS | `golden/scorecard/instruction/gates.json` | load_hack_ts_nocheck |
+| PASS | `golden/scorecard/instruction/gates.json` | named_gate_files_exist |
+| PASS | `golden/scorecard/instruction/gates.json` | load_hack_top_targets_helper |
+| PASS | `golden/scorecard/instruction/gates.json` | load_hack_contract_not_painted |
+| PASS | `golden/scorecard/instruction/gates.json` | load_hack_no_slice_scripts |
 
 ### Meal Log (165)
 
@@ -495,11 +500,11 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) keys the S-1 button/card chrome in en and id with differing copy |
 | PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) documents parked S-1 residuals without keying them yet |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not drop leak-class keys from the frozen list |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_id_not_incident_string |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_components_not_hardcoded_incident |

@@ -13,6 +13,7 @@ description: Run the Health-tracker master scorecard (six areas). Use when the u
 6. Localization: frozen required-chrome list + callsite scan. Parity-only is not a pass.
 7. Live Render `https://health-tracker-backend-64gt.onrender.com` is required. Local green is not live green. Inventories (Top Targets, polarity, 32-key ledger, B0 converts) must match `GET /api/scorecard/contract`.
 8. Do not edit agent instruction files to pass. Prompt net-zero; RFC if not possible.
+9. If AI Studio/preview does not load: restore the last green commit. Forbidden `LOAD_HACK`: `@ts-nocheck`, deleting a `gates.json` file, gutting `getTopTargetNutrientKeys`.
 
 Adding a gate: grow `instruction/gates.json` + MASTER_SCORECARD row, then re-run (archives current → past).
 

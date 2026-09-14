@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Router } from 'express';
 import { buildFoodAnalyzeInstruction } from './agents/index.js';
 import { withGeminiRetry } from './server_gemini_retry.js';

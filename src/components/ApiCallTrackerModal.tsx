@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Cloud, RefreshCw, Trash2, Clock, Check, AlertTriangle, ShieldCheck, Activity, Coins } from 'lucide-react';

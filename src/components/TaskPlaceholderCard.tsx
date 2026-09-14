@@ -268,8 +268,8 @@ export default function TaskPlaceholderCard({
           job.result?.mealBuild?.content ||
           job.mealBuild?.content?.pendingFoodLog ||
           job.mealBuild?.content ||
-          (job.messages || []).slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
-          (job.messages || []).slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog;
+          job.messages?.slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
+          job.messages?.slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog;
 
         if (pendingFoodLog?.imageUrl) rawCandidates.push(pendingFoodLog.imageUrl);
         if (Array.isArray(pendingFoodLog?.imageUrls)) rawCandidates.push(...pendingFoodLog.imageUrls);
@@ -390,8 +390,8 @@ export default function TaskPlaceholderCard({
     job.result?.foodData ||
     job.result?.mealBuild?.content ||
     job.mealBuild?.content ||
-    (job.messages || []).slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
-    (job.messages || []).slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog;
+    job.messages?.slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
+    job.messages?.slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog;
 
   const hasResults = !!(
     pendingLog?.name ||
@@ -471,8 +471,8 @@ export default function TaskPlaceholderCard({
     job.result?.data ||
     job.result?.foodData ||
     (job.result?.items ? job.result : null) ||
-    (job.messages || []).slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
-    (job.messages || []).slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog ||
+    job.messages?.slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
+    job.messages?.slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog ||
     (job as any).clean_result?.pendingFoodLog ||
     (job as any).clean_result?.data;
 

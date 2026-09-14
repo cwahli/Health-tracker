@@ -1,7 +1,7 @@
 {
   "origin": "https://health-tracker-backend-64gt.onrender.com",
-  "exportedAt": "2026-09-14T13:57:23.031Z",
-  "failed": 1,
+  "exportedAt": "2026-09-14T19:01:58.475Z",
+  "failed": 0,
   "probes": [
     {
       "id": "origin_shell",
@@ -20,9 +20,9 @@
     },
     {
       "id": "scorecard_contract",
-      "result": "FAIL",
-      "message": "live contract missing pack/inventories (old deploy or 404 HTML)"
+      "result": "PASS",
+      "message": "commit 799adbc (git-version.generated)"
     }
   ],
-  "contractCommit": null
+  "contractCommit": "799adbc"
 }

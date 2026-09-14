@@ -4,6 +4,8 @@ Maker ≠ checker. The checker is `scripts/assert-master-scorecard.mjs`, not you
 
 **skip is not PASS.** Never edit current/, `result_summary/`, or `REQUIRED_CHROME.json` to look green.
 
+**LOAD_HACK (AI Studio does not load):** restore the last green commit for the broken file. Never `@ts-nocheck`, never delete a file listed in `gates.json`, never gut `getTopTargetNutrientKeys` or paint `locked_apply: { hdl: 1.293 }`. Those make preview start and reintroduce Top Targets / polarity / missing-test bugs.
+
 ```text
  you: run the scorecard / add a gate / fix a red class
         │

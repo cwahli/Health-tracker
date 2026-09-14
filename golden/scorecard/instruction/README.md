@@ -31,6 +31,7 @@ Live origin is `https://health-tracker-backend-64gt.onrender.com/`. Local named-
 - Treat a local vitest pass as live. Inventories (Top Targets, polarity, 32-key ledger, B0 converts) must match on Render `GET /api/scorecard/contract`.
 - Swap or drop a frozen list to make a surface look new (Top Targets, nutrient keys, biomarker multipliers).
 - Grow agent instruction files. Prompt edits stay net-zero (AGENTS L12). If a scorecard class needs more instruction tokens, stop and RFC.
+- `@ts-nocheck`, delete a `gates.json` file, or rewrite `getTopTargetNutrientKeys` to a raw profile list so AI Studio/preview “loads”. Class `LOAD_HACK`. Restore from the last green commit instead.
 
 - Call journeys **complete** while Gate I18N-A11Y checklist has NOT COVERED/FAIL, or while `playwright --list` fails.
 - Use `page.accessibility.snapshot` (removed in Playwright 1.62+). Use `locator.ariaSnapshot()` per `i18n/GATE_I18N_A11Y_TREE.md`.

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { toYYYYMMDD } from "../utils/dateUtils";
 import React, { useState } from 'react';
 import { ResponsiveContainer, LineChart, XAxis, YAxis, Tooltip, ReferenceLine, Line } from 'recharts';

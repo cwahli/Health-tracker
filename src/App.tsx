@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 import { isCompareOnlyResult } from './utils/compareMealLogGuard';
@@ -27,7 +26,6 @@ import { translations } from './utils/translations';
 import { AVAILABLE_LLMS } from './utils/llm';
 import { PRIMARY_NUTRIENTS, isCoreNutrient, isAdditionalNutrient } from './utils/nutrients';
 import { toPendingFoodLog } from './mealBuild/adapters';
-import { startGoldenIngestWatcher } from './utils/goldenIngestClient';
 
 // Mobile/background tabs throttle or fully suspend plain setTimeout timers, so a job-status
 // poll loop using a flat `setTimeout(ms)` can silently stall for minutes after the tab is
@@ -1804,19 +1802,15 @@ export default function App() {
     let ingestIdleHandle: any = null;
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
       ingestIdleHandle = (window as any).requestIdleCallback(() => {
-        try {
+        import('./utils/goldenIngestClient').then(({ startGoldenIngestWatcher }) => {
           stopGoldenIngest = startGoldenIngestWatcher();
-        } catch (e) {
-          console.warn('[goldenIngest] watcher start failed:', e);
-        }
+        });
       }, { timeout: 4000 });
     } else {
       ingestIdleHandle = setTimeout(() => {
-        try {
+        import('./utils/goldenIngestClient').then(({ startGoldenIngestWatcher }) => {
           stopGoldenIngest = startGoldenIngestWatcher();
-        } catch (e) {
-          console.warn('[goldenIngest] watcher start failed:', e);
-        }
+        });
       }, 2500);
     }
 

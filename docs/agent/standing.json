@@ -216,6 +216,33 @@
       }
     },
     {
+      "id": "load_hack_forbidden",
+      "label": "AI Studio load fail: restore last green commit. Never @ts-nocheck, never delete gates.json files, never gut getTopTargetNutrientKeys",
+      "asked": "repeated",
+      "files_must_contain": {
+        "src/utils/nutrients.ts": [
+          "export function getTopTargetNutrientKeys",
+          "isCoreNutrient",
+          "canonicalNutrientKey"
+        ],
+        "src/utils/scorecardContract.ts": [
+          "50 * hdlMul",
+          "ANALYTE_CONVERSIONS"
+        ],
+        "scripts/assert-master-scorecard.mjs": [
+          "load_hack_ts_nocheck",
+          "named_gate_files_exist"
+        ],
+        "golden/scorecard/instruction/WORKFLOW.md": [
+          "Never `@ts-nocheck`",
+          "getTopTargetNutrientKeys"
+        ],
+        "AGENTS.md": [
+          "LOAD_HACK"
+        ]
+      }
+    },
+    {
       "id": "same_meal_package_prepared",
       "label": "Package + prepared views of the same food collapse to one dish; combine-language edits emit merge_dishes",
       "asked": "repeated",
