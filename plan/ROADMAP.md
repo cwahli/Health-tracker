@@ -450,11 +450,11 @@ EN/ID UI chrome for login, home, chat, food history, insights, trends/health, pr
 
 ### Still to do (active)
 
-- **L-1 Live Indonesian meal-log proof.** One demo meal on id UI: verdict/advice is Indonesian, not English Supports Sustained Metabolic Energy. Food names may stay English. Do not treat old saved analyses as a chrome bug. *(next)*
+- **L-1 Live Indonesian meal-log proof.** **Landed 2026-09-15.** Live Render PASS (`indo-l1-meal-verdict.live.spec.ts`, job `job_1789418889841_nx1b76vmp`): profile.language=id required; verdict/advice Indonesian (not English Supports Sustained Metabolic Energy). Food names may stay English.
 - **L-2 Seeded / demo content.** Pack restore from `85ce58b` landed 2026-09-15 (seed*/outlier*/clinicalActionDesc/dailyBenefitsDesc). Confirm live Insights literature + outlier preciseCause still follow profile.language.
 - **L-3 Catalog display names.** `displayBiomarkerName` / `displayConditionName` already wired (MedicalHistoryTab, dictionary, audit). Keep keys English; vitest gates in `i18n.test.ts`.
 - **L-4 Admin / leftover widgets.** Pack restore from `85ce58b` landed 2026-09-15 (table*/backup*/audit*/dict*/sanitize*/batch*/img*/del*). Scorecard `i18n_required_chrome` ALL GREEN.
-- **L-5 More languages.** New locale in SUPPORTED_LOCALES; pack in translations.ts; add to REQUIRED_COMPLETE_LOCALES only when that language is a milestone. Do not make fr/zh complete as a side quest. *(needs named locale from human)*
+- **L-5 More languages.** Deferred 2026-09-15 (no milestone locale chosen). Keep EN+ID only; do not make fr/zh complete as a side quest.
 
 **Out of Track L:** dish/brand names, JSON keys / nutrient codes / biomarker keys, native Choose File, old saved meal-analysis sentences (re-log to refresh).
 

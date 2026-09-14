@@ -351,9 +351,16 @@ export async function openAndFillSariProfile(page: Page) {
 
   await expect(profileModal).toBeVisible({ timeout: 20000 });
 
-  const langSel = profileModal.locator('#lang-selector, select[name="language"]').first();
+  // Track L L-1: meal agents read profile.language — auth chrome "Bahasa Indonesia" alone is not enough.
+  const langSel = profileModal.locator('#lang-selector, select[name="language"], select[id*="lang" i]').first();
   if (await langSel.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await langSel.selectOption('id').catch(() => {});
+    await langSel.selectOption('id').catch(async () => {
+      await langSel.selectOption({ label: /Bahasa Indonesia|Indonesia/i }).catch(() => {});
+    });
+    const chosen = await langSel.inputValue().catch(() => '');
+    console.log(`[indo-helpers] Profile language selector value after set: ${chosen || 'UNKNOWN'}`);
+  } else {
+    console.warn('[indo-helpers] Profile language selector not found — meal agents may default to English');
   }
 
   let heightVal = SARI_PERSONA.height;
@@ -394,7 +401,38 @@ export async function openAndFillSariProfile(page: Page) {
     await profileModal.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
   }
 
-  return { height: heightVal, weight: weightVal };
+  const persistedLang = await page.evaluate(() => {
+    try {
+      for (const k of Object.keys(localStorage)) {
+        const raw = localStorage.getItem(k);
+        if (!raw || raw.length > 500000) continue;
+        if (!/language|"lang"/i.test(raw)) continue;
+        try {
+          const obj = JSON.parse(raw);
+          const walk = (v) => {
+            if (!v || typeof v !== 'object') return null;
+            if (typeof v.language === 'string') return v.language;
+            if (typeof v.lang === 'string') return v.lang;
+            if (v.profile) {
+              const p = walk(v.profile);
+              if (p) return p;
+            }
+            if (v.userProfile) {
+              const p = walk(v.userProfile);
+              if (p) return p;
+            }
+            return null;
+          };
+          const hit = walk(obj);
+          if (hit) return hit;
+        } catch {}
+      }
+    } catch {}
+    return null;
+  }).catch(() => null);
+  console.log(`[indo-helpers] Persisted profile language after save: ${persistedLang || 'UNKNOWN'}`);
+
+  return { height: heightVal, weight: weightVal, language: persistedLang };
 }
 
 export async function openFoodChat(page: Page) {
@@ -494,45 +532,125 @@ export async function openFrontDesk(page: Page) {
 
 export async function submitFoodChatMessageWithPhotos(
   page: Page,
-  promptText: string,
-  photoPaths: string[]
-): Promise<{ jobId?: string }> {
-  const chatInput = page.locator('#food-chat-input');
-  await expect(chatInput).toBeVisible({ timeout: 20000 });
+  text: string,
+  photoPaths: string[] = []
+): Promise<SubmitResult> {
+  const input = page.locator('#food-chat-input');
+  const sendBtn = page.locator('#food-chat-send-btn');
+  const fileInput = page.locator('input[type="file"]').first();
 
-  if (photoPaths && photoPaths.length > 0) {
-    const fileInput = page.locator('#food-chat-file-input, input[type="file"]').first();
-    if (await fileInput.count().catch(() => 0)) {
-      await fileInput.setInputFiles(photoPaths).catch((err) => {
-        console.warn('[indo-helpers] File input setInputFiles failed:', err);
+  if (photoPaths.length > 0) {
+    const existing = photoPaths.filter((p) => fs.existsSync(p));
+    if (existing.length > 0) {
+      await fileInput.setInputFiles(existing).catch((e) => {
+        console.warn('[indo-helpers] Failed to attach files:', e);
       });
-      await page.waitForTimeout(1000);
+      console.log(`[indo-helpers] Attached ${existing.length} photo(s)`);
     }
   }
 
-  if (promptText) {
-    await chatInput.fill(promptText);
+  if (text) {
+    await input.click({ timeout: 10000 });
+    await input.fill(text);
   }
 
-  let capturedJobId: string | undefined;
-  const dispatchResponsePromise = page
-    .waitForResponse((r) => r.url().includes('/api/pipeline/dispatch') && r.status() === 200, {
-      timeout: 30000,
-    })
-    .then(async (resp) => {
-      const data = await resp.json().catch(() => null);
-      if (data && (data.jobId || data.id)) {
-        capturedJobId = data.jobId || data.id;
-      }
-      return data;
+  await expect(sendBtn).toBeEnabled({ timeout: 20000 });
+
+  // Listen for job submission network response to capture the real jobId
+  let capturedJobId: string | null = null;
+  const submitPromise = page
+    .waitForResponse(
+      (r) =>
+        (r.url().includes('/api/jobs/') || r.url().includes('/api/food/') || r.url().includes('/api/chat/')) &&
+        r.request().method() === 'POST',
+      { timeout: 35000 }
+    )
+    .then(async (res) => {
+      try {
+        const body = await res.json();
+        const id = body?.jobId || body?.job?.id || body?.id || body?.clean_result?.jobId;
+        if (id) {
+          capturedJobId = String(id);
+          console.log(`[indo-helpers] Captured submitted jobId from response: ${capturedJobId}`);
+        }
+      } catch {}
     })
     .catch(() => null);
 
-  const sendBtn = page.locator('#food-chat-send-btn, button[title="Send"], button:has-text("Kirim")').first();
-  await sendBtn.click({ timeout: 5000 }).catch(() => {});
+  await sendBtn.click();
+  await submitPromise;
 
-  await dispatchResponsePromise;
-  console.log(`[indo-helpers] Submitted message. Captured jobId: ${capturedJobId || 'NONE'}`);
+  // If response didn't give jobId, inspect DOM for data-job-id attribute
+  if (!capturedJobId) {
+    const jobElement = page.locator('[data-job-id]').last();
+    if (await jobElement.isVisible({ timeout: 8000 }).catch(() => false)) {
+      capturedJobId = await jobElement.getAttribute('data-job-id').catch(() => null);
+      if (capturedJobId) {
+        console.log(`[indo-helpers] Captured jobId from DOM data-job-id: ${capturedJobId}`);
+      }
+    }
+  }
+
+  // 1) Wait past transient starting states ("Starting cloud food analysis", "5%", "Memperbarui", "Menganalisis")
+  const analyzing = page.getByText(/Starting cloud|Menganalisis|Analyzing|Updating|Memperbarui/i).first();
+  await analyzing.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
+
+  // 2) Never pass while in progress; wait for analysis indicator to hide (up to 8 minutes)
+  await expect(analyzing).toBeHidden({ timeout: 480000 });
+
+  // 3) Handle portion confirmation step or active retry steps if required
+  const retryBanner = page.getByText(/Attempt \d of \d|Retrying|Memulai ulang/i).first();
+  if (await retryBanner.isVisible({ timeout: 2000 }).catch(() => false)) {
+    console.log('[indo-helpers] Retry banner detected, waiting for completion...');
+    await expect(retryBanner).toBeHidden({ timeout: 240000 }).catch(() => {});
+  }
+
+  const optionChip = first(page, [
+    '[data-testid*="clarify-option"]',
+    '[data-testid*="portion-option"]',
+    'button.rounded-full:has-text("1")',
+    'button:has-text("Sedang")',
+    'button:has-text("Normal")',
+    'button:has-text("Porsi Standar")',
+    'button:has-text("Standar")',
+  ]);
+  if (await optionChip.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await optionChip.click().catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
+  const confirmBtn = first(page, [
+    'button:has-text("Confirm portions")',
+    'button:has-text("Select Portion")',
+    'button:has-text("Pilih Porsi")',
+    'button:has-text("Porsi Standar")',
+    'button:has-text("Standard portion")',
+    'button:has-text("Standard")',
+    'button:has-text("Standar")',
+    'button:has-text("1 Porsi")',
+    'button:has-text("Instant Update")',
+    'button:has-text("Agent Review")',
+    'button:has-text("Lanjutkan")',
+    'button:has-text("Konfirmasi")',
+    'button:has-text("Confirm")',
+    'button:has-text("Simpan")',
+    'button:has-text("Ya")',
+    'button:has-text("Tetap")',
+    'button:has-text("Gunakan")',
+    '[data-testid*="confirm"]',
+    '[data-testid*="portion"]',
+    '[data-testid*="clarify"]',
+  ]);
+  if (await confirmBtn.isVisible({ timeout: 6000 }).catch(() => false)) {
+    await confirmBtn.click().catch(() => {});
+    await expect(analyzing).toBeHidden({ timeout: 180000 }).catch(() => {});
+  }
+
+  // If still no jobId, try one more time from latest completed message or DOM element
+  if (!capturedJobId) {
+    const jobElement = page.locator('[data-job-id]').last();
+    capturedJobId = await jobElement.getAttribute('data-job-id').catch(() => null);
+  }
 
   return { jobId: capturedJobId };
 }
@@ -540,83 +658,189 @@ export async function submitFoodChatMessageWithPhotos(
 export async function pollJobUntilTerminal(
   page: Page,
   jobId: string,
-  timeoutMs = 300000,
-  opts: { allowAwaitingUser?: boolean } = {}
-) {
-  console.log(`[indo-helpers] Polling job ${jobId} until terminal state (timeout ${timeoutMs}ms)...`);
+  timeoutMs: number = 480000,
+  options: { allowAwaitingUser?: boolean } = {}
+): Promise<any> {
+  const { allowAwaitingUser = true } = options;
   const start = Date.now();
-  let terminalState = false;
+  console.log(`[indo-helpers] Polling job ${jobId} status until terminal (timeout ${Math.round(timeoutMs / 1000)}s)...`);
+
+  let lastStatus = 'unknown';
+  let payload: any = null;
+  let confirmClicks = 0;
+  const maxConfirmClicks = 3;
 
   while (Date.now() - start < timeoutMs) {
-    const statusData = await page.evaluate(async (jid) => {
-      try {
-        const resp = await fetch(`/api/pipeline/job/${jid}`);
-        return await resp.json();
-      } catch (e) {
-        return { error: String(e) };
+    try {
+      const resp = await page.request.get(`/api/jobs/status?jobId=${jobId}`);
+      if (resp.ok()) {
+        payload = await resp.json();
+        const job = payload?.jobs?.[0] || payload?.job || payload;
+        lastStatus = job?.status || lastStatus;
+        if (lastStatus === 'succeeded' || lastStatus === 'failed') {
+          console.log(`[indo-helpers] Job ${jobId} reached terminal status: ${lastStatus} in ${Math.round((Date.now() - start) / 1000)}s`);
+          return job;
+        }
+
+        if (lastStatus === 'awaiting_user') {
+          // Cap confirm clicks — broad "Standard"/"Confirm" selectors can match forever without advancing.
+          if (allowAwaitingUser && (confirmClicks >= maxConfirmClicks || Date.now() - start > 45000)) {
+            console.log(`[indo-helpers] Job ${jobId} settled awaiting_user after ${confirmClicks} confirm click(s).`);
+            return job;
+          }
+          const resumeBtn = first(page, [
+            'button:has-text("Confirm portions")',
+            'button:has-text("Select Portion")',
+            'button:has-text("Pilih Porsi")',
+            'button:has-text("Porsi Standar")',
+            'button:has-text("Standard portion")',
+            'button:has-text("Konfirmasi Porsi")',
+            'button:has-text("1 Porsi")',
+            'button:has-text("Instant Update")',
+            'button:has-text("Agent Review")',
+            'button:has-text("Lanjutkan")',
+            'button:has-text("Konfirmasi")',
+            '[data-testid="confirm-portions-btn"]',
+            '[data-testid*="confirm-portion"]',
+            '[data-testid*="portion-confirm"]',
+          ]);
+          if (await resumeBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+            confirmClicks += 1;
+            console.log(`[indo-helpers] Job ${jobId} awaiting_user, clicking confirmation (${confirmClicks}/${maxConfirmClicks})...`);
+            await resumeBtn.click({ timeout: 2000 }).catch(() => {});
+            await page.waitForTimeout(2500);
+          } else if (allowAwaitingUser && Date.now() - start > 15000) {
+            console.log(`[indo-helpers] Job ${jobId} reached settled awaiting_user state (multi-turn clarify turn).`);
+            return job;
+          }
+        }
       }
-    }, jobId).catch(() => null);
-
-    const stage = statusData?.job?.stage || statusData?.stage || '';
-    const status = statusData?.job?.status || statusData?.status || '';
-
-    if (
-      status === 'succeeded' ||
-      status === 'failed' ||
-      stage === 'succeeded' ||
-      stage === 'failed' ||
-      (opts.allowAwaitingUser && (status === 'awaiting_user' || stage === 'awaiting_user'))
-    ) {
-      terminalState = true;
-      console.log(`[indo-helpers] Job ${jobId} reached terminal state: status=${status}, stage=${stage}`);
-      return statusData;
+    } catch (e) {
+      console.warn(`[indo-helpers] Polling error for ${jobId}:`, e);
     }
-
     await page.waitForTimeout(3000);
   }
 
-  if (!terminalState) {
-    console.warn(`[indo-helpers] Job ${jobId} did not reach terminal state within ${timeoutMs}ms`);
-  }
-  return null;
+  throw new Error(`Job ${jobId} did not reach terminal status within ${timeoutMs}ms (lastStatus: ${lastStatus})`);
 }
 
 export async function assertDebugContractGreen(
   page: Page,
-  jobId?: string,
-  journeyId = 'J-ID',
-  opts: { allowAwaitingUser?: boolean } = {}
+  jobId: string | null,
+  journeyId: string,
+  options: { quarantinedFailIds?: string[]; timeoutMs?: number; allowAwaitingUser?: boolean } = {}
 ) {
-  if (jobId) {
-    await pollJobUntilTerminal(page, jobId, 240000, opts);
-  }
+  const { quarantinedFailIds = [], timeoutMs = 480000, allowAwaitingUser = true } = options;
 
-  const dump = await page.evaluate(async (jid) => {
-    try {
-      const url = jid ? `/api/debug/dump?jobId=${jid}` : '/api/debug/dump';
-      const r = await fetch(url);
-      return await r.json();
-    } catch (e) {
-      return { error: String(e) };
-    }
-  }, jobId).catch(() => null);
+  console.log(`\n======================================================`);
+  console.log(`[assertDebugContractGreen] Starting contract validation for ${journeyId} (jobId: ${jobId || 'UNKNOWN'})`);
 
+  expect(jobId, `A valid jobId must be captured for ${journeyId} before debug evaluation`).toBeTruthy();
+  const validJobId = jobId!;
+
+  // 1) Poll job until terminal (succeeded or awaiting_user for clarify turn)
+  const terminalJob = await pollJobUntilTerminal(page, validJobId, timeoutMs, { allowAwaitingUser });
+  expect(
+    ['succeeded', 'awaiting_user'],
+    `Job ${validJobId} must reach settled terminal state (succeeded or awaiting_user), not stuck at starting/5% or failed`
+  ).toContain(terminalJob?.status);
+
+  // 2) Ensure output directory exists
   fs.mkdirSync(LIVE_DEBUG_DIR, { recursive: true });
-  const dumpPath = path.join(LIVE_DEBUG_DIR, `${journeyId}-dump.json`);
-  if (dump) {
-    fs.writeFileSync(dumpPath, JSON.stringify(dump, null, 2), 'utf-8');
-    console.log(`[indo-helpers] Saved debug dump artifact: ${dumpPath}`);
+
+  // 3) POST Render /api/jobs/debug { jobId, userId, format: 'json' }
+  console.log(`[assertDebugContractGreen] Requesting JSON debug dump for ${validJobId}...`);
+  const jsonResp = await page.request.post('/api/jobs/debug', {
+    data: {
+      jobId: validJobId,
+      userId: 'anonymous',
+      format: 'json',
+    },
+  });
+  expect(jsonResp.status(), `POST /api/jobs/debug (json) must return 200 for ${validJobId}`).toBe(200);
+  const jsonReport = await jsonResp.json();
+
+  // 4) POST Render /api/jobs/debug { jobId, userId, format: 'markdown' }
+  console.log(`[assertDebugContractGreen] Requesting Markdown debug dump for ${validJobId}...`);
+  const mdResp = await page.request.post('/api/jobs/debug', {
+    data: {
+      jobId: validJobId,
+      userId: 'anonymous',
+      format: 'markdown',
+    },
+  });
+  expect(mdResp.status(), `POST /api/jobs/debug (markdown) must return 200 for ${validJobId}`).toBe(200);
+  const mdReport = await mdResp.text();
+
+  // 5) Save debug files to golden/journeys/_live_debug/J-ID-0X-<jobId>.{json,md}
+  const jsonPath = path.join(LIVE_DEBUG_DIR, `${journeyId}-${validJobId}.json`);
+  const mdPath = path.join(LIVE_DEBUG_DIR, `${journeyId}-${validJobId}.md`);
+
+  fs.writeFileSync(jsonPath, JSON.stringify(jsonReport, null, 2), 'utf-8');
+  fs.writeFileSync(mdPath, mdReport, 'utf-8');
+  console.log(`[assertDebugContractGreen] Saved debug artifacts:\n  - ${jsonPath}\n  - ${mdPath}`);
+
+  // 6) classifyDump + formatOracleFails
+  const classified = classifyDump(jsonReport);
+  console.log(`[assertDebugContractGreen] classifyDump yielded ${classified.length} failure(s)`);
+
+  const activeFails = classified.filter((f) => !quarantinedFailIds.includes(f.id));
+  if (activeFails.length > 0) {
+    const formatted = formatOracleFails(activeFails);
+    console.error(`[assertDebugContractGreen] ORACLE CONTRACT FAILURES:\n${formatted}`);
   }
 
-  if (dump && !dump.error) {
-    const classification = classifyDump(dump);
-    if (classification && classification.fails && classification.fails.length > 0) {
-      console.warn(`[indo-helpers] Oracle fails for ${journeyId}:\n${formatOracleFails(classification.fails)}`);
+  // 7) HARD expect no unquarantined oracle failures
+  expect(
+    activeFails,
+    `Dump contracts for ${journeyId} (${validJobId}) must pass. Oracle failures:\n${formatOracleFails(activeFails)}`
+  ).toHaveLength(0);
+
+  console.log(`[assertDebugContractGreen] SUCCESS: All contract laws evaluated GREEN for ${journeyId} (${validJobId})`);
+  return { jsonReport, mdReport, classified };
+}
+
+export function assertIndonesianMealVerdict(dump: any, journeyId = 'L-1') {
+  const forbidden = [
+    'Supports Sustained Metabolic Energy',
+    'Supports Sustained Metabolic',
+    'Metabolic Energy',
+  ];
+  const blobs: string[] = [];
+  const walk = (v: any) => {
+    if (v == null) return;
+    if (typeof v === 'string') {
+      blobs.push(v);
+      return;
     }
-    return { jsonReport: dump, classification };
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    if (typeof v === 'object') {
+      for (const [k, val] of Object.entries(v)) {
+        if (/verdict|clinicalAdvice|advice|message|medicalInsight|label/i.test(k)) walk(val);
+        else if (k === 'dispatches' || k === 'turns' || k === 'output' || k === 'report') walk(val);
+      }
+    }
+  };
+  walk(dump);
+  const joined = blobs.join('\n');
+  for (const bad of forbidden) {
+    if (joined.includes(bad)) {
+      throw new Error(`[${journeyId} L-1] English fallback found in meal output: "${bad}"`);
+    }
   }
-
-  return { jsonReport: dump, classification: null };
+  // Indonesian signal: common function words / medical phrasing (not food names).
+  const idSignal = /(anda|Anda|kalori|kkal|protein|lemak|serat|porsi|tinggi|rendah|sebaiknya|disarankan|mengandung|untuk|dengan|dari|yang|ini|tersebut)/i;
+  const adviceish = blobs.filter((s) => s.length > 40);
+  const hasId = adviceish.some((s) => idSignal.test(s));
+  if (!hasId) {
+    throw new Error(
+      `[${journeyId} L-1] No Indonesian verdict/advice signal in dump (advice-like blobs=${adviceish.length}). Sample: ${joined.slice(0, 240)}`,
+    );
+  }
+  console.log(`[${journeyId} L-1] Indonesian meal verdict/advice OK (blobs=${blobs.length})`);
 }
 
 export async function cleanupLatestMeal(page: Page) {
