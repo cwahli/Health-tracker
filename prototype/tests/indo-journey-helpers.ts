@@ -655,12 +655,34 @@ export async function submitFoodChatMessageWithPhotos(
   return { jobId: capturedJobId };
 }
 
+export async function pollFrontDeskSettled(
+  page: Page,
+  jobId: string,
+  timeoutMs: number = 480000,
+): Promise<any> {
+  const start = Date.now();
+  console.log(`[indo-helpers] Front-desk job ${jobId} is client-only; settling on client signals...`);
+  const panel = page.getByText(/Extracted Biomarkers Panel|Biomarkers Panel/i).first();
+  await expect(panel).toBeVisible({ timeout: timeoutMs });
+  const analyzing = page.getByText(/Starting cloud|Menganalisis|Analyzing|Updating|Memperbarui/i).first();
+  await expect(analyzing).toBeHidden({ timeout: 60000 }).catch(() => {});
+  console.log(`[indo-helpers] Front-desk job ${jobId} settled client-side in ${Math.round((Date.now() - start) / 1000)}s`);
+  return { id: jobId, kind: 'front_desk', status: 'succeeded', clientSettled: true };
+}
+
 export async function pollJobUntilTerminal(
   page: Page,
   jobId: string,
   timeoutMs: number = 480000,
   options: { allowAwaitingUser?: boolean } = {}
 ): Promise<any> {
+  // Front-desk jobs are CLIENT-ONLY by design (excluded from cloud sync +
+  // hydration polling in SupabaseJobSync): the server never knows
+  // job_frontdesk_* ids, so server polling spins on 'unknown' forever.
+  // Settle on client signals instead (B0 learning 2026-09-14).
+  if (String(jobId || '').startsWith('job_frontdesk_')) {
+    return pollFrontDeskSettled(page, jobId, timeoutMs);
+  }
   const { allowAwaitingUser = true } = options;
   const start = Date.now();
   console.log(`[indo-helpers] Polling job ${jobId} status until terminal (timeout ${Math.round(timeoutMs / 1000)}s)...`);
