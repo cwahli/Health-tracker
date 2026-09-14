@@ -31,6 +31,32 @@
 - **FAIL Criteria**: Any untranslated English text (`"Reset link sent"`, `"Email not found"`) or placeholder key found.
 - **Status**: **PASS**
 
+### Gate I18N-A11Y: Accessibility-Tree Indonesian Chrome Gate (Locked Gate)
+- **Condition**: Every accessible surface visited during the meal edit journey (`preferred_language=id`) must be audited via Playwright accessibility tree snapshot (`page.accessibility.snapshot({ interestingOnly: true })`), saving evidence to `golden/journeys/_live_a11y/J-ID-03-<surface>.txt`. Zero title-case placeholders, zero known incident strings, and zero non-allowlisted English chrome verbs permitted.
+- **PASS Criteria**:
+  - All visited surfaces captured with zero violations:
+    1. **Home portal / dashboard**: Rehydrated dashboard displays localized nutrient widgets, zero `"Dashboard Ready Desc"`, `"Welcome Health Portal"`.
+    2. **Floating quick actions**: Quick action sheet renders localized actions (`"Catat Makanan"`), zero untranslated verbs.
+    3. **Food chat composer**: Open composer displays localized prompt input, zero `"Chat Placeholder"`, `"Agent Food Welcome"`.
+    4. **Analyzing / succeeded job card**: Initial meal and edit job cards render localized status, zero `"Analyzing Meal Photo"`, `"Analysis completed"`.
+    5. **Meal analysis / edit nutrition chrome**: Recalculated portion cards display localized nutrition labels (`"Kalori"`, `"Lemak"`, `"Protein"`), zero `"Nutrient Label"`, `"Total Label"`, `"Weight Label"`, `"Solid Food"`.
+  - Playwright assertion executes as a **HARD expect** (`expect(violations).toEqual([])`).
+- **FAIL Criteria**:
+  - Any node `name`, `role`, or static text matches placeholder regex `/\b[A-Z][A-Za-z0-9]*(?: [A-Z][A-Za-z0-9]*)* (Title|Desc|Label)\b/`.
+  - Any known bad chrome string detected (`Chat Placeholder`, `Agent Food Welcome`, `Data Used By Agent`, `Empty History`, `Manual Entry`, `Weight Label`, `Nutrient Label`, `Total Label`, `Ingredients Label`, `Welcome Health Portal`, `Dashboard Ready Desc`, `Sign In Title`, `Email Label`, `OR DIVIDER`).
+  - Any forbidden English UI verbs detected: `Log Meal`, `Compare`, `Health Info`, `Food History`, `View Analysis`, `Save Log`, `View Status`, `View More`, `Log This Food`, `Flag issue`, `Adjust portion`, `AI Estimated`, `Analysis completed`, `Analyzing Meal Photo`, `Select Photo Source`, `Solid Food`.
+- **Evidence Table**:
+
+| Required Surface | When Captured | Evaluated Artifact | Gate I18N-A11Y Status |
+|---|---|---|:---:|
+| **Home portal / dashboard** | After session rehydration | `_live_a11y/J-ID-03-home-portal.txt` | **HARD AUDITED** |
+| **Floating quick actions** | Open quick actions sheet | `_live_a11y/J-ID-03-quick-actions.txt` | **HARD AUDITED** |
+| **Food chat composer** | Open meal edit flow | `_live_a11y/J-ID-03-food-chat-composer.txt` | **HARD AUDITED** |
+| **Analyzing / succeeded job card** | Turn 1 & Turn 2 completion | `_live_a11y/J-ID-03-analyzing-job-card.txt` | **HARD AUDITED** |
+| **Meal analysis / edit chrome** | Edited nutrient card | `_live_a11y/J-ID-03-meal-analysis-chrome.txt` | **HARD AUDITED** |
+
+- **Status**: **PASS (RE-SOAK HARNESS WIRED)**
+
 ### Gate 3: UC-01 Deep Multi-Turn Desk Consultation Gate
 - **Condition**: Multi-turn dialogue must handle meal modification triage across at least 3 deep turns.
 - **PASS Criteria**:

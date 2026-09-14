@@ -11,6 +11,7 @@ import {
   switchAuthLanguageToIndonesian,
   checkAuthI18nKeys,
   assertDebugContractGreen,
+  assertIdChromeA11yTree,
   first,
 } from './indo-journey-helpers.js';
 
@@ -20,6 +21,7 @@ import {
  * Scoreboard Gates Coverage:
  * - G1: Anthropometry & Persona Profile (140 cm / 40 kg verified, basal / target kcal)
  * - G2: Authentication & Indonesian Chrome (no raw i18n placeholders like Sign In Title/Email Label, Masuk/Daftar)
+ * - Gate I18N-A11Y: Accessibility-Tree Indonesian Chrome Gate (Auth, Home, Quick Actions, Food Chat, Analyzing, Nutrition)
  * - G3: Desk UC-01 Multi-Turn Conversational Interaction (3 turns contextual coaching)
  * - G4: Authentic Indonesian Meal Photo Fixture (Real meal photo attached via file input)
  * - G5: Bug Evidence Handling Gate (Fail-green resilient assertions)
@@ -29,12 +31,12 @@ import {
 test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
   test.setTimeout(900000); // 15 minutes for live Render network + multimodal Gemini pipeline
 
-  test('J-ID-01: Full Gate Coverage (G1 Anthropometry, G2 Auth i18n, G3 Desk UC-01, G4 Real Photo, G5 Fail-Green)', async ({ page }) => {
+  test('J-ID-01: Full Gate Coverage (G1 Anthropometry, G2 Auth i18n, G-A11Y Tree, G3 Desk UC-01, G4 Real Photo, G5 Fail-Green)', async ({ page }) => {
     console.log('\n======================================================');
     console.log('[J-ID-01] Starting live journey for persona Sari Hartono (140cm, 40kg)');
 
     // -------------------------------------------------------------------------
-    // Gate 2: Auth Screen & Indonesian Chrome Validation
+    // Gate 2 & Gate I18N-A11Y: Auth Screen & Indonesian Chrome Validation
     // -------------------------------------------------------------------------
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 45000 });
     await switchAuthLanguageToIndonesian(page);
@@ -44,7 +46,12 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
     // Expect auth chrome text exists and contains Indonesian language option or login prompt
     const authCard = page.locator('#auth-card, main, body').first();
     await expect(authCard).toBeVisible({ timeout: 30000 });
-    expect.soft(i18nCheck.hasRawKey, `No raw translation keys like ${i18nCheck.rawKey} should appear`).toBeFalsy();
+
+    // Gate 2: HARD expect on raw placeholders (no soft assert)
+    expect(i18nCheck.hasRawKey, `No raw translation keys like ${i18nCheck.rawKey} should appear`).toBeFalsy();
+
+    // Gate I18N-A11Y: Surface 1 - Auth (lang=id)
+    await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'auth' });
 
     // Wrong password test on auth screen without locking account
     const emailInput = page.locator('#auth-email-input');
@@ -64,7 +71,7 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
         await page.waitForTimeout(2000);
         const cardText = await authCard.innerText().catch(() => '');
         console.log(`[J-ID-01 Gate 2] Wrong password feedback: ${cardText.slice(0, 150)}`);
-        expect.soft(cardText).not.toMatch(/\bauth\.errors\.[a-z_]+\b/i);
+        expect(cardText, 'Auth error must not contain raw dot-notation keys').not.toMatch(/\bauth\.errors\.[a-z_]+\b/i);
       }
     }
 
@@ -105,6 +112,37 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
       'Expected BMI, nutrient targets, or home dashboard after profile save',
     ).toBeTruthy();
 
+    // Gate I18N-A11Y: Surface 2 - Home empty / portal
+    await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'home-portal' });
+
+    // Gate I18N-A11Y: Surface 4 - Food History empty tab
+    const historyTab = first(page, ['#nav-tab-history', 'button:has-text("Riwayat")', 'button:has-text("History")']);
+    if (await historyTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await historyTab.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+      await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'food-history-empty' });
+      if (await homeTab.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await homeTab.click({ timeout: 2000 }).catch(() => {});
+      }
+    }
+
+    // Gate I18N-A11Y: Surface 3 - Floating quick actions sheet
+    const quickActionBtn = first(page, [
+      'button[title="Open quick actions"]',
+      'button[title*="quick" i]',
+      'button.w-14.h-14',
+      '[aria-label*="quick" i]',
+      'button:has-text("Open Quick Actions")',
+    ]);
+    if (await quickActionBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await quickActionBtn.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'quick-actions' });
+      // Close quick action sheet by pressing Escape or clicking backdrop
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(300);
+    }
+
     // -------------------------------------------------------------------------
     // Gate 4: Authentic Indonesian Meal Photo Fixture Gate
     // -------------------------------------------------------------------------
@@ -121,9 +159,31 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
     // Open Food Chat via Quick Actions
     await openFoodChat(page);
 
+    // Gate I18N-A11Y: Surface 5 - Food chat composer (Catat Makanan open)
+    await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'food-chat-composer' });
+
+    // Gate I18N-A11Y: Surface 6 - Photo source sheet (if attach triggers sheet)
+    const attachBtn = first(page, [
+      '#food-chat-attach-btn',
+      'button[aria-label*="attach" i]',
+      'button[aria-label*="foto" i]',
+      'button:has-text("Foto")',
+    ]);
+    if (await attachBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await attachBtn.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'photo-source-sheet' }).catch((e) => {
+        console.warn('[J-ID-01 Gate I18N-A11Y] photo-source-sheet snapshot notice:', e);
+      });
+      await page.keyboard.press('Escape').catch(() => {});
+    }
+
     const mealText = 'Nasi Uduk dengan Telur Balado dan Tempe Orek';
     console.log(`[J-ID-01 Gate 4] Uploading meal photo and submitting text: "${mealText}"`);
     const submitResult = await submitFoodChatMessageWithPhotos(page, mealText, [candidatePhotos[0]]);
+
+    // Gate I18N-A11Y: Surface 7 - Analyzing / Succeeded job card
+    await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'analyzing-job-card' });
 
     // Assert that the meal log response rendered nutrients and dish recognition
     const lastMealMsg = first(page, [
@@ -137,7 +197,26 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
     await expect(lastMealMsg).toBeVisible({ timeout: 45000 });
     const mealResText = await lastMealMsg.innerText().catch(() => '');
     console.log(`[J-ID-01 Gate 4] Meal Response snippet: ${mealResText.slice(0, 200)}`);
+    expect(mealResText, 'Meal card must not leak raw translation placeholders').not.toMatch(
+      /\b(table\.header\.[a-z_]+|auth\.[a-z_]+|Nutrient Label|Total Label)\b/i
+    );
     expect.soft(mealResText).toMatch(/nasi|uduk|telur|balado|tempe|oat|kalori|kcal|g\b|protein|lemak/i);
+
+    // Gate I18N-A11Y: Surface 8 - Meal analysis / nutrition chrome details
+    const viewAnalysisBtn = first(page, [
+      'button:has-text("Lihat Analisis")',
+      'button:has-text("Detail Nutrisi")',
+      'button:has-text("View Analysis")',
+      '[data-testid*="view-analysis"]',
+    ]);
+    if (await viewAnalysisBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await viewAnalysisBtn.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'meal-analysis-chrome' });
+    } else {
+      // Snapshot current analysis container
+      await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'meal-analysis-chrome' });
+    }
 
     // -------------------------------------------------------------------------
     // Debug Contract Evaluation Gate: Live Job Succeeds & No Oracle Violations

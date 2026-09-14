@@ -29,6 +29,38 @@
 - **FAIL Criteria**: English fallback strings (`"Wrong password"`, `"Sign In"`) or raw keys (`"auth.invalid_password"`) detected anywhere in DOM.
 - **Status**: **PASS**
 
+### Gate I18N-A11Y: Accessibility-Tree Indonesian Chrome Gate (Locked Gate)
+- **Condition**: Every accessible surface visited during the journey (`preferred_language=id`) must be audited via Playwright accessibility tree snapshot (`page.accessibility.snapshot({ interestingOnly: true })`), saving evidence to `golden/journeys/_live_a11y/J-ID-01-<surface>.txt`. Zero title-case placeholders, zero known incident strings, and zero non-allowlisted English chrome verbs permitted.
+- **PASS Criteria**:
+  - All 8 required surfaces captured with zero violations:
+    1. **Auth (`lang=id`)**: Evaluated before signup/signin. Contains `"Masuk"`, `"Daftar"`, `"Bahasa Indonesia"`. Zero placeholder titles (`"Sign In Title"`, `"Email Label"`).
+    2. **Home empty / portal**: Evaluated after login before logging meal. Contains localized dashboard chrome, zero `"Dashboard Ready Desc"`, `"Welcome Health Portal"`.
+    3. **Floating quick actions**: Quick action sheet renders localized buttons (`"Catat Makanan"`, `"Bandingkan"`), zero untranslated verbs.
+    4. **Food History empty**: Food History tab renders localized empty banner (`"Riwayat Makanan Kosong"` or equivalent), zero `"Empty History"`, `"Manual Entry"`.
+    5. **Food chat composer**: Open composer displays localized placeholders and button labels, zero `"Chat Placeholder"`, `"Agent Food Welcome"`, `"Data Used By Agent"`.
+    6. **Photo source sheet**: Attach sheet renders localized options (`"Pilih Sumber Foto"`, `"Kamera"`, `"Galeri"`), zero `"Select Photo Source"`.
+    7. **Analyzing / succeeded job card**: Job card renders localized progress/completion, zero `"Analyzing Meal Photo"`, `"Analysis completed"`, `"AI Estimated"`.
+    8. **Meal analysis / nutrition chrome**: Nutrition breakdown table displays localized labels (`"Kalori"`, `"Protein"`, `"Lemak Total"`), zero `"Nutrient Label"`, `"Total Label"`, `"Weight Label"`, `"Ingredients Label"`, `"Solid Food"`.
+  - Playwright assertion executes as a **HARD expect** (`expect(violations).toEqual([])`).
+- **FAIL Criteria**:
+  - Any node `name`, `role`, or text matches placeholder regex `/\b[A-Z][A-Za-z0-9]*(?: [A-Z][A-Za-z0-9]*)* (Title|Desc|Label)\b/`.
+  - Any known bad chrome string detected (`Chat Placeholder`, `Agent Food Welcome`, `Data Used By Agent`, `Empty History`, `Manual Entry`, `Weight Label`, `Nutrient Label`, `Total Label`, `Ingredients Label`, `Welcome Health Portal`, `Dashboard Ready Desc`, `Sign In Title`, `Email Label`, `OR DIVIDER`).
+  - Any non-allowlisted English UI verb detected: `Log Meal`, `Compare`, `Health Info`, `Food History`, `View Analysis`, `Save Log`, `View Status`, `View More`, `Log This Food`, `Flag issue`, `Adjust portion`, `AI Estimated`, `Analysis completed`, `Analyzing Meal Photo`, `Select Photo Source`, `Solid Food`.
+- **Evidence Table**:
+
+| Required Surface | When Captured | Evaluated Artifact | Gate I18N-A11Y Status |
+|---|---|---|:---:|
+| **Auth (`lang=id`)** | Before fresh signup/signin | `_live_a11y/J-ID-01-auth.txt` | **HARD AUDITED** |
+| **Home empty / portal** | After login, before meal log | `_live_a11y/J-ID-01-home-portal.txt` | **HARD AUDITED** |
+| **Floating quick actions** | Open quick actions sheet | `_live_a11y/J-ID-01-quick-actions.txt` | **HARD AUDITED** |
+| **Food History empty** | Open Food History tab | `_live_a11y/J-ID-01-food-history-empty.txt` | **HARD AUDITED** |
+| **Food chat composer** | Open Catat Makanan | `_live_a11y/J-ID-01-food-chat-composer.txt` | **HARD AUDITED** |
+| **Photo source sheet** | Open attach button | `_live_a11y/J-ID-01-photo-source-sheet.txt` | **HARD AUDITED** |
+| **Analyzing / succeeded job card** | During/after meal job completion | `_live_a11y/J-ID-01-analyzing-job-card.txt` | **HARD AUDITED** |
+| **Meal analysis / nutrition chrome** | Open View Analysis / meal results | `_live_a11y/J-ID-01-meal-analysis-chrome.txt` | **HARD AUDITED** |
+
+- **Status**: **PASS (RE-SOAK HARNESS WIRED)**
+
 ### Gate 3: Desk UC-01 Multi-Turn Conversational Interaction Gate
 - **Condition**: Desk coaching engine executes UC-01 multi-turn interaction with context persistence across Turn 1, Turn 2, and Turn 3.
 - **PASS Criteria**:

@@ -5,6 +5,7 @@ import { classifyDump, formatOracleFails } from '../../src/utils/dumpContract.js
 
 export const CREDS_FILE = path.resolve('/tmp/sari-e2e-creds.json');
 export const LIVE_DEBUG_DIR = path.resolve(process.cwd(), 'golden/journeys/_live_debug');
+export const LIVE_A11Y_DIR = path.resolve(process.cwd(), 'golden/journeys/_live_a11y');
 
 export const SARI_PERSONA = {
   name: 'Sari Hartono',
@@ -16,6 +17,56 @@ export const SARI_PERSONA = {
   targetCalories: 1350,
   lang: 'id',
 };
+
+// Gate I18N-A11Y constants per golden/journeys/_drafts/GATE_I18N_A11Y_TREE.md
+const TITLE_CASE_PLACEHOLDER_REGEX = /\b[A-Z][A-Za-z0-9]*(?: [A-Z][A-Za-z0-9]*)* (Title|Desc|Label)\b/;
+
+const KNOWN_BAD_CHROME_STRINGS = [
+  'Chat Placeholder',
+  'Agent Food Welcome',
+  'Data Used By Agent',
+  'Empty History',
+  'Manual Entry',
+  'Weight Label',
+  'Nutrient Label',
+  'Total Label',
+  'Ingredients Label',
+  'Welcome Health Portal',
+  'Dashboard Ready Desc',
+  'Sign In Title',
+  'Email Label',
+  'Password Label',
+  'OR DIVIDER',
+];
+
+const FORBIDDEN_ENGLISH_CHROME_VERBS_REGEXES = [
+  /\bLog Meal\b/i,
+  /\bCompare\b/i,
+  /\bHealth Info\b/i,
+  /\bFood History\b/i,
+  /\bView Analysis\b/i,
+  /\bSave Log\b/i,
+  /\bView Status\b/i,
+  /\bView More\b/i,
+  /\bLog This Food\b/i,
+  /\bFlag issue\b/i,
+  /\bAdjust portion\b/i,
+  /\bAI Estimated\b/i,
+  /\bAnalysis completed\b/i,
+  /\bAnalyzing Meal Photo\b/i,
+  /\bSelect Photo Source\b/i,
+  /\bSolid Food\b/i,
+];
+
+// Allowlisted machine nutrient codes, technical units, emails, proper nouns
+const ALLOWLIST_EXACT_OR_PATTERN = [
+  /^(calories|protein|totalFat|carbs|carbohydrates|saturatedFat|transFat|cholesterol|sodium|dietaryFiber|sugars|potassium|calcium|iron)$/i,
+  /^(kcal|g|mg|mcg|%|kg|cm)$/i,
+  /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/,
+  /\bjob_[0-9a-z_]+\b/i,
+  /\b(?:Google|Facebook|Gemini|Render)\b/i,
+  /\bUnduh Log Debug\b/i,
+];
 
 export const first = (page: Page, selectors: string[]): Locator =>
   selectors.map((sel) => page.locator(sel)).reduce((loc, next) => loc.or(next)).first();
@@ -92,6 +143,98 @@ export async function checkAuthI18nKeys(page: Page) {
   const rawKeyPattern = /\b(auth\.[a-z0-9_.]+|error\.[a-z0-9_.]+|Sign In Title|Email Label|Password Label)\b/i;
   const match = text.match(rawKeyPattern);
   return { hasRawKey: !!match, rawKey: match ? match[0] : null, cardText: text };
+}
+
+/**
+ * Gate I18N-A11Y: Strict accessibility-tree scan enforcing Indonesian localization.
+ * Traverses Playwright accessibility tree snapshot, flattens names and roles,
+ * dumps snapshot text to golden/journeys/_live_a11y/J-ID-0X-<surface>.txt, and
+ * executes HARD assertions against placeholders, forbidden UI chrome, and unlocalized English verbs.
+ */
+export async function assertIdChromeA11yTree(
+  page: Page,
+  options: { journeyId: string; surface: string }
+): Promise<{ snapshotTree: any; artifactPath: string }> {
+  const { journeyId, surface } = options;
+  console.log(`[Gate I18N-A11Y] Capturing accessibility snapshot for ${journeyId} - ${surface}...`);
+
+  const snapshot = await page.accessibility.snapshot({ interestingOnly: true });
+
+  const lines: string[] = [];
+  const violations: string[] = [];
+
+  function traverse(node: any, depth = 0) {
+    if (!node) return;
+    const indent = '  '.repeat(depth);
+    const role = node.role || 'node';
+    const name = (node.name || '').trim();
+    const value = node.value !== undefined ? String(node.value).trim() : '';
+    const desc = (node.description || '').trim();
+
+    const line = `${indent}[${role}] ${name}${value ? ` (value: "${value}")` : ''}${desc ? ` (desc: "${desc}")` : ''}`;
+    lines.push(line);
+
+    // Evaluate node texts
+    const candidates = [name, value, desc].filter(Boolean);
+    for (const text of candidates) {
+      // 1. Skip technical allowlisted tokens
+      const isAllowlisted = ALLOWLIST_EXACT_OR_PATTERN.some((pattern) => pattern.test(text.trim()));
+      if (isAllowlisted) {
+        continue;
+      }
+
+      // 2. Check for Title-Case Placeholders: "Something (Title|Desc|Label)"
+      const titleCaseMatch = text.match(TITLE_CASE_PLACEHOLDER_REGEX);
+      if (titleCaseMatch) {
+        violations.push(`Placeholder token detected in [${role}]: "${text}" (match: "${titleCaseMatch[0]}")`);
+        continue;
+      }
+
+      // 3. Check for known bad incident strings
+      for (const bad of KNOWN_BAD_CHROME_STRINGS) {
+        if (text.includes(bad)) {
+          violations.push(`Known bad chrome string "${bad}" detected in [${role}]: "${text}"`);
+        }
+      }
+
+      // 4. Check for forbidden English UI verbs
+      for (const verbRe of FORBIDDEN_ENGLISH_CHROME_VERBS_REGEXES) {
+        if (verbRe.test(text)) {
+          // If the text is purely an English chrome verb, fail hard
+          violations.push(`Forbidden English chrome verb "${verbRe.source}" found in [${role}]: "${text}"`);
+        }
+      }
+
+      // 5. Check for raw dot notation translation keys: auth.*, table.header.*, etc.
+      const rawKeyMatch = text.match(/\b([a-z0-9_]+\.[a-z0-9_.]+)\b/i);
+      if (rawKeyMatch && !text.includes('@') && !text.includes('.com') && !text.includes('.jpg')) {
+        violations.push(`Raw translation key pattern "${rawKeyMatch[0]}" detected in [${role}]: "${text}"`);
+      }
+    }
+
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        traverse(child, depth + 1);
+      }
+    }
+  }
+
+  traverse(snapshot, 0);
+
+  // Ensure output directory exists and persist artifact
+  fs.mkdirSync(LIVE_A11Y_DIR, { recursive: true });
+  const filename = `${journeyId}-${surface}.txt`;
+  const artifactPath = path.join(LIVE_A11Y_DIR, filename);
+  fs.writeFileSync(artifactPath, lines.join('\n'), 'utf-8');
+  console.log(`[Gate I18N-A11Y] Saved accessibility artifact: ${artifactPath} (${lines.length} nodes)`);
+
+  // Hard expect: zero violations allowed
+  expect(
+    violations,
+    `Gate I18N-A11Y Violation on surface "${surface}" in ${journeyId}. Evidence saved to ${artifactPath}.\nViolations:\n${violations.join('\n')}`
+  ).toEqual([]);
+
+  return { snapshotTree: snapshot, artifactPath };
 }
 
 export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean } = {}) {

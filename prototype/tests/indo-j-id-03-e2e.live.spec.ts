@@ -9,6 +9,7 @@ import {
   openFrontDesk,
   cleanupLatestMeal,
   assertDebugContractGreen,
+  assertIdChromeA11yTree,
   pollJobUntilTerminal,
   first,
 } from './indo-journey-helpers.js';
@@ -19,6 +20,7 @@ import {
  * Scoreboard Gates Coverage:
  * - Gate 1: Persona Anthropometry & Calorie Recalculation Gate (Post-log edit Gado-Gado portion reduction)
  * - Gate 2: Auth Recovery & Indonesian Chrome Gate (No untranslated tokens, correct chrome)
+ * - Gate I18N-A11Y: Accessibility-Tree Indonesian Chrome Gate (Home, Quick Actions, Food Chat, Edit Chrome, Analysis)
  * - Gate 3: UC-01 Deep Multi-Turn Desk Consultation Gate (3 deep consultation turns on meal edit)
  * - Gate 4: Real Meal Photo Fixture Gate (Authentic meal fixture attached)
  * - Gate 5: Bug Evidence Handling Gate (Fail-green resilient assertions for rounding bugs)
@@ -28,7 +30,7 @@ import {
 test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak', () => {
   test.setTimeout(900000); // 15 minutes for live Render network + multi-turn Gemini triage
 
-  test('J-ID-03: Full Gate Coverage (G1 Recalculation, G2 Auth Recovery Chrome, G3 Deep Turns, G4 Meal Photo, G5 Fail-Green)', async ({ page }) => {
+  test('J-ID-03: Full Gate Coverage (G1 Recalculation, G2 Auth Recovery Chrome, G-A11Y Tree, G3 Deep Turns, G4 Meal Photo, G5 Fail-Green)', async ({ page }) => {
     console.log('\n======================================================');
     console.log('[J-ID-03] Starting deep meal edit & desk triage journey for Sari');
 
@@ -43,7 +45,10 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
 
     const bodyText = await page.locator('body').innerText().catch(() => '');
     const hasRawAuthToken = /\b(auth\.reset\.[a-z_]+|auth\.error\.[a-z_]+)\b/i.test(bodyText);
-    expect.soft(hasRawAuthToken, 'No raw translation placeholder keys should be present').toBeFalsy();
+    expect(hasRawAuthToken, 'No raw translation placeholder keys should be present').toBeFalsy();
+
+    // Gate I18N-A11Y: Surface 2 - Home portal / dashboard
+    await assertIdChromeA11yTree(page, { journeyId: 'J-ID-03', surface: 'home-portal' });
 
     // -------------------------------------------------------------------------
     // Gate 4: Real Meal Photo Fixture Gate
@@ -60,7 +65,25 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
     // -------------------------------------------------------------------------
     // Gate 1: Turn 1 Meal Log & Post-Log Portion Edit Recalculation
     // -------------------------------------------------------------------------
+    // Gate I18N-A11Y: Surface 3 - Floating quick actions sheet
+    const quickActionBtn = first(page, [
+      'button[title="Open quick actions"]',
+      'button[title*="quick" i]',
+      'button.w-14.h-14',
+      '[aria-label*="quick" i]',
+      'button:has-text("Open Quick Actions")',
+    ]);
+    if (await quickActionBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await quickActionBtn.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      await assertIdChromeA11yTree(page, { journeyId: 'J-ID-03', surface: 'quick-actions' });
+      await page.keyboard.press('Escape').catch(() => {});
+    }
+
     await openFoodChat(page);
+
+    // Gate I18N-A11Y: Surface 5 - Food chat composer
+    await assertIdChromeA11yTree(page, { journeyId: 'J-ID-03', surface: 'food-chat-composer' });
 
     const initialMealPrompt = '1 porsi standar Gado-Gado komplit (250g) dengan tahu, tempe, telur, dan bumbu kacang';
     console.log(`[J-ID-03 Gate 1 Turn 1] Logging initial meal: "${initialMealPrompt}"`);
@@ -74,6 +97,9 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
       });
     }
 
+    // Gate I18N-A11Y: Surface 7 - Analyzing / Succeeded job card
+    await assertIdChromeA11yTree(page, { journeyId: 'J-ID-03', surface: 'analyzing-job-card' });
+
     // Verify first turn rendered
     const turn1Msg = first(page, [
       '#last-food-message',
@@ -86,6 +112,9 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
     await expect(turn1Msg).toBeVisible({ timeout: 45000 });
     const turn1Text = await turn1Msg.innerText().catch(() => '');
     console.log(`[J-ID-03 Gate 1 Turn 1] Meal logged response: ${turn1Text.slice(0, 200)}`);
+
+    // Gate I18N-A11Y: Surface 8 - Meal analysis / nutrition chrome
+    await assertIdChromeA11yTree(page, { journeyId: 'J-ID-03', surface: 'meal-analysis-chrome' });
 
     // Turn 2: Edit meal — cut peanut sauce portion by half to save calories
     const input = page.locator('#food-chat-input');
@@ -132,7 +161,7 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
 
       // Turn 1 Consultation: Calorie savings confirmation
       await deskInput.fill('Coach, dari pengurangan bumbu kacang tadi, apakah sudah sesuai untuk tinggi 140 cm?');
-      if (await sendBtn.isVisible().catch(() => false)) {
+      if (await sendBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
         await sendBtn.click();
         await page.waitForTimeout(6000);
       }
@@ -140,7 +169,7 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
       // Turn 2 Consultation: Vegetable volume increase
       if (await deskInput.isVisible({ timeout: 15000 }).catch(() => false)) {
         await deskInput.fill('Dengan tinggi 140 cm, apakah porsi sayuran seperti kangkung dan tauge boleh saya tambah dua kali lipat?');
-        if (await sendBtn.isVisible().catch(() => false)) {
+        if (await sendBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
           await sendBtn.click();
           await page.waitForTimeout(6000);
         }
@@ -149,7 +178,7 @@ test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak'
       // Turn 3 Consultation: Blood sugar and glycemic curve
       if (await deskInput.isVisible({ timeout: 15000 }).catch(() => false)) {
         await deskInput.fill('Bagaimana perkiraan kurva gula darah saya setelah porsi saus kacang ini dikurangi?');
-        if (await sendBtn.isVisible().catch(() => false)) {
+        if (await sendBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
           await sendBtn.click();
           await page.waitForTimeout(6000);
         }
