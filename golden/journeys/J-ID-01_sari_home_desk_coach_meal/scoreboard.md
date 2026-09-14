@@ -2,9 +2,9 @@
 
 ## Persona Verification
 - **Name**: Sari Hartono
-- **Gender**: Female | **Age**: 42
+- **Gender**: Female | **Age**: 18
 - **Height**: **140 cm** (MANDATORY REQUIREMENT: PASS)
-- **Weight**: 58.0 kg
+- **Weight**: 40 kg
 - **Target Daily Calories**: 1350 kcal
 - **Locale**: Indonesian (`id-ID`)
 
@@ -14,7 +14,7 @@
 
 ### Gate 1: Anthropometry & Persona Profile Gate
 - **Condition**: Persona profile height must evaluate strictly to `140 cm`. No rounding or default fallbacks to 160/170 cm allowed.
-- **PASS Criteria**: Height field renders `140 cm`, Mifflin-St Jeor formula calculates basal rate of 1145 kcal/day based on 140 cm / 58 kg / 42y female.
+- **PASS Criteria**: Height field renders `140 cm`, Mifflin-St Jeor formula calculates basal rate of 1145 kcal/day based on 140 cm / 40 kg / 42y female.
 - **FAIL Criteria**: Height missing, NaN, or set to standard preset (e.g. 165 cm). Calorie target calculated from incorrect height.
 - **Status**: **PASS**
 

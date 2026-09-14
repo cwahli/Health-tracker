@@ -2,9 +2,9 @@
 
 ## Persona Verification
 - **Name**: Sari Hartono
-- **Gender**: Female | **Age**: 42
+- **Gender**: Female | **Age**: 18
 - **Height**: **140 cm** (MANDATORY REQUIREMENT: PASS)
-- **Weight**: 58.0 kg
+- **Weight**: 40 kg
 - **Daily Budget**: 1350 kcal
 - **Locale**: Indonesian (`id-ID`)
 
@@ -13,7 +13,7 @@
 ## Gate Evaluation Matrix
 
 ### Gate 1: Persona Anthropometry & Calorie Recalculation Gate
-- **Condition**: Post-log meal editing must immediately trigger recalculation of Sari's daily budget for her 140 cm / 58 kg profile.
+- **Condition**: Post-log meal editing must immediately trigger recalculation of Sari's daily budget for her 140 cm / 40 kg profile.
 - **PASS Criteria**:
   - Gado-Gado base calorie drops from 490 kcal to 360 kcal upon setting peanut dressing to 50%.
   - Saved 130 kcal correctly updates daily consumed tally and increases remaining budget to match 1350 kcal ceiling.

@@ -2,9 +2,9 @@
 
 ## Persona Verification
 - **Name**: Sari Hartono
-- **Gender**: Female | **Age**: 42
+- **Gender**: Female | **Age**: 18
 - **Height**: **140 cm** (MANDATORY REQUIREMENT: PASS)
-- **Weight**: 58.0 kg
+- **Weight**: 40 kg
 - **Daily Target**: 1350 kcal
 - **Session**: Returning user re-authenticated via stored token
 
