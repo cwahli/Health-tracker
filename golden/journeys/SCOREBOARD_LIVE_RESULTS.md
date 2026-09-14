@@ -1,8 +1,10 @@
 # Scoreboard vs live Playwright — J-ID-01/02/03
 
+> **HONEST STATUS (2026-09-14):** Debug-contract green has run. **Gate I18N-A11Y has NOT run live** (`golden/journeys/_live_a11y/` empty; coverage checklist still NOT COVERED). By `GATE_I18N_A11Y_TREE.md`, journeys are **NOT complete** until every checklist row is PASS. Do not skim older LIVE PASS rows as full green.
+
 **When:** 2026-09-14 ~13:45 Jakarta  
 **Host:** https://health-tracker-backend-64gt.onrender.com/  
-**Locked Persona:** Sari Hartono (P-ID-WL-01) — Female, age 18, height **140 cm**, weight **40 kg**, target **1350 kcal**, lang `id` (Indonesian).  
+**Locked Persona:** Sari Hartono (P-ID-WL-01) — Female, **age 18**, height **140 cm**, weight **40 kg**, target **1350 kcal**, lang `id`, goal weight-loss. (Consolidation draft 58kg/age42 is stale — ignore.)
 **Harness Result & Oracle Standard:** FULL LIVE GATES COVERED (`LIVE PASS` / `FAIL-GREEN`). All jobs monitored until reaching actual cloud terminal completion (`status === 'succeeded'` or settled `awaiting_user` clarification) — never passing on intermediate states such as *"Starting cloud analysis 5%"*. Debug dumps are retrieved directly from Render via `POST /api/jobs/debug` (both JSON and Markdown), saved into `golden/journeys/_live_debug/`, and evaluated against `classifyDump` and `formatOracleFails`.
 
 ---
@@ -103,3 +105,6 @@ End-of-pass report must fill every row. Incomplete (`NOT COVERED`) = not complet
 | Hard (not soft) i18n/a11y asserts | wired | wired | wired | `assertIdChromeA11yTree` + hard auth |
 
 Gate definition: `golden/journeys/_drafts/GATE_I18N_A11Y_TREE.md`
+
+## FIXTURE NOTE (2026-09-14)
+Planned Indo dishes in consolidation (`nasi_padang_…`, `bubur_ayam_…`, `gado_gado_…` under `fixtures/meals/`) were **never added** to the repo. Live runs used existing golden fixtures instead (e.g. Meal_04 oats label, Meal_03 Silverqueen compare, Gado-Gado text prompts). Scoreboard “real Indonesian meal photo” = real photo bytes from golden/, not the named planned dishes until those fixtures land.

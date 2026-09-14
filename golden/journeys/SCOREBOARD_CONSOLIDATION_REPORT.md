@@ -55,3 +55,6 @@ This document records the consolidation of all draft scoreboards (promoting Vert
 
 ## 4. Next Step Handoff
 Consolidation phase is finalized. The repository is cleared for the live Playwright journey execution suite.
+
+
+> **STALE PERSONA NOTE (2026-09-14):** Locked live persona is P-ID-WL-01 Sari Hartono **F18 / 140 cm / 40 kg / 1350 kcal**, not 58kg/age42. Prefer SCOREBOARD_LIVE_RESULTS.md.
