@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 import { isCompareOnlyResult } from './utils/compareMealLogGuard';

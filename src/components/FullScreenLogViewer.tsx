@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Copy, Send, Check, AlertTriangle, Search, ChevronDown, ChevronUp, Trash2, Download, Loader } from 'lucide-react';

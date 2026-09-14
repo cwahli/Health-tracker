@@ -70,13 +70,8 @@ export function getTopTargetNutrientKeys(report?: any, profile?: any): string[] 
   if (Array.isArray(report?.topTargetNutrientKeys) && report.topTargetNutrientKeys.length > 0) {
     return report.topTargetNutrientKeys;
   }
-  if (report?.dailyNutrientTargets && typeof report.dailyNutrientTargets === 'object') {
-    const keys = Object.keys(report.dailyNutrientTargets).filter(Boolean);
-    if (keys.length > 0) return keys.slice(0, 5);
-  }
-  if (profile?.targets && typeof profile.targets === 'object') {
-    const keys = Object.keys(profile.targets).filter(Boolean);
-    if (keys.length > 0) return keys.slice(0, 5);
+  if (Array.isArray(profile?.topNutrientsToMonitor) && profile.topNutrientsToMonitor.length > 0) {
+    return profile.topNutrientsToMonitor;
   }
   return [...PRIMARY_NUTRIENTS];
 }

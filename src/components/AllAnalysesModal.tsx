@@ -183,8 +183,8 @@ export function AllAnalysesModal({
       job.result?.mealBuild?.content ||
       job.mealBuild?.content ||
       (job.result?.items ? job.result : null) ||
-      job.messages?.slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
-      job.messages?.slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog ||
+      (job.messages || []).slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
+      (job.messages || []).slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog ||
       null
     );
   }
@@ -653,8 +653,8 @@ function AnalysisCard({
     job.result?.mealBuild?.content ||
     job.mealBuild?.content ||
     (job.result?.items ? job.result : null) ||
-    job.messages?.slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
-    job.messages?.slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog ||
+    (job.messages || []).slice().reverse().find((m: any) => m.pendingFoodLog)?.pendingFoodLog ||
+    (job.messages || []).slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog ||
     null
   );
 

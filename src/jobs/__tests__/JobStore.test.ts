@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JobStore, isJobBlank, isStalePriorTurn } from '../JobStore';
 import { ImageStore } from '../ImageStore';

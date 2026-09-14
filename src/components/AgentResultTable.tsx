@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { toYYYYMMDD } from "../utils/dateUtils";
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 

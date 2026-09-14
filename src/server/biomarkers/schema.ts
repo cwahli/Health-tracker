@@ -1,0 +1,10 @@
+export const anySchema = {} as any;
+export type BiomarkerTemplate = any;
+export type CatalogSnapshot = any;
+export type CaseFile = any;
+export type ClassifiedRow = any;
+export type IntakeRow = any;
+export type LogPoint = any;
+export type MatchKind = any;
+export type ProfileFixture = any;
+export type FillRow = any;

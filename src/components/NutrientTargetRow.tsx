@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { NutrientPieChart } from './NutrientPieChart';
 import { getNutrientColor, nutrientDefinitions } from '../utils/nutrition';

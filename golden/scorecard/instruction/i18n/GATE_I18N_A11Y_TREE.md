@@ -49,7 +49,7 @@ Before claiming a journey soak green:
 
 1. **`--list` gate:** `npx playwright test <spec> --list` must exit 0. SyntaxError / “No tests found” = soak FAIL; fix helpers first.
 2. **No mid-soak self-edit** of `indo-journey-helpers.ts` / specs by failure-path aider until `--list` is green again.
-3. **Do not invent i18n copy.** On leftover English / missing keys: restore from known-good git (`i18n-en-id`, `4cd66d1`, or later restore commits). Grow `REQUIRED_CHROME.json` only; never invent Title-Case id values.
+3. **Restore, do not invent** i18n copy. On leftover English / missing keys: restore from known-good git (`i18n-en-id`, `4cd66d1`, or later restore commits). Grow `REQUIRED_CHROME.json` only; never invent Title-Case id values.
 4. **Headline honesty:** if any checklist row is `NOT COVERED` or `FAIL`, top verdict is **INCOMPLETE** — never skim as LIVE PASS.
 5. **One writer per file:** do not run parallel Vertex/Home-i18n/debug-green jobs that edit the same helpers/specs.
 6. **Push hygiene:** `git fetch && git pull --rebase` before push after long soaks.
