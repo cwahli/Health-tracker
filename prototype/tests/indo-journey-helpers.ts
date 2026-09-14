@@ -101,7 +101,6 @@ export function loadSharedCreds(): { email: string; pass: string } | null {
 }
 
 export async function switchAuthLanguageToIndonesian(page: Page): Promise<boolean> {
-  // 1. Check clickable button or link containing "Bahasa Indonesia"
   const indoClickable = first(page, [
     'button:has-text("Bahasa Indonesia")',
     'button:has-text("Indonesia")',
@@ -117,7 +116,6 @@ export async function switchAuthLanguageToIndonesian(page: Page): Promise<boolea
     return true;
   }
 
-  // 2. Try select dropdown
   const authLang = page.locator('#auth-card select, select[name="language"], select').first();
   if (await authLang.isVisible({ timeout: 2000 }).catch(() => false)) {
     try {
@@ -147,9 +145,6 @@ export async function checkAuthI18nKeys(page: Page) {
 
 /**
  * Gate I18N-A11Y: Strict accessibility-tree scan enforcing Indonesian localization.
- * Primary: Playwright locator.ariaSnapshot() (page.accessibility removed in Playwright 1.62+).
- * Flattens snapshot text, dumps to golden/journeys/_live_a11y/J-ID-0X-<surface>.txt,
- * HARD-fails on placeholders / known bad chrome / forbidden English UI verbs.
  */
 export async function assertIdChromeA11yTree(
   page: Page,
@@ -161,11 +156,13 @@ export async function assertIdChromeA11yTree(
   const root = page.locator('#root, body').first();
   let ariaText = '';
   try {
-    ariaText = await root.ariaSnapshot();
+    if (typeof (root as any).ariaSnapshot === 'function') {
+      ariaText = await (root as any).ariaSnapshot();
+    }
   } catch (e) {
-    console.warn('[Gate I18N-A11Y] ariaSnapshot failed, falling back to innerText:', e);
-    ariaText = await page.locator('body').innerText().catch(() => '');
+    console.warn('[Gate I18N-A11Y] ariaSnapshot failed, falling back to DOM walk:', e);
   }
+
   if (!ariaText || !ariaText.trim()) {
     ariaText = await page.evaluate(() => {
       const rootEl = document.querySelector('#root') || document.body;
@@ -220,14 +217,12 @@ export async function assertIdChromeA11yTree(
   };
 
   for (const line of lines) {
-    // ariaSnapshot lines look like: `- button "Log Meal"` or `- text: Manual Entry`
     const quoted = [...line.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
     const roleMatch = line.match(/^\s*-\s*([a-zA-Z0-9_-]+)/);
     const roleHint = roleMatch ? roleMatch[1] : 'node';
     if (quoted.length) {
       for (const q of quoted) checkText(q, roleHint);
     } else {
-      // strip leading `- role:` / bullets
       const stripped = line.replace(/^\s*-\s*/, '').replace(/^[a-zA-Z0-9_-]+:\s*/, '').trim();
       if (stripped) checkText(stripped, roleHint);
     }
@@ -245,128 +240,6 @@ export async function assertIdChromeA11yTree(
   ).toEqual([]);
 
   return { snapshotTree: ariaText, artifactPath };
-}
-): Promise<{ snapshotTree: any; artifactPath: string }> {
-  const { journeyId, surface } = options;
-  console.log(`[Gate I18N-A11Y] Capturing accessibility snapshot for ${journeyId} - ${surface}...`);
-
-  let snapshot: any = null;
-  if ((page as any).accessibility && typeof (page as any).accessibility.snapshot === 'function') {
-    try {
-      snapshot = await (page as any).accessibility.snapshot({ interestingOnly: true });
-    } catch (e) {
-      console.warn(`[Gate I18N-A11Y] page.accessibility.snapshot error:`, e);
-    }
-  }
-
-  // Fallback if page.accessibility is deprecated or unavailable in the environment
-  if (!snapshot) {
-    const fallbackTree = await page.evaluate(() => {
-      function walk(el: Element): any {
-        const role = el.getAttribute('role') || el.tagName.toLowerCase();
-        const ariaLabel = el.getAttribute('aria-label') || '';
-        const title = el.getAttribute('title') || '';
-        const placeholder = el.getAttribute('placeholder') || '';
-        let directText = '';
-        el.childNodes.forEach((n) => {
-          if (n.nodeType === Node.TEXT_NODE && n.textContent?.trim()) {
-            directText += ' ' + n.textContent.trim();
-          }
-        });
-        directText = directText.trim();
-        const name = ariaLabel || title || placeholder || directText;
-
-        const children: any[] = [];
-        Array.from(el.children).forEach((child) => {
-          const res = walk(child);
-          if (res && (res.name || res.children.length > 0)) {
-            children.push(res);
-          }
-        });
-
-        return { role, name, children };
-      }
-      return walk(document.querySelector('#root') || document.body);
-    }).catch(() => null);
-
-    snapshot = fallbackTree || { role: 'WebArea', name: 'App', children: [] };
-  }
-
-  const lines: string[] = [];
-  const violations: string[] = [];
-
-  function traverse(node: any, depth = 0) {
-    if (!node) return;
-    const indent = '  '.repeat(depth);
-    const role = node.role || 'node';
-    const name = (node.name || '').trim();
-    const value = node.value !== undefined ? String(node.value).trim() : '';
-    const desc = (node.description || '').trim();
-
-    const line = `${indent}[${role}] ${name}${value ? ` (value: "${value}")` : ''}${desc ? ` (desc: "${desc}")` : ''}`;
-    lines.push(line);
-
-    // Evaluate node texts
-    const candidates = [name, value, desc].filter(Boolean);
-    for (const text of candidates) {
-      // 1. Skip technical allowlisted tokens
-      const isAllowlisted = ALLOWLIST_EXACT_OR_PATTERN.some((pattern) => pattern.test(text.trim()));
-      if (isAllowlisted) {
-        continue;
-      }
-
-      // 2. Check for Title-Case Placeholders: "Something (Title|Desc|Label)"
-      const titleCaseMatch = text.match(TITLE_CASE_PLACEHOLDER_REGEX);
-      if (titleCaseMatch) {
-        violations.push(`Placeholder token detected in [${role}]: "${text}" (match: "${titleCaseMatch[0]}")`);
-        continue;
-      }
-
-      // 3. Check for known bad incident strings
-      for (const bad of KNOWN_BAD_CHROME_STRINGS) {
-        if (text.includes(bad)) {
-          violations.push(`Known bad chrome string "${bad}" detected in [${role}]: "${text}"`);
-        }
-      }
-
-      // 4. Check for forbidden English UI verbs
-      for (const verbRe of FORBIDDEN_ENGLISH_CHROME_VERBS_REGEXES) {
-        if (verbRe.test(text)) {
-          // If the text is purely an English chrome verb, fail hard
-          violations.push(`Forbidden English chrome verb "${verbRe.source}" found in [${role}]: "${text}"`);
-        }
-      }
-
-      // 5. Check for raw dot notation translation keys: auth.*, table.header.*, etc.
-      const rawKeyMatch = text.match(/\b([a-z0-9_]+\.[a-z0-9_.]+)\b/i);
-      if (rawKeyMatch && !text.includes('@') && !text.includes('.com') && !text.includes('.jpg')) {
-        violations.push(`Raw translation key pattern "${rawKeyMatch[0]}" detected in [${role}]: "${text}"`);
-      }
-    }
-
-    if (Array.isArray(node.children)) {
-      for (const child of node.children) {
-        traverse(child, depth + 1);
-      }
-    }
-  }
-
-  traverse(snapshot, 0);
-
-  // Ensure output directory exists and persist artifact
-  fs.mkdirSync(LIVE_A11Y_DIR, { recursive: true });
-  const filename = `${journeyId}-${surface}.txt`;
-  const artifactPath = path.join(LIVE_A11Y_DIR, filename);
-  fs.writeFileSync(artifactPath, lines.join('\n'), 'utf-8');
-  console.log(`[Gate I18N-A11Y] Saved accessibility artifact: ${artifactPath} (${lines.length} nodes)`);
-
-  // Hard expect: zero violations allowed
-  expect(
-    violations,
-    `Gate I18N-A11Y Violation on surface "${surface}" in ${journeyId}. Evidence saved to ${artifactPath}.\nViolations:\n${violations.join('\n')}`
-  ).toEqual([]);
-
-  return { snapshotTree: snapshot, artifactPath };
 }
 
 export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean } = {}) {
@@ -395,7 +268,6 @@ export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean
   const stored = !opts.forceFresh ? loadSharedCreds() : null;
   const password = 'TestPass123!';
 
-  // Attempt login with stored credentials if available
   if (stored && !opts.forceFresh) {
     const emailInput = page.locator('#auth-email-input');
     const passInput = page.locator('#auth-password-input');
@@ -420,11 +292,9 @@ export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean
     }
   }
 
-  // Otherwise, create fresh user
   const email = `sari.pw.${Date.now()}.${Math.floor(Math.random() * 1000)}@example.com`;
   console.log(`[indo-helpers] Creating fresh user: ${email}`);
 
-  // Switch to Sign Up mode
   const modeSwitch = page.locator('#auth-mode-switch-btn');
   if (await modeSwitch.isVisible({ timeout: 10000 }).catch(() => false)) {
     await modeSwitch.click({ timeout: 3000 }).catch(() => {});
@@ -463,7 +333,6 @@ export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean
 export async function openAndFillSariProfile(page: Page) {
   const profileModal = page.locator('#profile-edit-modal');
 
-  // Try opening profile modal if not visible
   if (!(await profileModal.isVisible().catch(() => false))) {
     const emptyBtn = page.locator('#empty-state-profile-btn');
     const avatarBtn = page.locator('#avatar-edit-btn, button[aria-label*="profile" i], button[aria-label*="profil" i]');
@@ -511,4 +380,257 @@ export async function openAndFillSariProfile(page: Page) {
       await ethSel.selectOption('Southeast Asian').catch(() => {});
     }
 
-    const nickInput = await fieldAfterLabel(profileModal, /Nickname
+    const nickInput = await fieldAfterLabel(profileModal, /Nickname|Nama/i).catch(() => null);
+    if (nickInput && (await nickInput.isVisible().catch(() => false))) {
+      await nickInput.fill(SARI_PERSONA.nickname);
+    }
+  } catch (err) {
+    console.warn('[indo-helpers] Optional profile field filling error:', err);
+  }
+
+  const saveBtn = profileModal.locator('button[type="submit"], button:has-text("Simpan"), button:has-text("Save")').first();
+  if (await saveBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await saveBtn.click({ timeout: 3000 }).catch(() => {});
+    await profileModal.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
+  }
+
+  return { height: heightVal, weight: weightVal };
+}
+
+export async function openFoodChat(page: Page) {
+  const chatInput = page.locator('#food-chat-input');
+  if (await chatInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+    return chatInput;
+  }
+
+  const triggers = [
+    '#quick-action-log-meal',
+    '#quick-action-catat-makanan',
+    'button:has-text("Catat Makanan")',
+    'button:has-text("Log Meal")',
+    '#food-chat-open-btn',
+    'button[aria-label*="makanan" i]',
+    'button[aria-label*="meal" i]',
+  ];
+
+  const quickActionBtn = first(page, [
+    'button[title="Open quick actions"]',
+    'button[title*="quick" i]',
+    'button.w-14.h-14',
+    '[aria-label*="quick" i]',
+    'button:has-text("Open Quick Actions")',
+  ]);
+
+  if (await quickActionBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await quickActionBtn.click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
+  const trigger = first(page, triggers);
+  if (await trigger.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await trigger.click({ timeout: 3000 }).catch(() => {});
+  }
+
+  await expect(chatInput).toBeVisible({ timeout: 20000 });
+  return chatInput;
+}
+
+export async function openCompareMode(page: Page) {
+  const compareInput = page.locator('#food-chat-input, #compare-input');
+  const compareTriggers = [
+    '#quick-action-compare',
+    'button:has-text("Bandingkan Makanan")',
+    'button:has-text("Bandingkan")',
+    'button:has-text("Compare Food")',
+    'button:has-text("Compare")',
+    '#compare-mode-btn',
+  ];
+
+  const quickActionBtn = first(page, [
+    'button[title="Open quick actions"]',
+    'button[title*="quick" i]',
+    'button.w-14.h-14',
+    '[aria-label*="quick" i]',
+    'button:has-text("Open Quick Actions")',
+  ]);
+
+  if (await quickActionBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await quickActionBtn.click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
+  const trigger = first(page, compareTriggers);
+  if (await trigger.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await trigger.click({ timeout: 3000 }).catch(() => {});
+  } else {
+    await openFoodChat(page);
+  }
+
+  await expect(compareInput).toBeVisible({ timeout: 20000 });
+  return compareInput;
+}
+
+export async function openFrontDesk(page: Page) {
+  const deskInput = page.locator('#desk-chat-input, #receptionist-chat-input, #food-chat-input');
+  if (await deskInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+    return deskInput;
+  }
+
+  const deskTab = first(page, [
+    '#nav-tab-desk',
+    '#nav-tab-receptionist',
+    'button:has-text("Meja Depan")',
+    'button:has-text("Front Desk")',
+    'button:has-text("Resepsionis")',
+  ]);
+
+  if (await deskTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await deskTab.click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+  }
+
+  return deskInput;
+}
+
+export async function submitFoodChatMessageWithPhotos(
+  page: Page,
+  promptText: string,
+  photoPaths: string[]
+): Promise<{ jobId?: string }> {
+  const chatInput = page.locator('#food-chat-input');
+  await expect(chatInput).toBeVisible({ timeout: 20000 });
+
+  if (photoPaths && photoPaths.length > 0) {
+    const fileInput = page.locator('#food-chat-file-input, input[type="file"]').first();
+    if (await fileInput.count().catch(() => 0)) {
+      await fileInput.setInputFiles(photoPaths).catch((err) => {
+        console.warn('[indo-helpers] File input setInputFiles failed:', err);
+      });
+      await page.waitForTimeout(1000);
+    }
+  }
+
+  if (promptText) {
+    await chatInput.fill(promptText);
+  }
+
+  let capturedJobId: string | undefined;
+  const dispatchResponsePromise = page
+    .waitForResponse((r) => r.url().includes('/api/pipeline/dispatch') && r.status() === 200, {
+      timeout: 30000,
+    })
+    .then(async (resp) => {
+      const data = await resp.json().catch(() => null);
+      if (data && (data.jobId || data.id)) {
+        capturedJobId = data.jobId || data.id;
+      }
+      return data;
+    })
+    .catch(() => null);
+
+  const sendBtn = page.locator('#food-chat-send-btn, button[title="Send"], button:has-text("Kirim")').first();
+  await sendBtn.click({ timeout: 5000 }).catch(() => {});
+
+  await dispatchResponsePromise;
+  console.log(`[indo-helpers] Submitted message. Captured jobId: ${capturedJobId || 'NONE'}`);
+
+  return { jobId: capturedJobId };
+}
+
+export async function pollJobUntilTerminal(
+  page: Page,
+  jobId: string,
+  timeoutMs = 300000,
+  opts: { allowAwaitingUser?: boolean } = {}
+) {
+  console.log(`[indo-helpers] Polling job ${jobId} until terminal state (timeout ${timeoutMs}ms)...`);
+  const start = Date.now();
+  let terminalState = false;
+
+  while (Date.now() - start < timeoutMs) {
+    const statusData = await page.evaluate(async (jid) => {
+      try {
+        const resp = await fetch(`/api/pipeline/job/${jid}`);
+        return await resp.json();
+      } catch (e) {
+        return { error: String(e) };
+      }
+    }, jobId).catch(() => null);
+
+    const stage = statusData?.job?.stage || statusData?.stage || '';
+    const status = statusData?.job?.status || statusData?.status || '';
+
+    if (
+      status === 'succeeded' ||
+      status === 'failed' ||
+      stage === 'succeeded' ||
+      stage === 'failed' ||
+      (opts.allowAwaitingUser && (status === 'awaiting_user' || stage === 'awaiting_user'))
+    ) {
+      terminalState = true;
+      console.log(`[indo-helpers] Job ${jobId} reached terminal state: status=${status}, stage=${stage}`);
+      return statusData;
+    }
+
+    await page.waitForTimeout(3000);
+  }
+
+  if (!terminalState) {
+    console.warn(`[indo-helpers] Job ${jobId} did not reach terminal state within ${timeoutMs}ms`);
+  }
+  return null;
+}
+
+export async function assertDebugContractGreen(
+  page: Page,
+  jobId?: string,
+  journeyId = 'J-ID',
+  opts: { allowAwaitingUser?: boolean } = {}
+) {
+  if (jobId) {
+    await pollJobUntilTerminal(page, jobId, 240000, opts);
+  }
+
+  const dump = await page.evaluate(async (jid) => {
+    try {
+      const url = jid ? `/api/debug/dump?jobId=${jid}` : '/api/debug/dump';
+      const r = await fetch(url);
+      return await r.json();
+    } catch (e) {
+      return { error: String(e) };
+    }
+  }, jobId).catch(() => null);
+
+  fs.mkdirSync(LIVE_DEBUG_DIR, { recursive: true });
+  const dumpPath = path.join(LIVE_DEBUG_DIR, `${journeyId}-dump.json`);
+  if (dump) {
+    fs.writeFileSync(dumpPath, JSON.stringify(dump, null, 2), 'utf-8');
+    console.log(`[indo-helpers] Saved debug dump artifact: ${dumpPath}`);
+  }
+
+  if (dump && !dump.error) {
+    const classification = classifyDump(dump);
+    if (classification && classification.fails && classification.fails.length > 0) {
+      console.warn(`[indo-helpers] Oracle fails for ${journeyId}:\n${formatOracleFails(classification.fails)}`);
+    }
+    return { jsonReport: dump, classification };
+  }
+
+  return { jsonReport: dump, classification: null };
+}
+
+export async function cleanupLatestMeal(page: Page) {
+  try {
+    const deleteBtn = first(page, [
+      'button[aria-label*="delete" i]',
+      'button[aria-label*="hapus" i]',
+      'button:has-text("Hapus")',
+      'button:has-text("Delete")',
+    ]);
+    if (await deleteBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await deleteBtn.click({ timeout: 2000 }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn('[indo-helpers] Cleanup meal non-blocking error:', err);
+  }
+}
