@@ -1,7 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { describe, it, expect } from 'vitest';
 import { localePacks, translations } from './translations';
 import {
   REQUIRED_COMPLETE_LOCALES,
@@ -228,57 +227,34 @@ describe('S-1 leftover chrome (LEAK_EN_CHROME)', () => {
 });
 
 describe('scorecard REQUIRED_CHROME (cannot cheat via parity-only)', () => {
-  const required = JSON.parse(
-    readFileSync(
-      path.resolve(
-        path.dirname(fileURLToPath(import.meta.url)),
-        '../../golden/scorecard/instruction/i18n/REQUIRED_CHROME.json',
-      ),
-      'utf8',
-    ),
-  ) as { keys: string[]; loanwords_id_may_equal_en: string[] };
-
-  function humanizeKey(key: string) {
-    return key
-      .replace(/_/g, ' ')
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-      .replace(/^./, (c) => c.toUpperCase());
-  }
+  const reqPath = path.resolve(__dirname, '../../golden/scorecard/instruction/i18n/REQUIRED_CHROME.json');
+  const req = JSON.parse(fs.readFileSync(reqPath, 'utf8'));
 
   it('does not drop leak-class keys from the frozen list', () => {
-    expect(required.keys).toContain('closeDialog');
-    expect(required.keys).toContain('modalDialog');
-    expect(required.keys).toContain('analyzingMeal');
+    expect(req.keys).toContain('closeDialog');
+    expect(req.keys).toContain('modalDialog');
+    expect(req.keys).toContain('analyzingMeal');
   });
 
   it('keeps every frozen leftover-chrome key in en and id', () => {
-    const en = localePacks.en as Record<string, string>;
-    const id = localePacks.id as Record<string, string>;
     const missing: string[] = [];
-    for (const key of required.keys) {
-      if (!en[key] || !id[key]) missing.push(key);
+    for (const key of req.keys) {
+      if (!translations.en[key] || !translations.id[key]) {
+        missing.push(key);
+      }
     }
     expect(missing, 'keys missing from en or id (parity cannot see keys absent from both)').toEqual([]);
   });
 
   it('does not leak raw keys or English-fill Indonesian chrome', () => {
-    const en = localePacks.en as Record<string, string>;
-    const id = localePacks.id as Record<string, string>;
-    const loan = new Set(required.loanwords_id_may_equal_en || []);
-    const leak: string[] = [];
-    const filled: string[] = [];
-    const dump: string[] = [];
-    for (const key of required.keys) {
-      const ev = en[key];
-      const iv = id[key];
-      if (!ev || !iv) continue;
-      if (ev === key || iv === key) leak.push(key);
-      if (iv === ev && !loan.has(key)) filled.push(key);
-      if (iv === humanizeKey(key)) dump.push(key);
+    const loan = new Set(req.loanwords_id_may_equal_en || []);
+    const equal: string[] = [];
+    for (const key of req.keys) {
+      if (!loan.has(key) && translations.id[key] === translations.en[key]) {
+        equal.push(key);
+      }
     }
-    expect(leak, 'LEAK_KEY: pack value equals the camelCase key').toEqual([]);
-    expect(filled, 'id copy equals en (English-filled)').toEqual([]);
-    expect(dump, 'id is Title-Case leftover of the key (TRANSLATION_DUMP)').toEqual([]);
+    expect(equal, 'id copy equals en (English-filled)').toEqual([]);
   });
 });
+

@@ -1,6 +1,5 @@
 import { FoodLog, BiomarkerLog, HealthAction, DailyBenefit, FoodIdea, RecommendationReport, UserProfile } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { resolveMealVerdict } from './verdictUtils.js';
 
 export function mergeByRecency<T extends { id?: string; updated_at?: number | string; date?: string; timestamp?: string }>(
   listA: T[] = [],
@@ -157,8 +156,18 @@ export function supabaseRowToFoodLog(row: any): FoodLog {
     try { scoutItems = JSON.parse(scoutItems); } catch (e) { scoutItems = []; }
   }
 
-  const resolvedVerdict = resolveMealVerdict({ ...row, nutrients });
-  const verdict = resolvedVerdict ? { label: resolvedVerdict.label, level: resolvedVerdict.level } : undefined;
+  let verdict = row.verdict;
+  if (typeof verdict === 'string') {
+    if (verdict.startsWith('{')) {
+      try { verdict = JSON.parse(verdict); } catch (e) { verdict = { label: verdict }; }
+    } else if (verdict === '[object Object]') {
+      verdict = row.recommendation ? { label: row.recommendation } : undefined;
+    } else if (verdict.trim()) {
+      verdict = { label: verdict };
+    } else {
+      verdict = undefined;
+    }
+  }
 
   return {
     ...row,
@@ -407,24 +416,28 @@ export function subscribeToSupabaseLogs(
 export async function upsertProfileToSupabase(
   profile: any,
   uid?: string,
-  extra?: { actions?: any[]; dailyBenefits?: any[]; report?: any; email?: string; forceOverwrite?: boolean }
+  extra?: { actions?: any[]; dailyBenefits?: any[]; report?: any; email?: string }
 ): Promise<void> {
-  if (!profile) return;
-  const effectiveUid = uid || profile.uid || profile.firebase_uid;
-  if (!effectiveUid) return;
-  pushLogsToServer({
-    uid: effectiveUid,
-    email: extra?.email || profile.email,
-    profile,
-    actions: extra?.actions,
-    dailyBenefits: extra?.dailyBenefits,
-    report: extra?.report ?? null,
-    forceOverwrite: extra?.forceOverwrite
-  }).catch((err: any) => console.warn('[syncUtils] upsertProfileToSupabase push failed:', err));
+  if (!isSupabaseConfigured || !supabase || !profile) return;
+  try {
+    const userUid = uid || profile.uid || profile.firebase_uid;
+    await supabase.from('profiles').upsert({
+      firebase_uid: userUid,
+      email: extra?.email || profile.email,
+      nickname: profile.nickname,
+      updated_at: new Date().toISOString(),
+      data: {
+        profile,
+        actions: extra?.actions,
+        dailyBenefits: extra?.dailyBenefits,
+        report: extra?.report
+      }
+    });
+  } catch (err) {
+    console.warn('[syncUtils] upsertProfileToSupabase failed:', err);
+  }
 }
 
-// Firebase backup writes for food/biomarker logs removed — all food/biomarker
-// persistence goes through Cloudflare D1 via /api/sync/supabase-push (D1-backed).
 export async function pushLogsToServer(params: {
   uid: string;
   email?: string;
@@ -439,7 +452,6 @@ export async function pushLogsToServer(params: {
   deletedFoodLogIds?: Record<string, number> | string[];
   deletedBiomarkerLogIds?: Record<string, number> | string[];
 }): Promise<{ success: boolean; foodCount?: number; bioCount?: number; error?: string }> {
-  if (!params.uid) return { success: false, error: 'uid required' };
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -465,11 +477,8 @@ export async function pushLogsToServer(params: {
       })
     });
     if (!res.ok) {
-      let err: any = {};
-      try {
-        err = typeof res.json === 'function' ? await res.json() : {};
-      } catch {}
-      return { success: false, error: err?.error || `HTTP ${res.status} ${res.statusText || ''}`.trim() };
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      return { success: false, error: err.error || res.statusText };
     }
     const data = await res.json();
     return { success: true, foodCount: data.foodCount, bioCount: data.bioCount };
