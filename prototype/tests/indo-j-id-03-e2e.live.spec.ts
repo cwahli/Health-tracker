@@ -24,7 +24,7 @@ import {
  * - Gate 3: UC-01 Deep Multi-Turn Desk Consultation Gate (3 deep consultation turns on meal edit)
  * - Gate 4: Real Meal Photo Fixture Gate (Authentic meal fixture attached)
  * - Gate 5: Bug Evidence Handling Gate (Fail-green resilient assertions for rounding bugs)
- * - Debug Contract: Live job completion verification + classifyDump oracle validation in golden/journeys/_live_debug/
+ * - Debug Contract: Live job completion verification + classifyDump oracle validation in golden/scorecard/current/debug/
  */
 
 test.describe('Journey ID-03: Indonesian Meal Edit & Deep Desk Triage Live Soak', () => {

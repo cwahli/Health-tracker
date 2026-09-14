@@ -25,7 +25,7 @@ import {
  * - G3: Desk UC-01 Multi-Turn Conversational Interaction (3 turns contextual coaching)
  * - G4: Authentic Indonesian Meal Photo Fixture (Real meal photo attached via file input)
  * - G5: Bug Evidence Handling Gate (Fail-green resilient assertions)
- * - Debug Contract: Live job completion verification + classifyDump oracle validation in golden/journeys/_live_debug/
+ * - Debug Contract: Live job completion verification + classifyDump oracle validation in golden/scorecard/current/debug/
  */
 
 test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {

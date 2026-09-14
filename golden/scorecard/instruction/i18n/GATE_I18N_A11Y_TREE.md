@@ -13,7 +13,7 @@
    - Title-Case placeholder: `/\b[A-Z][A-Za-z0-9]*(?: [A-Z][A-Za-z0-9]*)* (Title|Desc|Label)\b/`
    - Known bad chrome from incidents: `Chat Placeholder`, `Agent Food Welcome`, `Data Used By Agent`, `Empty History`, `Manual Entry`, `Weight Label`, `Nutrient Label`, `Total Label`, `Ingredients Label`, `Welcome Health Portal`, `Dashboard Ready Desc`, `Sign In Title`, `Email Label`, `OR DIVIDER`
    - English chrome allowlist-exceptions only (see below) — any other common UI verbs in English fail: Log Meal, Compare, Health Info, Food History, View Analysis, Save Log, View Status, View More, Log This Food, Flag issue, Adjust portion, AI Estimated, Analysis completed, Analyzing Meal Photo, Select Photo Source, Solid Food (unless exact allowlisted technical token)
-4. Save snapshot artifact: `golden/journeys/_live_a11y/J-ID-0X-<surface>.txt` for evidence.
+4. Save snapshot artifact: `golden/scorecard/current/a11y/J-ID-0X-<surface>.txt` for evidence.
 
 ## Required surfaces (visit all in journey)
 | Surface | When |
@@ -45,7 +45,7 @@
 Every green run must regenerate a report section **"Coverage checklist — all requirements"** that lists EVERY gate/surface below with status `PASS` | `FAIL` | `NOT COVERED`, plus artifact path (`_live_a11y/...` or debug dump). A journey may not be called complete unless every row is `PASS` (no NOT COVERED).
 
 Include in:
-1. `golden/journeys/SCOREBOARD_LIVE_RESULTS.md` (bottom)
+1. `golden/scorecard/past/SCOREBOARD_LIVE_RESULTS.md` (bottom; historical) and `golden/scorecard/current/` for a new soak
 2. `/workspace/gemini38-meal-review/tasks/FULL_THREE_JOURNEYS_FINAL_REPORT.md` (bottom)
 3. Each journey scoreboard's live results appendix when present
 

@@ -43,6 +43,7 @@ AGENTS + docs/agent = process (protected to EDIT)
 | Biomarkers | `docs/agent/domains/biomarkers.md` + ROADMAP Track B |
 | Which tests | `docs/agent/DOMAIN_REGRESSION_MAP.md` **matching row** |
 | What to implement | `plan/ROADMAP.md` **Current work** |
+| Master scorecard | `golden/scorecard/instruction/README.md` then `WORKFLOW.md`. Run `npm run scorecard:debug`. Never `npm test`. Never edit `current/` or `result_summary/`. |
 | `work bug` / `next bug` / `work 11` | **L15** below. Not a bare `continue`. |
 
 Do **not** load: `plan/archive/**`, `archive/**`, root `ROADMAP.md` (stub), `plan/QUALITY.md` except §1.4, `FOOD_SINGLE_PATH.md` unless F-8.10/12/13. There is no `studio/`.

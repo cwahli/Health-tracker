@@ -1,0 +1,14 @@
+{
+  "exportedAt": "2026-09-14T13:46:52.715Z",
+  "commit": "536230b",
+  "commitFull": "536230b12161ca6cfe6ffb0407a0e7e32db045f4",
+  "instructionHash": "b6dad0daf30eb064307a8871952d5ac8d784d62d10d6069a83be8faedc45a3ab",
+  "overallPass": false,
+  "seal": "b86850dbc4fbfb504bff5385bc32549ce23cd9ed3be4daf5861a9c78d21b4576",
+  "counts": {
+    "pass": 600,
+    "fail": 24,
+    "skip": 0,
+    "total": 624
+  }
+}

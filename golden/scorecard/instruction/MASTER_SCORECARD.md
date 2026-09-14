@@ -2,17 +2,18 @@
 
 **Purpose:** one PASS/FAIL board by product area, **plus a ratchet for bugs that took >3 fix iterations or came back after green.** Living document — do not delete a red or ratchet row to look green.
 
-**As of:** 2026-09-14, `HEAD` `c7db138`.  
-**How this v3 was built:** review of ROADMAP / QUALITY / FOOD / standing / learnings / prototypes / `golden/meal` / GitHub PRs #1–#5 / git history of restores, wipes, and re-fixes. Named reds re-verified. Did **not** run `npm test`.
+**As of:** 2026-09-14 (folder v4: `golden/scorecard/{instruction,current,past,result_summary}`).  
+**How this v3 board was built:** review of ROADMAP / QUALITY / FOOD / standing / learnings / prototypes / `golden/meal` / GitHub PRs #1–#5 / git history of restores, wipes, and re-fixes. Named reds re-verified. Did **not** run `npm test`.
 
-**Sister files:** [`SCOREBOARD_LIVE_RESULTS.md`](./SCOREBOARD_LIVE_RESULTS.md) · [`_drafts/GATE_I18N_A11Y_TREE.md`](./_drafts/GATE_I18N_A11Y_TREE.md) · [`plan/ROADMAP.md`](../../plan/ROADMAP.md) · [`docs/agent/DOMAIN_REGRESSION_MAP.md`](../../docs/agent/DOMAIN_REGRESSION_MAP.md) · [`docs/agent/standing.json`](../../docs/agent/standing.json)
+**Process:** [`README.md`](./README.md) · [`WORKFLOW.md`](./WORKFLOW.md) · [`gates.json`](./gates.json)  
+**Sister files:** [`../../past/SCOREBOARD_LIVE_RESULTS.md`](../../past/SCOREBOARD_LIVE_RESULTS.md) · [`i18n/GATE_I18N_A11Y_TREE.md`](./i18n/GATE_I18N_A11Y_TREE.md) · [`../../../plan/ROADMAP.md`](../../../plan/ROADMAP.md) · [`../../../docs/agent/DOMAIN_REGRESSION_MAP.md`](../../../docs/agent/DOMAIN_REGRESSION_MAP.md) · [`../../../docs/agent/standing.json`](../../../docs/agent/standing.json)
 
-**Debug dump (canonical evidence):** [`MASTER_SCORECARD_DEBUG.md`](./MASTER_SCORECARD_DEBUG.md) · [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Contract table first, then every named test PASS/FAIL/SKIP. Skip is not PASS. Cite **all green** only when `overall_named_gates` is PASS in that file.
+**This moment:** [`../../current/MASTER_SCORECARD_DEBUG.md`](../../current/MASTER_SCORECARD_DEBUG.md) · [`../../current/MASTER_SCORECARD_DEBUG.json`](../../current/MASTER_SCORECARD_DEBUG.json). Contract table first. Skip is not PASS. Cite **all green** only from [`../../result_summary/LATEST.md`](../../result_summary/LATEST.md) after exit 0.
 
 Refresh:
 
 ```
-node scripts/assert-master-scorecard.mjs
+npm run scorecard:debug
 ```
 
 Until `6c25141`, `npm test` also executed Playwright specs and printed **18 fake FAIL files**. Fixed in `vite.config.ts` (`**/prototype/tests/**` excluded).
@@ -144,8 +145,10 @@ npx vitest run src/utils/i18n.test.ts agents/dietitianInstructions.i18n.test.ts 
 
 | Check | Status | Evidence |
 |---|---|---|
-| en/id key parity | PASS for keys that exist. Absent keys are invisible to parity. | `i18n.test.ts` |
-| `AppModal` close | 🔴 `aria-label="closeDialog"` | `AppModal.test.tsx:53`; keys never in `localePacks` (`a3e8087` introduced the `t()` call) |
+| Frozen leftover chrome | 🔴 independent of vitest skip | `instruction/i18n/REQUIRED_CHROME.json` parsed from `translations.ts` text. Missing `closeDialog`/`modalDialog`; `analyzingMeal` id is English-filled `"Analyzing Meal"`. |
+| `t()` callsite keys | 🔴 244 keys used in `src/`/`agents/` missing from both packs (raw camelCase in UI) | `current/i18n_callsite_missing.json` — parity cannot see these |
+| en/id key parity | PASS for keys that exist. Absent keys are invisible to parity — **not sufficient**. | `i18n.test.ts` |
+| `AppModal` close | 🔴 `aria-label="closeDialog"` | `AppModal.test.tsx`; keys never in `localePacks` (`a3e8087` introduced the `t()` call) |
 | J-ID-01/02/03 debug-contract | LIVE PASS | `SCOREBOARD_LIVE_RESULTS.md` |
 | Gate I18N-A11Y | 🔴 NEVER RUN; helper rewritten then repaired | `_live_a11y/` missing |
 | Persona | **P-ID-WL-01 F18 / 140 cm / 40 kg / 1350 kcal**. Consolidation 58kg/age42 is stale | live-results header |

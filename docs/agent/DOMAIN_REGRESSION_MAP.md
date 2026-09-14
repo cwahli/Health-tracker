@@ -35,6 +35,7 @@ If you touch a hot path and **no** row fits: add a unit/fixture test in the same
 | Food catalog / DB / resolver | `npx vitest run server_food_catalog.test.ts server_food_db.test.ts server_food_resolver.test.ts` |
 | Golden meals (`tests/Golden_meal/**`) | `npx vitest run tests/golden_meals.test.ts` only. Not `golden_g1.test.ts` and not `golden:inbox` on every edit (Q-7) |
 | Golden scoreboard / tape parser | `npx vitest run src/utils/goldenScoreboard.test.ts` when you touch scoreboard/journey |
+| Master scorecard (`golden/scorecard/**`, `scripts/assert-master-scorecard.mjs`) | `npm run scorecard:debug` only. Never `npm test`. Never edit `current/` or `result_summary/` to pass. |
 | Nutrient aggregation / basis / prep | `npx vitest run server_nutrient_aggregation.test.ts server_nutrient_basis.test.ts server_prep_policy.test.ts` |
 | Portion clarify / refine / weight | `npx vitest run server_portion_clarify.test.ts` |
 | Food log identity / history | `npx vitest run src/utils/foodLogDedupe.test.ts` |

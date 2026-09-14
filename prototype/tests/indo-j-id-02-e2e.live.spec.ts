@@ -23,7 +23,7 @@ import {
  * - Gate 3: UC-01 Multi-Turn Comparison Dialogue Gate (Evaluating alternatives & topping strip)
  * - Gate 4: Real Indonesian Meal Photo Fixtures Gate (>=2 authentic photos evaluated in compare mode)
  * - Gate 5: Bug Evidence Handling Gate (Graceful overlay handling / fail-green)
- * - Debug Contract: Live job completion verification + classifyDump oracle validation in golden/journeys/_live_debug/
+ * - Debug Contract: Live job completion verification + classifyDump oracle validation in golden/scorecard/current/debug/
  */
 
 test.describe('Journey ID-02: Indonesian Meal Comparison (indo_compare) Live Soak', () => {

@@ -162,6 +162,33 @@
       }
     },
     {
+      "id": "scorecard_unfakeable",
+      "label": "Master scorecard layout is instruction/current/past/result_summary; sealed green only; i18n required chrome cannot pass by parity-only",
+      "asked": "repeated",
+      "files_must_contain": {
+        "golden/scorecard/instruction/WORKFLOW.md": [
+          "skip is not PASS",
+          "Never edit current/",
+          "result_summary"
+        ],
+        "golden/scorecard/instruction/i18n/REQUIRED_CHROME.json": [
+          "closeDialog",
+          "modalDialog",
+          "analyzingMeal"
+        ],
+        "scripts/assert-master-scorecard.mjs": [
+          "i18n_required_chrome",
+          "result_summary_sealed",
+          "skip_is_not_pass",
+          "if (!overallPass)"
+        ],
+        "src/utils/i18n.test.ts": [
+          "REQUIRED_CHROME.json",
+          "closeDialog"
+        ]
+      }
+    },
+    {
       "id": "same_meal_package_prepared",
       "label": "Package + prepared views of the same food collapse to one dish; combine-language edits emit merge_dishes",
       "asked": "repeated",

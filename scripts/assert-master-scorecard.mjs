@@ -1,79 +1,35 @@
 #!/usr/bin/env node
 /**
- * Master scorecard debug dump.
+ * Master scorecard runner (not `npm test`).
  *
- * Runs the named inner gates (not `npm test`), writes a JSON tree + markdown
- * view next to MASTER_SCORECARD.md. Skip is not PASS. Collection crash is FAIL.
+ * Reads frozen instruction/, writes current/, archives to past/ when the
+ * instruction hash changes, writes result_summary/ only on all-green.
+ * Skip is not PASS. Localization cannot pass on parity-only.
  *
  *   node scripts/assert-master-scorecard.mjs
- *
- * Exit 0 only when every named test is PASS and no required skip remains.
  */
 import { execSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const outJson = path.join(root, 'golden/journeys/MASTER_SCORECARD_DEBUG.json');
-const outMd = path.join(root, 'golden/journeys/MASTER_SCORECARD_DEBUG.md');
+const SCORECARD = path.join(root, 'golden/scorecard');
+const INSTRUCTION = path.join(SCORECARD, 'instruction');
+const CURRENT = path.join(SCORECARD, 'current');
+const PAST_RUNS = path.join(SCORECARD, 'past/runs');
+const RESULT = path.join(SCORECARD, 'result_summary');
+const GATES_PATH = path.join(INSTRUCTION, 'gates.json');
+const REQUIRED_CHROME_PATH = path.join(INSTRUCTION, 'i18n/REQUIRED_CHROME.json');
+const FORBIDDEN_CHROME_PATH = path.join(INSTRUCTION, 'i18n/FORBIDDEN_EN_CHROME.json');
+const TRANSLATIONS_PATH = path.join(root, 'src/utils/translations.ts');
 
-const AREAS = {
-  Localization: [
-    'src/utils/i18n.test.ts',
-    'agents/dietitianInstructions.i18n.test.ts',
-    'src/utils/auditEngine.i18n.test.ts',
-    'src/components/chat-cards/ReceptionistCard.i18n.test.tsx',
-    'src/components/ui/AppModal.test.tsx',
-  ],
-  'Meal Log': [
-    'server_portion_clarify.test.ts',
-    'server_vision_scout.test.ts',
-    'server_edit_patch_ledger.test.ts',
-    'server_derivation.test.ts',
-    'server_dish_finalize.test.ts',
-    'src/utils/nutrients.test.ts',
-    'src/utils/nutritionTargetStatus.test.ts',
-    'src/components/NutrientPieChart.test.tsx',
-    'tests/golden_meals.test.ts',
-  ],
-  Compare: [
-    'src/utils/compareMealLogGuard.test.ts',
-    'src/server/food/journeyFingerprints.test.ts',
-    'src/server/food/server_food_scout_source.test.ts',
-  ],
-  Biomarkers: [
-    'src/utils/biomarkerLifecycle.test.ts',
-    'src/utils/biomarkerIdentity.test.ts',
-    'src/utils/biomarkerSanitize.test.ts',
-    'src/utils/clinicalCalculators.test.ts',
-    'tests/bioProcess.golden.test.ts',
-    'tests/golden_biomarker.test.ts',
-  ],
-  Receptionist: [
-    'src/server/receptionist/handoffContract.test.ts',
-    'src/server/receptionist/jsonSanitize.test.ts',
-    'src/utils/frontDeskRouting.test.ts',
-    'src/utils/handoffGuard.test.ts',
-    'tests/deskProcess.golden.test.ts',
-  ],
-  Reliability: [
-    'src/jobs/__tests__/JobStore.test.ts',
-    'src/jobs/__tests__/JobSession.contract.test.ts',
-    'src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts',
-    'src/utils/creditManager.test.ts',
-    'src/utils/dumpContract.test.ts',
-    'src/utils/debugPayload.test.ts',
-    'src/utils/syncUtils.regression.test.ts',
-    'src/utils/goldenScoreboard.test.ts',
-    'src/utils/foodImageSources.test.ts',
-    'server_auth.test.ts',
-  ],
-};
-
-/** Skips in these files are contract FAILs (false-green class). */
-const SKIP_IS_FAIL = new Set(['tests/golden_biomarker.test.ts']);
+const gates = JSON.parse(fs.readFileSync(GATES_PATH, 'utf8'));
+const AREAS = gates.areas;
+const SKIP_IS_FAIL = new Set(gates.skip_is_fail_files || []);
+const SKIP_IS_FAIL_AREAS = new Set(gates.skip_is_fail_areas || []);
 
 function git(cmd) {
   try {
@@ -85,6 +41,22 @@ function git(cmd) {
 
 function rel(p) {
   return p.replace(/\\/g, '/').replace(root + '/', '').replace(/^\.\//, '');
+}
+
+function sha256(s) {
+  return createHash('sha256').update(s).digest('hex');
+}
+
+function hashFiles(relPaths) {
+  const h = createHash('sha256');
+  for (const rp of relPaths) {
+    const abs = path.join(root, rp);
+    h.update(rp);
+    h.update('\0');
+    h.update(fs.existsSync(abs) ? fs.readFileSync(abs) : Buffer.from('MISSING'));
+    h.update('\0');
+  }
+  return h.digest('hex');
 }
 
 function areaFor(file) {
@@ -129,7 +101,7 @@ function runVitest(files) {
   return { status: r.status ?? 1, stderr: r.stderr || '', stdout: r.stdout || '', report };
 }
 
-function runCmd(label, cmd, args) {
+function runCmd(label, cmd, args, area) {
   const r = spawnSync(cmd, args, {
     cwd: root,
     encoding: 'utf8',
@@ -142,7 +114,7 @@ function runCmd(label, cmd, args) {
     id: label,
     kind: 'command',
     file: `${cmd} ${args.join(' ')}`,
-    area: label === 'tsc' ? 'Reliability' : label === 'journey-guard' ? 'Reliability' : 'Biomarkers',
+    area,
     status: pass ? 'passed' : 'failed',
     durationMs: 0,
     message: pass ? '' : err.slice(0, 1200),
@@ -187,22 +159,12 @@ function collectTests(report) {
   return rows;
 }
 
-function normStatus(row) {
-  if (row.status === 'skipped' && SKIP_IS_FAIL.has(row.file)) return 'failed';
-  return row.status;
-}
-
-function badge(s) {
-  if (s === 'passed') return 'PASS';
-  if (s === 'skipped') return 'SKIP';
-  return 'FAIL';
-}
-
 function shortMessage(s) {
-  const first = String(s || '')
-    .split('\n')
-    .map((l) => l.trim())
-    .find((l) => l && !l.startsWith('at ') && !l.includes('node_modules')) || '';
+  const first =
+    String(s || '')
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l && !l.startsWith('at ') && !l.includes('node_modules')) || '';
   return first
     .replace(/file:\/\/\/[^\s)]+/g, '')
     .replace(/\/Users\/[^\s)]+Health-tracker\//g, '')
@@ -215,6 +177,236 @@ function shortMessage(s) {
 function mdEscape(s) {
   return shortMessage(s).replace(/\|/g, '\\|');
 }
+
+function badge(s) {
+  if (s === 'passed') return 'PASS';
+  if (s === 'skipped') return 'SKIP';
+  return 'FAIL';
+}
+
+function humanizeKey(key) {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+function extractPack(src, locale) {
+  const re = new RegExp(`\\b${locale}:\\s*\\{`);
+  const m = re.exec(src);
+  if (!m) return {};
+  let depth = 1;
+  let i = m.index + m[0].length;
+  while (i < src.length && depth > 0) {
+    const c = src[i];
+    if (c === '"') {
+      i += 1;
+      while (i < src.length && src[i] !== '"') {
+        if (src[i] === '\\') i += 1;
+        i += 1;
+      }
+    } else if (c === '{') depth += 1;
+    else if (c === '}') depth -= 1;
+    i += 1;
+  }
+  const body = src.slice(m.index + m[0].length, i - 1);
+  const pack = {};
+  const pair = /"([^"]+)":\s*"((?:\\.|[^"\\])*)"/g;
+  let pm;
+  while ((pm = pair.exec(body))) {
+    pack[pm[1]] = pm[2].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+  }
+  return pack;
+}
+
+function walkFiles(dir, acc = []) {
+  if (!fs.existsSync(dir)) return acc;
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (ent.name === 'node_modules' || ent.name === 'dist' || ent.name.startsWith('.')) continue;
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) walkFiles(p, acc);
+    else if (/\.(ts|tsx|js|jsx)$/.test(ent.name)) acc.push(p);
+  }
+  return acc;
+}
+
+function collectCallsiteKeys() {
+  const keys = new Map();
+  const re = /\bt\(\s*[^,()]+,\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]/g;
+  for (const file of [...walkFiles(path.join(root, 'src')), ...walkFiles(path.join(root, 'agents'))]) {
+    if (/\.test\.|\.spec\./.test(file)) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      const k = m[1];
+      if (!keys.has(k)) keys.set(k, []);
+      const list = keys.get(k);
+      const r = rel(file);
+      if (!list.includes(r)) list.push(r);
+    }
+  }
+  return keys;
+}
+
+function i18nRows() {
+  const rows = [];
+  const required = JSON.parse(fs.readFileSync(REQUIRED_CHROME_PATH, 'utf8'));
+  const forbidden = JSON.parse(fs.readFileSync(FORBIDDEN_CHROME_PATH, 'utf8'));
+  const src = fs.existsSync(TRANSLATIONS_PATH) ? fs.readFileSync(TRANSLATIONS_PATH, 'utf8') : '';
+  const en = extractPack(src, 'en');
+  const id = extractPack(src, 'id');
+  const loan = new Set(required.loanwords_id_may_equal_en || []);
+  const missing = [];
+  const leak = [];
+  const englishFilled = [];
+  const dumpLeftover = [];
+
+  for (const key of required.keys) {
+    const ev = en[key];
+    const iv = id[key];
+    if (ev == null || ev === '' || iv == null || iv === '') {
+      missing.push(key);
+      continue;
+    }
+    if (ev === key || iv === key) leak.push(key);
+    const human = humanizeKey(key);
+    if (iv === human) dumpLeftover.push(key);
+    if (iv === ev && !loan.has(key)) englishFilled.push(key);
+  }
+
+  const callsites = collectCallsiteKeys();
+  const callsiteMissing = [];
+  for (const [key, files] of callsites) {
+    if (!en[key] || !id[key]) callsiteMissing.push(`${key} (${files[0]})`);
+  }
+
+  const incidentInId = [];
+  for (const key of required.keys) {
+    const iv = id[key];
+    if (!iv) continue;
+    for (const s of forbidden.incident_strings || []) {
+      if (iv === s) incidentInId.push(`${key}=${s}`);
+    }
+  }
+
+  const hardcoded = [];
+  for (const rootRel of forbidden.scan_roots || []) {
+    for (const file of walkFiles(path.join(root, rootRel))) {
+      if ((forbidden.exclude_name_substrings || []).some((x) => file.includes(x))) continue;
+      const text = fs.readFileSync(file, 'utf8');
+      for (const s of forbidden.incident_strings || []) {
+        if (text.includes(`"${s}"`) || text.includes(`'${s}'`)) {
+          hardcoded.push(`${rel(file)}:${s}`);
+        }
+      }
+    }
+  }
+
+  function push(id, pass, message) {
+    rows.push({
+      id,
+      kind: 'i18n-contract',
+      file: 'golden/scorecard/instruction/i18n/REQUIRED_CHROME.json',
+      area: 'Localization',
+      status: pass ? 'passed' : 'failed',
+      durationMs: 0,
+      message: pass ? '' : message,
+      title: id,
+    });
+  }
+
+  push(
+    'i18n_required_chrome_present',
+    missing.length === 0,
+    missing.length ? `missing en+id: ${missing.join(', ')}` : '',
+  );
+  push(
+    'i18n_required_chrome_not_leak_key',
+    leak.length === 0,
+    leak.length ? `value equals key: ${leak.join(', ')}` : '',
+  );
+  push(
+    'i18n_required_chrome_id_not_en',
+    englishFilled.length === 0,
+    englishFilled.length ? `id copy equals en: ${englishFilled.join(', ')}` : '',
+  );
+  push(
+    'i18n_required_chrome_id_not_humanized_key',
+    dumpLeftover.length === 0,
+    dumpLeftover.length ? `id is Title-Case leftover of key: ${dumpLeftover.join(', ')}` : '',
+  );
+  push(
+    'i18n_callsite_keys_in_packs',
+    callsiteMissing.length === 0,
+    callsiteMissing.length
+      ? `${callsiteMissing.length} t() keys missing from packs (full list in current/i18n_callsite_missing.json)`
+      : '',
+  );
+  push(
+    'i18n_id_not_incident_string',
+    incidentInId.length === 0,
+    incidentInId.length ? incidentInId.join(', ') : '',
+  );
+  push(
+    'i18n_components_not_hardcoded_incident',
+    hardcoded.length === 0,
+    hardcoded.length ? hardcoded.slice(0, 8).join(', ') : '',
+  );
+
+  return {
+    rows,
+    stats: {
+      requiredKeys: required.keys.length,
+      missing,
+      leak,
+      englishFilled,
+      dumpLeftover,
+      callsiteCount: callsites.size,
+      callsiteMissingCount: callsiteMissing.length,
+      callsiteMissing,
+    },
+  };
+}
+
+function archiveCurrentIfInstructionChanged(instructionHash) {
+  const runPath = path.join(CURRENT, 'RUN.json');
+  if (!fs.existsSync(runPath)) return null;
+  let prev;
+  try {
+    prev = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!prev.instructionHash || prev.instructionHash === instructionHash) return null;
+  const stamp = `${(prev.exportedAt || new Date().toISOString()).replace(/[:.]/g, '-')}-${prev.commit || 'unknown'}`;
+  const dest = path.join(PAST_RUNS, stamp);
+  fs.mkdirSync(dest, { recursive: true });
+  for (const name of ['RUN.json', 'MASTER_SCORECARD_DEBUG.json', 'MASTER_SCORECARD_DEBUG.md']) {
+    const from = path.join(CURRENT, name);
+    if (fs.existsSync(from)) fs.renameSync(from, path.join(dest, name));
+  }
+  return rel(dest);
+}
+
+function sealTree(tree) {
+  const copy = { ...tree };
+  delete copy.seal;
+  return sha256(JSON.stringify(copy));
+}
+
+const instructionHash = hashFiles([
+  'golden/scorecard/instruction/gates.json',
+  'golden/scorecard/instruction/MASTER_SCORECARD.md',
+  'golden/scorecard/instruction/i18n/REQUIRED_CHROME.json',
+  'golden/scorecard/instruction/i18n/FORBIDDEN_EN_CHROME.json',
+]);
+
+fs.mkdirSync(CURRENT, { recursive: true });
+fs.mkdirSync(PAST_RUNS, { recursive: true });
+fs.mkdirSync(RESULT, { recursive: true });
+const archivedTo = archiveCurrentIfInstructionChanged(instructionHash);
 
 const commit = git('git rev-parse --short HEAD');
 const commitFull = git('git rev-parse HEAD');
@@ -239,6 +431,22 @@ for (const f of missingFiles) {
   });
 }
 
+for (const f of vitestFiles.filter((x) => !missingFiles.includes(x))) {
+  const has = tests.some((t) => t.file === f || t.file.endsWith(f));
+  if (!has) {
+    tests.push({
+      id: f,
+      kind: 'file',
+      file: f,
+      area: areaFor(f),
+      status: 'failed',
+      durationMs: 0,
+      message: 'named gate produced 0 tests (cannot pass by collecting nothing)',
+      title: '(empty collection)',
+    });
+  }
+}
+
 if (!vitest.report) {
   tests.push({
     id: 'vitest-json',
@@ -252,13 +460,17 @@ if (!vitest.report) {
   });
 }
 
-const commands = [
-  runCmd('tsc', 'npx', ['tsc', '--noEmit']),
-  runCmd('journey-guard', 'node', ['scripts/journey-guard.mjs']),
-  runCmd('biomarker-lifecycle-m31', 'node', ['scripts/assert-biomarker-lifecycle-m31.mjs']),
-];
+const commands = (gates.commands || []).map((c) => runCmd(c.id, c.cmd, c.args, c.area));
+const i18n = i18nRows();
 
-const rows = [...tests, ...commands].map((r) => {
+function normStatus(row) {
+  if (row.status === 'skipped' && (SKIP_IS_FAIL.has(row.file) || SKIP_IS_FAIL_AREAS.has(row.area))) {
+    return 'failed';
+  }
+  return row.status;
+}
+
+const rows = [...tests, ...commands, ...i18n.rows].map((r) => {
   const contractStatus = normStatus(r);
   const message = r.message ? shortMessage(r.message) : '';
   const out = { ...r, contractStatus, message };
@@ -287,7 +499,8 @@ for (const area of [...Object.keys(AREAS), 'Unmapped']) {
 }
 
 const skipFalseGreen = tests.filter(
-  (r) => r.file === 'tests/golden_biomarker.test.ts' && r.status === 'skipped',
+  (r) =>
+    (SKIP_IS_FAIL.has(r.file) || SKIP_IS_FAIL_AREAS.has(r.area)) && r.status === 'skipped',
 );
 const overallPass = failed.length === 0 && skipped.length === 0 && skipFalseGreen.length === 0;
 
@@ -304,17 +517,38 @@ const contract = [
     result: skipFalseGreen.length === 0 ? 'PASS' : 'FAIL',
     actual:
       skipFalseGreen.length === 0
-        ? 'no required-skip in golden_biomarker'
-        : `${skipFalseGreen.length} G-B* tests skipped because tests/Golden_biomarker is missing`,
+        ? 'no required-skip scored as pass'
+        : `${skipFalseGreen.length} required skips scored FAIL (Localization or golden_biomarker)`,
   },
   {
     law: 'collection_does_not_crash',
     layer: 'process',
     result: tests.some((t) => t.kind === 'file' && t.status === 'failed') ? 'FAIL' : 'PASS',
-    actual: tests
-      .filter((t) => t.kind === 'file' && t.status === 'failed')
-      .map((t) => t.file)
-      .join(', ') || 'all named files collected',
+    actual:
+      tests
+        .filter((t) => t.kind === 'file' && t.status === 'failed')
+        .map((t) => t.file)
+        .join(', ') || 'all named files collected',
+  },
+  {
+    law: 'i18n_required_chrome',
+    layer: 'localization',
+    result: i18n.rows.filter((r) => r.status !== 'passed').length === 0 ? 'PASS' : 'FAIL',
+    actual:
+      i18n.rows.filter((r) => r.status !== 'passed').length === 0
+        ? `${i18n.stats.requiredKeys} frozen keys present, not leak, id≠en`
+        : i18n.rows
+            .filter((r) => r.status !== 'passed')
+            .map((r) => r.message)
+            .join('; '),
+  },
+  {
+    law: 'result_summary_sealed',
+    layer: 'process',
+    result: 'PASS',
+    actual: overallPass
+      ? 'will write result_summary (overallPass)'
+      : 'will not write result_summary (not all green)',
   },
   ...Object.entries(byArea).map(([area, s]) => ({
     law: `area_${area.toLowerCase().replace(/\s+/g, '_')}`,
@@ -337,9 +571,11 @@ const tree = {
   identity: {
     commit,
     commitFull,
+    instructionHash,
     host: 'local named gates',
     command: 'node scripts/assert-master-scorecard.mjs',
     vitestFiles,
+    archivedTo,
   },
   counts: {
     pass: passed.length,
@@ -348,12 +584,16 @@ const tree = {
     total: rows.length,
   },
   byArea,
+  i18n: i18n.stats,
   contract,
   tests: rows,
 };
 
-fs.mkdirSync(path.dirname(outJson), { recursive: true });
-fs.writeFileSync(outJson, JSON.stringify(tree, null, 2));
+tree.seal = sealTree(tree);
+
+const outJson = path.join(CURRENT, 'MASTER_SCORECARD_DEBUG.json');
+const outMd = path.join(CURRENT, 'MASTER_SCORECARD_DEBUG.md');
+const runJson = path.join(CURRENT, 'RUN.json');
 
 function sectionList(title, list, extra) {
   const lines = [`## ${title}`, ''];
@@ -381,12 +621,15 @@ function sectionList(title, list, extra) {
 const md = [
   '# Master Scorecard Debug',
   '',
-  'Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS.',
+  'Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.',
   '',
   `**When:** ${exportedAt}`,
   `**Commit:** \`${commit}\``,
+  `**Instruction hash:** \`${instructionHash.slice(0, 12)}\``,
+  `**Seal:** \`${tree.seal}\``,
   `**Command:** \`node scripts/assert-master-scorecard.mjs\``,
   `**Overall:** ${overallPass ? '**ALL GREEN**' : '**NOT ALL GREEN**'} — ${passed.length} pass / ${failed.length} fail / ${skipped.length} skip`,
+  archivedTo ? `**Archived previous current →** \`${archivedTo}\`` : '',
   '',
   '## Contract',
   '',
@@ -407,19 +650,89 @@ const md = [
   ...sectionList('All passed (green)', passed),
   '## Notes',
   '',
-  '- Named gates only. Playwright live specs are not in this dump (quota). See MASTER_SCORECARD §E2E.',
-  '- `tests/golden_biomarker.test.ts` skips are scored FAIL (`skip_is_not_pass`).',
-  '- Regenerating this file is the refresh for MASTER_SCORECARD automated evidence.',
+  '- Named gates only. Playwright live specs are not in this dump (quota).',
+  '- Localization uses frozen `instruction/i18n/REQUIRED_CHROME.json` parsed from `translations.ts` text. Parity-only cannot pass.',
+  '- `tests/golden_biomarker.test.ts` skips and any Localization skip are scored FAIL.',
+  '- Regenerating this file is the only refresh. Do not edit it to look green.',
+  '',
+].filter((line, i, arr) => !(line === '' && arr[i - 1] === '')).join('\n');
+
+fs.writeFileSync(outJson, JSON.stringify(tree, null, 2));
+fs.writeFileSync(
+  path.join(CURRENT, 'i18n_callsite_missing.json'),
+  JSON.stringify(
+    {
+      law: 'Every t(lang, \'key\') in src/ and agents/ (non-test) must exist in localePacks.en and localePacks.id. Missing keys render as raw camelCase (LEAK_KEY).',
+      count: i18n.stats.callsiteMissingCount,
+      keys: i18n.stats.callsiteMissing,
+    },
+    null,
+    2,
+  ),
+);
+const i18nMissingMd = [
+  '## i18n t() keys missing from packs (complete)',
+  '',
+  i18n.stats.callsiteMissingCount
+    ? i18n.stats.callsiteMissing.map((k) => `- \`${k}\``).join('\n')
+    : '_none_',
   '',
 ].join('\n');
+fs.writeFileSync(outMd, md.replace('## Notes', `${i18nMissingMd}## Notes`));
+fs.writeFileSync(
+  runJson,
+  JSON.stringify(
+    {
+      exportedAt,
+      commit,
+      commitFull,
+      instructionHash,
+      overallPass,
+      seal: tree.seal,
+      counts: tree.counts,
+    },
+    null,
+    2,
+  ),
+);
 
-fs.writeFileSync(outMd, md);
+if (overallPass) {
+  const latestJson = path.join(RESULT, 'LATEST.json');
+  const latestMd = path.join(RESULT, 'LATEST.md');
+  fs.writeFileSync(latestJson, JSON.stringify(tree, null, 2));
+  fs.writeFileSync(
+    latestMd,
+    md.replace(
+      'Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json).',
+      'Canonical JSON: [`LATEST.json`](./LATEST.json). Sealed all-green copy of current/.',
+    ),
+  );
+  const stamped = path.join(RESULT, commit || exportedAt.replace(/[:.]/g, '-'));
+  fs.mkdirSync(stamped, { recursive: true });
+  fs.copyFileSync(latestJson, path.join(stamped, 'MASTER_SCORECARD_DEBUG.json'));
+  fs.copyFileSync(latestMd, path.join(stamped, 'MASTER_SCORECARD_DEBUG.md'));
+} else if (!overallPass) {
+  const latestJson = path.join(RESULT, 'LATEST.json');
+  if (fs.existsSync(latestJson)) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(latestJson, 'utf8'));
+      if (prev.identity?.instructionHash !== instructionHash || prev.status !== 'succeeded') {
+        /* stale green for a different instruction, or a hand-written file — leave README as source of truth */
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 console.log(`wrote ${rel(outMd)}`);
 console.log(`wrote ${rel(outJson)}`);
+if (archivedTo) console.log(`archived previous current → ${archivedTo}`);
 console.log(
   `${overallPass ? 'ALL GREEN' : 'NOT ALL GREEN'} ${passed.length} pass / ${failed.length} fail / ${skipped.length} skip`,
 );
+if (overallPass) console.log(`wrote ${rel(path.join(RESULT, 'LATEST.md'))}`);
+else console.log('result_summary not updated (not all green)');
 for (const c of contract.filter((x) => x.result !== 'PASS')) {
   console.error(`FAIL ${c.law}: ${c.actual}`);
 }

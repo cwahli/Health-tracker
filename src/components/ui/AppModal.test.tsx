@@ -50,6 +50,7 @@ describe('AppModal UI Primitive', () => {
 
     expect(html).toContain('max-w-lg');
     expect(html).toContain('data-testid="app-modal-close-btn"');
+    expect(html).not.toContain('aria-label="closeDialog"');
     expect(html).toContain('aria-label="Close dialog"');
   });
 });

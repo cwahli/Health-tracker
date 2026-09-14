@@ -1,11 +1,12 @@
 # golden/ — benchmark harness
 
-Two suites, one folder:
+Three suites:
 
 | Suite | Path | Canonical runner |
 |---|---|---|
 | Meal | `meal/` | New benchmark goldens (this folder). Computation use cases with photos + `expected.json`. |
 | Biomarker | `biomarker/` | Pointer to `tests/Golden_biomarker/` (existing suite stays canonical). |
+| Scorecard | `scorecard/` | Area PASS/FAIL board. Agent entry `scorecard/instruction/README.md`. Run `npm run scorecard:debug`. |
 
 ## meal/ contract (per `Meal_NN/` folder)
 

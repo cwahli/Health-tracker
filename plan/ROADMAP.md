@@ -369,7 +369,7 @@ R-8–R-11 are **client speed**, not a free-tier redo. Do not re-migrate images 
 ## Track Q — Quality loop (remaining method work)
 
 **Architecture:** `QUALITY.md`  
-**Area PASS/FAIL board:** [`golden/journeys/MASTER_SCORECARD.md`](../golden/journeys/MASTER_SCORECARD.md) (Localization / Meal Log / Compare / Biomarkers / Receptionist / Reliability). Refresh with that file’s named gates, never `npm test`.
+**Area PASS/FAIL board:** [`golden/scorecard/instruction/MASTER_SCORECARD.md`](../golden/scorecard/instruction/MASTER_SCORECARD.md) (Localization / Meal Log / Compare / Biomarkers / Receptionist / Reliability). Process: `golden/scorecard/instruction/README.md`. Refresh with `npm run scorecard:debug`, never `npm test`.
 
 Rules unchanged: work item = class · inner = vitest · outer = one example · honest residual · firewall.
 

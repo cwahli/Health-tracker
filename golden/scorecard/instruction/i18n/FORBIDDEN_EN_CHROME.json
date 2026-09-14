@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "law": "Incident strings from Indo chrome leaks. Must not appear as the Indonesian value of any REQUIRED_CHROME key. Must not appear as a quoted string literal in src/components except *.test.* / *.spec.*. Allowlist is food names, nutrient codes, units, proper nouns — not these chrome leftovers.",
+  "incident_strings": [
+    "Chat Placeholder",
+    "Agent Food Welcome",
+    "Data Used By Agent",
+    "Empty History",
+    "Manual Entry",
+    "Weight Label",
+    "Nutrient Label",
+    "Total Label",
+    "Ingredients Label",
+    "Welcome Health Portal",
+    "Dashboard Ready Desc",
+    "Sign In Title",
+    "Email Label",
+    "Password Label",
+    "OR DIVIDER"
+  ],
+  "scan_roots": ["src/components"],
+  "exclude_name_substrings": [".test.", ".spec."]
+}

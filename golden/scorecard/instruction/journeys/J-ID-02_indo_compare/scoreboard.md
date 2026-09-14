@@ -28,7 +28,7 @@
 - **Status**: **PASS**
 
 ### Gate I18N-A11Y: Accessibility-Tree Indonesian Chrome Gate (Locked Gate)
-- **Condition**: Every accessible surface visited during the comparison journey (`preferred_language=id`) must be audited via Playwright accessibility tree snapshot (`page.accessibility.snapshot({ interestingOnly: true })`), saving evidence to `golden/journeys/_live_a11y/J-ID-02-<surface>.txt`. Zero title-case placeholders, zero known incident strings, and zero non-allowlisted English chrome verbs permitted.
+- **Condition**: Every accessible surface visited during the comparison journey (`preferred_language=id`) must be audited via Playwright accessibility tree snapshot (`page.accessibility.snapshot({ interestingOnly: true })`), saving evidence to `golden/scorecard/current/a11y/J-ID-02-<surface>.txt`. Zero title-case placeholders, zero known incident strings, and zero non-allowlisted English chrome verbs permitted.
 - **PASS Criteria**:
   - All visited surfaces captured with zero violations:
     1. **Home portal / dashboard**: Returning user home portal displays localized headings and target cards, zero untranslated English verbs.

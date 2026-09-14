@@ -4,8 +4,8 @@ import { expect, type Page, type Locator } from '@playwright/test';
 import { classifyDump, formatOracleFails } from '../../src/utils/dumpContract.js';
 
 export const CREDS_FILE = path.resolve('/tmp/sari-e2e-creds.json');
-export const LIVE_DEBUG_DIR = path.resolve(process.cwd(), 'golden/journeys/_live_debug');
-export const LIVE_A11Y_DIR = path.resolve(process.cwd(), 'golden/journeys/_live_a11y');
+export const LIVE_DEBUG_DIR = path.resolve(process.cwd(), 'golden/scorecard/current/debug');
+export const LIVE_A11Y_DIR = path.resolve(process.cwd(), 'golden/scorecard/current/a11y');
 
 export const SARI_PERSONA = {
   name: 'Sari Hartono',
@@ -18,7 +18,7 @@ export const SARI_PERSONA = {
   lang: 'id',
 };
 
-// Gate I18N-A11Y constants per golden/journeys/_drafts/GATE_I18N_A11Y_TREE.md
+// Gate I18N-A11Y constants per golden/scorecard/instruction/i18n/GATE_I18N_A11Y_TREE.md
 const TITLE_CASE_PLACEHOLDER_REGEX = /\b[A-Z][A-Za-z0-9]*(?: [A-Z][A-Za-z0-9]*)* (Title|Desc|Label)\b/;
 
 const KNOWN_BAD_CHROME_STRINGS = [
