@@ -2,15 +2,17 @@
 
 **Purpose:** one PASS/FAIL board by product area, **plus a ratchet for bugs that took >3 fix iterations or came back after green.** Living document — do not delete a red or ratchet row to look green.
 
-**As of:** 2026-09-14, `HEAD` `064a9ff`.  
+**As of:** 2026-09-14, `HEAD` `c7db138`.  
 **How this v3 was built:** review of ROADMAP / QUALITY / FOOD / standing / learnings / prototypes / `golden/meal` / GitHub PRs #1–#5 / git history of restores, wipes, and re-fixes. Named reds re-verified. Did **not** run `npm test`.
 
 **Sister files:** [`SCOREBOARD_LIVE_RESULTS.md`](./SCOREBOARD_LIVE_RESULTS.md) · [`_drafts/GATE_I18N_A11Y_TREE.md`](./_drafts/GATE_I18N_A11Y_TREE.md) · [`plan/ROADMAP.md`](../../plan/ROADMAP.md) · [`docs/agent/DOMAIN_REGRESSION_MAP.md`](../../docs/agent/DOMAIN_REGRESSION_MAP.md) · [`docs/agent/standing.json`](../../docs/agent/standing.json)
 
-Refresh (currently-red named files only):
+**Debug dump (canonical evidence):** [`MASTER_SCORECARD_DEBUG.md`](./MASTER_SCORECARD_DEBUG.md) · [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Contract table first, then every named test PASS/FAIL/SKIP. Skip is not PASS. Cite **all green** only when `overall_named_gates` is PASS in that file.
+
+Refresh:
 
 ```
-npx vitest run server_portion_clarify.test.ts src/utils/goldenScoreboard.test.ts tests/golden_meals.test.ts src/components/ui/AppModal.test.tsx tests/golden_biomarker.test.ts
+node scripts/assert-master-scorecard.mjs
 ```
 
 Until `6c25141`, `npm test` also executed Playwright specs and printed **18 fake FAIL files**. Fixed in `vite.config.ts` (`**/prototype/tests/**` excluded).
