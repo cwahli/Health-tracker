@@ -4557,6 +4557,31 @@ ${logsText}`);
           // Merge custom biomarker definitions into profile if any
           let mergedProfile = { ...resData.profile };
           let defsWithApproval: { [key: string]: any } = {};
+          // B7.4: unapproved extract output routes to the Pending store, never
+          // the catalog bag. (Known-key updates still flow via defsWithApproval.)
+          const pushTransientPending = (item: any) => {
+            const list = mergedProfile.pendingObservations && Array.isArray(mergedProfile.pendingObservations)
+              ? [...mergedProfile.pendingObservations]
+              : [...(profile?.pendingObservations || [])];
+            const dup = list.some((p: any) =>
+              String(p?.printedName || '').toLowerCase() === String(item?.printedName || '').toLowerCase() &&
+              String(p?.date || '') === String(item?.date || '') &&
+              String(p?.rawValue ?? '') === String(item?.rawValue ?? ''));
+            if (!dup) {
+              list.push({
+                id: `pending_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                printedName: item.printedName || '',
+                suggestedKey: item.suggestedKey || '',
+                date: item.date || resData.date || '',
+                rawValue: item.rawValue ?? '',
+                rawUnit: item.rawUnit || '',
+                printedRange: item.printedRange || '',
+                labFlag: item.labFlag || '',
+                createdAt: Date.now(),
+              });
+            }
+            mergedProfile.pendingObservations = list;
+          };
           if (resData.customBiomarkerDefs && Object.keys(resData.customBiomarkerDefs).length > 0) {
             Object.entries(resData.customBiomarkerDefs).forEach(([k, v]: [string, any]) => {
               const mapped = getMappedBiomarkerKey(k) || k;
@@ -4565,7 +4590,7 @@ ${logsText}`);
               if (existing) {
                 defsWithApproval[mapped] = { ...existing, ...v, needsApproval: existing.needsApproval };
               } else if (shouldStampExtractedDefPending(mapped)) {
-                defsWithApproval[mapped] = { ...v, needsApproval: true };
+                pushTransientPending({ printedName: (v as any)?.name || k, suggestedKey: mapped, rawUnit: (v as any)?.unit || '' });
               }
             });
           }
@@ -4578,14 +4603,13 @@ ${logsText}`);
               const mapped = getMappedBiomarkerKey(suggested_key) || suggested_key;
               if (isCatalogBuiltIn(mapped)) return;
               if (!defsWithApproval[mapped] && shouldStampExtractedDefPending(mapped, profile?.customBiomarkers?.[mapped])) {
-                defsWithApproval[mapped] = {
-                  name: raw_name,
-                  unit: '',
-                  normalRange: '',
-                  description: '',
-                  standardMedicalGrouping: 'By Medical Practice',
-                  needsApproval: true
-                };
+                pushTransientPending({
+                  printedName: raw_name,
+                  suggestedKey: mapped,
+                  rawUnit: test.unit || '',
+                  printedRange: test.printedRange || test.normalRange || '',
+                  labFlag: test.labFlag || test.flag || '',
+                });
               }
             });
           }

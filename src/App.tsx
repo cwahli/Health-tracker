@@ -121,12 +121,36 @@ import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, getDocFromServer, 
 import { sanitizeForFirestore, checkQuotaFlag, handleRetryQuota } from './utils/firestoreUtils';
 import { getCurrentDateInTimezone, toYYYYMMDD, normalizeBiomarkerHistory } from './utils/dateUtils';
 import { biomarkerDefinitions, isAsianEthnicity, hasBmiPendingAlert, getProfileFingerprint, isValEmpty, getMappedBiomarkerKey, selfHealCustomBiomarkerDefinitions } from './utils/biomarkers';
-import { applyModificationCommands, overlayFingerprint, resolveAgentDestination, shouldRunCalibrator, attachObservationMeta, enrichReviewModificationCommands, collectCatalogUnitMap, cleanupInventedBiomarkerCatalog, routeExtractedObservations, type ModificationCommand } from './utils/biomarkerLifecycle';
+import { applyModificationCommands, overlayFingerprint, resolveAgentDestination, shouldRunCalibrator, attachObservationMeta, enrichReviewModificationCommands, collectCatalogUnitMap, cleanupInventedBiomarkerCatalog, routeExtractedObservations, approvePendingObservation, type ModificationCommand } from './utils/biomarkerLifecycle';
 import { extractFallbackModifications } from './components/chat-cards/BiomarkerReviewCard';
 import { formatOptimalTargetValue } from './utils/agentCalibration';
 import { standardizeUnit, CONVERSION_FACTORS } from './utils/unitConversion';
 import { get, set, pruneLocalStorageToFreeSpace, getStorageKey, getSnapshotKey, saveLocalSnapshot, loadLocalSnapshots, deleteLocalSnapshot, safeSaveToLocalStorage, getAggregatedAppData, clearCachedAppData, clearChatMemoryKeys } from './utils/storageUtils';
 const FIRESTORE_READ_BUDGET = 3000; // generous for one real session; a runaway loop hits this fast
+// B7.4 Real Pending store: unknown printed names route here with dedup
+// (printedName + date + rawValue). Never become catalog keys.
+function pushPendingObservation(existing: any[] | undefined, item: any): any[] {
+  const list = Array.isArray(existing) ? [...existing] : [];
+  const dup = list.some((p: any) =>
+    String(p?.printedName || '').toLowerCase() === String(item?.printedName || '').toLowerCase() &&
+    String(p?.date || '') === String(item?.date || '') &&
+    String(p?.rawValue ?? '') === String(item?.rawValue ?? ''));
+  if (!dup) {
+    list.push({
+      id: item.id || `pending_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      printedName: item.printedName || '',
+      suggestedKey: item.suggestedKey || '',
+      date: item.date || '',
+      rawValue: item.rawValue ?? '',
+      rawUnit: item.rawUnit || '',
+      printedRange: item.printedRange || '',
+      labFlag: item.labFlag || '',
+      sourceJobId: item.sourceJobId || '',
+      createdAt: item.createdAt || Date.now(),
+    });
+  }
+  return list;
+}
 function firestoreReadGuard(label: string, docCount: number = 1): boolean {
   const key = 'firestoreReadCountThisSession';
   const current = parseInt(sessionStorage.getItem(key) || '0', 10) + docCount;
@@ -4621,6 +4645,9 @@ export default function App() {
     // Standardize and normalize extracted biomarkers and custom definitions
     let finalExtracted = { ...extractedBiomarkers };
     let finalProfileUpdates = profileUpdates ? { ...profileUpdates } : undefined;
+    // B7.4: unapproved extract stamps collected here, routed to the Pending
+    // store after the entries loop (never merged into customBiomarkers).
+    const pendingFromDefs: any[] = [];
 
     // Filter out invalid/empty biomarkers
     const isValidValue = (v: unknown): boolean => v !== null && v !== undefined && v !== '' && v !== 'N/A' && v !== 'null';
@@ -4669,6 +4696,27 @@ export default function App() {
       const currentCustoms = { ...(profile?.customBiomarkers || {}) };
       const nextCustomDefs: { [key: string]: any } = {};
       Object.entries(finalProfileUpdates.customBiomarkers).forEach(([rawKey, def]) => {
+        // B7.4: needsApproval stamps are unapproved extract output. Route to the
+        // Pending store — unknown names NEVER become catalog keys here. (Values
+        // already flow to pending via routeExtractedObservations below; this
+        // preserves name-only defs that carry no value.)
+        if ((def as any)?.needsApproval === true) {
+          const alreadyApproved = !!currentCustoms[rawKey] && (currentCustoms[rawKey] as any)?.catalogApproved === true;
+          const builtInHit = biomarkerDefinitions.some((d: any) => d.key === rawKey);
+          if (!alreadyApproved && !builtInHit) {
+            const rawName = (def as any).name || rawKey;
+            const cleanedPending = cleanName(rawName);
+            const slugPending = cleanedPending.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || rawKey;
+            pendingFromDefs.push({
+              printedName: cleanedPending,
+              suggestedKey: slugPending,
+              rawValue: (finalExtracted as any)?.[rawKey] ?? '',
+              rawUnit: (def as any)?.unit || '',
+              printedRange: (def as any)?.normalRange || '',
+            });
+            return;
+          }
+        }
         const rawName = def.name || rawKey;
         const cleaned = cleanName(rawName);
         const normalizeUnit = (u: string) => (u || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -4831,9 +4879,14 @@ export default function App() {
       }
     }
     const newPendingItems: any[] = [];
+    // B7.4: same-call approvals (e.g. Dictionary pending approve bundling the
+    // approved def with its value) must route as approved, not back to pending.
+    const routingProfileView = finalProfileUpdates?.customBiomarkers
+      ? { ...(currentProfile as any), customBiomarkers: { ...((currentProfile as any)?.customBiomarkers || {}), ...finalProfileUpdates.customBiomarkers } }
+      : currentProfile;
     entriesToProcess.forEach(entry => {
       const recordDate = entry.date || getCurrentDateInTimezone(profile?.timezone);
-      const routed = routeExtractedObservations(entry.biomarkers || {}, entry.tests || [], currentProfile, recordDate);
+      const routed = routeExtractedObservations(entry.biomarkers || {}, entry.tests || [], routingProfileView, recordDate);
 
       if (routed.pendingObservations.length > 0) {
         newPendingItems.push(...routed.pendingObservations);
@@ -4914,6 +4967,20 @@ export default function App() {
         }
       }
     });
+
+    // B7.4: fold unapproved def stamps into the pending flow (skip ones the
+    // entries loop already routed with the same key).
+    if (pendingFromDefs.length > 0) {
+      const fallbackDate = (entriesToProcess[0] as any)?.date || getCurrentDateInTimezone(profile?.timezone) || new Date().toISOString().slice(0, 10);
+      pendingFromDefs.forEach((pd: any) => {
+        const item = { ...pd, date: (pd as any).date || fallbackDate };
+        const already = newPendingItems.some((np: any) =>
+          String(np?.suggestedKey || '').toLowerCase() === String(item.suggestedKey || '').toLowerCase() ||
+          (String(np?.printedName || '').toLowerCase() === String(item.printedName || '').toLowerCase() &&
+            String(np?.rawValue ?? '') === String(item.rawValue ?? '')));
+        if (!already) newPendingItems.push(item);
+      });
+    }
 
     if (newPendingItems.length > 0) {
       const existingPending = Array.isArray(currentProfile?.pendingObservations) ? [...currentProfile.pendingObservations] : [];
@@ -6728,6 +6795,7 @@ export default function App() {
                   if (updatedProfileArg) setProfile(updatedProfileArg);
                   await saveAndSync(updatedProfileArg || profile, foodLogs, newBiomarkers, updatedHistory, actions, dailyBenefits, report, { type: 'profile' });
                 }}
+                onLogMedical={handleLogMedical}
                 batchSize={batchSize}
                 onChangeBatchSize={(size) => {
                   setBatchSize(size);
@@ -7489,17 +7557,15 @@ export default function App() {
 
                 if (!updatedProfile.customBiomarkers[bioName]) {
                   if (!isBuiltIn) {
-                    updatedProfile.customBiomarkers[bioName] = {
-                      name: entry.displayName || entry.biomarker,
-                      unit: finalUnit,
-                      normalRange: finalRange || 'Unknown',
-                      description: '',
-                      riskCategories: mapData?.riskCategories || [],
-                      standardMedicalGrouping: mapData?.standardMedicalGrouping || 'Other',
-                      potentialMedicalConditions: mapData?.potentialMedicalConditions || [],
-                      needsApproval: true,
-                      catalogApproved: false,
-                    };
+                    // B7.4: unknown names route to the Pending store, never catalog keys.
+                    updatedProfile.pendingObservations = pushPendingObservation(updatedProfile.pendingObservations, {
+                      printedName: entry.displayName || entry.biomarker,
+                      suggestedKey: bioName,
+                      date: standardDate,
+                      rawValue: finalValue,
+                      rawUnit: finalUnit,
+                      printedRange: finalRange,
+                    });
                   } else if (shouldRunCalibrator(bioName, updatedProfile)) {
                     updatedProfile.customBiomarkers[bioName] = {
                       name: entry.displayName || entry.biomarker,
@@ -8784,17 +8850,15 @@ export default function App() {
                   // Built-in / alias-mapped keys already live in the catalog. Do not invent
                   // a custom overlay (or a pending-approval row) for every extracted line.
                   if (!isBuiltIn) {
-                    updatedProfile.customBiomarkers[bioName] = {
-                      name: entry.displayName || entry.biomarker,
-                      unit: finalUnit,
-                      normalRange: finalRange || 'Unknown',
-                      description: '',
-                      riskCategories: mapData?.riskCategories || [],
-                      standardMedicalGrouping: mapData?.standardMedicalGrouping || 'Other',
-                      potentialMedicalConditions: mapData?.potentialMedicalConditions || [],
-                      needsApproval: true,
-                      catalogApproved: false,
-                    };
+                    // B7.4: unknown names route to the Pending store, never catalog keys.
+                    updatedProfile.pendingObservations = pushPendingObservation(updatedProfile.pendingObservations, {
+                      printedName: entry.displayName || entry.biomarker,
+                      suggestedKey: bioName,
+                      date: standardDate,
+                      rawValue: finalValue,
+                      rawUnit: finalUnit,
+                      printedRange: finalRange,
+                    });
                   } else if (shouldRunCalibrator(bioName, updatedProfile)) {
                     updatedProfile.customBiomarkers[bioName] = {
                       name: entry.displayName || entry.biomarker,

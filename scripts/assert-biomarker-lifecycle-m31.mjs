@@ -98,6 +98,18 @@ ok(lifeTest.includes('converts history values with convertViaTable'), 'P6', 'mis
 ok(bioUtils.includes('isValEmpty'), 'P7', 'missing isValEmpty in biomarkers.ts');
 ok(lifeTest.includes('treats 0 and 0.0 as real values'), 'P7', 'missing isValEmpty(0) test in biomarkerLifecycle.test.ts');
 
+// P8 — B7.4 Real Pending store: unknown names route to pendingObservations,
+// never needsApproval flags on the customBiomarkers bag. Reads
+// (`?.needsApproval === true`) and fixture/test files are exempt — only the
+// `: true` stamp literal is forbidden in product extract/apply surfaces.
+const insights = read('src/components/InsightsTab.tsx');
+for (const [src, id] of [[app, 'App.tsx'], [logChat, 'LogChat.tsx'], [insights, 'InsightsTab.tsx'], [dict, 'BiomarkerDictionaryModal.tsx']]) {
+  const stamps = (src.match(/needsApproval:\s*true/g) || []).length;
+  ok(stamps === 0, 'P8', `${id} stamps needsApproval:true onto the bag (${stamps}x)`);
+}
+ok(app.includes('pushPendingObservation') && logChat.includes('pushTransientPending'), 'P8', 'pending push helpers missing');
+ok(dict.includes('approvePendingObservation') && dict.includes('dismissPendingObservation'), 'P8', 'Dictionary does not approve/dismiss from the pending store');
+
 if (failed) {
   console.error(`\nM31 assert failed: ${failed} check(s)`);
   process.exit(1);

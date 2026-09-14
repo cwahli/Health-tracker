@@ -1022,6 +1022,23 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
           if (flaggedAt > 0) unionNotUsedBiomarkers[k] = { flaggedAt };
         });
 
+        // B7.4: Pending store merges explicitly — union by id, dedup on
+        // printedName + date + rawValue (same triple as the client push).
+        // Approve splice wins over a concurrent re-add of the same id.
+        const existingPending = Array.isArray(existingData.profile?.pendingObservations)
+          ? existingData.profile.pendingObservations : [];
+        const incomingPending = Array.isArray(profile?.pendingObservations) ? profile.pendingObservations : [];
+        const unionPendingObservations: any[] = [...existingPending];
+        for (const item of incomingPending) {
+          const id = (item as any)?.id;
+          if (id && unionPendingObservations.some((p: any) => p?.id === id)) continue;
+          const dup = unionPendingObservations.some((p: any) =>
+            String(p?.printedName || '').toLowerCase() === String((item as any)?.printedName || '').toLowerCase() &&
+            String(p?.date || '') === String((item as any)?.date || '') &&
+            String(p?.rawValue ?? '') === String((item as any)?.rawValue ?? ''));
+          if (!dup) unionPendingObservations.push(item);
+        }
+
         const mergedDeletedBiomarkerLogIds = {
           ...sanitizeDeleteMap(existingData.profile?.deletedBiomarkerLogIds),
           ...sanitizeDeleteMap(profile?.deletedBiomarkerLogIds)
@@ -1036,9 +1053,11 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
               ...deepMergeObjectShallow(existingData.profile, profile, [
                 'customBiomarkers', 'deletedCustomBiomarkerKeys', 'notUsedBiomarkers', 'deletedNotUsedBiomarkerKeys',
                 'deletedFoodLogIds', 'deletedBiomarkerLogIds', 'targets', 'generalNutrientTargets', 'weeklyTargets',
-                'weeklyNutrientTargets', 'topWeeklyNutrientTargets', 'customGroupings', 'groupingDescriptions', 'categoryDescriptions'
+                'weeklyNutrientTargets', 'topWeeklyNutrientTargets', 'customGroupings', 'groupingDescriptions', 'categoryDescriptions',
+                'pendingObservations'
               ]),
               customBiomarkers: unionCustomBiomarkers,
+              pendingObservations: unionPendingObservations,
               deletedCustomBiomarkerKeys: mergedDeletedCustomBiomarkerKeys,
               notUsedBiomarkers: unionNotUsedBiomarkers,
               deletedNotUsedBiomarkerKeys: mergedDeletedNotUsedBiomarkerKeys,

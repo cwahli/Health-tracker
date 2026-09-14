@@ -16,6 +16,7 @@ import { BiomarkerAuditModal } from './BiomarkerAuditModal';
 import { saveAgentRequestLog } from '../utils/agentLogsTracker';
 import { t, interpolate, displayBiomarkerName } from '../utils/i18n';
 import { getDuplicateAliasGroups } from '../utils/biomarkerAuditEngine';
+import { approvePendingObservation, dismissPendingObservation } from '../utils/biomarkerLifecycle';
 
 interface BiomarkerDictionaryModalProps {
   profile: UserProfile;
@@ -5680,12 +5681,12 @@ I can analyze these, compare them with our database keys, and find standard mapp
               )}
 
               {/* TO BE APPROVED PANEL */}
-              {toApproveKeys.length > 0 && (
+              {(toApproveKeys.length > 0 || (profile.pendingObservations || []).length > 0) && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                       <Clock className="w-4 h-4 text-amber-500 animate-pulse" />
-                      Biomarkers To Review ({toApproveKeys.length})
+                      Biomarkers To Review ({toApproveKeys.length + (profile.pendingObservations || []).length})
                       <span className="text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                         Needing Review or Approval
                       </span>
@@ -5704,6 +5705,62 @@ I can analyze these, compare them with our database keys, and find standard mapp
                   <p className="text-xs text-theme-text-secondary mb-4">
                     These biomarkers are pending approval, have missing reference ranges, or have recently logged values that fall outside physiological bounds (indicating possible unit scaling errors).
                   </p>
+                  {/* B7.4: Pending-store rows — unknown printed names awaiting Dictionary approve. */}
+                  {(profile.pendingObservations || []).length > 0 && (
+                    <div className="space-y-2 mb-4">
+                      {(profile.pendingObservations || []).map((p: any) => (
+                        <div key={p.id || p.printedName} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/20">
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">
+                              {p.printedName || p.suggestedKey}
+                              {p.rawValue !== '' && p.rawValue !== undefined && (
+                                <span className="ml-2 font-normal text-slate-500">{String(p.rawValue)}{p.rawUnit ? ` ${p.rawUnit}` : ''}</span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              Extracted entry pending clinical verification{p.date ? ` · ${p.date}` : ''}{p.printedRange ? ` · ref ${p.printedRange}` : ''}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => {
+                                // B7.4: approve bundles the approved def with its value in one
+                                // hub call — the def lands in the catalog bag approved, the
+                                // value routes to history (same-call approval view), and the
+                                // pending row is spliced. No parent wiring needed.
+                                const targetKey = (p.suggestedKey || p.printedName || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                                const def = { name: p.printedName || p.suggestedKey, unit: p.rawUnit || '', normalRange: p.printedRange || '', catalogApproved: true };
+                                const remaining = (profile.pendingObservations || []).filter((q: any) => (q.id || q.printedName) !== (p.id || p.printedName));
+                                if (onLogMedical && p.rawValue !== '' && p.rawValue !== undefined && targetKey) {
+                                  onLogMedical(
+                                    { [targetKey]: p.rawValue },
+                                    { customBiomarkers: { [targetKey]: def }, pendingObservations: remaining } as any,
+                                    p.date || undefined,
+                                    [{ date: p.date || null, biomarkers: { [targetKey]: p.rawValue }, tests: [{ key: targetKey, name: p.printedName, unit: p.rawUnit, normalRange: p.printedRange, labFlag: p.labFlag }] }],
+                                  );
+                                } else {
+                                  const { profile: np } = approvePendingObservation(profile, biomarkerHistory, p.id || p.printedName, { name: def.name, unit: def.unit, normalRange: def.normalRange });
+                                  onUpdateProfile({ customBiomarkers: np.customBiomarkers, pendingObservations: np.pendingObservations });
+                                }
+                              }}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold cursor-pointer"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => {
+                                const np = dismissPendingObservation(profile, p.id || p.printedName);
+                                onUpdateProfile({ pendingObservations: np.pendingObservations });
+                              }}
+                              className="px-3 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-[11px] font-bold cursor-pointer"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="space-y-2">
                     {toApproveKeys.map(key => {
                       const builtIn = biomarkerDefinitions.find((b: any) => b.key === key || (Array.isArray(b.aliases) && b.aliases.some((a: string) => a.toLowerCase() === key.toLowerCase())));
@@ -5935,20 +5992,28 @@ I can analyze these, compare them with our database keys, and find standard mapp
                           }
 
                           const newKey = searchQuery.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-                          const newCustomBiomarkers = { ...profile.customBiomarkers };
-                          newCustomBiomarkers[newKey] = {
-                            name: searchQuery.includes('_') 
-                              ? searchQuery.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-                              : searchQuery,
-                            unit: '',
-                            normalRange: '',
-                            description: '',
-                            standardMedicalGrouping: 'By Medical Practice',
-                            riskCategories: [],
-                            potentialMedicalConditions: [],
-                            needsApproval: true
-                          };
-                          onUpdateProfile({ customBiomarkers: newCustomBiomarkers });
+                          // B7.4: user-created names enter via the Pending store, never
+                          // pre-approved catalog keys. Approve from To Review.
+                          const pendingName = searchQuery.includes('_')
+                            ? searchQuery.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                            : searchQuery;
+                          const existingPending = Array.isArray(profile.pendingObservations) ? [...profile.pendingObservations] : [];
+                          const alreadyPending = existingPending.some((p: any) =>
+                            String(p?.suggestedKey || '').toLowerCase() === newKey ||
+                            String(p?.printedName || '').toLowerCase() === String(pendingName).toLowerCase());
+                          if (!alreadyPending) {
+                            existingPending.push({
+                              id: `pending_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                              printedName: pendingName,
+                              suggestedKey: newKey,
+                              date: new Date().toISOString().slice(0, 10),
+                              rawValue: '',
+                              rawUnit: '',
+                              printedRange: '',
+                              createdAt: Date.now(),
+                            });
+                          }
+                          onUpdateProfile({ pendingObservations: existingPending });
                           setSearchQuery('');
                         }}
                         className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm shadow-indigo-600/10 cursor-pointer"

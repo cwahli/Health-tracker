@@ -67,6 +67,7 @@ interface InsightsTabProps {
   onAgentAnalysisSaved?: (agentType: string, agentResult: any, existingId?: string) => Promise<string | void>;
   onOpenFrontDesk?: () => void;
   onDataReviewStateChange?: (state: any) => void;
+  onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string, entries?: any, modificationCommand?: any, skipClose?: boolean) => void;
 }
 
 const STABLE_EMPTY_ARRAY: string[] = [];
@@ -103,7 +104,8 @@ export default function InsightsTab({
   onBatchConsolidate,
   onAgentAnalysisSaved,
   onOpenFrontDesk,
-  onDataReviewStateChange
+  onDataReviewStateChange,
+  onLogMedical
 }: InsightsTabProps) {
   const t = translations[profile.language] || translations.en;
   const activeHistory = React.useMemo(() => (biomarkerHistory || []).filter(h => h.sync_state !== 'delete'), [biomarkerHistory]);
@@ -952,8 +954,11 @@ export default function InsightsTab({
       }
     });
 
-    // 3. Add unmappedTests to customBiomarkers with needsApproval = true
+    // 3. Route unmappedTests to the Pending store (B7.4) — never catalog keys.
+    let pendingToSave: any[] | null = null;
     if (result?.unmappedTests && Array.isArray(result.unmappedTests)) {
+      const fallbackDate = (result as any)?.date || new Date().toISOString().slice(0, 10);
+      const existingPending = Array.isArray((profile as any)?.pendingObservations) ? [...(profile as any).pendingObservations] : [];
       result.unmappedTests.forEach((test: any) => {
         const raw_name = test?.raw_name || (typeof test === 'string' ? test : '');
         if (!raw_name) return;
@@ -961,16 +966,29 @@ export default function InsightsTab({
         const mapped = getMappedBiomarkerKey(suggested_key) || suggested_key;
         if (isCatalogBuiltIn(mapped)) return;
         if (!updatedCustoms[mapped] && shouldStampExtractedDefPending(mapped, updatedCustoms[mapped])) {
-          updatedCustoms[mapped] = {
-            name: raw_name,
-            unit: '',
-            normalRange: '',
-            description: '',
-            standardMedicalGrouping: 'By Medical Practice',
-            needsApproval: true
+          const item = {
+            printedName: raw_name,
+            suggestedKey: mapped,
+            date: test?.date || fallbackDate,
+            rawValue: test?.value ?? test?.raw_value ?? '',
+            rawUnit: test?.unit || '',
+            printedRange: test?.printedRange || test?.normalRange || '',
+            labFlag: test?.labFlag || test?.flag || '',
           };
+          const dup = existingPending.some((p: any) =>
+            String(p?.printedName || '').toLowerCase() === String(item.printedName).toLowerCase() &&
+            String(p?.date || '') === String(item.date) &&
+            String(p?.rawValue ?? '') === String(item.rawValue ?? ''));
+          if (!dup) {
+            existingPending.push({
+              ...item,
+              id: `pending_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              createdAt: Date.now(),
+            });
+          }
         }
       });
+      pendingToSave = existingPending;
     }
 
     currentHistory.sort((a, b) => toYYYYMMDD(b.date).localeCompare(toYYYYMMDD(a.date)));
@@ -985,7 +1003,8 @@ export default function InsightsTab({
 
     const updatedProfile = {
       ...profile,
-      customBiomarkers: updatedCustoms
+      customBiomarkers: updatedCustoms,
+      ...(pendingToSave ? { pendingObservations: pendingToSave } : {}),
     };
 
     if (onUpdateProfile) {
@@ -1143,10 +1162,10 @@ export default function InsightsTab({
           });
         });
 
-        const updatedProfile = {
-          ...profile,
-          customBiomarkers: updatedCustoms
-        };
+    const updatedProfile = {
+      ...profile,
+      customBiomarkers: updatedCustoms,
+    };
 
         if (onUpdateProfile) {
           await onUpdateProfile(updatedProfile);
@@ -3060,6 +3079,7 @@ export default function InsightsTab({
           onBatchConsolidate={onBatchConsolidate}
           onAgentAnalysisSaved={onAgentAnalysisSaved}
           onDeleteAnalysis={onDeleteAnalysis}
+          onLogMedical={onLogMedical}
           selectedModelId={selectedModelId}
           onChangeModelId={onChangeModelId}
         />
