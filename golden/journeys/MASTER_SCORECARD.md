@@ -1,85 +1,140 @@
 # Master Scorecard — Health-tracker
 
-**Purpose:** one PASS/FAIL board by product area so a real regression does not require re-testing the app by hand. Living document — **every bug found by hand becomes a permanent row here** (fix + named test + this row). Do not delete a red row to look green.
+**Purpose:** one PASS/FAIL board by product area, **plus a ratchet for bugs that took >3 fix iterations or came back after green.** Living document — do not delete a red or ratchet row to look green.
 
-**As of:** 2026-09-14, `HEAD` `d7f5216` (scorecard v1 landed in `6c25141`; I18N-A11Y helper repaired in `b8f91d1` → `d7f5216`).  
-**Re-verified this pass:** the four named failing vitest files below, plus `vite.config.ts` Playwright exclude. Did **not** run `npm test` (forbidden as the inner loop — `AGENTS.md` / `DOMAIN_REGRESSION_MAP.md`).
+**As of:** 2026-09-14, `HEAD` `064a9ff`.  
+**How this v3 was built:** review of ROADMAP / QUALITY / FOOD / standing / learnings / prototypes / `golden/meal` / GitHub PRs #1–#5 / git history of restores, wipes, and re-fixes. Named reds re-verified. Did **not** run `npm test`.
 
-**Sister files:** live Indo journeys = [`SCOREBOARD_LIVE_RESULTS.md`](./SCOREBOARD_LIVE_RESULTS.md). Gate definition = [`_drafts/GATE_I18N_A11Y_TREE.md`](./_drafts/GATE_I18N_A11Y_TREE.md). Execute order = [`plan/ROADMAP.md`](../../plan/ROADMAP.md). Named commands = [`docs/agent/DOMAIN_REGRESSION_MAP.md`](../../docs/agent/DOMAIN_REGRESSION_MAP.md).
+**Sister files:** [`SCOREBOARD_LIVE_RESULTS.md`](./SCOREBOARD_LIVE_RESULTS.md) · [`_drafts/GATE_I18N_A11Y_TREE.md`](./_drafts/GATE_I18N_A11Y_TREE.md) · [`plan/ROADMAP.md`](../../plan/ROADMAP.md) · [`docs/agent/DOMAIN_REGRESSION_MAP.md`](../../docs/agent/DOMAIN_REGRESSION_MAP.md) · [`docs/agent/standing.json`](../../docs/agent/standing.json)
 
----
+Refresh (currently-red named files only):
 
-## How to use this file
-
-| Who | Do |
-|---|---|
-| **Gemini / other agents** | Current work is still **B0** on the ROADMAP. Use this file to see which area is red; run that area’s **named** command, not `npm test`. |
-| **After a hand-found bug** | Fix → named vitest → add a row here under the area (class + evidence + gate). Grow `standing.json` if it is a must-keep feature. |
-| **Refresh numbers** | Re-run the **named gates in each section**. Do not cite a full-suite file count as proof. |
-
-```text
-# The only refresh this board needs (the four currently-red files):
-npx vitest run server_portion_clarify.test.ts src/utils/goldenScoreboard.test.ts tests/golden_meals.test.ts src/components/ui/AppModal.test.tsx
+```
+npx vitest run server_portion_clarify.test.ts src/utils/goldenScoreboard.test.ts tests/golden_meals.test.ts src/components/ui/AppModal.test.tsx tests/golden_biomarker.test.ts
 ```
 
-Until `6c25141`, `npm test` also executed `prototype/tests/*.spec.ts` (Playwright-only). That produced **18 fake FAIL files every run**. Fixed: `vite.config.ts` now excludes `**/prototype/tests/**`. If an older log says “21 failed files,” 18 of those were never product.
+Until `6c25141`, `npm test` also executed Playwright specs and printed **18 fake FAIL files**. Fixed in `vite.config.ts` (`**/prototype/tests/**` excluded).
 
 ---
 
 ## OVERALL VERDICT: **NOT ALL GREEN**
 
-| Area | Inner (named vitest) | Live / E2E | Verdict |
+| Area | Inner | Live / E2E | Verdict |
 |---|---|---|---|
-| Localization | i18n packs **PASS**; shared `AppModal` **FAIL** (`closeDialog` raw key) | J-ID-01/02/03 debug-contract **LIVE PASS**; Gate I18N-A11Y **never run live** | ⚠️ INCOMPLETE |
-| Meal Log | **FAIL** — portion-clarify inverted; golden fixture crash; Home polarity + same-meal merge **PASS** | 3 Indo journeys happy-path PASS; 5 meal specs untracked | 🔴 FAIL (1 product + 1 fixture-rot) |
-| Compare | `compareMealLogGuard` PASS (thin) | J-ID-02 LIVE PASS; 2 specs untracked | ⚠️ PARTIAL |
-| Biomarkers | 8 named files PASS | **zero** Playwright coverage; B0 Apply smoke is Current work | ⚠️ UNIT-ONLY |
-| Receptionist | 5 named files PASS | 2 specs, demo/stub only | ⚠️ PARTIAL |
-| Reliability | tooling exclude **fixed**; credits/jobs/debug PASS; golden scorer **FAIL**; cross-device **untested** | no second-device spec exists | 🔴 FAIL (scorer + structural gap) |
+| Localization | i18n packs PASS; `AppModal` `closeDialog` **FAIL**; keys have been wiped **≥5 times** | J-ID-01/02/03 debug-contract LIVE PASS; Gate I18N-A11Y **never run** | ⚠️ INCOMPLETE + ratchet |
+| Meal Log | `PORTION_FUNNEL` invert; golden fixture crash; polarity + same-meal **PASS + standing** | 3 Indo journeys happy-path; Meal_04 cases 10/11 under-extract | 🔴 FAIL + ratchet |
+| Compare | thin unit PASS; Mode D took a **6-commit** repair series | J-ID-02 LIVE PASS (wrong fixtures); 6-case spec untracked | ⚠️ PARTIAL + ratchet |
+| Biomarkers | helper units PASS; **G-B1–G-B9 fixtures deleted** so `golden_biomarker.test.ts` **skips 9 tests and still reports PASS** | zero Playwright; B0 Apply is Current work | 🔴 FALSE-GREEN on goldens |
+| Receptionist | 5 named files PASS | stub specs only | ⚠️ PARTIAL |
+| Reliability | vitest/Playwright exclude fixed; golden scorer **FAIL**; no second-device test | photo-sync class still untested | 🔴 FAIL + ratchet |
 
-Do not read “N files pass” as “the feature works.” Several areas are green only where unit tests look. Detail below.
+---
+
+## Recurrence table — >3 iterations **or** fixed-then-reappeared
+
+Rule for this table: count **distinct fix commits / documented retries**, not chat turns. Conservative. **On scorecard?** = keep a permanent area row (even if currently green) so the class cannot vanish.
+
+| Class | What it is | Iterations (evidence) | Reappeared after green? | Now | **On master scorecard?** |
+|---|---|---|---|---|---|
+| `TRANSLATION_DUMP` / `LEAK_KEY` / `LEAK_EN_CHROME` | `translations.ts` bulk overwrite drops keys; UI shows raw camelCase | **≥8 restores:** `bca0f80` wipe → `893d938` revert (S-7/8/9); `eeee07f` +263 keys; `fe61818` +10; `1bb0600` wipe → `2d6f78a` restore 277 **including `closeDialog`/`modalDialog`**; `d5a600e` gut (650-line delete + 4 `fix_translations*.cjs`) → `ff9d543` restore; `9848619` Home portal; `bfe5964` Food History overlay; `80c1911` auth placeholders; `f729298` quota copy (PR #3) | **Yes, repeatedly.** Every large “refactor/update translations” commit. `closeDialog` was restored in `2d6f78a` and is **gone again** in HEAD. | 🔴 AppModal still red; parity test cannot see keys that are absent from both locales | **YES — Localization #1.** Leftover-string list must include `closeDialog` / `modalDialog` so the next dump cannot hide them. |
+| `PORTION_FUNNEL` | ask vs adopt (stated grams, half-pack, overflow) | **≥6:** Bug #9 visual-source `30d5b2c`; servings-not-whole-pack `f86acde`; WRONG_BASIS 1g **PR #1** `c3e6cfd`; S-10 funnel `6669d81` + live cases `c277817` (**ROADMAP marked COMPLETE 2026-09-12**); bulk-pack follow-up `158dc14` (edits `server_portion_clarify.ts` + `quantityText.ts`) | **Yes.** S-10 COMPLETE then 4 tests inverted (ask/adopt swapped) on 2026-09-14 re-run. Likely broken by `158dc14`. | 🔴 4 failing assertions | **YES — Meal Log product red.** Do not paint expects. |
+| `SAME_MEAL_PACKAGE_PREPARED` | 3 photos of one oats meal → 2 dishes; “combine them” missed | Prior `merge_dishes` + closed regex; live `job_1789312118652` came back; TS collapse + standing `588154c` | **Yes.** User: “this bug was fixed before and reappeared.” Learner: no standing row, so the class returned. | ✅ standing `same_meal_package_prepared` | **YES — green ratchet.** Never drop the needles. |
+| `NUTRIENT_POLARITY` / Home Top Targets | sat fat over target shown green; snake_case vs camelCase; Home `includes` of undefined | Unify `4eefd94`; rolling-average `429ebbb`; Home crash `4a9f129`; polarity `588154c`; restore core keys `ff9d543` (**5 commits**) | **Yes.** Unify shipped, then sat fat still green because lists used `saturatedFat` and coach sent `saturated_fat`. | ✅ `isLimitNutrient` centralized | **YES — Home / Meal Log ratchet.** Gate: `nutrients.test.ts`. |
+| `CROSS_DEVICE_SYNC` / `DISPLAY_DUP` | photo placeholder; dup images; D1 sync_state | unique-by-key (Sync only) then Log `data:`+`/photos/` (`meal_image_unique` learning); R2 `cc6676d`; placeholder→URL **PR #2** `40dd6ca`; D1 push `bfea1f5`; sync_state `1527549` | **Yes.** First image fix tested on Sync, user still saw dups on Log. Photo still has **no second-device test**. | ⚠️ product claimed fixed; class untested | **YES — Reliability structural.** Highest-leverage new test. |
+| `COMPARE_MODE_D` | empty-success shelf, narrator fabricating logs, groups not on poll path, i18n | **≥6:** `75e1492` empty-success; `22db946` groups + never fabricate logs; `4a519ea` no narrator; `93a49c1` grouping template; `99141d8` zoom/normalize; `1558901` copy + target cards | Series of the same Mode D path, not one-and-done | ⚠️ unit thin; 6-case spec untracked; J-ID-02 used Silverqueen not the 6-set | **YES — Compare.** Gate = 6-case spec + standing `food_compare`. |
+| `GOLDEN_FIXTURE_ROT` | `bca0f80` (144 files) deleted golden assets; S-9 restored **only** translations | Deleted `tests/Golden_meal/{1–8}` expected/photos, **entire** `tests/Golden_biomarker/examples/G-B1…G-B9`, compare dirs. Manifest still lists G1–G9. | **Yes.** Suite was green, then collection crash / skip-pass. Never restored (blast-radius note in ROADMAP S-9). | 🔴 `golden_meals.test.ts` ENOENT; biomarker goldens **skip-pass** | **YES — both Meal Log and Biomarkers.** Restoring fixtures is a class, not a side quest. |
+| `USDA_FDC_OVERWRITE` | live FDC ranked into Analyze | F-1/F-2 “fix USDA” abandoned after 50-meal audit; F-12.1–12.4 delete (`4cef1e5`, `89358ed`, `fc51180`) | Product direction reversed (keep → delete). Residual: `golden_meals` still asserts `expectFdcId`. | ✅ FDC HTTP gone; local staple table numbers only | **YES as do-not-reopen ratchet**, not an open bug. Do not restore FDC to make old locks pass. |
+| `I18N_A11Y_UNRUN` | a11y-tree gate to catch leftover English chrome | Gate defined; specs wired `f372e85`; helper rewritten `b8f91d1` (Playwright 1.62 removed `page.accessibility`); repaired `d7f5216` — **3 commits in one day**, still no `_live_a11y/` | Helper **broke immediately** after rewrite (reappeared as a crash, not a chrome leak) | 🔴 never run live | **YES — Localization.** Journeys are not complete until checklist rows are PASS. |
+| `GOLDEN_SCORER_DRIFT` | Golden inbox `scoreGoldenRun` / title / blob-split | Drift lands in `d5a600e` (same commit that gutted translations **and** edited `goldenScoreboard.ts`) | Unknown prior green; currently deterministic red | 🔴 3 tests | **YES — Reliability/Quality.** Not the Settings “Food & Venues % logs” tile (`Header.tsx` `sync_state`). |
+| `VERDICT_CORRUPT` | `[object Object]` D1 verdicts; false default “Good” | `fe61818` false Good + 10 keys; `9ff1da2` D1 serialize/self-heal; `9252233` OCR sat-fat + preserve verdict | Related class hit more than once (default vs serialize vs OCR) | claimed fixed | **YES — Meal Log ratchet.** Named tests must keep a non-string verdict from rendering. |
+| `STALE_TURN` / stuck job card | preview shows previous turn; contradictory card states | F-9.1–9.5 series + `c79a448` stuck card + `334befc` contradictory states | Recurring job-lifecycle class (`8742686` is the blast-radius FAIL example in AGENTS) | F-9.5 shipped; flags still exist as fallback | **YES — Reliability ratchet.** Gate: `JobSession.contract.test.ts`. Do not mix with food-calc. |
+| `KCAL_ONE_WRITER` | agent-emitted calories vs `finalizeDishLedger` | F-8 whole track + F-10.2 Atwater; standing row | Architecture was rebuilt because the class kept returning | ✅ standing | **YES — Meal Log ratchet** (standing already). |
+| `APPLY_MISS` / B0 converts | HDL 50→1.293 etc. not applied to Home | B0 is Current work; G-B1 fixtures **deleted** so the outer lock is skip-pass | N/A (never proven live) | ⚠️ Current work | **YES — Biomarkers.** Do not treat skip-pass as G-B1 green. |
+| Credits / admin quota 0 | Admin `NaN`/0; quota copy `\n\n` | PR #3 + PR #4 (**2**, not >3) | No | ✅ `creditManager.test.ts` | **Thin yes** — keep the known-fixed row; not a ratchet driver. |
+| Deploy git-hash in Settings | Docker has no `.git` | `0d40406` `7093718` `613aa03` `eebbdc8` `930f0aa` `f12b296` (**>3**) | Infra churn | ops | **NO** on the product scorecard. Not a patient-facing class. |
+| Track L-2–L-5 leftovers | 1 serving / Preparation: / diagnostic logs | Parked 2026-09-02 | Parked, not a reappear | parked | **NO as open work.** Mention under Localization leftovers only. Do not unpark. |
+
+GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1** portion WRONG_BASIS · **#2** photo second-device · **#3** quota copy · **#4** admin quota · **#5** scorecard + vitest exclude.
 
 ---
 
 ## Classes currently red (work items)
 
-Work item = **class**, not a file count. Inner loop = the named command.
-
-| Class | Area | What is actually wrong | Kind | Named gate |
-|---|---|---|---|---|
-| `PORTION_FUNNEL` | Meal Log | S-10 marked COMPLETE 2026-09-12; 4 assertions now inverted (ask vs adopt) | **product regression** | `npx vitest run server_portion_clarify.test.ts` |
-| `LEAK_KEY` | Localization | `AppModal` close button `aria-label="closeDialog"` — key missing from `translations.ts` (`en` and `id`). `t()` falls back to the raw key. Same class as S-8. | **product, one-line keys** | `npx vitest run src/components/ui/AppModal.test.tsx src/utils/i18n.test.ts` |
-| `GOLDEN_SCORER_DRIFT` | Reliability / Quality | `scoreGoldenRun` false-fails a matching Ham line; `deriveGoldenTitle` keeps `"50% Duroc Breed"`; `splitExtraIssueText` returns 13 not 3 | **QA scorer**, not the Settings sync tile | `npx vitest run src/utils/goldenScoreboard.test.ts` |
-| `GOLDEN_FIXTURE_ROT` | Meal Log | `tests/golden_meals.test.ts` crashes at collection: `tests/Golden_meal/1. Multi-food log/expected.json` missing (deleted in `bca0f80`; ROADMAP S-9 already noted this) | **fixture**, not a live meal bug | `npx vitest run tests/golden_meals.test.ts` |
-| `I18N_A11Y_UNRUN` | Localization | Gate wired in specs; `_live_a11y/` does not exist; helper rewritten twice today (`b8f91d1`, `d7f5216`) and still unsoaked | **never-run gate** | `npx playwright test prototype/tests/indo-j-id-01-e2e.live.spec.ts` (quota) |
-| `CROSS_DEVICE_SYNC` | Reliability | Photo-sync bug was a second-device load. Nothing in unit or E2E simulates a fresh `JobStore` / second session | **structural gap** | no test yet — proposed below |
+| Class | Area | Kind | Named gate |
+|---|---|---|---|
+| `LEAK_KEY` | Localization | missing `closeDialog` / `modalDialog` in `localePacks` | `npx vitest run src/components/ui/AppModal.test.tsx src/utils/i18n.test.ts` |
+| `PORTION_FUNNEL` | Meal Log | ask/adopt inverted after S-10 COMPLETE | `npx vitest run server_portion_clarify.test.ts` |
+| `GOLDEN_SCORER_DRIFT` | Reliability | `failCount` 1≠0; title keeps `50% Duroc Breed`; blob split 13≠3 | `npx vitest run src/utils/goldenScoreboard.test.ts` |
+| `GOLDEN_FIXTURE_ROT` | Meal Log | `tests/Golden_meal/1. Multi-food log/expected.json` ENOENT | `npx vitest run tests/golden_meals.test.ts` |
+| `GOLDEN_FIXTURE_ROT` | Biomarkers | `tests/Golden_biomarker` **missing**; 9 G-B* tests **skipped**, file still PASS | `npx vitest run tests/golden_biomarker.test.ts` (must not treat skip as green) |
+| `I18N_A11Y_UNRUN` | Localization | `_live_a11y/` does not exist | live Playwright, quota |
+| `CROSS_DEVICE_SYNC` | Reliability | no second-device test | none yet |
 
 ---
 
-## Ordered actions (other agents)
+## Ordered actions
 
-Do **not** start F-11.2 / F-11.3, Q-9, Track L-2–L-5, or USDA. Gemini Current work remains **B0**.
+Gemini Current work remains **B0**. Do **not** start F-11.2, Q-9, Track L-2–L-5, or USDA.
 
-| # | Do | Who | Done when | Do not |
-|---|---|---|---|---|
-| **1** | Add `closeDialog` + `modalDialog` to `localePacks.en` and `.id`; AppModal callers that already pass `language` keep working | any, small | `AppModal.test.tsx` + i18n parity green; Indonesian close label is not the raw key | Unpark L-2–L-5; hardcode English |
-| **2** | Root-cause `PORTION_FUNNEL` invert (ask vs adopt). S-10 law still holds: user > label > visual; never silent-clamp past pack | Meal Log | `server_portion_clarify.test.ts` green, including lines 422 / 466 / 472 / 479 | Second LLM; paint the expects |
-| **3** | Repair `goldenScoreboard` parser (false fail + title leak + blob split) | Quality | `goldenScoreboard.test.ts`  green | Treat this as the Settings “Food & Venues % logs” tile — that tile is `Header.tsx` sync_state, a different engine |
-| **4** | Quarantine or restore `tests/Golden_meal/**/expected.json`. Manifest still lists G1–G6; dirs 3/5/6 are gone; G1 has no `expected.json` | Meal Log / Q-7 | `golden_meals.test.ts` collects; FDC lock assertions retargeted to local `id` (F-12.4) | Reopen USDA to make old `expectFdcId` pass |
-| **5** | Run Gate I18N-A11Y live once; write `_live_a11y/J-ID-0X-<surface>.txt`; flip SCOREBOARD_LIVE_RESULTS checklist off `NOT COVERED` | human / quota | every checklist row PASS | Soft-assert; claim complete from debug-contract alone |
-| **6** | Add `cross-device-sync` named test: persist job/message through the real sync path, load via a **fresh** store, assert photo URL + other synced fields | Reliability | second-device photo is an R2/`/photos/` URL, not `"Image reference preserved"` | Only re-test in one Playwright session |
-| **7** | Record the untracked Playwright specs (table in §E2E) on next live pass | human / soak | each spec has PASS/FAIL + date here | Run all live specs in one agent turn |
-| **8** | Biomarker live journey **after B0 Apply smoke** (same helper pattern as J-ID-01) | Gemini after B0 | upload → parse → review → Home numbers | Build the journey instead of B0 |
+| # | Do | Why it is next | Done when |
+|---|---|---|---|
+| **1** | Add `closeDialog` + `modalDialog` en+id | Smallest `LEAK_KEY`; 8th restore in the translation-wipe class | AppModal + i18n parity green |
+| **2** | Root-cause `PORTION_FUNNEL` invert vs `158dc14` bulk-pack | Reappeared after COMPLETE | lines 422/466/472/479 green; law user>label>visual; no silent clamp |
+| **3** | Stop biomarker **false green**: restore `tests/Golden_biomarker/examples/G-B*` **or** fail the suite when the dir is missing (no `it.skip` of the whole describe) | Claude’s “8/8 pass” hid deleted G-B1–G-B9 | either fixtures back or collection **fails** |
+| **4** | Quarantine or restore `tests/Golden_meal/**/expected.json`; retarget `expectFdcId` → local `id` | Same wipe as #3 (`bca0f80`) | `golden_meals.test.ts` collects |
+| **5** | Repair `goldenScoreboard` (`d5a600e` drift) | QA scorer lies | `goldenScoreboard.test.ts` green |
+| **6** | Run Gate I18N-A11Y live; fill `_live_a11y/` | 3 helper commits, still unsoaked | SCOREBOARD_LIVE_RESULTS checklist all PASS |
+| **7** | Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL |
+| **8** | Record Meal_03 6-case + Meal_04 live specs | Compare/log benches exist and are untracked | PASS/FAIL + date in §E2E |
+| **9** | B0 Apply smoke (Gemini) | Current work; locked converts | HDL 1.293 / TG 1.411 / LDL 3.362 / creat 79.56 / bili 13.68 on Home |
 
-**Human ops (site, not this file):** deploy current `main`; run `supabase/migrations/20260913_brand_menu_items_status.sql`; confirm Home Top Targets (sat fat over target is red).
+**Human ops:** deploy current `main`; confirm sat fat over target is red. Brand `status` migration `20260913_brand_menu_items_status.sql` is **cited in ROADMAP but not in the repo** (`supabase/` has no that file) — recover or apply by hand before claiming F-11.1 live.
+
+---
+
+## Prototype vs production (do not confuse the two)
+
+| Surface | Role | Status |
+|---|---|---|
+| `prototype/biomarkers/` C1–C7 | Fill-template SoT. Keep green **before** more production modal wiring. | `AI_HANDOVER` claims 100%. Gate: `scripts/assert-biomarker-cases.mjs`. **Not** a substitute for deleted G-B1–G-B9. |
+| `prototype/meallog/meal/` 11-case 1-vs-2 agent | Evidence that F-10 single Meal Agent (`diet`) + TS Atwater matched 2-agent. Fat residual on 1/4/9 is named, not 90%. | Production cutover F-10.7 shipped. Outer soak = Q-8.6 / F-10.8. |
+| `prototype/meallog/compare/` 6 sets | Mode D scout-only compare harness + images + `perfect_output_setN.json`. | Production standing `food_compare`. Live J-ID-02 did **not** run this matrix. |
+| `prototype/receptionist/` UC-01–10 | Front-desk use cases. | Unit `handoffContract` driven by UC JSON. Live specs are stub. Do not 10-case click-through. |
+| `prototype/tests/*.spec.ts` | Playwright only. | Vitest must stay excluded. |
+
+`golden/meal/` is the meal **source of truth** (Meal_01…04). Prototype is harness. Builder must not author and score the same live A/B (`builder_ne_tier3_ab_scorer`).
+
+---
+
+## Golden inventory (honest)
+
+### Meal log — `golden/meal/Meal_04_log` (Mode A)
+
+7 cases from prototype 01/02/06/08/09/10/11. Learning `golden-meal-suite-20260911.md`: stay **DRAFT** until a 32-key ledger exists (only 6–8 macros in prototype). Dual-GT conflict on case 11 stays on record.
+
+| Case | Contract | Known residual (from `benchmark_result.md`) |
+|---|---|---|
+| 01 Yolk / 02 Lidl / 06 menu / 08 oats / 09 plates | contract PASS on 2026-09-10 soak | 31-key incomplete; brand bind not asserted |
+| **10 barcode hotpot** | rerun contract PASS | **FAIL continuity** — live 1–2 dishes vs GT 5 |
+| **11 seafood + oats** | contract PASS | **under-extract** — live 2 vs GT 6 |
+
+### Compare — `golden/meal/Meal_03_compare` (Mode D)
+
+2026-09-09 bench claims 6/6 evaluated, 243 dishes, 96.2% recall on 104-item menu. **Not** the same as J-ID-02 (Silverqueen). Specs `compare-mode-six-cases.spec.ts` + `meal03-compare-benchmark.spec.ts` are **UNTRACKED** on this board.
+
+### Layer B — `tests/Golden_meal/`
+
+Manifest lists G1–G9. On disk: dirs 1, 2, 4, 9 (only **9** has `expected.json`). 3/5/6/7/8 deleted in `bca0f80`. `golden_meals.test.ts` crashes at collection and still wants `expectFdcId` (stale vs F-12.4).
+
+### Biomarkers — `tests/Golden_biomarker/`
+
+**Directory missing.** `bca0f80` deleted G-B1…G-B9 examples. `tests/golden_biomarker.test.ts` does `if (!exists) it.skip('missing directory')` then the file **PASSES**. Convert locks in the remaining 4 tests still check `ANALYTE_CONVERSIONS` (good) but G-B class goldens are not running.
 
 ---
 
 ## 1. Localization
 
-**Current live focus.** Detail: `SCOREBOARD_LIVE_RESULTS.md`. Track L-2–L-5 stay parked; leftover chrome is Track S / this board.
-
-**Named inner gates**
+**Named gates**
 
 ```
 npx vitest run src/utils/i18n.test.ts agents/dietitianInstructions.i18n.test.ts src/utils/auditEngine.i18n.test.ts src/components/chat-cards/ReceptionistCard.i18n.test.tsx src/components/ui/AppModal.test.tsx
@@ -87,28 +142,21 @@ npx vitest run src/utils/i18n.test.ts agents/dietitianInstructions.i18n.test.ts 
 
 | Check | Status | Evidence |
 |---|---|---|
-| en/id key parity (`i18n.test.ts`) | PASS (file; AppModal keys are **absent**, so parity does not see them) | named vitest |
-| dietitian / audit / ReceptionistCard i18n | PASS | named vitest |
-| `AppModal` close `aria-label` | 🔴 FAIL — `aria-label="closeDialog"` | `AppModal.test.tsx:53`. Keys `closeDialog` and `modalDialog` are **not** in `localePacks`. `t()` → `String(key)`. |
-| J-ID-01/02/03 happy-path (auth, multi-turn, photo, debug contract) | LIVE PASS | `SCOREBOARD_LIVE_RESULTS.md` |
-| Gate I18N-A11Y (a11y-tree chrome) | 🔴 NEVER RUN LIVE — `golden/journeys/_live_a11y/` missing | checklist still `NOT COVERED` |
-| I18N-A11Y helper | wired; rewritten `b8f91d1` (ariaSnapshot) then repaired `d7f5216` | still unsoaked |
-| Locked persona | **P-ID-WL-01 Sari F18 / 140 cm / 40 kg / 1350 kcal**. Consolidation draft 58kg/age42 is **stale** — ignore it | live-results header |
-| Fixture photos | planned `nasi_padang_*` / `bubur_ayam_*` / `gado_gado_*` were never added; live runs used golden oats / Silverqueen / text. Honest residual, not a silent swap | `SCOREBOARD_LIVE_RESULTS.md` FIXTURE NOTE |
-| Nutrient chrome `saturated_fat` → “Saturated Fat” | PASS | `displayNutrientName` + `src/utils/i18n.test.ts` |
-| Track L leftover (1 serving, Preparation:, View Diagnostic Logs, receipt internals) | parked under S-1 | ROADMAP Track S |
+| en/id key parity | PASS for keys that exist. Absent keys are invisible to parity. | `i18n.test.ts` |
+| `AppModal` close | 🔴 `aria-label="closeDialog"` | `AppModal.test.tsx:53`; keys never in `localePacks` (`a3e8087` introduced the `t()` call) |
+| J-ID-01/02/03 debug-contract | LIVE PASS | `SCOREBOARD_LIVE_RESULTS.md` |
+| Gate I18N-A11Y | 🔴 NEVER RUN; helper rewritten then repaired | `_live_a11y/` missing |
+| Persona | **P-ID-WL-01 F18 / 140 cm / 40 kg / 1350 kcal**. Consolidation 58kg/age42 is stale | live-results header |
+| Planned Indo dish photos | never added; live used oats / Silverqueen | FIXTURE NOTE |
+| Track L-2–L-5 | parked | ROADMAP |
 
-**Class `LEAK_KEY` (this session, unit-red, live-unseen):** every dialog that uses `AppModal` with the default close button exposes a raw camelCase name to assistive tech. Gate I18N-A11Y would have caught this on any surface that opens a modal **if it had run**.
-
-**Next:** action #1 (keys), then action #5 (live a11y soak). Do not unpark L-2–L-5.
+Ratchet: `TRANSLATION_DUMP` (table above). Next: actions #1 then #6.
 
 ---
 
 ## 2. Meal Log
 
-Largest area. Two different reds: a **product** invert and a **fixture** crash. Do not lump them.
-
-**Named inner gates** (union; do not run all on a chrome-only edit)
+**Named gates**
 
 ```
 npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server_edit_patch_ledger.test.ts server_derivation.test.ts server_dish_finalize.test.ts src/utils/nutrients.test.ts src/utils/nutritionTargetStatus.test.ts src/components/NutrientPieChart.test.tsx
@@ -116,35 +164,23 @@ npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server
 
 | Check | Status | Evidence |
 |---|---|---|
-| `server_portion_clarify.test.ts` S-10 | 🔴 FAIL — 4 tests. Clarify vs adopt inverted | Re-run 2026-09-14: L422 stated-100g expected 0 clarify; L466 “half the oats” expected ask; L472 “half the kacang” + known pack expected adopt 90g; L479 “500g kacang” expected adopt + overflow. Got the opposite on the adopt cases (clarify length 1). |
-| Home Top Targets polarity (limit vs goal) | PASS | `src/utils/nutrients.ts` `isLimitNutrient` / `isNutrientOverLimit`. Sat fat / sodium / calories red when over. Snake_case coach keys canonicalized. `nutrients.test.ts` + HomeTab/Trends/pie. |
-| Same-meal package + prepared (3 photos → 1 dish; “It's only 1 meal. Just combine them”) | PASS + standing | `same_meal_package_prepared` in `docs/agent/standing.json`. Gates: `server_edit_patch_ledger.test.ts`, `server_vision_scout.test.ts`. |
-| F-12 USDA/FDC on Analyze | shipped | F-12.1–12.4. Local staple table has numbers only. |
-| `tests/golden_meals.test.ts` | 🔴 CRASH at collection | `ENOENT` `tests/Golden_meal/1. Multi-food log/expected.json`. Manifest still names G1–G6; several dirs deleted in `bca0f80`. Layer B still asserts `expectFdcId` — stale vs F-12.4. |
-| Catalog schema warning | leftover | `server_food_catalog.test.ts` may warn that `20260805_food_catalog_schema.sql` is gone (D1). Not a meal-math fail. |
-| Live J-ID-01 log / J-ID-03 edit | LIVE PASS happy path | debug-contract 0 fails. I18N-A11Y not run. |
+| S-10 portion funnel | 🔴 invert | re-run 2026-09-14; likely `158dc14` after COMPLETE |
+| Home polarity | PASS + ratchet | `isLimitNutrient`; `nutrients.test.ts` |
+| Same-meal package+prepared | PASS + standing | `588154c` |
+| F-12 USDA | shipped / do-not-reopen | F-12.1–12.4 |
+| F-10.7 expand | ⚠️ helper exists, **not on analyze hot path** | `shouldExpandMealAgent` is unit-tested and exported from `src/mealBuild/`; no import from `server_food_analyze_run*.ts`. Complex meals do not spawn workers yet. Do not copy prototype DELEGATE. |
+| Layer B goldens | 🔴 crash | ENOENT expected.json |
+| Meal_04 live 10/11 | under-extract / continuity fail | `golden/meal/Meal_04_log/benchmark_result.md` |
+| Verdict serialize | claimed fixed | `9ff1da2` |
+| kcal one writer | standing | `finalizeDishLedger` |
 
-**KNOWN LIVE BUGS**
-
-| Bug | Status | Test? | Scorecard row |
-|---|---|---|---|
-| Chat photo does not survive a second device (`"Image reference preserved"` instead of R2 URL) | fixed PR #2 | **No second-device test** | Reliability `CROSS_DEVICE_SYNC` |
-| Credit-quota message truncated / literal `\n\n` | fixed PR #3 | translations completeness still thin | Reliability |
-| Portion funnel invert | **open** | yes, currently red | this section |
-| Package+porridge split + failed combine | fixed + **promoted** standing | yes | `same_meal_package_prepared` |
-| Sat fat over target shown green (`saturated_fat` vs `saturatedFat`) | fixed | `nutrients.test.ts` | polarity row above |
-
-**Untracked live specs:** `meal01-golden.live.spec.ts`, `multiturn-meal-edit.live.spec.ts`, `portion-clarify.live.spec.ts`, `portion-funnel.spec.ts`, `armC-meal02.spec.ts`. `signup-onboard-wl.live.spec.ts` is Localization/auth, listed in §E2E.
-
-**Next:** action #2 (portion), then #4 (fixture rot). Do not paint `expected.json`. Do not `POST /loop`.
+Ratchets: `PORTION_FUNNEL`, `SAME_MEAL_PACKAGE_PREPARED`, `NUTRIENT_POLARITY`, `KCAL_ONE_WRITER`, `VERDICT_CORRUPT`, `GOLDEN_FIXTURE_ROT`.
 
 ---
 
 ## 3. Compare
 
-Small dedicated unit surface; real logic sits in scout-only compare + resolver.
-
-**Named inner gates**
+**Named gates**
 
 ```
 npx vitest run src/utils/compareMealLogGuard.test.ts src/server/food/journeyFingerprints.test.ts src/server/food/server_food_scout_source.test.ts
@@ -153,41 +189,43 @@ node scripts/journey-guard.mjs
 
 | Check | Status | Evidence |
 |---|---|---|
-| `compareMealLogGuard.test.ts` | PASS | named vitest |
-| Standing journey `food_compare` (`allExtractedDishes`, EVALUATION ONLY) | protected | `docs/agent/standing.json` |
-| J-ID-02 live | LIVE PASS happy path | `SCOREBOARD_LIVE_RESULTS.md` (used Silverqueen fixtures, not planned Indo dishes) |
-| `compare-mode-six-cases.spec.ts`, `meal03-compare-benchmark.spec.ts` | 🔴 UNTRACKED | `prototype/tests/` |
+| compareMealLogGuard | PASS | named vitest |
+| standing `food_compare` | protected | `allExtractedDishes`, EVALUATION ONLY |
+| J-ID-02 | LIVE PASS happy path, wrong fixtures | Silverqueen not Meal_03 set3 menu |
+| 6-case + benchmark specs | UNTRACKED | `prototype/tests/` |
+| Mode D narrator / empty-success | claimed fixed after 6 commits | do not reintroduce narrator on compare |
 
-**Next:** on a live soak, run the two untracked specs and paste PASS/FAIL here. Do not merge compare and log packs.
+Ratchet: `COMPARE_MODE_D`. Do not merge compare and log packs.
 
 ---
 
 ## 4. Biomarkers
 
-**Named inner gates** (ROADMAP Current work)
+**Named gates** (ROADMAP Current work)
 
 ```
 npx tsc --noEmit
 node scripts/assert-biomarker-lifecycle-m31.mjs
-npx vitest run src/utils/biomarkerLifecycle.test.ts src/utils/biomarkerIdentity.test.ts src/utils/biomarkerSanitize.test.ts src/utils/clinicalCalculators.test.ts tests/bioProcess.golden.test.ts tests/golden_biomarker.test.ts
+npx vitest run src/utils/biomarkerLifecycle.test.ts src/utils/biomarkerIdentity.test.ts src/utils/biomarkerSanitize.test.ts tests/bioProcess.golden.test.ts tests/golden_biomarker.test.ts
 ```
 
 | Check | Status | Evidence |
 |---|---|---|
-| Named unit files (lifecycle, identity, sanitize, calculators, audit, status_labels, bioProcess, golden_biomarker) | PASS | Claude’s suite run; not re-soaked this pass |
-| B0 Apply smoke (HDL 50→**1.293**, TG 125→**1.411**, LDL 130→**3.362**, creat 0.9→**79.56**, bili 0.8→**13.68**) | ⚠️ Current work — human Apply on `job_medical_1786666223594` | ROADMAP B0 |
-| Fill-template C1–C7 | claimed complete in `AI_HANDOVER.md` | `scripts/assert-biomarker-cases.mjs` |
-| Live E2E | 🔴 ZERO — no Playwright spec mentions biomarkers | `prototype/tests/*.spec.ts` |
-| B7.4 pending store | not started | wait until B0 verified |
+| Lifecycle / identity / sanitize helpers | PASS | named vitest |
+| `tests/golden_biomarker.test.ts` | ⚠️ **file PASS, 9 skipped** | dir missing; skip is not G-B1 green |
+| Prototype C1–C7 | claimed 100% | `scripts/assert-biomarker-cases.mjs` |
+| B0 Apply smoke | Current work | locked `1.293` / `1.411` / `3.362` / `79.56` / `13.68` |
+| Live E2E | ZERO | no Playwright spec |
+| B7.4 pending store | not started | after B0 |
 | B8.1 convertViaTable only | shipped | Grok |
 
-**Next:** Gemini does B0, not a new journey. Action #8 only after Apply is proven.
+Ratchets: `GOLDEN_FIXTURE_ROT`, `APPLY_MISS`. Next for Gemini: B0, not a new journey. Next for scorecard honesty: action #3.
 
 ---
 
 ## 5. Receptionist
 
-**Named inner gates**
+**Named gates**
 
 ```
 npx vitest run src/server/receptionist/handoffContract.test.ts src/server/receptionist/jsonSanitize.test.ts src/utils/frontDeskRouting.test.ts src/utils/handoffGuard.test.ts tests/deskProcess.golden.test.ts
@@ -195,108 +233,68 @@ npx vitest run src/server/receptionist/handoffContract.test.ts src/server/recept
 
 | Check | Status | Evidence |
 |---|---|---|
-| Named unit files | PASS | Claude suite run |
-| `receptionist-usecases.spec.ts`, `receptionist-and-meallog-usecases.spec.ts` | stub/demo — not `.live.spec.ts` | no live network |
-| J-ID-01/03 Desk turns | indirect live evidence only | `expect.soft` length > 50 in places |
-| S-6 handoff i18n | landed | `handoffContract.test.ts` driven by `prototype/receptionist/benchmark/UC-0x.json` |
+| Named units | PASS | |
+| UC specs | stub, not `.live.spec.ts` | |
+| Desk turns on J-ID-01/03 | indirect, some `expect.soft` | |
+| S-6 handoff i18n | landed | UC JSON |
 
-**Next:** confirm whether a live Receptionist spec is wanted. Do not 10-case UC click-through (ROADMAP Q-8.5).
+No >3-iteration receptionist class found in recent history. Keep the area board; do not 10-case live UC.
 
 ---
 
 ## 6. Reliability
 
-Cross-cutting: sync, jobs, credits, debug, auth, Guard, and the test runner itself.
-
-**Named inner gates**
+**Named gates**
 
 ```
-npx vitest run src/jobs/__tests__/JobStore.test.ts src/jobs/__tests__/JobSession.contract.test.ts src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts src/utils/creditManager.test.ts src/utils/dumpContract.test.ts src/utils/debugPayload.test.ts src/utils/syncUtils.regression.test.ts src/utils/goldenScoreboard.test.ts server_auth.test.ts
+npx vitest run src/jobs/__tests__/JobStore.test.ts src/jobs/__tests__/JobSession.contract.test.ts src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts src/utils/creditManager.test.ts src/utils/dumpContract.test.ts src/utils/syncUtils.regression.test.ts src/utils/goldenScoreboard.test.ts src/utils/foodImageSources.test.ts server_auth.test.ts
 node scripts/journey-guard.mjs
 ```
 
 | Check | Status | Evidence |
 |---|---|---|
-| Vitest vs Playwright exclude | **fixed** `6c25141` | `vite.config.ts` `exclude` includes `**/prototype/tests/**` |
-| `AppModal.test.tsx` | counted under Localization (`LEAK_KEY`), not here | shared infra, i18n class |
-| `goldenScoreboard.test.ts` | 🔴 FAIL — 3 tests | Re-run: `failCount` 1 not 0 (`:49`); title keeps `50% Duroc Breed` (`:184`); blob split 13 not 3 (`:217`). Engine for **Golden inbox / `scoreGoldenRun`**, **not** Header “Food & Venues 100% · N logs” (that is `sync_state` in `Header.tsx`). |
-| Job sync / store / runner / ImageStore | PASS | Claude suite |
-| Credits (`creditManager.test.ts`) | PASS | PR #4 admin quota-null → 0 regression |
-| Debug / dump contract / bug queue | PASS | named files |
-| Auth | PASS | `server_auth.test.ts` |
-| Guard / standing | must stay | `same_meal_package_prepared` needles. Do not drop rows to pass. |
-| `storageUtils.test.ts` (S-5) | missing | ROADMAP S-9 note; demo-wipe covered by `deskProcess.golden.test.ts` |
-| Cross-device / second session | 🔴 no test | photo-sync class |
+| Vitest vs Playwright exclude | fixed `6c25141` | |
+| golden scorer | 🔴 | `d5a600e` edited the engine |
+| Job session / STALE_TURN | shipped + ratchet | `JobSession.contract.test.ts` |
+| Credits | PASS | PR #4 |
+| Debug / dump contract | PASS | |
+| `storageUtils.test.ts` | **missing** (deleted `bca0f80`) | S-5/S-9 note |
+| Cross-device | no test | PR #2 product-only |
+| Guard / standing | must grow, never shrink | including `same_meal_package_prepared` |
 
-**KNOWN LIVE BUGS (Reliability)**
-
-1. **Chat photo second-device.** Root: `LogChat` persisted `"Image reference preserved"` and never replaced with the R2 URL. Fixed PR #2. **No automated second-device step.** Highest-leverage new test (action #6).
-2. **Quota-exceeded copy** truncated / double-escaped. Fixed PR #3.
-3. **Admin quota defaults to 0/`NaN`** when `quotaAdmin` unset. Fixed PR #4 + `creditManager.test.ts`.
-4. **`npm test` wall of red** from Playwright specs under vitest. Fixed `6c25141`.
-
-**Next:** action #3 (scorer) and #6 (second-device). Do not start R-13 until `specs/active/R-13.md` is locked.
+Ratchets: `CROSS_DEVICE_SYNC`, `STALE_TURN`, `GOLDEN_SCORER_DRIFT`, `meal_image_unique`.
 
 ---
 
 ## E2E inventory (`prototype/tests/`)
 
-Run under `npx playwright test <spec>`, never under vitest.
+`npx playwright test <spec>` only.
 
-| Spec | Area | Mode | Scorecard |
-|---|---|---|---|
-| `indo-j-id-01-e2e.live.spec.ts` | Loc + Meal | live | LIVE PASS (debug). I18N-A11Y NOT COVERED |
-| `indo-j-id-02-e2e.live.spec.ts` | Loc + Compare | live | LIVE PASS (debug). I18N-A11Y NOT COVERED |
-| `indo-j-id-03-e2e.live.spec.ts` | Loc + Meal edit | live | LIVE PASS (debug). I18N-A11Y NOT COVERED |
-| `signup-onboard-wl.live.spec.ts` | Loc / auth | live | UNTRACKED |
-| `meal01-golden.live.spec.ts` | Meal | live | UNTRACKED |
-| `multiturn-meal-edit.live.spec.ts` | Meal | live | UNTRACKED |
-| `portion-clarify.live.spec.ts` | Meal | live | UNTRACKED |
-| `portion-funnel.spec.ts` | Meal | stub/live mix | UNTRACKED (S-10 inner is vitest) |
-| `armC-meal02.spec.ts` | Meal | live/arm | UNTRACKED |
-| `compare-mode-six-cases.spec.ts` | Compare | ? | UNTRACKED |
-| `meal03-compare-benchmark.spec.ts` | Compare | bench | UNTRACKED |
-| `receptionist-usecases.spec.ts` | Receptionist | stub | exists, not live |
-| `receptionist-and-meallog-usecases.spec.ts` | Receptionist + Meal | stub | exists, not live |
-| `dialog-inventory.spec.ts` | Reliability / Q-8.3 | stub | S-7 green 2026-09-12 |
-| `key-journeys.spec.ts` | Reliability / shell | stub | untracked here |
-| `r3-smoke.spec.ts` | Reliability / R-3 | leftover-English | after S-1 list green |
-| `example.spec.ts` | — | example | ignore |
+| Spec | Area | Scorecard |
+|---|---|---|
+| `indo-j-id-01-e2e.live.spec.ts` | Loc + Meal | LIVE PASS debug; I18N-A11Y NOT COVERED |
+| `indo-j-id-02-e2e.live.spec.ts` | Loc + Compare | LIVE PASS debug; wrong fixtures; I18N-A11Y NOT COVERED |
+| `indo-j-id-03-e2e.live.spec.ts` | Loc + Meal edit | LIVE PASS debug; I18N-A11Y NOT COVERED |
+| `signup-onboard-wl.live.spec.ts` | Loc / auth | UNTRACKED |
+| `meal01-golden.live.spec.ts` | Meal_01 | UNTRACKED |
+| `multiturn-meal-edit.live.spec.ts` | Meal | UNTRACKED |
+| `portion-clarify.live.spec.ts` / `portion-funnel.spec.ts` | Portion | UNTRACKED (inner vitest is the S-10 gate) |
+| `armC-meal02.spec.ts` | Meal_02 | UNTRACKED |
+| `compare-mode-six-cases.spec.ts` / `meal03-compare-benchmark.spec.ts` | Compare 6-set | UNTRACKED |
+| `receptionist-*.spec.ts` | Receptionist | stub |
+| `dialog-inventory.spec.ts` | Q-8.3 | S-7 green 2026-09-12 |
+| `key-journeys.spec.ts` / `r3-smoke.spec.ts` | shell / leftover-English | untracked here |
+| `example.spec.ts` | — | ignore |
 
 ---
 
-## What v1 (`6c25141`) got right vs what this pass corrected
+## Standing rule
 
-**Keep**
+Hand-found bug:
 
-- Six areas the human asked for, including Reliability.
-- Vitest/Playwright exclude — real reliability bug; 18 fake fails trained people to ignore red.
-- Honest “I18N-A11Y never run” and “Biomarkers have zero E2E.”
-- Standing rule: hand-found bug → test → row.
-- Cross-device as a class gap, not one photo anecdote.
+1. Fix the **class**.
+2. Named vitest (and standing needle if it reappeared or took >3 tries).
+3. Row in the **recurrence table** if it reappeared or took >3 tries; row in the area board either way.
+4. Grow `docs/agent/standing.json` via Learner / **promote**. Never drop a needle to pass Guard.
 
-**Corrected here**
-
-- **As-of was stale** (`f372e85`); HEAD is `d7f5216` with a rewritten then repaired a11y helper, still unsoaked.
-- **“Maps all ~140 files”** was a count, not a map. This file maps **named gates + every Playwright spec**. File-count theater is how a fixture crash and a product invert look the same.
-- **`npm test` as the regenerate command** contradicts `AGENTS.md`. Refresh = named files.
-- **Settings “Food & Venues 100%, 53 logs”** is `Header.tsx` `sync_state`, **not** `goldenScoreboard`. The scorer is still red and still worth fixing; it is the Golden inbox engine.
-- **Persona 58kg vs 40kg** is not an open conflict. Live-results header wins; consolidation is stale.
-- **`golden_meals` crash** is fixture rot from `bca0f80` (already in ROADMAP S-9), not a shipped meal-log math bug. It still must not stay red forever.
-- **AppModal** is a **missing translation key** (`LEAK_KEY`), not merely “untranslated camelCase in a passing dictionary.”
-- **Missing shipped rows:** Home nutrient polarity, `same_meal_package_prepared`, F-12.4, Guard needles.
-- **Missing specs:** `signup-onboard-wl`, `portion-funnel`, `key-journeys`, `r3-smoke`, `dialog-inventory`, `armC-meal02`.
-- **AppModal was double-counted** as Reliability’s only unit fail and as Localization.
-
----
-
-## Standing rule for this file
-
-Every time a bug is found by hand instead of a gate:
-
-1. Fix it (class, not the one meal).
-2. Add a named regression test.
-3. Add a row here under the area (same shape as the tables above).
-4. If it is a must-keep live behavior, grow `docs/agent/standing.json` via Learner / **promote** — do not drop a needle to pass Guard.
-
-This file is complete only when there are no `UNTRACKED`, `NEVER RUN`, or open `KNOWN` product rows. Fixture-rot and parked Track L leftovers may stay listed as honest residuals.
+`bca0f80` is the canonical PROCESS_GAP: a 144-file “stability” commit that wiped translations, goldens, biomarker examples, and `storageUtils.test.ts`. S-7/8/9 restored chrome only. The rest of that blast is why this scorecard exists.
