@@ -1,6 +1,7 @@
 # Status
+- **2026-09-14 Master scorecard v2**: `golden/journeys/MASTER_SCORECARD.md` is the area PASS/FAIL board (Localization, Meal Log, Compare, Biomarkers, Receptionist, Reliability). Overall **not all green**. Named reds: `PORTION_FUNNEL` invert, `LEAK_KEY` AppModal `closeDialog`, `GOLDEN_SCORER_DRIFT`, `GOLDEN_FIXTURE_ROT`, Gate I18N-A11Y never run live, no second-device sync test. Do not `npm test` to refresh — named gates in that file.
 - **2026-09-13 B0 / fill-template C1-C7 COMPLETE**: Re-ran the C1-C7 biomarker prototype cases and achieved 100% pass rate. Converted `prototype/biomarkers/runner.ts` into the official automated baseline regression gate script `scripts/assert-biomarker-cases.mjs` which successfully executes and asserts the tests. Modal wiring is confirmed complete as `server_routes_medical_gemini.ts` successfully delegates to the unified `runBiomarkerPipeline` with `LogChat.tsx` correctly mapping the unified array (`resData.filledRows`) to UI pending variables. The `MedicalAgentExecutor.ts` is now proven to be deprecated and unimported.
-- **Next**: F-11.2 / F-11.3 curator LLM or Q-8.6 / F-10.8 outer soak. (Waiting for human/Grok to proceed based on ROADMAP order).
+- **Next (Gemini)**: **B0** Apply smoke — not the scorecard reds unless Current work changes. **Next (scorecard)**: ordered actions #1–#6 in MASTER_SCORECARD.md. Do not start F-11.2 / Q-9 / Track L-2–L-5.
 
 ## Notes
 - `scripts/assert-biomarker-cases.mjs` was correctly transformed to a node script that spawns `tsx prototype/biomarkers/runner.ts --only all`.
