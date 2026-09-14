@@ -137,7 +137,7 @@
       "asked": "repeated",
       "files_must_contain": {
         "docs/agent/JOURNEY.md": [
-          "Builder \u2260 Tier-3 scorer",
+          "Builder ≠ Tier-3 scorer",
           "frozen ground-truth scorecard"
         ],
         "plan/RELIABILITY.md": [
@@ -233,6 +233,30 @@
         ],
         "server_vision_scout.test.ts": [
           "collapses a labeled oats package and the cooked porridge"
+        ]
+      }
+    },
+    {
+      "id": "i18n_a11y_soak_hygiene",
+      "label": "I18N-A11Y soak: ariaSnapshot only; playwright --list before soak; restore i18n from known-good git (no invent); current/a11y artifacts; incomplete checklist ≠ complete; no mid-soak helper self-edit",
+      "asked": "2026-09-14",
+      "files_must_contain": {
+        "golden/scorecard/instruction/i18n/GATE_I18N_A11Y_TREE.md": [
+          "ariaSnapshot",
+          "page.accessibility",
+          "--list",
+          "Restore, do not invent",
+          "INCOMPLETE"
+        ],
+        "golden/scorecard/instruction/WORKFLOW.md": [
+          "Journey / I18N-A11Y soak hygiene",
+          "ariaSnapshot",
+          "Restore, do not invent"
+        ],
+        "prototype/tests/indo-journey-helpers.ts": [
+          "ariaSnapshot",
+          "assertIdChromeA11yTree",
+          "golden/scorecard/current/a11y"
         ]
       }
     }
