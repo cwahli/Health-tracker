@@ -2,18 +2,18 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-14T21:09:34.652Z
-**Commit:** `f36e8c7`
+**When:** 2026-09-14T21:47:23.282Z
+**Commit:** `6c50372`
 **Instruction hash:** `bd4c673081a1`
-**Seal:** `433567a911e890096d553cedf1de4a720d6db051d0594581aaf1bc8cfddc876c`
+**Seal:** `9c401a6885b3ccbabf703fb3cfa66352655feeeb951545c622dade85f3fb2b1e`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **ALL GREEN** — 671 pass / 0 fail / 0 skip
+**Overall:** **ALL GREEN** — 674 pass / 0 fail / 0 skip
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | PASS | 671 pass / 0 fail / 0 skip of 671 |
+| `overall_named_gates` | PASS | 674 pass / 0 fail / 0 skip of 674 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
 | `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
@@ -24,7 +24,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | `area_localization` | PASS | 48 pass / 0 fail / 0 skip |
 | `area_meal_log` | PASS | 191 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
-| `area_biomarkers` | PASS | 145 pass / 0 fail / 0 skip |
+| `area_biomarkers` | PASS | 148 pass / 0 fail / 0 skip |
 | `area_receptionist` | PASS | 43 pass / 0 fail / 0 skip |
 | `area_reliability` | PASS | 197 pass / 0 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
@@ -39,7 +39,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | Localization | PASS | 48 | 0 | 0 | 48 |
 | Meal Log | PASS | 191 | 0 | 0 | 191 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
-| Biomarkers | PASS | 145 | 0 | 0 | 145 |
+| Biomarkers | PASS | 148 | 0 | 0 | 148 |
 | Receptionist | PASS | 43 | 0 | 0 | 43 |
 | Reliability | PASS | 197 | 0 | 0 | 197 |
 
@@ -490,12 +490,12 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not drop leak-class keys from the frozen list |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) keeps every frozen leftover-chrome key in en and id |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not leak raw keys or English-fill Indonesian chrome |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |
@@ -504,7 +504,7 @@ _none_
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_id_not_incident_string |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_components_not_hardcoded_incident |
 
-### Biomarkers (145)
+### Biomarkers (148)
 
 | Status | File | Test |
 |---|---|---|
@@ -517,6 +517,9 @@ _none_
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 biomarker process board — §1.3.1 bio exits DIAG5 auto-send does not fire on a lab chat |
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 biomarker process board — §1.3.1 bio exits shared stall hop still hops on 503 for a medical dummy tree |
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 in-memory medical publish isolation does not treat empty medical dummy as food ledger |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — backoffice extract converts via the single table (no second math path) converts the five G-B1 locks exactly (triglycerides must NOT use the cholesterol factor) |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — backoffice extract converts via the single table (no second math path) leaves incomparable pairs unconverted instead of guessing |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — backoffice extract converts via the single table (no second math path) keeps the legacy HbA1c % branch verbatim (shared table has no hba1c row) |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 case metadata and class bindings |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 five locked unit conversions match expected.json |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 review modification synthesis converts only non-SI row |
