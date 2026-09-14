@@ -1,0 +1,15 @@
+{
+  "slug": "diet-r1",
+  "node": "manual",
+  "at": "2026-09-13T13:17:02.806Z",
+  "git": {
+    "head": "a5bf1ce2ce30fe06853cb147d947d3bc2b81569c",
+    "stashCommit": "c1b9bec61d489a7ed728dd8d4ca564053cf84d58"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts"
+  ]
+}

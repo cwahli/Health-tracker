@@ -1,0 +1,15 @@
+{
+  "slug": "f12-2",
+  "node": "manual",
+  "at": "2026-09-13T13:06:56.909Z",
+  "git": {
+    "head": "a5bf1ce2ce30fe06853cb147d947d3bc2b81569c",
+    "stashCommit": "767d7838f80240ce0b0ad2b5570ac8311a6d39e7"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts"
+  ]
+}

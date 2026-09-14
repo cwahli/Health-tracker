@@ -1,0 +1,15 @@
+{
+  "slug": "f11-1",
+  "node": "manual",
+  "at": "2026-09-13T14:30:39.743Z",
+  "git": {
+    "head": "eebbdc8316709d922c7ec5622554045a324186cf",
+    "stashCommit": "3c501cee9b03dc779ad9abec5f8888699af0ea10"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts"
+  ]
+}
