@@ -1,0 +1,33 @@
+- banner:
+  - button "User Profile Alt":
+    - img "User Profile Alt"
+  - text: Sari 100 Siap (2) Home Tersinkron 23:55
+  - button "Click To Manually Sync"
+- main:
+  - heading "Selamat Datang di Portal Kesehatan Anda" [level=2]
+  - paragraph: Dasbor Anda siap! Catat beberapa data untuk mengkalibrasi target metabolisme, rekomendasi nutrisi, dan penilaian risiko biomarker.
+  - heading "Lengkapi Profil Anda" [level=3]
+  - paragraph: Tambahkan detail seperti usia, berat badan, tinggi badan, etnisitas, dan jenis kelamin. Ini mengkalibrasi mesin medis dan AI kami untuk menghitung target harian khusus bagi Anda.
+  - button "Atur Profil"
+  - heading "Catat Makanan atau Hidangan" [level=3]
+  - paragraph: Ketik apa yang Anda makan atau bicara secara alami untuk mendapatkan rincian klinis otomatis, perhitungan nutrisi, dan rekomendasi kesehatan yang dipersonalisasi.
+  - button "Tambahkan Catatan Makanan Pertama Anda"
+  - 'heading "Debug: Check Supabase Data" [level=3]'
+  - paragraph: If you expected to see existing data here, tap this to check what the server actually finds in Supabase.
+  - button "Run Debug Check"
+- navigation:
+  - button "Home"
+  - button "Health"
+  - button "Open Quick Actions"
+  - button "Riwayat Makanan"
+  - button "Trends"
+- heading "Agent Food Nutrition" [level=2]
+- button "Gemini 3.5 Flash Lite"
+- button "View Historical Logs"
+- button
+- button "Data yang digunakan agen"
+- paragraph: Halo! Ceritakan atau unggah foto makanan yang akan Anda makan, dan saya akan menganalisis manfaat kesehatannya, faktor risiko, dan rincian 30 nutrisi lengkap berdasarkan profil Anda.
+- button "Upload photo or take picture (Photos, Collections, Camera)"
+- button "Take photo from phone camera"
+- textbox "Ketik pesan atau jelaskan makanan/biomarker..."
+- button "Send"

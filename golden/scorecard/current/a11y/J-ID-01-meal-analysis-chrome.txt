@@ -1,0 +1,12 @@
+- banner:
+  - button "User Profile Alt":
+    - img "User Profile Alt"
+  - text: Sari 99 1 berjalan Riwayat Makanan Tersinkron 23:53
+  - button "Click To Manually Sync"
+- main
+- navigation:
+  - button "Home"
+  - button "Health"
+  - button "Open Quick Actions"
+  - button "Riwayat Makanan"
+  - button "Trends"

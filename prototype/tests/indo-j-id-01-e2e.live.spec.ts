@@ -186,15 +186,15 @@ test.describe('Journey ID-01: Sari Home Desk Coach Meal Live Soak', () => {
     await assertIdChromeA11yTree(page, { journeyId: 'J-ID-01', surface: 'analyzing-job-card' });
 
     // Assert that the meal log response rendered nutrients and dish recognition
-    const lastMealMsg = first(page, [
-      '#last-food-message',
-      '[data-job-id]',
-      'h4:has-text("Nasi Uduk")',
-      'text=/Nasi Uduk|Telur|Orek|kalori|kcal|oat/i',
-      '#food-chat-container',
-      'main',
-    ]);
+    // NOTE: .last() — chat appends newest card at the end; union .first()
+    // can match a stale/empty [data-job-id] skeleton node.
+    const lastMealMsg = page
+      .locator('#last-food-message, [data-job-id], h4:has-text("Nasi Uduk")')
+      .last();
     await expect(lastMealMsg).toBeVisible({ timeout: 45000 });
+    await expect
+      .poll(async () => await lastMealMsg.innerText().catch(() => ''), { timeout: 30000 })
+      .toMatch(/nasi|uduk|telur|balado|tempe|oat|kalori|kcal|protein|lemak/i);
     const mealResText = await lastMealMsg.innerText().catch(() => '');
     console.log(`[J-ID-01 Gate 4] Meal Response snippet: ${mealResText.slice(0, 200)}`);
     expect(mealResText, 'Meal card must not leak raw translation placeholders').not.toMatch(

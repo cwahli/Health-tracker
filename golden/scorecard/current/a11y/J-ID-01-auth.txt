@@ -1,0 +1,24 @@
+- heading "Sign in" [level=1]
+- paragraph: Sign in to continue tracking your health.
+- combobox:
+  - option "English" [selected]
+  - option "Français"
+  - option "中文"
+  - option "Bahasa Indonesia"
+- text: Demo
+- combobox:
+  - option "Demo Empty"
+  - option "Demo Average" [selected]
+  - option "Demo Complex"
+- button "Launch demo"
+- text: or use email Email
+- textbox "Enter email"
+- text: Password
+- button "Forgot password?"
+- textbox "Enter password"
+- button "Continue with email"
+- button "Don't have an account?"
+- text: or
+- button "Google"
+- button "X"
+- button "Facebook"

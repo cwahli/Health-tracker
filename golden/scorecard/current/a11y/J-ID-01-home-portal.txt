@@ -1,0 +1,16 @@
+- banner:
+  - button "User Profile Alt":
+    - img "User Profile Alt"
+  - text: Sari 100 Siap (2) Home Siap
+  - button "Click To Manually Sync"
+- main:
+  - heading "Selamat Datang di Portal Kesehatan Anda" [level=2]
+  - paragraph: Memuat profil dan mengkalibrasi metrik kesehatan Anda...
+  - heading "Loading Profile" [level=3]
+  - paragraph: Harap tunggu sebentar saat target harian, catatan biomarker, dan profil kesehatan Anda diambil.
+- navigation:
+  - button "Home"
+  - button "Health"
+  - button "Open Quick Actions"
+  - button "Riwayat Makanan"
+  - button "Trends"

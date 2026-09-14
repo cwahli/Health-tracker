@@ -211,7 +211,7 @@ export async function assertIdChromeA11yTree(
       }
     }
     const rawKeyMatch = trimmed.match(/\b([a-z0-9_]+\.[a-z0-9_.]+)\b/i);
-    if (rawKeyMatch && !trimmed.includes('@') && !trimmed.includes('.com') && !trimmed.includes('.jpg')) {
+    if (rawKeyMatch && /^[a-zA-Z_]/.test(rawKeyMatch[0]) && /[a-zA-Z]/.test(rawKeyMatch[0]) && !trimmed.includes('@') && !trimmed.includes('.com') && !trimmed.includes('.jpg')) {
       violations.push(`Raw translation key pattern "${rawKeyMatch[0]}" detected in [${roleHint}]: "${trimmed}"`);
     }
   };
@@ -295,7 +295,10 @@ export async function ensureSariAccount(page: Page, opts: { forceFresh?: boolean
   const email = `sari.pw.${Date.now()}.${Math.floor(Math.random() * 1000)}@example.com`;
   console.log(`[indo-helpers] Creating fresh user: ${email}`);
 
-  const modeSwitch = page.locator('#auth-mode-switch-btn');
+  const modeSwitch = first(page, [
+    '#auth-mode-switch-btn',
+    'button:has-text("Don\'t have an account?")',
+  ]);
   if (await modeSwitch.isVisible({ timeout: 10000 }).catch(() => false)) {
     await modeSwitch.click({ timeout: 3000 }).catch(() => {});
     console.log('[indo-helpers] Clicked auth mode switch to signup');
