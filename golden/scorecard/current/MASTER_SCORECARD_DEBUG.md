@@ -2,10 +2,10 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-14T20:29:14.237Z
-**Commit:** `9a399c9`
+**When:** 2026-09-14T21:09:34.652Z
+**Commit:** `f36e8c7`
 **Instruction hash:** `bd4c673081a1`
-**Seal:** `a012eb998b48fc2b48ffa6a11263a382f1c3fe2b454baeef63f4c0a7872e5456`
+**Seal:** `433567a911e890096d553cedf1de4a720d6db051d0594581aaf1bc8cfddc876c`
 **Command:** `node scripts/assert-master-scorecard.mjs`
 **Overall:** **ALL GREEN** — 671 pass / 0 fail / 0 skip
 
@@ -490,12 +490,12 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not drop leak-class keys from the frozen list |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) keeps every frozen leftover-chrome key in en and id |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not leak raw keys or English-fill Indonesian chrome |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |

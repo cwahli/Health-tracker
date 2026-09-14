@@ -1,8 +1,8 @@
 {
   "pack": "scorecard",
-  "commit": "9a399c9",
+  "commit": "96010ab",
   "commitSource": "env",
-  "time": "2026-09-14T20:30:14.676Z",
+  "time": "2026-09-14T21:09:50.023Z",
   "inventories": {
     "top_targets": {
       "helper": "getTopTargetNutrientKeys",
