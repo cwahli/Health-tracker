@@ -1,0 +1,129 @@
+{
+  "journey_id": "J-ID-02",
+  "persona": {
+    "id": "P-ID-WL-01",
+    "name": "Sari",
+    "language": "id",
+    "demographics": {
+      "age": 18,
+      "gender": "female",
+      "height_cm": 140,
+      "weight_kg": 40,
+      "bmi": 20.41
+    },
+    "prior_intake_baseline_kcal": 435,
+    "daily_target_kcal": 1400
+  },
+  "verification_gates": {
+    "compare_modal_zero_raw_keys": true,
+    "compare_agent_language": "id",
+    "nutrition_estimation_max_error_pct": 10.0,
+    "continuity_handoff_job_id_present": true,
+    "multi_agent_state_sync_verified": true
+  },
+  "steps": [
+    {
+      "step_index": 1,
+      "surface": "CompareModal",
+      "action": "compare_meals_request_with_photo",
+      "photo_fixtures": [
+        "golden/meal/Meal_03_compare/set1_silverqueen_1.jpg",
+        "golden/meal/Meal_03_compare/set1_silverqueen_2.jpg"
+      ],
+      "input_text": "Bagusan pilih camilan SilverQueen yang mana untuk selingan siang ini supaya tidak berlebihan kalori?",
+      "options_analyzed": [
+        {
+          "option_id": "A",
+          "name": "SilverQueen Cashew Milk Chocolate Bar (Besar / 58g)",
+          "estimated_kcal_range": {
+            "min": 310,
+            "max": 330
+          },
+          "estimated_kcal": 320,
+          "macros": {
+            "carbs_g": 32,
+            "protein_g": 6,
+            "fat_g": 20
+          },
+          "sugar_g": 28
+        },
+        {
+          "option_id": "B",
+          "name": "SilverQueen Bites Cashew Chocolate (Porsi Terkontrol / 30g)",
+          "estimated_kcal_range": {
+            "min": 155,
+            "max": 175
+          },
+          "estimated_kcal": 165,
+          "macros": {
+            "carbs_g": 17,
+            "protein_g": 3,
+            "fat_g": 10
+          },
+          "sugar_g": 14
+        }
+      ],
+      "expected_recommendation": {
+        "recommended_option": "B",
+        "rationale_points_id": [
+          "Porsi SilverQueen Bites lebih terkontrol (~165 kkal vs ~320 kkal)",
+          "Lebih aman untuk sisa target kalori harian Sari (tersisa 965 kkal setelah sarapan)",
+          "Kandungan gula dan lemak jenuh jauh lebih moderat"
+        ],
+        "compromise_tip": "Kalau memilih kemasan besar, nikmati 1-2 kotak saja (~70 kkal) dan simpan sisanya untuk besok.",
+        "language": "id",
+        "tone": "non_restrictive_constructive"
+      }
+    },
+    {
+      "step_index": 2,
+      "surface": "LogChat",
+      "action": "select_and_log_recommendation",
+      "input_text": "Oke aku pilih SilverQueen bites yang porsi kecil 30g ya",
+      "handoff_payload_asserts": {
+        "job_id_present": true,
+        "source_surface": "CompareModal",
+        "target_surface": "LogChat",
+        "item_id": "B",
+        "selected_kcal": 165
+      },
+      "expected_output": {
+        "logged_item": "SilverQueen Bites Cashew Chocolate 30g",
+        "calories_logged": 165,
+        "daily_cumulative_kcal": {
+          "breakfast": 435,
+          "snack": 165,
+          "total_consumed": 600,
+          "target": 1400,
+          "remaining": 800
+        },
+        "daily_sum_invariant_valid": true,
+        "sync_status": "synced",
+        "cross_surface_sync": {
+          "home_tab_consumed": 600,
+          "home_tab_remaining": 800,
+          "food_history_consumed": 600
+        }
+      }
+    },
+    {
+      "step_index": 3,
+      "surface": "AuthScreen",
+      "action": "verify_returning_session_after_snack",
+      "expected_output": {
+        "status": 200,
+        "user_profile": {
+          "height_cm": 140,
+          "weight_kg": 40,
+          "language": "id"
+        },
+        "daily_intake_persisted": 600,
+        "remaining_budget_persisted": 800
+      }
+    }
+  ],
+  "cleanup_contract": {
+    "no_orphan_compare_drafts": true,
+    "meals_snack_count_exact": 1
+  }
+}

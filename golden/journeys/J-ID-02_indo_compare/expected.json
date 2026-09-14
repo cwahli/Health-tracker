@@ -1,0 +1,99 @@
+{
+  "journey_id": "J-ID-02",
+  "journey_name": "indo_compare",
+  "version": "1.0.0",
+  "persona": {
+    "name": "Sari Hartono",
+    "gender": "female",
+    "age": 42,
+    "height_cm": 140,
+    "weight_kg": 58.0,
+    "target_weight_kg": 50.0,
+    "locale": "id-ID",
+    "daily_calorie_target_kcal": 1350
+  },
+  "session": {
+    "type": "returning_visit",
+    "token_refresh_successful": true,
+    "returning_banner_text": "Selamat datang kembali, Sari. Mari cek perbandingan menu Anda hari ini."
+  },
+  "comparison_items": [
+    {
+      "dish_id": "DISH-01",
+      "name": "Bubur Ayam Lengkap",
+      "portion": "1 mangkok sedang (350g)",
+      "calories_kcal": 380,
+      "glycemic_index": 78,
+      "glycemic_load": 32,
+      "photo_fixture": "fixtures/meals/bubur_ayam_cakwe_kerupuk.jpg"
+    },
+    {
+      "dish_id": "DISH-02",
+      "name": "Lontong Sayur Labu Siam",
+      "portion": "1 porsi (300g)",
+      "calories_kcal": 340,
+      "glycemic_index": 68,
+      "glycemic_load": 24,
+      "photo_fixture": "fixtures/meals/lontong_sayur_labu.jpg"
+    },
+    {
+      "dish_id": "DISH-03",
+      "name": "Nasi Uduk Komplit",
+      "portion": "1 porsi (300g)",
+      "calories_kcal": 520,
+      "glycemic_index": 73,
+      "glycemic_load": 36,
+      "photo_fixture": "fixtures/meals/nasi_uduk_semur_tahu.jpg"
+    }
+  ],
+  "desk_uc01_multiturn": {
+    "module": "UC-01",
+    "title": "Perbandingan Sarapan Tradisional",
+    "turns": [
+      {
+        "turn": 1,
+        "speaker": "user",
+        "input_text": "Bandingkan dampak Bubur Ayam vs Lontong Sayur untuk lonjakan gula darah saya di pagi hari.",
+        "expected_response_keywords": [
+          "Bubur Ayam",
+          "Lontong Sayur",
+          "indeks glikemik",
+          "kerupuk",
+          "cakwe",
+          "labu siam"
+        ]
+      },
+      {
+        "turn": 2,
+        "speaker": "user",
+        "input_text": "Bagaimana jika kerupuk dan cakwe di bubur ayam dihilangkan sama sekali?",
+        "expected_response_keywords": [
+          "cakwe",
+          "kerupuk",
+          "lemak jenuh",
+          "penurunan kalori",
+          "protein suwir ayam"
+        ]
+      },
+      {
+        "turn": 3,
+        "speaker": "user",
+        "input_text": "Mengingat tinggi saya 140 cm dan metabolisme saya lebih lambat, opsi mana yang paling aman untuk sarapan harian?",
+        "expected_response_keywords": [
+          "140 cm",
+          "Lontong Sayur",
+          "serat tinggi",
+          "porsi",
+          "stabilisasi glukosa"
+        ]
+      }
+    ]
+  },
+  "scoreboard_gates": {
+    "persona_height_exact_140": true,
+    "uc01_multiturn_comparison_depth_gte": 3,
+    "returning_session_auth_clean": true,
+    "real_meal_fixtures_all_present": true,
+    "bug_evidence_quarantine_active": true
+  }
+}

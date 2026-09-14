@@ -1,0 +1,90 @@
+{
+  "journey_id": "J-ID-03",
+  "journey_name": "indo_meal_edit_desk_deep",
+  "version": "1.0.0",
+  "persona": {
+    "name": "Sari Hartono",
+    "gender": "female",
+    "age": 42,
+    "height_cm": 140,
+    "weight_kg": 58.0,
+    "target_weight_kg": 50.0,
+    "locale": "id-ID",
+    "daily_calorie_target_kcal": 1350
+  },
+  "authentication_recovery": {
+    "forgot_password_path": "/id/lupa-kata-sandi",
+    "forgot_password_button": "Kirim Tautan Atur Ulang",
+    "confirmation_sent_text": "Tautan atur ulang kata sandi telah dikirim ke email Anda. Silakan periksa kotak masuk Anda.",
+    "invalid_email_error_text": "Alamat email tidak ditemukan dalam sistem kami.",
+    "zero_raw_keys_enforced": true
+  },
+  "initial_meal_log": {
+    "dish_name": "Gado-Gado Bumbu Kacang Sedang",
+    "photo_fixture": "fixtures/meals/gado_gado_bumbu_kacang.jpg",
+    "initial_bumbu_portion_percent": 100,
+    "initial_calories_kcal": 490,
+    "initial_carbohydrates_g": 48,
+    "initial_fats_g": 26,
+    "initial_proteins_g": 16
+  },
+  "edited_meal_log": {
+    "edit_action": "reduce_peanut_dressing_half",
+    "bumbu_portion_percent": 50,
+    "updated_calories_kcal": 360,
+    "updated_carbohydrates_g": 40,
+    "updated_fats_g": 14,
+    "updated_proteins_g": 14,
+    "calorie_delta_saved_kcal": 130
+  },
+  "desk_uc01_deep_multiturn": {
+    "module": "UC-01",
+    "session_depth": "deep_consultation",
+    "turns": [
+      {
+        "turn": 1,
+        "speaker": "user",
+        "input_text": "Coach, saya baru mengedit log Gado-Gado saya, saus kacangnya cuma saya pakai setengah porsi. Berapa kalori yang berhasil saya hemat?",
+        "expected_response_keywords": [
+          "Gado-Gado",
+          "bumbu kacang",
+          "setengah porsi",
+          "hemat 130 kalori",
+          "lemak"
+        ]
+      },
+      {
+        "turn": 2,
+        "speaker": "user",
+        "input_text": "Dengan tinggi 140 cm, apakah porsi sayuran seperti kangkung dan tauge boleh ditambah dua kali lipat?",
+        "expected_response_keywords": [
+          "140 cm",
+          "kangkung",
+          "tauge",
+          "serat",
+          "kenyang lebih lama",
+          "kalori minimal"
+        ]
+      },
+      {
+        "turn": 3,
+        "speaker": "user",
+        "input_text": "Bagaimana perkiraan kurva gula darah saya setelah pengeditan porsi saus kacang ini?",
+        "expected_response_keywords": [
+          "kurva gula darah",
+          "penyerapan lebih lambat",
+          "beban glikemik lebih rendah",
+          "energi stabil"
+        ]
+      }
+    ]
+  },
+  "scoreboard_gates": {
+    "persona_height_exact_140": true,
+    "uc01_deep_multiturn_turns_gte": 3,
+    "meal_edit_recalculation_exact": true,
+    "auth_recovery_chrome_id_no_raw_keys": true,
+    "real_meal_fixture_present": true,
+    "bug_evidence_quarantine_active": true
+  }
+}

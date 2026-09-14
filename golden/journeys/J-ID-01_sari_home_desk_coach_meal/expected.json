@@ -1,0 +1,111 @@
+{
+  "journey_id": "J-ID-01",
+  "journey_name": "sari_home_desk_coach_meal",
+  "version": "1.0.0",
+  "persona": {
+    "name": "Sari Hartono",
+    "gender": "female",
+    "age": 42,
+    "height_cm": 140,
+    "weight_kg": 58.0,
+    "target_weight_kg": 50.0,
+    "activity_level": "lightly_active",
+    "locale": "id-ID",
+    "timezone": "Asia/Jakarta",
+    "medical_conditions": ["pre-diabetes", "mild_hypertension"],
+    "bmr_kcal": 1145,
+    "daily_calorie_target_kcal": 1350
+  },
+  "authentication": {
+    "signup": {
+      "path": "/id/daftar",
+      "fields": {
+        "email": "sari.hartono@example.id",
+        "full_name": "Sari Hartono",
+        "height": "140",
+        "weight": "58"
+      },
+      "labels": {
+        "email_label": "Alamat Email",
+        "password_label": "Kata Sandi",
+        "height_label": "Tinggi Badan (cm)",
+        "weight_label": "Berat Badan (kg)",
+        "submit_button": "Daftar Akun Baru"
+      },
+      "confirmation_notice_text": "Tautan konfirmasi telah dikirim ke email Anda. Silakan periksa kotak masuk."
+    },
+    "signin_wrong_password_scenario": {
+      "input_password": "WrongPassword999!",
+      "expected_error_text": "Kata sandi salah. Silakan coba lagi atau atur ulang kata sandi Anda.",
+      "raw_key_prohibited": "auth.errors.invalid_password"
+    },
+    "signin_success": {
+      "path": "/id/masuk",
+      "submit_button": "Masuk",
+      "first_visit_welcome_header": "Selamat Datang di NutriCoach, Sari!"
+    }
+  },
+  "desk_uc01_multiturn": {
+    "module": "UC-01",
+    "title": "Konsultasi Desk Coach",
+    "turns": [
+      {
+        "turn": 1,
+        "speaker": "user",
+        "input_text": "Halo Coach, saya baru mencatat makan siang Nasi Padang Rendang. Apakah porsi ini berlebih untuk tinggi badan 140 cm?",
+        "expected_response_keywords": [
+          "Nasi Padang",
+          "rendang",
+          "140 cm",
+          "kalori",
+          "serat",
+          "lemak jenuh"
+        ]
+      },
+      {
+        "turn": 2,
+        "speaker": "user",
+        "input_text": "Jika santan dan kuahnya dikurangi setengahnya, bagaimana pengaruhnya ke gula darah saya?",
+        "expected_response_keywords": [
+          "kuah gulai",
+          "santan",
+          "beban glikemik",
+          "lonjakan insulin",
+          "pencernaan"
+        ]
+      },
+      {
+        "turn": 3,
+        "speaker": "user",
+        "input_text": "Saran menu makan malam apa yang cocok agar target 1350 kalori harian tidak terlampaui?",
+        "expected_response_keywords": [
+          "makan malam",
+          "target 1350",
+          "pepes tahu",
+          "sup bayam",
+          "protein rendah lemak"
+        ]
+      }
+    ]
+  },
+  "meal_photo_fixture": {
+    "fixture_id": "MP-ID-01",
+    "file_path": "fixtures/meals/nasi_padang_rendang_sayur_nangka.jpg",
+    "verified_authentic": true,
+    "dish_name": "Nasi Padang Rendang dan Sayur Nangka",
+    "estimated_nutrition": {
+      "calories_kcal": 680,
+      "carbohydrates_g": 82,
+      "proteins_g": 26,
+      "fats_g": 31,
+      "sodium_mg": 790
+    }
+  },
+  "scoreboard_gates": {
+    "persona_height_exact_140": true,
+    "uc01_multiturn_dialogue_turns_gte": 3,
+    "auth_chrome_id_no_raw_keys": true,
+    "real_meal_fixture_present": true,
+    "bug_evidence_quarantine_active": true
+  }
+}
