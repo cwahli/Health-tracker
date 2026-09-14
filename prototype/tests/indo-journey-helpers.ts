@@ -147,18 +147,150 @@ export async function checkAuthI18nKeys(page: Page) {
 
 /**
  * Gate I18N-A11Y: Strict accessibility-tree scan enforcing Indonesian localization.
- * Traverses Playwright accessibility tree snapshot, flattens names and roles,
- * dumps snapshot text to golden/journeys/_live_a11y/J-ID-0X-<surface>.txt, and
- * executes HARD assertions against placeholders, forbidden UI chrome, and unlocalized English verbs.
+ * Primary: Playwright locator.ariaSnapshot() (page.accessibility removed in Playwright 1.62+).
+ * Flattens snapshot text, dumps to golden/journeys/_live_a11y/J-ID-0X-<surface>.txt,
+ * HARD-fails on placeholders / known bad chrome / forbidden English UI verbs.
  */
 export async function assertIdChromeA11yTree(
   page: Page,
   options: { journeyId: string; surface: string }
+): Promise<{ snapshotTree: string; artifactPath: string }> {
+  const { journeyId, surface } = options;
+  console.log(`[Gate I18N-A11Y] Capturing ariaSnapshot for ${journeyId} - ${surface}...`);
+
+  const root = page.locator('#root, body').first();
+  let ariaText = '';
+  try {
+    ariaText = await root.ariaSnapshot();
+  } catch (e) {
+    console.warn('[Gate I18N-A11Y] ariaSnapshot failed, falling back to innerText:', e);
+    ariaText = await page.locator('body').innerText().catch(() => '');
+  }
+  if (!ariaText || !ariaText.trim()) {
+    ariaText = await page.evaluate(() => {
+      const rootEl = document.querySelector('#root') || document.body;
+      const bits: string[] = [];
+      const walk = (el: Element) => {
+        const role = el.getAttribute('role') || el.tagName.toLowerCase();
+        const name =
+          el.getAttribute('aria-label') ||
+          el.getAttribute('title') ||
+          el.getAttribute('placeholder') ||
+          '';
+        let direct = '';
+        el.childNodes.forEach((n) => {
+          if (n.nodeType === Node.TEXT_NODE && n.textContent?.trim()) direct += ' ' + n.textContent.trim();
+        });
+        const label = (name || direct).trim();
+        if (label) bits.push(`[${role}] ${label}`);
+        Array.from(el.children).forEach(walk);
+      };
+      walk(rootEl);
+      return bits.join('\n');
+    }).catch(() => '');
+  }
+
+  const lines = ariaText.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim().length > 0);
+  const violations: string[] = [];
+
+  const checkText = (text: string, roleHint: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (ALLOWLIST_EXACT_OR_PATTERN.some((pattern) => pattern.test(trimmed))) return;
+
+    const titleCaseMatch = trimmed.match(TITLE_CASE_PLACEHOLDER_REGEX);
+    if (titleCaseMatch) {
+      violations.push(`Placeholder token detected in [${roleHint}]: "${trimmed}" (match: "${titleCaseMatch[0]}")`);
+      return;
+    }
+    for (const bad of KNOWN_BAD_CHROME_STRINGS) {
+      if (trimmed.includes(bad)) {
+        violations.push(`Known bad chrome string "${bad}" detected in [${roleHint}]: "${trimmed}"`);
+      }
+    }
+    for (const verbRe of FORBIDDEN_ENGLISH_CHROME_VERBS_REGEXES) {
+      if (verbRe.test(trimmed)) {
+        violations.push(`Forbidden English chrome verb /${verbRe.source}/ found in [${roleHint}]: "${trimmed}"`);
+      }
+    }
+    const rawKeyMatch = trimmed.match(/\b([a-z0-9_]+\.[a-z0-9_.]+)\b/i);
+    if (rawKeyMatch && !trimmed.includes('@') && !trimmed.includes('.com') && !trimmed.includes('.jpg')) {
+      violations.push(`Raw translation key pattern "${rawKeyMatch[0]}" detected in [${roleHint}]: "${trimmed}"`);
+    }
+  };
+
+  for (const line of lines) {
+    // ariaSnapshot lines look like: `- button "Log Meal"` or `- text: Manual Entry`
+    const quoted = [...line.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    const roleMatch = line.match(/^\s*-\s*([a-zA-Z0-9_-]+)/);
+    const roleHint = roleMatch ? roleMatch[1] : 'node';
+    if (quoted.length) {
+      for (const q of quoted) checkText(q, roleHint);
+    } else {
+      // strip leading `- role:` / bullets
+      const stripped = line.replace(/^\s*-\s*/, '').replace(/^[a-zA-Z0-9_-]+:\s*/, '').trim();
+      if (stripped) checkText(stripped, roleHint);
+    }
+  }
+
+  fs.mkdirSync(LIVE_A11Y_DIR, { recursive: true });
+  const filename = `${journeyId}-${surface}.txt`;
+  const artifactPath = path.join(LIVE_A11Y_DIR, filename);
+  fs.writeFileSync(artifactPath, lines.join('\n'), 'utf-8');
+  console.log(`[Gate I18N-A11Y] Saved accessibility artifact: ${artifactPath} (${lines.length} lines)`);
+
+  expect(
+    violations,
+    `Gate I18N-A11Y Violation on surface "${surface}" in ${journeyId}. Evidence saved to ${artifactPath}.\nViolations:\n${violations.join('\n')}`
+  ).toEqual([]);
+
+  return { snapshotTree: ariaText, artifactPath };
+}
 ): Promise<{ snapshotTree: any; artifactPath: string }> {
   const { journeyId, surface } = options;
   console.log(`[Gate I18N-A11Y] Capturing accessibility snapshot for ${journeyId} - ${surface}...`);
 
-  const snapshot = await page.accessibility.snapshot({ interestingOnly: true });
+  let snapshot: any = null;
+  if ((page as any).accessibility && typeof (page as any).accessibility.snapshot === 'function') {
+    try {
+      snapshot = await (page as any).accessibility.snapshot({ interestingOnly: true });
+    } catch (e) {
+      console.warn(`[Gate I18N-A11Y] page.accessibility.snapshot error:`, e);
+    }
+  }
+
+  // Fallback if page.accessibility is deprecated or unavailable in the environment
+  if (!snapshot) {
+    const fallbackTree = await page.evaluate(() => {
+      function walk(el: Element): any {
+        const role = el.getAttribute('role') || el.tagName.toLowerCase();
+        const ariaLabel = el.getAttribute('aria-label') || '';
+        const title = el.getAttribute('title') || '';
+        const placeholder = el.getAttribute('placeholder') || '';
+        let directText = '';
+        el.childNodes.forEach((n) => {
+          if (n.nodeType === Node.TEXT_NODE && n.textContent?.trim()) {
+            directText += ' ' + n.textContent.trim();
+          }
+        });
+        directText = directText.trim();
+        const name = ariaLabel || title || placeholder || directText;
+
+        const children: any[] = [];
+        Array.from(el.children).forEach((child) => {
+          const res = walk(child);
+          if (res && (res.name || res.children.length > 0)) {
+            children.push(res);
+          }
+        });
+
+        return { role, name, children };
+      }
+      return walk(document.querySelector('#root') || document.body);
+    }).catch(() => null);
+
+    snapshot = fallbackTree || { role: 'WebArea', name: 'App', children: [] };
+  }
 
   const lines: string[] = [];
   const violations: string[] = [];
@@ -379,436 +511,4 @@ export async function openAndFillSariProfile(page: Page) {
       await ethSel.selectOption('Southeast Asian').catch(() => {});
     }
 
-    const nickInput = await fieldAfterLabel(profileModal, /Nickname|Nama\s*panggilan|Nama/i).catch(() => null);
-    if (nickInput && (await nickInput.isVisible().catch(() => false))) {
-      await nickInput.fill(SARI_PERSONA.name);
-    }
-  } catch (e) {
-    console.warn('[indo-helpers] fieldAfterLabel fallback to generic inputs:', e);
-    const inputs = profileModal.locator('input[type="number"], input[type="text"]');
-    const count = await inputs.count();
-    for (let i = 0; i < count; i++) {
-      const ph = (await inputs.nth(i).getAttribute('placeholder')) || '';
-      if (/age|usia/i.test(ph)) await inputs.nth(i).fill(SARI_PERSONA.age);
-      if (/weight|berat/i.test(ph)) {
-        await inputs.nth(i).fill(SARI_PERSONA.weight);
-        weightVal = await inputs.nth(i).inputValue();
-      }
-      if (/height|tinggi/i.test(ph)) {
-        await inputs.nth(i).fill(SARI_PERSONA.height);
-        heightVal = await inputs.nth(i).inputValue();
-      }
-    }
-  }
-
-  const saveBtn = profileModal.locator('#profile-save-btn, button:has-text("Save"), button:has-text("Simpan")').first();
-  if (await saveBtn.isVisible().catch(() => false)) {
-    await saveBtn.click({ timeout: 3000 }).catch(() => {});
-    await expect(profileModal).toBeHidden({ timeout: 15000 }).catch(() => {});
-  }
-
-  return { height: heightVal, weight: weightVal };
-}
-
-export async function openFoodChat(page: Page) {
-  const foodTab = first(page, ['#nav-tab-food', 'button:has-text("Food")', '[role="tab"]:has-text("Food")']);
-  if (await foodTab.isVisible().catch(() => false)) {
-    await foodTab.click({ timeout: 3000 }).catch(() => {});
-  }
-
-  const quickActionBtn = first(page, [
-    'button[title="Open quick actions"]',
-    'button[title*="quick" i]',
-    'button.w-14.h-14',
-    '[aria-label*="quick" i]',
-    'button:has-text("Open Quick Actions")',
-  ]);
-  if (await quickActionBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await quickActionBtn.click({ timeout: 3000 }).catch(() => {});
-  }
-
-  const logMealBtn = first(page, [
-    'button:has-text("Catat Makanan")',
-    'button:has-text("Log meal")',
-    'button:has-text("Log Meal")',
-    'button:has-text("Catat")',
-  ]);
-  if (await logMealBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await logMealBtn.click({ timeout: 3000 }).catch(() => {});
-  }
-
-  const input = page.locator('#food-chat-input');
-  await expect(input).toBeVisible({ timeout: 30000 });
-  await expect(input).toBeEnabled({ timeout: 15000 });
-}
-
-export async function openCompareMode(page: Page) {
-  const quickActionBtn = first(page, [
-    'button[title="Open quick actions"]',
-    'button[title*="quick" i]',
-    'button.w-14.h-14',
-    '[aria-label*="quick" i]',
-    'button:has-text("Open Quick Actions")',
-  ]);
-  if (await quickActionBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await quickActionBtn.click({ timeout: 3000 }).catch(() => {});
-  }
-
-  const compareBtn = first(page, [
-    '#quick-action-compare-meal',
-    'button:has-text("Compare")',
-    'button:has-text("Bandingkan")',
-    'button:has-text("Bandingkan Makanan")',
-  ]);
-  if (await compareBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await compareBtn.click({ timeout: 3000 }).catch(() => {});
-  }
-
-  const input = page.locator('#food-chat-input');
-  await expect(input).toBeVisible({ timeout: 30000 });
-}
-
-export async function openFrontDesk(page: Page): Promise<Locator> {
-  // Press Escape to dismiss any lingering quick action backdrop or dialog
-  await page.keyboard.press('Escape').catch(() => {});
-  await page.waitForTimeout(300);
-
-  const deskTab = first(page, [
-    '#nav-tab-desk',
-    '#nav-tab-receptionist',
-    'button:has-text("Desk")',
-    'button:has-text("Front Desk")',
-    'button:has-text("Meja Depan")',
-    'button:has-text("Resepsionis")',
-  ]);
-
-  if (await deskTab.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await deskTab.click({ timeout: 3000 }).catch(() => {});
-  } else {
-    // Check quick actions for receptionist / coach
-    const quickActionBtn = first(page, [
-      'button[title="Open quick actions"]',
-      'button.w-14.h-14',
-      '[aria-label*="quick" i]',
-    ]);
-    if (await quickActionBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await quickActionBtn.click({ timeout: 2000 }).catch(() => {});
-      const deskAction = first(page, [
-        '#quick-action-receptionist',
-        'button:has-text("Front Desk")',
-        'button:has-text("Receptionist")',
-        'button:has-text("Coach")',
-        'button:has-text("Konsultasi")',
-      ]);
-      if (await deskAction.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await deskAction.click({ timeout: 2000 }).catch(() => {});
-      }
-    }
-  }
-
-  const deskInput = first(page, [
-    '#receptionist-chat-input',
-    '#desk-chat-input',
-    '#food-chat-input',
-    'textarea[placeholder*="tanya" i]',
-    'input[placeholder*="tanya" i]',
-    'textarea',
-    'input[type="text"]',
-  ]);
-  return deskInput;
-}
-
-export type SubmitResult = {
-  jobId: string | null;
-};
-
-export async function submitFoodChatMessageWithPhotos(
-  page: Page,
-  text: string,
-  photoPaths: string[] = []
-): Promise<SubmitResult> {
-  const input = page.locator('#food-chat-input');
-  const sendBtn = page.locator('#food-chat-send-btn');
-  const fileInput = page.locator('input[type="file"]').first();
-
-  if (photoPaths.length > 0) {
-    const existing = photoPaths.filter((p) => fs.existsSync(p));
-    if (existing.length > 0) {
-      await fileInput.setInputFiles(existing).catch((e) => {
-        console.warn('[indo-helpers] Failed to attach files:', e);
-      });
-      console.log(`[indo-helpers] Attached ${existing.length} photo(s)`);
-    }
-  }
-
-  if (text) {
-    await input.click({ timeout: 10000 });
-    await input.fill(text);
-  }
-
-  await expect(sendBtn).toBeEnabled({ timeout: 20000 });
-
-  // Listen for job submission network response to capture the real jobId
-  let capturedJobId: string | null = null;
-  const submitPromise = page
-    .waitForResponse(
-      (r) =>
-        (r.url().includes('/api/jobs/') || r.url().includes('/api/food/') || r.url().includes('/api/chat/')) &&
-        r.request().method() === 'POST',
-      { timeout: 35000 }
-    )
-    .then(async (res) => {
-      try {
-        const body = await res.json();
-        const id = body?.jobId || body?.job?.id || body?.id || body?.clean_result?.jobId;
-        if (id) {
-          capturedJobId = String(id);
-          console.log(`[indo-helpers] Captured submitted jobId from response: ${capturedJobId}`);
-        }
-      } catch {}
-    })
-    .catch(() => null);
-
-  await sendBtn.click();
-  await submitPromise;
-
-  // If response didn't give jobId, inspect DOM for data-job-id attribute
-  if (!capturedJobId) {
-    const jobElement = page.locator('[data-job-id]').last();
-    if (await jobElement.isVisible({ timeout: 8000 }).catch(() => false)) {
-      capturedJobId = await jobElement.getAttribute('data-job-id').catch(() => null);
-      if (capturedJobId) {
-        console.log(`[indo-helpers] Captured jobId from DOM data-job-id: ${capturedJobId}`);
-      }
-    }
-  }
-
-  // 1) Wait past transient starting states ("Starting cloud food analysis", "5%", "Memperbarui", "Menganalisis")
-  const analyzing = page.getByText(/Starting cloud|Menganalisis|Analyzing|Updating|Memperbarui/i).first();
-  await analyzing.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
-
-  // 2) Never pass while in progress; wait for analysis indicator to hide (up to 8 minutes)
-  await expect(analyzing).toBeHidden({ timeout: 480000 });
-
-  // 3) Handle portion confirmation step or active retry steps if required
-  const retryBanner = page.getByText(/Attempt \d of \d|Retrying|Memulai ulang/i).first();
-  if (await retryBanner.isVisible({ timeout: 2000 }).catch(() => false)) {
-    console.log('[indo-helpers] Retry banner detected, waiting for completion...');
-    await expect(retryBanner).toBeHidden({ timeout: 240000 }).catch(() => {});
-  }
-
-  const optionChip = first(page, [
-    '[data-testid*="clarify-option"]',
-    '[data-testid*="portion-option"]',
-    'button.rounded-full:has-text("1")',
-    'button:has-text("Sedang")',
-    'button:has-text("Normal")',
-    'button:has-text("Porsi Standar")',
-    'button:has-text("Standar")',
-  ]);
-  if (await optionChip.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await optionChip.click().catch(() => {});
-    await page.waitForTimeout(500);
-  }
-
-  const confirmBtn = first(page, [
-    'button:has-text("Confirm portions")',
-    'button:has-text("Select Portion")',
-    'button:has-text("Pilih Porsi")',
-    'button:has-text("Porsi Standar")',
-    'button:has-text("Standard portion")',
-    'button:has-text("Standard")',
-    'button:has-text("Standar")',
-    'button:has-text("1 Porsi")',
-    'button:has-text("Instant Update")',
-    'button:has-text("Agent Review")',
-    'button:has-text("Lanjutkan")',
-    'button:has-text("Konfirmasi")',
-    'button:has-text("Confirm")',
-    'button:has-text("Simpan")',
-    'button:has-text("Ya")',
-    'button:has-text("Tetap")',
-    'button:has-text("Gunakan")',
-    '[data-testid*="confirm"]',
-    '[data-testid*="portion"]',
-    '[data-testid*="clarify"]',
-  ]);
-  if (await confirmBtn.isVisible({ timeout: 6000 }).catch(() => false)) {
-    await confirmBtn.click().catch(() => {});
-    await expect(analyzing).toBeHidden({ timeout: 180000 }).catch(() => {});
-  }
-
-  // If still no jobId, try one more time from latest completed message or DOM element
-  if (!capturedJobId) {
-    const jobElement = page.locator('[data-job-id]').last();
-    capturedJobId = await jobElement.getAttribute('data-job-id').catch(() => null);
-  }
-
-  return { jobId: capturedJobId };
-}
-
-export async function pollJobUntilTerminal(
-  page: Page,
-  jobId: string,
-  timeoutMs: number = 480000,
-  options: { allowAwaitingUser?: boolean } = {}
-): Promise<any> {
-  const { allowAwaitingUser = true } = options;
-  const start = Date.now();
-  console.log(`[indo-helpers] Polling job ${jobId} status until terminal (timeout ${Math.round(timeoutMs / 1000)}s)...`);
-
-  let lastStatus = 'unknown';
-  let payload: any = null;
-
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const resp = await page.request.get(`/api/jobs/status?jobId=${jobId}`);
-      if (resp.ok()) {
-        payload = await resp.json();
-        const job = payload?.jobs?.[0] || payload?.job || payload;
-        lastStatus = job?.status || lastStatus;
-        if (lastStatus === 'succeeded' || lastStatus === 'failed') {
-          console.log(`[indo-helpers] Job ${jobId} reached terminal status: ${lastStatus} in ${Math.round((Date.now() - start) / 1000)}s`);
-          return job;
-        }
-
-        if (lastStatus === 'awaiting_user') {
-          // Check if page has confirmation or portion buttons visible to advance the run
-          const resumeBtn = first(page, [
-            'button:has-text("Confirm portions")',
-            'button:has-text("Select Portion")',
-            'button:has-text("Pilih Porsi")',
-            'button:has-text("Porsi Standar")',
-            'button:has-text("Standard portion")',
-            'button:has-text("Standard")',
-            'button:has-text("Standar")',
-            'button:has-text("1 Porsi")',
-            'button:has-text("Instant Update")',
-            'button:has-text("Agent Review")',
-            'button:has-text("Lanjutkan")',
-            'button:has-text("Konfirmasi")',
-            'button:has-text("Confirm")',
-            'button:has-text("Simpan")',
-            'button:has-text("Ya")',
-            '[data-testid*="confirm"]',
-            '[data-testid*="portion"]',
-          ]);
-          if (await resumeBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
-            console.log(`[indo-helpers] Job ${jobId} awaiting_user, clicking confirmation to complete...`);
-            await resumeBtn.click({ timeout: 2000 }).catch(() => {});
-            await page.waitForTimeout(2000);
-          } else if (allowAwaitingUser && Date.now() - start > 15000) {
-            console.log(`[indo-helpers] Job ${jobId} reached settled awaiting_user state (multi-turn clarify turn).`);
-            return job;
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`[indo-helpers] Polling error for ${jobId}:`, e);
-    }
-    await page.waitForTimeout(3000);
-  }
-
-  throw new Error(`Job ${jobId} did not reach terminal status within ${timeoutMs}ms (lastStatus: ${lastStatus})`);
-}
-
-export async function assertDebugContractGreen(
-  page: Page,
-  jobId: string | null,
-  journeyId: string,
-  options: { quarantinedFailIds?: string[]; timeoutMs?: number; allowAwaitingUser?: boolean } = {}
-) {
-  const { quarantinedFailIds = [], timeoutMs = 480000, allowAwaitingUser = true } = options;
-
-  console.log(`\n======================================================`);
-  console.log(`[assertDebugContractGreen] Starting contract validation for ${journeyId} (jobId: ${jobId || 'UNKNOWN'})`);
-
-  expect(jobId, `A valid jobId must be captured for ${journeyId} before debug evaluation`).toBeTruthy();
-  const validJobId = jobId!;
-
-  // 1) Poll job until terminal (succeeded or awaiting_user for clarify turn)
-  const terminalJob = await pollJobUntilTerminal(page, validJobId, timeoutMs, { allowAwaitingUser });
-  expect(
-    ['succeeded', 'awaiting_user'],
-    `Job ${validJobId} must reach settled terminal state (succeeded or awaiting_user), not stuck at starting/5% or failed`
-  ).toContain(terminalJob?.status);
-
-  // 2) Ensure output directory exists
-  fs.mkdirSync(LIVE_DEBUG_DIR, { recursive: true });
-
-  // 3) POST Render /api/jobs/debug { jobId, userId, format: 'json' }
-  console.log(`[assertDebugContractGreen] Requesting JSON debug dump for ${validJobId}...`);
-  const jsonResp = await page.request.post('/api/jobs/debug', {
-    data: {
-      jobId: validJobId,
-      userId: 'anonymous',
-      format: 'json',
-    },
-  });
-  expect(jsonResp.status(), `POST /api/jobs/debug (json) must return 200 for ${validJobId}`).toBe(200);
-  const jsonReport = await jsonResp.json();
-
-  // 4) POST Render /api/jobs/debug { jobId, userId, format: 'markdown' }
-  console.log(`[assertDebugContractGreen] Requesting Markdown debug dump for ${validJobId}...`);
-  const mdResp = await page.request.post('/api/jobs/debug', {
-    data: {
-      jobId: validJobId,
-      userId: 'anonymous',
-      format: 'markdown',
-    },
-  });
-  expect(mdResp.status(), `POST /api/jobs/debug (markdown) must return 200 for ${validJobId}`).toBe(200);
-  const mdReport = await mdResp.text();
-
-  // 5) Save debug files to golden/journeys/_live_debug/J-ID-0X-<jobId>.{json,md}
-  const jsonPath = path.join(LIVE_DEBUG_DIR, `${journeyId}-${validJobId}.json`);
-  const mdPath = path.join(LIVE_DEBUG_DIR, `${journeyId}-${validJobId}.md`);
-
-  fs.writeFileSync(jsonPath, JSON.stringify(jsonReport, null, 2), 'utf-8');
-  fs.writeFileSync(mdPath, mdReport, 'utf-8');
-  console.log(`[assertDebugContractGreen] Saved debug artifacts:\n  - ${jsonPath}\n  - ${mdPath}`);
-
-  // 6) classifyDump + formatOracleFails
-  const classified = classifyDump(jsonReport);
-  console.log(`[assertDebugContractGreen] classifyDump yielded ${classified.length} failure(s)`);
-
-  const activeFails = classified.filter((f) => !quarantinedFailIds.includes(f.id));
-  if (activeFails.length > 0) {
-    const formatted = formatOracleFails(activeFails);
-    console.error(`[assertDebugContractGreen] ORACLE CONTRACT FAILURES:\n${formatted}`);
-  }
-
-  // 7) HARD expect no unquarantined oracle failures
-  expect(
-    activeFails,
-    `Dump contracts for ${journeyId} (${validJobId}) must pass. Oracle failures:\n${formatOracleFails(activeFails)}`
-  ).toHaveLength(0);
-
-  console.log(`[assertDebugContractGreen] SUCCESS: All contract laws evaluated GREEN for ${journeyId} (${validJobId})`);
-  return { jsonReport, mdReport, classified };
-}
-
-export async function cleanupLatestMeal(page: Page) {
-  const deleteBtn = first(page, [
-    'button:has-text("Delete task")',
-    'button:has-text("Delete Entry")',
-    'button:has-text("Hapus")',
-    'button:has-text("Delete")',
-    'button[aria-label*="delete" i]',
-    'button[aria-label*="hapus" i]',
-    '[data-testid*="delete"]',
-  ]);
-  if (await deleteBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await deleteBtn.click({ timeout: 2000 }).catch(() => {});
-    const confirmDelete = first(page, [
-      'button:has-text("Ya")',
-      'button:has-text("Hapus")',
-      'button:has-text("Confirm")',
-      'button:has-text("Yes")',
-    ]);
-    if (await confirmDelete.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await confirmDelete.click({ timeout: 2000 }).catch(() => {});
-    }
-    console.log('[indo-helpers] Meal cleanup executed.');
-  }
-}
+    const nickInput = await fieldAfterLabel(profileModal, /Nickname
