@@ -104,8 +104,7 @@ describe('namesReferToSameFood', () => {
     expect(namesReferToSameFood('Tofu', 'Tahu Putih')).toBe(true);
   });
 
-  it('does not duplicate items when dietitian emits standard names for foreign/brand packaged goods', () => {
-    const scoutItems = [
+  it('does not duplicate items when dietitian emits standard names for foreign/brand packaged goods', () => {    const scoutItems = [
       { scoutIndex: 0, originalName: 'Indomaret Kuaci Rasa Susu', keyword: 'milk flavored sunflower seeds' },
       { scoutIndex: 1, originalName: 'Coca-Cola Vanila Zero Sugar', keyword: 'vanilla zero sugar cola' }
     ];
@@ -118,5 +117,39 @@ describe('namesReferToSameFood', () => {
     expect(items).toHaveLength(2);
     expect(items[0].scoutIndex).toBe(0);
     expect(items[1].scoutIndex).toBe(1);
+  });
+
+  it('measures ID/EN alias hit rate over the probe list (F-4: must be 1.0)', () => {
+    const probes: Array<[string, string]> = [
+      ['Ayam Goreng', 'Fried Chicken'],
+      ['Telur Balado', 'Spicy Egg'],
+      ['Ikan Bakar', 'Grilled Fish'],
+      ['Cumi Goreng', 'Fried Squid'],
+      ['Sapi Rendang', 'Beef Rendang'],
+      ['Udang Goreng', 'Fried Shrimp'],
+      ['Bebek Goreng', 'Fried Duck'],
+      ['Tahu Goreng', 'Fried Tofu'],
+      ['Jamur Enoki', 'Enoki Mushrooms'],
+      ['Cumi-cumi', 'Squid'],
+      ['Hari Hari Fresh Telur Ayam Negeri', 'Chicken Egg'],
+      // NOTE: 'Sawi Hijau' != 'Choy Sum' is a CORRECT reject (different vegetables;
+      // the Mie Ayam live pairing was a silent merge, not an alias). Sawi has no
+      // canonical mapping, so it stays out of the hit-rate probe by design.
+      ['Tempe Orek', 'Sweet Soy Tempeh'],
+      ['Kepiting Saus Padang', 'Crab in Padang Sauce'],
+    ];
+    const misses = probes.filter(([alias, canonical]) => !namesReferToSameFood(alias, canonical));
+    const rate = (probes.length - misses.length) / probes.length;
+    expect(`hit rate ${rate} misses: ${misses.map(([a, c]) => `${a}!=${c}`).join('; ')}`).toBe(
+      `hit rate 1 misses: `
+    );
+  });
+
+  it('gates negation and dangerous-single merges (F-4: never silently merge)', () => {
+    expect(namesReferToSameFood('Sweetened Condensed Milk', 'Unsweetened Condensed Milk')).toBe(false);
+    expect(namesReferToSameFood('Salted Butter', 'Unsalted Butter')).toBe(false);
+    expect(namesReferToSameFood('Diet Cola', 'Regular Cola')).toBe(false);
+    expect(namesReferToSameFood('Whole Milk', 'Skim Milk')).toBe(false);
+    expect(namesReferToSameFood('Peanut Butter', 'Butter')).toBe(false);
   });
 });
