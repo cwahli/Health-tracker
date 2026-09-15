@@ -6288,10 +6288,10 @@ ${logsText}`);
                                   handleDownloadDebug(targetJobId || msg.data?.requestId || msg.id || 'error_turn', msg);
                                 }}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
-                                title={t.downloadDebugLogsTitle || 'Download complete raw debug logs and diagnostics'}
+                                title={t.downloadDebugLogsTitle}
                               >
                                 <Download className="w-3.5 h-3.5 text-indigo-500" />
-                                <span>{t.downloadDebugLogs || t.downloadDebugLog || 'Download Debug Logs'}</span>
+                                <span>{t.downloadDebugLogs || t.downloadDebugLog}</span>
                               </button>
                             )}
                             {isErrorMsg && (
@@ -6299,10 +6299,10 @@ ${logsText}`);
                                 type="button"
                                 onClick={() => setShowFullScreenDebugLogs(true)}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/40 transition-all cursor-pointer"
-                                title={t.viewDiagnosticLogsTitle || 'View full system and agent logs in unified modal'}
+                                title={t.viewDiagnosticLogsTitle}
                               >
                                 <Terminal className="w-3.5 h-3.5" />
-                                <span>{t.viewDiagnosticLogs || 'View Diagnostic Logs'}</span>
+                                <span>{t.viewDiagnosticLogs}</span>
                               </button>
                             )}
                           </div>

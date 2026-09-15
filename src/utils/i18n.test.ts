@@ -221,6 +221,59 @@ describe('S-1 leftover chrome (LEAK_EN_CHROME)', () => {
     expect(dictionaryFor('id').viewDiagnosticLogs).toBe(translations.id.viewDiagnosticLogs);
   });
 
+  // Wave H: pre-dump copy for the S-1 call-site keys. The component literals this
+  // wave deleted were byte-identical to these values, so a TRANSLATION_DUMP sweep
+  // must not drift them again (e.g. dropping the ':' or appending ' (default)').
+  const S1_RESTORED_VALUES: Record<string, { en: string; id: string }> = {
+    preparationLabel: { en: 'Preparation:', id: 'Persiapan:' },
+    oneServingDefault: { en: '1 serving', id: '1 porsi' },
+    viewDiagnosticLogsTitle: {
+      en: 'View full system and agent logs in unified modal',
+      id: 'Lihat log sistem dan agen lengkap dalam modal terpadu',
+    },
+    downloadDebugLogsTitle: {
+      en: 'Download complete raw debug logs and diagnostics',
+      id: 'Unduh log debug mentah lengkap dan diagnostik',
+    },
+    browserServingDefaulted: {
+      en: 'Defaulted serving size to {label}',
+      id: 'Ukuran saji default ke {label}',
+    },
+  };
+
+  it('keeps the S-1 call-site keys byte-identical to their pre-dump copy', () => {
+    const en = localePacks.en as Record<string, string>;
+    const id = localePacks.id as Record<string, string>;
+    for (const [key, value] of Object.entries(S1_RESTORED_VALUES)) {
+      expect(en[key], `en.${key}`).toBe(value.en);
+      expect(id[key], `id.${key}`).toBe(value.id);
+    }
+  });
+
+  it('renders the S-1 chrome from keys only (no hardcoded English fallback left)', () => {
+    const read = (rel: string) =>
+      readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), rel), 'utf8');
+
+    const foodHistory = read('../components/FoodHistoryTab.tsx');
+    expect(foodHistory).toContain('t.oneServingDefault');
+    expect(foodHistory).not.toMatch(/quantity:\s*'1 serving'/);
+
+    const foodCard = read('../components/chat-cards/FoodCard.tsx');
+    expect(foodCard).toContain('{t.preparationLabel}');
+    expect(foodCard).not.toContain("t.preparationLabel || 'Preparation:'");
+
+    const logChat = read('../components/LogChat.tsx');
+    expect(logChat).toContain('{t.viewDiagnosticLogs}');
+    expect(logChat).not.toContain("t.viewDiagnosticLogs || 'View Diagnostic Logs'");
+    expect(logChat).not.toContain(
+      "t.downloadDebugLogsTitle || 'Download complete raw debug logs and diagnostics'",
+    );
+
+    const nutritionBrowser = read('../components/NutritionDataBrowserModal.tsx');
+    expect(nutritionBrowser).toContain('interpolate(t.browserServingDefaulted, { label: def.label })');
+    expect(nutritionBrowser).not.toContain('Defaulted serving size to ${def.label}');
+  });
+
   // Parked residuals under S-1: documented, not yet keyed. When a future
   // pass keys one of these, move it to S1_GREEN_KEYS (the unkeyed assertion
   // below forces the move instead of silently going stale).

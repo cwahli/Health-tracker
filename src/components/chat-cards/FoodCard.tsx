@@ -2677,7 +2677,7 @@ export const FoodCard: React.FC<AgentCardProps & {
 
                       <div className="text-[11.5px] space-y-2 text-slate-800 dark:text-slate-100 font-medium text-left font-sans leading-relaxed">
                         {msg.data?.pendingFoodLog.cookingMethod && (
-                          <p className="text-slate-800 dark:text-slate-200 italic font-semibold">🔥 {t.preparationLabel || 'Preparation:'} {msg.data?.pendingFoodLog.cookingMethod}</p>
+                          <p className="text-slate-800 dark:text-slate-200 italic font-semibold">🔥 {t.preparationLabel} {msg.data?.pendingFoodLog.cookingMethod}</p>
                         )}
                         {msg.data?.pendingFoodLog.scoutConfidenceComment && (
                           <div className="text-[11.5px] text-slate-800 dark:text-slate-200 italic bg-slate-100 dark:bg-slate-800/80 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700">

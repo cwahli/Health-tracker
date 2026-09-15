@@ -289,7 +289,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
       if (!finalBasis || finalBasis.trim() === '') {
         const def = defaultServingSizeFor('restaurant');
         finalBasis = def.basisType;
-        setSyncBanner(`Defaulted serving size to ${def.label}`);
+        setSyncBanner(interpolate(t.browserServingDefaulted, { label: def.label }));
         setTimeout(() => setSyncBanner(null), 5000);
       }
 
