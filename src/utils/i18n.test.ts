@@ -24,6 +24,8 @@ import {
   withAgentLanguage,
 } from './i18n';
 import { diagnoseTelemetryIssue } from './biomarkers';
+import { previewStatusLabel } from '../jobs/jobPreview';
+import type { AgentJob } from '../jobs/types';
 
 const enKeys = Object.keys(translations.en).sort();
 
@@ -355,5 +357,75 @@ describe('L-2 seeded/demo chrome (Insights step cards + outlier preciseCause)', 
       return en[key] === human && id[key] === human;
     });
     expect(leftovers.length, 'key-name-valued chrome — see WAVE_C_REPORT.md').toBeLessThanOrEqual(DUMP_RATCHET_MAX);
+  });
+});
+
+describe('job-card chrome i18n (jobPreview status labels)', () => {
+  // Sensor for the class that produced J-ID-01 a11y FAIL: 1c868ab dropped the
+  // status* job-chrome keys, so an id-locale analyzing card rendered the
+  // English fallback "Analysis completed"
+  // (golden/scorecard/current/a11y/J-ID-01-analyzing-job-card.txt).
+  // Every value below is restored byte-for-byte from 85ce58b — never invented.
+  const JOB_CHROME_KEYS = [
+    'statusActionRequired',
+    'statusAiAdvicePending',
+    'statusAnalysisCancelled',
+    'statusAnalysisCompleted',
+    'statusAnalysisFailed',
+    'statusProcessing',
+    'statusUpdatingMealQueued',
+    'statusUploadedQueued',
+    'statusWaitingAhead',
+  ] as const;
+
+  function jobCard(status: AgentJob['status'], extra: Partial<AgentJob> = {}): AgentJob {
+    return {
+      id: 'job_wave_e',
+      kind: 'food_log',
+      status,
+      stepIndex: 0,
+      stepTotal: 1,
+      progressPercent: 100,
+      messages: [],
+      inputSnapshot: { text: 'meal', imageRefs: [] },
+      ...extra,
+    } as AgentJob;
+  }
+
+  it('keeps every jobPreview status key in en and id (no silent drop)', () => {
+    const en = localePacks.en as Record<string, string>;
+    const id = localePacks.id as Record<string, string>;
+    for (const key of JOB_CHROME_KEYS) {
+      expect(en[key], `en.${key} missing`).toBeTruthy();
+      expect(id[key], `id.${key} missing`).toBeTruthy();
+      expect(id[key], `id.${key} is English-filled`).not.toBe(en[key]);
+    }
+    expect(id.statusAnalysisCompleted).toBe('Analisis selesai');
+  });
+
+  it('shows the completed analyzing card in Indonesian', () => {
+    const done = jobCard('succeeded');
+    expect(previewStatusLabel(done, { dict: translations.id })).toBe('Analisis selesai');
+    expect(previewStatusLabel(done, { dict: translations.en })).toBe('Analysis completed');
+    expect(previewStatusLabel(done), 'no dict falls back to English').toBe('Analysis completed');
+  });
+
+  it('shows the other terminal and streaming job cards in Indonesian', () => {
+    const en = localePacks.en as Record<string, string>;
+    const id = localePacks.id as Record<string, string>;
+    const cases: Array<[AgentJob, string]> = [
+      [jobCard('awaiting_user'), 'statusActionRequired'],
+      [jobCard('failed'), 'statusAnalysisFailed'],
+      [jobCard('queued'), 'statusUploadedQueued'],
+      [jobCard('draft'), 'statusProcessing'],
+      [jobCard('succeeded', { result: { degradedStages: ['diet'] } }), 'statusAiAdvicePending'],
+    ];
+    for (const [job, key] of cases) {
+      expect(previewStatusLabel(job, { dict: translations.id }), key).toBe(id[key]);
+      expect(previewStatusLabel(job, { dict: translations.id }), key).not.toBe(en[key]);
+    }
+    expect(previewStatusLabel(jobCard('queued'), { dict: translations.id, queuedAhead: 2 })).toBe(
+      'Menunggu — 2 di depan',
+    );
   });
 });
