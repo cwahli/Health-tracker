@@ -1058,6 +1058,66 @@ describe("server_vision_scout", () => {
       expect(boxForUnrolledFood(null, [190, 0, 960, 1000], [150, 100], 0)[0]).toBe(190);
       expect(boxForUnrolledFood(null, [190, 0, 960, 1000], [150, 100], 1)[2]).toBe(960);
     });
+
+    it("unrolls a sole Nasi Uduk dish (job_1789430040929) with a dengan-dan compound name and zero boxes", () => {
+      const mockScout = {
+        dishes: [
+          {
+            dishName: "Nasi Uduk dengan Telur Balado dan Tempe Orek",
+            estimatedWeightGrams: 350,
+            cookingMethod: "steamed",
+            sourceImageIndex: 0,
+            boundingBox2D: [0, 0, 0, 0],
+            foods: [
+              {
+                foodName: "Nasi Uduk",
+                genericEnglishName: "coconut rice",
+                weightGrams: 200,
+                sourceImageIndex: 0,
+                boundingBox2D: [0, 0, 0, 0],
+                nutrients: { protein: 4, saturatedFat: 4.5, addedSugar: 0, totalFibre: 1, sodium: 300, carbohydrates: 45 },
+              },
+              {
+                foodName: "Telur Balado",
+                genericEnglishName: "spicy egg",
+                weightGrams: 75,
+                sourceImageIndex: 0,
+                boundingBox2D: [0, 0, 0, 0],
+                nutrients: { protein: 6.3, saturatedFat: 1.5, addedSugar: 2, totalFibre: 0.5, sodium: 250, carbohydrates: 4 },
+              },
+              {
+                foodName: "Tempe Orek",
+                genericEnglishName: "sweet soy tempeh",
+                weightGrams: 75,
+                sourceImageIndex: 0,
+                boundingBox2D: [0, 0, 0, 0],
+                nutrients: { protein: 14, saturatedFat: 1, addedSugar: 5, totalFibre: 3, sodium: 350, carbohydrates: 12 },
+              },
+            ],
+            dishNutrients: {
+              saturatedFat: 7,
+              totalFat: 18,
+              protein: 24.3,
+              sodium: 900,
+              carbohydrates: 61,
+              totalFibre: 4.5,
+            },
+          },
+        ],
+      };
+
+      const result = parseAndHealVisionScout(mockScout, () => {});
+      expect(result.items.map((it: any) => it.originalName)).toEqual([
+        "Nasi Uduk",
+        "Telur Balado",
+        "Tempe Orek",
+      ]);
+      expect(result.items.map((it: any) => it.estimatedWeightGrams)).toEqual([200, 75, 75]);
+      for (const it of result.items) {
+        expect(it.hasComponents).toBe(false);
+        expect(it.components).toBeUndefined();
+      }
+    });
   });
 });
 
