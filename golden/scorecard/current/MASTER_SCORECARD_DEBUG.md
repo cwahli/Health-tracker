@@ -2,18 +2,18 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-15T00:10:37.494Z
-**Commit:** `aa0aaec`
+**When:** 2026-09-15T15:58:26.406Z
+**Commit:** `3ff047d`
 **Instruction hash:** `bd4c673081a1`
-**Seal:** `e6a2e04d17b9fc6f5b8d326f2762e41aa92e024fcbedcaa267ea9e80fefaea58`
+**Seal:** `a7a744d76537d2bd224db673255340e58412e9a8315957417031af5ea67633a2`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **ALL GREEN** — 677 pass / 0 fail / 0 skip
+**Overall:** **ALL GREEN** — 705 pass / 0 fail / 0 skip
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | PASS | 677 pass / 0 fail / 0 skip of 677 |
+| `overall_named_gates` | PASS | 705 pass / 0 fail / 0 skip of 705 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
 | `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
@@ -21,12 +21,12 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | `load_hack_forbidden` | PASS | no @ts-nocheck; named gates on disk; Top Targets helper intact; contract not painted |
 | `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
 | `result_summary_sealed` | PASS | will write result_summary (overallPass) |
-| `area_localization` | PASS | 51 pass / 0 fail / 0 skip |
-| `area_meal_log` | PASS | 191 pass / 0 fail / 0 skip |
+| `area_localization` | PASS | 65 pass / 0 fail / 0 skip |
+| `area_meal_log` | PASS | 192 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
 | `area_biomarkers` | PASS | 148 pass / 0 fail / 0 skip |
-| `area_receptionist` | PASS | 43 pass / 0 fail / 0 skip |
-| `area_reliability` | PASS | 197 pass / 0 fail / 0 skip |
+| `area_receptionist` | PASS | 49 pass / 0 fail / 0 skip |
+| `area_reliability` | PASS | 204 pass / 0 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
 | `journey-guard` | PASS | exit 0 |
 | `biomarker-lifecycle-m31` | PASS | exit 0 |
@@ -36,12 +36,12 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
-| Localization | PASS | 51 | 0 | 0 | 51 |
-| Meal Log | PASS | 191 | 0 | 0 | 191 |
+| Localization | PASS | 65 | 0 | 0 | 65 |
+| Meal Log | PASS | 192 | 0 | 0 | 192 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
 | Biomarkers | PASS | 148 | 0 | 0 | 148 |
-| Receptionist | PASS | 43 | 0 | 0 | 43 |
-| Reliability | PASS | 197 | 0 | 0 | 197 |
+| Receptionist | PASS | 49 | 0 | 0 | 49 |
+| Reliability | PASS | 204 | 0 | 0 | 204 |
 
 ## All failed (red)
 
@@ -53,7 +53,7 @@ _none_
 
 ## All passed (green)
 
-### Reliability (197)
+### Reliability (204)
 
 | Status | File | Test |
 |---|---|---|
@@ -213,6 +213,13 @@ _none_
 | PASS | `src/utils/syncUtils.regression.test.ts` | mergeByRecency prefers the newer item by updated_at |
 | PASS | `src/utils/syncUtils.regression.test.ts` | mergeByRecency unions local-only and server-only items |
 | PASS | `src/utils/syncUtils.regression.test.ts` | mergeByRecency local-only items survive server absence (no implicit delete) |
+| PASS | `src/utils/syncUtils.regression.test.ts` | resolveInitialLanguage prefers an explicit chosenLanguage over everything else |
+| PASS | `src/utils/syncUtils.regression.test.ts` | resolveInitialLanguage falls back to preferred_language from localStorage when chosenLanguage is absent |
+| PASS | `src/utils/syncUtils.regression.test.ts` | resolveInitialLanguage reproduces and fixes the exact bug: Indonesian selected pre-login, no chosenLanguage threaded through |
+| PASS | `src/utils/syncUtils.regression.test.ts` | resolveInitialLanguage ignores an invalid chosenLanguage value and falls back to preferred_language |
+| PASS | `src/utils/syncUtils.regression.test.ts` | resolveInitialLanguage ignores an invalid preferred_language value and defaults to en |
+| PASS | `src/utils/syncUtils.regression.test.ts` | resolveInitialLanguage defaults to en when nothing is set anywhere |
+| PASS | `src/utils/syncUtils.regression.test.ts` | resolveInitialLanguage supports all four locales through the chosenLanguage path |
 | PASS | `src/utils/syncUtils.regression.test.ts` | mergeDeleteMaps takes the higher timestamp for the same id |
 | PASS | `src/utils/syncUtils.regression.test.ts` | mergeDeleteMaps never drops tombstones from either side |
 | PASS | `src/jobs/__tests__/JobSession.contract.test.ts` | JobSession contract (STALE_TURN) edit submit shows Updating meal while the prior meal is still on the job |
@@ -255,7 +262,7 @@ _none_
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_contract_not_painted |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_no_slice_scripts |
 
-### Meal Log (191)
+### Meal Log (192)
 
 | Status | File | Test |
 |---|---|---|
@@ -405,6 +412,7 @@ _none_
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling unrolls a sole Mie Ayam bowl (job_1789414917685) even when the dish name does not contain the food names |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling keeps diet-agent per-food boundingBox2D on unrolled top-level previews |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling slices a parent crop by weight when the diet agent omits per-food boxes |
+| PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling unrolls a sole Nasi Uduk dish (job_1789430040929) with a dengan-dan compound name and zero boxes |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set registers exactly the official goldens |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set each golden has Instruction.md, expected.json, and every listed photo |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match dictionary locks resolve to the pinned local canonical id |
@@ -451,7 +459,7 @@ _none_
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_top_targets_fallback |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_limit_keys_present |
 
-### Localization (51)
+### Localization (65)
 
 | Status | File | Test |
 |---|---|---|
@@ -469,6 +477,7 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | dictionaryFor returns Indonesian copy for id |
 | PASS | `src/utils/i18n.test.ts` | dictionaryFor uses Indonesian Front Desk welcome, not the English Health Preparation Agent string |
 | PASS | `src/utils/i18n.test.ts` | dictionaryFor translates leftover meal-10 chrome in Indonesian |
+| PASS | `src/utils/i18n.test.ts` | dictionaryFor restores verdictLabel with trailing colon in en and id (Wave J safe restore) |
 | PASS | `src/utils/i18n.test.ts` | agentOutputLanguageBlock names Bahasa Indonesia and keeps JSON keys in English |
 | PASS | `src/utils/i18n.test.ts` | agentOutputLanguageBlock does not tell English users to avoid English |
 | PASS | `src/utils/i18n.test.ts` | agentOutputLanguageBlock prepends the block onto an instruction |
@@ -486,6 +495,10 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | display chrome helpers translates medical condition names and passes unknown strings through |
 | PASS | `src/utils/i18n.test.ts` | display chrome helpers localizes meal fallback and widget chrome in Indonesian |
 | PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) keys the S-1 button/card chrome in en and id with differing copy |
+| PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) keeps the S-1 call-site keys byte-identical to their pre-dump copy |
+| PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) renders the S-1 chrome from keys only (no hardcoded English fallback left) |
+| PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) restores Wave I flag-issue id chrome byte-for-byte from c3e6cfd |
+| PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) renders Wave I flag-issue chrome from keys only (no English fallback left) |
 | PASS | `src/utils/i18n.test.ts` | S-1 leftover chrome (LEAK_EN_CHROME) documents parked S-1 residuals without keying them yet |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not drop leak-class keys from the frozen list |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) keeps every frozen leftover-chrome key in en and id |
@@ -493,6 +506,15 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | L-2 seeded/demo chrome (Insights step cards + outlier preciseCause) keeps the Insights step cards in real EN + ID copy (no key-name leftovers) |
 | PASS | `src/utils/i18n.test.ts` | L-2 seeded/demo chrome (Insights step cards + outlier preciseCause) follows profile.language in the outlier preciseCause (id / en / unset) |
 | PASS | `src/utils/i18n.test.ts` | L-2 seeded/demo chrome (Insights step cards + outlier preciseCause) ratchets TRANSLATION_DUMP leftovers so the class can only shrink |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (jobPreview status labels) keeps every jobPreview status key in en and id (no silent drop) |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (jobPreview status labels) shows the completed analyzing card in Indonesian |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (jobPreview status labels) shows the other terminal and streaming job cards in Indonesian |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) restores every scanned job-card key byte-for-byte from 85ce58b and id !== en |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) restores the five keys named in the Wave F card |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) restores the en side the dump mangled on the same-class siblings |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) keeps the placeholders the job card interpolates (no silent no-op replace) |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) renders the edit/retry running job card in Indonesian |
+| PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) never regresses a scanned key back to the Title-Case humanization of its key |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
@@ -660,7 +682,7 @@ _none_
 | PASS | `node scripts/assert-biomarker-lifecycle-m31.mjs` | biomarker-lifecycle-m31 |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_biomarker_multipliers |
 
-### Receptionist (43)
+### Receptionist (49)
 
 | Status | File | Test |
 |---|---|---|
@@ -704,6 +726,12 @@ _none_
 | PASS | `src/server/receptionist/handoffContract.test.ts` | S-6 HANDOFF_I18N — UC-02 vitality turns drive the contract UC-02 turn 2 (complete vitality snapshot) hands off to health_coach |
 | PASS | `src/server/receptionist/handoffContract.test.ts` | S-6 HANDOFF_I18N — UC-02 vitality turns drive the contract coach handoff ack follows profile language (en vs id) |
 | PASS | `src/server/receptionist/handoffContract.test.ts` | S-6 HANDOFF_I18N — UC-02 vitality turns drive the contract meal-photo and lab-report acks follow profile language |
+| PASS | `src/server/receptionist/handoffContract.test.ts` | COLLECTED_DATA_DROP — deterministic demographic extraction (live job_frontdesk_1789468175766) extracts the exact turn-2 submit (EN labels + ID weight) |
+| PASS | `src/server/receptionist/handoffContract.test.ts` | COLLECTED_DATA_DROP — deterministic demographic extraction (live job_frontdesk_1789468175766) extracts the exact turn-3 submit (ID activity + target) |
+| PASS | `src/server/receptionist/handoffContract.test.ts` | COLLECTED_DATA_DROP — deterministic demographic extraction (live job_frontdesk_1789468175766) never lets target weight leak into current weight, and female never matches male |
+| PASS | `src/server/receptionist/handoffContract.test.ts` | COLLECTED_DATA_DROP — deterministic demographic extraction (live job_frontdesk_1789468175766) rejects absurd numbers |
+| PASS | `src/server/receptionist/handoffContract.test.ts` | FORM_LABEL_EN — model uiForm labels follow the form language rewrites generically-named English labels to ID, unknown labels pass through |
+| PASS | `src/server/receptionist/handoffContract.test.ts` | FORM_LABEL_EN — model uiForm labels follow the form language leaves EN forms untouched |
 | PASS | `src/server/receptionist/jsonSanitize.test.ts` | sanitizeReceptionistJson repairs runaway weightKg decimals so JSON.parse succeeds |
 | PASS | `src/server/receptionist/jsonSanitize.test.ts` | sanitizeReceptionistJson repairs truncated JSON cut off inside a string literal |
 | PASS | `src/server/receptionist/jsonSanitize.test.ts` | sanitizeReceptionistJson repairs truncated JSON cut off |

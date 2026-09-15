@@ -2,7 +2,7 @@
 
 **Purpose:** one PASS/FAIL board by product area, **plus a ratchet for bugs that took >3 fix iterations or came back after green.** Living document — do not delete a red or ratchet row to look green.
 
-**As of:** 2026-09-14 (folder v4: `golden/scorecard/{instruction,current,past,result_summary}`).  
+**As of:** 2026-09-15 (folder v4: `golden/scorecard/{instruction,current,past,result_summary}`). Sealed ALL GREEN 705/0/0 at `3ff047d` — see `../result_summary/LATEST.md`.  
 **How this v3 board was built:** review of ROADMAP / QUALITY / FOOD / standing / learnings / prototypes / `golden/meal` / GitHub PRs #1–#5 / git history of restores, wipes, and re-fixes. Named reds re-verified. Did **not** run `npm test`.
 
 **Process:** [`README.md`](./README.md) · [`WORKFLOW.md`](./WORKFLOW.md) · [`gates.json`](./gates.json)  
@@ -22,18 +22,18 @@ Until `6c25141`, `npm test` also executed Playwright specs and printed **18 fake
 
 ---
 
-## OVERALL VERDICT: **NOT ALL GREEN**
+## OVERALL VERDICT: **ALL GREEN**
 
-Dump (`current/MASTER_SCORECARD_DEBUG.md`, as of `d105b0c` work): **666 pass / 1 fail**. Trust that dump over this table if they diverge. `result_summary/` empty until exit 0.
+Dump (`current/MASTER_SCORECARD_DEBUG.md`, sealed `3ff047d` 2026-09-15): **705 pass / 0 fail / 0 skip**. Sealed copy: `../result_summary/LATEST.md` (exit 0). Trust that dump over this table if they diverge.
 
 | Area | Inner | Live / E2E | Verdict |
 |---|---|---|---|
-| Localization | `closeDialog`/`modalDialog`/`analyzingMeal` in packs; **242 `t()` callsite keys** still missing | J-ID debug-contract LIVE PASS; Gate I18N-A11Y **never run** | ⚠️ INCOMPLETE + ratchet |
-| Meal Log | portion, polarity, goldens, same-meal **PASS**; **`SINGLE_DISH_FLATTEN`** now gated (Mie Ayam unroll) | 3 Indo journeys happy-path; live `job_1789414917685` was 1 nested dish | ⚠️ inner green after unroll fix; live re-soak not done |
-| Compare | named units PASS | J-ID-02 LIVE PASS (wrong fixtures); 6-case spec untracked | ⚠️ PARTIAL + ratchet |
-| Biomarkers | G-B1–G-B9 fixtures restored; **0 skip** | zero Playwright; B0 Apply is Current work | ⚠️ units green; live Apply not done |
-| Receptionist | 5 named files PASS | stub specs only | ⚠️ PARTIAL |
-| Reliability | scorer + tsc + Guard + live contract **PASS**; `LOAD_HACK` ratchet | photo-sync untested; Render commit may lag HEAD | ⚠️ structural green; second-device untested |
+| Localization | `closeDialog`/`modalDialog`/`analyzingMeal` in packs; L-2/L-4 callsite packs restored | J-ID debug-contract LIVE PASS; Wave K J-ID-01 I18N-A11Y soak evidence archived (`current/a11y/`) | ✅ PASS (sealed) + ratchet |
+| Meal Log | portion, polarity, goldens, same-meal, single-dish-flatten **PASS** | 3 Indo journeys happy-path; J-ID-01 live PASS | ✅ PASS (sealed) |
+| Compare | named units PASS | J-ID-02 LIVE PASS (wrong fixtures); 6-case spec untracked (residual) | ✅ PASS (sealed) + ratchet |
+| Biomarkers | G-B1–G-B9 fixtures restored; **0 skip** | B0 Apply CLOSED 2026-09-14; zero Playwright (residual) | ✅ PASS (sealed) |
+| Receptionist | 5 named files PASS | stub specs only (residual) | ✅ PASS (sealed) |
+| Reliability | scorer + tsc + Guard + live contract **PASS**; `LOAD_HACK` ratchet | live contract PASS sealed; photo-sync second-device untested (residual); Render commit now matches HEAD seal | ✅ PASS (sealed) |
 
 ---
 
@@ -43,20 +43,20 @@ Rule for this table: count **distinct fix commits / documented retries**, not ch
 
 | Class | What it is | Iterations (evidence) | Reappeared after green? | Now | **On master scorecard?** |
 |---|---|---|---|---|---|
-| `TRANSLATION_DUMP` / `LEAK_KEY` / `LEAK_EN_CHROME` | `translations.ts` bulk overwrite drops keys; UI shows raw camelCase | **≥8 restores:** `bca0f80` wipe → `893d938` revert (S-7/8/9); `eeee07f` +263 keys; `fe61818` +10; `1bb0600` wipe → `2d6f78a` restore 277 **including `closeDialog`/`modalDialog`**; `d5a600e` gut (650-line delete + 4 `fix_translations*.cjs`) → `ff9d543` restore; `9848619` Home portal; `bfe5964` Food History overlay; `80c1911` auth placeholders; `f729298` quota copy (PR #3) | **Yes, repeatedly.** Every large “refactor/update translations” commit. `closeDialog` was restored in `2d6f78a` and is **gone again** in HEAD. | 🔴 AppModal still red; parity test cannot see keys that are absent from both locales | **YES — Localization #1.** Leftover-string list must include `closeDialog` / `modalDialog` so the next dump cannot hide them. |
-| `PORTION_FUNNEL` | ask vs adopt (stated grams, half-pack, overflow) | **≥6:** Bug #9 visual-source `30d5b2c`; servings-not-whole-pack `f86acde`; WRONG_BASIS 1g **PR #1** `c3e6cfd`; S-10 funnel `6669d81` + live cases `c277817` (**ROADMAP marked COMPLETE 2026-09-12**); bulk-pack follow-up `158dc14` (edits `server_portion_clarify.ts` + `quantityText.ts`) | **Yes.** S-10 COMPLETE then 4 tests inverted (ask/adopt swapped) on 2026-09-14 re-run. Likely broken by `158dc14`. | 🔴 4 failing assertions | **YES — Meal Log product red.** Do not paint expects. |
+| `TRANSLATION_DUMP` / `LEAK_KEY` / `LEAK_EN_CHROME` | `translations.ts` bulk overwrite drops keys; UI shows raw camelCase | **≥8 restores:** `bca0f80` wipe → `893d938` revert (S-7/8/9); `eeee07f` +263 keys; `fe61818` +10; `1bb0600` wipe → `2d6f78a` restore 277 **including `closeDialog`/`modalDialog`**; `d5a600e` gut (650-line delete + 4 `fix_translations*.cjs`) → `ff9d543` restore; `9848619` Home portal; `bfe5964` Food History overlay; `80c1911` auth placeholders; `f729298` quota copy (PR #3) | **Yes, repeatedly.** Every large “refactor/update translations” commit. `closeDialog` was restored in `2d6f78a`, gone again at that HEAD, and restored again — sealed PASS 2026-09-15. | ✅ chrome keys sealed green (`i18n_required_chrome` PASS); ratchet stays | **YES — Localization #1.** Leftover-string list must include `closeDialog` / `modalDialog` so the next dump cannot hide them. |
+| `PORTION_FUNNEL` | ask vs adopt (stated grams, half-pack, overflow) | **≥6:** Bug #9 visual-source `30d5b2c`; servings-not-whole-pack `f86acde`; WRONG_BASIS 1g **PR #1** `c3e6cfd`; S-10 funnel `6669d81` + live cases `c277817` (**ROADMAP marked COMPLETE 2026-09-12**); bulk-pack follow-up `158dc14` (edits `server_portion_clarify.ts` + `quantityText.ts`) | **Yes.** S-10 COMPLETE then 4 tests inverted (ask/adopt swapped) on 2026-09-14 re-run. Likely broken by `158dc14`; restored in `d105b0c`. | ✅ PASS sealed (705 green 2026-09-15) | **YES — Meal Log product red.** Do not paint expects. |
 | `SAME_MEAL_PACKAGE_PREPARED` | 3 photos of one oats meal → 2 dishes; “combine them” missed | Prior `merge_dishes` + closed regex; live `job_1789312118652` came back; TS collapse + standing `588154c` | **Yes.** User: “this bug was fixed before and reappeared.” Learner: no standing row, so the class returned. | ✅ standing `same_meal_package_prepared` | **YES — green ratchet.** Never drop the needles. |
 | `NUTRIENT_POLARITY` / Home Top Targets | sat fat over target shown green; snake_case vs camelCase; Home `includes` of undefined | Unify `4eefd94`; rolling-average `429ebbb`; Home crash `4a9f129`; polarity `588154c`; restore core keys `ff9d543` (**5 commits**) | **Yes.** Unify shipped, then sat fat still green because lists used `saturatedFat` and coach sent `saturated_fat`. | ✅ `isLimitNutrient` centralized | **YES — Home / Meal Log ratchet.** Gate: `nutrients.test.ts`. |
 | `CROSS_DEVICE_SYNC` / `DISPLAY_DUP` | photo placeholder; dup images; D1 sync_state | unique-by-key (Sync only) then Log `data:`+`/photos/` (`meal_image_unique` learning); R2 `cc6676d`; placeholder→URL **PR #2** `40dd6ca`; D1 push `bfea1f5`; sync_state `1527549` | **Yes.** First image fix tested on Sync, user still saw dups on Log. Photo still has **no second-device test**. | ⚠️ product claimed fixed; class untested | **YES — Reliability structural.** Highest-leverage new test. |
 | `COMPARE_MODE_D` | empty-success shelf, narrator fabricating logs, groups not on poll path, i18n | **≥6:** `75e1492` empty-success; `22db946` groups + never fabricate logs; `4a519ea` no narrator; `93a49c1` grouping template; `99141d8` zoom/normalize; `1558901` copy + target cards | Series of the same Mode D path, not one-and-done | ⚠️ unit thin; 6-case spec untracked; J-ID-02 used Silverqueen not the 6-set | **YES — Compare.** Gate = 6-case spec + standing `food_compare`. |
-| `GOLDEN_FIXTURE_ROT` | `bca0f80` (144 files) deleted golden assets; S-9 restored **only** translations | Deleted `tests/Golden_meal/{1–8}` expected/photos, **entire** `tests/Golden_biomarker/examples/G-B1…G-B9`, compare dirs. Manifest still lists G1–G9. | **Yes.** Suite was green, then collection crash / skip-pass. Never restored (blast-radius note in ROADMAP S-9). | 🔴 `golden_meals.test.ts` ENOENT; biomarker goldens **skip-pass** | **YES — both Meal Log and Biomarkers.** Restoring fixtures is a class, not a side quest. |
+| `GOLDEN_FIXTURE_ROT` | `bca0f80` (144 files) deleted golden assets; S-9 restored **only** translations | Deleted `tests/Golden_meal/{1–8}` expected/photos, **entire** `tests/Golden_biomarker/examples/G-B1…G-B9`, compare dirs. Manifest still lists G1–G9. | **Yes.** Suite was green, then collection crash / skip-pass. Restored 2026-09-14/15 (blast-radius note in ROADMAP S-9 stands as history). | ✅ fixtures restored; sealed 0 skip, collection PASS | **YES — both Meal Log and Biomarkers.** Restoring fixtures is a class, not a side quest. |
 | `USDA_FDC_OVERWRITE` | live FDC ranked into Analyze | F-1/F-2 “fix USDA” abandoned after 50-meal audit; F-12.1–12.4 delete (`4cef1e5`, `89358ed`, `fc51180`) | Product direction reversed (keep → delete). Residual: `golden_meals` still asserts `expectFdcId`. | ✅ FDC HTTP gone; local staple table numbers only | **YES as do-not-reopen ratchet**, not an open bug. Do not restore FDC to make old locks pass. |
-| `I18N_A11Y_UNRUN` | a11y-tree gate to catch leftover English chrome | Gate defined; specs wired `f372e85`; helper rewritten `b8f91d1` (Playwright 1.62 removed `page.accessibility`); repaired `d7f5216` — **3 commits in one day**, still no `_live_a11y/` | Helper **broke immediately** after rewrite (reappeared as a crash, not a chrome leak) | 🔴 never run live | **YES — Localization.** Journeys are not complete until checklist rows are PASS. |
-| `GOLDEN_SCORER_DRIFT` | Golden inbox `scoreGoldenRun` / title / blob-split | Drift lands in `d5a600e` (same commit that gutted translations **and** edited `goldenScoreboard.ts`) | Unknown prior green; currently deterministic red | 🔴 3 tests | **YES — Reliability/Quality.** Not the Settings “Food & Venues % logs” tile (`Header.tsx` `sync_state`). |
+| `I18N_A11Y_UNRUN` | a11y-tree gate to catch leftover English chrome | Gate defined; specs wired `f372e85`; helper rewritten `b8f91d1` (Playwright 1.62 removed `page.accessibility`); repaired `d7f5216` — **3 commits in one day**; Wave K J-ID-01 soak evidence archived 2026-09-15 | Helper **broke immediately** after rewrite, then repaired; full checklist still partial | 🟡 Wave K J-ID-01 evidence in `current/a11y/` | **YES — Localization.** Journeys are not complete until checklist rows are PASS. |
+| `GOLDEN_SCORER_DRIFT` | Golden inbox `scoreGoldenRun` / title / blob-split | Drift lands in `d5a600e` (same commit that gutted translations **and** edited `goldenScoreboard.ts`); engine restored 2026-09-14 | Unknown prior green; was deterministic red, now sealed green | ✅ PASS sealed | **YES — Reliability/Quality.** Not the Settings “Food & Venues % logs” tile (`Header.tsx` `sync_state`). |
 | `VERDICT_CORRUPT` | `[object Object]` D1 verdicts; false default “Good” | `fe61818` false Good + 10 keys; `9ff1da2` D1 serialize/self-heal; `9252233` OCR sat-fat + preserve verdict | Related class hit more than once (default vs serialize vs OCR) | claimed fixed | **YES — Meal Log ratchet.** Named tests must keep a non-string verdict from rendering. |
 | `STALE_TURN` / stuck job card | preview shows previous turn; contradictory card states | F-9.1–9.5 series + `c79a448` stuck card + `334befc` contradictory states | Recurring job-lifecycle class (`8742686` is the blast-radius FAIL example in AGENTS) | F-9.5 shipped; flags still exist as fallback | **YES — Reliability ratchet.** Gate: `JobSession.contract.test.ts`. Do not mix with food-calc. |
 | `KCAL_ONE_WRITER` | agent-emitted calories vs `finalizeDishLedger` | F-8 whole track + F-10.2 Atwater; standing row | Architecture was rebuilt because the class kept returning | ✅ standing | **YES — Meal Log ratchet** (standing already). |
-| `APPLY_MISS` / B0 converts | HDL 50→1.293 etc. not applied to Home | B0 is Current work; G-B1 fixtures **deleted** so the outer lock is skip-pass | N/A (never proven live) | ⚠️ Current work | **YES — Biomarkers.** Do not treat skip-pass as G-B1 green. |
+| `APPLY_MISS` / B0 converts | HDL 50→1.293 etc. not applied to Home | B0 was Current work; G-B1 fixtures were deleted so the outer lock was skip-pass — both resolved 2026-09-14 | Proven live 2026-09-14, then sealed | ✅ B0 CLOSED 2026-09-14 | **YES — Biomarkers.** Do not treat skip-pass as G-B1 green. |
 | Credits / admin quota 0 | Admin `NaN`/0; quota copy `\n\n` | PR #3 + PR #4 (**2**, not >3) | No | ✅ `creditManager.test.ts` | **Thin yes** — keep the known-fixed row; not a ratchet driver. |
 | Deploy git-hash in Settings | Docker has no `.git` | `0d40406` `7093718` `613aa03` `eebbdc8` `930f0aa` `f12b296` (**>3**) | Infra churn | ops | **NO** on the product scorecard. Not a patient-facing class. |
 | Track L-2–L-5 leftovers | seed/outlier/admin chrome + catalog + live meal id | Unparked 2026-09-15 | Active Track L | active | Restore from `85ce58b`/`95c5640`; L-5 waits named locale. |
@@ -82,15 +82,15 @@ Gemini Current work remains **B0**. Do **not** start F-11.2, Q-9, or USDA. Track
 
 | # | Do | Why it is next | Done when |
 |---|---|---|---|
-| **1–5** | i18n chrome keys, portion restore, G-B fixtures, meal goldens, scorer | `d105b0c` | inner gates green in dump |
-| **6** | `SINGLE_DISH_FLATTEN` (this change) | live Mie Ayam nested 4 foods in 1 dish | `server_vision_scout.test.ts` Mie Ayam case green; standing `single_dish_flatten` |
-| **7** | Remaining 238 `t()` callsite keys — Track L unparked (seed*/outlier* = L-2, dict/table/batch/img/del/backup/sanitize/audit = L-4) | restore from `85ce58b` (no invent) | `i18n_required_chrome` PASS |
-| **8** | Run Gate I18N-A11Y live | 3 helper commits, still unsoaked | `current/a11y/` + SCOREBOARD_LIVE_RESULTS checklist all PASS |
-| **9** | Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL |
-| **10** | Record Meal_03 6-case + Meal_04 live specs | Compare/log benches exist and are untracked | PASS/FAIL + date in §E2E |
-| **11** | B0 Apply smoke (Gemini) | Current work; locked converts | HDL 1.293 / TG 1.411 / LDL 3.362 / creat 79.56 / bili 13.68 on Home |
+| **1–5** | ✅ DONE — i18n chrome keys, portion restore, G-B fixtures, meal goldens, scorer | sealed 705/0/0 at `3ff047d` | inner gates green in dump |
+| **6** | ✅ DONE — `SINGLE_DISH_FLATTEN` | live Mie Ayam nested 4 foods in 1 dish | `server_vision_scout.test.ts` Mie Ayam case green; standing `single_dish_flatten` |
+| **7** | ✅ DONE — Track L callsite keys (L-2 seed/outlier, L-4 dict/table/batch/img/del/backup/sanitize/audit) | restored from `85ce58b` (no invent) | `i18n_required_chrome` PASS sealed |
+| **8** | 🟡 PARTIAL — Gate I18N-A11Y Wave K J-ID-01 evidence archived | 3 helper commits, then J-ID-01 soak | `current/a11y/` present; checklist in SCOREBOARD_LIVE_RESULTS |
+| **9** | OPEN — Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL |
+| **10** | OPEN — Record Meal_03 6-case + Meal_04 live specs | Compare/log benches exist and are untracked | PASS/FAIL + date in §E2E |
+| **11** | ✅ DONE — B0 Apply smoke CLOSED 2026-09-14 | locked converts | HDL 1.293 / TG 1.411 / LDL 3.362 / creat 79.56 / bili 13.68 on Home |
 
-**Human ops:** deploy current `main`; confirm sat fat over target is red. Brand `status` migration `20260913_brand_menu_items_status.sql` is **cited in ROADMAP but not in the repo** (`supabase/` has no that file) — recover or apply by hand before claiming F-11.1 live.
+**Human ops DONE 2026-09-14:** Render serves current `main` (`live_origin` PASS sealed); sat fat over target confirmed red. Brand `status` migration `20260913_brand_menu_items_status.sql` is in the repo (`supabase/migrations/`) and applied to live Supabase by hand.
 
 ---
 
@@ -144,12 +144,11 @@ npx vitest run src/utils/i18n.test.ts agents/dietitianInstructions.i18n.test.ts 
 
 | Check | Status | Evidence |
 |---|---|---|
-| Frozen leftover chrome | 🔴 independent of vitest skip | `instruction/i18n/REQUIRED_CHROME.json` parsed from `translations.ts` text. Missing `closeDialog`/`modalDialog`; `analyzingMeal` id is English-filled `"Analyzing Meal"`. |
-| `t()` callsite keys | 🔴 244 keys used in `src/`/`agents/` missing from both packs (raw camelCase in UI) | `current/i18n_callsite_missing.json` — parity cannot see these |
-| en/id key parity | PASS for keys that exist. Absent keys are invisible to parity — **not sufficient**. | `i18n.test.ts` |
-| `AppModal` close | 🔴 `aria-label="closeDialog"` | `AppModal.test.tsx`; keys never in `localePacks` (`a3e8087` introduced the `t()` call) |
+| Frozen leftover chrome | ✅ PASS sealed | 27 frozen keys present, not leak, id≠en (`i18n_required_chrome` law) |
+| `t()` callsite keys | ✅ PASS sealed | L-2/L-4 restores landed; no missing-keys fail in sealed dump |
+| `AppModal` close | ✅ PASS sealed | `closeDialog`/`modalDialog` in packs; `AppModal.test.tsx` green in sealed run |
 | J-ID-01/02/03 debug-contract | LIVE PASS | `SCOREBOARD_LIVE_RESULTS.md` |
-| Gate I18N-A11Y | 🔴 NEVER RUN; helper rewritten then repaired | `_live_a11y/` missing |
+| Gate I18N-A11Y | 🟡 Wave K J-ID-01 evidence archived | helper repaired; `current/a11y/` present; full checklist partial |
 | Persona | **P-ID-WL-01 F18 / 140 cm / 40 kg / 1350 kcal**. Consolidation 58kg/age42 is stale | live-results header |
 | Planned Indo dish photos | never added; live used oats / Silverqueen | FIXTURE NOTE |
 | Track L-2–L-5 | **active** (unparked 2026-09-15) | ROADMAP |
@@ -171,7 +170,7 @@ npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server
 | S-10 portion funnel | PASS after `d105b0c` restore | `quantityText.ts` + `server_portion_clarify.test.ts` |
 | Home polarity | PASS + ratchet | `isLimitNutrient`; `nutrients.test.ts` |
 | Same-meal package+prepared | PASS + standing | `588154c` |
-| **Single-dish flatten** | INNER GATE (was live FAIL `job_1789414917685`) | `server_vision_scout.test.ts` Mie Ayam unroll; J-ID-01 + G8. Sole dish with `foods[]` must become top-level items + `boundingBox2D` for zoom |
+| **Single-dish flatten** | ✅ PASS sealed (was live FAIL `job_1789414917685`) | `server_vision_scout.test.ts` Mie Ayam unroll; J-ID-01 + G8; standing `single_dish_flatten` |
 | F-12 USDA | shipped / do-not-reopen | F-12.1–12.4 |
 | F-10.7 expand | ⚠️ helper exists, **not on analyze hot path** | `shouldExpandMealAgent` is unit-tested and exported from `src/mealBuild/`; no import from `server_food_analyze_run*.ts`. Complex meals do not spawn workers yet. Do not copy prototype DELEGATE. |
 | Layer B goldens | PASS collect | restored G1–G9; identity/lock fixtures, not 32-key ledgers |
@@ -217,11 +216,11 @@ npx vitest run src/utils/biomarkerLifecycle.test.ts src/utils/biomarkerIdentity.
 | Check | Status | Evidence |
 |---|---|---|
 | Lifecycle / identity / sanitize helpers | PASS | named vitest |
-| `tests/golden_biomarker.test.ts` | ⚠️ **file PASS, 9 skipped** | dir missing; skip is not G-B1 green |
+| `tests/golden_biomarker.test.ts` | ✅ PASS sealed, 0 skip | fixtures restored; collection PASS |
 | Prototype C1–C7 | claimed 100% | `scripts/assert-biomarker-cases.mjs` |
-| B0 Apply smoke | Current work | locked `1.293` / `1.411` / `3.362` / `79.56` / `13.68` |
+| B0 Apply smoke | ✅ CLOSED 2026-09-14 | locked `1.293` / `1.411` / `3.362` / `79.56` / `13.68` on Home |
 | Live E2E | ZERO | no Playwright spec |
-| B7.4 pending store | not started | after B0 |
+| B7.4 pending store | ✅ shipped (`74e29bc`) | packet `specs/done/b7-4-pending-store.md` |
 | B8.1 convertViaTable only | shipped | Grok |
 
 Ratchets: `GOLDEN_FIXTURE_ROT`, `APPLY_MISS`. Next for Gemini: B0, not a new journey. Next for scorecard honesty: action #3.
@@ -259,7 +258,7 @@ node scripts/journey-guard.mjs
 | Check | Status | Evidence |
 |---|---|---|
 | Vitest vs Playwright exclude | fixed `6c25141` | |
-| golden scorer | 🔴 | `d5a600e` edited the engine |
+| golden scorer | ✅ PASS sealed | engine restored; `goldenScoreboard.test.ts` green in sealed run |
 | Job session / STALE_TURN | shipped + ratchet | `JobSession.contract.test.ts` |
 | Credits | PASS | PR #4 |
 | Debug / dump contract | PASS | |

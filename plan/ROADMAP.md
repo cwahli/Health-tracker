@@ -13,7 +13,7 @@
 Laws: `docs/agent/domains/{biomarkers,food-calc,sync}.md`  
 WIP: `AI_HANDOVER.md` (header only) · Completed: `archive/` · `plan/archive/`
 
-**As of 2026-09-13.** F-8.1–F-8.13, F-9, F-10.1–10.7 shipped. Meal Agent is `diet`. Live USDA/FDC cut (F-12.1–12.3). Brand TS self-clean (F-11.1). EN/ID chrome shipped; leftover localisation is **Track L (active, unparked 2026-09-15)**; live leftover chrome also in **Track S**. Do not reopen FDC or put curator back on Analyze.
+**As of 2026-09-15.** F-8.1–F-8.13, F-9, F-10.1–10.7 shipped. Meal Agent is `diet`. Live USDA/FDC cut (F-12.1–12.4). Brand TS self-clean (F-11.1). Biomarkers B7.4–B7.6 landed. F-3 / F-4 / F-6 / F-8.12 landed. EN/ID chrome shipped incl. L-1 / L-2 / L-4. Sealed scorecard ALL GREEN 705/0/0 at `3ff047d` (`golden/scorecard/result_summary/LATEST.md`). Leftover localisation is **Track L (active, unparked 2026-09-15)**; live leftover chrome also in **Track S**. Do not reopen FDC or put curator back on Analyze.
 
 ---
 
@@ -31,18 +31,18 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ---
 
-## Current work — B0 (Gemini / AI Studio)
+## Current work — B0 CLOSED, Track B landed (2026-09-15)
+
+**B0.1–0.3 Apply smoke CLOSED 2026-09-14** (card shows HDL 50→**1.293**, TG 125→**1.411**, LDL 130→**3.362**, creat 0.9→**79.56**, bili 0.8→**13.68**; history + Home written; `observationMeta` raw kept; older SI rows untouched). **B0.5** not needed (no miss). Fill-template **C1–C7** green (`scripts/assert-biomarker-cases.mjs`). **B7.4 / B7.5 / B7.6 landed** (packets in `specs/done/`). **B8.0** is a human product choice — skip.
 
 **Do this, in order. Do not restart F-10.**
 
-1. **B0.1–0.3** Human Apply smoke on `job_medical_1786666223594`. Card must show HDL 50→**1.293**, TG 125→**1.411**, LDL 130→**3.362**, creat 0.9→**79.56**, bili 0.8→**13.68**; Apply writes history + Home; `observationMeta` raw kept. Older SI rows untouched.
-2. If Apply misses → **B0.5** (`APPLY_MISS` test, then hydrate / `enrichReviewModificationCommands` only).
-3. Keep fill-template **C1–C7** green in `prototype/biomarkers/` before any production modal wiring. List: [BIOMARKER_FILL_TEMPLATE_CASES.md](./BIOMARKER_FILL_TEMPLATE_CASES.md).
-4. After B0 verified: **B7.4** pending store (not B7.5/B7.6 until 7.4 lands). **B8.0** is a human product choice — skip.
+1. Outer soaks only: **Q-8.6 / F-10.8** one website Log Meal per `scripts/soak-q8-tier3.md` (human/script outer confirm, Grok not in the wait loop).
+2. Gated future work needs **go** — do not start it to look busy: **F-11.2 / F-11.3**, **Q-9**, **Q-10**, **R-13** (incl. R-5), **L-5**, **B8.0**.
 
-**Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs`
+**Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 705/0/0 at `3ff047d`, `golden/scorecard/result_summary/LATEST.md`).
 
-**Human ops (site live, not Gemini):** deploy current `main` so Render serves `GET /api/scorecard/contract`; run `supabase/migrations/20260913_brand_menu_items_status.sql` on live Supabase; confirm Home Top Targets (sat fat over target is red, not green). Scorecard `live_origin` stays FAIL until that deploy.
+**Human ops DONE 2026-09-14 (site live, not Gemini):** Render serves `GET /api/scorecard/contract` (`live_origin` PASS in sealed run); `supabase/migrations/20260913_brand_menu_items_status.sql` applied to live Supabase by hand; Home Top Targets confirmed (sat fat over target red).
 
 ```text
                     ┌─────────────────────┐
@@ -150,14 +150,14 @@ Found while triaging `debug-job_1789169906811` + red gates. Work in this order:
 **Laws:** `docs/agent/domains/biomarkers.md`  
 **Gate always:** `node scripts/assert-biomarker-lifecycle-m31.mjs`
 
-Ingest **code** for B1–B6 is on GitHub. Ingest **v1 is not shipped** until the remaining rows below are done.
+Ingest **code** for B1–B6 is on GitHub. Ingest **v1 shipped 2026-09-14** — rows below are the criteria record.
 
-### Still to do
+### Done — criteria record (all shipped, kept so gates stay citable)
 
 | # | Item | Done when | Class |
 |---|---|---|---|
-| **B0.1–0.3** | Human Apply smoke on `job_medical_1786666223594` | Card shows HDL 50→**1.293**, TG 125→**1.411**, LDL 130→**3.362**, creat 0.9→**79.56**, bili 0.8→**13.68**; Apply writes history + Home; `observationMeta` raw kept; older SI rows (HDL 1.43, creat 100/72, bili 16/13) untouched | `APPLY_MISS` |
-| **B0.5** | Only if Apply misses | Failing `APPLY_MISS` test, then fix hydrate / `enrichReviewModificationCommands` only | `APPLY_MISS` |
+| **B0.1–0.3** | **Shipped 2026-09-14:** Apply smoke CLOSED on `job_medical_1786666223594` | Card shows HDL 50→**1.293**, TG 125→**1.411**, LDL 130→**3.362**, creat 0.9→**79.56**, bili 0.8→**13.68**; Apply writes history + Home; `observationMeta` raw kept; older SI rows (HDL 1.43, creat 100/72, bili 16/13) untouched | `APPLY_MISS` |
+| **B0.5** | **Not needed:** Apply hit, no miss | Failing `APPLY_MISS` test, then fix hydrate / `enrichReviewModificationCommands` only | `APPLY_MISS` |
 | **B2.1** | **Shipped** | Extract prompt has no second `Chat History:` prefix (`server.ts`) | hygiene |
 | **B2.2** | **Shipped** | Schema / prompt no longer ask the model for `updated_at` | — |
 | **B2.3** | **Shipped** | `remainingText` gone from extract path (`server.ts` → `LogChat` → `MedicalAgentExecutor` → `serverJobs`) | — |
@@ -166,9 +166,9 @@ Ingest **code** for B1–B6 is on GitHub. Ingest **v1 is not shipped** until the
 | **B4.3** | **Shipped** | `lexTable` + `buildIngestBatch` run on the 140-row fixture; assert **class counts from the lexer**, not `expected.json` labels | — |
 | **B5.11** | **Shipped** | Same report upserts; no second observation row | `UPSERT_IDENTITY` |
 | **B6** | **Shipped** | `golden-from-medical-debug.mjs`; inbox Biomarkers grouped by class (not a G-B1 stub); G-B5/7/9 tests **execute** the door / completeness / image path | — |
-| **B7.4** | Real Pending store | Unknown names never become catalog keys; pending not a field on the `customBiomarkers` bag | `COMPLETENESS` |
-| **B7.5** | Silent Calibrator | Overlay re-runs when demographic fingerprint (`ageBand\|gender\|ethnicity`) changes — product path, not only a helper | `CURRENCY` |
-| **B7.6** | Name Deduper leftovers | Parallel keys from aliases / `metric_N` still in live profiles are merged or tombstoned | `IDENTITY_PARALLEL_KEY` |
+| **B7.4** | **Shipped** (`74e29bc`, packet `specs/done/b7-4-pending-store.md`): Real Pending store | Unknown names never become catalog keys; pending not a field on the `customBiomarkers` bag | `COMPLETENESS` |
+| **B7.5** | **Shipped** (`93b702d`, packet `specs/done/b7-5-silent-calibrator.md`): Silent Calibrator | Overlay re-runs when demographic fingerprint (`ageBand\|gender\|ethnicity`) changes — product path, not only a helper | `CURRENCY` |
+| **B7.6** | **Shipped** (`9080458`, packet `specs/done/b7-6-name-deduper-leftovers.md`): Name Deduper leftovers | Parallel keys from aliases / `metric_N` still in live profiles are merged or tombstoned | `IDENTITY_PARALLEL_KEY` |
 
 **Stop if:** lexer writes observations · G-B4 fails · Parser is sent a high-confidence name.
 
@@ -227,9 +227,9 @@ Live USDA/FDC is **abandoned** (F-12). Brand catalog self-clean is **F-11**.
 |---|---|---|---|
 | **F-1** | **Abandoned** | 50-meal audit: FDC overwrite is net-negative. Replaced by **F-12** delete | Reopen FDC; “fix USDA” |
 | **F-2** | **Abandoned** | Same. Analyze is OCR → brand → Meal Agent | Last-resort USDA; Analyze USDA-first |
-| **F-3** | Open | One class playbook per session (picnic / lassi / ham…). Fixture tests in `golden_meals.test.ts` are **not** this item | `POST /loop` until all-green |
-| **F-4** | Open | Measured alias hit rate; dups gated, not silently merged | Silent merge |
-| **F-6** | Open | `FoodCard.tsx` ~4121 / catalog 4200. Net-zero toward ~3800 or pack lists growth. New portion/receipt UI stays in existing cards | New food table / +100 lines “enhance” |
+| **F-3** | **Shipped 2026-09-15** | DISH_DROP sensor: sole Nasi Uduk dengan-dan dish unrolls to 3 items (packet `specs/done/f-3-dish-drop-nasi-uduk.md`) | `POST /loop` until all-green |
+| **F-4** | **Shipped 2026-09-15** | Measured alias hit rate 1.0 over 13-probe list + negation/dangerous-single merge gates (packet `specs/done/f-4-alias-hit-rate.md`) | Silent merge |
+| **F-6** | **Shipped 2026-09-15** | FoodCard 3336 under 3800, 0 food-UI lines added; 3 pre-existing god-file budget fails recorded (packet `specs/done/f-6-net-zero-verify.md`) | New food table / +100 lines “enhance” |
 | **F-7** | **Gate green** | `assert-budgets.mjs` PROMPT_BUDGET/scout. Keep net-zero on prompt edits (L12) | Prompt-only unit math |
 
 Q-1 (`assert-budgets.mjs`) is **green**. Brand self-clean is **F-11**. USDA delete is **F-12**.
@@ -245,7 +245,7 @@ Q-1 (`assert-budgets.mjs`) is **green**. Brand self-clean is **F-11**. USDA dele
 |---|---|---|---|
 | **F-8.10** | **Shipped** | `server_food_analyze_run.ts` split into 150–600 owners (Meal Agent dispatch, DB search, precalc/finalize, responses). Dead backup deleted. HTTP adapter stays ≤700. | 40-line shards; a second kcal writer |
 | **F-8.11** | **Superseded by F-10.8** | Do not soak the old always-dietitian create path. Evidence job still required on the F-10 pipeline | Replay scout+dietitian as “done” |
-| **F-8.12** | Packaged catalog residual | Hemaviton-class drink: vitamin C / labelled kcal from **brand or printed OCR** when those facts exist. Bind-attempt + `BIND_MISS` is already honest. F-10 does not replace catalog bind | Invent 1000 mg vitamin C |
+| **F-8.12** | **Shipped 2026-09-15** | Hemaviton HIT with vitamin C locked 6/6 green; residual closed (packet `specs/done/f-8-12-packaged-bind-verify.md`). F-10 does not replace catalog bind | Invent 1000 mg vitamin C |
 | **F-8.13** | **Shipped** | JSON run tree (`debugRunTree.ts`) + `dumpContract` on JSON + Contract-first markdown. Gaps A–F in `docs/agent/domains/debug-contract.md`. | Hash-only prompts; hide schema; PNG as contract; LangSmith/LLM-judge |
 
 Execute **one class** per session. Inner = named vitest. Outer = one frozen example, not meal-green.
@@ -451,9 +451,9 @@ EN/ID UI chrome for login, home, chat, food history, insights, trends/health, pr
 ### Still to do (active)
 
 - **L-1 Live Indonesian meal-log proof.** **Landed 2026-09-15.** Live Render PASS (`indo-l1-meal-verdict.live.spec.ts`, job `job_1789418889841_nx1b76vmp`): profile.language=id required; verdict/advice Indonesian (not English Supports Sustained Metabolic Energy). Food names may stay English.
-- **L-2 Seeded / demo content.** Pack restore from `85ce58b` landed 2026-09-15 (seed*/outlier*/clinicalActionDesc/dailyBenefitsDesc). Confirm live Insights literature + outlier preciseCause still follow profile.language.
+- **L-2 Seeded / demo content.** Pack restore from `85ce58b` landed 2026-09-15 (seed*/outlier*/clinicalActionDesc/dailyBenefitsDesc). Covered by automated preciseCause language test (`81a9651`); no live eyeball needed.
 - **L-3 Catalog display names.** `displayBiomarkerName` / `displayConditionName` already wired (MedicalHistoryTab, dictionary, audit). Keep keys English; vitest gates in `i18n.test.ts`.
-- **L-4 Admin / leftover widgets.** Pack restore from `85ce58b` landed 2026-09-15 (table*/backup*/audit*/dict*/sanitize*/batch*/img*/del*). Scorecard `i18n_required_chrome` ALL GREEN.
+- **L-4 Admin / leftover widgets.** Pack restore from `85ce58b` landed 2026-09-15 (table*/backup*/audit*/dict*/sanitize*/batch*/img*/del*). Scorecard `i18n_required_chrome` ALL GREEN, sealed 2026-09-15 (705/0/0).
 - **L-5 More languages.** Deferred 2026-09-15 (no milestone locale chosen). Keep EN+ID only; do not make fr/zh complete as a side quest.
 
 **Out of Track L:** dish/brand names, JSON keys / nutrient codes / biomarker keys, native Choose File, old saved meal-analysis sentences (re-log to refresh).
