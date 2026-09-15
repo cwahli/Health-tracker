@@ -5466,33 +5466,19 @@ ${logsText}`);
             </div>
           </div>
           <div className="flex items-center gap-1">
-            {messages.length > 1 && (
-              <button
-                onClick={async () => {
-                  const welcome = getWelcomeMessage();
-                  setMessages([welcome], true);
-                  setLastSentPayload(null);
-                  sessionStorage.removeItem(chatStorageKey);
-                  sessionStorage.removeItem(payloadStorageKey);
-                  localStorage.removeItem(chatStorageKey);
-                  localStorage.removeItem(payloadStorageKey);
-                  if (activeConversationId) {
-                    const userId = auth.currentUser?.uid;
-                    if (userId) {
-                      await safeIdbSet(`${chatStorageKey}_${userId}_${activeConversationId}`, [welcome]);
-                      await safeIdbSet(`${payloadStorageKey}_${userId}_${activeConversationId}`, null);
-                    } else {
-                      await safeIdbSet(`${chatStorageKey}_guest_${activeConversationId}`, [welcome]);
-                      await safeIdbSet(`${payloadStorageKey}_guest_${activeConversationId}`, null);
-                    }
-                  }
-                }}
-                className="p-1.5 rounded-full hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 hover:text-rose-600 transition-colors cursor-pointer"
-                title={t.clearAll || "Clear all"}
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
-            )}
+            <button
+              type="button"
+              id="download-debug-logs-header-btn"
+              onClick={() => {
+                const targetMsg = [...messages].reverse().find(m => m.data?.jobId || m.data?.requestId || m.pendingFoodLog || m.data?.pendingFoodLog || m.data?.agentResult) || messages[messages.length - 1];
+                const downloadTargetId = jobId || targetMsg?.data?.jobId || targetMsg?.data?.requestId || targetMsg?.id || 'error_turn';
+                handleDownloadDebug(downloadTargetId, targetMsg);
+              }}
+              className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 transition-colors cursor-pointer"
+              title={t.downloadDebugLogsTitle || t.downloadDebugLogs || "Download Debug Logs"}
+            >
+              <Download className="w-5 h-5" />
+            </button>
             <button
               onClick={() => setShowFullScreenDebugLogs(true)}
               className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 transition-colors"
@@ -6279,19 +6265,6 @@ ${logsText}`);
                                 <Sparkles className="w-3.5 h-3.5" />
                                 <span>{t.switchAgent}</span>
                                 <ChevronDown className="w-3 h-3" />
-                              </button>
-                            )}
-                            {(debugUrl || targetJobId || isErrorMsg) && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleDownloadDebug(targetJobId || msg.data?.requestId || msg.id || 'error_turn', msg);
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
-                                title={t.downloadDebugLogsTitle}
-                              >
-                                <Download className="w-3.5 h-3.5 text-indigo-500" />
-                                <span>{t.downloadDebugLogs || t.downloadDebugLog}</span>
                               </button>
                             )}
                             {isErrorMsg && (

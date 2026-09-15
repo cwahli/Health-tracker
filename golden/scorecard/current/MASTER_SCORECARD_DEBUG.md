@@ -2,13 +2,12 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-15T22:59:57.578Z
-**Commit:** `6166ea6`
+**When:** 2026-09-15T23:07:47.044Z
+**Commit:** `b661693`
 **Instruction hash:** `c5cbb90c42d3`
-**Seal:** `aaafbd2921b7ebbce03418d2350df69a79fa01d7518ed5597a2d2a75815d027d`
+**Seal:** `edccfe47a4d88670191b096d78f605f263e324242b015b3aebf8077bd2def84d`
 **Command:** `node scripts/assert-master-scorecard.mjs`
 **Overall:** **ALL GREEN** — 707 pass / 0 fail / 0 skip
-**Archived previous current →** `golden/scorecard/past/runs/2026-09-15T22-58-52-306Z-6166ea6`
 
 ## Contract
 
@@ -518,12 +517,12 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) keeps the placeholders the job card interpolates (no silent no-op replace) |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) renders the edit/retry running job card in Indonesian |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) never regresses a scanned key back to the Title-Case humanization of its key |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |
