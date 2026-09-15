@@ -3311,13 +3311,13 @@ function FoodResultFlagButton({
           className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full border border-amber-400/80 text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100"
         >
           <Flag className="w-3 h-3" />
-          {flaggedId ? (t.flagAnother || 'Flag another') : (t.flagIssue || 'Flag issue')}
+          {flaggedId ? t.flagAnother : t.flagIssue}
         </button>
       </div>
       <UniversalModal
         isOpen={open}
         onClose={() => setOpen(false)}
-        title={t.flagFoodAnalysisIssue || "Flag food analysis issue"}
+        title={t.flagFoodAnalysisIssue}
         onFlagSuccess={(id) => setFlaggedId(id)}
         flagContext={{
           context: 'food_analyze',

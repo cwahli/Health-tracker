@@ -6182,7 +6182,7 @@ ${logsText}`);
                           type="button"
                           onClick={() => setFlagMsg(msg)}
                           className="p-1 text-slate-300 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                          title={t.flagIssueWithThisResponse || "Flag issue with this response"}
+                          title={t.flagIssueWithThisResponse}
                         >
                           <Flag className="w-3.5 h-3.5" />
                         </button>
@@ -7259,7 +7259,7 @@ ${logsText}`);
         <UniversalModal
           isOpen={!!flagMsg}
           onClose={() => setFlagMsg(null)}
-          title={(t.flagIssueWithAgentResponse || 'Flag issue with {agent} response').replace('{agent}', activeAgentKey)}
+          title={t.flagIssueWithAgentResponse.replace('{agent}', activeAgentKey)}
           flagContext={{
             context: activeAgentKey || 'log_chat',
             initialCategory: (activeAgentKey === 'data_review' || activeAgentKey === 'medical') ? 'biomarker' : (activeAgentKey === 'food' ? 'foodcart' : 'Other'),

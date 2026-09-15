@@ -274,6 +274,45 @@ describe('S-1 leftover chrome (LEAK_EN_CHROME)', () => {
     expect(nutritionBrowser).not.toContain('Defaulted serving size to ${def.label}');
   });
 
+  // Wave I: flag-issue chrome restored from c3e6cfd (bca0f80~1) byte-for-byte.
+  // id values had drifted to English; call sites carried `|| 'English'` fallbacks.
+  const FLAG_RESTORED_ID: Record<string, string> = {
+    flagIssueWithThisResponse: 'Laporkan masalah pada respons ini',
+    flagIssueWithAgentResponse: 'Laporkan masalah dengan respons {agent}',
+    flagAnother: 'Laporkan lainnya',
+    flagFoodAnalysisIssue: 'Laporkan masalah analisis makanan',
+  };
+
+  it('restores Wave I flag-issue id chrome byte-for-byte from c3e6cfd', () => {
+    const en = localePacks.en as Record<string, string>;
+    const id = localePacks.id as Record<string, string>;
+    for (const [key, value] of Object.entries(FLAG_RESTORED_ID)) {
+      expect(id[key], `id.${key} missing`).toBeTruthy();
+      expect(id[key], `id.${key} drifts from c3e6cfd`).toBe(value);
+      expect(id[key], `id.${key} is English-filled`).not.toBe(en[key]);
+    }
+    // flagIssue id was already correct — guard it stays put.
+    expect(id.flagIssue).toBe('Laporkan masalah');
+  });
+
+  it('renders Wave I flag-issue chrome from keys only (no English fallback left)', () => {
+    const read = (rel: string) =>
+      readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), rel), 'utf8');
+
+    const logChat = read('../components/LogChat.tsx');
+    expect(logChat).toContain('title={t.flagIssueWithThisResponse}');
+    expect(logChat).not.toContain('t.flagIssueWithThisResponse ||');
+    expect(logChat).toContain('t.flagIssueWithAgentResponse.replace(');
+    expect(logChat).not.toContain("t.flagIssueWithAgentResponse ||");
+
+    const foodCard = read('../components/chat-cards/FoodCard.tsx');
+    expect(foodCard).toContain('flaggedId ? t.flagAnother : t.flagIssue');
+    expect(foodCard).not.toContain("t.flagAnother || 'Flag another'");
+    expect(foodCard).not.toContain("t.flagIssue || 'Flag issue'");
+    expect(foodCard).toContain('title={t.flagFoodAnalysisIssue}');
+    expect(foodCard).not.toContain('t.flagFoodAnalysisIssue ||');
+  });
+
   // Parked residuals under S-1: documented, not yet keyed. When a future
   // pass keys one of these, move it to S1_GREEN_KEYS (the unkeyed assertion
   // below forces the move instead of silently going stale).
