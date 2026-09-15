@@ -28,18 +28,56 @@ export function generateDynamicInsight(def: BiomarkerDefinition, profile: UserPr
     }
   }
 
+  if (def.key === 'hba1c') {
+    const numericVal = typeof val === 'number' ? val : parseFloat(String(val)) || 40;
+    if (numericVal >= 48) {
+      return `Your HbA1c level of ${numericVal} mmol/mol is elevated above standard glycemic thresholds (>= 48 mmol/mol), falling into the diagnostic diabetes band. Close clinical coordination, personalized dietary carbohydrate management, and regular glycemic tracking are strongly recommended.`;
+    } else if (numericVal >= 39) {
+      return `Your HbA1c level of ${numericVal} mmol/mol is within the standard general laboratory reference range (20 - 41 mmol/mol), but falls into the high-normal / pre-diabetes surveillance threshold (>= 39 mmol/mol). For a ${ageStr} ${ethnicityStr} ${genderStr}, proactive lifestyle optimization—including whole foods, dietary fiber, and regular exercise—is recommended to preserve insulin sensitivity.`;
+    } else {
+      return `Your HbA1c level of ${numericVal} mmol/mol is optimal and well within the healthy reference range (20 - 41 mmol/mol). For a ${ageStr} ${ethnicityStr} ${genderStr}, this indicates robust glycemic control and metabolic balance.`;
+    }
+  }
+
+  if (def.key === 'steps') {
+    const numericVal = typeof val === 'number' ? val : parseInt(String(val), 10) || 0;
+    if (numericVal < 6000 || status.toLowerCase().includes('low')) {
+      return `Your daily step count of ${numericVal} steps is below the recommended physical activity target (Aim over 8,000 steps). For a ${ageStr} ${ethnicityStr} ${genderStr}, progressively increasing daily walking and active movement supports cardiovascular health, glycemic control, and metabolic endurance.`;
+    } else {
+      return `Your daily step count of ${numericVal} steps meets recommended physical activity levels, supporting cardiovascular fitness and metabolic wellness.`;
+    }
+  }
+
+  if (def.key === 'egfr') {
+    const numericVal = typeof val === 'number' ? val : parseFloat(String(val)) || 80;
+    if (numericVal < 60) {
+      return `Your eGFR of ${numericVal} mL/min/1.73m² is moderately reduced (< 60 mL/min/1.73m²). Clinical review with a physician, repeat renal testing, blood pressure tracking, and medication review are recommended.`;
+    } else if (numericVal < 90 || status.toLowerCase().includes('low')) {
+      return `Your eGFR of ${numericVal} mL/min/1.73m² is mildly decreased compared to optimal young-adult baselines (> 90 mL/min/1.73m²). In healthy individuals, minor fluctuations can reflect temporary hydration status, high dietary protein intake, or muscle mass changes. Confirming stable kidney function with repeat serum creatinine and maintaining adequate hydration is advised.`;
+    } else {
+      return `Your eGFR of ${numericVal} mL/min/1.73m² is optimal (> 90 mL/min/1.73m²), indicating healthy glomerular filtration and renal function.`;
+    }
+  }
+
   // Generic fallback for any other biomarker
   const name = def.name;
   const unit = def.unit || '';
   const statusLabel = status || 'Normal';
+  const hasKnownRange = def.normalRange && def.normalRange.trim() !== '' && def.normalRange.toLowerCase() !== 'unknown';
 
   if (statusLabel.toLowerCase() === 'healthy' || statusLabel.toLowerCase() === 'normal' || statusLabel.toLowerCase() === 'optimal') {
-    return `Your ${name} level of ${valStr} is optimal and falls within the recommended healthy reference range of ${def.normalRange} ${unit}. For a ${ageStr} ${ethnicityStr} ${genderStr}, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.`;
+    const rangeSnippet = hasKnownRange ? `recommended healthy reference range of ${def.normalRange} ${unit}`.trim() : 'expected clinical parameters';
+    return `Your ${name} level of ${valStr} is optimal and falls within the ${rangeSnippet}. For a ${ageStr} ${ethnicityStr} ${genderStr}, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.`;
   } else if (statusLabel.toLowerCase().includes('high')) {
-    return `Your ${name} level of ${valStr} is elevated above the standard reference range (${def.normalRange} ${unit}), falling into the 'High' category. For a ${ageStr} ${ethnicityStr} ${genderStr}, this elevation warrants attention. Depending on clinical history, implementing targeted nutritional adjustments, stress management, or physical exercise is highly recommended to bring this marker back into balance.`;
+    const rangeSnippet = hasKnownRange ? `the standard reference range (${def.normalRange} ${unit})`.trim() : 'expected clinical baseline';
+    return `Your ${name} level of ${valStr} is elevated above ${rangeSnippet}, falling into the 'High' category. For a ${ageStr} ${ethnicityStr} ${genderStr}, this elevation warrants attention. Depending on clinical history, implementing targeted nutritional adjustments, stress management, or physical exercise is highly recommended to bring this marker back into balance.`;
   } else if (statusLabel.toLowerCase().includes('low')) {
-    return `Your ${name} level of ${valStr} is below the optimal reference range (${def.normalRange} ${unit}), falling into the 'Low' category. For a ${ageStr} ${ethnicityStr} ${genderStr}, this low level can be associated with sub-optimal nutrient absorption or metabolic efficiency. Prioritizing dietary reinforcement or targeted supplementation is recommended to restore healthy baseline activity.`;
+    const rangeSnippet = hasKnownRange ? `the optimal reference range (${def.normalRange} ${unit})`.trim() : 'expected clinical baseline';
+    return `Your ${name} level of ${valStr} is below ${rangeSnippet}, falling into the 'Low' category. For a ${ageStr} ${ethnicityStr} ${genderStr}, clinical monitoring and appropriate lifestyle or nutritional support are recommended to restore healthy baseline activity.`;
   } else {
+    if (!hasKnownRange) {
+      return `Your ${name} level is registered at ${valStr}. Standard reference range is pending clinical lab verification. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.`;
+    }
     return `Your ${name} level is registered at ${valStr}. For a ${ageStr} ${ethnicityStr} ${genderStr}, maintaining this biomarker within the recommended target range of ${def.normalRange} is essential for systemic health. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.`;
   }
 }

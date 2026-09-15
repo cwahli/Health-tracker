@@ -19,8 +19,8 @@ type Props = {
 };
 
 const kindIcon = (kind: SanitizeProposal['kind']) => {
-  if (kind === 'fix_value') return <RefreshCw className="w-3.5 h-3.5 text-emerald-500" />;
-  if (kind === 'merge_food') return <Merge className="w-3.5 h-3.5 text-indigo-500" />;
+  if (kind === 'fix_value' || kind === 'backfill_canonical_range') return <RefreshCw className="w-3.5 h-3.5 text-emerald-500" />;
+  if (kind === 'merge_food' || kind === 'merge_transposed_dates') return <Merge className="w-3.5 h-3.5 text-indigo-500" />;
   return <Trash2 className="w-3.5 h-3.5 text-rose-500" />;
 };
 

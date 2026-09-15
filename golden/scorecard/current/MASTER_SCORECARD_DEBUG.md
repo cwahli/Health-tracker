@@ -2,18 +2,18 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-15T23:17:44.845Z
-**Commit:** `f9897dc`
+**When:** 2026-09-15T23:31:41.297Z
+**Commit:** `cdb1f47`
 **Instruction hash:** `c5cbb90c42d3`
-**Seal:** `03822b20f6adf191b02b42d3d62a3feeb08f007e313200da21c5e5e8fbdf4c31`
+**Seal:** `125abda5712b68d124384728b2e5679d61f91a1332fad4d7426698eb04313627`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **ALL GREEN** — 707 pass / 0 fail / 0 skip
+**Overall:** **ALL GREEN** — 713 pass / 0 fail / 0 skip
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | PASS | 707 pass / 0 fail / 0 skip of 707 |
+| `overall_named_gates` | PASS | 713 pass / 0 fail / 0 skip of 713 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
 | `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
@@ -24,7 +24,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | `area_localization` | PASS | 65 pass / 0 fail / 0 skip |
 | `area_meal_log` | PASS | 192 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
-| `area_biomarkers` | PASS | 148 pass / 0 fail / 0 skip |
+| `area_biomarkers` | PASS | 154 pass / 0 fail / 0 skip |
 | `area_receptionist` | PASS | 49 pass / 0 fail / 0 skip |
 | `area_reliability` | PASS | 206 pass / 0 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
@@ -39,7 +39,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | Localization | PASS | 65 | 0 | 0 | 65 |
 | Meal Log | PASS | 192 | 0 | 0 | 192 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
-| Biomarkers | PASS | 148 | 0 | 0 | 148 |
+| Biomarkers | PASS | 154 | 0 | 0 | 154 |
 | Receptionist | PASS | 49 | 0 | 0 | 49 |
 | Reliability | PASS | 206 | 0 | 0 | 206 |
 
@@ -517,12 +517,12 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) keeps the placeholders the job card interpolates (no silent no-op replace) |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) renders the edit/retry running job card in Indonesian |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) never regresses a scanned key back to the Title-Case humanization of its key |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |
@@ -531,7 +531,7 @@ _none_
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_id_not_incident_string |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_components_not_hardcoded_incident |
 
-### Biomarkers (148)
+### Biomarkers (154)
 
 | Status | File | Test |
 |---|---|---|
@@ -674,6 +674,12 @@ _none_
 | PASS | `src/utils/biomarkerSanitize.test.ts` | isBiomarkerValueImprobable does not flag everyday step counts as improbable |
 | PASS | `src/utils/biomarkerSanitize.test.ts` | sanitizeBiomarkerHistoryOnLoad flags 195 cholesterol but does not rewrite it |
 | PASS | `src/utils/biomarkerSanitize.test.ts` | sanitizeBiomarkerHistoryOnLoad flags hematocrit 42.1 but leaves the stored value |
+| PASS | `src/utils/biomarkerSanitize.test.ts` | canonical clinical definitions and engine sanitization capabilities provides built-in standard reference ranges and units for basic clinical panel markers |
+| PASS | `src/utils/biomarkerSanitize.test.ts` | canonical clinical definitions and engine sanitization capabilities detects transposed DD-MM vs MM-DD lab panels and unifies observations onto the true date |
+| PASS | `src/utils/biomarkerSanitize.test.ts` | canonical clinical definitions and engine sanitization capabilities detects future date transpositions (e.g. 07-11-2026 duplicate of 11-07-2026) and merges them |
+| PASS | `src/utils/biomarkerSanitize.test.ts` | canonical clinical definitions and engine sanitization capabilities proposes backfilling canonical ranges for custom biomarkers marked Unknown |
+| PASS | `src/utils/biomarkerSanitize.test.ts` | canonical clinical definitions and engine sanitization capabilities proposes archiving qualitative swab tests and granular survey checkboxes |
+| PASS | `src/utils/biomarkerSanitize.test.ts` | canonical clinical definitions and engine sanitization capabilities generates non-contradictory medical insights for HbA1c, steps, and unverified ranges |
 | PASS | `src/utils/clinicalCalculators.test.ts` | Clinical Calculator Engine calculateMifflinStJeor calculates exact energy target for baseline Asian profile |
 | PASS | `src/utils/clinicalCalculators.test.ts` | Clinical Calculator Engine calculateMifflinStJeor calculates dynamic target calories for non-baseline female profile |
 | PASS | `src/utils/clinicalCalculators.test.ts` | Clinical Calculator Engine calculateTgHdlRatio calculates optimal atherogenic ratio correctly in mg/dL |
