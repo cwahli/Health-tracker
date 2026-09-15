@@ -3276,7 +3276,13 @@ export default function App() {
           ];
           // Write to Firestore dashboard document to prevent multiple writes
           const tDashId = logInteraction('upload', `users/${uid}/metadata/dashboard`, null);
-          Promise.resolve() // [FreeTier] profile single-writer disabled; console.error(err); });
+          // [FreeTier] profile single-writer disabled - no actual write happens here, but the
+          // interaction above must still be marked complete or it stays 'pending' forever,
+          // which keeps the header's sync-attention indicator blinking for the rest of the
+          // session (this was previously swallowed into the comment above and never ran).
+          Promise.resolve()
+            .then(() => completeInteraction(tDashId, true, 0))
+            .catch(err => { completeInteraction(tDashId, false, 0, err.message); console.error(err); });
         }
         setFoodLogs([]);
         setBiomarkers({});
