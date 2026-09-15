@@ -277,6 +277,30 @@ describe('S-1 leftover chrome (LEAK_EN_CHROME)', () => {
     const nutritionBrowser = read('../components/NutritionDataBrowserModal.tsx');
     expect(nutritionBrowser).toContain('interpolate(t.browserServingDefaulted, { label: def.label })');
     expect(nutritionBrowser).not.toContain('Defaulted serving size to ${def.label}');
+    // Wave L: remaining oneServingDefault hardcodes wired (bakeoff A–K leftover sweep).
+    // toScoutItem now takes an optional language and falls back to t.oneServingDefault.
+    expect(nutritionBrowser).toContain('t.oneServingDefault');
+    expect(nutritionBrowser).not.toMatch(/servingSize:\s*['"]1 serving['"]/);
+
+    const allAnalyses = read('../components/AllAnalysesModal.tsx');
+    expect(allAnalyses).toContain('dict.oneServingDefault');
+    expect(allAnalyses).not.toMatch(/quantity:\s*pendingLog\?\.\w+\s*\|\|\s*['"]1 serving['"]/);
+    expect(allAnalyses).not.toMatch(/\|\|\s*['"]1 serving['"]/);
+
+    const syncUtils = read('../utils/syncUtils.ts');
+    expect(syncUtils).toContain('dict.oneServingDefault');
+    expect(syncUtils).not.toMatch(/quantity:\s*row\.quantity\s*\|\|\s*['"]1 serving['"]/);
+    expect(syncUtils).not.toMatch(/\|\|\s*['"]1 serving['"]/);
+
+    // Server already has t/language scope: quantity sanitize default is keyed, not bare.
+    const mealAssemble = read('../server/food/server_food_meal_assemble.ts');
+    expect(mealAssemble).toContain("t(language, 'oneServingDefault')");
+    expect(mealAssemble).not.toMatch(/sanitizeString\(rawFoodData\.quantity,\s*['"]1 serving['"]/);
+
+    // NutritionLabelTable string-equality data matchers stay exempt (stored label
+    // values, not UI chrome) — guarded so a future sweep does not "fix" them.
+    const labelTable = read('../components/chat-cards/NutritionLabelTable.tsx');
+    expect(labelTable).toMatch(/===\s*['"]1 serving['"]/);
   });
 
   // Wave I: flag-issue chrome restored from c3e6cfd (bca0f80~1) byte-for-byte.

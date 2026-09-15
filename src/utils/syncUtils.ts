@@ -1,6 +1,7 @@
 import { FoodLog, BiomarkerLog, HealthAction, DailyBenefit, FoodIdea, RecommendationReport, UserProfile } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { resolveMealVerdict } from './verdictUtils.js';
+import { translations } from './translations';
 
 export function mergeByRecency<T extends { id?: string; updated_at?: number | string; date?: string; timestamp?: string }>(
   listA: T[] = [],
@@ -89,7 +90,7 @@ export function mergeDeleteMaps(a: Record<string, number> = {}, b: Record<string
   return res;
 }
 
-export function supabaseRowToFoodLog(row: any): FoodLog {
+export function supabaseRowToFoodLog(row: any, language?: string): FoodLog {
   const dateStr = row.date || new Date().toISOString().split('T')[0];
   const updatedTime = row.updated_at
     ? (typeof row.updated_at === 'number' ? row.updated_at : new Date(row.updated_at).getTime())
@@ -159,6 +160,7 @@ export function supabaseRowToFoodLog(row: any): FoodLog {
 
   const resolvedVerdict = resolveMealVerdict({ ...row, nutrients });
   const verdict = resolvedVerdict ? { label: resolvedVerdict.label, level: resolvedVerdict.level } : undefined;
+  const dict = translations[language || 'en'] || translations.en;
 
   return {
     ...row,
@@ -167,7 +169,7 @@ export function supabaseRowToFoodLog(row: any): FoodLog {
     name: row.name || row.description || 'Meal',
     composition: row.composition || '',
     weightGrams: Number(row.weightGrams ?? row.weight_grams ?? 0),
-    quantity: row.quantity || '1 serving',
+    quantity: row.quantity || dict.oneServingDefault,
     consumedAmount: Number(row.consumedAmount ?? row.consumed_amount ?? 1),
     benefits: Array.isArray(row.benefits) ? row.benefits.join(', ') : (row.benefits || ''),
     risks: Array.isArray(row.risks) ? row.risks.join(', ') : (row.risks || ''),

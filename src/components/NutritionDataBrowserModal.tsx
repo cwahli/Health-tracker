@@ -64,13 +64,14 @@ const renderNutrientSummaryLine = (nutrients: any) => {
   return parts.join(' · ');
 };
 
-const toScoutItem = (item: any) => {
+const toScoutItem = (item: any, language?: string) => {
   if (!item) return null;
   const nuts = item.nutrients || {};
+  const t = translations[language || 'en'] || translations.en;
   return {
     originalName: item.dish_name || item.originalName || item.keyword,
     rawNutritionLabel: {
-      servingSize: '1 serving',
+      servingSize: t.oneServingDefault,
       calories: nuts.calories != null && nuts.calories !== '' && nuts.calories !== '—' ? `${nuts.calories} kcal` : undefined,
       protein: nuts.protein != null && nuts.protein !== '' && nuts.protein !== '—' ? `${nuts.protein}g` : undefined,
       totalFat: (nuts.totalFat ?? nuts.fat) != null && (nuts.totalFat ?? nuts.fat) !== '' && (nuts.totalFat ?? nuts.fat) !== '—' ? `${nuts.totalFat ?? nuts.fat}g` : undefined,
