@@ -1160,64 +1160,6 @@ export default function Header({
                 >
                   {profile.nickname || (profile.email ? profile.email.split('@')[0] : 'User')}
                 </span>
-
-                {(() => {
-                  const validJobs = jobs.filter(j => !isJobBlank(j));
-                  const runningJobs = validJobs.filter(j => j.status === 'running' || j.status === 'processing');
-                  const queuedJobs = validJobs.filter(j => j.status === 'queued' || j.status === 'awaiting_user');
-                  const succeededUnsavedJobs = validJobs.filter(j => j.status === 'succeeded' && !j.result?.savedToHistory && !j.viewed && !j.result?.viewed && !j.savedToLog);
-                  
-                  const runningCount = runningJobs.length;
-                  const queuedCount = queuedJobs.length;
-                  const readyCount = succeededUnsavedJobs.length;
-
-                  if (runningCount === 0 && queuedCount === 0 && readyCount === 0) return null;
-
-                  const activeRunning = runningJobs[0];
-                  const activeProgress = activeRunning?.progressPercent || 0;
-
-                  const handleBadgeClick = () => {
-                    setShowAllAnalysesModal(true);
-                  };
-
-                  return (
-                    <span 
-                      onClick={handleBadgeClick}
-                      className={`text-[9px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border cursor-pointer hover:opacity-90 transition-all ${
-                        runningCount > 0 
-                          ? 'bg-indigo-600 border-indigo-500 text-white animate-pulse' 
-                          : queuedCount > 0
-                          ? 'bg-amber-500 border-amber-400 text-white'
-                          : 'bg-emerald-600 border-emerald-500 text-white'
-                      }`}
-                      title={
-                        runningCount > 0 
-                          ? interpolate(t.jobsActiveTooltip, { count: runningCount, percent: activeProgress })
-                          : queuedCount > 0 
-                          ? interpolate(t.jobsQueuedTooltip, { count: queuedCount })
-                          : interpolate(t.jobsReadyTooltip, { count: readyCount })
-                      }
-                    >
-                      {runningCount > 0 ? (
-                        <>
-                          <Loader className="w-2.5 h-2.5 animate-spin" />
-                          <span>{activeProgress > 0
-                            ? interpolate(t.jobsActiveProgress, { count: runningCount, percent: activeProgress })
-                            : interpolate(t.jobsActive, { count: runningCount })}</span>
-                        </>
-                      ) : queuedCount > 0 ? (
-                        <>
-                          <span>{interpolate(t.jobsQueued, { count: queuedCount })}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Check className="w-2.5 h-2.5" />
-                          <span>{interpolate(t.jobsReady, { count: readyCount })}</span>
-                        </>
-                      )}
-                    </span>
-                  );
-                })()}
               </div>
               <span className="text-[10px] text-slate-400 capitalize font-medium mt-0.5 block tracking-wide">
                 {activeTab === 'home' ? t.home : activeTab === 'health' ? t.health : activeTab === 'insights' ? t.insights : activeTab === 'food' ? t.foodHistory : activeTab === 'medical' ? t.medicalHistory : activeTab === 'trends' ? t.trends : activeTab}
@@ -1228,16 +1170,65 @@ export default function Header({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2.5">
-          <span
-            onClick={() => {
-              setDbOverlayViewMode('admin');
-              setShowDbInteractionsOverlay(true);
-            }}
-            className="text-[10px] font-mono font-bold text-slate-400 dark:text-slate-500 cursor-pointer hover:underline hover:text-indigo-600 transition-colors"
-            title={t.syncClickToOpen}
-          >
-            {lastSyncTime ? `${t.syncLabelPrefix ? `${t.syncLabelPrefix} ` : ''}${lastSyncTime}` : t.syncReady}
-          </span>
+          {(() => {
+            const validJobs = jobs.filter(j => !isJobBlank(j));
+            const runningJobs = validJobs.filter(j => j.status === 'running' || j.status === 'processing');
+            const queuedJobs = validJobs.filter(j => j.status === 'queued' || j.status === 'awaiting_user');
+            const succeededUnsavedJobs = validJobs.filter(j => j.status === 'succeeded' && !j.result?.savedToHistory && !j.viewed && !j.result?.viewed && !j.savedToLog);
+            
+            const runningCount = runningJobs.length;
+            const queuedCount = queuedJobs.length;
+            const readyCount = succeededUnsavedJobs.length;
+
+            if (runningCount === 0 && queuedCount === 0 && readyCount === 0) return null;
+
+            const activeRunning = runningJobs[0];
+            const activeProgress = activeRunning?.progressPercent || 0;
+
+            const handleBadgeClick = () => {
+              setShowAllAnalysesModal(true);
+            };
+
+            return (
+              <button 
+                type="button"
+                id="ready-jobs-badge-btn"
+                onClick={handleBadgeClick}
+                className={`text-[9px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border cursor-pointer hover:opacity-90 transition-all ${
+                  runningCount > 0 
+                    ? 'bg-indigo-600 border-indigo-500 text-white animate-pulse' 
+                    : queuedCount > 0
+                    ? 'bg-amber-500 border-amber-400 text-white'
+                    : 'bg-emerald-600 border-emerald-500 text-white'
+                }`}
+                title={
+                  runningCount > 0 
+                    ? interpolate(t.jobsActiveTooltip, { count: runningCount, percent: activeProgress })
+                    : queuedCount > 0 
+                    ? interpolate(t.jobsQueuedTooltip, { count: queuedCount })
+                    : interpolate(t.jobsReadyTooltip, { count: readyCount })
+                }
+              >
+                {runningCount > 0 ? (
+                  <>
+                    <Loader className="w-2.5 h-2.5 animate-spin" />
+                    <span>{activeProgress > 0
+                      ? interpolate(t.jobsActiveProgress, { count: runningCount, percent: activeProgress })
+                      : interpolate(t.jobsActive, { count: runningCount })}</span>
+                  </>
+                ) : queuedCount > 0 ? (
+                  <>
+                    <span>{interpolate(t.jobsQueued, { count: queuedCount })}</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-2.5 h-2.5" />
+                    <span>{interpolate(t.jobsReady, { count: readyCount })}</span>
+                  </>
+                )}
+              </button>
+            );
+          })()}
 
           {/* Sync Status Icon Indicator (Click opens Settings) */}
           {(() => {

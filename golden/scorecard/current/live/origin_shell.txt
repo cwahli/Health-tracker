@@ -12,10 +12,10 @@
         navigator.serviceWorker.register('/sw.js').catch(function() {});
       }
     </script>
-    <script type="module" crossorigin src="/assets/index-BpCDLRlG.js"></script>
+    <script type="module" crossorigin src="/assets/index-CavX7CJu.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/vendor-DCy0fwz4.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-firebase-BcHNMy-o.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-Cw0Hd-q5.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-CC6VBAKi.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-motion-BTVCcmNx.js">
     <link rel="stylesheet" crossorigin href="/assets/index-Cj_lklYZ.css">
   </head>
