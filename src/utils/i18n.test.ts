@@ -429,3 +429,130 @@ describe('job-card chrome i18n (jobPreview status labels)', () => {
     );
   });
 });
+
+
+describe('job-card chrome i18n (English-filled id residuals — Wave F)', () => {
+  // Sensor for the class Wave E found and deliberately left alone: the 1c868ab
+  // TRANSLATION_DUMP kept these job-card chrome keys, but with the ENGLISH copy
+  // written into `id` (id === en), so the J-ID-01 analyzing card still rendered
+  // English chrome (`Updating meal...`, `Delete task`, `Attempt 1 of 3`).
+  // Every value below is restored byte-for-byte from 85ce58b — never invented.
+  // Scan basis: every key read as `t.…` by src/components/TaskPlaceholderCard.tsx
+  // or `d?.…` by src/jobs/jobPreview.ts. Two keys are excluded on purpose:
+  // `retryingAttemptNofM` (no 85ce58b baseline) and `stuckFor` (id was already
+  // Indonesian, just drifted — left for the coordinator, see WAVE_F_REPORT.md §5).
+  const RESTORED_ID: Record<string, string> = {
+    analysisFailed: "Analisis gagal",
+    analyzingMedicalData: "Menganalisis data medis...",
+    analyzingYourMeal: "Menganalisis makanan Anda...",
+    attemptFailedTapRetry: "Upaya {n} dari {m} gagal • Ketuk \"Coba Lagi\" untuk mencoba lagi",
+    attemptOf: "Upaya {current} dari {max}",
+    calculating: "Menghitung...",
+    chattingEllipsis: "Mengobrol...",
+    confirmPortionToFinish: "Harap konfirmasi ukuran porsi untuk menyelesaikan pencatatan makanan Anda.",
+    deleteTask: "Hapus tugas",
+    healthPreparationChat: "Obrolan Persiapan Kesehatan",
+    macrosUpdatedRetryAdvice: "Makronutrisi diperbarui — panduan mungkin mencerminkan porsi sebelumnya. Gunakan Coba Lagi Saran untuk memperbarui.",
+    mealComparisonRequest: "Permintaan Perbandingan Makanan",
+    mealPreview: "Pratinjau Makanan",
+    medicalDataRequest: "Permintaan Data Medis",
+    noImage: "Tidak Ada Gambar",
+    optionN: "Opsi {n}",
+    pickPortion: "Pilih Porsi",
+    portionChoiceNeeded: "Perlu Pilihan Porsi",
+    portionSelectionNeeded: "{name} — Perlu Pemilihan Porsi",
+    retry: "Coba Lagi",
+    retryAdvice: "Coba Lagi Saran",
+    retryingAiAdvice: "Mencoba lagi saran AI (Upaya {n})...",
+    retryingAnalysisAttempt: "Mencoba lagi analisis (Upaya {n})...",
+    selectPortion: "Pilih Porsi",
+    updatingMeal: "Memperbarui makanan...",
+    uploadedSafeToClose: "Diunggah ke server • Aman untuk menutup peramban & cek kembali nanti",
+    uploadingKeepTabOpen: "Mengunggah ke server… Tetap buka tab ini",
+  };
+
+  // The same dump also truncated the en side of these four siblings (dropped
+  // `{n}`/`{name}`, or left the Title-Case key name), so the restore is en + id.
+  const RESTORED_EN: Record<string, string> = {
+    attemptFailedTapRetry: "Attempt {n} of {m} failed • Tap \"Retry\" to try again",
+    optionN: "Option {n}",
+    portionSelectionNeeded: "{name} — Portion Selection Needed",
+    retryingAiAdvice: "Retrying AI advice (Attempt {n})...",
+    retryingAnalysisAttempt: "Retrying analysis (Attempt {n})...",
+  };
+
+  function jobCardChrome(status: AgentJob['status'], extra: Partial<AgentJob> = {}): AgentJob {
+    return {
+      id: 'job_wave_f',
+      kind: 'food_log',
+      status,
+      stepIndex: 0,
+      stepTotal: 1,
+      progressPercent: 100,
+      messages: [],
+      inputSnapshot: { text: 'meal', imageRefs: [] },
+      ...extra,
+    } as AgentJob;
+  }
+
+  it('restores every scanned job-card key byte-for-byte from 85ce58b and id !== en', () => {
+    const en = localePacks.en as Record<string, string>;
+    const id = localePacks.id as Record<string, string>;
+    for (const [key, value] of Object.entries(RESTORED_ID)) {
+      expect(id[key], `id.${key} missing`).toBeTruthy();
+      expect(id[key], `id.${key} drifts from 85ce58b`).toBe(value);
+      expect(id[key], `id.${key} is English-filled`).not.toBe(en[key]);
+    }
+  });
+
+  it('restores the five keys named in the Wave F card', () => {
+    const id = localePacks.id as Record<string, string>;
+    expect(id.updatingMeal).toBe('Memperbarui makanan...');
+    expect(id.attemptOf).toBe('Upaya {current} dari {max}');
+    expect(id.attemptFailedTapRetry).toBe('Upaya {n} dari {m} gagal • Ketuk "Coba Lagi" untuk mencoba lagi');
+    expect(id.analysisFailed).toBe('Analisis gagal');
+    expect(id.deleteTask).toBe('Hapus tugas');
+  });
+
+  it('restores the en side the dump mangled on the same-class siblings', () => {
+    const en = localePacks.en as Record<string, string>;
+    for (const [key, value] of Object.entries(RESTORED_EN)) {
+      expect(en[key], `en.${key} drifts from 85ce58b`).toBe(value);
+    }
+  });
+
+  it('keeps the placeholders the job card interpolates (no silent no-op replace)', () => {
+    const id = localePacks.id as Record<string, string>;
+    expect(id.optionN.replace('{n}', '2')).toBe('Opsi 2');
+    expect(translations.en.optionN.replace('{n}', '2')).toBe('Option 2');
+    expect(id.retryingAnalysisAttempt.replace('{n}', '3')).toBe('Mencoba lagi analisis (Upaya 3)...');
+    expect(id.portionSelectionNeeded.replace('{name}', 'Nasi Goreng')).toBe('Nasi Goreng — Perlu Pemilihan Porsi');
+    expect(id.attemptFailedTapRetry.replace('{n}', '1').replace('{m}', '3')).toBe(
+      'Upaya 1 dari 3 gagal • Ketuk "Coba Lagi" untuk mencoba lagi',
+    );
+  });
+
+  it('renders the edit/retry running job card in Indonesian', () => {
+    const editRunning = jobCardChrome('running', { mode: 'edit' });
+    expect(previewStatusLabel(editRunning, { dict: translations.id })).toBe('Memperbarui makanan...');
+    expect(previewStatusLabel(editRunning, { dict: translations.en })).toBe('Updating meal...');
+    const firstAttempt = jobCardChrome('running', { attemptCount: 1, maxAttempts: 3 });
+    expect(previewStatusLabel(firstAttempt, { dict: translations.id })).toBe('Upaya 1 dari 3');
+    expect(previewStatusLabel(firstAttempt, { dict: translations.en })).toBe('Attempt 1 of 3');
+    const retrying = jobCardChrome('running', { attemptCount: 2, maxAttempts: 3 });
+    expect(previewStatusLabel(retrying, { dict: translations.id })).toBe('Mencoba lagi (percobaan 2/3)...');
+  });
+
+  it('never regresses a scanned key back to the Title-Case humanization of its key', () => {
+    const id = localePacks.id as Record<string, string>;
+    const humanize = (key: string) =>
+      key
+        .replace(/_/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replace(/^./, (c) => c.toUpperCase());
+    for (const key of Object.keys(RESTORED_ID)) {
+      expect(id[key], `id.${key} is a Title-Case leftover of the key`).not.toBe(humanize(key));
+    }
+  });
+});
