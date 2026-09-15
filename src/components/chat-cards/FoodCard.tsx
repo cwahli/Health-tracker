@@ -2644,7 +2644,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                           : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300';
                         return (
                           <div className="py-2 border-b border-theme-border/50 flex items-center gap-2 flex-wrap text-left w-full">
-                            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 font-sans">{t.verdictLabel || 'Verdict:'}</span>
+                            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 font-sans">{t.verdictLabel}</span>
                             <span className={`text-[11px] font-bold px-3 py-0.5 rounded-full border inline-block ${colorCls} font-sans`}>
                               {v.label}
                             </span>

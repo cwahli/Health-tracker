@@ -83,6 +83,11 @@ describe('dictionaryFor', () => {
     expect(dict.verdictLabel).toBe(translations.id.verdictLabel);
     expect(dict.downloadDebugLogs).toBe(translations.id.downloadDebugLogs);
   });
+
+  it('restores verdictLabel with trailing colon in en and id (Wave J safe restore)', () => {
+    expect(translations.en.verdictLabel).toBe('Verdict:');
+    expect(translations.id.verdictLabel).toBe('Penilaian:');
+  });
 });
 
 describe('agentOutputLanguageBlock', () => {
