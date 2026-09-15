@@ -1160,16 +1160,7 @@ export default function Header({
                 >
                   {profile.nickname || (profile.email ? profile.email.split('@')[0] : 'User')}
                 </span>
-                {(() => {
-                  const info = getAvailableCredits(profile);
-                  const safeTotal = Number.isFinite(info?.total) ? info.total : 0;
-                  return (
-                    <span className="text-[9px] bg-indigo-50 dark:bg-indigo-950/45 text-indigo-600 dark:text-indigo-400 border border-indigo-100/30 dark:border-indigo-900/30 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5" title={interpolate(t.agentCreditsLeftTitle, { n: safeTotal })}>
-                      <Coins className="w-2.5 h-2.5" />
-                      {safeTotal}
-                    </span>
-                  );
-                })()}
+
                 {(() => {
                   const validJobs = jobs.filter(j => !isJobBlank(j));
                   const runningJobs = validJobs.filter(j => j.status === 'running' || j.status === 'processing');
@@ -1248,33 +1239,22 @@ export default function Header({
             {lastSyncTime ? `${t.syncLabelPrefix ? `${t.syncLabelPrefix} ` : ''}${lastSyncTime}` : t.syncReady}
           </span>
 
-          {isAdmin && (
-            <button
-              onClick={() => setIsTrackerOpen(true)}
-              className="p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-650 dark:text-slate-300 rounded-2xl transition-all flex items-center justify-center cursor-pointer hover:scale-[1.03]"
-              title="API Call Tracker"
-            >
-              <Activity className="w-5 h-5" />
-            </button>
-          )}
-
-          {/* Sync Status Icon Indicator */}
+          {/* Sync Status Icon Indicator (Click opens Settings) */}
           {(() => {
             const isAttentionNeeded = syncState === 'syncing' || dbInteractions.some(o => o.status === 'pending') || checkQuotaFlag();
             return (
               <button
                 id="cloud-sync-btn"
-                onClick={async () => {
-                  if (onCloudSync) {
-                    await onCloudSync();
-                  }
+                onClick={() => {
+                  setDbOverlayViewMode('admin');
+                  setShowDbInteractionsOverlay(true);
                 }}
                 className={`flex items-center p-2 rounded-xl transition-colors cursor-pointer relative ${
                   isAttentionNeeded 
                     ? 'text-amber-500 hover:bg-amber-500/10' 
                     : 'text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
-                title={t.clickToManuallySync}
+                title={t.syncClickToOpen || "Settings"}
               >
                 {syncState === 'syncing' && (
                   <RefreshCw className="w-5 h-5 text-amber-500 animate-spin" />
