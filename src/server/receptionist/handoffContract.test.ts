@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { enforceReadyHandoffContract, maybePromoteHandoff, synthesizeReadyHandoffPayload, formatReceptionistInput, compactUserMemory } from "./call_agent.js";
+import { enforceReadyHandoffContract, maybePromoteHandoff, synthesizeReadyHandoffPayload, formatReceptionistInput, compactUserMemory, extractDemographicsFromText, normalizeUiFormLanguage } from "./call_agent.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UC02 = JSON.parse(
@@ -390,5 +390,51 @@ describe("S-6 HANDOFF_I18N — UC-02 vitality turns drive the contract", () => {
     const idLab = runPostProcessor(labRaw(), labCtx("id")).userResponse;
     expect(idLab).toContain("Pengurai Lab Medis");
     expect(idLab).not.toContain("Medical Lab Parser");
+  });
+});
+
+describe("COLLECTED_DATA_DROP — deterministic demographic extraction (live job_frontdesk_1789468175766)", () => {
+  it("extracts the exact turn-2 submit (EN labels + ID weight)", () => {
+    const found = extractDemographicsFromText("Age: 15, Gender: Wanita, Height: 145, Berat Badan Saat Ini: 40");
+    expect(found).toEqual({ age: 15, gender: "Female", heightCm: 145, weightKg: 40 });
+  });
+  it("extracts the exact turn-3 submit (ID activity + target)", () => {
+    const found = extractDemographicsFromText("Tingkat Aktivitas: sedentary, Berat Badan Target: 35 kg");
+    expect(found).toEqual({ targetWeightKg: 35, activityLevel: "sedentary" });
+  });
+  it("never lets target weight leak into current weight, and female never matches male", () => {
+    const found = extractDemographicsFromText("Berat Badan Target: 35 kg");
+    expect(found.weightKg).toBeUndefined();
+    expect(found.targetWeightKg).toBe(35);
+    expect(extractDemographicsFromText("Gender: female").gender).toBe("Female");
+    expect(extractDemographicsFromText("Gender: male").gender).toBe("Male");
+  });
+  it("rejects absurd numbers", () => {
+    expect(extractDemographicsFromText("Age: 4, Height: 30").age).toBeUndefined();
+    expect(extractDemographicsFromText("Age: 4, Height: 30").heightCm).toBeUndefined();
+  });
+});
+
+describe("FORM_LABEL_EN — model uiForm labels follow the form language", () => {
+  const modelForm = {
+    title: "Details",
+    fields: [
+      { name: "q1", label: "Age", type: "number", unit: "years" },
+      { name: "q2", label: "Gender", type: "select" },
+      { name: "q3", label: "Height", type: "number" },
+      { name: "notes", label: "Anything else?", type: "text" },
+    ],
+  };
+  it("rewrites generically-named English labels to ID, unknown labels pass through", () => {
+    const out = normalizeUiFormLanguage(modelForm, "id");
+    expect(out.fields[0].label).toBe("Usia");
+    expect(out.fields[0].unit).toBe("tahun");
+    expect(out.fields[1].label).toBe("Jenis Kelamin");
+    expect(out.fields[2].label).toBe("Tinggi Badan");
+    expect(out.fields[3].label).toBe("Anything else?");
+  });
+  it("leaves EN forms untouched", () => {
+    const out = normalizeUiFormLanguage(modelForm, "en");
+    expect(out.fields[0].label).toBe("Age");
   });
 });
