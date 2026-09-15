@@ -23,6 +23,7 @@ import {
   t,
   withAgentLanguage,
 } from './i18n';
+import { diagnoseTelemetryIssue } from './biomarkers';
 
 const enKeys = Object.keys(translations.en).sort();
 
@@ -280,5 +281,79 @@ describe('scorecard REQUIRED_CHROME (cannot cheat via parity-only)', () => {
     expect(leak, 'LEAK_KEY: pack value equals the camelCase key').toEqual([]);
     expect(filled, 'id copy equals en (English-filled)').toEqual([]);
     expect(dump, 'id is Title-Case leftover of the key (TRANSLATION_DUMP)').toEqual([]);
+  });
+});
+
+describe('L-2 seeded/demo chrome (Insights step cards + outlier preciseCause)', () => {
+  // Sensor for the TRANSLATION_DUMP regression: pack values that are only the
+  // Title-Case humanization of their key (in BOTH locales). It reached the pack
+  // via 1c868ab (scratch_keys.json) and goes unseen because
+  // REQUIRED_CHROME.json freezes 27 keys only.
+  // Class size, evidence and restore plan: gemini38-meal-review/tasks/bakeoff/WAVE_C_REPORT.md
+  const DUMP_RATCHET_MAX = 969; // measured 2026-09-15 after the Insights step* restore; must only shrink
+
+  function humanizeKey(key: string) {
+    return key
+      .replace(/_/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .replace(/^./, (c) => c.toUpperCase());
+  }
+
+  // en copy that legitimately equals the Title-Case humanization of its key.
+  // Shipped exactly like this in 85ce58b, so restore-not-invent keeps it.
+  const EN_KEY_NAME_COPY_ALLOWED = new Set(['stepsCompleted']);
+
+  // src/components/InsightsTab.tsx renders title/description/valueProposition for these cards.
+  const L2_STEP_KEYS = [
+    'stepAddHealthDataTitle', 'stepAddHealthDataDesc', 'stepAddHealthDataValue',
+    'stepLabParserTitle', 'stepLabParserDesc', 'stepLabParserValue',
+    'stepRangeCalibratorTitle', 'stepRangeCalibratorDesc', 'stepRangeCalibratorValue',
+    'stepHealthCoachDesc', 'stepHealthCoachValue',
+    'stepTestPlannerTitle', 'stepTestPlannerDesc', 'stepTestPlannerValue',
+    'stepLiteratureTitle', 'stepLiteratureDesc', 'stepLiteratureValue',
+    'stepDone', 'stepPending', 'stepToDo', 'stepToReview',
+    'stepsCompleted', 'stepsLabel', 'stepsProgress',
+  ] as const;
+
+  it('keeps the Insights step cards in real EN + ID copy (no key-name leftovers)', () => {
+    const en = localePacks.en as Record<string, string>;
+    const id = localePacks.id as Record<string, string>;
+    for (const key of L2_STEP_KEYS) {
+      expect(en[key], `en.${key} missing`).toBeTruthy();
+      expect(id[key], `id.${key} missing`).toBeTruthy();
+      if (!EN_KEY_NAME_COPY_ALLOWED.has(key)) {
+        expect(en[key], `en.${key} is a Title-Case leftover of the key`).not.toBe(humanizeKey(key));
+      }
+      expect(id[key], `id.${key} is a Title-Case leftover of the key`).not.toBe(humanizeKey(key));
+      expect(id[key], `id.${key} is English-filled`).not.toBe(en[key]);
+    }
+    expect(en.stepLiteratureTitle).toBe('Literature');
+    expect(id.stepLiteratureTitle).toBe('Literatur Ilmiah');
+    expect(id.stepsCompleted).toBe('Langkah Selesai');
+  });
+
+  it('follows profile.language in the outlier preciseCause (id / en / unset)', () => {
+    const en = diagnoseTelemetryIssue('hematocrit', 'Hematocrit', 48, '%', '0.40 - 0.52', undefined, 'en');
+    const id = diagnoseTelemetryIssue('hematocrit', 'Hematocrit', 48, '%', '0.40 - 0.52', undefined, 'id');
+    const unset = diagnoseTelemetryIssue('hematocrit', 'Hematocrit', 48, '%', '0.40 - 0.52');
+    expect(unset.preciseCause, 'unset profile.language falls back to English').toBe(en.preciseCause);
+    expect(id.preciseCause).not.toBe(en.preciseCause);
+    expect(en.preciseCause).toContain('percentage');
+    expect(id.preciseCause, 'id outlier cause must be Indonesian, not English').toContain('persentase');
+    expect(id.badgeLabel).toBe(t('id', 'outlierBadgeRatioPct'));
+    expect(id.badgeLabel).not.toBe(t('en', 'outlierBadgeRatioPct'));
+    expect(id.issueTitle).not.toBe(en.issueTitle);
+  });
+
+  it('ratchets TRANSLATION_DUMP leftovers so the class can only shrink', () => {
+    const en = localePacks.en as Record<string, string>;
+    const id = localePacks.id as Record<string, string>;
+    const leftovers = Object.keys(en).filter((key) => {
+      if (!/[a-z0-9][A-Z]/.test(key)) return false;
+      const human = humanizeKey(key);
+      return en[key] === human && id[key] === human;
+    });
+    expect(leftovers.length, 'key-name-valued chrome — see WAVE_C_REPORT.md').toBeLessThanOrEqual(DUMP_RATCHET_MAX);
   });
 });
