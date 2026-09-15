@@ -2,18 +2,18 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-14T22:01:21.852Z
-**Commit:** `969e0e0`
+**When:** 2026-09-15T00:10:37.494Z
+**Commit:** `aa0aaec`
 **Instruction hash:** `bd4c673081a1`
-**Seal:** `7d262340924ec6c1783425a132e99250cb1a7bf68bf2d8353959cd4dcd8a9c43`
+**Seal:** `e6a2e04d17b9fc6f5b8d326f2762e41aa92e024fcbedcaa267ea9e80fefaea58`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **ALL GREEN** — 674 pass / 0 fail / 0 skip
+**Overall:** **ALL GREEN** — 677 pass / 0 fail / 0 skip
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | PASS | 674 pass / 0 fail / 0 skip of 674 |
+| `overall_named_gates` | PASS | 677 pass / 0 fail / 0 skip of 677 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
 | `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
@@ -21,7 +21,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | `load_hack_forbidden` | PASS | no @ts-nocheck; named gates on disk; Top Targets helper intact; contract not painted |
 | `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
 | `result_summary_sealed` | PASS | will write result_summary (overallPass) |
-| `area_localization` | PASS | 48 pass / 0 fail / 0 skip |
+| `area_localization` | PASS | 51 pass / 0 fail / 0 skip |
 | `area_meal_log` | PASS | 191 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
 | `area_biomarkers` | PASS | 148 pass / 0 fail / 0 skip |
@@ -36,7 +36,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
-| Localization | PASS | 48 | 0 | 0 | 48 |
+| Localization | PASS | 51 | 0 | 0 | 51 |
 | Meal Log | PASS | 191 | 0 | 0 | 191 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
 | Biomarkers | PASS | 148 | 0 | 0 | 148 |
@@ -451,7 +451,7 @@ _none_
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_top_targets_fallback |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_limit_keys_present |
 
-### Localization (48)
+### Localization (51)
 
 | Status | File | Test |
 |---|---|---|
@@ -490,12 +490,15 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not drop leak-class keys from the frozen list |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) keeps every frozen leftover-chrome key in en and id |
 | PASS | `src/utils/i18n.test.ts` | scorecard REQUIRED_CHROME (cannot cheat via parity-only) does not leak raw keys or English-fill Indonesian chrome |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
+| PASS | `src/utils/i18n.test.ts` | L-2 seeded/demo chrome (Insights step cards + outlier preciseCause) keeps the Insights step cards in real EN + ID copy (no key-name leftovers) |
+| PASS | `src/utils/i18n.test.ts` | L-2 seeded/demo chrome (Insights step cards + outlier preciseCause) follows profile.language in the outlier preciseCause (id / en / unset) |
+| PASS | `src/utils/i18n.test.ts` | L-2 seeded/demo chrome (Insights step cards + outlier preciseCause) ratchets TRANSLATION_DUMP leftovers so the class can only shrink |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |

@@ -1,25 +1,18 @@
 - banner:
   - button "User Profile Alt":
     - img "User Profile Alt"
-  - text: Sari 99 Siap (1) Riwayat Makanan Tersinkron 23:55
+  - text: Sari 99 1 berjalan · 15% Riwayat Makanan Tersinkron 03:31
   - button "Click To Manually Sync"
 - main:
   - textbox "Cari makanan atau nutrisi..."
   - button "Entri Manual"
-  - text: …
-  - heading "Oatmeal, Nasi Uduk, and 2 other dishes" [level=3]
-  - text: 2 September Tinggi Kalori dan Karbohidrat Ganda
-  - button "Edit Food Log"
-  - button "Delete Entry"
-  - paragraph: Kombinasi nasi uduk, telur balado, tempe orek, dan tambahan oatmeal ini memberikan asupan kalori serta karbohidrat yang sangat tinggi sekaligus, yang dapat memicu lonjakan gula darah. Serat dari oatmeal sangat bagus untuk pencernaan, tetapi porsi karbohidrat ganda ini melebihi kebutuhan energi normal dalam sekali makan. Seimbangkan dengan jalan kaki ringan setelah makan.
-  - text: "Natrium: 1052 mg Lemak Jenuh: 8.80 g Kalori: 737 kcal"
-  - img "Meal Preview"
-  - text: Analysis completed
-  - heading "Oatmeal and Nasi Uduk dengan Telur Balado dan Tempe Orek" [level=4]
-  - text: "🔥 501 kcal • 💪 9g protein Oatmeal: 187 kcal Nasi Uduk dengan Telur Balado dan Tempe Orek: 314 kcal"
-  - button "Lihat Analisis"
-  - button "Simpan Catatan"
-  - button "Delete task"
+  - img "Pratinjau Makanan"
+  - text: Upaya 1 dari 3 15%
+  - heading "Nasi Uduk dengan Telur Balado dan Tempe Orek" [level=4]
+  - paragraph: Vision Scout starting...
+  - text: Diunggah ke server • Aman untuk menutup peramban & cek kembali nanti 0:02 berlalu
+  - button "Lihat Status"
+  - button "Hapus tugas"
 - navigation:
   - button "Home"
   - button "Health"

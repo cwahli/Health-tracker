@@ -1,7 +1,7 @@
 - banner:
   - button "User Profile Alt":
     - img "User Profile Alt"
-  - text: Sari 100 Siap (2) Home Siap
+  - text: Sari 100 Home Tersinkron 03:31
   - button "Click To Manually Sync"
 - main:
   - heading "Selamat Datang di Portal Kesehatan Anda" [level=2]

@@ -1,13 +1,20 @@
 - banner:
   - button "User Profile Alt":
     - img "User Profile Alt"
-  - text: Sari 100 Siap (2) Home Siap
+  - text: Sari 100 Home Siap
   - button "Click To Manually Sync"
 - main:
   - heading "Selamat Datang di Portal Kesehatan Anda" [level=2]
-  - paragraph: Memuat profil dan mengkalibrasi metrik kesehatan Anda...
-  - heading "Loading Profile" [level=3]
-  - paragraph: Harap tunggu sebentar saat target harian, catatan biomarker, dan profil kesehatan Anda diambil.
+  - paragraph: Dasbor Anda siap! Catat beberapa data untuk mengkalibrasi target metabolisme, rekomendasi nutrisi, dan penilaian risiko biomarker.
+  - heading "Lengkapi Profil Anda" [level=3]
+  - paragraph: Tambahkan detail seperti usia, berat badan, tinggi badan, etnisitas, dan jenis kelamin. Ini mengkalibrasi mesin medis dan AI kami untuk menghitung target harian khusus bagi Anda.
+  - button "Atur Profil"
+  - heading "Catat Makanan atau Hidangan" [level=3]
+  - paragraph: Ketik apa yang Anda makan atau bicara secara alami untuk mendapatkan rincian klinis otomatis, perhitungan nutrisi, dan rekomendasi kesehatan yang dipersonalisasi.
+  - button "Tambahkan Catatan Makanan Pertama Anda"
+  - 'heading "Debug: Check Supabase Data" [level=3]'
+  - paragraph: If you expected to see existing data here, tap this to check what the server actually finds in Supabase.
+  - button "Run Debug Check"
 - navigation:
   - button "Home"
   - button "Health"

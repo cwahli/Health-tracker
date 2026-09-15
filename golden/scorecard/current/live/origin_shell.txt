@@ -12,12 +12,12 @@
         navigator.serviceWorker.register('/sw.js').catch(function() {});
       }
     </script>
-    <script type="module" crossorigin src="/assets/index-BPkg5TC6.js"></script>
+    <script type="module" crossorigin src="/assets/index-DiEcVo3P.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/vendor-DCy0fwz4.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-firebase-BcHNMy-o.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-icons-Cw0Hd-q5.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-motion-BTVCcmNx.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-BMY-EH1J.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-Dy1iXnIN.css">
   </head>
   <body>
     <div id="root"></div>
