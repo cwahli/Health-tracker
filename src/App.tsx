@@ -175,7 +175,7 @@ function firestoreReadGuard(label: string, docCount: number = 1): boolean {
 }
 import { runCleanupMigration } from './utils/migrationTask';
 import { supabase, isSupabaseConfigured, cleanupAuthUrlParams } from './utils/supabaseClient';
-import { syncLogsWithTimeBuckets, fetchAllConsolidatedLogs, subscribeToSupabaseLogs, upsertProfileToSupabase, pushLogsToServer, mergeByRecency, mergeActions, mergeBenefits, mergeFoodIdeas, mergeReports, mergeProfiles, mergeBiomarkerHistory, mergeDeleteMaps, supabaseRowToFoodLog, supabaseRowToBiomarkerLog } from "./utils/syncUtils";
+import { syncLogsWithTimeBuckets, fetchAllConsolidatedLogs, subscribeToSupabaseLogs, upsertProfileToSupabase, pushLogsToServer, mergeByRecency, mergeActions, mergeBenefits, mergeFoodIdeas, mergeReports, mergeProfiles, mergeBiomarkerHistory, mergeDeleteMaps, supabaseRowToFoodLog, supabaseRowToBiomarkerLog, resolveInitialLanguage } from "./utils/syncUtils";
 import { mergeFoodLogsDeduped, rehydrateFoodImagesFromDonors, foodLogFingerprint } from "./utils/foodLogDedupe";
 import { isUsableImageUrl, uniqueMealImageUrls } from "./utils/foodImageSources";
 import { sanitizeBiomarkerHistoryOnLoad } from "./utils/biomarkers";
@@ -2925,7 +2925,7 @@ export default function App() {
               nickname: auth.currentUser?.displayName || '',
               photoUrl: auth.currentUser?.photoURL || '',
               timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-              language: 'en',
+              language: resolveInitialLanguage(profile?.language),
               topNutrientsToMonitor: PRIMARY_NUTRIENTS,
               lastUpdatedAt: Date.now()
             } as UserProfile);
@@ -3272,7 +3272,7 @@ export default function App() {
           height: isDemoUser ? 178 : '' as any,
           gender: isDemoUser ? 'Male' : 'Unknown',
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          language: 'en',
+          language: resolveInitialLanguage(profile?.language),
           topNutrientsToMonitor: PRIMARY_NUTRIENTS
         };
         const tNewProfileId = logInteraction('upload', `users/${uid} (Create Profile)`, newProfile);

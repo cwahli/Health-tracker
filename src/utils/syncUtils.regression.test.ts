@@ -6,13 +6,28 @@
  *  - upsertProfileToSupabase: delegates to pushLogsToServer, no-op on missing uid
  *  - mergeByRecency / mergeDeleteMaps: must-not-regress merge laws
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
   pushLogsToServer,
   upsertProfileToSupabase,
   mergeByRecency,
   mergeDeleteMaps,
+  resolveInitialLanguage,
 } from './syncUtils';
+
+// This project's vitest run doesn't use a DOM environment (no jsdom/happy-dom
+// dependency), so localStorage isn't a global here the way it is in the
+// browser. Polyfill a minimal in-memory version, matching the pattern in
+// creditManager.test.ts.
+if (typeof (globalThis as any).localStorage === 'undefined') {
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => { store.set(key, String(value)); },
+    removeItem: (key: string) => { store.delete(key); },
+    clear: () => { store.clear(); },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // pushLogsToServer
@@ -124,6 +139,64 @@ describe('mergeByRecency', () => {
     const local = [{ id: 'local-only', updated_at: 500 }];
     const result = mergeByRecency(local, []);
     expect(result.map(r => r.id)).toContain('local-only');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveInitialLanguage — regression for the "Indonesian selected, Home
+// screen shows English after signup" bug.
+//
+// Root cause: on a brand-new signup, checkForDbChanges' "no cloud doc yet"
+// branch built a fresh profile with a hardcoded `language: 'en'`, with zero
+// regard for the language the person had just picked on the login screen
+// (threaded correctly elsewhere via loadUserData's chosenLanguage param, and
+// persisted to localStorage['preferred_language'] by AuthScreen). Because
+// that branch runs asynchronously and can resolve after loadUserData's own
+// correct setProfile() call, its hardcoded English default could silently
+// win the race and overwrite the just-selected language on first login.
+// ---------------------------------------------------------------------------
+describe('resolveInitialLanguage', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('prefers an explicit chosenLanguage over everything else', () => {
+    localStorage.setItem('preferred_language', 'fr');
+    expect(resolveInitialLanguage('id')).toBe('id');
+  });
+
+  it('falls back to preferred_language from localStorage when chosenLanguage is absent', () => {
+    localStorage.setItem('preferred_language', 'id');
+    expect(resolveInitialLanguage(undefined)).toBe('id');
+    expect(resolveInitialLanguage(null)).toBe('id');
+  });
+
+  it('reproduces and fixes the exact bug: Indonesian selected pre-login, no chosenLanguage threaded through', () => {
+    localStorage.setItem('preferred_language', 'id');
+    // The buggy code path hardcoded 'en' with no lookup at all - simulate
+    // the equivalent call (no chosenLanguage available).
+    expect(resolveInitialLanguage()).toBe('id');
+  });
+
+  it('ignores an invalid chosenLanguage value and falls back to preferred_language', () => {
+    localStorage.setItem('preferred_language', 'zh');
+    expect(resolveInitialLanguage('not-a-real-locale')).toBe('zh');
+  });
+
+  it('ignores an invalid preferred_language value and defaults to en', () => {
+    localStorage.setItem('preferred_language', 'not-a-real-locale');
+    expect(resolveInitialLanguage()).toBe('en');
+  });
+
+  it('defaults to en when nothing is set anywhere', () => {
+    expect(resolveInitialLanguage()).toBe('en');
+  });
+
+  it('supports all four locales through the chosenLanguage path', () => {
+    expect(resolveInitialLanguage('en')).toBe('en');
+    expect(resolveInitialLanguage('fr')).toBe('fr');
+    expect(resolveInitialLanguage('zh')).toBe('zh');
+    expect(resolveInitialLanguage('id')).toBe('id');
   });
 });
 

@@ -57,6 +57,34 @@ export function mergeReports(a?: RecommendationReport | null, b?: Recommendation
   return timeB >= timeA ? b : a;
 }
 
+// Every place in the app that constructs a brand-new UserProfile needs to
+// pick an initial language the same way: prefer an explicit choice made this
+// session (e.g. passed through from the just-completed login/signup flow),
+// then fall back to whatever the person selected on the language picker
+// before they logged in (persisted to localStorage), and only default to
+// English if neither is available. Before this helper existed, some call
+// sites (loadUserData's new-profile branch) implemented this correctly while
+// others (checkForDbChanges' "brand new sign up, no cloud doc yet" branch)
+// hardcoded 'en' with no fallback at all - a race between the two on a
+// fresh signup could let the hardcoded English default win and overwrite
+// the language the person had just picked, even though nothing was ever
+// "wrong" from either code path's own local point of view.
+export function resolveInitialLanguage(chosenLanguage?: string | null): 'en' | 'fr' | 'zh' | 'id' {
+  const valid = ['en', 'fr', 'zh', 'id'];
+  if (chosenLanguage && valid.includes(chosenLanguage)) {
+    return chosenLanguage as 'en' | 'fr' | 'zh' | 'id';
+  }
+  try {
+    const preferred = typeof localStorage !== 'undefined' ? localStorage.getItem('preferred_language') : null;
+    if (preferred && valid.includes(preferred)) {
+      return preferred as 'en' | 'fr' | 'zh' | 'id';
+    }
+  } catch {
+    // localStorage unavailable (SSR/sandboxed) - fall through to default
+  }
+  return 'en';
+}
+
 export function mergeProfiles(a?: UserProfile | null, b?: UserProfile | null): UserProfile | null {
   if (!a) return b || null;
   if (!b) return a;
