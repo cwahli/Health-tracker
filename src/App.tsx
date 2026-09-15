@@ -122,6 +122,7 @@ import { sanitizeForFirestore, checkQuotaFlag, handleRetryQuota } from './utils/
 import { getCurrentDateInTimezone, toYYYYMMDD, normalizeBiomarkerHistory } from './utils/dateUtils';
 import { biomarkerDefinitions, isAsianEthnicity, hasBmiPendingAlert, getProfileFingerprint, isValEmpty, getMappedBiomarkerKey, selfHealCustomBiomarkerDefinitions } from './utils/biomarkers';
 import { applyModificationCommands, overlayFingerprint, resolveAgentDestination, shouldRunCalibrator, attachObservationMeta, enrichReviewModificationCommands, collectCatalogUnitMap, cleanupInventedBiomarkerCatalog, routeExtractedObservations, approvePendingObservation, type ModificationCommand } from './utils/biomarkerLifecycle';
+import { mergeParallelAliasGroups } from './utils/biomarkerAuditEngine';
 import { extractFallbackModifications } from './components/chat-cards/BiomarkerReviewCard';
 import { formatOptimalTargetValue } from './utils/agentCalibration';
 import { standardizeUnit, CONVERSION_FACTORS } from './utils/unitConversion';
@@ -2386,9 +2387,12 @@ export default function App() {
           (serverFoods || []).filter(f => f.sync_state !== 'delete' && !delFoods[f.id]),
           []
         );
-        const mergedBioHistory = (serverBiomarkers || []).filter(b => b.sync_state !== 'delete' && !delBios[b.id]);
+        let mergedBioHistory = (serverBiomarkers || []).filter(b => b.sync_state !== 'delete' && !delBios[b.id]);
         const cleanedAuth = cleanupInventedBiomarkerCatalog(authProfile, mergedBioHistory);
-        authProfile = cleanedAuth.profile as UserProfile;
+        // B7.6: fold live parallel alias keys into their master (or tombstone empties).
+        const dedupedAuth = mergeParallelAliasGroups(cleanedAuth.profile, cleanedAuth.history);
+        authProfile = dedupedAuth.profile as UserProfile;
+        mergedBioHistory = dedupedAuth.history;
         const mergedActions = Array.isArray(serverActions) ? serverActions : [];
         const mergedBenefits = Array.isArray(serverBenefits) ? serverBenefits : [];
         const resolvedReport = serverReport != null ? serverReport : null;
@@ -3174,7 +3178,10 @@ export default function App() {
         // B7.5: merged or authority-swapped profiles can carry new demographics.
         mergedProfile = maybeRecalibrateDemographicOverlays(profile, mergedProfile);
         const cleanedMerged = cleanupInventedBiomarkerCatalog(mergedProfile, mergedBioHistory);
-        mergedProfile = cleanedMerged.profile as UserProfile;
+        // B7.6: fold live parallel alias keys into their master (or tombstone empties).
+        const dedupedMerged = mergeParallelAliasGroups(cleanedMerged.profile, cleanedMerged.history);
+        mergedProfile = dedupedMerged.profile as UserProfile;
+        mergedBioHistory = dedupedMerged.history;
         setProfile(sanitizeProfile(mergedProfile, activeEmail));
         // Final safety: dedupe + rehydrate once more before React state / IndexedDB
         mergedFoods = mergeFoodLogsDeduped(rehydrateFoodImagesFromDonors(mergedFoods, localFoods), []);

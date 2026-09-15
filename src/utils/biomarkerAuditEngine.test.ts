@@ -6,7 +6,8 @@ import {
   findCatalogDefinition,
   extractUnitFromString,
   normalizeUnitEquivalence,
-  deriveConflictResolution
+  deriveConflictResolution,
+  mergeParallelAliasGroups
 } from './biomarkerAuditEngine';
 import {
   normalizeBiomarkerName,
@@ -292,5 +293,48 @@ describe('Biomarker Audit & Deduplication Engine', () => {
     const ibwItem = report.items.find(i => i.key === 'ideal_body_weight');
     // Even if bracket mismatch is flagged as conflict, no destructive align_declared_to_brackets auto-fix proposal is created
     expect(ibwItem?.conflictInfo?.suggestedResolution).toBeUndefined();
+  });
+
+  it('B7.6 folds populated parallel keys into the master, tombstones empties, skips unit conflicts', () => {
+    const customBiomarkers = {
+      hdl: { name: 'HDL-C', unit: 'mmol/L', normalRange: '0.9 - 1.7', category: 'lipids' },
+      serum_hdl_cholesterol: { name: 'Serum HDL Cholesterol', unit: 'mmol/L' },
+      hdl_c: { name: 'HDL-C', unit: 'mg/dL' },
+      ast: { name: 'AST (SGOT)', unit: 'U/L', normalRange: '10 - 40', category: 'liver' },
+      ast_serum_level_u_l: { name: 'AST Serum Level', unit: 'U/L' }
+    };
+    const biomarkerHistory = [
+      {
+        id: 'l1', date: '2026-08-01',
+        biomarkers: { hdl: 1.2, serum_hdl_cholesterol: 1.3, ast: 28 },
+        observationMeta: { serum_hdl_cholesterol: { rawValue: '1.3' } }
+      },
+      { id: 'l2', date: '2026-08-10', biomarkers: { serum_hdl_cholesterol: 1.4 } },
+      { id: 'l3', date: '2026-08-20', biomarkers: { hdl: 1.35, hdl_c: 50 } }
+    ];
+    const { profile, history, merged } = mergeParallelAliasGroups(
+      { customBiomarkers, deletedCustomBiomarkerKeys: {} }, biomarkerHistory
+    );
+    // Populated loser folds into hdl master; master wins the l1 tie, absorbs l2
+    const l1 = history.find((h: any) => h.id === 'l1');
+    const l2 = history.find((h: any) => h.id === 'l2');
+    expect(l1.biomarkers).toEqual({ hdl: 1.2, ast: 28 });
+    expect(l2.biomarkers).toEqual({ hdl: 1.4 });
+    expect(l1.observationMeta?.hdl?.rawValue).toBe('1.3');
+    expect(l1.observationMeta?.serum_hdl_cholesterol).toBeUndefined();
+    expect(profile.customBiomarkers.serum_hdl_cholesterol).toBeUndefined();
+    expect(profile.deletedCustomBiomarkerKeys.serum_hdl_cholesterol).toBeGreaterThan(0);
+    const serumMerge = merged.find((m) => m.from === 'serum_hdl_cholesterol');
+    expect(serumMerge?.to).toBe('hdl');
+    expect(serumMerge?.logsMoved).toBe(1);
+    // Empty ghost is tombstoned without moving values
+    expect(profile.customBiomarkers.ast_serum_level_u_l).toBeUndefined();
+    expect(profile.deletedCustomBiomarkerKeys.ast_serum_level_u_l).toBeGreaterThan(0);
+    // Unit conflict (hdl_c mg/dL vs hdl mmol/L) stays for manual combine
+    const l3 = history.find((h: any) => h.id === 'l3');
+    expect(l3.biomarkers).toEqual({ hdl: 1.35, hdl_c: 50 });
+    expect(profile.customBiomarkers.hdl_c).toBeDefined();
+    expect(profile.deletedCustomBiomarkerKeys.hdl_c).toBeUndefined();
+    expect(merged.some((m) => m.from === 'hdl_c')).toBe(false);
   });
 });

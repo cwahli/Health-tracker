@@ -71,6 +71,13 @@ ok(app.includes('collectCatalogUnitMap'), 'P1', 'App.tsx does not use collectCat
 // P2 — Catalog Hygiene
 ok(life.includes('export function cleanupInventedBiomarkerCatalog'), 'P2', 'missing cleanupInventedBiomarkerCatalog in biomarkerLifecycle.ts');
 ok(sanitizeUtils.includes('cleanupInventedBiomarkerCatalog'), 'P2', 'dataSanitize.ts does not call cleanupInventedBiomarkerCatalog');
+// P2b — B7.6 Name Deduper leftovers: parallel alias keys fold into the audit
+// master (or tombstone) on both load paths, never across different units.
+const audit = read('src/utils/biomarkerAuditEngine.ts');
+ok(audit.includes('export function mergeParallelAliasGroups'), 'P2', 'missing mergeParallelAliasGroups in biomarkerAuditEngine.ts');
+const dedupeSites = (app.match(/mergeParallelAliasGroups\(/g) || []).length;
+ok(dedupeSites >= 2, 'P2', `parallel-key fold wired at ${dedupeSites} load paths, want >= 2 (auth load + sync merge)`);
+ok(audit.includes('masterUnit !== loserUnit'), 'P2', 'parallel-key fold missing unit-mismatch guard');
 
 // P3 — Destination routing
 ok(life.includes('export function resolveAgentDestination'), 'P3', 'missing resolveAgentDestination');
