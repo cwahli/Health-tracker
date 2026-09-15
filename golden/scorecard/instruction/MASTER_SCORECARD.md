@@ -61,7 +61,7 @@ Rule for this table: count **distinct fix commits / documented retries**, not ch
 | Deploy git-hash in Settings | Docker has no `.git` | `0d40406` `7093718` `613aa03` `eebbdc8` `930f0aa` `f12b296` (**>3**) | Infra churn | ops | **NO** on the product scorecard. Not a patient-facing class. |
 | Track L-2–L-5 leftovers | seed/outlier/admin chrome + catalog + live meal id | Unparked 2026-09-15 | Active Track L | active | Restore from `85ce58b`/`95c5640`; L-5 waits named locale. |
 
-GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1** portion WRONG_BASIS · **#2** photo second-device · **#3** quota copy · **#4** admin quota · **#5** scorecard + vitest exclude.
+GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1** portion WRONG_BASIS · **#2** photo second-device · **#3** quota copy · **#4** admin quota · **#5** scorecard + vitest exclude · **#6** `48a87ee` stuck-pending `dbInteractions` entry (swallowed `Promise.resolve() //` comment ate a `completeInteraction()` call on demo-signup dashboard write) — kept the header's amber attention badge blinking forever on a new profile, unrelated to `CROSS_DEVICE_SYNC` above; not yet regression-tested (`App.tsx` has no test harness) and not yet confirmed as a class (only one instance found via `grep "Promise.resolve() //"`, but worth a repo-wide check for other silently-truncated `//` comments eating code if this pattern recurs).
 
 ---
 
