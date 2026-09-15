@@ -2,18 +2,19 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-15T15:58:26.406Z
-**Commit:** `3ff047d`
-**Instruction hash:** `bd4c673081a1`
-**Seal:** `a7a744d76537d2bd224db673255340e58412e9a8315957417031af5ea67633a2`
+**When:** 2026-09-15T22:59:57.578Z
+**Commit:** `6166ea6`
+**Instruction hash:** `c5cbb90c42d3`
+**Seal:** `aaafbd2921b7ebbce03418d2350df69a79fa01d7518ed5597a2d2a75815d027d`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **ALL GREEN** — 705 pass / 0 fail / 0 skip
+**Overall:** **ALL GREEN** — 707 pass / 0 fail / 0 skip
+**Archived previous current →** `golden/scorecard/past/runs/2026-09-15T22-58-52-306Z-6166ea6`
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | PASS | 705 pass / 0 fail / 0 skip of 705 |
+| `overall_named_gates` | PASS | 707 pass / 0 fail / 0 skip of 707 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
 | `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
@@ -26,7 +27,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
 | `area_biomarkers` | PASS | 148 pass / 0 fail / 0 skip |
 | `area_receptionist` | PASS | 49 pass / 0 fail / 0 skip |
-| `area_reliability` | PASS | 204 pass / 0 fail / 0 skip |
+| `area_reliability` | PASS | 206 pass / 0 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
 | `journey-guard` | PASS | exit 0 |
 | `biomarker-lifecycle-m31` | PASS | exit 0 |
@@ -41,7 +42,7 @@ Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). 
 | Compare | PASS | 47 | 0 | 0 | 47 |
 | Biomarkers | PASS | 148 | 0 | 0 | 148 |
 | Receptionist | PASS | 49 | 0 | 0 | 49 |
-| Reliability | PASS | 204 | 0 | 0 | 204 |
+| Reliability | PASS | 206 | 0 | 0 | 206 |
 
 ## All failed (red)
 
@@ -53,7 +54,7 @@ _none_
 
 ## All passed (green)
 
-### Reliability (204)
+### Reliability (206)
 
 | Status | File | Test |
 |---|---|---|
@@ -250,6 +251,8 @@ _none_
 | PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore detects stale prior-turn succeeded rows while an edit is in flight |
 | PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore drops succeeded echoes from a lower currentTurn |
 | PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore does not let a stale realtime failed echo clobber an in-flight retry |
+| PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore CROSS_DEVICE_SYNC: fresh JobStore on second device sees R2/photo URL without local ImageStore |
+| PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore CROSS_DEVICE_SYNC: patches stripped placeholder to durable R2 URL before remote sync |
 | PASS | `src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts` | scheduleCoalescedJobUpsert collapses a burst of schedules into active + trailing with the latest snapshot |
 | PASS | `src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts` | scheduleCoalescedJobUpsert runs a lone schedule exactly once |
 | PASS | `npx tsc --noEmit` | tsc |
@@ -515,12 +518,12 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) keeps the placeholders the job card interpolates (no silent no-op replace) |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) renders the edit/retry running job card in Indonesian |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) never regresses a scanned key back to the Title-Case humanization of its key |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |

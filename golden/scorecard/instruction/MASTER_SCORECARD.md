@@ -24,7 +24,7 @@ Until `6c25141`, `npm test` also executed Playwright specs and printed **18 fake
 
 ## OVERALL VERDICT: **ALL GREEN**
 
-Dump (`current/MASTER_SCORECARD_DEBUG.md`, sealed `3ff047d` 2026-09-15): **705 pass / 0 fail / 0 skip**. Sealed copy: `../result_summary/LATEST.md` (exit 0). Trust that dump over this table if they diverge.
+Dump (`current/MASTER_SCORECARD_DEBUG.md`, sealed 2026-09-15): **707 pass / 0 fail / 0 skip**. Sealed copy: `../result_summary/LATEST.md` (exit 0). Trust that dump over this table if they diverge.
 
 | Area | Inner | Live / E2E | Verdict |
 |---|---|---|---|
@@ -33,7 +33,7 @@ Dump (`current/MASTER_SCORECARD_DEBUG.md`, sealed `3ff047d` 2026-09-15): **705 p
 | Compare | named units PASS | J-ID-02 LIVE PASS (wrong fixtures); 6-case spec untracked (residual) | ✅ PASS (sealed) + ratchet |
 | Biomarkers | G-B1–G-B9 fixtures restored; **0 skip** | B0 Apply CLOSED 2026-09-14; zero Playwright (residual) | ✅ PASS (sealed) |
 | Receptionist | 5 named files PASS | stub specs only (residual) | ✅ PASS (sealed) |
-| Reliability | scorer + tsc + Guard + live contract **PASS**; `LOAD_HACK` ratchet | live contract PASS sealed; photo-sync second-device untested (residual); Render commit now matches HEAD seal | ✅ PASS (sealed) |
+| Reliability | scorer + tsc + Guard + live contract + CROSS_DEVICE_SYNC **PASS**; `LOAD_HACK` ratchet | live contract PASS sealed; second-device sync tested in JobStore.test.ts; Render commit now matches HEAD seal | ✅ PASS (sealed) |
 
 ---
 
@@ -71,7 +71,7 @@ GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1**
 |---|---|---|---|
 | `LEAK_KEY` | Localization | 242 `t()` callsites missing from packs (chrome keys `closeDialog`/`modalDialog` restored) | `npm run scorecard:debug` law `i18n_required_chrome` |
 | `I18N_A11Y_UNRUN` | Localization | `current/a11y/` empty | live Playwright, quota |
-| `CROSS_DEVICE_SYNC` | Reliability | no second-device test | none yet |
+| `CROSS_DEVICE_SYNC` | Reliability | second-device test added (`JobStore.test.ts`) | `src/jobs/__tests__/JobStore.test.ts` |
 | `SINGLE_DISH_FLATTEN` | Meal Log | live Mie Ayam stayed 1 nested dish; inner unroll now gated | `npx vitest run server_vision_scout.test.ts` (J-ID-01 / G8 journey, not a new pack) |
 
 ---
@@ -86,7 +86,7 @@ Gemini Current work remains **B0**. Do **not** start F-11.2, Q-9, or USDA. Track
 | **6** | ✅ DONE — `SINGLE_DISH_FLATTEN` | live Mie Ayam nested 4 foods in 1 dish | `server_vision_scout.test.ts` Mie Ayam case green; standing `single_dish_flatten` |
 | **7** | ✅ DONE — Track L callsite keys (L-2 seed/outlier, L-4 dict/table/batch/img/del/backup/sanitize/audit) | restored from `85ce58b` (no invent) | `i18n_required_chrome` PASS sealed |
 | **8** | 🟡 PARTIAL — Gate I18N-A11Y Wave K J-ID-01 evidence archived | 3 helper commits, then J-ID-01 soak | `current/a11y/` present; checklist in SCOREBOARD_LIVE_RESULTS |
-| **9** | OPEN — Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL |
+| **9** | ✅ DONE — Second-device sync named test | Class that beat unique-by-key and PR #2 | fresh JobStore sees R2/`/photos/` URL in `JobStore.test.ts` (707 green) |
 | **10** | OPEN — Record Meal_03 6-case + Meal_04 live specs | Compare/log benches exist and are untracked | PASS/FAIL + date in §E2E |
 | **11** | ✅ DONE — B0 Apply smoke CLOSED 2026-09-14 | locked converts | HDL 1.293 / TG 1.411 / LDL 3.362 / creat 79.56 / bili 13.68 on Home |
 

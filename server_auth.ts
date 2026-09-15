@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { getAuth } from 'firebase-admin/auth';
 import { d1Query, isD1Configured } from './server_d1.js';
 
 const SESSION_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET || 'health-tracker-secret-session-key-v1';
@@ -233,6 +232,7 @@ export async function verifyFirebaseIdToken(req: any): Promise<{ uid: string; em
 
   // 2. Check if token is Firebase ID token (AI Studio / local dev)
   try {
+    const { getAuth } = await import('firebase-admin/auth');
     const decoded = await getAuth().verifyIdToken(token);
     console.log('[FreeTier] requireAuth');
     return { uid: decoded.uid, email: decoded.email };

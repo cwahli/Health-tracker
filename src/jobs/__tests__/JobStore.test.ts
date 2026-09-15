@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JobStore, isJobBlank, isStalePriorTurn } from '../JobStore';
 import { ImageStore } from '../ImageStore';
+import { processJobRows } from '../SupabaseJobSync';
+import { uniqueMealImageUrls } from '../../utils/foodImageSources';
 
 vi.mock('idb-keyval', () => {
   const store = new Map();
@@ -360,5 +362,90 @@ describe('JobStore', () => {
     });
     expect(JobStore.getJob('echo-fail')?.status).toBe('failed');
     expect(JobStore.getJob('echo-fail')?.error?.message).toContain('Invalid JSON from model');
+  });
+
+  it('CROSS_DEVICE_SYNC: fresh JobStore on second device sees R2/photo URL without local ImageStore', async () => {
+    // 1. Fresh second device starts with an empty store and no local ImageStore records
+    JobStore.clearForTests();
+    const localImages = await ImageStore.getImages('job_remote_sync_1');
+    expect(localImages).toEqual([]);
+
+    // 2. Second device processes remote job row synced from backend (e.g. Supabase or /api/jobs/status)
+    const remotePhotoUrl = 'https://pub-r2.example.com/photos/job_remote_sync_1.jpg';
+    processJobRows([
+      {
+        id: 'job_remote_sync_1',
+        kind: 'food_log',
+        status: 'succeeded',
+        photo_url: remotePhotoUrl,
+        clean_result: {
+          photoUrl: remotePhotoUrl,
+          message: 'Analysis complete.',
+          pendingFoodLog: {
+            name: 'Grilled Salmon with Quinoa',
+            nutrients: { calories: 520, protein: 42 },
+          },
+        },
+        raw_text: 'Analyze this meal photo.',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    // 3. Fresh JobStore on second device receives and stores the durable remote photoUrl
+    const remoteJob = JobStore.getJob('job_remote_sync_1');
+    expect(remoteJob).toBeDefined();
+    expect(remoteJob?.photoUrl).toBe(remotePhotoUrl);
+    expect(remoteJob?.inputSnapshot?.hasImage).toBe(true);
+    expect(remoteJob?.result?.photoUrl).toBe(remotePhotoUrl);
+
+    // 4. Image sanitization / deduplication on second device normalizes R2 URL to /photos/ proxy and rejects placeholders
+    const resolvedUrls = uniqueMealImageUrls([
+      remoteJob?.photoUrl,
+      'Image reference preserved',
+      '[image_removed_for_snapshot]',
+    ]);
+    expect(resolvedUrls).toEqual(['/photos/job_remote_sync_1.jpg']);
+  });
+
+  it('CROSS_DEVICE_SYNC: patches stripped placeholder to durable R2 URL before remote sync', () => {
+    JobStore.clearForTests();
+    JobStore.createJob({
+      id: 'job_submit_patch_1',
+      status: 'draft',
+      messages: [
+        {
+          id: 'msg_user_1',
+          role: 'user',
+          content: 'Here is my breakfast',
+          timestamp: new Date().toISOString(),
+          imageUrl: 'Image reference preserved',
+          imageUrls: ['Image reference preserved'],
+        },
+      ],
+    });
+
+    const r2Url = '/photos/job_submit_patch_1.jpg';
+    // Emulate LogChat submit response patch (PR #2)
+    JobStore.apply({
+      type: 'ServerStatus',
+      id: 'job_submit_patch_1',
+      status: 'running',
+      serverSubmittedAt: Date.now(),
+      messages: [
+        {
+          id: 'msg_user_1',
+          role: 'user',
+          content: 'Here is my breakfast',
+          timestamp: new Date().toISOString(),
+          imageUrl: r2Url,
+          imageUrls: [r2Url],
+        },
+      ],
+    });
+
+    const job = JobStore.getJob('job_submit_patch_1');
+    expect(job?.messages?.[0].imageUrl).toBe(r2Url);
+    expect(job?.messages?.[0].imageUrls).toEqual([r2Url]);
+    expect(job?.messages?.[0].imageUrl).not.toBe('Image reference preserved');
   });
 });
