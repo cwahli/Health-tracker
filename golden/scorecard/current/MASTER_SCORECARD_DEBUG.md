@@ -2,10 +2,10 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-15T23:31:41.297Z
-**Commit:** `cdb1f47`
+**When:** 2026-09-16T00:30:15.766Z
+**Commit:** `c887f38`
 **Instruction hash:** `c5cbb90c42d3`
-**Seal:** `125abda5712b68d124384728b2e5679d61f91a1332fad4d7426698eb04313627`
+**Seal:** `181b955d67faea93c4664889e0aefc0b7557ac27e5f6373a6d196c0d8d27922b`
 **Command:** `node scripts/assert-master-scorecard.mjs`
 **Overall:** **ALL GREEN** — 713 pass / 0 fail / 0 skip
 

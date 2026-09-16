@@ -14,9 +14,9 @@
     { "id": "lazyWithRetry", "path": "src/utils/lazyWithRetry.ts", "status": "canonical" }
   ],
   "autoFixSurface": {
-    "choice": "A",
-    "onlyComponent": "src/components/HomeTab.tsx",
-    "note": "B8.0 Option A: Flagged Telemetry modal is the only Auto-Fix. Dictionary Auto-Calibrate / Quick Approve stay gone."
+    "choice": "B",
+    "onlyComponent": null,
+    "note": "B8.0 Option B: Auto-Fix banned from Home. Informational warning banner preserved on Home pointing to Health / Sanitize."
   },
   "ceilings": {
     "src/App.tsx": 9200,

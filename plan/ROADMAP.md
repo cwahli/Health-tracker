@@ -33,7 +33,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ## Current work — B0 CLOSED, Track B landed (2026-09-15)
 
-**B0.1–0.3 Apply smoke CLOSED 2026-09-14** (card shows HDL 50→**1.293**, TG 125→**1.411**, LDL 130→**3.362**, creat 0.9→**79.56**, bili 0.8→**13.68**; history + Home written; `observationMeta` raw kept; older SI rows untouched). **B0.5** not needed (no miss). Fill-template **C1–C7** green (`scripts/assert-biomarker-cases.mjs`). **B7.4 / B7.5 / B7.6 landed** (packets in `specs/done/`). **B8.0** is a human product choice — skip.
+**B0.1–0.3 Apply smoke CLOSED 2026-09-14** (card shows HDL 50→**1.293**, TG 125→**1.411**, LDL 130→**3.362**, creat 0.9→**79.56**, bili 0.8→**13.68**; history + Home written; `observationMeta` raw kept; older SI rows untouched). **B0.5** not needed (no miss). Fill-template **C1–C7** green (`scripts/assert-biomarker-cases.mjs`). **B7.4 / B7.5 / B7.6 landed** (packets in `specs/done/`). **B8.0** CLOSED (Option B chosen: Auto-Fix removed from Home, warning banner points to Health / Sanitize).
 
 **Do this, in order. Do not restart F-10.**
 
@@ -207,7 +207,7 @@ Does **not** replace B0–B7. Same pillar, same `convertViaTable` law. Trigger: 
 
 | # | Item | Done when | Class | Who |
 |---|---|---|---|---|
-| **B8.0** | Human: one Auto-Fix surface | Choice written in `AI_HANDOVER.md`: **(A)** Flagged Telemetry modal is the only Auto-Fix, or **(B)** Auto-Fix banned again | product | Human |
+| **B8.0** | **Shipped (Option B)** | Auto-Fix banned from Home; warning banner preserved pointing to Health Clean & Sanitize (`CATALOG.json` choice B, onlyComponent null) | product | Human + Gemini |
 | **B8.1** | **Shipped** | `computeBiomarkerTelemetryMultiplier` uses `ANALYTE_CONVERSIONS` only; locked `1.293` / `1.411` / `3.362` / `79.56` / `13.68` unchanged | `SECOND_MATH_PATH` | Grok (constants) |
 | **B8.2** | **Shipped** | Dictionary toolbar **or** Cleaning menu, not both | `CLONE_UI` | Gemini |
 | **B8.3** | **Shipped** | `runGeneralizedBiomarkerAudit` / `detectFlaggedTelemetryErrors` not re-run from Dictionary + Medical History + Trends + LogChat on the same paint | `EAGER_MOUNT` | Gemini after Grok names call sites |

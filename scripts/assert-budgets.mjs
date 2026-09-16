@@ -38,11 +38,11 @@ for (const id of requiredIds) {
   ok(ids.has(id), 'Q2:catalog_id', `CATALOG.json missing primitive id ${id}`);
 }
 
-ok(catalog.autoFixSurface?.choice === 'A', 'B8.0:choice_A', 'CATALOG autoFixSurface.choice must be A');
+ok(catalog.autoFixSurface?.choice === 'B', 'B8.0:choice_B', 'CATALOG autoFixSurface.choice must be B');
 ok(
-  catalog.autoFixSurface?.onlyComponent === 'src/components/HomeTab.tsx',
+  catalog.autoFixSurface?.onlyComponent === null,
   'B8.0:surface',
-  'only Auto-Fix surface must be HomeTab.tsx'
+  'Auto-Fix is banned from Home in Option B'
 );
 
 const ceilings = catalog.ceilings || {};

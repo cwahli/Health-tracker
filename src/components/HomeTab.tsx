@@ -1164,6 +1164,16 @@ export default function HomeTab({
               <button
                 type="button"
                 onClick={() => {
+                  onNavigateToTab?.('medical');
+                }}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer flex items-center gap-1.5"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>Review & Clean in Health</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   setSelectedErrorKeys(new Set(flaggedTelemetryErrors.map(e => e.key)));
                   setShowTelemetryModal(true);
                 }}
@@ -2390,84 +2400,7 @@ export default function HomeTab({
           });
         });
 
-        const handleAutoFixBiomarker = (err: any) => {
-          if (!err.proposedAutoFix?.canAutoFix) return;
-          const mult = err.proposedAutoFix.proposedMultiplier;
-          const custom = profile.customBiomarkers?.[err.key];
-          const def = allDefinitions.find(d => d.key === err.key) || biomarkerDefinitions.find(d => d.key === err.key);
-          const range = (custom?.normalRange && custom.normalRange !== 'Unknown' && custom.normalRange !== 'unset' && custom.normalRange !== 'n/a' && custom.normalRange !== '-') ? custom.normalRange : (def?.normalRange || custom?.normalRange);
 
-          const updatesToApply: { id: string; key: string; value: number }[] = [];
-          (activeHistory || []).forEach(log => {
-            if (!log.biomarkers || !log.id) return;
-            const rawKey = Object.keys(log.biomarkers).find(k => {
-              const canBk = getMappedBiomarkerKey(k) || k;
-              return canBk === err.key || canBk.toLowerCase().replace(/[\s_]/g, '') === err.key.toLowerCase().replace(/[\s_]/g, '') || k.toLowerCase().replace(/[\s_]/g, '') === err.key.toLowerCase().replace(/[\s_]/g, '');
-            }) || err.key;
-            const rawVal = log.biomarkers[rawKey];
-            if (rawVal === undefined || rawVal === null) return;
-            const num = typeof rawVal === 'number' ? rawVal : parseFloat(String(rawVal));
-            if (!isNaN(num) && isBiomarkerValueImprobable(err.key, num, range)) {
-              let converted = num * mult;
-              if (converted >= 100) converted = Math.round(converted);
-              else if (converted >= 10) converted = parseFloat(converted.toFixed(1));
-              else converted = parseFloat(converted.toFixed(3));
-              updatesToApply.push({ id: log.id, key: rawKey, value: converted });
-            }
-          });
-
-          if (updatesToApply.length === 0) return;
-          if (onBatchEditBiomarkersInLogs) {
-            onBatchEditBiomarkersInLogs(updatesToApply);
-          } else {
-            updatesToApply.forEach(u => onEditBiomarkerLog(u.id, u.key, u.value));
-          }
-
-          setAppliedToastMessage(`⚡ Applied auto-fix to ${updatesToApply.length} reading(s) for ${err.name}`);
-          setTimeout(() => setAppliedToastMessage(null), 3500);
-        };
-
-        const handleAutoFixAllSelected = () => {
-          const keys = Array.from(selectedErrorKeys);
-          const targetErrors = flaggedTelemetryErrors.filter(e => keys.includes(e.key) && e.proposedAutoFix?.canAutoFix);
-          if (targetErrors.length === 0) return;
-
-          const updatesToApply: { id: string; key: string; value: number }[] = [];
-          targetErrors.forEach(err => {
-            const mult = err.proposedAutoFix!.proposedMultiplier;
-            const custom = profile.customBiomarkers?.[err.key];
-            const def = allDefinitions.find(d => d.key === err.key) || biomarkerDefinitions.find(d => d.key === err.key);
-            const range = (custom?.normalRange && custom.normalRange !== 'Unknown' && custom.normalRange !== 'unset' && custom.normalRange !== 'n/a' && custom.normalRange !== '-') ? custom.normalRange : (def?.normalRange || custom?.normalRange);
-
-            (activeHistory || []).forEach(log => {
-              if (!log.biomarkers || !log.id) return;
-              const rawKey = Object.keys(log.biomarkers).find(k => {
-                const canBk = getMappedBiomarkerKey(k) || k;
-                return canBk === err.key || canBk.toLowerCase().replace(/[\s_]/g, '') === err.key.toLowerCase().replace(/[\s_]/g, '') || k.toLowerCase().replace(/[\s_]/g, '') === err.key.toLowerCase().replace(/[\s_]/g, '');
-              }) || err.key;
-              const rawVal = log.biomarkers[rawKey];
-              if (rawVal === undefined || rawVal === null) return;
-              const num = typeof rawVal === 'number' ? rawVal : parseFloat(String(rawVal));
-              if (!isNaN(num) && isBiomarkerValueImprobable(err.key, num, range)) {
-                let converted = num * mult;
-                if (converted >= 100) converted = Math.round(converted);
-                else if (converted >= 10) converted = parseFloat(converted.toFixed(1));
-                else converted = parseFloat(converted.toFixed(3));
-                updatesToApply.push({ id: log.id, key: rawKey, value: converted });
-              }
-            });
-          });
-
-          if (updatesToApply.length === 0) return;
-          if (onBatchEditBiomarkersInLogs) {
-            onBatchEditBiomarkersInLogs(updatesToApply);
-          } else {
-            updatesToApply.forEach(u => onEditBiomarkerLog(u.id, u.key, u.value));
-          }
-
-          setAppliedToastMessage(`⚡ Batch converted ${updatesToApply.length} reading(s) across ${targetErrors.length} biomarker(s)!`);
-          setTimeout(() => setAppliedToastMessage(null), 3500);
-        };
 
         return (
           <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex flex-col p-0 overflow-hidden animate-in fade-in duration-200">
@@ -2672,11 +2605,14 @@ export default function HomeTab({
                             </div>
                             <button
                               type="button"
-                              onClick={() => handleAutoFixBiomarker(err)}
+                              onClick={() => {
+                                setShowTelemetryModal(false);
+                                onNavigateToTab?.('medical');
+                              }}
                               className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer flex items-center gap-1.5 shrink-0 self-start sm:self-center"
                             >
-                              <Zap className="w-3.5 h-3.5 text-emerald-200" />
-                              <span>⚡ Apply Auto-Fix to All Logs</span>
+                              <Activity className="w-3.5 h-3.5 text-emerald-200" />
+                              <span>Clean & Sanitize in Health</span>
                             </button>
                           </div>
                         ) : (
@@ -2893,32 +2829,14 @@ export default function HomeTab({
                   {selectedAutoFixableCount > 0 && (
                     <button
                       type="button"
-                      disabled={savingActionKeys['batch_autofix'] !== undefined}
                       onClick={() => {
-                        markKeySaving('batch_autofix', 'Converting...');
-                        handleAutoFixAllSelected();
-                        setTimeout(() => {
-                          markKeySaved('batch_autofix');
-                        }, 400);
+                        setShowTelemetryModal(false);
+                        onNavigateToTab?.('medical');
                       }}
-                      className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-75"
+                      className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
                     >
-                      {savingActionKeys['batch_autofix'] ? (
-                        <>
-                          <Loader2 className="w-4 h-4 text-emerald-200 animate-spin" />
-                          <span>Converting...</span>
-                        </>
-                      ) : savedActionKeys.has('batch_autofix') ? (
-                        <>
-                          <Check className="w-4 h-4 text-white" />
-                          <span>Saved!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="w-4 h-4 text-emerald-200" />
-                          <span>⚡ Auto-Fix Selected ({selectedAutoFixableCount})</span>
-                        </>
-                      )}
+                      <Activity className="w-4 h-4 text-emerald-200" />
+                      <span>Clean & Sanitize in Health ({selectedAutoFixableCount})</span>
                     </button>
                   )}
 
