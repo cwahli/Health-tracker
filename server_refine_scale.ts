@@ -62,6 +62,17 @@ export function detectWeightRefineIntent(message: string | null | undefined): We
     }
   }
 
+  // Transition format: "27g ➔ 68g", "27g -> 68g", "27g to 68g"
+  {
+    const m = msg.match(/\b\d+(?:\.\d+)?\s*g\s*(?:➔|->|to)\s*(\d+(?:\.\d+)?)\s*g\b/i);
+    if (m) {
+      const n = parseFloat(m[1]);
+      if (n > 0 && n <= 5000) {
+        return { isRefine: true, kind: 'absolute_grams', weightGrams: Math.round(n), targetHint };
+      }
+    }
+  }
+
   // "change/set/adjust weight|portion|size to 100g" / "make it 100g"
   {
     const m = msg.match(

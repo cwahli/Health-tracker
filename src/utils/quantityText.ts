@@ -127,14 +127,21 @@ export function parseStatedQuantity(text: unknown, locale: unknown = 'en'): Stat
       }
     }
 
-    // Mass mention ("100g", "330 ml", "1.5kg").
+    // Mass mention ("100g", "330 ml", "1.5kg") or transition ("27g ➔ 68g").
     let grams: number | null = null;
     let massSpan = '';
-    const massMatch = rest.match(MASS_RE);
-    if (massMatch) {
-      grams = toGrams(parseFloat(massMatch[1]), massMatch[2]);
-      massSpan = massMatch[0];
-      rest = (rest.slice(0, massMatch.index) + ' ' + rest.slice(massMatch.index + massMatch[0].length)).trim();
+    const transitionMatch = rest.match(/(\d+(?:\.\d+)?)\s*(?:kg|grams?|g|ml|l|liters?|litres?|oz)?\s*(?:➔|->|\bto\b)\s*(\d+(?:\.\d+)?)\s*(kg|grams?|g|ml|l|liters?|litres?|oz)\b/i);
+    if (transitionMatch) {
+      grams = toGrams(parseFloat(transitionMatch[2]), transitionMatch[3]);
+      massSpan = transitionMatch[0];
+      rest = (rest.slice(0, transitionMatch.index) + ' ' + rest.slice(transitionMatch.index + transitionMatch[0].length)).trim();
+    } else {
+      const massMatch = rest.match(MASS_RE);
+      if (massMatch) {
+        grams = toGrams(parseFloat(massMatch[1]), massMatch[2]);
+        massSpan = massMatch[0];
+        rest = (rest.slice(0, massMatch.index) + ' ' + rest.slice(massMatch.index + massMatch[0].length)).trim();
+      }
     }
 
     // Count + unit ("2 cans", "1 kaleng").

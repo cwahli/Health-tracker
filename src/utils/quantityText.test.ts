@@ -19,6 +19,13 @@ describe('parseStatedQuantity', () => {
     expect(out[0].itemRefText).toBeNull();
   });
 
+  it('parses transition quantities adopting the target amount', () => {
+    const out = parseStatedQuantity('Please update my meal portions: Kacang Almond: 27g ➔ 68g (+152%)', 'en');
+    expect(out).toHaveLength(1);
+    expect(out[0].grams).toBe(68);
+    expect(out[0].itemRefText).toMatch(/kacang almond/i);
+  });
+
   it('parses multiple pairs independently', () => {
     const out = parseStatedQuantity('100g kacang and 1 can of coke', 'en');
     expect(out).toHaveLength(2);

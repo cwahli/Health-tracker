@@ -38,7 +38,7 @@ export function computeDietitianSkipGates(args: DietitianSkipArgs): {
     !weightRefineIntent.targetHint &&
     (weightRefineIntent.kind === 'absolute_grams' || weightRefineIntent.kind === 'whole_pack') &&
     (!Array.isArray(activeMeal.itemsBreakdown) || activeMeal.itemsBreakdown.length <= 1) &&
-    !/\b(only|remove|delete|without|except|no|instead|replace|add|plus|with|not|didn't|did\s+not)\b/i.test(message || '')
+    !/\b(only|remove|delete|without|except|no|instead|replace|add|plus|with|not|didn't|did\s+not|review|evaluation|verdict|clinical|advice)\b/i.test(message || '')
   );
   return { canSkipDietitianForPureScale };
 }

@@ -258,3 +258,193 @@ test.describe('S-10: live debug-file regression cases (real funnel, no stubs)', 
     expect(weights).toEqual(expect.arrayContaining([28, 90, 45, 100]));
   });
 });
+
+test.describe('S-10: True Path B full-stack portion edit & contract parity', () => {
+  test('Path B: >30% portion change submits to backend, eliminates stutter, syncs table macros, and satisfies Contract Law 15/16', async ({ request }) => {
+    // 1. Send the Turn 2 portion change request to the real /api/jobs/submit endpoint
+    const turn2Payload = {
+      jobId: 'job_test_path_b_kacang_almond_' + Date.now(),
+      mode: 'edit',
+      userSelectedMode: 'edit',
+      isResume: true,
+      skipScout: true,
+      portionChoices: { '0': 68 },
+      text: 'Please update my meal portions: Kacang Almond: 27g ➔ 68g (+152%). Because the portion difference exceeds 30%, please review the nutritional calculation, macro distribution, and provide an updated clinical evaluation and verdict.',
+      activeMeal: {
+        id: 'meal_test_kacang_1',
+        name: 'Kacang Almond',
+        weightGrams: 27,
+        calories: 180,
+        nutrients: {
+          calories: 180,
+          protein: 8,
+          carbohydrates: 3,
+          totalFat: 15,
+          saturatedFat: 1,
+          sodium: 10,
+        },
+        itemsBreakdown: [
+          {
+            name: 'Kacang Almond',
+            weightGrams: 27,
+            calories: 180,
+            nutrients: {
+              calories: 180,
+              protein: 8,
+              carbohydrates: 3,
+              totalFat: 15,
+              saturatedFat: 1,
+              sodium: 10,
+            },
+            foods: [
+              {
+                name: 'Kacang Almond',
+                foodName: 'Kacang Almond',
+                weightGrams: 27,
+                nutrients: { protein: 8, carbohydrates: 3, totalFat: 15, saturatedFat: 1, sodium: 10 },
+              },
+            ],
+          },
+        ],
+        scoutItems: [
+          {
+            scoutIndex: 0,
+            name: 'Kacang Almond',
+            keyword: 'Kacang Almond',
+            estimatedWeightGrams: 27,
+            packGrams: 67.5,
+            nutrients: { protein: 8, carbohydrates: 3, totalFat: 15, saturatedFat: 1, sodium: 10 },
+          },
+        ],
+      },
+      activeScoutItems: [
+        {
+          scoutIndex: 0,
+          name: 'Kacang Almond',
+          keyword: 'Kacang Almond',
+          estimatedWeightGrams: 27,
+          packGrams: 67.5,
+          nutrients: { protein: 8, carbohydrates: 3, totalFat: 15, saturatedFat: 1, sodium: 10 },
+        },
+      ],
+      dispatches: [
+        {
+          id: 't1/scout',
+          turn: 1,
+          agent: 'scout',
+          model: 'gemini-3.5-flash-lite',
+          latency_ms: 1200,
+          output: {
+            verdict: { label: 'Heart-Healthy Fats with Clean Protein', level: 'good' },
+            clinicalAdvice: 'These roasted almonds deliver 8g of plant protein and heart-healthy unsaturated fats that support your cholesterol profile. Although calorie-dense, staying within the 27g serving keeps your intake balanced without excess sodium. Pair them with hydration to support your daily metabolic goals.',
+          },
+        },
+      ],
+    };
+
+    const submitRes = await request.post('/api/jobs/submit', { data: turn2Payload });
+    expect(submitRes.ok()).toBeTruthy();
+
+    // 2. Poll for job completion
+    let jobResult: any = null;
+    for (let i = 0; i < 20; i++) {
+      const statusRes = await request.get(`/api/jobs/status?jobId=${turn2Payload.jobId}`);
+      if (statusRes.ok()) {
+        const body = await statusRes.json();
+        const j = body.jobs?.find((item: any) => item.id === turn2Payload.jobId);
+        if (j && (j.status === 'succeeded' || j.status === 'failed')) {
+          jobResult = j;
+          break;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    expect(jobResult).toBeTruthy();
+    expect(jobResult.status).toBe('succeeded');
+
+    // 3. Contract Check: Agent output message & narrative must NOT stutter
+    const narrative = jobResult.result?.text || jobResult.result?.message || jobResult.clean_result?.text || jobResult.clean_result?.message;
+    expect(narrative).toBeTruthy();
+    expect(narrative).not.toMatch(/Kacang Almond:\s*Kacang Almond/i);
+    expect(narrative).toMatch(/^Kacang Almond 68g\./);
+
+    // 4. Contract Law 15/16 Word Bounds: between 35 and 70 words
+    const words = narrative.trim().split(/\s+/).filter(Boolean).length;
+    expect(words).toBeGreaterThanOrEqual(35);
+    expect(words).toBeLessThanOrEqual(70);
+
+    // 5. Table Check: Receipt table constituent row must match the grand total (20.1g protein)
+    const receiptTable = jobResult.result?.receiptTable || jobResult.result?.clean_result?.receiptTable || jobResult.clean_result?.pendingFoodLog?.receiptTable;
+    if (receiptTable) {
+      expect(receiptTable).not.toMatch(/\|\s*8g\s*\|\s*2\.5g/); // must NOT have unscaled 8g
+      expect(receiptTable).toMatch(/20\.1g/);
+    }
+
+    // 6. Run tree & Contract validation via /api/jobs/debug
+    const debugRes = await request.post('/api/jobs/debug', {
+      data: {
+        jobId: turn2Payload.jobId,
+        format: 'json',
+      },
+    });
+    if (debugRes.ok()) {
+      const debugData = await debugRes.json();
+      const verdictAdviceLaw = debugData.contract?.find((c: any) => c.law === 'Agent output: verdict + advice');
+      if (verdictAdviceLaw && verdictAdviceLaw.result !== 'PASS') {
+        console.error('verdictAdviceLaw diagnostic:', JSON.stringify(verdictAdviceLaw, null, 2));
+        console.error('dispatches:', JSON.stringify(debugData.dispatches, null, 2));
+      }
+      if (verdictAdviceLaw) {
+        expect(verdictAdviceLaw.result).toBe('PASS');
+      }
+    }
+  });
+
+  test('UI & Realtime Downgrade Protection: delayed awaiting_user event cannot downgrade succeeded job', async ({ page }) => {
+    // Verify in the browser that a succeeded job ignores delayed awaiting_user poll
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const demoBtn = page.locator('#demo-login-btn');
+    if (await demoBtn.isVisible().catch(() => false)) {
+      await demoBtn.click();
+    }
+    await page.locator('#nav-tab-home').waitFor({ state: 'attached', timeout: 20000 });
+
+    // Seed a succeeded job directly in client JobStore
+    await page.evaluate(() => {
+      const win = window as any;
+      if (win.JobStore) {
+        win.JobStore.createJob({
+          id: 'job_race_test_1',
+          kind: 'food',
+          status: 'succeeded',
+          inputSnapshot: { text: 'Kacang Almond' },
+          result: {
+            text: 'Kacang Almond 68g. 20g of clean protein.',
+            portionClarifyAnswered: true,
+            pendingFoodLog: { name: 'Kacang Almond', calories: 453 },
+          },
+        });
+      }
+    });
+
+    // Simulate delayed poller/realtime event attempting to overwrite with awaiting_user
+    await page.evaluate(() => {
+      const win = window as any;
+      if (win.JobStore) {
+        win.JobStore.updateJob('job_race_test_1', { status: 'awaiting_user' });
+      }
+    });
+
+    // Status MUST remain succeeded
+    const finalStatus = await page.evaluate(() => {
+      const win = window as any;
+      return win.JobStore ? win.JobStore.getJob('job_race_test_1')?.status : null;
+    });
+    expect(finalStatus).toBe('succeeded');
+
+    // Header MUST NOT show "1 queued"
+    const queuedBadge = page.locator('text=/\\d+\\s+queued/i');
+    await expect(queuedBadge).not.toBeVisible();
+  });
+});
