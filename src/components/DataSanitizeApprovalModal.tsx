@@ -180,6 +180,7 @@ export default function DataSanitizeApprovalModal({
           </button>
           <button
             type="button"
+            id="apply-sanitize-proposals-btn"
             disabled={selectedIds.size === 0 || applying}
             onClick={async () => {
               setApplying(true);

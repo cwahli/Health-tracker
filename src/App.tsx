@@ -649,11 +649,22 @@ export default function App() {
         setActiveTab(customEvent.detail.tab);
       }
     };
+    const handleSeedTestData = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        const { profile: p, biomarkers: b, biomarkerHistory: h } = customEvent.detail;
+        if (p) setProfile(p);
+        if (b) setBiomarkers(b);
+        if (h) setBiomarkerHistory(h);
+      }
+    };
     window.addEventListener('switch-tab', handleSwitchTab);
     window.addEventListener('navigate-tab', handleSwitchTab);
+    window.addEventListener('seed-biomarker-test-data', handleSeedTestData);
     return () => {
       window.removeEventListener('switch-tab', handleSwitchTab);
       window.removeEventListener('navigate-tab', handleSwitchTab);
+      window.removeEventListener('seed-biomarker-test-data', handleSeedTestData);
     };
   }, []);
   const [initiallyExpandedFoodId, setInitiallyExpandedFoodId] = useState<string | null>(null);

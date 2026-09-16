@@ -1,0 +1,396 @@
+﻿Biomarker Name,Key,Alias,Description,Unit,Normal Range,Custom Range,Clinical Reference Range,Optimal Target Value,Medical Practice,Risk Categories,Medical Conditions,Current Evaluation Status,Medical Insight,Historical Logs (Date: Value),Not Used
+"HbA1c","hba1c","hba1cc; glycatedhaemoglobin; hemoglobin_a1c_mmol_mol; hba1c_mmol_mol; hemoglobin_a1c","Average blood glucose levels over the past 2-3 months.","mmol/mol","20 - 41","[All patients] Elevated (Diabetes): >=48; Elevated: >=39; Normal: >=20; Elevated (Diabetes): >=6.5; Elevated: >=5.7","20 - 41 (Standard clinical thresholds (all patients) - General Profile)","","Metabolic","Metabolic","Diabetes; Metabolic Syndrome; Insulin Resistance","Value: 40 | Status: Optimal | Risk: N/A","Your HbA1c level of 40 mmol/mol is within the standard general laboratory reference range (20 - 41 mmol/mol), but falls into the high-normal / pre-diabetes surveillance threshold (>= 39 mmol/mol). For a 43-year-old Asian male, proactive lifestyle optimization—including whole foods, dietary fiber, and regular exercise—is recommended to preserve insulin sensitivity.","Date: 06-09-2026 | Value: 40
+
+---
+
+Date: 08-07-2026 | Value: 40
+
+---
+
+Date: 05-05-2026 | Value: 40
+
+---
+
+Date: 04-04-2024 | Value: 39
+Original Name: HbA1c
+Doctor/Lab Comment:
+Extracted by Clinical Data Parser","FALSE"
+"LDL-C","ldl","ldlc; ldlcholesterol; calculatedldlcholesterol; calculatedldl; calculated_ldl_cholesterol_mmol_l; calculated_ldl_cholesterol","Low-Density Lipoprotein, the ""bad"" cholesterol driving plaque.","mmol/L","< 2.6","[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6","< 2.6 (Standard clinical thresholds (all patients) - General Profile)","","Metabolic","Cardiovascular","Dyslipidemia; Cardiovascular Disease Risk","Value: 4.3 | Status: Elevated | Risk: N/A","Your LDL-C level of 4.3 mmol/L is elevated above the standard reference range (< 2.6 mmol/L), falling into the 'High' category. For a 43-year-old Asian male, this elevation warrants attention. Depending on clinical history, implementing targeted nutritional adjustments, stress management, or physical exercise is highly recommended to bring this marker back into balance.","Date: 05-05-2026 | Value: 4.2
+
+---
+
+Date: 06-03-2026 | Value: 4.3
+Original Name: LDL-C
+Doctor/Lab Comment:
+Recovered from source medical sheet
+
+---
+
+Date: 03-04-2024 | Value: 4.2","FALSE"
+"Total Cholesterol","total_cholesterol","cholesterol; serumtotalcholesterol; serum_cholesterol","Total amount of cholesterol in the blood.","mmol/L","Aim under 5.0","[All patients] Very High: >6.2; Elevated: >5; Optimal: <=5","Aim under 5.0 (Standard clinical thresholds (all patients) - General Profile)","","Metabolic","Cardiovascular","Dyslipidemia; Cardiovascular Disease Risk","Value: 6.1 | Status: Elevated | Risk: N/A","A total cholesterol level of 6.1 mmol/L is elevated and falls into the 'High' range. For a 43-year-old Asian male, this elevation is associated with an increased risk of arterial plaque buildup. Initiating cardioprotective lifestyle changes, such as adopting a low-fat diet and increasing physical activity, is highly recommended.","Date: 05-05-2026 | Value: 6.1
+
+---
+
+Date: 06-03-2026 | Value: 6.5
+Original Name: Total Cholesterol
+Doctor/Lab Comment:
+Less strict targets apply in people without CVD.
+
+---
+
+Date: 03-04-2024 | Value: 6.1","FALSE"
+"HDL-C","hdl","hdlc; hdlcholesterol; serum_hdl_cholesterol; serum_hdl_cholesterol_mmol_l","High-Density Lipoprotein, the ""good"" cholesterol removing excess lipids.","mmol/L","0.9 - 1.7","","0.9 - 1.7","","Metabolic","Cardiovascular","Dyslipidemia; Cardiovascular Disease Risk","Value: 1.5 | Status: Optimal | Risk: N/A","Your HDL-C level of 1.5 mmol/L is optimal and falls within the recommended healthy reference range of 0.9 - 1.7 mmol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 1.43
+
+---
+
+Date: 06-03-2026 | Value: 1.5
+Original Name: HDL-C
+Doctor/Lab Comment:
+Recovered from source medical sheet
+
+---
+
+Date: 25-06-2025 | Value: 1.4
+Original Name: HDL-C
+Doctor/Lab Comment:
+Recovered from source medical sheet
+
+---
+
+Date: 03-04-2024 | Value: 1.43
+Original Name: HDL-C
+Doctor/Lab Comment:
+Recovered from source medical sheet","FALSE"
+"Triglycerides","triglycerides","trig; serum_triglycerides; serum_triglycerides_mmol_l","Type of fat in the blood used for energy storage.","mmol/L","< 1.7","[All patients] Very High: >=5.6; Elevated: >=1.7; Optimal: <1.7","< 1.7 (Standard clinical thresholds (all patients) - General Profile)","","Metabolic","Cardiovascular","Dyslipidemia; Cardiovascular Disease Risk","Value: 1.07 | Status: Optimal | Risk: N/A","Your Triglycerides level of 1.07 mmol/L is optimal and falls within the recommended healthy reference range of < 1.7 mmol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 1.07
+
+---
+
+Date: 06-03-2026 | Value: 1.7
+
+---
+
+Date: 03-04-2024 | Value: 1.07","FALSE"
+"eGFR","egfr","egfrmlmin173m2; egfrmlmin173; egfr_ml_min_1_73m2; egfr_mlmin173m2","Estimated Glomerular Filtration Rate, showing kidney health.","mL/min/1.73m²","over 90","[All patients] Decreased (CKD G3): <60; Mildly Decreased (CKD G2): <90; Optimal: >=90","over 90 (Standard clinical thresholds (all patients) - General Profile)","","Renal","Kidney","Kidney Dysfunction; Chronic Kidney Disease","Value: 80 | Status: Low | Risk: N/A","Your eGFR of 80 mL/min/1.73m² is mildly decreased compared to optimal young-adult baselines (> 90 mL/min/1.73m²). In healthy individuals, minor fluctuations can reflect temporary hydration status, high dietary protein intake, or muscle mass changes. Confirming stable kidney function with repeat serum creatinine and maintaining adequate hydration is advised.","Date: 05-05-2026 | Value: 80
+
+---
+
+Date: 02-04-2024 | Value: 90","FALSE"
+"Red Blood Cell (RBC)","rbc","redbloodcell; redbloodcells; redbloodcellcount; red_blood_cell_count_10_12_l; red_blood_cell_count","Total red blood cell count carrying oxygen to tissue.","M/uL","4.5 - 5.9","","4.5 - 5.9","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 5.47 | Status: Optimal | Risk: N/A","Your Red Blood Cell (RBC) level of 5.47 M/uL is optimal and falls within the recommended healthy reference range of 4.5 - 5.9 M/uL. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 5.47
+
+---
+
+Date: 02-04-2024 | Value: 5.47
+
+---
+
+Date: 01-04-2024 | Value: 5.47","FALSE"
+"Platelets","platelets","plateletcount; platelet; platelet_count_10_9_l; platelet_count","Cells responsible for blood clotting and wound repair.","K/uL","150 - 450","","150 - 450","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 227 | Status: Optimal | Risk: N/A","Your Platelets level of 227 K/uL is optimal and falls within the recommended healthy reference range of 150 - 450 K/uL. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 227
+
+---
+
+Date: 02-04-2024 | Value: 241
+
+---
+
+Date: 01-04-2024 | Value: 241","FALSE"
+"Body Mass Index (BMI)","bmi","bodymassindex; bmi_kg_m2","A measure of body fat based on height and weight.","kg/m2","18.5 - 22.9","[Asian] Obese: >= 27.5; Overweight: 22.9 - 27.5; Normal: 18.5 - 22.9; Underweight: <= 18.5 | [All patients] Obese: >= 30; Overweight: 24.9 - 30; Normal: 18.5 - 24.9; Underweight: <= 18.5","18.5 - 22.9","","Biometrics","Screenings & Wellness","Weight Management","Value: 23.3 | Status: Overweight | Risk: N/A","At 23.3 kg/m², your BMI is elevated. For East Asian populations, even modest weight elevations are associated with disproportionately higher visceral fat accumulation and cardiovascular risk. Adopting targeted lifestyle adjustments, such as calorie optimization and active daily movement, will help achieve a healthier metabolic profile.","Date: 05-05-2026 | Value: 23.3
+
+---
+
+Date: 17-11-2023 | Value: 22.7
+Original Name: Body Mass Index (BMI)
+Doctor/Lab Comment:
+Extracted by Clinical Data Parser
+
+---
+
+Date: 10-04-2020 | Value: 24.2","FALSE"
+"Creatinine","creatinine","serumcreatinine; serumcreatinineumoll; serum_creatinine_umol_l; serum_creatinine","A waste product from muscle breakdown, filtered by kidneys.","umol/L","44 - 106","","44 - 106","","Renal","Kidney","Kidney Dysfunction; Chronic Kidney Disease","Value: 100 | Status: Optimal | Risk: N/A","Your Creatinine level of 100 umol/L is optimal and falls within the recommended healthy reference range of 44 - 106 umol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 100
+
+---
+
+Date: 02-04-2024 | Value: 72
+
+---
+
+Date: 01-04-2024 | Value: 72","FALSE"
+"Hematocrit","hematocrit","","The proportion of blood made up of red blood cells.","L/L","0.36 - 0.50","","0.36 - 0.50","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 0.48 | Status: Optimal | Risk: N/A","Your Hematocrit level of 0.48 L/L is optimal and falls within the recommended healthy reference range of 0.36 - 0.50 L/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 0.48
+
+---
+
+Date: 02-04-2024 | Value: 0.488
+
+---
+
+Date: 01-04-2024 | Value: 0.488","FALSE"
+"Hemoglobin","hemoglobin","haemoglobin; hgb; hb; hemoglobin_g_l; haemoglobinestimation; haemoglobin_estimation; haemoglobin_estimation_hb; haemoglobin_hb; hemoglobingl; hemoglobingdl; haemoglobingl; haemoglobingdl","Oxygen-carrying protein in red blood cells.","g/L","120 - 175","","120 - 175","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 166 | Status: Optimal | Risk: N/A","Your Hemoglobin level of 166 g/L is optimal and falls within the recommended healthy reference range of 120 - 175 g/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-06-2026 | Value: 166
+Original Name: Hemoglobin
+Doctor/Lab Comment:
+Recovered from source medical sheet
+
+---
+
+Date: 05-05-2026 | Value: 166
+
+---
+
+Date: 02-04-2024 | Value: 164
+Original Name: Hemoglobin
+Doctor/Lab Comment:
+Recovered from source medical sheet","FALSE"
+"Mean Corpuscular Hemoglobin (MCH)","mean_corpuscular_hemoglobin","mch; mean_corpuscular_hemoglobin_pg; meancorpuscularhemoglobin; meancorpuscularhemoglobinpg; meancorpuschaemoglobinmch; haemoglobin_mch","Average amount of hemoglobin per red blood cell.","pg","27 - 33","","27 - 33","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 30.3 | Status: Optimal | Risk: N/A","Your Mean Corpuscular Hemoglobin (MCH) level of 30.3 pg is optimal and falls within the recommended healthy reference range of 27 - 33 pg. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 30.3
+
+---
+
+Date: 02-04-2024 | Value: 30","FALSE"
+"Mean Corpuscular Volume (MCV)","mean_corpuscular_volume","mcv; mean_corpuscular_volume_fl; meancorpuscularvolume; meancorpuscularvolumemcv","Average volume or size of red blood cells.","fL","80 - 100","","80 - 100","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 88 | Status: Optimal | Risk: N/A","Your Mean Corpuscular Volume (MCV) level of 88 fL is optimal and falls within the recommended healthy reference range of 80 - 100 fL. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 88
+
+---
+
+Date: 02-04-2024 | Value: 89","FALSE"
+"Mean Corpuscular Hemoglobin Concentration (MCHC)","mean_corpuscular_hemoglobin_concentration","mchc; mean_corpuscular_hb_conc_g_l; mean_corpuscular_hb_concentration; mean_corpuscular_hb_conc; meancorpuschbconcmchc; mean_corpuscular_hemoglobin_concentration_g_l","Average concentration of hemoglobin inside red blood cells.","g/L","320 - 360","","320 - 360","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 346 | Status: Optimal | Risk: N/A","Your Mean Corpuscular Hemoglobin Concentration (MCHC) level of 346 g/L is optimal and falls within the recommended healthy reference range of 320 - 360 g/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-06-2026 | Value: 346
+Original Name: Mean Corpuscular Hemoglobin Concentration (MCHC)
+Doctor/Lab Comment:
+Recovered from source medical sheet
+
+---
+
+Date: 05-05-2026 | Value: 346
+
+---
+
+Date: 02-04-2024 | Value: 336
+Original Name: Mean Corpuscular Hemoglobin Concentration (MCHC)
+Doctor/Lab Comment:
+Recovered from source medical sheet","FALSE"
+"Red Cell Distribution Width (RDW)","rdw","red_blood_cell_distribution_width; redbloodcelldistributwidth; red_blood_cell_distribution_width_percent","Measurement of the variation in red blood cell size and volume.","%","11.5 - 14.5","","11.5 - 14.5","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 11.8 | Status: Optimal | Risk: N/A","Your Red Cell Distribution Width (RDW) level of 11.8 % is optimal and falls within the recommended healthy reference range of 11.5 - 14.5 %. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 11.8
+
+---
+
+Date: 02-04-2024 | Value: 12","FALSE"
+"Serum Albumin","serum_albumin","albumin; serumalbumin; serum_albumin_g_l","Main protein produced by the liver, keeping fluid balance in vessels.","g/L","35 - 50","","35 - 50","","Hepatic","Liver; Kidney","Liver Dysfunction; Fatty Liver","Value: 46 | Status: Optimal | Risk: N/A","Your Serum Albumin level of 46 g/L is optimal and falls within the recommended healthy reference range of 35 - 50 g/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 46
+
+---
+
+Date: 03-04-2024 | Value: 44","FALSE"
+"Total Protein","total_protein","serumtotalprotein; serum_total_protein_g_l; serum_total_protein","Measures the total amount of protein in your blood.","g/L","60 - 80","","60 - 80","","Hepatic","Liver; Kidney","","Value: 81 | Status: Elevated | Risk: N/A","Your Total Protein level of 81 g/L is elevated above the standard reference range (60 - 80 g/L), falling into the 'High' category. For a 43-year-old Asian male, this elevation warrants attention. Depending on clinical history, implementing targeted nutritional adjustments, stress management, or physical exercise is highly recommended to bring this marker back into balance.","Date: 05-05-2026 | Value: 81","FALSE"
+"AUDIT Total Score","audit_total_score","","Alcohol Use Disorders Identification Test total score.","points","0 - 7","","0 - 7","","Other","Screenings & Wellness","","Value: 5 | Status: Optimal | Risk: N/A","Your AUDIT Total Score level of 5 points is optimal and falls within the recommended healthy reference range of 0 - 7 points. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 10-04-2020 | Value: 5","TRUE"
+"White Blood Cell (WBC)","wbc","whitebloodcell; total_white_cell_count; total_white_cell_count_10_9_l; white_blood_cell_count","Total white blood cell count for immune function.","K/uL","4.5 - 11.0","","4.5 - 11.0","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 5.7 | Status: Optimal | Risk: N/A","Your White Blood Cell (WBC) level of 5.7 K/uL is optimal and falls within the recommended healthy reference range of 4.5 - 11.0 K/uL. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 5.7
+
+---
+
+Date: 02-04-2024 | Value: 5.6","FALSE"
+"Neutrophils","neutrophil_count","neutrophils; neutrophil; neutrophils_10_9_l; abs_neutrophil_count; neutrophil_count_10_9_l","Essential white blood cells for fighting bacterial infections.","10^9/L","2.0 - 7.5","","2.0 - 7.5","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 3.18 | Status: Optimal | Risk: N/A","Your Neutrophils level of 3.18 10^9/L is optimal and falls within the recommended healthy reference range of 2.0 - 7.5 10^9/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 3.18
+
+---
+
+Date: 01-04-2024 | Value: 3.14","FALSE"
+"Lymphocytes","lymphocyte_count","lymphocytes; lymphocyte; lymphocytes_10_9_l; abs_lymphocyte_count; lymphocyte_count_10_9_l","White blood cells critical for adaptive viral and antibody immunity.","10^9/L","1.0 - 3.5","","1.0 - 3.5","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 1.96 | Status: Optimal | Risk: N/A","Your Lymphocytes level of 1.96 10^9/L is optimal and falls within the recommended healthy reference range of 1.0 - 3.5 10^9/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 02-04-2024 | Value: 1.96","FALSE"
+"Monocyte Count","monocyte_count","monocytes; monocyte; monocytes_10_9_l; abs_monocyte_count; monocyte_count_10_9_l","Phagocytic white blood cells that clear cellular debris and respond to chronic inflammation.","10^9/L","0.1 - 0.6","","0.1 - 0.6","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 0.33 | Status: Optimal | Risk: N/A","Your Monocyte Count level of 0.33 10^9/L is optimal and falls within the recommended healthy reference range of 0.1 - 0.6 10^9/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 02-04-2024 | Value: 0.33","FALSE"
+"Eosinophils","eosinophil_count","eosinophils; eosinophil; eosinophils_10_9_l; abs_eosinophil_count; eosinophil_count_10_9_l","White blood cells involved in allergic responses and parasitic defense.","10^9/L","0.02 - 0.50","","0.02 - 0.50","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 0.11 | Status: Optimal | Risk: N/A","Your Eosinophils level of 0.11 10^9/L is optimal and falls within the recommended healthy reference range of 0.02 - 0.50 10^9/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 02-04-2024 | Value: 0.11","FALSE"
+"Basophils","basophil_count","basophils; basophil; basophils_10_9_l; abs_basophil_count; basophil_count_10_9_l","Granulocytes responsible for histamine release and inflammatory reactions.","10^9/L","0.0 - 0.1","","0.0 - 0.1","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 0.05 | Status: Optimal | Risk: N/A","Your Basophils level of 0.05 10^9/L is optimal and falls within the recommended healthy reference range of 0.0 - 0.1 10^9/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 02-04-2024 | Value: 0.05","FALSE"
+"ALT (SGPT)","alt","sgpt; alanine_aminotransferase; serum_alt_level_u_l; serum_alt_level","Alanine Aminotransferase, an enzyme found mostly in the liver.","U/L","10 - 40","","10 - 40","","Hepatic","Liver","Liver Dysfunction; Fatty Liver","Value: 41 | Status: Elevated | Risk: N/A","Your ALT (SGPT) level of 41 U/L is elevated above the standard reference range (10 - 40 U/L), falling into the 'High' category. For a 43-year-old Asian male, this elevation warrants attention. Depending on clinical history, implementing targeted nutritional adjustments, stress management, or physical exercise is highly recommended to bring this marker back into balance.","Date: 05-05-2026 | Value: 41
+
+---
+
+Date: 03-04-2024 | Value: 28","FALSE"
+"AST (SGOT)","ast","sgot; aspartate_aminotransferase; ast_serum_level_u_l; ast_serum_level","Aspartate Aminotransferase, an enzyme found in liver and muscle.","U/L","10 - 40","","10 - 40","","Hepatic","Liver","Liver Dysfunction; Fatty Liver","Value: 27 | Status: Optimal | Risk: N/A","Your AST (SGOT) level of 27 U/L is optimal and falls within the recommended healthy reference range of 10 - 40 U/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 27","FALSE"
+"Daily Steps","steps","step_count; stepcount","Total daily step count.","steps","Aim over 8000","","Aim over 8000","","Biometrics","Screenings & Wellness","","Value: 3095 | Status: Low | Risk: N/A","Your daily step count of 3095 steps is below the recommended physical activity target (Aim over 8,000 steps). For a 43-year-old Asian male, progressively increasing daily walking and active movement supports cardiovascular health, glycemic control, and metabolic endurance.","Date: 24-07-2026 | Value: 6130
+Original Name: Daily Steps
+Doctor/Lab Comment:
+Auto-synced from Google Fit
+
+---
+
+Date: 22-07-2026 | Value: 1462
+Original Name: Daily Steps
+Doctor/Lab Comment:
+Auto-synced from Google Fit
+
+---
+
+Date: 21-07-2026 | Value: 814
+Original Name: Daily Steps
+Doctor/Lab Comment:
+Auto-synced from Google Fit
+
+---
+
+Date: 20-07-2026 | Value: 2798
+Original Name: Daily Steps
+Doctor/Lab Comment:
+Auto-synced from Google Fit
+
+---
+
+Date: 19-07-2026 | Value: 7610
+Original Name: Daily Steps
+Doctor/Lab Comment:
+Auto-synced from Google Fit
+
+---
+
+Date: 12-07-2026 | Value: 681
+
+---
+
+Date: 11-07-2026 | Value: 3095
+Original Name: Daily Steps
+Doctor/Lab Comment:
+Auto-synced from Google Fit
+
+---
+
+Date: 06-07-2026 | Value: 4302
+Original Name: Daily Steps
+Doctor/Lab Comment:
+Auto-synced from Google Fit
+
+---
+
+Date: 06-06-2026 | Value: 4302
+Original Name: Daily Steps
+Doctor/Lab Comment:
+Auto-synced from Google Fit","FALSE"
+"AUDIT-C Alcohol Consumption Score","audit_c_total_score","audit_c_score; audit_c; auditctotalscore; audit_c_consumption_score; audit_c_score_total; alcohol_use_disorders_identification_test_c","Alcohol Use Disorders Identification Test Consumption 3-item screening score (0 to 12).","score","0 - 3","","0 - 3","","Screenings & Assessments","Screenings & Wellness","","Value: 3 | Status: Optimal | Risk: N/A","Your AUDIT-C Alcohol Consumption Score level of 3 score is optimal and falls within the recommended healthy reference range of 0 - 3 score. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 3
+
+---
+
+Date: 23-10-2024 | Value: 3
+Original Name: AUDIT-C Alcohol Consumption Score
+Doctor/Lab Comment:
+Recovered from source medical sheet
+
+---
+
+Date: 10-04-2020 | Value: 5","TRUE"
+"Mean Platelet Volume (MPV)","mpv","mean_platelet_volume; meanplateletvolume; mean_platelet_volume_mpv; mpv_fl; mean_platelet_volume_fl","Mean Platelet Volume, measuring the average physical volume of circulating thrombocytes for bone marrow platelet production.","fL","7.5 - 11.5","[All patients] Elevated: >13; Normal: <=13","7.5 - 11.5 (Standard clinical thresholds (all patients) - General Profile)","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 10.6 | Status: Optimal | Risk: N/A","Your Mean Platelet Volume (MPV) level of 10.6 fL is optimal and falls within the recommended healthy reference range of 7.5 - 11.5 fL. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 10.6
+
+---
+
+Date: 02-04-2024 | Value: 10.6
+
+---
+
+Date: 01-04-2024 | Value: 10.6","FALSE"
+"QRISK2 10-Year Cardiovascular Risk","qrisk2","qrisk2_10yr_risk_percent; qrisk2_score; qrisk_2; qrisk2_10_year_cardiovascular_risk; qrisk2_percent; qrisk2_10yr_risk","QRISK2 algorithm estimating the 10-year percentage probability of developing cardiovascular disease, coronary heart disease, or stroke.","%","< 10","","< 10","","Cardiovascular","Cardiovascular","","Value: 1.2 | Status: Optimal | Risk: N/A","Your QRISK2 10-Year Cardiovascular Risk level of 1.2 % is optimal and falls within the recommended healthy reference range of < 10 %. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 04-06-2026 | Value: 1.2
+
+---
+
+Date: 05-05-2026 | Value: 1.2
+
+---
+
+Date: 05-04-2026 | Value: 1.2
+
+---
+
+Date: 26-06-2025 | Value: 1.2
+Original Name: QRISK2 10-Year Cardiovascular Risk
+Doctor/Lab Comment:
+Extracted by Clinical Data Parser
+
+---
+
+Date: 04-11-2020 | Value: 0.8
+Original Name: QRISK2 10-Year Cardiovascular Risk
+Doctor/Lab Comment:
+Recovered from source medical sheet
+
+---
+
+Date: 10-04-2020 | Value: 0.8","FALSE"
+"AUDIT Drinking Frequency Score","audit_score_frequency_drinking","audit_drinking_frequency; audit_q1_score","AUDIT Item 1 evaluating how often alcohol is consumed (0: never to 4: 4+ times a week).","score","0 - 1","","0 - 1","","Screenings & Assessments","Screenings & Wellness","","Value: 2 | Status: Elevated | Risk: N/A","Your AUDIT Drinking Frequency Score level of 2 score is elevated above the standard reference range (0 - 1 score), falling into the 'High' category. For a 43-year-old Asian male, this elevation warrants attention. Depending on clinical history, implementing targeted nutritional adjustments, stress management, or physical exercise is highly recommended to bring this marker back into balance.","Date: 10-04-2020 | Value: 2","TRUE"
+"AUDIT Binge Drinking Score","audit_binge_drinking_score","audit_binge_score; audit_q3_score; audit_score_freq_drunk; audit_score_freq_drunk_6_units","AUDIT Item 3 evaluating frequency of binge drinking.","score","0 - 4","","0 - 4","","General / Wellness","Screenings & Wellness","","Value: 3 | Status: Optimal | Risk: N/A","Your AUDIT Binge Drinking Score level of 3 score is optimal and falls within the recommended healthy reference range of 0 - 4 score. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 27-03-2024 | Value: 3
+Original Name: AUDIT Binge Drinking Score
+Doctor/Lab Comment:
+Recovered from source medical sheet
+
+---
+
+Date: 10-04-2020 | Value: 2","TRUE"
+"QDiabetes 10-Year Risk Score","qdiabetes","qdiabetes_risk_score_percent; qdiabetes_score; qdiabetes_10yr_risk_percent; qdiabetes_percent","QDiabetes clinical risk calculation predicting the 10-year probability of developing Type 2 diabetes.","%","< 5","","< 5","","Metabolic","Metabolic","","Value: 4.4 | Status: Optimal | Risk: N/A","Your QDiabetes 10-Year Risk Score level of 4.4 % is optimal and falls within the recommended healthy reference range of < 5 %. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 10-04-2020 | Value: 4.4","FALSE"
+"FAST Alcohol Score","fast_alcohol_score","fast_alcohol_screening_test; fast_score","Fast Alcohol Screening Test (FAST) score. A score of 3 or more indicates hazardous drinking (max 16).","points","< 3","","< 3","","General / Wellness","Screenings & Wellness","","Value: 0 | Status: Optimal | Risk: N/A","Your FAST Alcohol Score level of 0 points is optimal and falls within the recommended healthy reference range of < 3 points. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 27-03-2024 | Value: 0
+Original Name: FAST Alcohol Score
+Doctor/Lab Comment:
+Recovered from source medical sheet","FALSE"
+"Serum Potassium","serum_potassium","potassium; serum_potassium_mmol_l; serumpotassium; k_serum","Essential electrolyte regulating cardiac rhythm, neuromuscular transmission, and cellular fluid balance.","mmol/L","3.5 - 5.0","","3.5 - 5.0","","Renal / Electrolytes","Kidney; Cardiovascular","Kidney Dysfunction; Chronic Kidney Disease","Value: 4.3 | Status: Optimal | Risk: N/A","Your Serum Potassium level of 4.3 mmol/L is optimal and falls within the recommended healthy reference range of 3.5 - 5.0 mmol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 4.3
+
+---
+
+Date: 02-04-2024 | Value: 5.3
+
+---
+
+Date: 01-04-2024 | Value: 5.3","FALSE"
+"Serum Sodium","serum_sodium","sodium; serum_sodium_mmol_l; serumsodium; na_serum","Primary extracellular electrolyte regulating osmotic pressure, blood volume, and membrane potential.","mmol/L","135 - 145","","135 - 145","","Renal / Electrolytes","Kidney; Cardiovascular","Kidney Dysfunction; Chronic Kidney Disease","Value: 143 | Status: Optimal | Risk: N/A","Your Serum Sodium level of 143 mmol/L is optimal and falls within the recommended healthy reference range of 135 - 145 mmol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 143
+
+---
+
+Date: 02-04-2024 | Value: 141","FALSE"
+"Total Bilirubin","total_bilirubin","bilirubin; serum_total_bilirubin; serumbilirubin; total_bilirubin_umol_l","Bile pigment derived from erythrocyte breakdown; evaluated for hepatobiliary clearance and hemolysis.","umol/L","3 - 21","","3 - 21","","Hepatic / Liver","Liver","Liver Dysfunction; Fatty Liver","Value: 16 | Status: Optimal | Risk: N/A","Your Total Bilirubin level of 16 umol/L is optimal and falls within the recommended healthy reference range of 3 - 21 umol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 16
+
+---
+
+Date: 03-04-2024 | Value: 13","FALSE"
+"Prostate Specific Antigen","prostate_specific_antigen","psa; total_psa; serum_psa; prostate_specific_antigen_total","Glycoprotein enzyme produced by prostatic epithelium; utilized for prostate health screening.","ug/L","< 2.5","","< 2.5","","Screenings & Wellness","Screenings & Wellness","","Value: 1.41 | Status: Optimal | Risk: N/A","Your Prostate Specific Antigen level of 1.41 ug/L is optimal and falls within the recommended healthy reference range of < 2.5 ug/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 1.41","FALSE"
+"Serum Adjusted Calcium","serum_adjusted_calcium","adjusted_calcium; corrected_calcium; serum_adjusted_calcium_mmol_l","Serum calcium adjusted for serum albumin concentration, reflecting physiological ionized calcium.","mmol/L","2.20 - 2.60","","2.20 - 2.60","","Bone & Mineral / Electrolytes","Screenings & Wellness","","Value: 2.37 | Status: Optimal | Risk: N/A","Your Serum Adjusted Calcium level of 2.37 mmol/L is optimal and falls within the recommended healthy reference range of 2.20 - 2.60 mmol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 2.37","FALSE"
+"Serum Calcium","serum_calcium","calcium; total_calcium; serum_calcium_mmol_l","Total serum calcium essential for mineralized bone matrix, cardiac excitation, and cell signaling.","mmol/L","2.15 - 2.55","","2.15 - 2.55","","Bone & Mineral / Electrolytes","Screenings & Wellness","","Value: 2.47 | Status: Optimal | Risk: N/A","Your Serum Calcium level of 2.47 mmol/L is optimal and falls within the recommended healthy reference range of 2.15 - 2.55 mmol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 2.47","FALSE"
+"Alkaline Phosphatase","alkaline_phosphatase","alp; serum_alkaline_phosphatase; alk_phos; alkaline_phosphatase_u_l","Hydrolase enzyme abundant in biliary canaliculi and osteoblasts; screens for cholestasis and bone turnover.","U/L","30 - 130","","30 - 130","","Hepatic / Liver","Liver; Screenings & Wellness","Liver Dysfunction; Fatty Liver","Value: 39 | Status: Optimal | Risk: N/A","Your Alkaline Phosphatase level of 39 U/L is optimal and falls within the recommended healthy reference range of 30 - 130 U/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 39
+
+---
+
+Date: 03-04-2024 | Value: 41","FALSE"
+"Serum Inorganic Phosphate","serum_inorganic_phosphate","phosphate; inorganic_phosphate; serum_phosphate; serum_inorganic_phosphate_mmol_l","Inorganic phosphate crucial for ATP bioenergetics, acid-base homeostasis, and hydroxyapatite bone crystal formation.","mmol/L","0.80 - 1.50","","0.80 - 1.50","","Bone & Mineral / Electrolytes","Screenings & Wellness; Kidney","","Value: 1.12 | Status: Optimal | Risk: N/A","Your Serum Inorganic Phosphate level of 1.12 mmol/L is optimal and falls within the recommended healthy reference range of 0.80 - 1.50 mmol/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 1.12","FALSE"
+"Serum Globulin","serum_globulin","globulin; serum_globulin_g_l; total_globulin","Serum proteins excluding albumin, comprising immunoglobulins, complement factors, and transport globulins.","g/L","20 - 35","","20 - 35","","Hepatic / Proteins","Liver; Screenings & Wellness","Liver Dysfunction; Fatty Liver","Value: 35 | Status: Optimal | Risk: N/A","Your Serum Globulin level of 35 g/L is optimal and falls within the recommended healthy reference range of 20 - 35 g/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 35","FALSE"
+"Non Hdl Cholesterol","non_hdl_cholesterol","non_hdl; non_hdl_c; se_non_hdl_cholesterol; non_hdl_cholesterol_mmol_l","Total cholesterol minus HDL-C; quantifies circulating atherogenic apolipoprotein B-containing particles.","mmol/L","< 3.8","","< 3.8","","Cardiovascular / Lipids","Cardiovascular; Metabolic","Dyslipidemia; Cardiovascular Disease Risk","Value: 4.7 | Status: Elevated | Risk: N/A","Your Non Hdl Cholesterol level of 4.7 mmol/L is elevated above the standard reference range (< 3.8 mmol/L), falling into the 'High' category. For a 43-year-old Asian male, this elevation warrants attention. Depending on clinical history, implementing targeted nutritional adjustments, stress management, or physical exercise is highly recommended to bring this marker back into balance.","Date: 05-05-2026 | Value: 4.7
+
+---
+
+Date: 06-03-2026 | Value: 5
+Original Name: Non Hdl Cholesterol
+Doctor/Lab Comment:
+Aim for 2.6 mmol/L or lower for patients with established cardiovascular disease, history of stroke/TIA or peripheral arterial disease.
+
+---
+
+Date: 03-04-2024 | Value: 4.7","FALSE"
+"Cholesterol Hdl Ratio","cholesterol_hdl_ratio","chol_hdl_ratio; cholesterol_to_hdl_ratio; total_cholesterol_hdl_ratio; serum_cholesterol_hdl_ratio","Ratio of total serum cholesterol to cardioprotective HDL cholesterol, serving as an atherogenic risk index.","ratio","< 4.0","","< 4.0","","Cardiovascular / Lipids","Cardiovascular","Dyslipidemia; Cardiovascular Disease Risk","Value: 4.3 | Status: Elevated | Risk: N/A","Your Cholesterol Hdl Ratio level of 4.3 ratio is elevated above the standard reference range (< 4.0 ratio), falling into the 'High' category. For a 43-year-old Asian male, this elevation warrants attention. Depending on clinical history, implementing targeted nutritional adjustments, stress management, or physical exercise is highly recommended to bring this marker back into balance.","Date: 05-05-2026 | Value: 4.3
+
+---
+
+Date: 06-03-2026 | Value: 4.3
+
+---
+
+Date: 03-04-2024 | Value: 4.3","FALSE"
+"Platelet Distribution Width","platelet_distribution_width","pdw; platelet_distribution_width_fl","Geometric standard deviation of platelet size distribution; reflects thrombopoiesis and platelet activation.","fL","8.3 - 18.0","","8.3 - 18.0","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 12.9 | Status: Optimal | Risk: N/A","Your Platelet Distribution Width level of 12.9 fL is optimal and falls within the recommended healthy reference range of 8.3 - 18.0 fL. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 12.9
+
+---
+
+Date: 02-04-2024 | Value: 12.7
+
+---
+
+Date: 01-04-2024 | Value: 12.7","FALSE"
+"Nucleated Red Blood Cell Count","nucleated_red_blood_cell_count","nrbc; nucleated_rbc; nucleated_red_blood_cells","Immature nucleated erythrocytes in peripheral circulation; normally negligible in healthy adult blood.","10^9/L","0.00 - 0.01","","0.00 - 0.01","","Hematology","Hematology","Anemia; Infection; Blood Disorder","Value: 0 | Status: Optimal | Risk: N/A","Your Nucleated Red Blood Cell Count level of 0 10^9/L is optimal and falls within the recommended healthy reference range of 0.00 - 0.01 10^9/L. For a 43-year-old Asian male, maintaining this level signifies stable homeostasis and supports overall vitality. Continuing your current dietary and exercise habits will help sustain these protective biomarkers.","Date: 05-05-2026 | Value: 0
+
+---
+
+Date: 02-04-2024 | Value: 0","FALSE"
+"Sars Cov 2 Rna Detection","sars_cov_2_rna_detection","","","","Unknown","","Unknown","","Other","Screenings & Wellness","","Value: Negative | Status: unknown | Risk: N/A","Your Sars Cov 2 Rna Detection level is registered at Negative . Standard reference range is pending clinical lab verification. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.","Date: 13-12-2020 | Value: Negative
+Original Name: Sars Cov 2 Rna Detection
+Doctor/Lab Comment:
+Extracted by Clinical Data Parser","TRUE"
+"Chlamydia Dna Detection","chlamydia_dna_detection","","","","Unknown","","Unknown","","Other","Screenings & Wellness","","Value: NEGATIVE | Status: unknown | Risk: N/A","Your Chlamydia Dna Detection level is registered at NEGATIVE . Standard reference range is pending clinical lab verification. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.","Date: 09-06-2026 | Value: NEGATIVE
+Original Name: Chlamydia Dna Detection
+Doctor/Lab Comment:
+Extracted by Clinical Data Parser","TRUE"
+"N Gonorrhoeae Nucl Acid Detn","n_gonorrhoeae_nucl_acid_detn","","","","Unknown","","Unknown","","Other","Screenings & Wellness","","Value: NEGATIVE | Status: unknown | Risk: N/A","Your N Gonorrhoeae Nucl Acid Detn level is registered at NEGATIVE . Standard reference range is pending clinical lab verification. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.","Date: 09-06-2026 | Value: NEGATIVE
+Original Name: N Gonorrhoeae Nucl Acid Detn
+Doctor/Lab Comment:
+Extracted by Clinical Data Parser","TRUE"
+"Audit Typical Consumption","audit_typical_consumption","","","","Unknown","","Unknown","","Other","Screenings & Wellness","","Value: 1 | Status: unknown | Risk: N/A","Your Audit Typical Consumption level is registered at 1 . Standard reference range is pending clinical lab verification. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.","Date: 10-04-2020 | Value: 1","TRUE"
+"Audit Others Concerned Score","audit_others_concerned_score","","","score","Unknown","","Unknown","","Other","Screenings & Wellness","","Value: 0 | Status: unknown | Risk: N/A","Your Audit Others Concerned Score level is registered at 0 score. Standard reference range is pending clinical lab verification. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.","Date: 10-04-2020 | Value: 0","TRUE"
+"Audit Guilt Remorse Score","audit_guilt_remorse_score","","","score","Unknown","","Unknown","","Other","Screenings & Wellness","","Value: 0 | Status: unknown | Risk: N/A","Your Audit Guilt Remorse Score level is registered at 0 score. Standard reference range is pending clinical lab verification. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.","Date: 10-04-2020 | Value: 0","TRUE"
+"Audit Memory Loss Score","audit_memory_loss_score","","","score","Unknown","","Unknown","","Other","Screenings & Wellness","","Value: 0 | Status: unknown | Risk: N/A","Your Audit Memory Loss Score level is registered at 0 score. Standard reference range is pending clinical lab verification. Regular monitoring and balanced clinical tracking are advised to optimize your metabolic and cardiorenal wellness.","Date: 10-04-2020 | Value: 0","TRUE"

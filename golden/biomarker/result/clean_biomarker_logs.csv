@@ -1,0 +1,125 @@
+﻿Biomarker,Date,Value,Unit,Comment
+HbA1c,06-09-2026,40,mmol/mol,
+Daily Steps,24-07-2026,6130,steps,Auto-synced from Google Fit
+Daily Steps,22-07-2026,1462,steps,Auto-synced from Google Fit
+Daily Steps,21-07-2026,814,steps,Auto-synced from Google Fit
+Daily Steps,20-07-2026,2798,steps,Auto-synced from Google Fit
+Daily Steps,19-07-2026,7610,steps,Auto-synced from Google Fit
+Daily Steps,12-07-2026,681,steps,
+Daily Steps,11-07-2026,3095,steps,Auto-synced from Google Fit
+HbA1c,08-07-2026,40,mmol/mol,
+Daily Steps,06-07-2026,4302,steps,Auto-synced from Google Fit
+Chlamydia Dna Detection,09-06-2026,NEGATIVE,,Extracted by Clinical Data Parser
+N Gonorrhoeae Nucl Acid Detn,09-06-2026,NEGATIVE,,Extracted by Clinical Data Parser
+Daily Steps,06-06-2026,4302,steps,Auto-synced from Google Fit
+Hemoglobin,05-06-2026,166,g/L,Recovered from source medical sheet
+Mean Corpuscular Hemoglobin Concentration (MCHC),05-06-2026,346,g/L,Recovered from source medical sheet
+QRISK2 10-Year Cardiovascular Risk,04-06-2026,1.2,%,
+Hematocrit,05-05-2026,0.48,L/L,
+HbA1c,05-05-2026,40,mmol/mol,
+Serum Adjusted Calcium,05-05-2026,2.37,mmol/L,
+LDL-C,05-05-2026,4.2,mmol/L,
+Mean Corpuscular Volume (MCV),05-05-2026,88,fL,
+AUDIT-C Alcohol Consumption Score,05-05-2026,3,score,
+Prostate Specific Antigen,05-05-2026,1.41,ug/L,
+Red Cell Distribution Width (RDW),05-05-2026,11.8,%,
+Mean Platelet Volume (MPV),05-05-2026,10.6,fL,
+Platelets,05-05-2026,227,K/uL,
+Platelet Distribution Width,05-05-2026,12.9,fL,
+Alkaline Phosphatase,05-05-2026,39,U/L,
+Serum Inorganic Phosphate,05-05-2026,1.12,mmol/L,
+AST (SGOT),05-05-2026,27,U/L,
+Mean Corpuscular Hemoglobin Concentration (MCHC),05-05-2026,346,g/L,
+ALT (SGPT),05-05-2026,41,U/L,
+Creatinine,05-05-2026,100,umol/L,
+Serum Potassium,05-05-2026,4.3,mmol/L,
+Red Blood Cell (RBC),05-05-2026,5.47,M/uL,
+eGFR,05-05-2026,80,mL/min/1.73m²,
+Non Hdl Cholesterol,05-05-2026,4.7,mmol/L,
+Hemoglobin,05-05-2026,166,g/L,
+Serum Sodium,05-05-2026,143,mmol/L,
+Mean Corpuscular Hemoglobin (MCH),05-05-2026,30.3,pg,
+Triglycerides,05-05-2026,1.07,mmol/L,
+White Blood Cell (WBC),05-05-2026,5.7,K/uL,
+Total Bilirubin,05-05-2026,16,umol/L,
+Nucleated Red Blood Cell Count,05-05-2026,0,10^9/L,
+HDL-C,05-05-2026,1.43,mmol/L,
+Cholesterol Hdl Ratio,05-05-2026,4.3,ratio,
+Neutrophils,05-05-2026,3.18,10^9/L,
+Total Cholesterol,05-05-2026,6.1,mmol/L,
+Serum Globulin,05-05-2026,35,g/L,
+Serum Calcium,05-05-2026,2.47,mmol/L,
+Total Protein,05-05-2026,81,g/L,
+Body Mass Index (BMI),05-05-2026,23.3,kg/m2,
+Serum Albumin,05-05-2026,46,g/L,
+QRISK2 10-Year Cardiovascular Risk,05-05-2026,1.2,%,
+QRISK2 10-Year Cardiovascular Risk,05-04-2026,1.2,%,
+HDL-C,06-03-2026,1.5,mmol/L,Recovered from source medical sheet
+LDL-C,06-03-2026,4.3,mmol/L,Recovered from source medical sheet
+Triglycerides,06-03-2026,1.7,mmol/L,"Aim for 2.6 mmol/L or lower for patients with established cardiovascular disease, history of stroke/TIA or peripheral arterial disease."
+Cholesterol Hdl Ratio,06-03-2026,4.3,ratio,"Aim for 2.6 mmol/L or lower for patients with established cardiovascular disease, history of stroke/TIA or peripheral arterial disease."
+Non Hdl Cholesterol,06-03-2026,5,mmol/L,"Aim for 2.6 mmol/L or lower for patients with established cardiovascular disease, history of stroke/TIA or peripheral arterial disease."
+Total Cholesterol,06-03-2026,6.5,mmol/L,Less strict targets apply in people without CVD.
+QRISK2 10-Year Cardiovascular Risk,26-06-2025,1.2,%,Extracted by Clinical Data Parser
+HDL-C,25-06-2025,1.4,mmol/L,Recovered from source medical sheet
+AUDIT-C Alcohol Consumption Score,23-10-2024,3,score,Recovered from source medical sheet
+HbA1c,04-04-2024,39,mmol/mol,Extracted by Clinical Data Parser
+Serum Albumin,03-04-2024,44,g/L,Recovered from source medical sheet
+Total Bilirubin,03-04-2024,13,umol/L,Recovered from source medical sheet
+Triglycerides,03-04-2024,1.07,mmol/L,Recovered from source medical sheet
+ALT (SGPT),03-04-2024,28,U/L,Recovered from source medical sheet
+Total Cholesterol,03-04-2024,6.1,mmol/L,Recovered from source medical sheet
+Cholesterol Hdl Ratio,03-04-2024,4.3,ratio,Recovered from source medical sheet
+LDL-C,03-04-2024,4.2,mmol/L,Recovered from source medical sheet
+HDL-C,03-04-2024,1.43,mmol/L,Recovered from source medical sheet
+Non Hdl Cholesterol,03-04-2024,4.7,mmol/L,Recovered from source medical sheet
+Alkaline Phosphatase,03-04-2024,41,U/L,Recovered from source medical sheet
+Red Cell Distribution Width (RDW),02-04-2024,12,%,Recovered from source medical sheet
+Nucleated Red Blood Cell Count,02-04-2024,0,10^9/L,Recovered from source medical sheet
+Platelet Distribution Width,02-04-2024,12.7,fL,Recovered from source medical sheet
+Eosinophils,02-04-2024,0.11,10^9/L,Recovered from source medical sheet
+Mean Corpuscular Hemoglobin Concentration (MCHC),02-04-2024,336,g/L,Recovered from source medical sheet
+Platelets,02-04-2024,241,K/uL,Recovered from source medical sheet
+eGFR,02-04-2024,90,mL/min/1.73m²,Recovered from source medical sheet
+White Blood Cell (WBC),02-04-2024,5.6,K/uL,Recovered from source medical sheet
+Hematocrit,02-04-2024,0.488,L/L,Recovered from source medical sheet
+Basophils,02-04-2024,0.05,10^9/L,Recovered from source medical sheet
+Mean Corpuscular Volume (MCV),02-04-2024,89,fL,Recovered from source medical sheet
+Monocyte Count,02-04-2024,0.33,10^9/L,Recovered from source medical sheet
+Lymphocytes,02-04-2024,1.96,10^9/L,Recovered from source medical sheet
+Red Blood Cell (RBC),02-04-2024,5.47,M/uL,Recovered from source medical sheet
+Mean Platelet Volume (MPV),02-04-2024,10.6,fL,Recovered from source medical sheet
+Hemoglobin,02-04-2024,164,g/L,Recovered from source medical sheet
+Serum Potassium,02-04-2024,5.3,mmol/L,Recovered from source medical sheet
+Creatinine,02-04-2024,72,umol/L,Recovered from source medical sheet
+Mean Corpuscular Hemoglobin (MCH),02-04-2024,30,pg,Recovered from source medical sheet
+Serum Sodium,02-04-2024,141,mmol/L,Recovered from source medical sheet
+Hematocrit,01-04-2024,0.488,L/L,
+Neutrophils,01-04-2024,3.14,10^9/L,
+Creatinine,01-04-2024,72,umol/L,
+Platelet Distribution Width,01-04-2024,12.7,fL,
+Platelets,01-04-2024,241,K/uL,
+Red Blood Cell (RBC),01-04-2024,5.47,M/uL,
+Serum Potassium,01-04-2024,5.3,mmol/L,
+Mean Platelet Volume (MPV),01-04-2024,10.6,fL,
+FAST Alcohol Score,27-03-2024,0,points,Recovered from source medical sheet
+AUDIT Binge Drinking Score,27-03-2024,3,score,Recovered from source medical sheet
+Body Mass Index (BMI),17-11-2023,22.7,kg/m2,Extracted by Clinical Data Parser
+Height,17-11-2023,164,,Extracted by Clinical Data Parser
+Body Weight,17-11-2023,61.9,kg,Extracted by Clinical Data Parser
+Sars Cov 2 Rna Detection,13-12-2020,Negative,,Extracted by Clinical Data Parser
+QRISK2 10-Year Cardiovascular Risk,04-11-2020,0.8,%,Recovered from source medical sheet
+QDiabetes 10-Year Risk Score,10-04-2020,4.4,%,
+Audit Typical Consumption,10-04-2020,1,,
+Ideal Body Weight (Target),10-04-2020,61.9,kg,
+QRISK2 10-Year Cardiovascular Risk,10-04-2020,0.8,%,
+Height,10-04-2020,164,,
+AUDIT Total Score,10-04-2020,5,points,
+Audit Others Concerned Score,10-04-2020,0,,
+AUDIT Binge Drinking Score,10-04-2020,2,score,
+AUDIT-C Alcohol Consumption Score,10-04-2020,5,score,
+Body Mass Index (BMI),10-04-2020,24.2,kg/m2,
+Audit Guilt Remorse Score,10-04-2020,0,,
+Alcohol Consumption,10-04-2020,5,,
+Audit Memory Loss Score,10-04-2020,0,,
+AUDIT Drinking Frequency Score,10-04-2020,2,score,

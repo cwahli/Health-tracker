@@ -301,6 +301,22 @@ export function buildDataSanitizePlan(opts: {
         const timeB = parseD(dateStrB);
         const nowThreshold = Date.now() + 86400000;
 
+        const hasCommentsA = (logA.tests || []).some((t: any) => t.doctorComment && !t.doctorComment.includes('Recovered') && !t.doctorComment.includes('Google Fit') && !t.doctorComment.includes('Clinical Data Parser'));
+        const hasCommentsB = (logB.tests || []).some((t: any) => t.doctorComment && !t.doctorComment.includes('Recovered') && !t.doctorComment.includes('Google Fit') && !t.doctorComment.includes('Clinical Data Parser'));
+
+        const getMonthDensity = (dStr: string) => {
+          const parts = dStr.split('-');
+          const m = parts[1];
+          const y = parts[2];
+          return updatedHistory.filter((h: any) => {
+            if (!h || h.id === logA.id || h.id === logB.id || h.sync_state === 'delete') return false;
+            const dp = String(h.date || '').split('-');
+            return dp[2] === y && dp[1] === m;
+          }).length;
+        };
+        const densityA = getMonthDensity(dateStrA);
+        const densityB = getMonthDensity(dateStrB);
+
         let sourceLog = logA;
         let targetLog = logB;
         if (timeA > nowThreshold && timeB <= nowThreshold) {
@@ -309,14 +325,24 @@ export function buildDataSanitizePlan(opts: {
         } else if (timeB > nowThreshold && timeA <= nowThreshold) {
           sourceLog = logB;
           targetLog = logA;
+        } else if (hasCommentsA && !hasCommentsB) {
+          sourceLog = logB;
+          targetLog = logA;
+        } else if (hasCommentsB && !hasCommentsA) {
+          sourceLog = logA;
+          targetLog = logB;
+        } else if (densityA - densityB >= 2) {
+          sourceLog = logB;
+          targetLog = logA;
+        } else if (densityB - densityA >= 2) {
+          sourceLog = logA;
+          targetLog = logB;
+        } else if (keysA.length >= keysB.length) {
+          sourceLog = logB;
+          targetLog = logA;
         } else {
-          if (keysA.length >= keysB.length) {
-            sourceLog = logB;
-            targetLog = logA;
-          } else {
-            sourceLog = logA;
-            targetLog = logB;
-          }
+          sourceLog = logA;
+          targetLog = logB;
         }
 
         proposals.push({
@@ -359,11 +385,20 @@ export function buildDataSanitizePlan(opts: {
   });
 
   // Archive qualitative non-biomarker swab/PCR tests or granular survey question items
-  Object.entries(customs).forEach(([key, def]: [string, any]) => {
+  const allCandidateKeys = new Set<string>();
+  Object.keys(customs).forEach((k) => allCandidateKeys.add(k));
+  if (opts.biomarkers) Object.keys(opts.biomarkers).forEach((k) => allCandidateKeys.add(k));
+  history.forEach((h) => {
+    if (h?.biomarkers) Object.keys(h.biomarkers).forEach((k) => allCandidateKeys.add(k));
+  });
+
+  allCandidateKeys.forEach((key) => {
+    const def = customs[key] || biomarkerDefinitions.find((d) => d.key === key);
     if (def?.isNotUsed === true) return;
+    if (profile?.notUsedBiomarkers?.[key] || profile?.notUsedInMedicalHistory?.[key]) return;
     const nameLower = String(def?.name || key).toLowerCase();
     const isQualitativeSwab = /sars_cov|covid|chlamydia|gonorrho|strep|influenza|dna_detection|nucl_acid_detn/i.test(key) || /sars[-_ ]?cov|covid|chlamydia|gonorrho|strep/i.test(nameLower);
-    const isGranularSurvey = /^audit_(guilt|remorse|memory|others_concerned|typical_consumption|drinking_frequency|binge)/i.test(key);
+    const isGranularSurvey = /^audit_?(guilt|remorse|memory|others_concerned|typical_consumption|drinking_frequency|binge|score_frequency|c_total|total)/i.test(key) || key === 'alcohol_consumption';
 
     const historyVals = history.map((h) => h?.biomarkers?.[key]).filter((v) => v !== undefined && v !== null && v !== '');
     const currentVal = opts.biomarkers?.[key];
@@ -463,6 +498,14 @@ export function applyDataSanitizePlan(
             ...(sourceLog.biomarkers || {}),
             ...(targetLog.biomarkers || {}),
           };
+          if (sourceLog.tests && Array.isArray(sourceLog.tests)) {
+            const existingKeys = new Set((targetLog.tests || []).map((t: any) => t.key));
+            const newTests = sourceLog.tests.filter((t: any) => !existingKeys.has(t.key));
+            targetLog.tests = [...(targetLog.tests || []), ...newTests];
+          }
+          if (sourceLog.note && !targetLog.note) {
+            targetLog.note = sourceLog.note;
+          }
           targetLog.updated_at = now;
         }
       }
@@ -472,10 +515,16 @@ export function applyDataSanitizePlan(
     }
     if (p.kind === 'backfill_canonical_range' && p.key) {
       const existing = customs[p.key] || {};
+      const canon = biomarkerDefinitions.find((d) => d.key === p.key || d.aliases?.includes(p.key));
       customs[p.key] = {
         ...existing,
+        name: existing.name || canon?.name,
         normalRange: p.canonicalRange || existing.normalRange,
-        unit: existing.unit || p.canonicalUnit || '',
+        unit: p.canonicalUnit || existing.unit || canon?.unit || '',
+        standardMedicalGrouping: (canon?.standardMedicalGrouping && (!existing.standardMedicalGrouping || existing.standardMedicalGrouping === 'Other')) ? canon.standardMedicalGrouping : (existing.standardMedicalGrouping || canon?.standardMedicalGrouping),
+        riskCategories: (canon?.riskCategories && (!existing.riskCategories || existing.riskCategories.length === 0 || (existing.riskCategories.length === 1 && existing.riskCategories[0] === 'Screenings & Wellness'))) ? canon.riskCategories : (existing.riskCategories || canon?.riskCategories),
+        potentialMedicalConditions: existing.potentialMedicalConditions || canon?.potentialMedicalConditions,
+        description: (canon?.descriptions?.en && (!existing.description || existing.description.trim() === '')) ? canon.descriptions.en : (existing.description || canon?.descriptions?.en),
       };
       applied++;
     }
