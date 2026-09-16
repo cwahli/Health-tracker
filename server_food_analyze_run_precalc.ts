@@ -25,6 +25,7 @@ import {
   brandHitFitsQuery,
   sanitizeDishTitle,
   normalizeChainKey,
+  normalizeDishKey,
   resolveMealCountry,
   enqueueBrandClean,
   selfCleanBrandDatabase,
@@ -208,18 +209,50 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
   if (ctx.userSelectedMode !== 'compare') {
     try {
       const country = resolveMealCountry((ctx as any).userProfile);
-      const chains = new Map<string, Set<string>>();
+      const chains = new Map<string, {
+        usedRowIds: Set<string>;
+        dishNameKey?: string | null;
+        bindStatus?: 'HIT' | 'MULTI' | 'MISS' | 'SKIPPED' | null;
+      }>();
       ledgers.forEach((l: any, idx: number) => {
         const vItem = ctx.visionScoutItems?.[l?.scoutIndex ?? idx];
         const ck = normalizeChainKey(l?.chainName || vItem?.chainName || '');
         if (!ck) return;
-        if (!chains.has(ck)) chains.set(ck, new Set());
+        if (!chains.has(ck)) {
+          const dName = l?.originalName || l?.dish || vItem?.originalName || vItem?.dishName || '';
+          const dKey = l?.dish_name_key || (dName ? normalizeDishKey(dName) : null);
+          const bStatus = l?.bindStatus || l?.brandMatchStatus || vItem?.brandMatchStatus || null;
+          chains.set(ck, {
+            usedRowIds: new Set(),
+            dishNameKey: dKey,
+            bindStatus: bStatus,
+          });
+        }
         if (l?.dbSource === 'brand_official' && l?.dbId != null) {
-          chains.get(ck)!.add(String(l.dbId));
+          chains.get(ck)!.usedRowIds.add(String(l.dbId));
         }
       });
-      for (const [ck, ids] of chains) {
-        enqueueBrandClean({ chainKey: ck, countryCode: country, usedRowIds: [...ids], onLog: ctx.addDebugLog });
+      const callLLMFn = (ctx as any).callLLMFn || (async (prompt: string, sysInst: string) => {
+        const unifiedCaller = ctx.callUnifiedLLM || callUnifiedLLM;
+        return await unifiedCaller({
+          modelId: ctx.engine || 'gemini-3.5-flash-lite',
+          systemInstruction: sysInst,
+          promptText: prompt,
+          logStagePrefix: 'curator',
+          temperature: 0.1,
+        });
+      });
+      for (const [ck, meta] of chains) {
+        enqueueBrandClean({
+          chainKey: ck,
+          countryCode: country,
+          usedRowIds: [...meta.usedRowIds],
+          dishNameKey: meta.dishNameKey,
+          bindStatus: meta.bindStatus,
+          callLLMFn,
+          mode: ctx.userSelectedMode,
+          onLog: ctx.addDebugLog,
+        });
       }
     } catch (e: any) {
       ctx.addDebugLog(`[BrandClean] enqueue skipped (${e?.message || e}).`);

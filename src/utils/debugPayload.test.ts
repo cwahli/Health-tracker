@@ -501,6 +501,7 @@ describe('debugPayload', () => {
     expect(md).toContain('### Dispatch fd/front_desk');
     expect(md).not.toMatch(/### Dispatch t\d+\/scout/);
     expect(md).not.toContain('### Dispatch t1/resolver');
+    expect(md).not.toContain('### Dispatch t1/curator');
   });
 
   it('uses a medical dispatch heading for medical pack instead of scout', () => {

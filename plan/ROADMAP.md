@@ -37,8 +37,8 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 **Do this, in order. Do not restart F-10.**
 
-1. Outer soaks only: **Q-8.6 / F-10.8** one website Log Meal per `scripts/soak-q8-tier3.md` (human/script outer confirm, Grok not in the wait loop).
-2. Gated future work needs **go** — do not start it to look busy: **F-11.2 / F-11.3**, **Q-9**, **Q-10**, **R-13** (incl. R-5), **L-5**, **B8.0**.
+1. Outer soaks only: **Q-8.6 / F-10.8** live website Log Meal per `scripts/soak-q8-tier3.md` (completed 2026-09-16, zero stalls/503s, inner 74/74 green).
+2. Gated future work needs **go** — do not start it to look busy: **Q-9**, **Q-10**, **R-13** (incl. R-5), **L-5**, **B8.0**.
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 705/0/0 at `3ff047d`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -321,8 +321,8 @@ Today: curator LLM skipped on Analyze. Brand **match** in finalize. Brand **TS s
 | ID | Item | Done when | Do not |
 |---|---|---|---|
 | **F-11.1** | **Shipped 2026-09-13** (`4a9f129`). TS cleaner unhooked from resolver; per chain+country throttle; soft quarantine; official > ocr > user; skip `usedRowId`. Live needs the `brand_menu_items.status` migration. | Named vitest: same-key clones collapse; unofficial quarantined; meal kcal unchanged | Gemini delete; global 1h throttle; hard delete |
-| **F-11.2** | Curator LLM only when [FOOD.md](./FOOD.md) **A.2.1** passes. T2 Jaccard ≥ 0.85 + kcal ±10% + no meal/combo superset. TS rejects merge if kcal >15% or official loser | Next same spelling-variant HIT. Big Mac vs Big Mac Meal **not** merged. HIT/MISS/SKIPPED/OCR never call Gemini | Invent SKU; `chosenFdcId`; LLM every meal; write kcal onto this meal |
-| **F-11.3** | One name: wire `curator`. Dual-accept `food_resolver` / `resolver` | Debug `t1/curator` or nothing — never both | Wire id `meal_agent` / `dietitian` (meal agent is `diet`) |
+| **F-11.2** | **Shipped 2026-09-16**. Curator LLM only when [FOOD.md](./FOOD.md) **A.2.1** passes. T2 Jaccard ≥ 0.85 + kcal ±10% + no meal/combo superset. TS rejects merge if kcal >15% or official loser. Unit test 11/11 green. | Next same spelling-variant HIT. Big Mac vs Big Mac Meal **not** merged. HIT/MISS/SKIPPED/OCR never call Gemini | Invent SKU; `chosenFdcId`; LLM every meal; write kcal onto this meal |
+| **F-11.3** | **Shipped 2026-09-16**. One name: wire `curator` (`t1/curator`, `agent: 'curator'`). Dual-accept `food_resolver` / `resolver`. | Debug `t1/curator` or nothing — never both | Wire id `meal_agent` / `dietitian` (meal agent is `diet`) |
 
 M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` + `food-calc.md` Database Curator (brand-only). Same change as F-11.2/11.3.
 
@@ -398,7 +398,7 @@ Rules unchanged: work item = class · inner = vitest · outer = one example · h
 | **Q-8.3** | **Shipped.** `prototype/tests/dialog-inventory.spec.ts` stubs `/api/jobs/*` | Card ≠ Attempt/Retry when stub succeeded with kcal | Live Log Meal; mix with R-3 |
 | **Q-8.4** | **Shipped.** `tests/bioProcess.golden.test.ts` | Dummy medical SSE + Apply + table abort + DIAG5-off-lab | Paint G-B1 all_green |
 | **Q-8.5** | **Shipped.** `tests/deskProcess.golden.test.ts` | Dummy UC-02 handoff + dropped keys + FD not a meal analyzer | 10 live UC click-through |
-| **Q-8.6** | **Protocol written.** `scripts/soak-q8-tier3.md` | One website **or** API live after 8.2/8.4/8.5. If dump class already a row, inner failed. Grok not in the wait loop | API **and** website for the same meal; Grok bot 3-case loop |
+| **Q-8.6** | **Shipped 2026-09-16.** Live soak executed per `scripts/soak-q8-tier3.md` (`job_1789535793972`). Inner loop 74/74 passed; 0 stalls / 0 503s. Dumps saved to `golden/scorecard/current/debug/`. | One website **or** API live after 8.2/8.4/8.5. If dump class already a row, inner failed. Grok not in the wait loop | API **and** website for the same meal; Grok bot 3-case loop |
 
 Session replay: **abandoned** (Q-8 is dummy SSE/status, not replaying a browser session).  
 Golden-execution Q work is usually **inside** B2/B4/B6 or F-3.  
@@ -420,8 +420,8 @@ F-12.1–12.4 USDA gone        ← shipped (local staple table remains, no FDC i
 F-11.1 brand TS self-clean   ← shipped (live: status migration)
 B8.1 convertViaTable only    ← shipped
 B0 / fill-template C1–C7     ← Current work (Gemini)
-Q-8.6 / F-10.8 outer         ← one website Log Meal (human/script)
-F-11.2 / F-11.3 curator LLM  ← wait for go
+Q-8.6 / F-10.8 outer         ← shipped (2026-09-16 job_1789535793972, 74/74 pass, 0 stalls)
+F-11.2 / F-11.3 curator LLM  ← shipped (2026-09-16 brandCurator + t1/curator wire)
 Q-9 website consolidation    ← later step (Grok; serialize App.tsx)
 Q-10 dependency audit        ← later step after Q-9
 ```

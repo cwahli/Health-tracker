@@ -41,7 +41,7 @@ export interface DialogInventory {
 }
 
 export interface DispatchTrace {
-  id: string; // e.g. "t1/scout", "t1/resolver", "fd/front_desk"
+  id: string; // e.g. "t1/scout", "t1/curator", "fd/front_desk"
   parent?: string | null;
   turn?: number | string;
   agent?: string;
@@ -242,13 +242,13 @@ export function parseUnifiedTimingAll(logs: string): { stage: string; ms: number
  *  on skip paths, so those are deliberately NOT evidence. `[scout_answer]` is
  *  kept as legacy evidence: old exports predate usage/timing lines and scout
  *  always calls. (The dietitian agent is removed; its stages never call.) */
-export function hasCallEvidence(logs: string, stage: 'scout' | 'resolver'): boolean {
+export function hasCallEvidence(logs: string, stage: 'scout' | 'resolver' | 'curator'): boolean {
   if (!logs || typeof logs !== 'string') return false;
   const tag = `\\[UnifiedLLM:${stage}\\]|\\[UnifiedLLM-Prompt:${stage}\\]|\\[UnifiedLLM-Usage:${stage}\\]|\\[UnifiedLLM-Timing:${stage}\\]|\\[UnifiedLLM-Response:${stage}\\]`;
   if (stage === 'scout') {
     return new RegExp(`${tag}|\\[scout_answer\\]|\\[Vision Scout\\] Retrying`).test(logs);
   }
-  return new RegExp(`${tag}|food_resolver|Food Resolver agent`).test(logs);
+  return new RegExp(`${tag}|\\[UnifiedLLM:(?:food_)?resolver\\]|\\[UnifiedLLM-Usage:(?:food_)?resolver\\]|\\[UnifiedLLM-Timing:(?:food_)?resolver\\]|\\[UnifiedLLM:curator\\]|\\[UnifiedLLM-Usage:curator\\]|\\[UnifiedLLM-Timing:curator\\]|food_resolver|Food Resolver agent|curator|brandCurator|\\[curator_answer\\]`).test(logs);
 }
 
 /** Prefix a log line with [jobId] unless blank or already tagged (contract §9: joinable lines) */
@@ -382,20 +382,20 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
       return copy;
     });
 
-    const hasResolver = Boolean(
-      /food_resolver|Food Resolver/i.test(logs) ||
-      usages.some(u => u.stage === 'food_resolver') ||
-      timings.some(t => t.stage === 'food_resolver')
+    const hasCurator = Boolean(
+      /food_resolver|Food Resolver|curator/i.test(logs) ||
+      usages.some(u => u.stage === 'food_resolver' || u.stage === 'curator') ||
+      timings.some(t => t.stage === 'food_resolver' || t.stage === 'curator')
     );
-    if (hasResolver && !enriched.some(d => d.agent === 'resolver')) {
-      const u = usages.find(x => x.stage === 'food_resolver');
-      const t = timings.find(x => x.stage === 'food_resolver');
-      const rModelMatch = logs.match(/Food Resolver.*?Calling (gemini-[^\s]+)|Calling (gemini-[^\s]+).*?[Rr]esolver/i);
+    if (hasCurator && !enriched.some(d => d.agent === 'curator' || d.agent === 'resolver')) {
+      const u = usages.find(x => x.stage === 'curator' || x.stage === 'food_resolver');
+      const t = timings.find(x => x.stage === 'curator' || x.stage === 'food_resolver');
+      const rModelMatch = logs.match(/(?:Food Resolver|Curator).*?Calling (gemini-[^\s]+)|Calling (gemini-[^\s]+).*?(?:[Rr]esolver|[Cc]urator)/i);
       enriched.push({
-        id: 't1/resolver',
+        id: 't1/curator',
         parent: enriched[0]?.id || null,
         turn: 1,
-        agent: 'resolver',
+        agent: 'curator',
         user: undefined,
         received: { gapItems: true },
         instruction: undefined,
@@ -683,23 +683,23 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
     }
   }
 
-  // Food Resolver: runs inside DB search for gap items (unknown foods needing
-  // resolution). Evidence: streamed `food_resolver` status lines or usage/timing.
-  const hasResolver = Boolean(
-    /food_resolver|Food Resolver/i.test(logs) ||
-    parseUnifiedUsageLines(logs).some(u => u.stage === 'food_resolver') ||
-    parseUnifiedTimingLines(logs).some(t => t.stage === 'food_resolver')
+  // Brand Curator (formerly Food Resolver): runs inside DB search / brand clean for gap items or catalog curation.
+  // Evidence: streamed `curator` / `food_resolver` status lines or usage/timing.
+  const hasCurator = Boolean(
+    /food_resolver|Food Resolver|curator/i.test(logs) ||
+    parseUnifiedUsageLines(logs).some(u => u.stage === 'curator' || u.stage === 'food_resolver') ||
+    parseUnifiedTimingLines(logs).some(t => t.stage === 'curator' || t.stage === 'food_resolver')
   );
 
-  if (hasResolver) {
-    const usage = parseUnifiedUsageLines(logs).find(u => u.stage === 'food_resolver');
-    const timing = parseUnifiedTimingLines(logs).find(t => t.stage === 'food_resolver');
-    const modelMatch = logs.match(/Food Resolver.*?Calling (gemini-[^\s]+)|Calling (gemini-[^\s]+).*?[Rr]esolver/i);
+  if (hasCurator) {
+    const usage = parseUnifiedUsageLines(logs).find(u => u.stage === 'curator' || u.stage === 'food_resolver');
+    const timing = parseUnifiedTimingLines(logs).find(t => t.stage === 'curator' || t.stage === 'food_resolver');
+    const modelMatch = logs.match(/(?:Food Resolver|Curator).*?Calling (gemini-[^\s]+)|Calling (gemini-[^\s]+).*?(?:[Rr]esolver|[Cc]urator)/i);
     dispatches.push({
-      id: 't1/resolver',
+      id: 't1/curator',
       parent: hasScout ? 't1/scout' : null,
       turn: 1,
-      agent: 'resolver',
+      agent: 'curator',
       user: undefined,
       received: { gapItems: true },
       instruction: undefined,

@@ -208,7 +208,7 @@ describe('extractDispatches (food)', () => {
   it('attaches tokens per stage and prefers raw scout output over processed items', () => {
     const d = extractDispatches(foodInput());
     const scout = d.find(x => x.agent === 'scout')!;
-    const resolver = d.find(x => x.agent === 'resolver')!;
+    const resolver = d.find(x => x.agent === 'curator' || x.agent === 'resolver')!;
     expect(scout.tokens).toBe(908);
     expect(scout.rawEmission).toEqual(foodInput().rawScout);
     // "Output:" in the Agent Dispatches card must show the exact raw LLM
@@ -237,7 +237,7 @@ describe('extractDispatches (food)', () => {
     const d = extractDispatches(foodInput({
       backendLogs: '[Vision Scout] done\n[Budget] Finalized ledger',
     }));
-    expect(d.find(x => x.agent === 'resolver')).toBeUndefined();
+    expect(d.find(x => x.agent === 'curator' || x.agent === 'resolver')).toBeUndefined();
   });
 
   it('returns scout only with length 1 for food with only scout logs and no prior dispatches', () => {
@@ -248,14 +248,14 @@ describe('extractDispatches (food)', () => {
     expect(d.length).toBe(1);
     expect(d[0].agent).toBe('scout');
     expect(d[0].id).toBe('t1/scout');
-    expect(d.some(x => x.agent === 'resolver')).toBe(false);
+    expect(d.some(x => x.agent === 'curator' || x.agent === 'resolver')).toBe(false);
   });
 
   it('builds scout and optional resolver from logs when prior dispatches is empty, without inventing edit turns', () => {
     const d = extractDispatches(foodInput({ dispatches: [] }));
     expect(d.some(x => x.agent === 'scout')).toBe(true);
-    expect(d.some(x => x.agent === 'resolver')).toBe(true);
-    expect(d.map(x => x.id)).toEqual(['t1/scout', 't1/resolver']);
+    expect(d.some(x => x.agent === 'curator' || x.agent === 'resolver')).toBe(true);
+    expect(d.map(x => x.id)).toEqual(['t1/scout', 't1/curator']);
     expect(d.some(x => /^t[23]\//.test(x.id))).toBe(false);
   });
 });
@@ -264,6 +264,13 @@ describe('hasCallEvidence', () => {
   it('hasCallEvidence scout true for production Analyze/Scout marker and false for empty logs', () => {
     expect(hasCallEvidence('[UnifiedLLM-Prompt:scout] User Prompt:\nAnalyze this meal photo.', 'scout')).toBe(true);
     expect(hasCallEvidence('', 'scout')).toBe(false);
+  });
+  it('hasCallEvidence dual-accepts resolver and curator evidence', () => {
+    expect(hasCallEvidence('[UnifiedLLM:curator]', 'curator')).toBe(true);
+    expect(hasCallEvidence('Food Resolver agent', 'curator')).toBe(true);
+    expect(hasCallEvidence('[UnifiedLLM-Prompt:curator]', 'resolver')).toBe(true);
+    expect(hasCallEvidence('[curator_answer]', 'resolver')).toBe(true);
+    expect(hasCallEvidence('', 'curator')).toBe(false);
   });
 });
 

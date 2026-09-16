@@ -4,6 +4,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
 import { inferBasisFromServingText, toPer100g, parseNutrientNumber } from './server_nutrient_basis';
+import { runBrandCuratorStage } from './src/server/food/brandCurator.js';
 
 function getFirestoreDb() {
   if (getApps().length === 0) {
@@ -218,6 +219,11 @@ export interface ChainCleanArgs {
   chainKey: string;
   countryCode?: string;
   usedRowIds?: Array<string | number>;
+  dishNameKey?: string | null;
+  bindStatus?: 'HIT' | 'MULTI' | 'MISS' | 'SKIPPED' | null;
+  candidateIds?: Array<string | number>;
+  callLLMFn?: (prompt: string, sysInst: string) => Promise<string>;
+  mode?: string;
   onLog?: (msg: string) => void;
   bypassThrottle?: boolean;
 }
@@ -409,6 +415,37 @@ export async function cleanBrandChain(args: ChainCleanArgs): Promise<BrandCleanC
   if (quarantined > 0) {
     log(`[BrandClean] ${scope}: complete — quarantined ${quarantined} row(s).`);
   }
+
+  // F-11.2: Layer 2 Brand Curator LLM (runs only when G0-G4 and T1-T3 pass)
+  if (args.callLLMFn) {
+    try {
+      const survivingRows = items.filter(
+        (r) => !quarantineIds.has(String(r.id)) && r.status !== 'quarantined'
+      );
+      const curatorRes = await runBrandCuratorStage({
+        eligibility: {
+          chainKey,
+          countryCode: country,
+          mode: args.mode,
+          bindStatus: args.bindStatus,
+          dishNameKey: args.dishNameKey,
+          candidateIds: args.candidateIds,
+          usedRowIds: args.usedRowIds,
+        },
+        survivingRows,
+        callLLMFn: args.callLLMFn,
+        adminClient: admin,
+        onLog: log,
+      });
+      if (curatorRes.executed) {
+        counts.deletedDuplicatesCount += curatorRes.quarantinedCount;
+        counts.details.push(...curatorRes.details);
+      }
+    } catch (err: any) {
+      log(`[BrandClean] ${scope}: Layer 2 Curator error: ${err?.message || err}`);
+    }
+  }
+
   return counts;
 }
 
@@ -417,6 +454,11 @@ export function enqueueBrandClean(args: {
   chainKey?: string | null;
   countryCode?: string;
   usedRowIds?: Array<string | number>;
+  dishNameKey?: string | null;
+  bindStatus?: 'HIT' | 'MULTI' | 'MISS' | 'SKIPPED' | null;
+  candidateIds?: Array<string | number>;
+  callLLMFn?: (prompt: string, sysInst: string) => Promise<string>;
+  mode?: string;
   onLog?: (msg: string) => void;
 }): void {
   const chainKey = normalizeChainKey(args.chainKey || '');
@@ -425,6 +467,11 @@ export function enqueueBrandClean(args: {
     chainKey,
     countryCode: args.countryCode,
     usedRowIds: args.usedRowIds,
+    dishNameKey: args.dishNameKey,
+    bindStatus: args.bindStatus,
+    candidateIds: args.candidateIds,
+    callLLMFn: args.callLLMFn,
+    mode: args.mode,
     onLog: args.onLog,
   }).catch((e: any) =>
     (args.onLog || console.log)(`[BrandClean] background error for ${chainKey}: ${e?.message || e}`)
