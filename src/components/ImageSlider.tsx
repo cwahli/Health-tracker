@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ImageIcon, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
-  nextPhotoFallbackUrl,
-  photoKeyFromUrl,
   uniqueMealImageUrls,
+  resolveNextPhotoUrl,
 } from '../utils/foodImageSources';
 import { t, interpolate } from '../utils/i18n';
 
@@ -168,23 +167,10 @@ export default function ImageSlider({
     const tried = triedFallbacks.current[original];
     tried.add(current);
 
-    // B11d: try proxy / signed resolve
-    let next = nextPhotoFallbackUrl(current, tried);
-    if (next?.includes('/api/r2/photo-url')) {
-      try {
-        const key = photoKeyFromUrl(current) || photoKeyFromUrl(original);
-        const res = await fetch(`/api/r2/photo-url?key=${encodeURIComponent(key || '')}`);
-        if (res.ok) {
-          const json = await res.json();
-          next = json.proxyUrl || json.url || next;
-        }
-      } catch {
-        /* keep next */
-      }
-    }
-    if (next && !tried.has(next)) {
+    const next = await resolveNextPhotoUrl(original, current, tried);
+    if (next) {
       tried.add(next);
-      setSrcMap((prev) => ({ ...prev, [original]: next! }));
+      setSrcMap((prev) => ({ ...prev, [original]: next }));
       return;
     }
     setBrokenImages((prev) => ({

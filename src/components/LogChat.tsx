@@ -22,6 +22,7 @@ import { compressMultipleImages, compressImage } from '../utils/imageCompressor'
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
+import PreviousMealThumbnail from './PreviousMealThumbnail';
 import { blobToDurableDataUrl } from '../utils/foodImageSources';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 const FullScreenLogViewer = lazyWithRetry(() => import('./FullScreenLogViewer'));
@@ -6276,11 +6277,10 @@ ${logsText}`);
                       <div className="flex items-center gap-2.5 min-w-0">
                         {item._listType === 'previous_meal' && (
                           (item.imageUrl || (item.imageUrls && item.imageUrls.length > 0)) ? (
-                            <img 
-                              src={resolveFoodImage(item.imageUrl || item.imageUrls?.[0], activeFoodLogs)} 
-                              alt={item.name} 
-                              className="w-8 h-8 rounded-lg object-cover border border-slate-100 dark:border-slate-700 shrink-0"
-                              referrerPolicy="no-referrer"
+                            <PreviousMealThumbnail
+                              src={resolveFoodImage(item.imageUrl || item.imageUrls?.[0], activeFoodLogs) || ''}
+                              alt={item.name}
+                              fallbackLabel={item.name}
                             />
                           ) : (
                             <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-500 font-bold text-xs shrink-0">
