@@ -17,7 +17,7 @@ export interface SessionEvent {
   action: SessionAction;
 }
 
-const MAX = 80;
+const MAX = 150;
 const logs = new Map<string, SessionEvent[]>();
 
 export function recordSessionEvent(
@@ -25,8 +25,21 @@ export function recordSessionEvent(
   event: Omit<SessionEvent, 'ts'> & { ts?: number }
 ): SessionEvent[] {
   if (!jobId) return [];
-  const row: SessionEvent = { ts: event.ts ?? Date.now(), ...event };
-  const next = [...(logs.get(jobId) || []), row].slice(-MAX);
+  const existing = logs.get(jobId) || [];
+  const now = event.ts ?? Date.now();
+  const last = existing[existing.length - 1];
+  if (
+    last &&
+    last.writer === event.writer &&
+    last.action === event.action &&
+    last.status === event.status &&
+    last.resultKey === event.resultKey &&
+    Math.abs(now - last.ts) < 15000
+  ) {
+    return existing;
+  }
+  const row: SessionEvent = { ts: now, ...event };
+  const next = [...existing, row].slice(-MAX);
   logs.set(jobId, next);
   return next;
 }

@@ -240,6 +240,20 @@ describe('accept-defaults gate (portion choices within 30%, no agent)', () => {
     expect(out.modificationCommand).toEqual([]);
   });
 
+  it('deduplicates dish name when single constituent matches mealName and meets word bounds', () => {
+    const single = [{
+      keyword: 'Kacang Almond',
+      estimatedWeightGrams: 68,
+      nutrients: { calories: 414, protein: 20.1, sugar: 3.4, saturatedFat: 2.8 },
+    }];
+    const out = composeAcceptDefaultsParsed({ items: single, mealName: 'Kacang Almond', language: 'en' });
+    expect(out.message).not.toMatch(/Kacang Almond:\s*Kacang Almond/i);
+    expect(out.message).toMatch(/^Kacang Almond 68g\./);
+    const words = (out.clinicalAdvice || out.message).trim().split(/\s+/).length;
+    expect(words).toBeGreaterThanOrEqual(35);
+    expect(words).toBeLessThanOrEqual(70);
+  });
+
   it('composes a personalised 2-paragraph message when explicit targets exist', () => {
     const mealItems = [{
       keyword: 'Mixed Meal',

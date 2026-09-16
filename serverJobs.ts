@@ -56,6 +56,11 @@ export interface ServerJobPayload {
   userActionBreadcrumbs?: any[];
   lastUserAction?: any;
   sessionEvents?: any[];
+  isRetry?: boolean;
+  attempt?: number;
+  priorLogs?: string | string[];
+  dispatches?: any[];
+  previousAttempts?: any[];
 }
 
 export const inMemoryServerJobs = new Map<string, any>();
@@ -339,15 +344,35 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
   const existingMemJob = inMemoryServerJobs.get(jobId);
   const prevTurn = Number(existingMemJob?.current_turn ?? existingMemJob?.currentTurn ?? 1) || 1;
   const isContinuation = !!(
-    existingMemJob &&
-    (existingMemJob.status === 'succeeded' || existingMemJob.status === 'awaiting_user' || existingMemJob.status === 'failed')
+    payload.isRetry ||
+    (payload.attempt && payload.attempt > 1) ||
+    (existingMemJob &&
+      (existingMemJob.status === 'succeeded' || existingMemJob.status === 'awaiting_user' || existingMemJob.status === 'failed'))
   );
   const currentTurn = isContinuation ? prevTurn + 1 : (existingMemJob?.current_turn ?? existingMemJob?.currentTurn ?? 1) || 1;
-  const turn1Logs: string[] = (existingMemJob?.turn1Logs && existingMemJob.turn1Logs.length > 0)
-    ? existingMemJob.turn1Logs
-    : ((existingMemJob?.accumulatedLogs && existingMemJob.accumulatedLogs.length > 0)
-      ? existingMemJob.accumulatedLogs
-      : []);
+  
+  const priorLogsFromMem = (existingMemJob?.accumulatedLogs && existingMemJob.accumulatedLogs.length > 0)
+    ? existingMemJob.accumulatedLogs
+    : (existingMemJob?.turn1Logs && existingMemJob.turn1Logs.length > 0 ? existingMemJob.turn1Logs : []);
+  const priorLogsFromPayload = Array.isArray(payload.priorLogs)
+    ? payload.priorLogs
+    : (typeof payload.priorLogs === 'string' && payload.priorLogs.trim() ? payload.priorLogs.split('\n') : []);
+  const turn1Logs: string[] = priorLogsFromMem.length > 0
+    ? priorLogsFromMem
+    : priorLogsFromPayload;
+
+  const previousAttempts = [
+    ...(existingMemJob?.previousAttempts || []),
+    ...(existingMemJob && isContinuation ? [{
+      turn: prevTurn,
+      status: existingMemJob.status,
+      error: existingMemJob.error || existingMemJob.clean_result?.error || existingMemJob.clean_result?.message,
+      dispatches: existingMemJob.dispatches || existingMemJob.clean_result?.dispatches || [],
+      completedAt: existingMemJob.updated_at || new Date().toISOString()
+    }] : [])
+  ];
+
+  const preservedDispatches = payload.dispatches || existingMemJob?.dispatches || existingMemJob?.clean_result?.dispatches || [];
 
   const initialJobRecord = {
     id: jobId,
@@ -361,6 +386,8 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
     accumulatedLogs: turn1Logs,
     photo_url: payload.photoUrl || existingMemJob?.photo_url || (imageUrls && imageUrls[0]) || null,
     clean_result: null,
+    dispatches: preservedDispatches,
+    previousAttempts,
     sessionEvents: payload.sessionEvents || existingMemJob?.sessionEvents || [],
     clientConsoleLogs: payload.clientConsoleLogs || existingMemJob?.clientConsoleLogs || [],
     networkErrors: payload.networkErrors || existingMemJob?.networkErrors || [],
@@ -448,6 +475,8 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
         memJob.progress_percent = progress;
         memJob.status_message = message;
         memJob.photo_url = photoUrl || null;
+        memJob.accumulatedLogs = [...accumulatedLogs];
+        memJob.turn1Logs = [...accumulatedLogs];
         memJob.updated_at = new Date().toISOString();
         memJob.sessionEvents = [
           ...(memJob.sessionEvents || []),
@@ -638,6 +667,11 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
             if (chunkTimer) clearTimeout(chunkTimer);
             chunkTimer = setTimeout(() => {
               accumulatedLogs.push(`[error] ${stallMessage}`);
+              const mem = inMemoryServerJobs.get(jobId);
+              if (mem) {
+                mem.accumulatedLogs = [...accumulatedLogs];
+                mem.turn1Logs = [...accumulatedLogs];
+              }
               controller.abort(new Error(stallMessage));
             }, 90000);
           };
@@ -1350,6 +1384,7 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
         console.warn('[ServerJobs] Failed uploading error logs to R2:', r2LogErr);
       }
 
+      const existingMem = inMemoryServerJobs.get(jobId);
       const errorCleanResult: any = {
         message: abortReason || 'Server analysis failed or timed out',
         error: abortReason || 'Unknown error',
@@ -1357,6 +1392,8 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
         backendLogs: logsUrl ? `[Logs stored in R2: ${logsUrl}]` : rawErrorLogs.slice(0, 5000),
         photoUrl: photoUrl || undefined,
         scoutItems: finalData?.scoutItems,
+        previousAttempts: existingMem?.previousAttempts,
+        dispatches: existingMem?.dispatches,
       };
       if (finalData?.pendingFoodLog || finalData?.data) {
         errorCleanResult.pendingFoodLog = finalData.pendingFoodLog || finalData.data;
@@ -1372,6 +1409,8 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
           result: errorCleanResult,
           backendLogsUrl: logsUrl || undefined,
           backendLogs: rawErrorLogs,
+          dispatches: existingMem?.dispatches,
+          previousAttempts: existingMem?.previousAttempts,
           failedAt: new Date().toISOString(),
         });
         if (debugUrl) errorCleanResult.debugUrl = debugUrl;

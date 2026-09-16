@@ -19,6 +19,9 @@ describe('server_nutrient_basis', () => {
     expect(inferBasisFromServingText('1 porsi', 70)).toEqual({ basisType: 'per_dish', servingGrams: 70 });
     expect(inferBasisFromServingText('1 serving', 70)).toEqual({ basisType: 'per_dish', servingGrams: 70 });
     expect(inferBasisFromServingText('1', 70)).toEqual({ basisType: 'per_dish', servingGrams: 70 });
+    expect(inferBasisFromServingText('2.5 sajian', 65)).toEqual({ basisType: 'per_serving', servingGrams: 26 });
+    expect(inferBasisFromServingText('2.5 porsi per kemasan', 65)).toEqual({ basisType: 'per_serving', servingGrams: 26 });
+    expect(inferBasisFromServingText('2.5', 65)).toEqual({ basisType: 'per_serving', servingGrams: 26 });
   });
 
   it('scales per_100g nutrients to consumed weight (120 kcal / 100g to 180g = 216 kcal)', () => {

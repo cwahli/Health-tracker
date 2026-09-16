@@ -109,20 +109,40 @@ export function parseOcrLabel(rawLabel: any, targetWeight: number, defaultR: num
         ocrServingGrams = inferred.servingGrams;
       }
     }
-  } else if (rawLabel.servingsPerContainer && Number(rawLabel.servingsPerContainer) > 1 && targetWeight > 50) {
-    ocrServingGrams = Math.round(targetWeight / Number(rawLabel.servingsPerContainer));
+  } else if ((rawLabel.servingsPerContainer || rawLabel.jumlahSajianPerKemasan || rawLabel.servings_per_container) && Number(rawLabel.servingsPerContainer || rawLabel.jumlahSajianPerKemasan || rawLabel.servings_per_container) > 1 && targetWeight > 10) {
+    ocrServingGrams = Math.round(targetWeight / Number(rawLabel.servingsPerContainer || rawLabel.jumlahSajianPerKemasan || rawLabel.servings_per_container));
   }
-  const isPer100g = !!(isPer100gFlag || ocrServingGrams === 100);
-  // Serving text without parseable grams: never apply an R>9 leftover from a 1g basis.
-  const fallbackScale = (hadServingText && defaultR > 9.2) ? 1 : defaultR;
-  const ocrScale = isPer100g
-    ? (targetWeight / 100)
-    : ((ocrServingGrams && ocrServingGrams > 0) ? (targetWeight / ocrServingGrams) : fallbackScale);
-      
+
   const rawCalStr = rawLabel.calories ?? rawLabel.energy ?? rawLabel.kcal ?? rawLabel.energyKcal ?? rawLabel.energiTotal ?? rawLabel.energi ?? rawLabel.kalori;
   const ocrCal = typeof rawCalStr === 'number'
     ? rawCalStr
     : (rawCalStr ? parseFloat(String(rawCalStr).replace(/[^0-9.]/g, '')) : NaN);
+
+  // Sanity check: if ocrServingGrams is small (<= 15) and targetWeight > ocrServingGrams
+  // If calorie density exceeds pure fat (> 9.2 kcal/g), ocrServingGrams was parsed as a serving COUNT (e.g. 2.25 or 2.5 servings in container), NOT grams.
+  if (ocrServingGrams && ocrServingGrams > 0 && ocrServingGrams <= 15 && targetWeight > ocrServingGrams) {
+    const calPerGram = Number.isFinite(ocrCal) && ocrCal > 0 ? (ocrCal / ocrServingGrams) : 0;
+    if (calPerGram > 9.2) {
+      // It is a serving count N; true serving size is targetWeight / N
+      ocrServingGrams = targetWeight / ocrServingGrams;
+    }
+  }
+
+  const isPer100g = !!(isPer100gFlag || ocrServingGrams === 100);
+  // Serving text without parseable grams: never apply an R>9 leftover from a 1g basis.
+  const fallbackScale = (hadServingText && defaultR > 9.2) ? 1 : defaultR;
+  let ocrScale = isPer100g
+    ? (targetWeight / 100)
+    : ((ocrServingGrams && ocrServingGrams > 0) ? (targetWeight / ocrServingGrams) : fallbackScale);
+
+  // Physical Safeguard: When scaling up (ocrScale > 1), ocrScale must never cause calories to exceed physical maximum of pure fat (9.2 kcal/g)
+  if (ocrScale > 1 && Number.isFinite(ocrCal) && ocrCal > 0 && targetWeight > 0) {
+    const maxScale = (targetWeight * 9.2) / ocrCal;
+    if (ocrScale > maxScale) {
+      ocrScale = maxScale;
+    }
+  }
+
   if (Number.isFinite(ocrCal) && ocrCal > 0) {
     ocrNutrients.calories = Math.round(ocrCal * ocrScale);
     lockedKeys.push('calories');
@@ -667,6 +687,38 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
     }
     if (!lockedNutrientKeys.includes('addedSugar')) {
       nutrients.addedSugar = sugarResult.addedSugar;
+    }
+  }
+
+  // Physical Bounds Invariant (Pure lipid upper bound 9.2 kcal/g, macro mass <= weight)
+  if (consumedWeight > 0) {
+    const maxPhysCal = Math.round(consumedWeight * 9.2);
+    if (nutrients.calories != null) {
+      const calVal = Number(nutrients.calories);
+      if (!lockedNutrientKeys.includes('calories') && calVal > maxPhysCal) {
+        nutrients.calories = maxPhysCal;
+      } else if (lockedNutrientKeys.includes('calories') && calVal > Math.round(consumedWeight * 15)) {
+        nutrients.calories = maxPhysCal;
+      }
+    }
+    const macroKeys = ['protein', 'totalFat', 'saturatedFat', 'transFat', 'carbohydrates', 'totalFibre', 'sugar', 'addedSugar'];
+    for (const mk of macroKeys) {
+      if (nutrients[mk] != null && Number(nutrients[mk]) > consumedWeight) {
+        nutrients[mk] = Math.round(consumedWeight * 10) / 10;
+      }
+    }
+    const p = Number(nutrients.protein) || 0;
+    const f = Number(nutrients.totalFat) || 0;
+    const c = Number(nutrients.carbohydrates) || 0;
+    const sumMacros = p + f + c;
+    if (sumMacros > consumedWeight * 1.05 && sumMacros > 0) {
+      const macroFactor = consumedWeight / sumMacros;
+      if (nutrients.protein != null) nutrients.protein = Math.round(p * macroFactor * 10) / 10;
+      if (nutrients.totalFat != null) nutrients.totalFat = Math.round(f * macroFactor * 10) / 10;
+      if (nutrients.carbohydrates != null) nutrients.carbohydrates = Math.round(c * macroFactor * 10) / 10;
+      if (nutrients.totalFibre != null && Number(nutrients.totalFibre) > (Number(nutrients.carbohydrates) || 0)) {
+        nutrients.totalFibre = nutrients.carbohydrates;
+      }
     }
   }
 

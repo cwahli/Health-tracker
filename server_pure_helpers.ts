@@ -2067,11 +2067,12 @@ export function formatMealReceiptTable(items: any[], totalNutrients: any, totalW
     if (compList && compList.length > 0) {
       compList.forEach((c: any) => {
         const cName = c.name || c.searchQuery || c.keyword || 'Ingredient';
-        const cW = Number(c.weightGrams) || Math.round(itW / compList.length);
-        const cCal = c.calories ?? c.nutrients?.calories ?? (compList.length === 1 ? itCal : 0);
-        const cP = c.protein ?? c.nutrients?.protein ?? (compList.length === 1 ? itP : 0);
-        const cSatFat = c.saturatedFat ?? c.nutrients?.saturatedFat ?? (compList.length === 1 ? itSatFat : 0);
-        const cNa = c.sodium ?? c.nutrients?.sodium ?? (compList.length === 1 ? itNa : 0);
+        const isSingleComp = compList.length === 1;
+        const cW = isSingleComp ? itW : (Number(c.weightGrams) || Math.round(itW / compList.length));
+        const cCal = isSingleComp ? itCal : (c.calories ?? c.nutrients?.calories ?? 0);
+        const cP = isSingleComp ? itP : (c.protein ?? c.nutrients?.protein ?? 0);
+        const cSatFat = isSingleComp ? itSatFat : (c.saturatedFat ?? c.nutrients?.saturatedFat ?? 0);
+        const cNa = isSingleComp ? itNa : (c.sodium ?? c.nutrients?.sodium ?? 0);
         table += `| ${cName} - ${cW}g | ${fVal(cCal)} | ${fVal(cP, 'g')} | ${fVal(cSatFat, 'g')} | ${fVal(cNa, 'mg')} |\n`;
       });
     } else {

@@ -84,6 +84,10 @@ export interface AgentJob {
    * (client-recorded). Persisted alongside job.result so it survives into
    * the server-side debug export. */
   sessionEvents?: Array<{ ts: number; writer: string; turn?: number; status?: string; resultKey?: string; action: string }>;
+  backendLogs?: string;
+  dispatches?: any[];
+  previousAttempts?: any[];
+  priorLogs?: string | string[];
 }
 
 /* 'awaiting_user' */

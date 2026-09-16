@@ -131,6 +131,9 @@ export function isStalePriorTurn(
   incomingUpdatedAt?: string
 ): boolean {
   if (!existing) return false;
+  if (existing.status === 'succeeded' && incomingStatus === 'awaiting_user') {
+    return true;
+  }
   const turnInFlight =
     typeof existing.inFlightTurnAt === 'number' &&
     (!existing.finishedAt || new Date(existing.finishedAt).getTime() < existing.inFlightTurnAt);
@@ -446,8 +449,10 @@ class JobStoreImpl {
       job.clientSubmitPending === true ||
       (typeof patch.attemptCount === 'number' && patch.attemptCount > (job.attemptCount || 0)) ||
       !!(patch.inputSnapshot?.text && patch.inputSnapshot.text !== job.inputSnapshot?.text);
-    if ((patch.status === 'queued' || patch.status === 'running' || patch.status === 'processing') && !isExplicitNewTurn) {
-      if (job.status === 'succeeded' || job.status === 'awaiting_user') {
+    if ((patch.status === 'queued' || patch.status === 'running' || patch.status === 'processing' || patch.status === 'awaiting_user') && !isExplicitNewTurn) {
+      if (job.status === 'succeeded') {
+        delete patch.status;
+      } else if (job.status === 'awaiting_user' && patch.status !== 'awaiting_user') {
         delete patch.status;
       }
     }

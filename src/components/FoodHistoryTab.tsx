@@ -1769,6 +1769,26 @@ export default function FoodHistoryTab({
                         </div>
 
                         <div className="flex items-center gap-2">
+                          {(() => {
+                            const retention = retentionStatusMap.get(log.id);
+                            const hasExplicitDebug = Boolean(log.debugUrl || (log as any).backendLogs || (log as any).jobId);
+                            const isAvailable = retention ? retention.kept : hasExplicitDebug;
+                            if (!isAvailable) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownloadDebugLog(log);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                title={t.downloadDebugLog || 'Download Debug Log'}
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                            );
+                          })()}
+
                           <button
                             type="button"
                             onClick={(e) => {
@@ -2123,8 +2143,10 @@ export default function FoodHistoryTab({
                           )}
 
                           {/* Debug Log Download (Inside Expanded Log) */}
-                          {(log.debugUrl || (log as any).backendLogs || (log as any).jobId) && (() => {
+                          {(() => {
                             const retention = retentionStatusMap.get(log.id);
+                            const hasExplicitDebug = Boolean(log.debugUrl || (log as any).backendLogs || (log as any).jobId);
+                            if (!retention?.kept && !hasExplicitDebug) return null;
                             const isAvailable = retention ? retention.kept : true;
                             const isBugProtected = Boolean(retention?.isBugProtected);
                             const isLast10 = Boolean(retention?.isLast10);

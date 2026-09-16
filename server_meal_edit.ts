@@ -136,6 +136,9 @@ export function scaleItemNutrients(item: any, ratio: number, newWeight?: number)
   if (Array.isArray(next.components) && next.components[0] && typeof next.components[0] === 'object') {
     next.components = next.components.map((c: any) => (typeof c === 'object' ? scaleItemNutrients(c, ratio) : c));
   }
+  if (Array.isArray(next.foods) && next.foods[0] && typeof next.foods[0] === 'object') {
+    next.foods = next.foods.map((c: any) => (typeof c === 'object' ? scaleItemNutrients(c, ratio) : c));
+  }
   return next;
 }
 

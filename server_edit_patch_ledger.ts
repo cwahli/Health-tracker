@@ -1011,10 +1011,12 @@ export function buildEditExpertDispatch(args: {
         skipped: true,
         skipReason: args.skipReason || 'explicit_skip',
         message: args.finalMessage,
+        clinicalAdvice: args.finalMessage,
       }
     : {
         skipped: false,
         message: args.finalMessage,
+        clinicalAdvice: args.finalMessage,
         // Contract parity with create: one emission must carry BOTH the
         // verdict label/level and the advice text, or the debug export law
         // "Agent output: verdict + advice" fails on every weight-only edit

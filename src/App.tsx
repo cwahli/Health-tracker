@@ -20,6 +20,7 @@ import { initSupabaseJobSync, hydrateUserJobs, upsertJobToSupabase } from './job
 import { ImageStore } from './jobs/ImageStore';
 import { refundCredits } from './jobs/credits';
 import { getProgressPercent, getStepCeiling } from './jobs/progress';
+import { getSessionLog } from './jobs/sessionLog';
 import FloatingActionSheet from './components/FloatingActionSheet';
 import { saveAgentRequestLog } from './utils/agentLogsTracker';
 import { translations } from './utils/translations';
@@ -798,6 +799,13 @@ export default function App() {
               let lastSubmitErr: any = null;
               for (let sAttempt = 1; sAttempt <= 3; sAttempt++) {
                 try {
+                  const w = typeof window !== 'undefined' ? (window as any) : {};
+                  const submitSessionEvents = getSessionLog(job.id).length > 0
+                    ? getSessionLog(job.id)
+                    : (job.sessionEvents || latestForSubmit.sessionEvents || undefined);
+                  const submitPriorLogs = latestForSubmit.backendLogs || job.backendLogs || (latestForSubmit as any).clean_result?.backendLogs || (job as any).clean_result?.backendLogs || undefined;
+                  const submitDispatches = latestForSubmit.dispatches || job.dispatches || (latestForSubmit as any).clean_result?.dispatches || (job as any).clean_result?.dispatches || undefined;
+
                   const res = await fetch('/api/jobs/submit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -811,6 +819,14 @@ export default function App() {
                       history: job.messages || [],
                       userProfile: profileRef.current,
                       isRetry: isRetryAttempt,
+                      attempt: effectiveAttempt,
+                      sessionEvents: submitSessionEvents,
+                      clientConsoleLogs: w.__clientConsoleLogs || [],
+                      networkErrors: w.__clientNetworkErrors || [],
+                      userActionBreadcrumbs: w.__userActionBreadcrumbs || [],
+                      lastUserAction: w.__lastUserAction || null,
+                      priorLogs: submitPriorLogs,
+                      dispatches: submitDispatches,
                       ...job.inputSnapshot
                     })
                   });

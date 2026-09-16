@@ -443,7 +443,18 @@ export function composeAcceptDefaultsParsed(args: {
     });
     const verdict = decideScoutVerdict({ scoutVerdict: null, totals, mealName, language: lang });
     const clinicalAdvice = decideScoutAdvice({ rawAdvice: '', totals, mealName, language: lang });
-    const message = weighed.length > 0 ? `${mealName}: ${weighed.join('; ')}. ${clinicalAdvice}` : String(clinicalAdvice || '');
+    let messagePrefix = '';
+    if (weighed.length === 1) {
+      const single = weighed[0];
+      if (single.toLowerCase().startsWith(mealName.toLowerCase())) {
+        messagePrefix = `${single}. `;
+      } else {
+        messagePrefix = `${mealName}: ${single}. `;
+      }
+    } else if (weighed.length > 1) {
+      messagePrefix = `${mealName}: ${weighed.join('; ')}. `;
+    }
+    const message = messagePrefix ? `${messagePrefix}${clinicalAdvice}` : String(clinicalAdvice || '');
     return {
       mode: undefined, message, verdict, clinicalAdvice,
       _internalReasoning: '[Accept] portion choices within 30% of estimates; no agent call.',

@@ -463,6 +463,18 @@ jobsRouter.all('/api/jobs/debug', async (req, res) => {
       debugPayload.backendLogs = job.accumulatedLogs.join('\n');
     }
 
+    const clientProvidedLogs = typeof req.body?.backendLogs === 'string'
+      ? req.body.backendLogs
+      : (typeof req.body?.priorLogs === 'string' ? req.body.priorLogs : '');
+
+    if (clientProvidedLogs) {
+      if (!debugPayload.backendLogs || String(debugPayload.backendLogs).startsWith('[Logs stored in R2')) {
+        debugPayload.backendLogs = clientProvidedLogs;
+      } else if (!debugPayload.backendLogs.includes(clientProvidedLogs.slice(0, 80))) {
+        debugPayload.backendLogs = `${clientProvidedLogs}\n\n--- SERVER EXECUTION LOGS ---\n${debugPayload.backendLogs}`;
+      }
+    }
+
     let memJobForMerge: any = null;
     try {
       const { getInMemoryServerJob: getMem } = await import('./serverJobs.js');
@@ -548,6 +560,14 @@ jobsRouter.all('/api/jobs/debug', async (req, res) => {
     const { buildCanonicalRunTree } = await import('./src/utils/debugRunTree.js');
     const safePayload = stripHeavyImages(debugPayload);
 
+    const effectivePreviousAttempts = (Array.isArray(req.body?.previousAttempts) && req.body.previousAttempts.length > 0)
+      ? req.body.previousAttempts
+      : ((memJobForMerge as any)?.previousAttempts
+        || (memJobForMerge as any)?.clean_result?.previousAttempts
+        || debugPayload.previousAttempts
+        || debugPayload.result?.previousAttempts
+        || []);
+
     const reportInput = {
       jobId: cleanJobId,
       status: safePayload.status || (job as any)?.status || 'unknown',
@@ -586,6 +606,7 @@ jobsRouter.all('/api/jobs/debug', async (req, res) => {
       agentInstructions: safePayload.result?.agentInstructions || safePayload.agentInstructions,
       dialogInventory: effectiveDialogInventory,
       dispatches: effectiveDispatches,
+      previousAttempts: effectivePreviousAttempts,
     };
 
     if (format === 'markdown' || format === 'md') {

@@ -366,7 +366,12 @@ export function initSupabaseJobSync(userId?: string): () => void {
         return;
       }
       if (j.status === 'running' || j.status === 'pending') {
-        const startedAt = new Date(j.createdAt || j.updatedAt || now).getTime();
+        const startedAt = Math.max(
+          typeof j.serverSubmittedAt === 'number' ? j.serverSubmittedAt : new Date(j.serverSubmittedAt || 0).getTime(),
+          typeof j.inFlightTurnAt === 'number' ? j.inFlightTurnAt : 0,
+          new Date(j.updatedAt || 0).getTime(),
+          new Date(j.createdAt || now).getTime()
+        );
         if (now - startedAt > 10 * 60 * 1000) {
           JobStore.apply({ type: 'AnalyzeFailed', id: j.id, error: 'timeout' });
         } else {

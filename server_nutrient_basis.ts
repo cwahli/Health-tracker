@@ -45,15 +45,28 @@ export function inferBasisFromServingText(
     return { basisType: 'per_serving', servingGrams: g };
   }
 
+  const multiServingMatch = rawLower.match(/^(\d+(?:[.,]\d+)?)\s*(?:sajian|porsi|servings?|portions?|kemasan)/i) ||
+                            rawLower.match(/(\d+(?:[.,]\d+)?)\s*(?:sajian|porsi|servings?|portions?)\s*per\s*kemasan/i);
+  if (multiServingMatch && estimatedWeightGrams && estimatedWeightGrams > 0) {
+    const count = parseFloat(multiServingMatch[1].replace(',', '.'));
+    if (count > 1 && count <= 25) {
+      const servingGrams = Math.round(estimatedWeightGrams / count);
+      return { basisType: 'per_serving', servingGrams };
+    }
+  }
+
   if (/\b(pack|dish|bowl|portion|container|pot|slice|pie|item|serving|bar|can|bottle|pcs?|porsi|sajian|saji|pieces?|units?|buah)\b/i.test(rawLower)) {
     const fallbackGrams = estimatedWeightGrams && estimatedWeightGrams > 0 ? estimatedWeightGrams : null;
     return { basisType: 'per_dish', servingGrams: fallbackGrams };
   }
 
-  // Bare small integer ("1") is a serving count, not 1 gram. WRONG_BASIS otherwise.
-  if (/^\d+(?:\.\d+)?$/.test(rawLower)) {
-    const n = parseFloat(rawLower);
+  // Bare small number ("1", "2.5") is a serving count, not 1 gram. WRONG_BASIS otherwise.
+  if (/^\d+(?:[.,]\d+)?$/.test(rawLower)) {
+    const n = parseFloat(rawLower.replace(',', '.'));
     if (n >= 1 && n <= 12) {
+      if (n > 1 && estimatedWeightGrams && estimatedWeightGrams > 0) {
+        return { basisType: 'per_serving', servingGrams: Math.round(estimatedWeightGrams / n) };
+      }
       const fallbackGrams = estimatedWeightGrams && estimatedWeightGrams > 0 ? estimatedWeightGrams : null;
       return { basisType: 'per_dish', servingGrams: fallbackGrams };
     }

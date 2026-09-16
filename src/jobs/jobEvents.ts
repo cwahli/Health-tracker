@@ -69,9 +69,18 @@ export function eventToPatch(event: JobEvent): Partial<AgentJob> {
   if (event.requestId !== undefined) patch.requestId = event.requestId;
   if ('serverSubmittedAt' in event) patch.serverSubmittedAt = event.serverSubmittedAt as any;
   if (event.checkpoint !== undefined) (patch as any).checkpoint = event.checkpoint;
+  if ('backendLogs' in event && (event as any).backendLogs !== undefined) (patch as any).backendLogs = (event as any).backendLogs;
+  if ('dispatches' in event && (event as any).dispatches !== undefined) (patch as any).dispatches = (event as any).dispatches;
+  if ('previousAttempts' in event && (event as any).previousAttempts !== undefined) (patch as any).previousAttempts = (event as any).previousAttempts;
 
   if (event.type === 'SubmitStarted' && patch.status === undefined) {
     patch.status = 'queued';
+  }
+  if (event.type === 'AnalyzeFailed' && patch.status === undefined) {
+    patch.status = 'failed';
+  }
+  if (event.type === 'AnalyzeFinished' && patch.status === undefined) {
+    patch.status = 'succeeded';
   }
 
   return patch;

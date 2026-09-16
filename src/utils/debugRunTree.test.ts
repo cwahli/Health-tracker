@@ -727,3 +727,111 @@ describe('extractPortionAdjustment', () => {
     expect(adj?.agentCalled).toBe(false);
   });
 });
+
+describe('retry sessions & stalled stream dispatches', () => {
+  it('extracts stalled Vision Scout and fallback dispatches from logs with 90s latency and respective models', () => {
+    const logs = [
+      '[UnifiedLLM] Calling gemini-3.5-flash-lite',
+      '[UnifiedLLM-Prompt:scout] System Instruction:',
+      'You are Vision Scout.',
+      '[UnifiedLLM-Prompt:scout] User Prompt:',
+      'Analyze this meal photo.',
+      '[error] Stream stalled: Vision Scout (gemini-3.5-flash-lite) produced no tokens for 90s. Aborting.',
+      'Switch to gemini-3.1-flash-lite after error: Stream stalled',
+      '[UnifiedLLM] Calling gemini-3.1-flash-lite',
+      '[error] Stream stalled: Vision Scout (gemini-3.1-flash-lite) produced no tokens for 90s. Aborting.',
+    ].join('\n');
+
+    const d = extractDispatches({
+      jobId: 'job_stall_test',
+      status: 'failed',
+      backendLogs: logs,
+      photoUrl: 'https://example.com/meal.jpg',
+    });
+
+    expect(d).toHaveLength(2);
+    expect(d[0].id).toBe('t1/scout');
+    expect(d[0].model).toBe('gemini-3.5-flash-lite');
+    expect(d[0].latency_ms).toBe(90000);
+    expect(d[0].error).toContain('Stream stalled: Vision Scout (gemini-3.5-flash-lite)');
+
+    expect(d[1].id).toBe('t1/scout-fallback');
+    expect(d[1].model).toBe('gemini-3.1-flash-lite');
+    expect(d[1].latency_ms).toBe(90000);
+    expect(d[1].error).toContain('Stream stalled: Vision Scout (gemini-3.1-flash-lite)');
+    expect(d[1].received?.fallbackFrom).toBe('t1/scout');
+  });
+
+  it('extracts multi-turn dispatches from continuation session logs', () => {
+    const logs = [
+      '[UnifiedLLM-Prompt:scout] System Instruction:',
+      'You are Vision Scout.',
+      '[UnifiedLLM-Prompt:scout] User Prompt:',
+      'Analyze this meal photo.',
+      '[Vision Scout] done in 2100ms',
+      '',
+      '--- RETRY / CONTINUATION (TURN 2) ---',
+      '',
+      '[UnifiedLLM-Prompt:scout] System Instruction:',
+      'You are Vision Scout.',
+      '[UnifiedLLM-Prompt:scout] User Prompt:',
+      'User modification instruction: "The tea is unsweetened"',
+      '[Vision Scout] done in 1800ms',
+    ].join('\n');
+
+    const d = extractDispatches({
+      jobId: 'job_cont_test',
+      status: 'succeeded',
+      backendLogs: logs,
+      photoUrl: 'https://example.com/meal.jpg',
+    });
+
+    expect(d.length).toBeGreaterThanOrEqual(2);
+    expect(d[0].id).toBe('t1/scout');
+    expect(d[0].turn).toBe(1);
+    expect(d[0].user).toBe('Analyze this meal photo.');
+
+    expect(d[1].id).toBe('t2/scout');
+    expect(d[1].turn).toBe(2);
+    expect(d[1].user).toBe('The tea is unsweetened');
+  });
+
+  it('merges prior attempt dispatches into tree dispatches when previousAttempts is provided', () => {
+    const input = {
+      jobId: 'job_prev_attempts_merge',
+      status: 'succeeded',
+      backendLogs: '[Vision Scout] done in 1200ms',
+      previousAttempts: [
+        {
+          turn: 1,
+          status: 'failed',
+          dispatches: [
+            {
+              id: 't1/scout',
+              agent: 'scout',
+              turn: 1,
+              model: 'gemini-3.5-flash-lite',
+              latency_ms: 90000,
+              error: 'Stream stalled',
+            },
+          ],
+        },
+      ],
+      dispatches: [
+        {
+          id: 't2/scout',
+          agent: 'scout',
+          turn: 2,
+          model: 'gemini-3.5-flash-lite',
+          latency_ms: 2500,
+        },
+      ],
+    };
+
+    const tree = buildCanonicalRunTree(input);
+    expect(tree.previousAttempts).toHaveLength(1);
+    expect(tree.dispatches.some(d => d.id === 't1/scout')).toBe(true);
+    expect(tree.dispatches.some(d => d.id === 't2/scout')).toBe(true);
+  });
+});
+

@@ -794,4 +794,87 @@ describe("server_dish_finalize", () => {
     expect(ledger.nutrients.calories).toBe(90);
     expect(ledger.nutrients.totalFat).toBe(25);
   });
+
+  it('finalizes a 65g almond pack at ~433 kcal (not 5199 kcal) when serving size is 27g and 2.5 servings per pack', async () => {
+    // 1) Labeled serving size 27g with 65g net weight consumed (2.4x)
+    const ledger = await finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        originalName: 'Indomaret Kacang Almond',
+        keyword: 'almonds',
+        estimatedWeightGrams: 65,
+        rawNutritionLabel: {
+          servingSize: '27g',
+          servingsPerContainer: 2.4,
+          calories: 180,
+          protein: '8g',
+          totalFat: '15g',
+          carbohydrates: '4g',
+          seratPangan: '3g',
+        },
+      },
+      nutrientBasisWeight: 65,
+      consumedWeight: 65,
+    });
+
+    expect(ledger.dbSource).toBe('label');
+    expect(ledger.nutrients.calories).toBeGreaterThanOrEqual(400);
+    expect(ledger.nutrients.calories).toBeLessThanOrEqual(450);
+    expect(ledger.nutrients.protein).toBeGreaterThanOrEqual(18);
+    expect(ledger.nutrients.protein).toBeLessThanOrEqual(21);
+    expect(ledger.nutrients.totalFibre).toBeGreaterThanOrEqual(6);
+    expect(ledger.nutrients.totalFibre).toBeLessThanOrEqual(8);
+  });
+
+  it('does not explode to 5199 kcal when serving count 2.25 or "2.5 sajian" is passed as servingSize / servingGrams', async () => {
+    // 2) Case where servingSize is "2.5 sajian"
+    const ledgerSajian = await finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        originalName: 'Indomaret Kacang Almond',
+        keyword: 'almonds',
+        estimatedWeightGrams: 65,
+        rawNutritionLabel: {
+          servingSize: '2.5 sajian',
+          calories: '180',
+          protein: '8g',
+          totalFat: '15g',
+          carbohydrates: '4g',
+          seratPangan: '3g',
+        },
+      },
+      nutrientBasisWeight: 65,
+      consumedWeight: 65,
+    });
+
+    expect(ledgerSajian.nutrients.calories).toBeGreaterThanOrEqual(400);
+    expect(ledgerSajian.nutrients.calories).toBeLessThanOrEqual(460);
+    expect(ledgerSajian.nutrients.protein).toBeLessThanOrEqual(22);
+    expect(ledgerSajian.nutrients.totalFibre).toBeLessThanOrEqual(10);
+
+    // 3) Case where raw servingGrams is 2.25 (the exact math that previously produced 5199 kcal)
+    const ledgerCountGrams = await finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        originalName: 'Indomaret Kacang Almond',
+        keyword: 'almonds',
+        estimatedWeightGrams: 65,
+        rawNutritionLabel: {
+          servingGrams: 2.25,
+          calories: 180,
+          protein: 8,
+          totalFat: 15,
+          carbohydrates: 4,
+          totalFibre: 3,
+        },
+      },
+      nutrientBasisWeight: 65,
+      consumedWeight: 65,
+    });
+
+    expect(ledgerCountGrams.nutrients.calories).toBeGreaterThanOrEqual(400);
+    expect(ledgerCountGrams.nutrients.calories).toBeLessThanOrEqual(450);
+    expect(ledgerCountGrams.nutrients.protein).toBeLessThanOrEqual(21);
+    expect(ledgerCountGrams.nutrients.totalFibre).toBeLessThanOrEqual(8);
+  });
 });
