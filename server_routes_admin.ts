@@ -5,6 +5,7 @@ import { supabaseAdmin } from './supabaseAdmin.js';
 import { pushTranslationsToSheets, pullTranslationsFromSheets } from './server_translations.js';
 import { getCatalogSyncStatus, mergeFoodCatalogItems, quarantineAtwaterFailures } from './server_food_catalog.js';
 import { selfCleanBrandDatabase } from './serverBrandMenu.js';
+import { getS3Client, CLOUDFLARE_R2_BUCKET_NAME, CLOUDFLARE_R2_PUBLIC_URL } from './server_routes_r2.js';
 
 export const adminRouter = Router();
 
@@ -365,5 +366,176 @@ adminRouter.get('/api/admin/food-catalog/metrics', async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// R2 orphaned photo audit + delete
+//
+// Every food-photo upload path in the app (job submission, sync push,
+// edit-mode re-upload) writes to R2 under photos/{id}.jpg but nothing ever
+// deletes the object when a meal is deleted, a job fails, or a photo is
+// replaced during edit/re-analysis. This surfaces what's actually orphaned
+// so it can be reviewed and cleaned up deliberately, rather than guessed at.
+//
+// "Referenced" (kept) means the photo's public URL appears in EITHER:
+//   - a food log's image_urls (Supabase, all users, current data)
+//   - a job's photo_url (Cloudflare D1 agent_jobs table, any status)
+// A job's own photo_url covers "linked to a debug file" in practice, since
+// every job record IS the durable record a debug export is built from -
+// we don't additionally parse the contents of debug/*.json blobs in R2 for
+// this pass (would mean fetching and parsing every debug payload on every
+// audit run); if that turns out to miss real cases, it's worth adding.
+// ---------------------------------------------------------------------------
+
+async function listAllR2PhotoKeys(): Promise<Array<{ key: string; size: number; lastModified: string | null }>> {
+  const client = getS3Client();
+  if (!client) return [];
+  const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+  const out: Array<{ key: string; size: number; lastModified: string | null }> = [];
+  let continuationToken: string | undefined;
+  do {
+    const page: any = await client.send(new ListObjectsV2Command({
+      Bucket: CLOUDFLARE_R2_BUCKET_NAME,
+      Prefix: 'photos/',
+      ContinuationToken: continuationToken,
+    }));
+    for (const obj of (page.Contents || [])) {
+      if (!obj.Key) continue;
+      out.push({
+        key: obj.Key,
+        size: obj.Size || 0,
+        lastModified: obj.LastModified ? new Date(obj.LastModified).toISOString() : null,
+      });
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return out;
+}
+
+function extractR2KeyFromUrl(url: string): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const idx = url.indexOf('/photos/');
+  if (idx === -1) return null;
+  return url.slice(idx + 1); // "photos/xxx.jpg"
+}
+
+async function getReferencedPhotoKeys(): Promise<Set<string>> {
+  const referenced = new Set<string>();
+
+  // Food logs across every user - image_urls is a JSON array column.
+  try {
+    const { data: rows } = await supabaseAdmin.from('food_logs').select('image_urls').limit(5000);
+    for (const row of (rows || [])) {
+      let urls: any = row.image_urls;
+      if (typeof urls === 'string') {
+        try { urls = JSON.parse(urls); } catch { urls = []; }
+      }
+      if (Array.isArray(urls)) {
+        for (const u of urls) {
+          const key = extractR2KeyFromUrl(u);
+          if (key) referenced.add(key);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[r2-photo-audit] Supabase food_logs lookup failed:', err);
+  }
+
+  // Every job record, any status - a job's photo_url is the durable link a
+  // debug export is built from, so this is also the "linked to a debug
+  // file" check.
+  try {
+    const { d1ListJobs } = await import('./server_db_d1.js');
+    const jobs = await d1ListJobs({ isFull: true, limit: 5000 });
+    for (const job of jobs) {
+      const key = extractR2KeyFromUrl(job.photo_url);
+      if (key) referenced.add(key);
+    }
+  } catch (err) {
+    console.warn('[r2-photo-audit] D1 jobs lookup failed:', err);
+  }
+
+  return referenced;
+}
+
+// GET - report mode only. Never deletes anything.
+adminRouter.get('/api/admin/r2-photo-audit', async (req, res) => {
+  try {
+    const adminEmail = await requireAdmin(req, res);
+    if (!adminEmail) return;
+
+    const client = getS3Client();
+    if (!client) {
+      return res.status(503).json({ success: false, error: 'R2 not configured on this server' });
+    }
+
+    const [allKeys, referenced] = await Promise.all([
+      listAllR2PhotoKeys(),
+      getReferencedPhotoKeys(),
+    ]);
+
+    const orphans = allKeys.filter(o => !referenced.has(o.key));
+    const totalOrphanBytes = orphans.reduce((sum, o) => sum + (o.size || 0), 0);
+
+    res.json({
+      success: true,
+      totalPhotos: allKeys.length,
+      referencedCount: referenced.size,
+      orphanCount: orphans.length,
+      totalOrphanBytes,
+      orphans: orphans
+        .sort((a, b) => (b.lastModified || '').localeCompare(a.lastModified || ''))
+        .map(o => ({ key: o.key, size: o.size, lastModified: o.lastModified, publicUrl: `${CLOUDFLARE_R2_PUBLIC_URL}/${o.key}` })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
+});
+
+// POST - actually deletes. Re-verifies each key is still an orphan right
+// before deleting (defends against a meal being created between the report
+// and this call), and reports per-key success/failure.
+adminRouter.post('/api/admin/r2-photo-delete', async (req, res) => {
+  try {
+    const adminEmail = await requireAdmin(req, res);
+    if (!adminEmail) return;
+
+    const keys: string[] = Array.isArray(req.body?.keys) ? req.body.keys : [];
+    if (keys.length === 0) {
+      return res.status(400).json({ success: false, error: 'No keys provided' });
+    }
+    // Safety: only ever allow deleting objects under photos/, never anything
+    // else in the bucket, no matter what the caller sends.
+    const safeKeys = keys.filter(k => typeof k === 'string' && k.startsWith('photos/'));
+
+    const client = getS3Client();
+    if (!client) {
+      return res.status(503).json({ success: false, error: 'R2 not configured on this server' });
+    }
+
+    const referenced = await getReferencedPhotoKeys();
+    const { DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+
+    const results = await Promise.all(safeKeys.map(async (key) => {
+      if (referenced.has(key)) {
+        return { key, deleted: false, reason: 'no_longer_orphaned' };
+      }
+      try {
+        await client.send(new DeleteObjectCommand({ Bucket: CLOUDFLARE_R2_BUCKET_NAME, Key: key }));
+        return { key, deleted: true };
+      } catch (err: any) {
+        return { key, deleted: false, reason: err?.message || String(err) };
+      }
+    }));
+
+    res.json({
+      success: true,
+      deletedCount: results.filter(r => r.deleted).length,
+      skippedCount: results.filter(r => !r.deleted).length,
+      results,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
   }
 });

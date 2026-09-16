@@ -28,7 +28,8 @@ const AllAnalysesModal = lazyWithRetry(() => import('./AllAnalysesModal').then(m
 const UserManagementTab = lazyWithRetry(() => import('./UserManagementTab'));
 const BackupRestoreTab = lazyWithRetry(() => import('./BackupRestoreTab'));
 const FoodCatalogAdminTab = lazyWithRetry(() => import('./FoodCatalogAdminTab').then(m => ({ default: m.FoodCatalogAdminTab })));
-import { Activity, Stethoscope, X, ChevronRight, Database, Bug, Loader } from 'lucide-react';
+const PhotoStorageAdminTab = lazyWithRetry(() => import('./PhotoStorageAdminTab').then(m => ({ default: m.PhotoStorageAdminTab })));
+import { Activity, Stethoscope, X, ChevronRight, Database, Bug, Loader, Image as ImageIcon } from 'lucide-react';
 import { JobStore, isJobBlank } from '../jobs/JobStore';
 import { compressImage } from '../utils/imageCompressor';
 import { checkQuotaFlag } from '../utils/firestoreUtils';
@@ -386,7 +387,7 @@ export default function Header({
     if (saved) return saved as 'admin' | 'user';
     return 'admin';
   });
-  const [activeAdminTab, setActiveAdminTab] = useState<'sync' | 'users' | 'backup' | 'catalog'>('sync');
+  const [activeAdminTab, setActiveAdminTab] = useState<'sync' | 'users' | 'backup' | 'catalog' | 'storage'>('sync');
   const [showAgentLogs, setShowAgentLogs] = useState(false);
   const [showApiTracker, setShowApiTracker] = useState(false);
   const [showNutritionDataBrowser, setShowNutritionDataBrowser] = useState(false);
@@ -3284,6 +3285,18 @@ export default function Header({
                     <Database className="w-4 h-4 text-orange-500" />
                     Food & Venues Catalog
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveAdminTab('storage')}
+                    className={`pb-3 text-xs font-bold transition-all border-b-2 relative cursor-pointer flex items-center gap-1.5 ${
+                      activeAdminTab === 'storage'
+                        ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                        : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    <ImageIcon className="w-4 h-4 text-purple-500" />
+                    Photo Storage
+                  </button>
                 </div>
               )}
 
@@ -3291,6 +3304,12 @@ export default function Header({
                 <div className="max-h-[75vh] overflow-y-auto p-4">
                   <React.Suspense fallback={<div className="p-4 flex items-center justify-center"><Loader className="w-5 h-5 animate-spin text-slate-400" /></div>}>
                     <FoodCatalogAdminTab />
+                  </React.Suspense>
+                </div>
+              ) : dbOverlayViewMode === 'admin' && activeAdminTab === 'storage' ? (
+                <div className="max-h-[75vh] overflow-y-auto p-4">
+                  <React.Suspense fallback={<div className="p-4 flex items-center justify-center"><Loader className="w-5 h-5 animate-spin text-slate-400" /></div>}>
+                    <PhotoStorageAdminTab />
                   </React.Suspense>
                 </div>
               ) : dbOverlayViewMode === 'admin' && activeAdminTab === 'users' ? (
