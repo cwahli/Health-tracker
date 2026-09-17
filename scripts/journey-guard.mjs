@@ -55,7 +55,9 @@ function isUiPath(f) {
     f.startsWith('src/components/') ||
     f === 'src/App.tsx' ||
     f === 'src/main.tsx' ||
-    f.startsWith('src/utils/translations.ts') ||
+    // Q-11.8: the i18n packs now live in src/utils/translations/<lang>.ts behind the thin
+    // aggregator; both the aggregator and the packs stay classified as UI copy.
+    f.startsWith('src/utils/translations') ||
     f.startsWith('src/index.css')
   );
 }

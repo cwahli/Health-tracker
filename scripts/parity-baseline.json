@@ -1,6 +1,6 @@
 {
   "note": "Q-11 parity baseline. Regenerated only with --update; falling metrics are a regression.",
-  "capturedFromCommit": "dc19a18",
+  "capturedFromCommit": "818808f",
   "types": {
     "lines": 558,
     "declarations": 30,
@@ -10,6 +10,11 @@
   "appLines": 8803,
   "ceilings": {
     "src/App.tsx": 8810,
+    "src/utils/translations.ts": 40,
+    "src/utils/translations/en.ts": 2010,
+    "src/utils/translations/id.ts": 2010,
+    "src/utils/translations/fr.ts": 20,
+    "src/utils/translations/zh.ts": 20,
     "src/components/BiomarkerDictionaryModal.tsx": 6640,
     "src/components/chat-cards/FoodCard.tsx": 4200,
     "src/components/HomeTab.tsx": 3200,
@@ -25,7 +30,6 @@
     "src/components/LogChat.tsx": 7011,
     "src/components/BiomarkerDictionaryModal.tsx": 6229,
     "src/utils/biomarkers.ts": 4204,
-    "src/utils/translations.ts": 4009,
     "src/components/Header.tsx": 3937,
     "src/components/chat-cards/FoodCard.tsx": 3338,
     "src/components/InsightsTab.tsx": 3090,
@@ -34,6 +38,8 @@
     "src/components/FoodHistoryTab.tsx": 2295,
     "src/components/BugTrackerModal.tsx": 2256,
     "src/components/BugSnapshotFab.tsx": 2179,
+    "src/utils/translations/en.ts": 1998,
+    "src/utils/translations/id.ts": 1998,
     "src/components/FullScreenLogViewer.tsx": 1899,
     "src/components/BiomarkerAuditModal.tsx": 1888,
     "src/utils/biomarkerLifecycle.ts": 1773,

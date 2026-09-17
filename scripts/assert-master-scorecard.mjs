@@ -26,6 +26,23 @@ const REQUIRED_CHROME_PATH = path.join(INSTRUCTION, 'i18n/REQUIRED_CHROME.json')
 const FORBIDDEN_CHROME_PATH = path.join(INSTRUCTION, 'i18n/FORBIDDEN_EN_CHROME.json');
 const STRUCTURE_PATH = path.join(INSTRUCTION, 'inventories/structure.json');
 const TRANSLATIONS_PATH = path.join(root, 'src/utils/translations.ts');
+const TRANSLATIONS_DIR = path.join(root, 'src/utils/translations');
+
+/**
+ * Q-11.8 split the dictionary into `src/utils/translations/<lang>.ts` behind a thin
+ * aggregator, so the locale packs are read from the module set. The concatenated text keeps
+ * the `en: { … }` block shape `extractPack` expects.
+ */
+function readTranslationSource() {
+  const parts = [];
+  if (fs.existsSync(TRANSLATIONS_PATH)) parts.push(fs.readFileSync(TRANSLATIONS_PATH, 'utf8'));
+  if (fs.existsSync(TRANSLATIONS_DIR)) {
+    for (const f of fs.readdirSync(TRANSLATIONS_DIR).filter((n) => n.endsWith('.ts')).sort()) {
+      parts.push(fs.readFileSync(path.join(TRANSLATIONS_DIR, f), 'utf8'));
+    }
+  }
+  return parts.join('\n');
+}
 
 const gates = JSON.parse(fs.readFileSync(GATES_PATH, 'utf8'));
 const AREAS = gates.areas;
@@ -194,7 +211,8 @@ function humanizeKey(key) {
 }
 
 function extractPack(src, locale) {
-  const re = new RegExp(`\\b${locale}:\\s*\\{`);
+  // Accepts both the pre-split `en: {` shape and the per-language `export const en = {` shape.
+  const re = new RegExp(`\\b${locale}\\s*(?::|=)\\s*\\{`);
   const m = re.exec(src);
   if (!m) return {};
   let depth = 1;
@@ -255,7 +273,7 @@ function i18nRows() {
   const rows = [];
   const required = JSON.parse(fs.readFileSync(REQUIRED_CHROME_PATH, 'utf8'));
   const forbidden = JSON.parse(fs.readFileSync(FORBIDDEN_CHROME_PATH, 'utf8'));
-  const src = fs.existsSync(TRANSLATIONS_PATH) ? fs.readFileSync(TRANSLATIONS_PATH, 'utf8') : '';
+  const src = readTranslationSource();
   const en = extractPack(src, 'en');
   const id = extractPack(src, 'id');
   const loan = new Set(required.loanwords_id_may_equal_en || []);

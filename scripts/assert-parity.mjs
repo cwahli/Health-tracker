@@ -75,7 +75,19 @@ function measure() {
   const anyAliases = [
     ...typesSrc.matchAll(/^export\s+(?:type|interface)\s+(\w+)[^\n]*?=\s*any\s*;?/gm),
   ].map((m) => m[1]);
-  const i18nKeys = (read('src/utils/translations.ts').match(/^\s+"[A-Za-z0-9_]+":/gm) || []).length;
+  // Q-11.8 moved the dictionaries into src/utils/translations/<lang>.ts and left a thin
+  // aggregator behind, so the count follows the module set instead of one path. Keys are
+  // declared as `"key":` in both shapes (`en: {` and `export const en = {`), so only the
+  // number of surviving keys matters — the baseline still only moves down by hand.
+  const i18nSources = [
+    'src/utils/translations.ts',
+    ...(fs.existsSync(path.join(root, 'src/utils/translations'))
+      ? walkSrc('src/utils/translations').filter((f) => /\.ts$/.test(f))
+      : []),
+  ];
+  const i18nKeys = i18nSources
+    .filter((f) => fs.existsSync(path.join(root, f)))
+    .reduce((n, f) => n + (read(f).match(/^\s+"[A-Za-z0-9_]+":/gm) || []).length, 0);
   const catalog = JSON.parse(read('src/components/CATALOG.json'));
   const tsNoCheckFiles = walkSrc().filter((f) => read(f).includes('@ts-nocheck'));
 

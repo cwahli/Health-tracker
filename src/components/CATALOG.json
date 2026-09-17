@@ -20,6 +20,11 @@
   },
   "ceilings": {
     "src/App.tsx": 8810,
+    "src/utils/translations.ts": 40,
+    "src/utils/translations/en.ts": 2010,
+    "src/utils/translations/id.ts": 2010,
+    "src/utils/translations/fr.ts": 20,
+    "src/utils/translations/zh.ts": 20,
     "src/components/BiomarkerDictionaryModal.tsx": 6640,
     "src/components/chat-cards/FoodCard.tsx": 4200,
     "src/components/HomeTab.tsx": 3200,
