@@ -14,6 +14,7 @@ import ConflictResolutionModal from './components/ConflictResolutionModal';
 const LogChat = lazyWithRetry(() => import('./components/LogChat'));
 import { JobStore } from './jobs/JobStore';
 import { useAuthSession } from './hooks/useAuthSession';
+import { useAppProfile, type ProfileDbChangeChecker } from './hooks/useAppProfile';
 import { useJobRuntime } from './hooks/useJobRuntime';
 import { initSupabaseJobSync, hydrateUserJobs, upsertJobToSupabase } from './jobs/SupabaseJobSync';
 import { getProgressPercent, getStepCeiling } from './jobs/progress';
@@ -23,7 +24,6 @@ import { AVAILABLE_LLMS } from './utils/llm';
 import { PRIMARY_NUTRIENTS, isCoreNutrient, isAdditionalNutrient } from './utils/nutrients';
 import { getDynamicStyles } from './components/AppDynamicStyles';
 
-import type { DemoProfileType } from './utils/demoData';
 import { getAvailableCredits, deductAgentCredits } from './utils/creditManager';
 import { Plus, HeartHandshake, RefreshCw, Sparkles, Stethoscope, Utensils, Loader, CloudLightning, AlertTriangle, Activity, X } from 'lucide-react';
 import { auth, db } from './firebase';
@@ -37,7 +37,7 @@ import { mergeParallelAliasGroups } from './utils/biomarkerAuditEngine';
 import { extractFallbackModifications } from './components/chat-cards/BiomarkerReviewCard';
 import { formatOptimalTargetValue } from './utils/agentCalibration';
 import { standardizeUnit, CONVERSION_FACTORS } from './utils/unitConversion';
-import { get, set, pruneLocalStorageToFreeSpace, getStorageKey, getSnapshotKey, saveLocalSnapshot, loadLocalSnapshots, deleteLocalSnapshot, safeSaveToLocalStorage, getAggregatedAppData, clearChatMemoryKeys } from './utils/storageUtils';
+import { get, set, pruneLocalStorageToFreeSpace, getStorageKey, getSnapshotKey, saveLocalSnapshot, loadLocalSnapshots, deleteLocalSnapshot, safeSaveToLocalStorage, getAggregatedAppData } from './utils/storageUtils';
 import { maybeRecalibrateDemographicOverlays, pushPendingObservation, isDeepEqual, sanitizeProfile } from './utils/appProfileUtils';
 
 const FIRESTORE_READ_BUDGET = 3000; // generous for one real session; a runaway loop hits this fast
@@ -59,7 +59,6 @@ import { isUsableImageUrl, uniqueMealImageUrls } from "./utils/foodImageSources"
 import { sanitizeBiomarkerHistoryOnLoad } from "./utils/biomarkers";
 import { recalibrateProfileOverlays } from "./utils/biomarkerLifecycle";
 import type { SanitizeProposal } from "./utils/dataSanitize";
-import { purgeHallucinatedAndCorruptedData } from "./utils/dataSanitize";
 import { compressImage } from "./utils/imageCompressor";
 /** Cap bulk foodImages Firestore reads per sync (console showed 209 — free-tier death). Rest stay lazy. */
 const MAX_IMAGE_FETCH_PER_SYNC = 24;
@@ -92,7 +91,78 @@ export default function App() {
     }
   }, []);
 
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  // ── Q-11.4 ────────────────────────────────────────────────────────────────────────────────────
+  // Profile state, its localStorage persistence and the data loader now live in
+  // hooks/useAppProfile.ts. Everything the hook's save effect depends on has to be declared above
+  // the hook site (hoisting only — no behaviour change); handleFetchMoreFoods stays below it because
+  // its own dependency array already reads profile.
+  const [syncState, setSyncState] = useState<'synced' | 'syncing' | 'local' | 'conflict'>('local');
+  const [isInitialDataLoading, setIsInitialDataLoading] = useState<boolean>(true);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  // Core logs and targets states
+  const [foodLogs, setFoodLogsRaw] = useState<FoodLog[]>([]);
+  const [totalFoodsCount, setTotalFoodsCount] = useState<number | undefined>(undefined);
+  // B11: every write path collapses id + soft name/kcal/day duplicates (YOLK variants, retries)
+  const setFoodLogs = (val: FoodLog[] | ((prev: FoodLog[]) => FoodLog[])) => {
+    setFoodLogsRaw((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      if (!Array.isArray(next)) return prev;
+      return mergeFoodLogsDeduped(next, []);
+    });
+  };
+  const [biomarkers, setBiomarkers] = useState<{ [key: string]: number | string }>({});
+  const [biomarkerHistoryRaw, setBiomarkerHistoryRaw] = useState<BiomarkerLog[]>([]);
+  const setBiomarkerHistory = (val: BiomarkerLog[] | ((prev: BiomarkerLog[]) => BiomarkerLog[])) => {
+    const apply = (raw: BiomarkerLog[]) => {
+      const normalized = normalizeBiomarkerHistory(raw || []);
+      // Auto-fix unit-scale phantoms (195 mmol/L chol, 42.1 Hct, 14.5 Hb as g/L) and drop rest
+      const { history: cleaned, fixedCount } = sanitizeBiomarkerHistoryOnLoad(
+        normalized,
+        profileRef.current || profile
+      );
+      if (fixedCount > 0 && !(window as any).__biomarkerSanitizeLogged) {
+        (window as any).__biomarkerSanitizeLogged = true;
+        console.debug(`[BiomarkerSanitize] Flagged ${fixedCount} improbable unit-scale value(s) — not auto-rewritten`);
+      }
+      return cleaned as BiomarkerLog[];
+    };
+    if (typeof val === 'function') {
+      setBiomarkerHistoryRaw((prev) => apply(val(prev)));
+    } else {
+      setBiomarkerHistoryRaw(apply(val));
+    }
+  };
+  const biomarkerHistory = biomarkerHistoryRaw;
+  const [actions, setActions] = useState<HealthAction[]>([]);
+  const [dailyBenefits, setDailyBenefits] = useState<DailyBenefit[]>([]);
+  const [foodIdeas, setFoodIdeas] = useState<FoodIdea[]>([]);
+  const [report, setReport] = useState<RecommendationReport | null>(null);
+  const [draftReport, setDraftReport] = useState<RecommendationReport | null>(null);
+
+  // checkForDbChanges is declared ~1,900 lines below this hook, so the loader receives it through a
+  // ref the way the job runtime receives saveAndSync (Q-11.3b) instead of capturing a binding that
+  // does not exist yet at render time.
+  const checkForDbChangesRef = useRef<ProfileDbChangeChecker | null>(null);
+  const { profile, setProfile, loadUserData } = useAppProfile({
+    foodLogs,
+    biomarkers,
+    biomarkerHistory,
+    actions,
+    dailyBenefits,
+    foodIdeas,
+    report,
+    syncState,
+    setFoodLogs,
+    setBiomarkers,
+    setBiomarkerHistory,
+    setActions,
+    setDailyBenefits,
+    setReport,
+    setSyncState,
+    setIsInitialDataLoading,
+    setIsAuthChecking,
+    checkForDbChangesRef,
+  });
   const hasRunImageCompression = useRef(false);
   const [dismissedBmiAlerts, setDismissedBmiAlerts] = useState<{[key: string]: boolean}>(() => {
     try {
@@ -157,8 +227,6 @@ export default function App() {
     };
   }, []);
   const [initiallyExpandedFoodId, setInitiallyExpandedFoodId] = useState<string | null>(null);
-  const [syncState, setSyncState] = useState<'synced' | 'syncing' | 'local' | 'conflict'>('local');
-  const [isInitialDataLoading, setIsInitialDataLoading] = useState<boolean>(true);
   const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [conflictData, setConflictData] = useState<{
     localProfile: UserProfile;
@@ -477,17 +545,6 @@ export default function App() {
       })
     ]);
   };
-  // Core logs and targets states
-  const [foodLogs, setFoodLogsRaw] = useState<FoodLog[]>([]);
-  const [totalFoodsCount, setTotalFoodsCount] = useState<number | undefined>(undefined);
-  // B11: every write path collapses id + soft name/kcal/day duplicates (YOLK variants, retries)
-  const setFoodLogs = (val: FoodLog[] | ((prev: FoodLog[]) => FoodLog[])) => {
-    setFoodLogsRaw((prev) => {
-      const next = typeof val === 'function' ? val(prev) : val;
-      if (!Array.isArray(next)) return prev;
-      return mergeFoodLogsDeduped(next, []);
-    });
-  };
 
   const handleFetchMoreFoods = useCallback(async (page: number) => {
     const uid = auth.currentUser?.uid || profile?.uid;
@@ -501,34 +558,6 @@ export default function App() {
       setTotalFoodsCount(newTotal);
     }
   }, [profile?.uid, profile?.email]);
-  const [biomarkers, setBiomarkers] = useState<{ [key: string]: number | string }>({});
-  const [biomarkerHistoryRaw, setBiomarkerHistoryRaw] = useState<BiomarkerLog[]>([]);
-  const setBiomarkerHistory = (val: BiomarkerLog[] | ((prev: BiomarkerLog[]) => BiomarkerLog[])) => {
-    const apply = (raw: BiomarkerLog[]) => {
-      const normalized = normalizeBiomarkerHistory(raw || []);
-      // Auto-fix unit-scale phantoms (195 mmol/L chol, 42.1 Hct, 14.5 Hb as g/L) and drop rest
-      const { history: cleaned, fixedCount } = sanitizeBiomarkerHistoryOnLoad(
-        normalized,
-        profileRef.current || profile
-      );
-      if (fixedCount > 0 && !(window as any).__biomarkerSanitizeLogged) {
-        (window as any).__biomarkerSanitizeLogged = true;
-        console.debug(`[BiomarkerSanitize] Flagged ${fixedCount} improbable unit-scale value(s) — not auto-rewritten`);
-      }
-      return cleaned as BiomarkerLog[];
-    };
-    if (typeof val === 'function') {
-      setBiomarkerHistoryRaw((prev) => apply(val(prev)));
-    } else {
-      setBiomarkerHistoryRaw(apply(val));
-    }
-  };
-  const biomarkerHistory = biomarkerHistoryRaw;
-  const [actions, setActions] = useState<HealthAction[]>([]);
-  const [dailyBenefits, setDailyBenefits] = useState<DailyBenefit[]>([]);
-  const [foodIdeas, setFoodIdeas] = useState<FoodIdea[]>([]);
-  const [report, setReport] = useState<RecommendationReport | null>(null);
-  const [draftReport, setDraftReport] = useState<RecommendationReport | null>(null);
   // Chat window visibility modals
   const [activeFrontDeskJobId, setActiveFrontDeskJobId] = useState<string | null>(null);
   const [isMedicalChatOpen, setIsMedicalChatOpen] = useState(false);
@@ -622,7 +651,6 @@ export default function App() {
   const [activeHandoffPayload, setActiveHandoffPayload] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEditingFoodLog, setIsEditingFoodLog] = useState(false);
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   // Preload LogChat chunk in background after initial page paint so opening Front Desk or Agents is instant
   useEffect(() => {
@@ -2037,175 +2065,7 @@ export default function App() {
       setSyncState(s => (s === 'syncing' ? 'local' : s));
     }
   };
-  const loadUserData = async (uid: string, email: string, displayName?: string, photoURL?: string, chosenLanguage?: string) => {
-    const newEmail = email.toLowerCase().trim();
-    if (!newEmail) {
-      setIsAuthChecking(false);
-      return;
-    }
-    localStorage.setItem('last_active_email', newEmail);
-    const storageKey = getStorageKey(newEmail);
-    
-    const parsedLocal = await get(storageKey);
-    const cachedSignupNick = localStorage.getItem(`signup_nickname_${newEmail}`);
-    const resolvedNickname = (
-      displayName ||
-      cachedSignupNick ||
-      parsedLocal?.profile?.nickname ||
-      newEmail.split('@')[0] ||
-      'User'
-    ).trim();
-    
-    let loadedProfile: UserProfile | null = null;
-    let loadedFoods: FoodLog[] = [];
-    let loadedBiomarkers = {};
-    let loadedHistory: BiomarkerLog[] = [];
-    let loadedActions: HealthAction[] = [];
-    let loadedBenefits: DailyBenefit[] = [];
-    let loadedReport: RecommendationReport | null = null;
-
-    if (parsedLocal) {
-      loadedProfile = parsedLocal.profile || null;
-      const deletedFoodMap = loadedProfile?.deletedFoodLogIds || {};
-      const deletedBioMap = loadedProfile?.deletedBiomarkerLogIds || {};
-      loadedFoods = (parsedLocal.foodLogs || []).filter((f: any) => f.sync_state !== 'delete' && !deletedFoodMap[f.id]);
-      loadedHistory = (parsedLocal.biomarkerHistory || []).filter((b: any) => b.sync_state !== 'delete' && !deletedBioMap[b.id]);
-      loadedBiomarkers = parsedLocal.biomarkers || {};
-      loadedActions = parsedLocal.actions || [];
-      loadedBenefits = parsedLocal.dailyBenefits || [];
-      loadedReport = parsedLocal.report || null;
-
-      const purged = purgeHallucinatedAndCorruptedData(loadedHistory, loadedBiomarkers, loadedProfile);
-      if (purged.purgedCount > 0) {
-        loadedHistory = purged.biomarkerHistory;
-        loadedBiomarkers = purged.biomarkers;
-        if (loadedProfile) {
-          loadedProfile = {
-            ...loadedProfile,
-            deletedBiomarkerLogIds: {
-              ...(loadedProfile.deletedBiomarkerLogIds || {}),
-              ...(purged.profileUpdates.deletedBiomarkerLogIds || {})
-            }
-          };
-        }
-      }
-    }
-
-    const isDemoUser = newEmail === 'demo@healthcockpit.com';
-    const demoType = (localStorage.getItem('demo_profile_type') || 'average') as DemoProfileType;
-    // Explicit "Initial Start (Empty)" demo login always reseeds empty, even when
-    // stale cached state exists for the shared demo account. One-shot flag set by
-    // AuthScreen.handleDemoLogin and consumed here.
-    const freshEmptyDemoLogin = isDemoUser && demoType === 'empty' && localStorage.getItem('demo_fresh_login') === '1';
-    if (freshEmptyDemoLogin) {
-      localStorage.removeItem('demo_fresh_login');
-    }
-    if (isDemoUser && (!loadedProfile || loadedHistory.length === 0 || freshEmptyDemoLogin)) {
-      if (demoType === 'empty') {
-        // Any empty-demo reseed (not only the one-shot fresh-login flag) must
-        // drop Front Desk transcripts + JobStore so leftover chats cannot win
-        // over the localized welcome.
-        clearChatMemoryKeys();
-        JobStore.resetAllJobs();
-      }
-      const demoDataModule = await import('./utils/demoData');
-      loadedProfile = demoDataModule.getDemoProfile(demoType);
-      loadedFoods = demoDataModule.getDemoFoodLogs(demoType);
-      loadedHistory = demoDataModule.getDemoBiomarkerHistory(demoType);
-      if (demoType === 'empty') {
-        loadedBiomarkers = {};
-      } else if (demoType === 'complex') {
-        loadedBiomarkers = { fasting_glucose: 131, hba1c: 7.1, total_cholesterol: 228, ldl: 151, hdl: 38, triglycerides: 198, egfr: 64, vitamin_d: 19, wbc: 6.9, hemoglobin: 14.1, bmi: 30.2 };
-      } else {
-        loadedBiomarkers = { fasting_glucose: 91, hba1c: 5.3, total_cholesterol: 208, ldl: 132, hdl: 46, triglycerides: 155, egfr: 94, vitamin_d: 22, wbc: 6.2, hemoglobin: 14.6, bmi: 23.4 };
-      }
-      loadedReport = demoDataModule.getDemoReport(demoType, loadedProfile?.language);
-      loadedActions = loadedReport.actions || [];
-      loadedBenefits = loadedReport.dailyBenefits || [];
-    }
-
-    if (!loadedProfile) {
-      loadedProfile = {
-        nickname: resolvedNickname,
-        photoUrl: photoURL || '',
-        email: newEmail,
-        age: '' as any,
-        ethnicity: 'Unknown',
-        weight: '' as any,
-        height: '' as any,
-        gender: 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        language: resolveInitialLanguage(chosenLanguage),
-        userType: 'Standard',
-        topNutrientsToMonitor: PRIMARY_NUTRIENTS
-      };
-    } else {
-      loadedProfile.email = newEmail;
-      if (resolvedNickname && (!loadedProfile.nickname || loadedProfile.nickname === 'Healthy User' || loadedProfile.nickname === 'User')) {
-        loadedProfile.nickname = resolvedNickname;
-      }
-      if (photoURL && !loadedProfile.photoUrl) loadedProfile.photoUrl = photoURL;
-      if (!loadedProfile.topNutrientsToMonitor) {
-        loadedProfile.topNutrientsToMonitor = PRIMARY_NUTRIENTS;
-      }
-    }
-    if (chosenLanguage && ['en', 'fr', 'zh', 'id'].includes(chosenLanguage)) {
-      loadedProfile.language = chosenLanguage as any;
-    } else if (loadedProfile && (!loadedProfile.language || !['en', 'fr', 'zh', 'id'].includes(loadedProfile.language))) {
-      loadedProfile.language = resolveInitialLanguage();
-    }
-    if (loadedProfile?.language) {
-      localStorage.setItem('preferred_language', loadedProfile.language);
-    }
-    if (loadedProfile.nickname && loadedProfile.nickname !== 'Healthy User' && loadedProfile.nickname !== 'User') {
-      localStorage.setItem(`signup_nickname_${newEmail}`, loadedProfile.nickname);
-    }
-    loadedProfile.lastLogin = new Date().toISOString();
-
-    const bundle = {
-      profile: loadedProfile,
-      foodLogs: loadedFoods,
-      biomarkers: loadedBiomarkers,
-      biomarkerHistory: loadedHistory,
-      actions: loadedActions,
-      dailyBenefits: loadedBenefits,
-      foodIdeas,
-      report: loadedReport
-    };
-    await set(storageKey, bundle);
-
-    setProfile(loadedProfile);
-    setFoodLogs(loadedFoods);
-    setBiomarkers(loadedBiomarkers);
-    setBiomarkerHistory(loadedHistory);
-    setActions(loadedActions);
-    setDailyBenefits(loadedBenefits);
-    setReport(loadedReport);
-
-    setIsAuthChecking(false);
-
-    if (!isDemoUser) {
-      const hasSyncedThisSession = sessionStorage.getItem('synced_' + uid) === 'true';
-      const isLocalDataEmpty = loadedFoods.length === 0 && loadedHistory.length === 0;
-
-      if (!hasSyncedThisSession) {
-        sessionStorage.setItem('synced_' + uid, 'true');
-        checkForDbChanges(uid, isLocalDataEmpty).catch(err => console.warn("[Auth] Background sync error:", err)).finally(() => {
-          setIsInitialDataLoading(false);
-        });
-      } else if (isLocalDataEmpty) {
-        checkForDbChanges(uid, true).catch(err => console.warn("[Auth] Background sync error:", err)).finally(() => {
-          setIsInitialDataLoading(false);
-        });
-      } else {
-        setSyncState('synced');
-        setIsInitialDataLoading(false);
-      }
-    } else {
-      setSyncState('synced');
-      setIsInitialDataLoading(false);
-    }
-  };
+  checkForDbChangesRef.current = checkForDbChanges; // Q-11.4: loadUserData lives in hooks/useAppProfile.ts now
 
   // Data hygiene, not auth: migrate legacy localStorage snapshots into IndexedDB.
   useEffect(() => {
@@ -2265,22 +2125,6 @@ export default function App() {
       setSyncState('local');
     },
   });
-  // Keep localStorage updated with React states so that hasLocal and canSkipFetch work flawlessly!
-  useEffect(() => {
-    // Prevent overwriting local storage with empty arrays during initial loading/syncing
-    if (!profile || (syncState !== 'synced' && syncState !== 'local' && syncState !== 'conflict')) return;
-    const bundle = {
-      profile,
-      foodLogs,
-      biomarkers,
-      biomarkerHistory,
-      actions,
-      dailyBenefits,
-      foodIdeas,
-      report
-    };
-    safeSaveToLocalStorage(getStorageKey(profile?.email), bundle);
-  }, [profile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, foodIdeas, report]);
   // Auto-restore missing food images from chat history
   useEffect(() => {
     if (foodLogs.length === 0) return;
