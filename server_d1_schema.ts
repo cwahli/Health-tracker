@@ -110,9 +110,196 @@ CREATE TABLE IF NOT EXISTS app_users (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
+
+CREATE TABLE IF NOT EXISTS chain_menu_sources (
+  id TEXT PRIMARY KEY,
+  country_code TEXT NOT NULL DEFAULT 'GB',
+  chain_key TEXT NOT NULL,
+  display_name TEXT,
+  url TEXT,
+  source_kind TEXT DEFAULT 'unknown',
+  status TEXT DEFAULT 'pending',
+  priority INTEGER DEFAULT 100,
+  enabled INTEGER DEFAULT 1,
+  last_success_at TEXT,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chain_menu_sources_country_key ON chain_menu_sources(country_code, chain_key);
+
+CREATE TABLE IF NOT EXISTS brand_menu_items (
+  id TEXT PRIMARY KEY,
+  country_code TEXT NOT NULL DEFAULT 'GB',
+  chain_key TEXT NOT NULL,
+  chain_name TEXT,
+  dish_name TEXT NOT NULL,
+  dish_name_key TEXT,
+  basis_type TEXT DEFAULT 'per_100g',
+  serving_grams REAL,
+  calories REAL,
+  protein REAL,
+  carbohydrates REAL,
+  total_fat REAL,
+  saturated_fat REAL,
+  sodium REAL,
+  sugar REAL,
+  added_sugar REAL,
+  total_fibre REAL,
+  nutrients TEXT DEFAULT '{}',
+  ingredients TEXT,
+  source_url TEXT,
+  notes TEXT,
+  enabled INTEGER DEFAULT 1,
+  status TEXT DEFAULT 'active',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brand_menu_items_chain ON brand_menu_items(chain_key, country_code);
+CREATE INDEX IF NOT EXISTS idx_brand_menu_items_dish ON brand_menu_items(dish_name);
+
+CREATE TABLE IF NOT EXISTS food_items (
+  food_id TEXT PRIMARY KEY,
+  food_key TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  brand_name TEXT,
+  nutrients_per_100g TEXT DEFAULT '{}',
+  standard_serving_g REAL,
+  confidence REAL DEFAULT 1.0,
+  status TEXT DEFAULT 'active',
+  source TEXT DEFAULT 'canonical_local',
+  fdc_id TEXT,
+  version INTEGER DEFAULT 1,
+  capture_count INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_food_items_key ON food_items(food_key);
+
+CREATE TABLE IF NOT EXISTS dish_cache (
+  dish_key TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  core_nutrients TEXT DEFAULT '{}',
+  basis_type TEXT DEFAULT 'prepared',
+  serving_grams REAL DEFAULT 100,
+  confidence REAL DEFAULT 1.0,
+  status TEXT DEFAULT 'active',
+  version INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS food_cache (
+  id TEXT PRIMARY KEY,
+  provider TEXT,
+  query_or_id TEXT,
+  name TEXT,
+  nutrients TEXT DEFAULT '{}',
+  fetched_at TEXT DEFAULT (datetime('now')),
+  expires_at TEXT,
+  meta TEXT DEFAULT '{}'
+);
 `;
 
 let schemaEnsured = false;
+
+export async function ensureNutritionD1Seed(): Promise<void> {
+  if (!isD1Configured()) return;
+  try {
+    const chainCheck = await d1Query('SELECT COUNT(*) as c FROM chain_menu_sources');
+    if (chainCheck.success && (chainCheck.results[0]?.c ?? 0) === 0) {
+      const defaultChains = [
+        { country_code: 'GB', chain_key: 'sainsbury', display_name: "Sainsbury's", url: 'https://www.sainsburys.co.uk', status: 'ready', priority: 1 },
+        { country_code: 'GB', chain_key: 'yolk', display_name: 'YOLK', url: 'https://yolk.vmos.io', status: 'ready', priority: 2 },
+        { country_code: 'GB', chain_key: 'pret', display_name: 'Pret A Manger', url: 'https://www.pret.co.uk', status: 'pending', priority: 3 },
+        { country_code: 'GB', chain_key: 'starbucks', display_name: 'Starbucks UK', url: 'https://www.starbucks.co.uk', status: 'pending', priority: 4 },
+        { country_code: 'GB', chain_key: 'mcdonalds', display_name: "McDonald's UK", url: 'https://www.mcdonalds.com/gb/en-gb.html', status: 'pending', priority: 5 },
+        { country_code: 'GB', chain_key: 'mr_oat', display_name: 'Mr Oat', url: 'https://mroat.co.uk', status: 'ready', priority: 6 },
+        { country_code: 'GB', chain_key: 'hemaviton', display_name: 'Hemaviton', url: 'https://hemaviton.com', status: 'ready', priority: 7 },
+      ];
+      for (const c of defaultChains) {
+        await d1Query(`INSERT OR REPLACE INTO chain_menu_sources (
+          id, country_code, chain_key, display_name, url, source_kind, status, priority, enabled, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`, [
+          'chain_' + c.chain_key, c.country_code, c.chain_key, c.display_name, c.url, 'official', c.status, c.priority, 1
+        ]);
+      }
+    }
+
+    const itemsCheck = await d1Query('SELECT COUNT(*) as c FROM brand_menu_items');
+    if (itemsCheck.success && (itemsCheck.results[0]?.c ?? 0) === 0) {
+      let localItems: any[] = [];
+      try {
+        const { loadLocalItems } = await import('./serverBrandMenu.js');
+        localItems = loadLocalItems();
+      } catch {}
+      for (const it of localItems) {
+        const id = it.id || ('local_' + it.chain_key + '_' + (it.dish_name_key || (it.dish_name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_')));
+        await d1Query(`INSERT OR REPLACE INTO brand_menu_items (
+          id, country_code, chain_key, chain_name, dish_name, dish_name_key, basis_type, serving_grams,
+          calories, protein, carbohydrates, total_fat, saturated_fat, sodium, sugar, total_fibre,
+          nutrients, ingredients, source_url, notes, enabled, status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`, [
+          id,
+          it.country_code || 'GB',
+          it.chain_key,
+          it.chain_name || it.chain_key,
+          it.dish_name,
+          it.dish_name_key || null,
+          it.basis_type || 'per_100g',
+          it.serving_grams || 100,
+          it.nutrients?.calories || 0,
+          it.nutrients?.protein || 0,
+          it.nutrients?.carbohydrates || 0,
+          it.nutrients?.totalFat || 0,
+          it.nutrients?.saturatedFat || 0,
+          it.nutrients?.sodium || 0,
+          it.nutrients?.sugar || 0,
+          it.nutrients?.totalFibre || 0,
+          JSON.stringify(it.nutrients || {}),
+          it.ingredients || '',
+          it.source_url || '',
+          it.notes || '',
+          1,
+          'active'
+        ]);
+      }
+    }
+
+    const foodsCheck = await d1Query('SELECT COUNT(*) as c FROM food_items');
+    if (foodsCheck.success && (foodsCheck.results[0]?.c ?? 0) === 0) {
+      const { CANONICAL_BASE_FOODS } = await import('./server_food_db.js');
+      const entries = Object.entries(CANONICAL_BASE_FOODS);
+      const CHUNK = 5;
+      for (let i = 0; i < entries.length; i += CHUNK) {
+        const chunk = entries.slice(i, i + CHUNK);
+        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+        const params: any[] = [];
+        for (const [key, val] of chunk) {
+          const displayName = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          params.push(
+            'canonical_' + key,
+            key,
+            displayName,
+            null,
+            JSON.stringify(val),
+            (val as any).serving_grams || 100,
+            1.0,
+            'active',
+            'canonical_local',
+            null,
+            1,
+            1
+          );
+        }
+        await d1Query(`INSERT OR REPLACE INTO food_items (
+          food_id, food_key, display_name, brand_name, nutrients_per_100g, standard_serving_g,
+          confidence, status, source, fdc_id, version, capture_count
+        ) VALUES ${placeholders}`, params);
+      }
+    }
+  } catch (err) {
+    console.warn('[D1 Schema] ensureNutritionD1Seed warning:', err);
+  }
+}
 
 export async function ensureD1Schema(): Promise<{ success: boolean; error?: string }> {
   if (schemaEnsured) return { success: true };
@@ -128,6 +315,7 @@ export async function ensureD1Schema(): Promise<{ success: boolean; error?: stri
     }
     schemaEnsured = true;
     console.log('[D1 Schema] Successfully verified/created D1 tables.');
+    await ensureNutritionD1Seed();
     return { success: true };
   } catch (err: any) {
     console.error('[D1 Schema] Error ensuring schema:', err);

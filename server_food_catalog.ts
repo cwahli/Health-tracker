@@ -798,7 +798,16 @@ const EMPTY_CATALOG_SYNC = {
 };
 
 export async function getCatalogSyncStatus(): Promise<any> {
-  if (!isSupabaseConfigured) {
+  try {
+    const { isD1Configured } = await import('./server_d1.js');
+    if (isD1Configured()) {
+      const { d1GetCatalogMetrics } = await import('./server_db_d1.js');
+      const metrics = await d1GetCatalogMetrics();
+      return metrics;
+    }
+  } catch {}
+
+  if (!isSupabaseConfigured || !supabaseAdmin) {
     return { ...EMPTY_CATALOG_SYNC, offline: true };
   }
   try {

@@ -557,3 +557,270 @@ export async function d1GetStuckJobs(staleMs: number = 300000): Promise<any[]> {
     clean_result: safeJsonParse(row.clean_result, null)
   }));
 }
+
+// ==========================================
+// NUTRITION & FOOD CATALOG (D1)
+// ==========================================
+
+export async function d1GetChainMenuSources(countryCode: string = 'GB'): Promise<any[]> {
+  if (!isD1Configured()) return [];
+  const sql = `SELECT * FROM chain_menu_sources WHERE country_code = ? ORDER BY chain_key ASC`;
+  const res = await d1Query(sql, [countryCode]);
+  if (!res.success || !res.results) return [];
+  return res.results.map((r: any) => ({
+    ...r,
+    enabled: Boolean(r.enabled),
+  }));
+}
+
+export async function d1UpsertChainMenuSource(row: any): Promise<{ success: boolean; data?: any; error?: string }> {
+  if (!isD1Configured()) return { success: false, error: 'D1 not configured' };
+  const id = row.id || `chain_${row.chain_key}`;
+  const sql = `
+    INSERT INTO chain_menu_sources (
+      id, country_code, chain_key, display_name, url, source_kind, status, priority, enabled, last_success_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      country_code = excluded.country_code,
+      chain_key = excluded.chain_key,
+      display_name = excluded.display_name,
+      url = excluded.url,
+      source_kind = excluded.source_kind,
+      status = excluded.status,
+      priority = excluded.priority,
+      enabled = excluded.enabled,
+      last_success_at = excluded.last_success_at,
+      updated_at = excluded.updated_at
+  `;
+  const params = [
+    id,
+    row.country_code || 'GB',
+    row.chain_key,
+    row.display_name || row.chain_key,
+    row.url || '',
+    row.source_kind || 'unknown',
+    row.status || 'pending',
+    typeof row.priority === 'number' ? row.priority : 100,
+    row.enabled !== false ? 1 : 0,
+    row.last_success_at || null,
+  ];
+  const res = await d1Query(sql, params);
+  if (!res.success) return { success: false, error: res.error };
+  return { success: true, data: { ...row, id, enabled: row.enabled !== false } };
+}
+
+export async function d1DeleteChainMenuSource(id?: string, chainKey?: string): Promise<{ success: boolean; error?: string }> {
+  if (!isD1Configured()) return { success: true };
+  if (id) {
+    await d1Query('DELETE FROM chain_menu_sources WHERE id = ?', [id]);
+  }
+  if (chainKey) {
+    await d1Query('DELETE FROM chain_menu_sources WHERE chain_key = ?', [chainKey]);
+    await d1Query('DELETE FROM brand_menu_items WHERE chain_key = ?', [chainKey]);
+  }
+  return { success: true };
+}
+
+export async function d1GetBrandMenuItems(chainKey?: string, countryCode?: string): Promise<any[]> {
+  if (!isD1Configured()) return [];
+  let sql = `SELECT * FROM brand_menu_items WHERE status != 'quarantined'`;
+  const params: any[] = [];
+  if (chainKey) {
+    sql += ` AND chain_key = ?`;
+    params.push(chainKey);
+  }
+  if (countryCode) {
+    sql += ` AND country_code = ?`;
+    params.push(countryCode);
+  }
+  sql += ` ORDER BY dish_name ASC LIMIT 500`;
+  const res = await d1Query(sql, params);
+  if (!res.success || !res.results) return [];
+  return res.results.map((r: any) => ({
+    ...r,
+    nutrients: safeJsonParse(r.nutrients, {}),
+    enabled: Boolean(r.enabled),
+  }));
+}
+
+export async function d1SearchBrandMenuItems(q: string, countryCode: string = 'GB'): Promise<any[]> {
+  if (!isD1Configured() || !q) return [];
+  const sql = `SELECT * FROM brand_menu_items WHERE country_code = ? AND status != 'quarantined' AND dish_name LIKE ? LIMIT 50`;
+  const res = await d1Query(sql, [countryCode, `%${q}%`]);
+  if (!res.success || !res.results) return [];
+  return res.results.map((r: any) => ({
+    ...r,
+    nutrients: safeJsonParse(r.nutrients, {}),
+    enabled: Boolean(r.enabled),
+  }));
+}
+
+export async function d1UpsertBrandMenuItem(item: any): Promise<{ success: boolean; error?: string }> {
+  if (!isD1Configured()) return { success: false, error: 'D1 not configured' };
+  const id = item.id || `bmi_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const sql = `
+    INSERT INTO brand_menu_items (
+      id, country_code, chain_key, chain_name, dish_name, dish_name_key, basis_type, serving_grams,
+      calories, protein, carbohydrates, total_fat, saturated_fat, sodium, sugar, total_fibre,
+      nutrients, ingredients, source_url, notes, enabled, status, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      country_code = excluded.country_code,
+      chain_key = excluded.chain_key,
+      chain_name = excluded.chain_name,
+      dish_name = excluded.dish_name,
+      dish_name_key = excluded.dish_name_key,
+      basis_type = excluded.basis_type,
+      serving_grams = excluded.serving_grams,
+      calories = excluded.calories,
+      protein = excluded.protein,
+      carbohydrates = excluded.carbohydrates,
+      total_fat = excluded.total_fat,
+      saturated_fat = excluded.saturated_fat,
+      sodium = excluded.sodium,
+      sugar = excluded.sugar,
+      total_fibre = excluded.total_fibre,
+      nutrients = excluded.nutrients,
+      ingredients = excluded.ingredients,
+      source_url = excluded.source_url,
+      notes = excluded.notes,
+      enabled = excluded.enabled,
+      status = excluded.status,
+      updated_at = excluded.updated_at
+  `;
+  const nutrientsStr = typeof item.nutrients === 'object' ? JSON.stringify(item.nutrients) : String(item.nutrients || '{}');
+  const params = [
+    id,
+    item.country_code || 'GB',
+    item.chain_key || '',
+    item.chain_name || item.chain_key || '',
+    item.dish_name || '',
+    item.dish_name_key || null,
+    item.basis_type || 'per_100g',
+    item.serving_grams || null,
+    item.calories ?? item.nutrients?.calories ?? 0,
+    item.protein ?? item.nutrients?.protein ?? 0,
+    item.carbohydrates ?? item.nutrients?.carbohydrates ?? 0,
+    item.total_fat ?? item.nutrients?.totalFat ?? 0,
+    item.saturated_fat ?? item.nutrients?.saturatedFat ?? 0,
+    item.sodium ?? item.nutrients?.sodium ?? 0,
+    item.sugar ?? item.nutrients?.sugar ?? 0,
+    item.total_fibre ?? item.nutrients?.totalFibre ?? item.nutrients?.fiber ?? 0,
+    nutrientsStr,
+    item.ingredients || '',
+    item.source_url || '',
+    item.notes || '',
+    item.enabled !== false ? 1 : 0,
+    item.status || 'active',
+  ];
+  return d1Query(sql, params);
+}
+
+export async function d1DeleteBrandMenuItem(id: string): Promise<{ success: boolean; error?: string }> {
+  if (!isD1Configured() || !id) return { success: true };
+  return d1Query('DELETE FROM brand_menu_items WHERE id = ?', [id]);
+}
+
+export async function d1GetFoodCatalogItems(
+  itemType: 'food' | 'dish',
+  statusFilter: string = 'all',
+  searchQuery: string = '',
+  limit: number = 100
+): Promise<any[]> {
+  if (!isD1Configured()) return [];
+  const table = itemType === 'dish' ? 'dish_cache' : 'food_items';
+  let sql = `SELECT * FROM ${table} WHERE 1=1`;
+  const params: any[] = [];
+  if (statusFilter !== 'all') {
+    sql += ` AND status = ?`;
+    params.push(statusFilter);
+  }
+  if (searchQuery) {
+    sql += ` AND display_name LIKE ?`;
+    params.push(`%${searchQuery}%`);
+  }
+  sql += ` ORDER BY updated_at DESC LIMIT ?`;
+  params.push(limit);
+
+  const res = await d1Query(sql, params);
+  if (!res.success || !res.results) return [];
+  return res.results.map((r: any) => ({
+    ...r,
+    nutrients_per_100g: safeJsonParse(r.nutrients_per_100g, {}),
+    core_nutrients: safeJsonParse(r.core_nutrients, {}),
+  }));
+}
+
+export async function d1UpdateFoodServing(
+  itemType: 'food' | 'dish',
+  key: string,
+  basisType: string,
+  servingGrams: number
+): Promise<{ success: boolean; error?: string }> {
+  if (!isD1Configured()) return { success: false, error: 'D1 not configured' };
+  if (itemType === 'dish') {
+    const sql = `UPDATE dish_cache SET basis_type = ?, serving_grams = ?, updated_at = datetime('now') WHERE dish_key = ?`;
+    return d1Query(sql, [basisType, servingGrams, key]);
+  } else {
+    const sql = `UPDATE food_items SET standard_serving_g = ?, updated_at = datetime('now') WHERE food_key = ? OR food_id = ?`;
+    return d1Query(sql, [servingGrams, key, key]);
+  }
+}
+
+export async function d1UpdateItemStatus(
+  itemType: 'food' | 'dish',
+  key: string,
+  status: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isD1Configured()) return { success: false, error: 'D1 not configured' };
+  const table = itemType === 'dish' ? 'dish_cache' : 'food_items';
+  const keyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
+  const sql = `UPDATE ${table} SET status = ?, updated_at = datetime('now') WHERE ${keyCol} = ?`;
+  return d1Query(sql, [status, key]);
+}
+
+export async function d1GetCatalogMetrics(): Promise<{
+  success: boolean;
+  food_items: { total: number; active: number; candidate: number };
+  dish_cache: { total: number; active: number };
+  open_deferred_gaps: number;
+  sync_failures: number;
+  resolver_call_count: number;
+  latest_sync_events: any[];
+}> {
+  if (!isD1Configured()) {
+    return {
+      success: true,
+      food_items: { total: 0, active: 0, candidate: 0 },
+      dish_cache: { total: 0, active: 0 },
+      open_deferred_gaps: 0,
+      sync_failures: 0,
+      resolver_call_count: 0,
+      latest_sync_events: [],
+    };
+  }
+  const [fTot, fAct, fCand, dTot, dAct] = await Promise.all([
+    d1Query('SELECT COUNT(*) as c FROM food_items'),
+    d1Query("SELECT COUNT(*) as c FROM food_items WHERE status = 'active'"),
+    d1Query("SELECT COUNT(*) as c FROM food_items WHERE status = 'candidate'"),
+    d1Query('SELECT COUNT(*) as c FROM dish_cache'),
+    d1Query("SELECT COUNT(*) as c FROM dish_cache WHERE status = 'active'"),
+  ]);
+  return {
+    success: true,
+    food_items: {
+      total: fTot.results?.[0]?.c || 0,
+      active: fAct.results?.[0]?.c || 0,
+      candidate: fCand.results?.[0]?.c || 0,
+    },
+    dish_cache: {
+      total: dTot.results?.[0]?.c || 0,
+      active: dAct.results?.[0]?.c || 0,
+    },
+    open_deferred_gaps: 0,
+    sync_failures: 0,
+    resolver_call_count: 0,
+    latest_sync_events: [],
+  };
+}
+

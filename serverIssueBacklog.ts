@@ -353,7 +353,7 @@ async function upsertTagByTitle(supabaseAdmin: any, titleRaw: string): Promise<{
 /** UUID, #18, or 18 — same lookup as GET /api/bugs/:tagId. */
 export async function findIssueTag(supabaseAdmin: any, param: string): Promise<any | null> {
   const raw = String(param || '').replace(/^#/, '').trim();
-  if (!raw) return null;
+  if (!raw || !supabaseAdmin) return null;
   const { data: byId } = await supabaseAdmin.from('issue_tags').select('*').eq('id', raw).maybeSingle();
   if (byId) return byId;
   if (/^\d+$/.test(raw)) {
@@ -391,6 +391,8 @@ async function loadBugTagsWithLinks(supabaseAdmin: any) {
       }
       return { tags, links };
     }
+
+    if (!supabaseAdmin) return { tags: [], links: [] };
 
     let { data: tagRows, error: tErr } = await supabaseAdmin
       .from('issue_tags')
@@ -920,24 +922,77 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
 
   app.get('/api/nutrition-data/overview', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
       const country = String(req.query.country || 'GB');
+      let sources: any[] = [];
+      let issues: any[] = [];
+      let cachedFoods: any[] = [];
 
-      const { data: sources, error: sErr } = await supabaseAdmin
-        .from('chain_menu_sources')
-        .select('*')
-        .order('chain_key', { ascending: true });
-      if (sErr) return res.status(500).json({ error: sErr.message });
+      if (isD1Configured()) {
+        const { d1GetChainMenuSources } = await import('./server_db_d1.js');
+        sources = await d1GetChainMenuSources(country);
+        const iRes = await d1Query(
+          'SELECT id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, source_url, user_note, resolution_note FROM issue_backlog ORDER BY created_at DESC LIMIT 100'
+        );
+        issues = iRes.results || [];
+        try {
+          const fRes = await d1Query(
+            'SELECT id, provider, query_or_id, name, nutrients, fetched_at, expires_at, meta FROM food_cache ORDER BY fetched_at DESC LIMIT 200'
+          );
+          cachedFoods = (fRes.results || []).map((f: any) => ({
+            ...f,
+            nutrients: typeof f.nutrients === 'string' ? JSON.parse(f.nutrients) : (f.nutrients || {}),
+            meta: typeof f.meta === 'string' ? JSON.parse(f.meta) : (f.meta || {})
+          }));
+        } catch {}
+      } else {
+        const { supabaseAdmin } = await import('./supabaseAdmin.js');
+        if (supabaseAdmin) {
+          try {
+            const { data: sData, error: sErr } = await supabaseAdmin
+              .from('chain_menu_sources')
+              .select('*')
+              .order('chain_key', { ascending: true });
+            if (!sErr && sData) sources = sData;
+          } catch (e) {
+            console.warn('[nutrition-data/overview] Supabase sources failed:', e);
+          }
 
-      const { data: issues, error: iErr } = await supabaseAdmin
-        .from('issue_backlog')
-        .select(
-          'id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, source_url, user_note, resolution_note'
-        )
-        .order('created_at', { ascending: false })
-        .limit(100);
-      if (iErr) return res.status(500).json({ error: iErr.message });
+          try {
+            const { data: iData, error: iErr } = await supabaseAdmin
+              .from('issue_backlog')
+              .select('id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, source_url, user_note, resolution_note')
+              .order('created_at', { ascending: false })
+              .limit(100);
+            if (!iErr && iData) issues = iData;
+          } catch (e) {
+            console.warn('[nutrition-data/overview] Supabase issues failed:', e);
+          }
 
+          try {
+            const { data: foods } = await supabaseAdmin
+              .from('food_cache')
+              .select('id, provider, query_or_id, name, nutrients, fetched_at, expires_at, meta')
+              .order('fetched_at', { ascending: false })
+              .limit(200);
+            cachedFoods = foods || [];
+          } catch {}
+        }
+      }
+
+      // If no sources found from DB, provide standard chains so overview is never blank
+      if (!sources || sources.length === 0) {
+        sources = [
+          { country_code: 'GB', chain_key: 'sainsbury', display_name: "Sainsbury's", url: 'https://www.sainsburys.co.uk', status: 'ready', priority: 1, enabled: true },
+          { country_code: 'GB', chain_key: 'yolk', display_name: 'YOLK', url: 'https://yolk.vmos.io', status: 'ready', priority: 2, enabled: true },
+          { country_code: 'GB', chain_key: 'pret', display_name: 'Pret A Manger', url: 'https://www.pret.co.uk', status: 'pending', priority: 3, enabled: true },
+          { country_code: 'GB', chain_key: 'starbucks', display_name: 'Starbucks UK', url: 'https://www.starbucks.co.uk', status: 'pending', priority: 4, enabled: true },
+          { country_code: 'GB', chain_key: 'mcdonalds', display_name: "McDonald's UK", url: 'https://www.mcdonalds.com/gb/en-gb.html', status: 'pending', priority: 5, enabled: true },
+          { country_code: 'GB', chain_key: 'mr_oat', display_name: 'Mr Oat', url: 'https://mroat.co.uk', status: 'ready', priority: 6, enabled: true },
+          { country_code: 'GB', chain_key: 'hemaviton', display_name: 'Hemaviton', url: 'https://hemaviton.com', status: 'ready', priority: 7, enabled: true },
+        ];
+      }
+
+      const supabaseAdmin = !isD1Configured() ? (await import('./supabaseAdmin.js')).supabaseAdmin : null;
       const { tags, links } = await loadBugTagsWithLinks(supabaseAdmin);
 
       const issuesById = new Map((issues || []).map((i: any) => [i.id, i]));
@@ -963,18 +1018,6 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         };
       });
 
-      let cachedFoods: any[] = [];
-      try {
-        const { data: foods } = await supabaseAdmin
-          .from('food_cache')
-          .select('id, provider, query_or_id, name, nutrients, fetched_at, expires_at, meta')
-          .order('fetched_at', { ascending: false })
-          .limit(200);
-        cachedFoods = foods || [];
-      } catch {
-        cachedFoods = [];
-      }
-
       // Deduplicate sources by normalized chain_key so each chain appears exactly once
       const rawSources = sources || [];
       const deduplicatedSourcesMap = new Map<string, any>();
@@ -998,17 +1041,32 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
 
       let chainItemCounts: Record<string, { synced: number; pending: number; total: number }> = {};
       try {
-        const { data: menuRows } = await supabaseAdmin
-          .from('brand_menu_items')
-          .select('chain_key')
-          .eq('country_code', country);
-        (menuRows || []).forEach((r: any) => {
-          const k = normalizeChainKey(r.chain_key);
-          if (!k) return;
-          if (!chainItemCounts[k]) chainItemCounts[k] = { synced: 0, pending: 0, total: 0 };
-          chainItemCounts[k].synced++;
-          chainItemCounts[k].total++;
-        });
+        if (isD1Configured()) {
+          const { d1GetBrandMenuItems } = await import('./server_db_d1.js');
+          const d1Items = await d1GetBrandMenuItems(undefined, country);
+          (d1Items || []).forEach((r: any) => {
+            const k = normalizeChainKey(r.chain_key);
+            if (!k) return;
+            if (!chainItemCounts[k]) chainItemCounts[k] = { synced: 0, pending: 0, total: 0 };
+            chainItemCounts[k].synced++;
+            chainItemCounts[k].total++;
+          });
+        } else {
+          const { supabaseAdmin: sAdmin } = await import('./supabaseAdmin.js');
+          if (sAdmin) {
+            const { data: menuRows } = await sAdmin
+              .from('brand_menu_items')
+              .select('chain_key')
+              .eq('country_code', country);
+            (menuRows || []).forEach((r: any) => {
+              const k = normalizeChainKey(r.chain_key);
+              if (!k) return;
+              if (!chainItemCounts[k]) chainItemCounts[k] = { synced: 0, pending: 0, total: 0 };
+              chainItemCounts[k].synced++;
+              chainItemCounts[k].total++;
+            });
+          }
+        }
         const { loadLocalItems } = await import('./serverBrandMenu.js');
         const localItems = loadLocalItems().filter((it: any) => it.country_code === country);
         localItems.forEach((it: any) => {

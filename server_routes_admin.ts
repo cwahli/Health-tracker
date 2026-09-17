@@ -2,6 +2,13 @@ import { Router } from 'express';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { supabaseAdmin } from './supabaseAdmin.js';
+import { isD1Configured } from './server_d1.js';
+import {
+  d1GetFoodCatalogItems,
+  d1UpdateFoodServing,
+  d1UpdateItemStatus,
+  d1GetCatalogMetrics
+} from './server_db_d1.js';
 import { pushTranslationsToSheets, pullTranslationsFromSheets } from './server_translations.js';
 import { getCatalogSyncStatus, mergeFoodCatalogItems, quarantineAtwaterFailures } from './server_food_catalog.js';
 import { selfCleanBrandDatabase } from './serverBrandMenu.js';
@@ -171,33 +178,89 @@ adminRouter.post('/api/admin/translations/pull', async (req, res) => {
 // Food Catalog Admin Endpoints
 adminRouter.get('/api/admin/food-catalog', async (req, res) => {
   try {
-    const itemType = (req.query.type as string) || 'food';
+    const itemType = ((req.query.type as string) || 'food') as 'food' | 'dish';
     const statusFilter = (req.query.status as string) || 'all';
     const searchQuery = ((req.query.search as string) || '').toLowerCase().trim();
 
-    if (itemType === 'dish') {
-      let query = supabaseAdmin.from('dish_cache').select('*');
-      if (statusFilter !== 'all') {
-        query = query.eq('status', statusFilter);
+    // 1. Try D1 if configured
+    if (isD1Configured()) {
+      try {
+        const d1Items = await d1GetFoodCatalogItems(itemType, statusFilter, searchQuery);
+        if (d1Items && d1Items.length > 0) {
+          return res.json({ items: d1Items });
+        }
+      } catch (d1Err) {
+        console.warn('[api/admin/food-catalog] D1 fetch error:', d1Err);
       }
-      if (searchQuery) {
-        query = query.ilike('display_name', `%${searchQuery}%`);
-      }
-      const { data, error } = await query.order('updated_at', { ascending: false }).limit(100);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ items: data || [] });
-    } else {
-      let query = supabaseAdmin.from('food_items').select('*');
-      if (statusFilter !== 'all') {
-        query = query.eq('status', statusFilter);
-      }
-      if (searchQuery) {
-        query = query.ilike('display_name', `%${searchQuery}%`);
-      }
-      const { data, error } = await query.order('updated_at', { ascending: false }).limit(100);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ items: data || [] });
     }
+
+    // 2. Try Supabase if available
+    if (supabaseAdmin) {
+      try {
+        const tableName = itemType === 'dish' ? 'dish_cache' : 'food_items';
+        let query = supabaseAdmin.from(tableName).select('*');
+        if (statusFilter !== 'all') {
+          query = query.eq('status', statusFilter);
+        }
+        if (searchQuery) {
+          query = query.ilike('display_name', `%${searchQuery}%`);
+        }
+        const { data, error } = await query.order('updated_at', { ascending: false }).limit(100);
+        if (!error && data && data.length > 0) {
+          return res.json({ items: data });
+        }
+      } catch (sbErr) {
+        console.warn('[api/admin/food-catalog] Supabase fetch error:', sbErr);
+      }
+    }
+
+    // 3. Fallback: If requesting base food items and no results yet, return from CANONICAL_BASE_FOODS
+    if (itemType !== 'dish') {
+      const { CANONICAL_BASE_FOODS } = await import('./server_food_db.js');
+      let fallbackItems = Object.entries(CANONICAL_BASE_FOODS).map(([key, val]: [string, any]) => {
+        const displayName = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        return {
+          food_id: 'canonical_' + key,
+          food_key: key,
+          display_name: displayName,
+          scientific_name: null,
+          category: val.foodType || 'whole_food',
+          standard_serving_g: val.serving_grams || 100,
+          density_g_ml: val.density_g_ml || null,
+          status: 'active',
+          source: 'canonical',
+          core_nutrients: {
+            calories: val.calories || 0,
+            protein: val.protein || 0,
+            carbs: val.carbohydrates || 0,
+            fat: val.totalFat || 0
+          },
+          nutrients_per_100g: {
+            calories: val.calories || 0,
+            protein: val.protein || 0,
+            carbs: val.carbohydrates || 0,
+            fat: val.totalFat || 0,
+            saturated_fat: val.saturatedFat || 0,
+            fiber: val.totalFibre || 0,
+            sugar: val.sugar || 0,
+            sodium: val.sodium || 0,
+            potassium: val.potassium || 0,
+          },
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+      });
+
+      if (statusFilter !== 'all' && statusFilter !== 'active') {
+        fallbackItems = [];
+      } else if (searchQuery) {
+        fallbackItems = fallbackItems.filter(i => i.display_name.toLowerCase().includes(searchQuery));
+      }
+      return res.json({ items: fallbackItems.slice(0, 100) });
+    }
+
+    return res.json({ items: [] });
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
   }
@@ -220,27 +283,27 @@ adminRouter.post('/api/admin/food-catalog/promote', async (req, res) => {
     const { itemType, key } = req.body || {};
     if (!key) return res.status(400).json({ error: 'Missing item key' });
 
-    if (itemType === 'dish') {
-      const { data: existing } = await supabaseAdmin.from('dish_cache').select('version').eq('dish_key', key).maybeSingle();
-      const currentVer = existing?.version || 1;
-      const { error } = await supabaseAdmin.from('dish_cache').update({
-        status: 'active',
-        version: currentVer + 1,
-        updated_at: new Date().toISOString()
-      }).eq('dish_key', key);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ success: true, message: `Promoted dish ${key} to active` });
-    } else {
-      const { data: existing } = await supabaseAdmin.from('food_items').select('version').eq('food_key', key).maybeSingle();
-      const currentVer = existing?.version || 1;
-      const { error } = await supabaseAdmin.from('food_items').update({
-        status: 'active',
-        version: currentVer + 1,
-        updated_at: new Date().toISOString()
-      }).eq('food_key', key);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ success: true, message: `Promoted food ${key} to active` });
+    if (isD1Configured()) {
+      await d1UpdateItemStatus(itemType === 'dish' ? 'dish' : 'food', key, 'active');
     }
+
+    if (supabaseAdmin) {
+      try {
+        const table = itemType === 'dish' ? 'dish_cache' : 'food_items';
+        const keyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
+        const { data: existing } = await supabaseAdmin.from(table).select('version').eq(keyCol, key).maybeSingle();
+        const currentVer = existing?.version || 1;
+        await supabaseAdmin.from(table).update({
+          status: 'active',
+          version: currentVer + 1,
+          updated_at: new Date().toISOString()
+        }).eq(keyCol, key);
+      } catch (sbErr) {
+        console.warn('[food-catalog/promote] Supabase update failed:', sbErr);
+      }
+    }
+
+    return res.json({ success: true, message: `Promoted ${itemType || 'item'} ${key} to active` });
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
   }
@@ -251,15 +314,23 @@ adminRouter.post('/api/admin/food-catalog/quarantine', async (req, res) => {
     const { itemType, key } = req.body || {};
     if (!key) return res.status(400).json({ error: 'Missing item key' });
 
-    const targetTable = itemType === 'dish' ? 'dish_cache' : 'food_items';
-    const targetKeyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
+    if (isD1Configured()) {
+      await d1UpdateItemStatus(itemType === 'dish' ? 'dish' : 'food', key, 'quarantine');
+    }
 
-    const { error } = await supabaseAdmin.from(targetTable).update({
-      status: 'quarantine',
-      updated_at: new Date().toISOString()
-    }).eq(targetKeyCol, key);
+    if (supabaseAdmin) {
+      try {
+        const targetTable = itemType === 'dish' ? 'dish_cache' : 'food_items';
+        const targetKeyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
+        await supabaseAdmin.from(targetTable).update({
+          status: 'quarantine',
+          updated_at: new Date().toISOString()
+        }).eq(targetKeyCol, key);
+      } catch (sbErr) {
+        console.warn('[food-catalog/quarantine] Supabase update failed:', sbErr);
+      }
+    }
 
-    if (error) return res.status(500).json({ error: error.message });
     return res.json({ success: true, message: `Quarantined ${key}` });
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
@@ -271,16 +342,26 @@ adminRouter.post('/api/admin/food-catalog/update-serving', async (req, res) => {
     const { itemType, key, basisType, servingGrams } = req.body || {};
     if (!key) return res.status(400).json({ error: 'Missing item key' });
 
-    const targetTable = itemType === 'dish' ? 'dish_cache' : 'food_items';
-    const targetKeyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
+    const numServing = servingGrams === '' || servingGrams == null ? 0 : Number(servingGrams);
 
-    const { error } = await supabaseAdmin.from(targetTable).update({
-      basis_type: basisType || null,
-      serving_grams: servingGrams === '' || servingGrams == null ? null : Number(servingGrams),
-      updated_at: new Date().toISOString()
-    }).eq(targetKeyCol, key);
+    if (isD1Configured()) {
+      await d1UpdateFoodServing(itemType === 'dish' ? 'dish' : 'food', key, basisType || 'per_serving', numServing);
+    }
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (supabaseAdmin) {
+      try {
+        const targetTable = itemType === 'dish' ? 'dish_cache' : 'food_items';
+        const targetKeyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
+        await supabaseAdmin.from(targetTable).update({
+          basis_type: basisType || null,
+          serving_grams: numServing || null,
+          updated_at: new Date().toISOString()
+        }).eq(targetKeyCol, key);
+      } catch (sbErr) {
+        console.warn('[food-catalog/update-serving] Supabase update failed:', sbErr);
+      }
+    }
+
     return res.json({ success: true, message: `Updated serving size of ${key}` });
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
@@ -289,6 +370,10 @@ adminRouter.post('/api/admin/food-catalog/update-serving', async (req, res) => {
 
 adminRouter.get('/api/admin/food-catalog-sync-status', async (req, res) => {
   try {
+    if (isD1Configured()) {
+      const d1Metrics = await d1GetCatalogMetrics();
+      return res.json({ ...d1Metrics, backend: 'd1' });
+    }
     const result = await getCatalogSyncStatus();
     if (!result.success) return res.status(200).json({ ...result, success: true, unavailable: true });
     res.json(result);
