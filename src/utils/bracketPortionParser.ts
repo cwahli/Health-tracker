@@ -182,3 +182,19 @@ export function removeBracketItem(currentText: string, name: string): string {
 
   return currentText.replace(existingRegex, '').trim();
 }
+
+/**
+ * Strips bracketed food tags from chat input text to isolate active search terms for autocomplete.
+ * Returns empty string if the remaining query is shorter than 3 characters.
+ */
+export function extractAutocompleteQuery(text: string): string {
+  if (!text) return '';
+  let strippedInput = text.replace(/\[[^\]]*\]/g, '').trim();
+  // Strip conversational lead words like "i had", "ate", "for lunch", "and"
+  strippedInput = strippedInput.replace(/^(?:i\s+(?:had|ate|have)|had|ate|having|eating|for\s+(?:breakfast|lunch|dinner|snack)|and|plus|\+)\s+/i, '').trim();
+  if (strippedInput.length < 3) return '';
+  const words = strippedInput.split(/\s+/);
+  return words.slice(Math.max(words.length - 4, 0)).join(' ');
+}
+
+

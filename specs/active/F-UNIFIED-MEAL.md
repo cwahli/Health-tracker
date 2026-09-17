@@ -21,7 +21,12 @@ allowed_files:
   - src/utils/bracketPortionParser.ts
   - src/utils/bracketPortionParser.test.ts
   - src/server/food/server_brand_image_linking.contract.test.ts
+  - src/utils/compositeFoodCalculation.ts
+  - tests/food_autocomplete_composition.contract.test.ts
+  - golden/scorecard/instruction/gates.json
+  - golden/scorecard/instruction/MASTER_SCORECARD.md
   - supabase/migrations/20260917_brand_menu_items_image_url.sql
+
   - specs/packets/R-13.md
 frozen_files:
   - src/App.tsx

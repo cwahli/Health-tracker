@@ -20,6 +20,7 @@ import LLMSelector from './LLMSelector';
 import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
+import { computeRemainingAllowance } from '../utils/compositeFoodCalculation';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
@@ -40,7 +41,8 @@ import { sanitizeForFirestore, checkQuotaFlag } from '../utils/firestoreUtils';
 import { get as idbGet } from 'idb-keyval';
 import { pruneLocalStorageToFreeSpace, safeIdbSet } from '../utils/storageUtils';
 import { resolveFoodImage } from '../utils/imageResolver';
-import { updateOrAddBracketItem, removeBracketItem, parseBracketItems } from '../utils/bracketPortionParser';
+import { updateOrAddBracketItem, removeBracketItem, parseBracketItems, extractAutocompleteQuery } from '../utils/bracketPortionParser';
+import { calculateCompositeMeal } from '../utils/compositeFoodCalculation';
 import { JobStore } from '../jobs/JobStore';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
 import { toPendingFoodLog } from '../mealBuild/adapters';
@@ -880,15 +882,14 @@ ${logsText}`);
       } else {
         setTagPortionPreFill(100);
       }
-      // Strip out anything inside brackets to avoid searching for already tagged items
-      const strippedInput = inputText.replace(/\[.*?\]/g, '').trim();
-      if (strippedInput.length < 3) {
+      // Strip out anything inside brackets to isolate active search terms
+      const searchTerms = extractAutocompleteQuery(inputText);
+      if (!searchTerms) {
         setCatalogMatches([]);
         setActiveSearchTerms('');
         return;
       }
-      const words = strippedInput.split(/\s+/);
-      const searchTerms = words.slice(Math.max(words.length - 4, 0)).join(' ');
+
       try {
         const res = await fetch(`/api/food/search?q=${encodeURIComponent(searchTerms)}`);
         if (res.ok) {
@@ -1842,105 +1843,7 @@ ${logsText}`);
     });
     return list;
   }, [biomarkers, profile?.ethnicity, activeHistory]);
-  const remainingAllowance = React.useMemo(() => {
-    const todayStr = getCurrentDateInTimezone(profile?.timezone);
-    const todaysFoods = activeFoodLogs ? activeFoodLogs.filter(f => f.date === todayStr) : [];
-    const todaysTotals = todaysFoods.reduce((acc, curr) => {
-      if (curr.nutrients) {
-        Object.keys(curr.nutrients).forEach(k => {
-          const key = k as keyof typeof curr.nutrients;
-          acc[key] = (Number(acc[key]) || 0) + (Number(curr.nutrients[key]) || 0);
-        });
-      }
-      return acc;
-    }, {} as { [key: string]: number });
-    const parseTarget = (val: any, fallback: number) => {
-      if (val === null || val === undefined) return fallback;
-      const cleanStr = String(val).replace(/,/g, '');
-      const matches = cleanStr.match(/\d+(\.\d+)?/g);
-      if (!matches || matches.length === 0) return fallback;
-      const parsed = parseFloat(matches[0]);
-      return isNaN(parsed) ? fallback : parsed;
-    };
-    const activeTargets = {
-      calories: Number(todaysTotals.calories || 0),
-      caloriesTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.calories, 1700) : 1800,
-      satFat: Number(todaysTotals.saturatedFat || 0),
-      satFatTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.saturatedFat, 15) : 15,
-      sodium: Number(todaysTotals.sodium || 0),
-      sodiumTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.sodium, 1200) : 1200,
-      addedSugar: Number(todaysTotals.addedSugar || 0),
-      addedSugarTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.addedSugar, 50) : 50,
-      carbohydrates: Number(todaysTotals.carbohydrates || 0),
-      carbohydratesTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.carbohydrates, 250) : 250,
-      solubleFibre: Number(todaysTotals.solubleFibre || 0),
-      solubleFibreTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.solubleFibre, 15) : 15,
-      protein: Number(todaysTotals.protein || 0),
-      proteinTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.protein, 50) : 50,
-      potassium: Number(todaysTotals.potassium || 0),
-      potassiumTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.potassium, 3500) : 3500,
-      unsaturatedFat: Number(todaysTotals.unsaturatedFat || 0),
-      unsaturatedFatTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.unsaturatedFat, 40) : 40,
-    };
-    const rollingDaysStr = localStorage.getItem('foodTracker_rollingDays');
-    const rollingDays = rollingDaysStr ? parseInt(rollingDaysStr, 10) : 7;
-    const showAverageInBar = localStorage.getItem('foodTracker_showAverageInBar') === 'true';
-    const getAverageIntake = (key: string, numDays: number) => {
-      let totalIntake = 0;
-      for (let d = 0; d < numDays; d++) {
-        const parts = todayStr.split('-');
-        const todayDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-        const targetDate = new Date(todayDate);
-        targetDate.setDate(todayDate.getDate() - d);
-        const y = targetDate.getFullYear();
-        const m = String(targetDate.getMonth() + 1).padStart(2, '0');
-        const day = String(targetDate.getDate()).padStart(2, '0');
-        const dStr = `${y}-${m}-${day}`;
-        const dayFoods = activeFoodLogs ? activeFoodLogs.filter(f => f.date === dStr) : [];
-        const dayTotal = dayFoods.reduce((acc, curr) => {
-          return acc + (Number(curr.nutrients?.[key as keyof typeof curr.nutrients]) || 0);
-        }, 0);
-        totalIntake += dayTotal;
-      }
-      return totalIntake / numDays;
-    };
-    const averages = {
-      calories: getAverageIntake('calories', rollingDays),
-      saturatedFat: getAverageIntake('saturatedFat', rollingDays),
-      sodium: getAverageIntake('sodium', rollingDays),
-      addedSugar: getAverageIntake('addedSugar', rollingDays),
-      carbohydrates: getAverageIntake('carbohydrates', rollingDays),
-      solubleFibre: getAverageIntake('solubleFibre', rollingDays),
-      protein: getAverageIntake('protein', rollingDays),
-      potassium: getAverageIntake('potassium', rollingDays),
-      unsaturatedFat: getAverageIntake('unsaturatedFat', rollingDays),
-    };
-    return {
-      calories: Math.max(0, activeTargets.caloriesTarget - activeTargets.calories),
-      saturatedFat: Math.max(0, activeTargets.satFatTarget - activeTargets.satFat),
-      sodium: Math.max(0, activeTargets.sodiumTarget - activeTargets.sodium),
-      addedSugar: Math.max(0, activeTargets.addedSugarTarget - activeTargets.addedSugar),
-      carbohydrates: Math.max(0, activeTargets.carbohydratesTarget - activeTargets.carbohydrates),
-      solubleFibre: Math.max(0, activeTargets.solubleFibreTarget - activeTargets.solubleFibre),
-      protein: Math.max(0, activeTargets.proteinTarget - activeTargets.protein),
-      potassium: Math.max(0, activeTargets.potassiumTarget - activeTargets.potassium),
-      unsaturatedFat: Math.max(0, activeTargets.unsaturatedFatTarget - activeTargets.unsaturatedFat),
-      caloriesLogged: activeTargets.calories,
-      saturatedFatLogged: activeTargets.satFat,
-      sodiumLogged: activeTargets.sodium,
-      caloriesTarget: activeTargets.caloriesTarget,
-      saturatedFatTarget: activeTargets.satFatTarget,
-      sodiumTarget: activeTargets.sodiumTarget,
-      addedSugarTarget: activeTargets.addedSugarTarget,
-      carbohydratesTarget: activeTargets.carbohydratesTarget,
-      solubleFibreTarget: activeTargets.solubleFibreTarget,
-      proteinTarget: activeTargets.proteinTarget,
-      potassiumTarget: activeTargets.potassiumTarget,
-      unsaturatedFatTarget: activeTargets.unsaturatedFatTarget,
-      averages,
-      rollingDays,
-    };
-  }, [foodLogs, report, profile?.timezone]);
+  const remainingAllowance = React.useMemo(() => computeRemainingAllowance({ profile, activeFoodLogs, report }), [foodLogs, report, profile?.timezone]);
   useEffect(() => {
     if (!isAnalyzing && messages.length > 1) {
       const lastMsg = messages[messages.length - 1];
@@ -1958,8 +1861,9 @@ ${logsText}`);
     }
   }, [isAnalyzing, messages, liveThoughts]);
   const matchingPreviousLogs = React.useMemo(() => {
-    if (type !== 'food' || !activeFoodLogs || inputText.trim().length < 3) return [];
-    const query = inputText.toLowerCase().trim();
+    if (type !== 'food' || !activeFoodLogs) return [];
+    const query = extractAutocompleteQuery(inputText).toLowerCase().trim();
+    if (query.length < 3) return [];
     const uniqueMatches: FoodLog[] = [];
     const seenNames = new Set<string>();
     const reversedLogs = [...activeFoodLogs].reverse();
@@ -2224,107 +2128,21 @@ ${logsText}`);
         const hasAdditionalText = strippedText.replace(/\[+.*?\]+/g, '').replace(/^[+\s,.-]+/, '').trim().length > 0;
         if (!hasAdditionalText && finalImages.length === 0 && explicitFoodTags.length >= 1) {
           const todayDate = getCurrentDateInTimezone(profile?.timezone);
-          let totalCalories = 0;
-          let totalProtein = 0;
-          let totalCarbs = 0;
-          let totalFat = 0;
-          let totalSatFat = 0;
-          let totalFibre = 0;
-          let totalSodium = 0;
-          let totalWeight = 0;
-          const itemsBreakdown: any[] = [];
-          const allImages: string[] = [];
+          const {
+            dishName,
+            totalWeight,
+            roundedCal,
+            roundedProt,
+            roundedCarb,
+            roundedFat,
+            roundedSat,
+            roundedFib,
+            roundedSod,
+            allImages,
+            primaryImageUrl,
+            itemsBreakdown
+          } = calculateCompositeMeal(explicitFoodTags);
 
-          explicitFoodTags.forEach((tag, idx) => {
-            let cal = 0;
-            let prot = 0;
-            let carb = 0;
-            let fat = 0;
-            let sat = 0;
-            let fib = 0;
-            let sod = 0;
-            let weight = Number(tag.weightGrams) || 100;
-            let img = tag.imageUrl;
-
-            if (tag.source === 'previous_meal' && tag.originalLog) {
-              const orig = tag.originalLog;
-              const origWeight = Number(orig.weightGrams || orig.portionGrams) || 100;
-              const factor = tag.weightGrams ? Number(tag.weightGrams) / origWeight : 1;
-              const origNutr = orig.nutrients || {};
-              cal = (Number(orig.calories ?? origNutr.calories) || 0) * factor;
-              prot = (Number(orig.protein ?? origNutr.protein) || 0) * factor;
-              carb = (Number(orig.carbohydrates ?? origNutr.carbohydrates) || 0) * factor;
-              fat = (Number(orig.totalFat ?? orig.fat ?? origNutr.totalFat ?? origNutr.fat) || 0) * factor;
-              sat = (Number(orig.saturatedFat ?? origNutr.saturatedFat) || 0) * factor;
-              fib = (Number(orig.totalFibre ?? orig.fiber ?? origNutr.totalFibre ?? origNutr.fiber) || 0) * factor;
-              sod = (Number(orig.sodium ?? origNutr.sodium) || 0) * factor;
-              weight = tag.weightGrams ? Number(tag.weightGrams) : origWeight;
-              if (!img) {
-                img = orig.imageUrl || orig.imageUrls?.[0];
-              }
-            } else {
-              const item = tag.item || {};
-              const nutr = item.nutrients || tag.nutrients || {};
-              const baseServing = Number(item.serving_grams || tag.servingGrams) || 100;
-              const factor = tag.weightGrams ? Number(tag.weightGrams) / baseServing : 1;
-              cal = (Number(item.calories ?? nutr.calories ?? tag.calories) || 0) * factor;
-              prot = (Number(item.protein ?? nutr.protein ?? tag.protein) || 0) * factor;
-              carb = (Number(item.carbohydrates ?? nutr.carbohydrates ?? tag.carbohydrates) || 0) * factor;
-              fat = (Number(item.total_fat ?? nutr.totalFat ?? nutr.fat ?? tag.fat) || 0) * factor;
-              sat = (Number(item.saturated_fat ?? nutr.saturatedFat ?? tag.saturatedFat) || 0) * factor;
-              fib = (Number(item.total_fibre ?? nutr.totalFibre ?? nutr.fiber ?? tag.totalFibre) || 0) * factor;
-              sod = (Number(item.sodium ?? nutr.sodium ?? tag.sodium) || 0) * factor;
-              weight = tag.weightGrams ? Number(tag.weightGrams) : baseServing;
-              if (!img) {
-                img = item.image_url || item.imageUrl || tag.imageUrl;
-              }
-            }
-
-            totalCalories += cal;
-            totalProtein += prot;
-            totalCarbs += carb;
-            totalFat += fat;
-            totalSatFat += sat;
-            totalFibre += fib;
-            totalSodium += sod;
-            totalWeight += weight;
-
-            if (img && !allImages.includes(img)) {
-              allImages.push(img);
-            }
-
-            itemsBreakdown.push({
-              id: tag.dbId || `item_${idx}`,
-              name: tag.name,
-              displayName: tag.name,
-              portion: `${Math.round(weight)}g`,
-              weightGrams: Math.round(weight),
-              weight: `${Math.round(weight)}g`,
-              calories: Math.round(cal),
-              protein: Math.round(prot * 10) / 10,
-              carbohydrates: Math.round(carb * 10) / 10,
-              fat: Math.round(fat * 10) / 10,
-              totalFat: Math.round(fat * 10) / 10,
-              saturatedFat: Math.round(sat * 10) / 10,
-              totalFibre: Math.round(fib * 10) / 10,
-              fiber: Math.round(fib * 10) / 10,
-              sodium: Math.round(sod),
-              salt: Math.round((sod / 400) * 10) / 10,
-              imageUrl: img,
-              source: tag.source || 'catalog_tag',
-              scoutIndex: idx
-            });
-          });
-
-          const dishName = explicitFoodTags.length === 1 ? explicitFoodTags[0].name : explicitFoodTags.map(t => t.name).join(' + ');
-          const primaryImageUrl = allImages[0] || undefined;
-          const roundedCal = Math.round(totalCalories);
-          const roundedProt = Math.round(totalProtein * 10) / 10;
-          const roundedCarb = Math.round(totalCarbs * 10) / 10;
-          const roundedFat = Math.round(totalFat * 10) / 10;
-          const roundedSat = Math.round(totalSatFat * 10) / 10;
-          const roundedFib = Math.round(totalFibre * 10) / 10;
-          const roundedSod = Math.round(totalSodium);
 
           const compositeFoodLog: any = {
             id: `food_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,

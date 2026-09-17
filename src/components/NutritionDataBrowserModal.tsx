@@ -18,6 +18,7 @@ import {
   AlertCircle,
   UploadCloud,
   Sparkles,
+  Camera,
 } from 'lucide-react';
 import { parseMenuNutritionPaste, parseMenuNutritionBulkPaste, cleanDescriptionText } from '../utils/parseMenuNutritionPaste';
 import { ComprehensiveNutrientsTable } from './chat-cards/ComprehensiveNutrientsTable';
@@ -284,6 +285,48 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
     } finally {
       setBusy(false);
     }
+  };
+
+  const directUploadPhotoForItem = async (item: any, file: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const b64 = reader.result as string;
+      setBusy(true);
+      try {
+        const upRes = await fetch('/api/r2/upload-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload: b64, id: `brand_${Date.now()}` })
+        });
+        const upData = await upRes.json();
+        const photoUrl = upData.url || upData.proxyUrl;
+        if (!photoUrl) throw new Error("Failed to obtain photo URL");
+
+        const editRes = await fetch('/api/brand-menu-items/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            country_code: item.country_code || 'GB',
+            chain_key: item.chain_key,
+            dish_name_key: item.dish_name_key,
+            dish_name: item.dish_name,
+            image_url: photoUrl
+          })
+        });
+        if (!editRes.ok) throw new Error("Failed to save brand photo");
+
+        if (item.chain_key) await loadChainItems(item.chain_key);
+        if (globalSearch.trim()) await runGlobalSearch(globalSearch);
+        setSyncBanner(`Photo added to ${item.dish_name}`);
+        setTimeout(() => setSyncBanner(null), 3500);
+      } catch (e: any) {
+        alert(e?.message || "Failed to add photo");
+      } finally {
+        setBusy(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const saveChainSource = async () => {

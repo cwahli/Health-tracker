@@ -120,6 +120,52 @@ export function resolvePhotoForBrandItem(
 }
 
 /**
+ * Builds full overwrite fields for a brand menu item from a logged meal's nutrients and photo.
+ */
+export function buildBrandItemFromMealLog(
+  mealData: any,
+  chosenPhotoUrl: string,
+  customNotes?: string
+): Record<string, any> {
+  const cal = Number(mealData?.calories);
+  const prot = Number(mealData?.protein);
+  const carb = Number(mealData?.carbohydrates);
+  const fat = Number(mealData?.total_fat ?? mealData?.fat);
+  const sat = Number(mealData?.saturated_fat ?? mealData?.saturatedFat);
+  const sod = Number(mealData?.sodium);
+  const serving = Number(mealData?.portion_grams ?? mealData?.weight_grams ?? mealData?.serving_grams) || 100;
+  const notes = customNotes || mealData?.notes || mealData?.composition || '';
+
+  const rawNuts = mealData?.nutrients || {};
+  const nutrients = {
+    ...rawNuts,
+    calories: !isNaN(cal) ? cal : rawNuts.calories,
+    protein: !isNaN(prot) ? prot : rawNuts.protein,
+    carbohydrates: !isNaN(carb) ? carb : rawNuts.carbohydrates,
+    totalFat: !isNaN(fat) ? fat : (rawNuts.totalFat ?? rawNuts.fat),
+    saturatedFat: !isNaN(sat) ? sat : rawNuts.saturatedFat,
+    sodium: !isNaN(sod) ? sod : rawNuts.sodium,
+    salt: !isNaN(sod) ? Number((sod / 400).toFixed(2)) : rawNuts.salt,
+  };
+
+  return {
+    image_url: chosenPhotoUrl,
+    calories: !isNaN(cal) ? cal : null,
+    protein: !isNaN(prot) ? prot : null,
+    carbohydrates: !isNaN(carb) ? carb : null,
+    total_fat: !isNaN(fat) ? fat : null,
+    saturated_fat: !isNaN(sat) ? sat : null,
+    sodium: !isNaN(sod) ? sod : null,
+    serving_grams: serving,
+    basis_type: 'per_dish',
+    notes: notes || '',
+    nutrients,
+    updated_at: new Date().toISOString()
+  };
+}
+
+
+/**
  * Automatically links a meal photo to a brand catalog item if it does not already have an image.
  */
 export async function autoLinkBrandItemPhoto(args: {
@@ -1927,40 +1973,57 @@ export function registerBrandMenuRoutes(app: Express) {
         return res.status(400).json({ error: 'No valid photo found for linking' });
       }
 
-      const updateData: Record<string, any> = { image_url: photoUrl };
-      if (copyNutrients && mealData) {
-        const cal = Number(mealData.calories);
-        const prot = Number(mealData.protein);
-        const carb = Number(mealData.carbohydrates);
-        const fat = Number(mealData.total_fat ?? mealData.fat);
-        const sat = Number(mealData.saturated_fat ?? mealData.saturatedFat);
-        const sod = Number(mealData.sodium);
-        if (!isNaN(cal)) updateData.calories = cal;
-        if (!isNaN(prot)) updateData.protein = prot;
-        if (!isNaN(carb)) updateData.carbohydrates = carb;
-        if (!isNaN(fat)) updateData.total_fat = fat;
-        if (!isNaN(sat)) updateData.saturated_fat = sat;
-        if (!isNaN(sod)) updateData.sodium = sod;
-        updateData.nutrients = {
-          ...(updateData.nutrients || {}),
-          calories: cal,
-          protein: prot,
-          carbohydrates: carb,
-          totalFat: fat,
-          saturatedFat: sat,
-          sodium: sod
-        };
-      }
+      const updateData = mealData
+        ? buildBrandItemFromMealLog(mealData, photoUrl)
+        : { image_url: photoUrl, updated_at: new Date().toISOString() };
+
 
       if (isD1Configured()) {
         try {
           const { d1Query } = await import('./server_d1.js');
+          const d1NutrientsStr = JSON.stringify(updateData.nutrients || {});
           if (brandItemId) {
-            await d1Query('UPDATE brand_menu_items SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [photoUrl, brandItemId]);
+            await d1Query(
+              `UPDATE brand_menu_items 
+               SET image_url = ?, calories = ?, protein = ?, carbohydrates = ?, total_fat = ?, saturated_fat = ?, sodium = ?, serving_grams = ?, basis_type = ?, nutrients = ?, notes = ?, updated_at = CURRENT_TIMESTAMP 
+               WHERE id = ?`,
+              [
+                updateData.image_url,
+                updateData.calories,
+                updateData.protein,
+                updateData.carbohydrates,
+                updateData.total_fat,
+                updateData.saturated_fat,
+                updateData.sodium,
+                updateData.serving_grams,
+                updateData.basis_type || 'per_dish',
+                d1NutrientsStr,
+                updateData.notes || '',
+                brandItemId
+              ]
+            );
           } else if (chain_key && dish_name_key) {
             await d1Query(
-              'UPDATE brand_menu_items SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE country_code = ? AND chain_key = ? AND (dish_name_key = ? OR dish_name = ?)',
-              [photoUrl, country_code, chain_key, dish_name_key, dish_name_key]
+              `UPDATE brand_menu_items 
+               SET image_url = ?, calories = ?, protein = ?, carbohydrates = ?, total_fat = ?, saturated_fat = ?, sodium = ?, serving_grams = ?, basis_type = ?, nutrients = ?, notes = ?, updated_at = CURRENT_TIMESTAMP 
+               WHERE country_code = ? AND chain_key = ? AND (dish_name_key = ? OR dish_name = ?)`,
+              [
+                updateData.image_url,
+                updateData.calories,
+                updateData.protein,
+                updateData.carbohydrates,
+                updateData.total_fat,
+                updateData.saturated_fat,
+                updateData.sodium,
+                updateData.serving_grams,
+                updateData.basis_type || 'per_dish',
+                d1NutrientsStr,
+                updateData.notes || '',
+                country_code,
+                chain_key,
+                dish_name_key,
+                dish_name_key
+              ]
             );
           }
         } catch (d1Err) {
