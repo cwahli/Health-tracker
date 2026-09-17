@@ -1336,7 +1336,7 @@ process.on('unhandledRejection', (reason) => {
   console.error('[UNHANDLED REJECTION]', reason);
 });
 const imageSearchCache = new Map<string, any>();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const SERVER_START_TIME = Date.now();
 console.log("[boot] server.ts evaluated, starting…");
 
