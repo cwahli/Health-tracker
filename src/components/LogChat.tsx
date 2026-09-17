@@ -1,20 +1,19 @@
 import { formatMessageContent } from '../utils/formatUtils';
-import { ErrorBoundary } from './ErrorBoundary';
 import { agentCardRegistry } from './chat-cards';
 import { decideFrontDeskHandoff } from '../utils/handoffGuard';
-import { mapFrontDeskSpecialist, specialistDisplayName } from '../utils/frontDeskRouting';
+import { mapFrontDeskSpecialist } from '../utils/frontDeskRouting';
 import { dedupeConsecutiveAssistantMessages, dropAnsweredClarifyMessages, dropStaleTimeoutMessages, firstPortionClarifyMessageIndex, hasPortionClarifyPayload, retirePortionClarifyPayloads, shouldInjectPortionClarifyMessage } from '../utils/chatMessageDedupe';
 import { AgentThoughtBox } from './chat-cards/FoodCard';
 import { trackApiCall, setActiveQueryId, generateQueryId } from '../utils/apiTracker';
-import { saveAgentRequestLog, getAgentRequestLogs } from '../utils/agentLogsTracker';
+import { saveAgentRequestLog } from '../utils/agentLogsTracker';
 import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { ChatMessage, FoodLog, UserProfile, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
 import { displayStatusLabel, dictionaryFor } from '../utils/i18n';
 import { isCompareOnlyResult } from '../utils/compareMealLogGuard';
-import { X, Send, Image, Camera, FolderOpen, MessageSquare, Sparkles, Plus, Terminal, ChevronDown, ChevronUp, Loader, MapPin, Trash2, Check, Table, RotateCcw, RefreshCw, AlertTriangle, ShieldAlert, Edit2, Maximize2, Minimize2, Flag, BrainCircuit, Download, Utensils } from 'lucide-react';
+import { X, Send, Image, Camera, FolderOpen, MessageSquare, Sparkles, Plus, Terminal, ChevronDown, ChevronUp, Loader, Trash2, Check, Table, RotateCcw, AlertTriangle, Flag, BrainCircuit, Download, Utensils } from 'lucide-react';
 import { UniversalModal } from './UniversalModal';
-import { biomarkerDefinitions, getBiomarkerStatus, isAsianEthnicity, getBiomarkerStatusLabel, isBiomarkerValueImprobable, getMergedBiomarkerDef, detectFlaggedTelemetryErrors, buildReviewBiomarkerContext, buildBiomarkerReviewPrefill, getMappedBiomarkerKey, isBiomarkerApproved, isCatalogBuiltIn, shouldStampExtractedDefPending } from '../utils/biomarkers';
+import { biomarkerDefinitions, getBiomarkerStatus, getBiomarkerStatusLabel, isBiomarkerValueImprobable, getMergedBiomarkerDef, detectFlaggedTelemetryErrors, buildReviewBiomarkerContext, buildBiomarkerReviewPrefill, getMappedBiomarkerKey, isBiomarkerApproved, isCatalogBuiltIn, shouldStampExtractedDefPending } from '../utils/biomarkers';
 import { BatchNavigator } from './BatchNavigator';
 import LLMSelector from './LLMSelector';
 import { AVAILABLE_LLMS } from '../utils/llm';
@@ -31,14 +30,13 @@ const FullScreenLogViewer = lazyWithRetry(() => import('./FullScreenLogViewer'))
 const frontDeskAbortControllers = new Map<string, AbortController>();
 import FullScreenInstructionViewer from './FullScreenInstructionViewer';
 import { NutritionLabelTable } from './chat-cards/NutritionLabelTable';
-import { InteractivePlacesMap } from './InteractivePlacesMap';
 import { PortionClarifyCard } from './PortionClarifyCard';
 import { applyPortionChoicesToLog } from '../utils/portionUtils';
 import exifr from 'exifr';
-import { auth, db } from '../firebase';
-import { getAgentCalibration, getAllAgentCalibrations } from '../utils/agentCalibration';
-import { collection, query, where, getDocs, setDoc, doc, deleteDoc, getDoc, limit, orderBy } from 'firebase/firestore';
-import { sanitizeForFirestore, checkQuotaFlag } from '../utils/firestoreUtils';
+import { auth } from '../firebase';
+import { getAllAgentCalibrations } from '../utils/agentCalibration';
+import { query, where, limit } from 'firebase/firestore';
+import { checkQuotaFlag } from '../utils/firestoreUtils';
 import { get as idbGet } from 'idb-keyval';
 import { pruneLocalStorageToFreeSpace, safeIdbSet } from '../utils/storageUtils';
 import { resolveFoodImage } from '../utils/imageResolver';
@@ -46,23 +44,14 @@ import { updateOrAddBracketItem, removeBracketItem, parseBracketItems, extractAu
 import { calculateCompositeMeal } from '../utils/compositeFoodCalculation';
 import { JobStore } from '../jobs/JobStore';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
-import { toPendingFoodLog } from '../mealBuild/adapters';
 import { executeFoodAgent } from '../jobs/FoodAgentExecutor';
 import { downloadJobDebugReport } from '../utils/logChatDebugDownload';
 import { shouldRunHandoffAutoSend } from '../utils/chatAutoSend';
 import { getSessionLog } from '../jobs/sessionLog';
 import {
-  isValidFoodLog,
   resolvePendingFoodLog,
-  isValidValue,
   formatNutrientValue,
   safeJSONStringify,
-  parseJsonOffline,
-  getOfflineCategorization,
-  performOfflineDataAssembly,
-  extractBiomarkerKeysFromJson,
-  extractBiomarkerKeysFromPrioritizedConditions,
-  detectBiomarkersInText,
 } from '../utils/logChatOffline';
 export { safeJSONStringify };
 import { humanizeJobFailure } from '../utils/jobFailure';
@@ -71,7 +60,7 @@ import { reserveCredits } from '../jobs/credits';
 import { JobQueueRunner } from '../jobs/JobQueueRunner';
 import { recordBreadcrumb, setActiveJobScope } from '../utils/breadcrumbTracker';
 import { consumeGoldenAnalyzeToken, GOLDEN_NEW_ANALYZE_EVENT } from '../utils/goldenIngestClient';
-import { PRIMARY_NUTRIENTS, formatNutrientDisplayValue, getTopTargetNutrientKeys } from '../utils/nutrients';
+import { getTopTargetNutrientKeys } from '../utils/nutrients';
 import { AgentType, AGENT_REGISTRY, getAgentRolloutStatus } from '../utils/agentConfig';
 import { getAvailableCredits, deductAgentCredits, DEFAULT_AGENT_COSTS } from '../utils/creditManager';
 import { getAdminSettings } from '../utils/userManagement';
