@@ -1,0 +1,16 @@
+{
+  "slug": "q-4d-stage-rows-ratchet",
+  "node": "builder-start",
+  "at": "2026-09-17T08:39:24.195Z",
+  "git": {
+    "head": "bf0efa234ca4b6ca69fd7996382b237edace9e2b",
+    "stashCommit": "ddbdd9cab67bdd5a1e346760864fe1d1acce6dfe"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/q-4d-stage-rows-ratchet.md"
+  ]
+}
