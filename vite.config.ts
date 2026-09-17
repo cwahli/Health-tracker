@@ -18,8 +18,6 @@ export default defineConfig(() => {
         'react-dom/client',
         'lucide-react',
         'motion/react',
-        'clsx',
-        'tailwind-merge',
         'firebase/app',
         'firebase/auth',
         'firebase/firestore',
@@ -63,7 +61,7 @@ export default defineConfig(() => {
       },
     },
     test: {
-      exclude: ['**/node_modules/**', '**/dist/**', '**/studio/**', '**/archive/**', '**/prototype/tests/**'],
+      exclude: ['**/node_modules/**', '**/dist/**', '**/studio/**', '**/archive/**'],
     },
   };
 });

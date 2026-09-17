@@ -91,34 +91,8 @@ export function nextPhotoFallbackUrl(failedUrl: string, tried: Set<string>): str
   return null;
 }
 
-/**
- * B11d — given a failed image src, resolve the next URL to try (awaiting the
- * signed-URL API when that's the candidate), or null if every fallback in
- * nextPhotoFallbackUrl() has already been tried. Shared by any component that
- * displays a food/meal photo and wants to self-heal from an expired/private
- * R2 URL rather than showing a permanently broken image.
- */
-export async function resolveNextPhotoUrl(
-  original: string,
-  current: string,
-  tried: Set<string>
-): Promise<string | null> {
-  let next = nextPhotoFallbackUrl(current, tried);
-  if (next?.includes('/api/r2/photo-url')) {
-    try {
-      const key = photoKeyFromUrl(current) || photoKeyFromUrl(original);
-      const res = await fetch(`/api/r2/photo-url?key=${encodeURIComponent(key || '')}`);
-      if (res.ok) {
-        const json = await res.json();
-        next = json.proxyUrl || json.url || next;
-      }
-    } catch {
-      /* keep next */
-    }
-  }
-  if (next && !tried.has(next)) return next;
-  return null;
-}
+export const resolveNextPhotoUrl = nextPhotoFallbackUrl;
+
 /**
  * Ordered candidates for a meal/job (first usable wins for primary display).
  * Does NOT invent stock/catalog images.

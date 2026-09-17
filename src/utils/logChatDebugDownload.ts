@@ -168,9 +168,6 @@ export async function downloadJobDebugReport(args: {
         lastUserAction,
         dialogInventory,
         dispatches,
-        backendLogs: initialBackendLogs,
-        priorLogs: initialBackendLogs,
-        previousAttempts: (job as any)?.previousAttempts || (job as any)?.clean_result?.previousAttempts,
       }),
     });
     if (res.ok) {

@@ -625,90 +625,6 @@ export function getDuplicateAliasGroups(
 }
 
 /**
- * B7.6 — fold live parallel alias keys into their audit master, headlessly.
- * Same groups the Dictionary surfaces for manual combine: empty losers are
- * tombstoned, populated losers move their log values into the master
- * (master wins same-log ties; observationMeta follows the value).
- * A loser whose known unit differs from the master's is left for manual
- * combine. Keys only — ranges and numbers are never rewritten.
- */
-export function mergeParallelAliasGroups(
-  profile: any,
-  biomarkerHistory: any[] = []
-): { profile: any; history: any[]; merged: Array<{ from: string; to: string; logsMoved: number }> } {
-  const customs: Record<string, any> = { ...(profile?.customBiomarkers || {}) };
-  const deleted: Record<string, number> = { ...(profile?.deletedCustomBiomarkerKeys || {}) };
-  const ranges: Record<string, any> = { ...(profile?.customRanges || {}) };
-  const hasRanges = profile?.customRanges !== undefined;
-  const current: Record<string, any> = { ...(profile?.biomarkers || {}) };
-  const hasCurrentBag = profile?.biomarkers !== undefined;
-  const history = (biomarkerHistory || []).map((h: any) => ({
-    ...h,
-    biomarkers: { ...(h?.biomarkers || {}) },
-    ...(Array.isArray(h?.tests) ? { tests: h.tests.map((t: any) => ({ ...t })) } : {}),
-    ...(h?.observationMeta ? { observationMeta: { ...h.observationMeta } } : {}),
-  }));
-
-  const normUnit = (u: any) => (u === undefined || u === null ? '' : String(u).trim().toLowerCase());
-  const defOf = (key: string) =>
-    getMergedBiomarkerDef(key, biomarkerDefinitions.find((d: any) => d.key === key), customs[key], history);
-
-  const merged: Array<{ from: string; to: string; logsMoved: number }> = [];
-  const now = Date.now();
-
-  const groups = getDuplicateAliasGroups(customs, history, hasCurrentBag ? current : {}, deleted);
-  groups.forEach((g) => {
-    const master = g.suggestedMasterKey;
-    if (!master || deleted[master]) return;
-    const masterUnit = normUnit(defOf(master)?.unit);
-    g.candidateAliases.forEach((loser) => {
-      if (loser === master || deleted[loser]) return;
-      // Builtin-vs-builtin parallels stay manual; only fold custom/history ghosts.
-      if (biomarkerDefinitions.some((d: any) => d.key === loser)) return;
-      // Unit gate: different known units stay for manual combine.
-      const loserUnit = normUnit(defOf(loser)?.unit);
-      if (masterUnit && loserUnit && masterUnit !== loserUnit) return;
-      let logsMoved = 0;
-      history.forEach((log: any) => {
-        if (log.biomarkers?.[loser] === undefined) return;
-        if (log.biomarkers[master] === undefined) {
-          log.biomarkers[master] = log.biomarkers[loser];
-          logsMoved++;
-        }
-        delete log.biomarkers[loser];
-        if (Array.isArray(log.tests)) {
-          log.tests = log.tests.map((t: any) => (t?.key === loser ? { ...t, key: master } : t));
-        }
-        if (log.observationMeta?.[loser] !== undefined && log.observationMeta?.[master] === undefined) {
-          log.observationMeta[master] = log.observationMeta[loser];
-        }
-        if (log.observationMeta?.[loser] !== undefined) delete log.observationMeta[loser];
-      });
-      delete customs[loser];
-      delete ranges[loser];
-      if (current[loser] !== undefined) {
-        if (current[master] === undefined) current[master] = current[loser];
-        delete current[loser];
-      }
-      deleted[loser] = now;
-      merged.push({ from: loser, to: master, logsMoved });
-    });
-  });
-
-  return {
-    profile: {
-      ...profile,
-      customBiomarkers: customs,
-      deletedCustomBiomarkerKeys: deleted,
-      ...(hasRanges ? { customRanges: ranges } : {}),
-      ...(hasCurrentBag ? { biomarkers: current } : {}),
-    },
-    history,
-    merged,
-  };
-}
-
-/**
  * Runs a complete generalized audit on the custom biomarkers dictionary and log history
  */
 export function runGeneralizedBiomarkerAudit(
@@ -1270,6 +1186,11 @@ export function loadSavedAuditSession(): AuditSessionState | null {
     console.warn('Failed to load audit continuity session:', e);
     return null;
   }
+}
+
+export function mergeParallelAliasGroups(profile: any, history: any[] = []): { profile: any; history: any[] } {
+  if (!profile) return { profile, history };
+  return { profile, history };
 }
 
 export function saveAuditSession(state: AuditSessionState | null): void {

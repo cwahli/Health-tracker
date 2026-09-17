@@ -1119,19 +1119,18 @@ export function buildAutoInvariants(input: {
       (b) => b.kcal == null && (b.id === 'foundation' || b.id === 'reconcile' || b.id === 'dietitian_payload')
     );
     const drift = (compile.imbalances || [])[0];
-    const balanced = compile.compiler === 'balanced' || compile.compiler === 'green';
     add({
       id: 'math_trial_balance',
       group: 'math',
       label:
-        balanced
+        compile.compiler === 'green'
           ? 'Trial balance books agree'
           : missingLogBooks.length
             ? `Trial balance incomplete (${missingLogBooks.map((b) => b.id).join(', ')} not in log)`
             : `Trial balance drifted: ${drift?.label || 'books disagree'}`,
       expected: 'foundation, reconcile, dietitian payload, and saved table present and agree',
       actual: (compile.books || []).map((b) => `${b.id}=${b.kcal ?? '—'}`).join(', '),
-      pass: balanced,
+      pass: compile.compiler === 'green',
       signature: 'trial_balance',
     });
   }

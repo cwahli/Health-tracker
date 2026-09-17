@@ -170,55 +170,10 @@ export async function runDatabaseSearchStage(
     }
   });
   const searchResultsList = await Promise.all(searchPromises);
-  // Ensure explicit food tags from internal catalog and previous meals are present in databaseMatchesArray
+  // Ensure explicit food tags from internal catalog are present in databaseMatchesArray
   if (Array.isArray(explicitFoodTags) && explicitFoodTags.length > 0) {
     for (const tag of explicitFoodTags) {
-      if (tag.source === 'previous_meal' || (tag.originalLog && tag.source !== 'catalog_tag')) {
-        const log = tag.originalLog || {};
-        const dishName = tag.name || log.name || 'Previous Meal';
-        const hitId = tag.dbId || log.id || `food_${Date.now()}`;
-        const previousMealHit = {
-          id: hitId,
-          source: 'previous_meal',
-          brandPriority: true,
-          searchQuery: dishName,
-          name: dishName,
-          dish_name: dishName,
-          chainName: 'Previous Meal',
-          chain_name: 'Previous Meal',
-          basisType: 'per_dish',
-          basis_type: 'per_dish',
-          servingGrams: tag.weightGrams || log.portionGrams || 100,
-          calories: log.calories != null ? String(log.calories) : undefined,
-          protein: log.protein != null ? Number(log.protein) : undefined,
-          fat: log.totalFat != null ? Number(log.totalFat) : (log.fat != null ? Number(log.fat) : undefined),
-          saturatedFat: log.saturatedFat != null ? Number(log.saturatedFat) : undefined,
-          carbohydrates: log.carbohydrates != null ? Number(log.carbohydrates) : undefined,
-          totalFibre: log.totalFibre != null ? Number(log.totalFibre) : (log.fiber != null ? Number(log.fiber) : undefined),
-          sodium: log.sodium != null ? Number(log.sodium) : undefined,
-          imageUrl: log.imageUrl || log.imageUrls?.[0] || tag.imageUrl || undefined,
-          imageUrls: log.imageUrls || (log.imageUrl ? [log.imageUrl] : []),
-          nutrients: {
-            basisType: 'per_dish',
-            calories: log.calories != null ? Number(log.calories) : 0,
-            protein: log.protein,
-            totalFat: log.totalFat ?? log.fat,
-            saturatedFat: log.saturatedFat,
-            carbohydrates: log.carbohydrates,
-            totalFibre: log.totalFibre ?? log.fiber,
-            sodium: log.sodium,
-          },
-          itemsBreakdown: log.itemsBreakdown,
-          snippet: `Previous logged meal: ${dishName}. Nutrition: ${log.calories ?? 0} kcal, ${log.protein ?? 0}g protein, ${log.carbohydrates ?? 0}g carbs, ${log.totalFat ?? 0}g fat.`
-        };
-        searchResultsList.push({
-          query: dishName,
-          off: [],
-          brandHits: [previousMealHit],
-          web: []
-        });
-        addDebugLog(`[Explicit Tag] Injected direct previous meal lookup for tag "${dishName}" (ID: ${hitId})`);
-      } else if (tag.dbId && typeof tag.dbId === 'string' && tag.dbId.startsWith('brand_menu_')) {
+      if (tag.dbId && typeof tag.dbId === 'string' && tag.dbId.startsWith('brand_menu_')) {
         const brandItem = await getBrandMenuItemById(tag.dbId);
         if (brandItem) {
           searchResultsList.push({

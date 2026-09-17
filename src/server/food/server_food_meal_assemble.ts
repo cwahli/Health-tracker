@@ -139,7 +139,7 @@ export function assembleParsedMealHeader(args: ParsedMealHeaderArgs): {
   parsedData.weightGrams = totalWeightGrams;
   parsedData.basis_type = 'total';
   parsedData.serving_grams = totalWeightGrams;
-  parsedData.quantity = sanitizeString(rawFoodData.quantity, t(language, 'oneServingDefault'));
+  parsedData.quantity = sanitizeString(rawFoodData.quantity, "1 serving");
   parsedData.benefits = sanitizeString(rawFoodData.benefits, "");
   parsedData.risks = sanitizeString(rawFoodData.risks, "");
   parsedData.healthImpact = sanitizeString(rawFoodData.healthImpact, "");
