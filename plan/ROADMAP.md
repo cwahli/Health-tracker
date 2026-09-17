@@ -37,7 +37,7 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 are **shipped**. D
 
 **Do this, in order. Packets are locked = go.**
 
-1. **Q-4** — `specs/active/q-4-agent-result-table.md` (`auto_go: true`). Extract-only `KIT_DRIFT`. Any builder.
+1. **Q-4** — shrink sequence `specs/active/q-4a-parse-keys.md` → `q-4b-batch-rows` → `q-4c-fallback-rows` → `q-4d-stage-rows-ratchet` (all locked, `auto_go: true`; commit on `journey/q-4-thin` between steps). Extract-only `KIT_DRIFT`. Old single-PR packet `q-4-agent-result-table.md` is `superseded` (needed ≥65% churn, gate allows ≤30%). Any builder.
 2. **Q-10** — `specs/active/q-10-dependency-audit.md` (`auto_go: true`). Hygiene only, after Q-4 gates green. Any builder.
 3. **R-13.1** — `specs/active/R-13.md` (`auto_go: true`). **R-13.0 preflight PASS 2026-09-17** (agent CLI). Do not start R-13.4 / R-5 / a second Cloud Run go-live in the same PR.
 
@@ -426,7 +426,7 @@ B0 / fill-template C1–C7     ← shipped
 Q-8.6 / F-10.8 outer         ← shipped (2026-09-16 job_1789535793972, 74/74 pass, 0 stalls)
 F-11.2 / F-11.3 curator LLM  ← shipped (2026-09-16 brandCurator + t1/curator wire)
 Q-9 website consolidation    ← shipped (extract-only)
-Q-4 AgentResultTable thin    ← Current work (packet locked; any agent)
+Q-4 AgentResultTable thin    ← Current work (q-4a→q-4b→q-4c→q-4d locked; any agent)
 Q-10 dependency audit        ← after Q-4 (packet locked; any agent)
 R-13.1 Cloudflare go-live    ← after Q-10 or in parallel if no shared files; R-13.0 PASS
 ```

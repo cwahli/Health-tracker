@@ -1,11 +1,15 @@
 ---
 id: q-4-agent-result-table
-status: locked
+status: superseded
 class: KIT_DRIFT
 skill: biomarkers
 edit_mode: patch
 who: any-agent
-auto_go: true
+auto_go: false
+# SUPERSEDED 2026-09-17 (human-approved re-plan): single-PR needs ≥65% file
+# churn, patch gate allows ≤30% — mathematically unexecutable. Execute instead
+# specs/active/q-4a-parse-keys.md → q-4b-batch-rows → q-4c-fallback-rows →
+# q-4d-stage-rows-ratchet (each ≤27% churn, commit between, branch journey/q-4-thin).
 allowed_files:
   - src/components/AgentResultTable.tsx
   - src/utils/agentResultParse.ts

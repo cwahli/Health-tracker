@@ -1,0 +1,16 @@
+{
+  "slug": "q-4a-parse-keys",
+  "node": "builder-start",
+  "at": "2026-09-17T08:23:34.149Z",
+  "git": {
+    "head": "a7fdde76b70dbb1b8491fc9344614a0160488420",
+    "stashCommit": "a8fed66da7090a8cde9a91cca36edc3ba447b9e0"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/q-4a-parse-keys.md"
+  ]
+}
