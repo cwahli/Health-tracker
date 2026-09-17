@@ -634,6 +634,7 @@ export default function App() {
   const foodLogsRef = useRef(foodLogs);
   const biomarkersRef = useRef(biomarkers);
   const biomarkerHistoryRef = useRef(biomarkerHistory);
+  const saveAndSyncRef = useRef<typeof saveAndSync | null>(null); // Q-11.3b: job-runtime persist path — assigned below, because its subscriber mounts long before saveAndSync exists
 
   useEffect(() => {
     profileRef.current = profile;
@@ -1495,7 +1496,7 @@ export default function App() {
 
       if (profileUpdated && newProfile) {
         setProfile(newProfile);
-        await saveAndSync(newProfile, foodLogsRef.current, biomarkersRef.current, biomarkerHistoryRef.current, actions, dailyBenefits, report, { type: 'profile' });
+        await saveAndSyncRef.current?.(newProfile, foodLogsRef.current, biomarkersRef.current, biomarkerHistoryRef.current, actions, dailyBenefits, report, { type: 'profile' });
       }
       if (typeof window !== 'undefined') {
         (window as any).JobStore = JobStore;
@@ -1709,7 +1710,6 @@ export default function App() {
     }
   }, [activeTab, isFoodChatOpen, isMedicalChatOpen]);
   // Initialize from Firebase Auth and Firestore on mount
-
 
   const lastSyncTrigger = useRef<number>(0);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -3401,7 +3401,6 @@ export default function App() {
     await safeSaveToLocalStorage(getStorageKey(updatedProfile?.email || profile?.email || auth.currentUser?.email), bundle);
 
 
-
     const profileForCloud = updatedProfile ? {
       ...updatedProfile,
       deletedFoodLogIds: mergeDeleteMaps(updatedProfile.deletedFoodLogIds, profile?.deletedFoodLogIds),
@@ -3769,6 +3768,7 @@ export default function App() {
       completeInteraction(syncRootId, false, 0, e.message || 'Save error');
     }
   };
+  saveAndSyncRef.current = saveAndSync; // Q-11.3b: keep the subscriber persist path current
 
   const handleResolveConflict = async (biomarkerSource: 'local' | 'cloud', foodSource: 'local' | 'cloud') => {
     if (!conflictData || !auth.currentUser) return;
