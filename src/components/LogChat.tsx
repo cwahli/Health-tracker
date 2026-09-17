@@ -40,6 +40,7 @@ import { sanitizeForFirestore, checkQuotaFlag } from '../utils/firestoreUtils';
 import { get as idbGet } from 'idb-keyval';
 import { pruneLocalStorageToFreeSpace, safeIdbSet } from '../utils/storageUtils';
 import { resolveFoodImage } from '../utils/imageResolver';
+import { updateOrAddBracketItem, removeBracketItem, parseBracketItems } from '../utils/bracketPortionParser';
 import { JobStore } from '../jobs/JobStore';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
 import { toPendingFoodLog } from '../mealBuild/adapters';
@@ -2218,8 +2219,7 @@ ${logsText}`);
         }
         let strippedText = userContent || '';
         explicitFoodTags.forEach(t => {
-          const escaped = (t.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          strippedText = strippedText.replace(new RegExp(`\\[+${escaped}(?:\\s+${t.weightGrams}g)?\\]+`, 'gi'), '').replace(/\s+/g, ' ').trim();
+          strippedText = removeBracketItem(strippedText, t.name);
         });
         const hasAdditionalText = strippedText.replace(/\[+.*?\]+/g, '').replace(/^[+\s,.-]+/, '').trim().length > 0;
         if (!hasAdditionalText && finalImages.length === 0 && explicitFoodTags.length >= 1) {
@@ -6480,13 +6480,23 @@ ${logsText}`);
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {item._listType === 'brand' && (
+                        {item._listType === 'brand' ? (
                           <>
                             <input 
                               type="number" 
-                              defaultValue={tagPortionPreFill}
-                              id={`tag-portion-${item.food_id}`}
-                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center" 
+                              defaultValue={item.serving_grams || tagPortionPreFill || 100}
+                              id={`tag-portion-${item.food_id || idx}`}
+                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center font-mono" 
+                            />
+                            <span className="text-xs text-slate-500">g</span>
+                          </>
+                        ) : (
+                          <>
+                            <input 
+                              type="number" 
+                              defaultValue={item.portionGrams || item.weightGrams || 100}
+                              id={`prev-portion-${item.id}`}
+                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center font-mono" 
                             />
                             <span className="text-xs text-slate-500">g</span>
                           </>
@@ -6494,41 +6504,9 @@ ${logsText}`);
                         <button
                           type="button"
                           onClick={() => {
-                            const applyTag = (prev: string, searchTerms: string, tagContent: string) => {
-                              const trimmedPrev = prev.trimEnd();
-                              if (!trimmedPrev) return `[${tagContent}] `;
-                              const words = trimmedPrev.split(/\s+/);
-                              const tagWords = tagContent.toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
-                              let matchCount = 0;
-                              for (let i = 1; i <= Math.min(words.length, 6); i++) {
-                                const firstWordOfSuffix = words[words.length - i].toLowerCase();
-                                const cleanWord = firstWordOfSuffix.replace(/[^a-z0-9]/g, '');
-                                if (!cleanWord) {
-                                  matchCount = i;
-                                  continue;
-                                }
-                                const isMatch = tagWords.some(tw => {
-                                  if (cleanWord.length < 3) {
-                                    return tw === cleanWord || tw.startsWith(cleanWord);
-                                  }
-                                  return tw.includes(cleanWord) || cleanWord.includes(tw);
-                                });
-                                if (isMatch) {
-                                  matchCount = i;
-                                } else {
-                                  break;
-                                }
-                              }
-                              if (matchCount > 0) {
-                                  const beforeWords = words.slice(0, words.length - matchCount);
-                                  const beforeStr = beforeWords.join(' ').replace(/\[+\s*$/, '').trim();
-                                  return (beforeStr ? beforeStr + ' ' : '') + `[${tagContent}] `;
-                                }
-                                const cleanedPrev = prev.replace(/\[+\s*$/, '').trim();
-                                return (cleanedPrev ? cleanedPrev + ' ' : '') + `[${tagContent}] `;
-                            };
                             if (item._listType === 'brand') {
-                              const w = (document.getElementById(`tag-portion-${item.food_id}`) as HTMLInputElement)?.value || tagPortionPreFill;
+                              const inputEl = document.getElementById(`tag-portion-${item.food_id || idx}`) as HTMLInputElement;
+                              const w = Number(inputEl?.value) || item.serving_grams || tagPortionPreFill || 100;
                               setExplicitFoodTags(prev => [...prev, { 
                                 dbId: item.food_id, 
                                 name: item.dish_name, 
@@ -6537,17 +6515,19 @@ ${logsText}`);
                                 imageUrl: item.imageUrl || item.image_url,
                                 item 
                               }]);
-                              setInputText(prev => applyTag(prev, activeSearchTerms, `${item.dish_name} ${w}g`));
+                              setInputText(prev => updateOrAddBracketItem(prev, item.dish_name, `${w}g`));
                             } else {
+                              const inputEl = document.getElementById(`prev-portion-${item.id}`) as HTMLInputElement;
+                              const w = Number(inputEl?.value) || item.portionGrams || item.weightGrams || 100;
                               setExplicitFoodTags(prev => [...prev, { 
                                 dbId: item.id, 
                                 name: item.name, 
                                 source: 'previous_meal', 
                                 originalLog: item,
                                 imageUrl: item.imageUrl || item.imageUrls?.[0],
-                                weightGrams: item.portionGrams || item.weightGrams || 100
+                                weightGrams: Number(w)
                               }]);
-                              setInputText(prev => applyTag(prev, activeSearchTerms, item.name));
+                              setInputText(prev => updateOrAddBracketItem(prev, item.name, `${w}g`));
                             }
                             setCatalogMatches([]);
                             setActiveSearchTerms('');
@@ -6590,17 +6570,25 @@ ${logsText}`);
                       <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 max-w-[120px] truncate">
                         {tag.name}
                       </span>
-                      {tag.weightGrams ? (
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-700/50 px-1 py-0.5 rounded">
-                          {tag.weightGrams}g
-                        </span>
-                      ) : null}
+                      <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-700/50 px-1.5 py-0.5 rounded">
+                        <input
+                          type="number"
+                          value={tag.weightGrams ?? 100}
+                          onChange={(e) => {
+                            const newW = Math.max(1, Number(e.target.value) || 0);
+                            setExplicitFoodTags(prev => prev.map((item, i) => i === tIdx ? { ...item, weightGrams: newW } : item));
+                            setInputText(prev => updateOrAddBracketItem(prev, tag.name, `${newW}g`));
+                          }}
+                          className="w-10 text-[10px] text-center font-mono bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none"
+                          min="1"
+                        />
+                        <span className="text-[9px] text-slate-500 dark:text-slate-400 font-mono">g</span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => {
                           setExplicitFoodTags(prev => prev.filter((_, i) => i !== tIdx));
-                          const escaped = (tag.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                          setInputText(prev => prev.replace(new RegExp(`\\[+${escaped}(?:\\s+\\d+g)?\\]+`, 'gi'), '').trim());
+                          setInputText(prev => removeBracketItem(prev, tag.name));
                         }}
                         className="p-0.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-rose-500 rounded transition-colors"
                         title="Remove item"
@@ -6919,7 +6907,26 @@ ${logsText}`);
                 id="food-chat-input"
                 type="text"
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setInputText(val);
+                  if (explicitFoodTags.length > 0) {
+                    const parsed = parseBracketItems(val);
+                    if (parsed.length > 0) {
+                      setExplicitFoodTags(prev => prev.map(tag => {
+                        const matched = parsed.find(p => p.name.toLowerCase() === tag.name.toLowerCase());
+                        if (matched && matched.scaling && matched.scaling.value > 0) {
+                          const base = tag.item?.serving_grams || tag.originalLog?.portionGrams || 100;
+                          const w = matched.scaling.unit === 'x' 
+                            ? base * matched.scaling.value
+                            : matched.scaling.value;
+                          return { ...tag, weightGrams: Math.round(w) };
+                        }
+                        return tag;
+                      }));
+                    }
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !isAnalyzing && !isSubmitting && !isSendingRef.current && !isCompressing) {
                     const triggerText = inputText.trim() || autoSendMessage || (reviewBiomarkerKey ? buildBiomarkerReviewPrefill(reviewBiomarkerKey, undefined, biomarkers, profile) : (selectedImages.length > 0 ? 'Analyze this meal photo.' : ''));

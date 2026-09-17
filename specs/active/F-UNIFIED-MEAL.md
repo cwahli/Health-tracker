@@ -18,6 +18,9 @@ allowed_files:
   - src/utils/translations.ts
   - src/server/food/server_food_multi_composition.test.ts
   - src/utils/imageResolver.contract.test.ts
+  - src/utils/bracketPortionParser.ts
+  - src/utils/bracketPortionParser.test.ts
+  - src/server/food/server_brand_image_linking.contract.test.ts
   - supabase/migrations/20260917_brand_menu_items_image_url.sql
   - specs/packets/R-13.md
 frozen_files:

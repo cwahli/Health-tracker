@@ -83,6 +83,97 @@ export function normalizeChainKey(name: string): string {
   return str;
 }
 
+/**
+ * Resolves the appropriate photo URL for a brand item from a meal's uploaded photos.
+ * Disambiguates multiple photos using sourceImageIndex and prevents false cross-assignment.
+ */
+export function resolvePhotoForBrandItem(
+  imageUrls: string[] | undefined | null,
+  sourceImageIndex?: number | null
+): string | null {
+  if (!Array.isArray(imageUrls) || imageUrls.length === 0) return null;
+
+  const validPhotos = imageUrls.map(u => (typeof u === 'string' ? u.trim() : ''));
+  const isValidPhoto = (u: string) =>
+    Boolean(
+      u &&
+      !u.startsWith('data:') &&
+      u !== '[base64_image_data_truncated]' &&
+      (u.startsWith('http://') || u.startsWith('https://') || u.startsWith('/photos/') || u.startsWith('photos/'))
+    );
+
+  if (sourceImageIndex != null && Number.isInteger(sourceImageIndex)) {
+    if (sourceImageIndex >= 0 && sourceImageIndex < validPhotos.length) {
+      const candidate = validPhotos[sourceImageIndex];
+      return isValidPhoto(candidate) ? candidate : null;
+    }
+    return null;
+  }
+
+  if (validPhotos.length === 1) {
+    const candidate = validPhotos[0];
+    return isValidPhoto(candidate) ? candidate : null;
+  }
+
+  // Multiple photos without explicit, valid index: return null to avoid cross-contamination
+  return null;
+}
+
+/**
+ * Automatically links a meal photo to a brand catalog item if it does not already have an image.
+ */
+export async function autoLinkBrandItemPhoto(args: {
+  chainKey: string;
+  dishNameKey?: string;
+  dishName?: string;
+  photoUrl: string;
+  countryCode?: string;
+}): Promise<boolean> {
+  const { chainKey, photoUrl, countryCode = 'GB' } = args;
+  if (!chainKey || !photoUrl) return false;
+  const dishNameKey = args.dishNameKey || (args.dishName ? normalizeDishKey(args.dishName) : '');
+  if (!dishNameKey) return false;
+
+  try {
+    if (isD1Configured()) {
+      const { d1Query } = await import('./server_d1.js');
+      const existingRes = await d1Query<any>(
+        'SELECT id, image_url FROM brand_menu_items WHERE country_code = ? AND chain_key = ? AND (dish_name_key = ? OR dish_name = ?) LIMIT 1',
+        [countryCode, chainKey, dishNameKey, args.dishName || dishNameKey]
+      );
+      const existing = existingRes?.results || [];
+      if (existing.length > 0 && (!existing[0].image_url || existing[0].image_url.trim() === '')) {
+        await d1Query(
+          'UPDATE brand_menu_items SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [photoUrl, existing[0].id]
+        );
+      }
+    }
+
+    const { supabaseAdmin } = await import('./supabaseAdmin.js');
+    if (supabaseAdmin) {
+      const { data: existingSb } = await supabaseAdmin
+        .from('brand_menu_items')
+        .select('id, image_url')
+        .eq('country_code', countryCode)
+        .eq('chain_key', chainKey)
+        .eq('dish_name_key', dishNameKey)
+        .maybeSingle();
+
+      if (existingSb && (!existingSb.image_url || existingSb.image_url.trim() === '')) {
+        await supabaseAdmin
+          .from('brand_menu_items')
+          .update({ image_url: photoUrl, updated_at: new Date().toISOString() })
+          .eq('id', existingSb.id);
+      }
+    }
+    return true;
+  } catch (err) {
+    console.warn('[autoLinkBrandItemPhoto] Warning:', err);
+    return false;
+  }
+}
+
 const inFlightRegisterLocks = new Set<string>();
 
 export function isUnofficialOrCompositeDish(
@@ -1711,6 +1802,198 @@ export function registerBrandMenuRoutes(app: Express) {
       return runLocalFallback();
     } catch (err: any) {
       return runLocalFallback();
+    }
+  });
+
+  /** Get recent meals with photos for admin photo-linking picker */
+  app.get('/api/admin/meals-with-photos', async (_req: Request, res: Response) => {
+    try {
+      let meals: any[] = [];
+      try {
+        const { supabaseAdmin } = await import('./supabaseAdmin.js');
+        if (supabaseAdmin) {
+          const { data, error } = await supabaseAdmin
+            .from('food_logs')
+            .select('id, name, date, image_url, image_urls, calories, protein, carbohydrates, total_fat, saturated_fat, sodium, portion_grams')
+            .not('image_url', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (!error && Array.isArray(data) && data.length > 0) {
+            meals = data.map((d: any) => ({
+              id: d.id,
+              name: d.name,
+              date: d.date,
+              imageUrl: d.image_url,
+              imageUrls: d.image_urls || (d.image_url ? [d.image_url] : []),
+              calories: d.calories,
+              protein: d.protein,
+              carbohydrates: d.carbohydrates,
+              totalFat: d.total_fat,
+              saturatedFat: d.saturated_fat,
+              sodium: d.sodium,
+              portionGrams: d.portion_grams
+            }));
+          }
+        }
+      } catch (_) {}
+
+      if (meals.length === 0 && isD1Configured()) {
+        try {
+          const { d1Query } = await import('./server_d1.js');
+          const d1Res = await d1Query<any>(
+            `SELECT id, name, date, image_url, image_urls, calories, protein, carbohydrates, total_fat, saturated_fat, sodium, portion_grams 
+             FROM food_logs 
+             WHERE (image_url IS NOT NULL AND image_url != '') 
+                OR (image_urls IS NOT NULL AND image_urls != '') 
+             ORDER BY created_at DESC 
+             LIMIT 50`
+          );
+          const d1Meals = d1Res?.results || [];
+          if (Array.isArray(d1Meals)) {
+            meals = d1Meals.map(d => ({
+              id: d.id,
+              name: d.name,
+              date: d.date,
+              imageUrl: d.image_url,
+              imageUrls: d.image_urls ? (typeof d.image_urls === 'string' ? JSON.parse(d.image_urls) : d.image_urls) : (d.image_url ? [d.image_url] : []),
+              calories: d.calories,
+              protein: d.protein,
+              carbohydrates: d.carbohydrates,
+              totalFat: d.total_fat,
+              saturatedFat: d.saturated_fat,
+              sodium: d.sodium,
+              portionGrams: d.portion_grams
+            }));
+          }
+        } catch (_) {}
+      }
+
+      res.json({ success: true, meals });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to fetch meals with photos' });
+    }
+  });
+
+  /** Link a meal photo (and optionally nutrients) to a brand item */
+  app.post('/api/admin/brand-menu-items/link-meal', async (req: Request, res: Response) => {
+    try {
+      const brandItemId = req.body?.brandItemId ? String(req.body.brandItemId).trim() : '';
+      const chain_key = String(req.body?.chain_key || req.body?.chainKey || '').trim().toLowerCase();
+      const dish_name_key = String(req.body?.dish_name_key || req.body?.dishNameKey || '').trim();
+      const country_code = String(req.body?.country_code || req.body?.countryCode || 'GB');
+      const mealLogId = req.body?.mealLogId ? String(req.body.mealLogId).trim() : '';
+      const photoIndex = req.body?.photoIndex != null ? Number(req.body.photoIndex) : 0;
+      const copyNutrients = Boolean(req.body?.copyNutrients);
+      let photoUrl = req.body?.photoUrl ? String(req.body.photoUrl).trim() : '';
+      let mealData: any = null;
+
+      if (mealLogId) {
+        try {
+          const { supabaseAdmin } = await import('./supabaseAdmin.js');
+          if (supabaseAdmin) {
+            const { data } = await supabaseAdmin.from('food_logs').select('*').eq('id', mealLogId).maybeSingle();
+            if (data) mealData = data;
+          }
+        } catch (_) {}
+
+        if (!mealData && isD1Configured()) {
+          try {
+            const { d1Query } = await import('./server_d1.js');
+            const rowsRes = await d1Query<any>('SELECT * FROM food_logs WHERE id = ? LIMIT 1', [mealLogId]);
+            const rows = rowsRes?.results || [];
+            if (rows.length > 0) mealData = rows[0];
+          } catch (_) {}
+        }
+
+        if (mealData) {
+          const rawUrls = mealData.image_urls || mealData.imageUrls;
+          let parsedUrls: string[] = [];
+          if (Array.isArray(rawUrls)) parsedUrls = rawUrls;
+          else if (typeof rawUrls === 'string') {
+            try { parsedUrls = JSON.parse(rawUrls); } catch (_) { parsedUrls = [rawUrls]; }
+          }
+          if (parsedUrls.length === 0 && (mealData.image_url || mealData.imageUrl)) {
+            parsedUrls = [mealData.image_url || mealData.imageUrl];
+          }
+
+          if (parsedUrls.length > 0) {
+            const chosen = (photoIndex >= 0 && photoIndex < parsedUrls.length) ? parsedUrls[photoIndex] : parsedUrls[0];
+            if (chosen) photoUrl = chosen;
+          }
+        }
+      }
+
+      if (!photoUrl) {
+        return res.status(400).json({ error: 'No valid photo found for linking' });
+      }
+
+      const updateData: Record<string, any> = { image_url: photoUrl };
+      if (copyNutrients && mealData) {
+        const cal = Number(mealData.calories);
+        const prot = Number(mealData.protein);
+        const carb = Number(mealData.carbohydrates);
+        const fat = Number(mealData.total_fat ?? mealData.fat);
+        const sat = Number(mealData.saturated_fat ?? mealData.saturatedFat);
+        const sod = Number(mealData.sodium);
+        if (!isNaN(cal)) updateData.calories = cal;
+        if (!isNaN(prot)) updateData.protein = prot;
+        if (!isNaN(carb)) updateData.carbohydrates = carb;
+        if (!isNaN(fat)) updateData.total_fat = fat;
+        if (!isNaN(sat)) updateData.saturated_fat = sat;
+        if (!isNaN(sod)) updateData.sodium = sod;
+        updateData.nutrients = {
+          ...(updateData.nutrients || {}),
+          calories: cal,
+          protein: prot,
+          carbohydrates: carb,
+          totalFat: fat,
+          saturatedFat: sat,
+          sodium: sod
+        };
+      }
+
+      if (isD1Configured()) {
+        try {
+          const { d1Query } = await import('./server_d1.js');
+          if (brandItemId) {
+            await d1Query('UPDATE brand_menu_items SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [photoUrl, brandItemId]);
+          } else if (chain_key && dish_name_key) {
+            await d1Query(
+              'UPDATE brand_menu_items SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE country_code = ? AND chain_key = ? AND (dish_name_key = ? OR dish_name = ?)',
+              [photoUrl, country_code, chain_key, dish_name_key, dish_name_key]
+            );
+          }
+        } catch (d1Err) {
+          console.warn('[link-meal] D1 update warning:', d1Err);
+        }
+      }
+
+      try {
+        const { supabaseAdmin } = await import('./supabaseAdmin.js');
+        if (supabaseAdmin) {
+          let q = supabaseAdmin.from('brand_menu_items').update(updateData);
+          if (brandItemId) {
+            q = q.eq('id', brandItemId);
+          } else if (chain_key && dish_name_key) {
+            q = q.eq('country_code', country_code).eq('chain_key', chain_key).eq('dish_name_key', dish_name_key);
+          }
+          await q;
+        }
+      } catch (_) {}
+
+      const all = loadLocalItems();
+      const idx = all.findIndex((it: any) => 
+        (brandItemId && it.id === brandItemId) || 
+        (chain_key && it.chain_key === chain_key && (it.dish_name_key === dish_name_key || it.dish_name === dish_name_key))
+      );
+      if (idx >= 0) {
+        all[idx] = { ...all[idx], ...updateData, updated_at: new Date().toISOString() };
+        saveLocalItems(all);
+      }
+
+      return res.json({ success: true, photoUrl, copyNutrients, item: updateData });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to link meal to brand item' });
     }
   });
 
