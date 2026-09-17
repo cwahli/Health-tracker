@@ -437,10 +437,31 @@ F-11.2 / F-11.3 curator LLM  ← shipped (2026-09-16 brandCurator + t1/curator w
 Q-9 website consolidation    ← shipped (extract-only)
 Q-4 AgentResultTable thin    ← Current work (q-4a→q-4b→q-4c→q-4d locked; any agent)
 Q-10 dependency audit        ← after Q-4 (packet locked; any agent)
+Q-11 App shell decoupling     ← umbrella locked (specs/active/Q-11.md); milestone ladder below; move-only, parity-guarded
 R-13.1 Cloudflare go-live    ← after Q-10 or in parallel if no shared files; R-13.0 PASS
 ```
 
-Do **not** open a Dictionary/FoodCard/`App.tsx` breakup without a locked packet. Q-9/Q-8.2 are green. Do **not** skip Q-4’s extract-only nodes.
+**Q-11 milestone ladder** (one milestone per commit, one module per milestone; umbrella laws in
+`specs/active/Q-11.md` — move-only, no deletions, `src/types.ts` frozen, parity guard green,
+ratchet the `CATALOG.json` ceiling of any file that shrinks):
+
+```text
+q-11-1-pures        utils/appProfileUtils.ts (move + unit test)      App.tsx 9,101 -> ~9,003   auto_go: true
+q-11-2-auth-session hooks/useAuthSession.ts (auth + real sign-out)   -> ~8,600                human go
+q-11-3-job-poller   hooks/useJobPoller.ts (JobStore poll loop)       -> ~8,300                human go
+q-11-4-profile-hook hooks/useAppProfile.ts (real profile source)     -> ~8,000                human go
+q-11-5-sync-hook    hooks/useAppSync.ts (Supabase/Firestore merge)   -> ~7,300                human go; no stubs
+q-11-6-tabs-modals  components/App{Tabs,Modals}.tsx                 -> ~6,600                human go
+q-11-7-shell-header components/AppShell.tsx + Header/ProfileModal   -> ~6,200                human go
+q-11-8-i18n-split   utils/translations/{en,fr,zh,id}.ts             App.tsx unchanged        human go
+q-11-9-assembly     src/App.tsx as a hook wiring layer              -> <= 1,200              human go
+```
+
+Any agent: pick the lowest milestone that is not committed, pass its `node scripts/journey-guard.mjs
+<id>` and `node scripts/assert-spec-diff.mjs <id>` gates, and stop when it is green. Do not chain
+two milestones in one working tree — they all edit `src/App.tsx`.
+
+Do **not** open a Dictionary/FoodCard/`App.tsx` breakup without a locked packet. `App.tsx` has one: **Q-11** (`specs/active/Q-11.md`, move-only, `src/types.ts` frozen). Dictionary/FoodCard still need their own. Q-9/Q-8.2 are green. Do **not** skip Q-4’s extract-only nodes.
 
 ### Who does which
 

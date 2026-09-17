@@ -12,6 +12,8 @@ const specs = [
   'prototype/tests/key-journeys.spec.ts',
   'prototype/tests/r3-smoke.spec.ts',
   'prototype/tests/dialog-inventory.spec.ts',
+  // Q-11: a shell that renders but cannot sign in / sign out is still broken.
+  'prototype/tests/auth-session.spec.ts',
 ];
 
 console.log('── shell-smoke (Playwright stubs, no Gemini) ──');
