@@ -21,6 +21,7 @@ import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { computeRemainingAllowance } from '../utils/compositeFoodCalculation';
+import { isMealFollowUpEdit } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
@@ -2069,7 +2070,12 @@ ${logsText}`);
         let submissionMode: 'review' | 'compare' | 'edit' = mappedMode;
         const hasPriorResult = job && (job.status === 'succeeded' || job.result?.pendingFoodLog || job.result?.data?.pendingFoodLog || (job.messages && job.messages.some(m => m.data?.pendingFoodLog || m.pendingFoodLog)));
         const userExplicitlyChoseReview = mappedMode === 'review' && finalImages.length > 0;
-        if (hasPriorResult && !userExplicitlyChoseReview && mappedMode !== 'compare') {
+        // Case-12 T2: a text-only follow-up typed into a freshly reopened sheet carries a
+        // blank draft (no result, no messages), so it must edit the last logged meal rather
+        // than start a new `review` thread that double-counts the meal. An explicit edit
+        // verb is required so a plain new meal description stays a new scan.
+        const followUpEdit = isMealFollowUpEdit({ hasPriorResult: !!hasPriorResult, existingMessageCount: job?.messages?.length || 0, imageCount: finalImages.length, text: textToSend, mappedMode, foodLogs: activeFoodLogs, nowMs: Date.now() });
+        if ((hasPriorResult || followUpEdit) && !userExplicitlyChoseReview && mappedMode !== 'compare') {
           submissionMode = 'edit';
         } else if (family === 'D') {
           submissionMode = 'compare';
@@ -2495,7 +2501,7 @@ ${logsText}`);
           // original photos). submissionMode === 'edit' already scopes this fallback
           // correctly, so gating on image count is unnecessary and causes edits to be
           // silently rejected server-side with "No active meal exists in Firestore".
-          (submissionMode === 'edit' && !extraOptions?.portionChoices && foodLogs && foodLogs.length > 0 ? foodLogs[foodLogs.length - 1] : null);
+          (submissionMode === 'edit' && !extraOptions?.portionChoices && activeFoodLogs && activeFoodLogs.length > 0 ? activeFoodLogs[activeFoodLogs.length - 1] : null);
         let prunedMealForJob = null;
         if (lastFoodLogForJob) {
           try {

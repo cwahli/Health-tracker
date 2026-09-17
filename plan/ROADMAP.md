@@ -329,6 +329,15 @@ Today: curator LLM skipped on Analyze. Brand **match** in finalize. Brand **TS s
 
 M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` + `food-calc.md` Database Curator (brand-only). Same change as F-11.2/11.3.
 
+### F-13 — Case-12 T2: same-thread meal edit (add/remove)
+
+**Packet:** `specs/active/F-13.md` (locked).  **Evidence:** `golden/meal/Meal_04_log/12_chat_saved_meal/correct_results.md` §4.  **Not:** `App.tsx` (frozen), `JobStore`, per-100g *tag* rescale (gap 1), `brand_menu_local_*` resolution (gap 3).
+
+| ID | Item | Done when | Do not |
+|---|---|---|---|
+| **F-13.1** | **Shipped 2026-09-17.** `src/utils/foodFollowUpEdit.ts` — text-only follow-up on a blank draft + recent meal ⇒ `submissionMode = 'edit'`, so the existing `activeMeal` fallback (`LogChat.tsx:2498`) supplies the prior meal. 24/24 vitest. | Text-only follow-up reports `mode === 'edit'` with the prior meal's dishes carried | Adopt the newest meal unconditionally — T1 sends a photo and must stay a new scan |
+| **F-13.2** | Lock-merge basis consistency in `server_dish_finalize.ts` residual fill. **Not started: no hard evidence** — the golden path succeeded with oats *estimated* (turn-2 capture has zero `per_100g`), so the recorded numbers are prose only. Do not guess math in the sole kcal writer. | A live T2 capture that actually exercises a `per_100g` brand lock at a non-100 g weight | Change `finalizeDishLedger` basis on prose alone |
+
 ---
 
 ## Track R — Reliability (core done; start only on trigger)
