@@ -1,6 +1,6 @@
 # AGENTS.md — Always-on rules (keep short)
 
-**Updated:** 2026-09-01
+**Updated:** 2026-09-17
 
 **Token rule:** Read **this file first**. Load domain files **only** from the table in §1. Do not open `plan/FOOD.md` Part A/B, `plan/QUALITY.md`, or old `AI_HANDOVER` history unless that table says so.
 
@@ -12,7 +12,7 @@
 2. **A question is not implement.** “How accurate is OCR?” / “review the prototype” = **answer**. Do not edit files, add tests, or run vitest unless the user asked to implement.
 3. **Tests only if you changed application code** (`src/`, `server.ts`, `server_*.ts`, `agents/`, `supabase/`). Docs, reviews, and prototype-log reads: **run nothing**. Never `npm test` (~97 files). Named row from `docs/agent/DOMAIN_REGRESSION_MAP.md` only.
 4. **Do not edit** `AGENTS.md` or `docs/agent/**` unless the human asked for a process change. Confirmation in §3 is for **edits**, not reads.
-5. **Follow `plan/ROADMAP.md`.** There is no `studio/` pack folder. “Work on the roadmap” = **Current work**, then the next open ID. Do not invent a pack file. Do not mix F-9.5 (`App.tsx`) with F-10.
+5. **Follow `plan/ROADMAP.md`.** There is no `studio/` pack folder. “Work on the roadmap” = **Current work**, then the next open ID. Locked `specs/active/` packets are pre-approved **go** — do not wait for Grok. Do not invent a pack file. Do not mix job-lifecycle files (`App.tsx` poller / LogChat submit) with food-calc.
 6. **Journey:** `docs/agent/JOURNEY.md`. Planner → Guard → **go** → Builder → Guard. Reviewer only after a second Guard fail or if asked — writes `specs/learnings/`, never standing/Guard/`src/` in that turn. **promote** = new packet. Standing: `docs/agent/standing.json` (do not drop rows to pass). Unattended night runs: only `scripts/discover-gated-work.mjs` items (must have a gate). Class S and questions skip.
 7. **i18n (durable).** User-visible UI copy goes in `src/utils/translations.ts`. `en` is the source of truth; `id` must have the same keys (parity test). New languages: add a locale and fill keys; missing keys fall back to English. Agent system instructions must include `userProfile.language` and tell the model to write **user-visible answers** in that language (JSON keys, nutrient codes, biomarker keys stay English). Do not hardcode English chrome in new UI.
 8. **Load (AI Studio).** If preview or `tsc` does not start: restore the last green commit for that file. Forbidden class `LOAD_HACK`: `@ts-nocheck`, deleting a file in `golden/scorecard/instruction/gates.json`, gutting `getTopTargetNutrientKeys`. Do not delete tests to make the app load.
@@ -87,7 +87,7 @@ When you **changed application code**: named vitest + `tsc`. Default model for a
 Agent instruction edits stay net-zero lines. Math lives in TypeScript, not English. Schema: agent emits estimates; TS derives calories / unsaturated fat / salt.
 
 ### L13 — Roadmap IDs
-After an ID’s named gate is green, start the next open non-Grok ID on `plan/ROADMAP.md` in the same turn. Do not ask the human to say continue. COMPLETE needs that ID’s named gate exit 0.
+After an ID’s named gate is green, start the next open ID on `plan/ROADMAP.md` in the same turn. Do not skip an ID because it used to be Grok-only (retired 2026-09-17). Do not ask the human to say continue. COMPLETE needs that ID’s named gate exit 0.
 
 ### L14 — No meal-green loops
 Work item = class (`FALSE_FRIEND`, `DISH_DROP`, `STALE_TURN`, `ALWAYS_SECOND_AGENT`, …). Inner loop = named vitest. Forbidden: `POST /loop`, replay until `all_green`, catalog paint. Two burned hypotheses → STOP that job.
@@ -136,4 +136,4 @@ Questions and prototype reviews are not L/X.
 
 ## 5. AI Studio
 
-Read `plan/ROADMAP.md`. Execute **Current work**, then the next open ID. Named gates on that ID only. Update `AI_HANDOVER.md` **Now** when an ID finishes. F-9.5 (`App.tsx`) is Grok-only — do not mix.
+Read `plan/ROADMAP.md`. Execute **Current work**, then the next open ID. Named gates on that ID only. Update `AI_HANDOVER.md` **Now** when an ID finishes. F-9.5 shipped — do not mix job-lifecycle files with food-calc. Locked packets = go.

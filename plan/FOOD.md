@@ -98,7 +98,7 @@ Session leftover **F-9.5** (App poller emitters): [ROADMAP.md](./ROADMAP.md) Tra
 | `server_vision_scout.ts` | Meal Agent create dispatch (identity + P/C/F + OCR; no persisted kcal) | slim toward ~800 |
 | `server_nutrient_aggregation.ts` | Off the hot path | do not call after finalize |
 
-Detail, leftover F-8 IDs (**F-8.10–F-8.13**), F-10 execute IDs, and debug shape: [FOOD_SINGLE_PATH.md](./FOOD_SINGLE_PATH.md) + [ROADMAP.md](./ROADMAP.md) Track F. F-9.5 App/LogChat emitters stay Grok-owned.
+Detail, leftover F-8 IDs (**F-8.10–F-8.13**), F-10 execute IDs, and debug shape: [FOOD_SINGLE_PATH.md](./FOOD_SINGLE_PATH.md) + [ROADMAP.md](./ROADMAP.md) Track F. F-9.5 App/LogChat emitters shipped. Do not mix job-lifecycle files with food-calc.
 
 ---
 

@@ -8,4 +8,4 @@ Same process as Grok and AI Studio. Do not invent a second one.
 4. Guard is a script, not a vibe: `node scripts/journey-guard.mjs`
 5. Standing: `docs/agent/standing.json` — do not drop rows to pass.
 
-Execute remaining product work from `plan/ROADMAP.md`. Git is shared memory across Studio, Antigravity, and Grok.
+Execute remaining product work from `plan/ROADMAP.md` **Current work**. Locked packets in `specs/active/` are pre-approved **go** — do not wait for Grok quota. Git is shared memory across Studio, Antigravity, OpenCode, Cline, and Grok.

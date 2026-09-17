@@ -4,7 +4,7 @@
   "primitives": [
     { "id": "AppModal", "path": "src/components/ui/AppModal.tsx", "status": "canonical" },
     { "id": "UniversalModal", "path": "src/components/UniversalModal.tsx", "status": "canonical" },
-    { "id": "DataGrid", "path": "src/components/AgentResultTable.tsx", "status": "partial" },
+    { "id": "DataGrid", "path": "src/components/AgentResultTable.tsx", "status": "partial", "note": "Q-4 locked 2026-09-17: grid = sort/page/row-select only. YAML/row parse → src/utils/agentResultParse.ts + agentResultRows.ts. localStorage missing-keys → agentResultMissingKeys.ts. Do not invent BiomarkerDataGrid. ConfirmBar stays planned." },
     { "id": "FilterPills", "path": "src/components/ui/FilterPills.tsx", "status": "canonical" },
     { "id": "ConfirmBar", "path": null, "status": "planned" },
     { "id": "NutritionLabelTable", "path": "src/components/chat-cards/NutritionLabelTable.tsx", "status": "canonical" },
@@ -26,6 +26,7 @@
     "src/components/LogChat.tsx": 7000,
     "server_vision_scout.ts": 1800,
     "server_routes_food_analyze.ts": 700,
-    "server_food_analyze_run.ts": 3800
+    "server_food_analyze_run.ts": 3800,
+    "src/components/AgentResultTable.tsx": 2975
   }
 }

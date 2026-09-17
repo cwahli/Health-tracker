@@ -167,7 +167,7 @@ Absorbed from archived `Reliability_perf.md`. **Do not start these to “finish 
 |---|---|---|---|
 | R-1 | Re-measure Firestore writes / Supabase egress on a normal day | Quota or bill spike | — |
 | R-2 | Cloudflare Pages for `dist/` only (no API) | Global static latency actually hurts | Never required for personal use. **Go-live is R-13**, not this row. |
-| R-13 | Cloudflare go-live + AI Studio parity | Human wants a public URL | See §12. Do not start until `specs/active/R-13.md` is **locked**. |
+| R-13 | Cloudflare go-live + AI Studio parity | Human wants a public URL | See §12. Packet **locked**. R-13.1 any agent; R-13.0 human. |
 | R-3 | Playwright leftover-English crawl plus Kosong empty Front Desk | After Track **S-1** string list is green; not a 10-case meal loop | Not a substitute for class goldens |
 | R-4 | Extract `server.ts` routes (food / jobs / biomarkers) | Touching the monolith anyway | Do not big-bang for free-tier |
 | R-5 | Investigate D1 as primary SQL | **After** R-1, free tier still fails | Default: stay on thin Supabase + R2 |
@@ -626,7 +626,7 @@ Do **not** import LangSmith. Do **not** add a fourth live-testing tier.
 ## 12. Cloudflare go-live (R-13) — AI Studio parity
 
 **Execute IDs:** [ROADMAP.md](./ROADMAP.md) Track R **R-13.0–R-13.5**.  
-**Locked contract:** `specs/active/R-13.md` (draft until the human replies **go**).  
+**Locked contract:** `specs/active/R-13.md` (locked 2026-09-17; R-13.1 any agent, R-13.0 human).  
 **Class:** `LIVE_DEPLOY`. Class X when touching auth, jobs, or sync.  
 **Do not** add a sixth `plan/` file. This section is the architecture.
 

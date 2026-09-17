@@ -13,7 +13,7 @@
 Laws: `docs/agent/domains/{biomarkers,food-calc,sync}.md`  
 WIP: `AI_HANDOVER.md` (header only) · Completed: `archive/` · `plan/archive/`
 
-**As of 2026-09-15.** F-8.1–F-8.13, F-9, F-10.1–10.7 shipped. Meal Agent is `diet`. Live USDA/FDC cut (F-12.1–12.4). Brand TS self-clean (F-11.1). Biomarkers B7.4–B7.6 landed. F-3 / F-4 / F-6 / F-8.12 landed. EN/ID chrome shipped incl. L-1 / L-2 / L-4. Sealed scorecard ALL GREEN 705/0/0 at `3ff047d` (`golden/scorecard/result_summary/LATEST.md`). Leftover localisation is **Track L (active, unparked 2026-09-15)**; live leftover chrome also in **Track S**. Do not reopen FDC or put curator back on Analyze.
+**As of 2026-09-17.** Scorecard sealed ALL GREEN **713/0/0** (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent (Gemini / OpenCode / Cline / Antigravity). Do not reopen FDC or put curator back on Analyze.
 
 ---
 
@@ -22,23 +22,26 @@ WIP: `AI_HANDOVER.md` (header only) · Completed: `archive/` · `plan/archive/`
 The human will say **work on the roadmap**. That means:
 
 1. Read **this file** from the top through **Current work**.
-2. Implement the **first open ID** that is not marked Grok-only / `blocked_human`.
+2. Implement the **first open ID** that is not `blocked_human`. Locked packets in `specs/active/` are **pre-approved go** — do not wait for Grok quota.
 3. Named gates for that ID (below). Never `npm test`. Never ask to confirm a **read**. If a file truncates, read the rest in the same turn.
-4. When that ID’s gates are green, **immediately** start the next open non-Grok ID in this file. Do not wait for “continue.”
-5. Stop when you hit a Grok-only row, `blocked_human`, or context pressure (then write one line on `AI_HANDOVER.md` **Now** table: which ID finished).
+4. When that ID’s gates are green, **immediately** start the next open ID in this file. Do not wait for “continue.”
+5. Stop when you hit `blocked_human` or context pressure (then write one line on `AI_HANDOVER.md` **Now** table: which ID finished).
 
 Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 packs.
 
 ---
 
-## Current work — B0 CLOSED, Track B landed (2026-09-15)
+## Current work — Grok lock done; any agent executes packets (2026-09-17)
 
-**B0.1–0.3 Apply smoke CLOSED 2026-09-14** (card shows HDL 50→**1.293**, TG 125→**1.411**, LDL 130→**3.362**, creat 0.9→**79.56**, bili 0.8→**13.68**; history + Home written; `observationMeta` raw kept; older SI rows untouched). **B0.5** not needed (no miss). Fill-template **C1–C7** green (`scripts/assert-biomarker-cases.mjs`). **B7.4 / B7.5 / B7.6 landed** (packets in `specs/done/`). **B8.0** CLOSED (Option B chosen: Auto-Fix removed from Home, warning banner points to Health / Sanitize).
+B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 are **shipped**. Do not restart them.
 
-**Do this, in order. Do not restart F-10.**
+**Do this, in order. Packets are locked = go.**
 
-1. Outer soaks only: **Q-8.6 / F-10.8** live website Log Meal per `scripts/soak-q8-tier3.md` (completed 2026-09-16, zero stalls/503s, inner 74/74 green).
-2. Gated future work needs **go** — do not start it to look busy: **Q-9**, **Q-10**, **R-13** (incl. R-5), **L-5**, **B8.0**.
+1. **Q-4** — `specs/active/q-4-agent-result-table.md` (`auto_go: true`). Extract-only `KIT_DRIFT`. Any builder.
+2. **Q-10** — `specs/active/q-10-dependency-audit.md` (`auto_go: true`). Hygiene only, after Q-4 gates green. Any builder.
+3. **R-13.1** — `specs/active/R-13.md`. Code allowed now. **R-13.0** (Workers Paid, secrets, Firebase hosts) is `blocked_human` — do not invent secrets. Do not start R-13.4 / R-5 / a second Cloud Run go-live in the same PR.
+
+**Still `blocked_human`:** **L-5** (no milestone locale), **R-13.0** checklist. **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, Header/`App.tsx` split without a new packet, ConfirmBar as a side quest.
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 705/0/0 at `3ff047d`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -70,8 +73,8 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 
 | If you are… | Do |
 |---|---|
-| **AI Studio / Gemini (default)** | **Current work — B0** above. This file only. F-10 is shipped. |
-| **Grok leftover** | F-9.5 / F-10.6 / Q-8.1–8.5 / F-11.1 / F-12.1–12.4 / B8.1 shipped. **Q-4** only if Q-1 red on AgentResultTable. **Q-9** later. Outer live confirm is **Q-8.6** (human or script, not Grok in the wait loop). |
+| **AI Studio / Gemini / OpenCode / Cline (default)** | **Current work** above. Locked `specs/active/` packets. F-10 is shipped. |
+| **Grok leftover** | **Retired 2026-09-17.** F-9.5 / F-10.6 / Q-8.1–8.6 / Q-9 / F-11 / F-12 / B8.1 shipped. Q-4 + Q-10 packets locked for any agent. Do not sit in a live wait loop. |
 | Tests feel huge / every edit runs everything | **Q-7:** named map rows only. Do not `npm test`. Do not recreate missing asserts. |
 | Food create architecture | **F-10** (one Meal Agent + TS expand). Not a Dietitian critic. |
 | Food calories / debug file | **F-8.10, F-8.12, F-8.13** (split, packaged bind, debug). Soak is **F-10.8**, not a replay of always-dietitian. |
@@ -79,12 +82,12 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
-| Make the site live / Cloudflare | **R-13** — [RELIABILITY.md](./RELIABILITY.md) **§12**. Draft spec `specs/active/R-13.md`. Wait for **go**. Not R-2. Not Pages Functions importing `server.ts`. |
+| Make the site live / Cloudflare | **R-13** — [RELIABILITY.md](./RELIABILITY.md) **§12**. Packet `specs/active/R-13.md` **locked**. R-13.1 any agent; R-13.0 human. Not R-2. Not Pages Functions importing `server.ts`. |
 | Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: putting curator back on Analyze, reopening FDC, B7.5 before B7.4, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, more NHS aliases before G-B2 lexer + G-B4 green, a Commercial Cooking Critic LLM, production wiring of fill-template before C1–C7 green, ~~**Track L-2 to L-5**~~ (unparked 2026-09-15), a 10-case live replay queue, **R-13** until the human locks `specs/active/R-13.md`, **F-11.2 / F-11.3** (curator LLM) until **go**, **Q-9** rewrite binge.  
+Do **not** start: putting curator back on Analyze, reopening FDC, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive. **R-13.1** is unlocked (packet locked); **R-13.0** stays human.  
 Do **not** add a sixth plan file. F-10 lives here + [FOOD.md](./FOOD.md) Process.
 
 ---
@@ -347,7 +350,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | **R-10** | Header code-split | `themeRegistry` audit, Drive backup, `FoodCatalogAdminTab`, quota checkers lazy; Header line count may not grow | After R-9 |
 | **R-11** | `HomeTab` / `LogChat` stay out of other tabs’ first paint | Already lazy-tabbed; do not eagerly import them from Insights / History | Regression after R-10 |
 | **R-12** | One-line stall/503 count (free-tier hang rate) | After F-8.13 JSON tree has `latency_ms` / error on dispatches. A number in `AI_HANDOVER.md`, **not** a metrics product. RELIABILITY.md §11.12 **H** | LangSmith; Grafana; inner-loop Gemini |
-| **R-13** | Cloudflare go-live + AI Studio parity | Human wants a public URL. RELIABILITY.md §12 + `specs/active/R-13.md` (draft — wait for **go**) |
+| **R-13** | Cloudflare go-live + AI Studio parity | Packet **locked** `specs/active/R-13.md`. R-13.1 any agent; R-13.0 `blocked_human`. Not R-2. |
 
 ### R-13 sub-IDs (one at a time after lock)
 
@@ -362,7 +365,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 
 R-7 knip / `getBiomarkerStatus` memo as a reliability gate is **abandoned**.  
 R-8–R-11 are **client speed**, not a free-tier redo. Do not re-migrate images or re-kill Firestore writes.  
-`App.tsx` extract (`useSyncOrchestrator`) stays **parked inside R-4** — only if a later pack already touches that file. Grok owns any `App.tsx` / `LogChat.tsx` / `Header.tsx` split. Gemini may do R-9 FIND/REPLACE from a named pack.
+`App.tsx` extract (`useSyncOrchestrator`) stays **parked inside R-4** — only if a later pack already touches that file. God-file splits need a **locked packet** (Q-9 is the pattern). Do not split `App.tsx` / `LogChat.tsx` / `Header.tsx` without one.
 
 ---
 
@@ -377,10 +380,10 @@ Rules unchanged: work item = class · inner = vitest · outer = one example · h
 
 | Still to do | Done when |
 |---|---|
-| **Q-4** `AgentResultTable` thin | Grid behavior only; agent YAML / apply / localStorage missing-keys **out**. Call sites pass data. Grok-owned |
-| **Q-8** Process goldens | **Shipped 8.1–8.5.** Boards: `tests/foodProcess.golden.test.ts`, `tests/bioProcess.golden.test.ts`, `tests/deskProcess.golden.test.ts`. Q-8.3 Playwright stub already in tree. **Q-8.6** protocol: `scripts/soak-q8-tier3.md` (human/script outer confirm). |
-| **Q-9** Website consolidation | Later **step**, not now. Too many files, `patch_*`, god `LogChat` / `App` / `Header`. Split/fold only with a named gate. Serialize vs F-9.5 / B0 / R-9 (`App.tsx`). **Grok**. Do not start as a rewrite binge |
-| **Q-10** Dependency consolidation | Later **step**, after Q-9. Audit `package.json` / unused imports; remove what we can. **Not** R-7 knip-as-reliability-gate (abandoned). Hygiene only |
+| **Q-4** `AgentResultTable` thin | **Current work.** Packet `specs/active/q-4-agent-result-table.md` locked. Extract-only. Any agent. |
+| **Q-8** Process goldens | **Shipped 8.1–8.6.** |
+| **Q-9** Website consolidation | **Shipped 2026-09-16** extract-only (`specs/done/q-9-website-consolidation.md`). Do not rewrite. |
+| **Q-10** Dependency consolidation | **Current work after Q-4.** Packet `specs/active/q-10-dependency-audit.md` locked. Hygiene only. **Not** R-7 knip. |
 
 **Landed — recently completed:**
 - Make G-B2/5/6/7/9 execute the helper they name
@@ -419,21 +422,23 @@ F-8.10 shards                ← shipped
 F-12.1–12.4 USDA gone        ← shipped (local staple table remains, no FDC ids)
 F-11.1 brand TS self-clean   ← shipped (live: status migration)
 B8.1 convertViaTable only    ← shipped
-B0 / fill-template C1–C7     ← Current work (Gemini)
+B0 / fill-template C1–C7     ← shipped
 Q-8.6 / F-10.8 outer         ← shipped (2026-09-16 job_1789535793972, 74/74 pass, 0 stalls)
 F-11.2 / F-11.3 curator LLM  ← shipped (2026-09-16 brandCurator + t1/curator wire)
-Q-9 website consolidation    ← later step (Grok; serialize App.tsx)
-Q-10 dependency audit        ← later step after Q-9
+Q-9 website consolidation    ← shipped (extract-only)
+Q-4 AgentResultTable thin    ← Current work (packet locked; any agent)
+Q-10 dependency audit        ← after Q-4 (packet locked; any agent)
+R-13.1 Cloudflare go-live    ← after Q-10 or in parallel if no shared files; R-13.0 human
 ```
 
-Do **not** open Q-4 or a Dictionary/FoodCard/`App.tsx` breakup unless Q-1 is red on that file. Do **not** open Q-9/Q-10 until Q-8.2 is green (process board exists). Do **not** skip Q-8.1 audit.
+Do **not** open a Dictionary/FoodCard/`App.tsx` breakup without a locked packet. Q-9/Q-8.2 are green. Do **not** skip Q-4’s extract-only nodes.
 
 ### Who does which
 
-| | **Gemini** (AI Studio — this ROADMAP) | **Grok** |
+| | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | **B0** Apply smoke + C1–C7; then B7.4; F-3 one class; F-6 net-zero in existing cards | Q-4 if Q-1 red on AgentResultTable; Q-9 later; any split of `App.tsx` / `LogChat.tsx` / `Header.tsx` |
-| Do not | `npm test`; critic LLM; USDA; invent a pack file; live Gemini as inner loop | Grok Bot clicking remaining live cases; Q-9 rewrite binge |
+| Prefer | Current work packets: **Q-4** then **Q-10** then **R-13.1**. One class, named vitest. | Catalog / process lock only when a **new** primitive or new god-file split is needed. Already done for Q-4/Q-10/R-13. |
+| Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---
 

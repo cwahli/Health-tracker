@@ -78,7 +78,7 @@ GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1**
 
 ## Ordered actions
 
-Gemini Current work remains **B0**. Do **not** start F-11.2, Q-9, or USDA. Track L was **unparked 2026-09-15** — restore EN/ID only, no invent.
+Any-agent Current work is **Q-4** then **Q-10** (`specs/active/`). Do **not** start USDA or a Q-9 rewrite. Track L-1…L-4 landed; L-5 waits a locale.
 
 | # | Do | Why it is next | Done when |
 |---|---|---|---|

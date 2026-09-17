@@ -508,7 +508,7 @@ lazyWithRetry                 keep
 
 Each new primitive: ≤300 lines, own vitest, frozen props. Feature screens compose; they do not own focus-trap, pill styles, or unit factors.
 
-**Inner-platform rule:** if a “shared” file grows past ~400 lines of `if (agentType === …)` (`AgentResultTable` today), it is **KIT_DRIFT**, not reuse. Split behavior out. Grok owns that split (Q-4).
+**Inner-platform rule:** if a “shared” file grows past ~400 lines of `if (agentType === …)` (`AgentResultTable` today), it is **KIT_DRIFT**, not reuse. Split behavior out. **Q-4 packet is locked** (`specs/active/q-4-agent-result-table.md`) — any builder executes it. Do not invent a new primitive.
 
 ### 13.3 Playbook firewall (platform)
 
@@ -520,11 +520,11 @@ Each new primitive: ≤300 lines, own vitest, frozen props. Feature screens comp
 | `PROMPT_GROWTH` | `server_vision_scout.ts` with net-zero | Unit math in English |
 | `KIT_DRIFT` / `GOD_FILE_GROWTH` | Catalog primitive + tests, then thin call sites | God-file rewrite as the inner loop |
 
-### 13.4 Who (Gemini large-token vs Grok)
+### 13.4 Who (any agent vs catalog lock)
 
-Same table as `ROADMAP.md` “Who does which.” Packs are FIND/REPLACE + named assert. Gemini may hold a whole god file in context **only** to apply a Grok-authored range. Gemini must not design the catalog or choose a new primitive.
+Same table as `ROADMAP.md` “Who does which.” Packs are FIND/REPLACE + named assert. **Grok-only is retired (2026-09-17).** Locked packets in `specs/active/` are pre-approved go. Any agent may hold a god file **only** to apply a packet-authored range. Do not design a new catalog primitive or choose a new id — `CATALOG.json` is the lock. Q-4/Q-10/R-13 ranges are already authored.
 
-Audit (living): line counts, duplicate labels, second math path, eager imports. Grok regenerates it; Gemini does not “search `src/components/`” as a substitute.
+Audit (living): line counts, duplicate labels, second math path, eager imports. Follow `CATALOG.json` ceilings; do not “search `src/components/`” as a substitute for the packet.
 
 ---
 
@@ -563,17 +563,7 @@ Burns never collapse when `current_evidence` moves. Two burns → `blocked`.
 
 ### 14.3 Who (Q-6)
 
-| Slice | Owner |
-|---|---|
-| Tag schema: Bug field, commits, burns, current_evidence, fingerprint, hold | **Grok** |
-| `GET /api/bugs/next` + Start JSON | **Grok** |
-| Queue UI (left list + NOW + commit timeline + clickable evidence) | Gemini from mock, Grok reviews |
-| Flag / Snap “Open #n” vs new | Gemini |
-| Auto-file + unmatched strip | **Grok** |
-| Delete hold (skip R2 GC while tag open) | **Grok** |
-| Refuse `/loop` as inner COMPLETE | **Grok** |
-
-Do not ask Gemini to design the contract or mark `done` from a chat claim.
+**Shipped.** Contract lives in `serverBugSnapshot.ts` / `src/utils/bugWorkItem.ts`. Any agent may fix a class on a bug card. Do **not** redesign the tag schema, mark `done` from a chat claim, or treat `POST /loop` as inner COMPLETE.
 
 ### 14.4 Combine Inbox tape into the bug card (review before build)
 

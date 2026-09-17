@@ -18,6 +18,47 @@ function run(label, args) {
   return { label, status: r.status ?? 1, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
+function parsePacketFrontmatter(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const out = { id: '', status: '', auto_go: '', who: '', class: '' };
+  for (const raw of m[1].split(/\r?\n/)) {
+    const kv = raw.match(/^([A-Za-z0-9_]+):\s*(.*?)\s*$/);
+    if (!kv) continue;
+    const key = kv[1];
+    if (!(key in out)) continue;
+    out[key] = kv[2].replace(/^['"]|['"]$/g, '');
+  }
+  return out;
+}
+
+function listActivePackets() {
+  const dir = path.join(root, 'specs', 'active');
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => {
+      const fm = parsePacketFrontmatter(path.join(dir, f));
+      if (!fm || fm.status !== 'locked') return null;
+      const auto = String(fm.auto_go).toLowerCase() === 'true';
+      const id = fm.id || f.replace(/\.md$/, '');
+      return {
+        id,
+        class: fm.class || '',
+        why: auto
+          ? `locked packet specs/active/${f} — pre-approved go (Grok-only retired)`
+          : `locked packet specs/active/${f} — wait for human (auto_go=false)`,
+        gate: `node scripts/journey-guard.mjs ${id}`,
+        auto_go: auto,
+        frozen: ['docs/agent/standing.json', 'scripts/assert-standing.mjs', 'scripts/journey-guard.mjs'],
+        spec: `specs/active/${f}`,
+      };
+    })
+    .filter(Boolean);
+}
+
 const standingRun = run('standing', [path.join(root, 'scripts/assert-standing.mjs')]);
 const eligible = [];
 const blocked = [];
@@ -33,6 +74,18 @@ if (standingRun.status !== 0) {
   });
 }
 
+const currentWorkOrder = ['q-4-agent-result-table', 'q-10-dependency-audit'];
+const packets = listActivePackets();
+packets.sort((a, b) => {
+  const ia = currentWorkOrder.indexOf(a.id);
+  const ib = currentWorkOrder.indexOf(b.id);
+  return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+});
+for (const pkt of packets) {
+  if (pkt.auto_go) eligible.push(pkt);
+  else blocked.push({ id: pkt.id, why: pkt.why });
+}
+
 for (const j of standing.journeys || []) {
   blocked.push({
     id: `do-not-swap:${j.id}`,
@@ -42,7 +95,7 @@ for (const j of standing.journeys || []) {
 
 console.log('=== unattended-eligible (has a gate) ===');
 if (eligible.length === 0) {
-  console.log('(none — standing is green. Do not invent a night job. Wait for a red named test, a standing FAIL, or a human sentence.)');
+  console.log('(none — standing is green and no auto_go packet. Do not invent a night job.)');
 } else {
   console.log(JSON.stringify(eligible, null, 2));
 }

@@ -44,6 +44,7 @@ Chat does not carry over between tools. A packet in `specs/active/` and a checkp
         ▼
  [YOU]       go | stop | one comment
         │ go → packet status: locked
+        │ ROADMAP Current work + auto_go: true is already go (2026-09-17)
         ▼
  [Builder]   skill: builder. Checkpoint saved: checkpoint/<slug>/start
         │ executes node-by-node with local sensor gates
