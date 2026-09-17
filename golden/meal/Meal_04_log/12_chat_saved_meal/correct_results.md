@@ -76,6 +76,15 @@ Full 32-key ledger in `expected.json` turn 2 dishes (+ `salt`).
    Kept exact portions in this journey so the FINAL ledger is fully correct.
 3. Local-file brand items (`brand_menu_local_*` ids) never resolve in
    `getBrandMenuItemById` → estimated rows (oats here).
+4. UI-live 2026-09-17 (`meal12-chat-saved-meal.live.spec.ts`): the compose
+   sheet closes on submit and reopening starts a FRESH thread, so follow-up
+   sends go out as mode `review` — there is NO UI path to the add/remove
+   edit (turn 2 here runs via API `mode:edit` + `activeMeal`). In review
+   mode the same T2 text double-processes: a phantom `Oats Porridge`
+   estimate row PLUS the lock row (double count), and the per-100g lock
+   merges partially (400 kcal @40 g with inconsistently scaled macros;
+   Atwater flag wrong). T0/T1 are green live; T2 pends a UI edit
+   affordance (or same-thread follow-up) + the lock-merge fix.
 
 ## Sources
 - Live captures: `debug_runs/debug-job_g12_turn{0_coconut,1_meal,2_edit}.{md,json}`

@@ -112,13 +112,14 @@ Any-agent Current work is **Q-4** then **Q-10** (`specs/active/`). Do **not** st
 
 ### Meal log — `golden/meal/Meal_04_log` (Mode A)
 
-7 cases from prototype 01/02/06/08/09/10/11. Learning `golden-meal-suite-20260911.md`: stay **DRAFT** until a 32-key ledger exists (only 6–8 macros in prototype). Dual-GT conflict on case 11 stays on record.
+8 cases: 7 from prototype 01/02/06/08/09/10/11 + app-chat case 12. Learning `golden-meal-suite-20260911.md`: stay **DRAFT** until a 32-key ledger exists (only 6–8 macros in prototype). Dual-GT conflict on case 11 stays on record. Case 12 is **FINAL** (live 32-key ledger).
 
 | Case | Contract | Known residual (from `benchmark_result.md`) |
 |---|---|---|
 | 01 Yolk / 02 Lidl / 06 menu / 08 oats / 09 plates | contract PASS on 2026-09-10 soak | 31-key incomplete; brand bind not asserted |
 | **10 barcode hotpot** | rerun contract PASS | **FAIL continuity** — live 1–2 dishes vs GT 5 |
 | **11 seafood + oats** | contract PASS | **under-extract** — live 2 vs GT 6 |
+| **12 chat saved-meal** | LIVE PASS T0/T1 2026-09-17; T2 API-perfect, UI-blocked | must-succeed: brand chip + saved chip + tray edit + note → 3 dishes; edit (+oats −coconut) exact sums. OPEN: no UI add/remove edit path (sheet closes, fresh thread → review); review-mode tag+text double-count; per-100g lock partial merge |
 
 ### Compare — `golden/meal/Meal_03_compare` (Mode D)
 
@@ -162,7 +163,7 @@ Ratchet: `TRANSLATION_DUMP` (table above). Next: actions #1 then #6.
 **Named gates**
 
 ```
-npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server_edit_patch_ledger.test.ts server_derivation.test.ts server_dish_finalize.test.ts src/utils/nutrients.test.ts src/utils/nutritionTargetStatus.test.ts src/components/NutrientPieChart.test.tsx
+npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server_edit_patch_ledger.test.ts server_derivation.test.ts server_dish_finalize.test.ts src/utils/nutrients.test.ts src/utils/nutritionTargetStatus.test.ts src/components/NutrientPieChart.test.tsx src/components/NutrientTargetRow.test.tsx tests/golden_meals.test.ts tests/golden_meal12_chat_saved_meal.test.ts tests/food_autocomplete_composition.contract.test.ts
 ```
 
 | Check | Status | Evidence |
@@ -171,12 +172,14 @@ npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server
 | Home polarity | PASS + ratchet | `isLimitNutrient`; `nutrients.test.ts` |
 | Same-meal package+prepared | PASS + standing | `588154c` |
 | **Single-dish flatten** | ✅ PASS sealed (was live FAIL `job_1789414917685`) | `server_vision_scout.test.ts` Mie Ayam unroll; J-ID-01 + G8; standing `single_dish_flatten` |
+| Food Autocomplete & Composite Logging | ✅ PASS (11 tests) | Autocomplete query isolation, multi-item staging, bracket portion sync, photo deduplication, admin meal overwrite, composite calculation |
 | F-12 USDA | shipped / do-not-reopen | F-12.1–12.4 |
 | F-10.7 expand | ⚠️ helper exists, **not on analyze hot path** | `shouldExpandMealAgent` is unit-tested and exported from `src/mealBuild/`; no import from `server_food_analyze_run*.ts`. Complex meals do not spawn workers yet. Do not copy prototype DELEGATE. |
 | Layer B goldens | PASS collect | restored G1–G9; identity/lock fixtures, not 32-key ledgers |
 | Meal_04 live 10/11 | under-extract / continuity fail | `golden/meal/Meal_04_log/benchmark_result.md` |
 | Verdict serialize | claimed fixed | `9ff1da2` |
 | kcal one writer | standing | `finalizeDishLedger` |
+
 
 Ratchets: `PORTION_FUNNEL`, `SAME_MEAL_PACKAGE_PREPARED`, `SINGLE_DISH_FLATTEN`, `NUTRIENT_POLARITY`, `KCAL_ONE_WRITER`, `VERDICT_CORRUPT`, `GOLDEN_FIXTURE_ROT`.
 
@@ -282,6 +285,7 @@ Ratchets: `CROSS_DEVICE_SYNC`, `STALE_TURN`, `GOLDEN_SCORER_DRIFT`, `meal_image_
 | `signup-onboard-wl.live.spec.ts` | Loc / auth | UNTRACKED |
 | `meal01-golden.live.spec.ts` | Meal_01 | UNTRACKED |
 | `multiturn-meal-edit.live.spec.ts` | Meal | UNTRACKED |
+| `meal12-chat-saved-meal.live.spec.ts` | Meal_04 case 12 | LIVE T0/T1 PASS 2026-09-17; T2 RED (no UI edit path — must-succeed on fix) |
 | `portion-clarify.live.spec.ts` / `portion-funnel.spec.ts` | Portion | UNTRACKED (inner vitest is the S-10 gate) |
 | `armC-meal02.spec.ts` | Meal_02 | UNTRACKED |
 | `compare-mode-six-cases.spec.ts` / `meal03-compare-benchmark.spec.ts` | Compare 6-set | UNTRACKED |
