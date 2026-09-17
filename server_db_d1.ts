@@ -662,8 +662,8 @@ export async function d1UpsertBrandMenuItem(item: any): Promise<{ success: boole
     INSERT INTO brand_menu_items (
       id, country_code, chain_key, chain_name, dish_name, dish_name_key, basis_type, serving_grams,
       calories, protein, carbohydrates, total_fat, saturated_fat, sodium, sugar, total_fibre,
-      nutrients, ingredients, source_url, notes, enabled, status, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      nutrients, ingredients, source_url, image_url, notes, enabled, status, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
       country_code = excluded.country_code,
       chain_key = excluded.chain_key,
@@ -683,6 +683,7 @@ export async function d1UpsertBrandMenuItem(item: any): Promise<{ success: boole
       nutrients = excluded.nutrients,
       ingredients = excluded.ingredients,
       source_url = excluded.source_url,
+      image_url = excluded.image_url,
       notes = excluded.notes,
       enabled = excluded.enabled,
       status = excluded.status,
@@ -709,6 +710,7 @@ export async function d1UpsertBrandMenuItem(item: any): Promise<{ success: boole
     nutrientsStr,
     item.ingredients || '',
     item.source_url || '',
+    item.image_url || item.imageUrl || null,
     item.notes || '',
     item.enabled !== false ? 1 : 0,
     item.status || 'active',

@@ -273,6 +273,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
     sodium: '',
     notes: '',
     ingredients: '',
+    image_url: '',
     basis_type: 'per_dish',
     serving_grams: ''
   });
@@ -304,6 +305,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
           dish_name: editForm.dish_name,
           serving_grams: editForm.serving_grams === '' ? null : Number(editForm.serving_grams),
           basis_type: finalBasis,
+          image_url: editForm.image_url ? String(editForm.image_url).trim() : null,
           nutrients: {
             calories: editForm.calories === '' ? null : Number(editForm.calories),
             protein: editForm.protein === '' ? null : Number(editForm.protein),
@@ -917,6 +919,55 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                               onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
                             />
                           </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-white/50 block font-bold">Image URL / Photo</label>
+                            <div className="flex items-center gap-2">
+                              {editForm.image_url ? (
+                                <img
+                                  src={editForm.image_url}
+                                  alt="Brand preview"
+                                  className="w-7 h-7 rounded object-cover border border-white/20 shrink-0"
+                                />
+                              ) : null}
+                              <input
+                                type="text"
+                                placeholder="https://... or /photos/..."
+                                className="flex-1 bg-slate-900 border border-white/10 rounded px-2 py-1 text-[10px] text-white font-mono"
+                                value={editForm.image_url || ''}
+                                onChange={(e) => setEditForm({ ...editForm, image_url: e.target.value })}
+                              />
+                              <label className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded cursor-pointer text-[9px] font-bold shrink-0">
+                                Upload
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = async () => {
+                                      const b64 = reader.result as string;
+                                      try {
+                                        const res = await fetch('/api/r2/upload-photo', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ payload: b64, id: `brand_${Date.now()}` })
+                                        });
+                                        const data = await res.json();
+                                        if (data.url || data.proxyUrl) {
+                                          setEditForm((prev: any) => ({ ...prev, image_url: data.url || data.proxyUrl }));
+                                        }
+                                      } catch (upErr) {
+                                        console.error('Failed to upload brand image', upErr);
+                                      }
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          </div>
                           <div className="flex gap-1.5 justify-end pt-1">
                             <button
                               type="button"
@@ -958,13 +1009,21 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                             sodium: item.nutrients?.sodium ?? (item.nutrients?.salt ? Math.round(item.nutrients.salt * 400) : ''),
                             notes: cleanDescriptionText(item.notes || ''),
                             ingredients: cleanDescriptionText(item.ingredients || ''),
+                            image_url: item.image_url || item.imageUrl || '',
                             basis_type: item.basis_type || 'per_dish',
                             serving_grams: item.serving_grams ?? ''
                           });
                         }}
                       >
                         <div className="flex items-center justify-between gap-2 min-w-0">
-                          <span className="font-bold text-white flex items-center gap-1 truncate min-w-0">
+                          <span className="font-bold text-white flex items-center gap-1.5 truncate min-w-0">
+                            {(item.image_url || item.imageUrl) ? (
+                              <img
+                                src={item.image_url || item.imageUrl}
+                                alt={item.dish_name}
+                                className="w-5 h-5 rounded object-cover border border-white/10 shrink-0"
+                              />
+                            ) : null}
                             {item._source === 'supabase' ? (
                               <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" aria-label={t.syncedToSupabase} />
                             ) : (
@@ -1400,6 +1459,55 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                                       onChange={(e) => setEditForm({ ...editForm, ingredients: e.target.value })}
                                     />
                                   </div>
+                                  <div className="space-y-1">
+                                    <label className="text-[9px] text-white/50 block font-bold">Image URL / Photo</label>
+                                    <div className="flex items-center gap-2">
+                                      {editForm.image_url ? (
+                                        <img
+                                          src={editForm.image_url}
+                                          alt="Brand preview"
+                                          className="w-7 h-7 rounded object-cover border border-white/20 shrink-0"
+                                        />
+                                      ) : null}
+                                      <input
+                                        type="text"
+                                        placeholder="https://... or /photos/..."
+                                        className="flex-1 bg-slate-900 border border-white/10 rounded px-2 py-1 text-[10px] text-white font-mono"
+                                        value={editForm.image_url || ''}
+                                        onChange={(e) => setEditForm({ ...editForm, image_url: e.target.value })}
+                                      />
+                                      <label className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded cursor-pointer text-[9px] font-bold shrink-0">
+                                        Upload
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          className="hidden"
+                                          onChange={async (e) => {
+                                            const file = e.target.files?.[0];
+                                            if (!file) return;
+                                            const reader = new FileReader();
+                                            reader.onload = async () => {
+                                              const b64 = reader.result as string;
+                                              try {
+                                                const res = await fetch('/api/r2/upload-photo', {
+                                                  method: 'POST',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify({ payload: b64, id: `brand_${Date.now()}` })
+                                                });
+                                                const data = await res.json();
+                                                if (data.url || data.proxyUrl) {
+                                                  setEditForm((prev: any) => ({ ...prev, image_url: data.url || data.proxyUrl }));
+                                                }
+                                              } catch (upErr) {
+                                                console.error('Failed to upload brand image', upErr);
+                                              }
+                                            };
+                                            reader.readAsDataURL(file);
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
                                 </div>
                               );
                             }
@@ -1407,7 +1515,14 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                             return (
                               <div key={item.dish_name_key || item.id} className="text-[10px] bg-black/25 p-2 rounded-lg flex flex-col items-stretch gap-2 border border-white/5 hover:border-white/15 transition-all">
                                 <div className="flex items-center justify-between gap-2 min-w-0">
-                                  <span className="font-bold text-white flex items-center gap-1 truncate min-w-0">
+                                  <span className="font-bold text-white flex items-center gap-1.5 truncate min-w-0">
+                                    {(item.image_url || item.imageUrl) ? (
+                                      <img
+                                        src={item.image_url || item.imageUrl}
+                                        alt={item.dish_name}
+                                        className="w-5 h-5 rounded object-cover border border-white/10 shrink-0"
+                                      />
+                                    ) : null}
                                     {item._source === 'supabase' ? (
                                       <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" aria-label={t.syncedToSupabase} />
                                     ) : (
@@ -1434,6 +1549,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                                           sodium: item.nutrients?.sodium ?? (item.nutrients?.salt ? Math.round(item.nutrients.salt * 400) : ''),
                                           notes: cleanDescriptionText(item.notes || ''),
                                           ingredients: cleanDescriptionText(item.ingredients || ''),
+                                          image_url: item.image_url || item.imageUrl || '',
                                           basis_type: item.basis_type || 'per_dish',
                                           serving_grams: item.serving_grams ?? ''
                                         });

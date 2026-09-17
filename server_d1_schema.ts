@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS brand_menu_items (
   nutrients TEXT DEFAULT '{}',
   ingredients TEXT,
   source_url TEXT,
+  image_url TEXT,
   notes TEXT,
   enabled INTEGER DEFAULT 1,
   status TEXT DEFAULT 'active',
@@ -315,6 +316,10 @@ export async function ensureD1Schema(): Promise<{ success: boolean; error?: stri
     }
     schemaEnsured = true;
     console.log('[D1 Schema] Successfully verified/created D1 tables.');
+    // Safe migration check for existing D1 databases lacking image_url
+    try {
+      await d1Query('ALTER TABLE brand_menu_items ADD COLUMN image_url TEXT');
+    } catch (_) {}
     await ensureNutritionD1Seed();
     return { success: true };
   } catch (err: any) {

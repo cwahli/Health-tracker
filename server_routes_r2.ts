@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import crypto from 'crypto';
+import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 
 export const r2Router = Router();
 
@@ -264,7 +265,7 @@ r2Router.post(['/api/r2/upload-photo', '/api/upload'], async (req, res) => {
       return res.json({ url: proxyUrl, proxyUrl, publicUrl, key: objectKey });
     }
 
-    let body;
+    let body: Buffer;
     let contentType = 'image/jpeg';
 
     if (payload.startsWith('data:')) {
@@ -279,15 +280,46 @@ r2Router.post(['/api/r2/upload-photo', '/api/upload'], async (req, res) => {
       body = Buffer.from(payload);
     }
 
+    // SHA-256 Content-Addressable Storage (CAS) to guarantee zero duplicate image storage
+    const hash = crypto.createHash('sha256').update(body).digest('hex');
+    const casKey = `photos/sha256_${hash}.jpg`;
+    const casProxyUrl = `/photos/sha256_${hash}.jpg`;
+    const casPublicUrl = `${CLOUDFLARE_R2_PUBLIC_URL}/${casKey}`;
+
+    // Check if identical photo already exists in R2 bucket
+    try {
+      const headCmd = new HeadObjectCommand({
+        Bucket: CLOUDFLARE_R2_BUCKET_NAME,
+        Key: casKey,
+      });
+      await client.send(headCmd);
+      // Already present in R2! Skip re-upload and return existing deduplicated URL
+      return res.json({
+        url: casProxyUrl,
+        proxyUrl: casProxyUrl,
+        publicUrl: casPublicUrl,
+        key: casKey,
+        deduplicated: true
+      });
+    } catch (headErr: any) {
+      // Object not found in R2 yet, proceed with write
+    }
+
     const command = new PutObjectCommand({
       Bucket: CLOUDFLARE_R2_BUCKET_NAME,
-      Key: objectKey,
+      Key: casKey,
       Body: body,
       ContentType: contentType,
     });
     await client.send(command);
 
-    res.json({ url: proxyUrl, proxyUrl, publicUrl, key: objectKey });
+    res.json({
+      url: casProxyUrl,
+      proxyUrl: casProxyUrl,
+      publicUrl: casPublicUrl,
+      key: casKey,
+      deduplicated: false
+    });
   } catch (err) {
     console.error('Failed to upload photo to R2:', err);
     res.status(500).json({ error: 'Failed to upload photo' });

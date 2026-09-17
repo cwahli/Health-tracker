@@ -19,6 +19,7 @@ foodRouter.get('/api/food/search', async (req, res) => {
       dish_name: m.dish_name || m.name,
       chain_name: m.chain_name || m.chainName || m.brandOwner,
       display_name: m.dish_name || m.name,
+      imageUrl: m.imageUrl || m.image_url || undefined,
       type: 'brand'
     }));
     res.json({ results });

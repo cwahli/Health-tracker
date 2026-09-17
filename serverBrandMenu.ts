@@ -1578,6 +1578,7 @@ export function registerBrandMenuRoutes(app: Express) {
     const nutrients = req.body?.nutrients || {};
     const notes = String(req.body?.notes || '').trim();
     const ingredients = req.body?.ingredients != null ? String(req.body.ingredients).trim() : undefined;
+    const image_url = req.body?.image_url != null ? String(req.body.image_url).trim() : (req.body?.imageUrl != null ? String(req.body.imageUrl).trim() : undefined);
 
     if (!chain_key || !dish_name_key) {
       return res.status(400).json({ error: 'chain_key and dish_name_key are required' });
@@ -1595,6 +1596,7 @@ export function registerBrandMenuRoutes(app: Express) {
           nutrients,
           notes,
           ...(ingredients !== undefined ? { ingredients } : {}),
+          ...(image_url !== undefined ? { image_url } : {}),
         });
       } catch (d1Err) {
         console.warn('[brand-menu-items/edit] D1 update warning:', d1Err);
@@ -1618,27 +1620,34 @@ export function registerBrandMenuRoutes(app: Express) {
         if (ingredients !== undefined) {
           row.ingredients = ingredients;
         }
+        if (image_url !== undefined) {
+          row.image_url = image_url;
+        }
         row.updated_at = new Date().toISOString();
         saveLocalItems(all);
         return res.json({ success: true, item: row, fallback: true });
       }
-      return res.json({ success: true, item: { country_code, chain_key, dish_name, dish_name_key, serving_grams, basis_type, nutrients, notes } });
+      return res.json({ success: true, item: { country_code, chain_key, dish_name, dish_name_key, serving_grams, basis_type, nutrients, notes, image_url } });
     };
 
     try {
       const { supabaseAdmin } = await import('./supabaseAdmin.js');
       if (supabaseAdmin) {
+        const updatePayload: Record<string, any> = {
+          dish_name,
+          serving_grams,
+          basis_type,
+          nutrients,
+          notes,
+          ...(ingredients !== undefined ? { ingredients } : {}),
+          updated_at: new Date().toISOString()
+        };
+        if (image_url !== undefined) {
+          updatePayload.image_url = image_url;
+        }
         const { data, error } = await supabaseAdmin
           .from('brand_menu_items')
-          .update({
-            dish_name,
-            serving_grams,
-            basis_type,
-            nutrients,
-            notes,
-            ...(ingredients !== undefined ? { ingredients } : {}),
-            updated_at: new Date().toISOString()
-          })
+          .update(updatePayload)
           .eq('country_code', country_code)
           .eq('chain_key', chain_key)
           .eq('dish_name_key', dish_name_key)
@@ -1740,6 +1749,7 @@ export function registerBrandMenuRoutes(app: Express) {
         'confidence',
         'capture_count',
         'source_url',
+        'image_url',
         'notes',
         'enabled',
         'updated_at'
@@ -2475,6 +2485,18 @@ export async function fetchAllBrandMenuItems(): Promise<any[]> {
     console.warn('[fetchAllBrandMenuItems] Supabase fetch warning:', err);
   }
 
+  if (items.length === 0 && isD1Configured()) {
+    try {
+      const { d1GetBrandMenuItems } = await import('./server_db_d1.js');
+      const d1Items = await d1GetBrandMenuItems();
+      if (Array.isArray(d1Items) && d1Items.length > 0) {
+        items = d1Items;
+      }
+    } catch (d1Err) {
+      console.warn('[fetchAllBrandMenuItems] D1 fetch warning:', d1Err);
+    }
+  }
+
   try {
     const localItems = loadLocalItems();
     if (Array.isArray(localItems)) {
@@ -2579,6 +2601,7 @@ const formatBrandHit = (matchedItem: any, query: string, matchScore: number, all
       searchQuery: query,
       name: matchedItem.dish_name,
       chainName: matchedItem.chain_name || matchedItem.chain_key || 'Brand',
+      imageUrl: matchedItem.image_url || matchedItem.imageUrl || undefined,
       servingGrams: matchedItem.serving_grams || (matchedItem.basis_type === 'per_100g' ? 100 : null),
       calories: cals != null ? String(cals) : undefined,
       protein: protein != null ? Number(protein) : undefined,

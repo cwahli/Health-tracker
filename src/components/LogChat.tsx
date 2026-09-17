@@ -12,7 +12,7 @@ import { ChatMessage, FoodLog, UserProfile, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
 import { displayStatusLabel, dictionaryFor } from '../utils/i18n';
 import { isCompareOnlyResult } from '../utils/compareMealLogGuard';
-import { X, Send, Image, Camera, FolderOpen, MessageSquare, Sparkles, Plus, Terminal, ChevronDown, ChevronUp, Loader, MapPin, Trash2, Check, Table, RotateCcw, RefreshCw, AlertTriangle, ShieldAlert, Edit2, Maximize2, Minimize2, Flag, BrainCircuit, Download } from 'lucide-react';
+import { X, Send, Image, Camera, FolderOpen, MessageSquare, Sparkles, Plus, Terminal, ChevronDown, ChevronUp, Loader, MapPin, Trash2, Check, Table, RotateCcw, RefreshCw, AlertTriangle, ShieldAlert, Edit2, Maximize2, Minimize2, Flag, BrainCircuit, Download, Utensils } from 'lucide-react';
 import { UniversalModal } from './UniversalModal';
 import { biomarkerDefinitions, getBiomarkerStatus, isAsianEthnicity, getBiomarkerStatusLabel, isBiomarkerValueImprobable, getMergedBiomarkerDef, detectFlaggedTelemetryErrors, buildReviewBiomarkerContext, buildBiomarkerReviewPrefill, getMappedBiomarkerKey, isBiomarkerApproved, isCatalogBuiltIn, shouldStampExtractedDefPending } from '../utils/biomarkers';
 import { BatchNavigator } from './BatchNavigator';
@@ -2222,8 +2222,174 @@ ${logsText}`);
           strippedText = strippedText.replace(new RegExp(`\\[+${escaped}(?:\\s+${t.weightGrams}g)?\\]+`, 'gi'), '').replace(/\s+/g, ' ').trim();
         });
         const hasAdditionalText = strippedText.replace(/\[+.*?\]+/g, '').replace(/^[+\s,.-]+/, '').trim().length > 0;
-        if (!hasAdditionalText && finalImages.length === 0 && explicitFoodTags.length === 1 && explicitFoodTags[0].source === 'previous_meal') {
-          handleDuplicateFoodLog(explicitFoodTags[0].originalLog);
+        if (!hasAdditionalText && finalImages.length === 0 && explicitFoodTags.length >= 1) {
+          const todayDate = getCurrentDateInTimezone(profile?.timezone);
+          let totalCalories = 0;
+          let totalProtein = 0;
+          let totalCarbs = 0;
+          let totalFat = 0;
+          let totalSatFat = 0;
+          let totalFibre = 0;
+          let totalSodium = 0;
+          let totalWeight = 0;
+          const itemsBreakdown: any[] = [];
+          const allImages: string[] = [];
+
+          explicitFoodTags.forEach((tag, idx) => {
+            let cal = 0;
+            let prot = 0;
+            let carb = 0;
+            let fat = 0;
+            let sat = 0;
+            let fib = 0;
+            let sod = 0;
+            let weight = Number(tag.weightGrams) || 100;
+            let img = tag.imageUrl;
+
+            if (tag.source === 'previous_meal' && tag.originalLog) {
+              const orig = tag.originalLog;
+              const origWeight = Number(orig.weightGrams || orig.portionGrams) || 100;
+              const factor = tag.weightGrams ? Number(tag.weightGrams) / origWeight : 1;
+              const origNutr = orig.nutrients || {};
+              cal = (Number(orig.calories ?? origNutr.calories) || 0) * factor;
+              prot = (Number(orig.protein ?? origNutr.protein) || 0) * factor;
+              carb = (Number(orig.carbohydrates ?? origNutr.carbohydrates) || 0) * factor;
+              fat = (Number(orig.totalFat ?? orig.fat ?? origNutr.totalFat ?? origNutr.fat) || 0) * factor;
+              sat = (Number(orig.saturatedFat ?? origNutr.saturatedFat) || 0) * factor;
+              fib = (Number(orig.totalFibre ?? orig.fiber ?? origNutr.totalFibre ?? origNutr.fiber) || 0) * factor;
+              sod = (Number(orig.sodium ?? origNutr.sodium) || 0) * factor;
+              weight = tag.weightGrams ? Number(tag.weightGrams) : origWeight;
+              if (!img) {
+                img = orig.imageUrl || orig.imageUrls?.[0];
+              }
+            } else {
+              const item = tag.item || {};
+              const nutr = item.nutrients || tag.nutrients || {};
+              const baseServing = Number(item.serving_grams || tag.servingGrams) || 100;
+              const factor = tag.weightGrams ? Number(tag.weightGrams) / baseServing : 1;
+              cal = (Number(item.calories ?? nutr.calories ?? tag.calories) || 0) * factor;
+              prot = (Number(item.protein ?? nutr.protein ?? tag.protein) || 0) * factor;
+              carb = (Number(item.carbohydrates ?? nutr.carbohydrates ?? tag.carbohydrates) || 0) * factor;
+              fat = (Number(item.total_fat ?? nutr.totalFat ?? nutr.fat ?? tag.fat) || 0) * factor;
+              sat = (Number(item.saturated_fat ?? nutr.saturatedFat ?? tag.saturatedFat) || 0) * factor;
+              fib = (Number(item.total_fibre ?? nutr.totalFibre ?? nutr.fiber ?? tag.totalFibre) || 0) * factor;
+              sod = (Number(item.sodium ?? nutr.sodium ?? tag.sodium) || 0) * factor;
+              weight = tag.weightGrams ? Number(tag.weightGrams) : baseServing;
+              if (!img) {
+                img = item.image_url || item.imageUrl || tag.imageUrl;
+              }
+            }
+
+            totalCalories += cal;
+            totalProtein += prot;
+            totalCarbs += carb;
+            totalFat += fat;
+            totalSatFat += sat;
+            totalFibre += fib;
+            totalSodium += sod;
+            totalWeight += weight;
+
+            if (img && !allImages.includes(img)) {
+              allImages.push(img);
+            }
+
+            itemsBreakdown.push({
+              id: tag.dbId || `item_${idx}`,
+              name: tag.name,
+              displayName: tag.name,
+              portion: `${Math.round(weight)}g`,
+              weightGrams: Math.round(weight),
+              weight: `${Math.round(weight)}g`,
+              calories: Math.round(cal),
+              protein: Math.round(prot * 10) / 10,
+              carbohydrates: Math.round(carb * 10) / 10,
+              fat: Math.round(fat * 10) / 10,
+              totalFat: Math.round(fat * 10) / 10,
+              saturatedFat: Math.round(sat * 10) / 10,
+              totalFibre: Math.round(fib * 10) / 10,
+              fiber: Math.round(fib * 10) / 10,
+              sodium: Math.round(sod),
+              salt: Math.round((sod / 400) * 10) / 10,
+              imageUrl: img,
+              source: tag.source || 'catalog_tag',
+              scoutIndex: idx
+            });
+          });
+
+          const dishName = explicitFoodTags.length === 1 ? explicitFoodTags[0].name : explicitFoodTags.map(t => t.name).join(' + ');
+          const primaryImageUrl = allImages[0] || undefined;
+          const roundedCal = Math.round(totalCalories);
+          const roundedProt = Math.round(totalProtein * 10) / 10;
+          const roundedCarb = Math.round(totalCarbs * 10) / 10;
+          const roundedFat = Math.round(totalFat * 10) / 10;
+          const roundedSat = Math.round(totalSatFat * 10) / 10;
+          const roundedFib = Math.round(totalFibre * 10) / 10;
+          const roundedSod = Math.round(totalSodium);
+
+          const compositeFoodLog: any = {
+            id: `food_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            name: dishName,
+            title: dishName,
+            date: todayDate,
+            weightGrams: Math.round(totalWeight),
+            quantity: '1 serving',
+            composition: itemsBreakdown.map(i => `${i.name} (${i.weight})`).join(', '),
+            nutrients: {
+              calories: roundedCal,
+              protein: roundedProt,
+              carbohydrates: roundedCarb,
+              totalFat: roundedFat,
+              fat: roundedFat,
+              saturatedFat: roundedSat,
+              totalFibre: roundedFib,
+              fiber: roundedFib,
+              sodium: roundedSod,
+              salt: Math.round((roundedSod / 400) * 10) / 10,
+            },
+            calories: roundedCal,
+            protein: roundedProt,
+            carbohydrates: roundedCarb,
+            totalFat: roundedFat,
+            saturatedFat: roundedSat,
+            totalFibre: roundedFib,
+            sodium: roundedSod,
+            itemsBreakdown,
+            items: itemsBreakdown,
+            imageUrl: primaryImageUrl,
+            photoUrl: primaryImageUrl,
+            imageUrls: allImages.length > 0 ? allImages : undefined,
+            healthImpact: `Balanced intake from ${itemsBreakdown.length} selected item(s).`,
+            benefits: ['Accurate catalog nutrition', 'Portion verified'],
+            risks: [],
+            recommendation: 'good',
+            verdict: { label: 'Tracked', level: 'good' }
+          };
+
+          const userMsg: any = {
+            id: `msg_${Date.now()}_user`,
+            role: 'user',
+            content: userContent || dishName,
+            timestamp: new Date().toISOString(),
+            imageUrl: primaryImageUrl,
+            imageUrls: allImages.length > 0 ? allImages : undefined
+          };
+
+          const assistantMsg: any = {
+            id: `msg_${Date.now()}_assistant`,
+            role: 'assistant',
+            content: `Here is the nutrition breakdown for **${dishName}**:`,
+            timestamp: new Date().toISOString(),
+            data: {
+              pendingFoodLog: compositeFoodLog,
+              scoutItems: itemsBreakdown,
+              agentResult: {
+                status: 'success',
+                mode: 'new_log'
+              }
+            }
+          };
+
+          setMessages(prev => [...prev, userMsg, assistantMsg]);
           setInputText('');
           setExplicitFoodTags([]);
           clearTimeout(failsafe);
@@ -6275,7 +6441,7 @@ ${logsText}`);
                   {combinedMatches.map((item, idx) => (
                     <div key={item._listType === 'brand' ? (item.food_id || idx) : item.id} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        {item._listType === 'previous_meal' && (
+                        {item._listType === 'previous_meal' ? (
                           (item.imageUrl || (item.imageUrls && item.imageUrls.length > 0)) ? (
                             <PreviousMealThumbnail
                               src={resolveFoodImage(item.imageUrl || item.imageUrls?.[0], activeFoodLogs) || ''}
@@ -6285,6 +6451,18 @@ ${logsText}`);
                           ) : (
                             <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-500 font-bold text-xs shrink-0">
                               {item.name.charAt(0).toUpperCase()}
+                            </div>
+                          )
+                        ) : (
+                          (item.imageUrl || item.image_url) ? (
+                            <PreviousMealThumbnail
+                              src={item.imageUrl || item.image_url}
+                              alt={item.dish_name}
+                              fallbackLabel={item.chain_name || item.dish_name}
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0">
+                              {(item.chain_name || item.dish_name || 'B').charAt(0).toUpperCase()}
                             </div>
                           )
                         )}
@@ -6351,10 +6529,24 @@ ${logsText}`);
                             };
                             if (item._listType === 'brand') {
                               const w = (document.getElementById(`tag-portion-${item.food_id}`) as HTMLInputElement)?.value || tagPortionPreFill;
-                              setExplicitFoodTags(prev => [...prev, { dbId: item.food_id, name: item.dish_name, weightGrams: Number(w), source: 'catalog_tag' }]);
+                              setExplicitFoodTags(prev => [...prev, { 
+                                dbId: item.food_id, 
+                                name: item.dish_name, 
+                                weightGrams: Number(w), 
+                                source: 'catalog_tag',
+                                imageUrl: item.imageUrl || item.image_url,
+                                item 
+                              }]);
                               setInputText(prev => applyTag(prev, activeSearchTerms, `${item.dish_name} ${w}g`));
                             } else {
-                              setExplicitFoodTags(prev => [...prev, { dbId: item.id, name: item.name, source: 'previous_meal', originalLog: item }]);
+                              setExplicitFoodTags(prev => [...prev, { 
+                                dbId: item.id, 
+                                name: item.name, 
+                                source: 'previous_meal', 
+                                originalLog: item,
+                                imageUrl: item.imageUrl || item.imageUrls?.[0],
+                                weightGrams: item.portionGrams || item.weightGrams || 100
+                              }]);
                               setInputText(prev => applyTag(prev, activeSearchTerms, item.name));
                             }
                             setCatalogMatches([]);
@@ -6372,6 +6564,55 @@ ${logsText}`);
               </div>
             );
           })()}
+          {/* Staged Meal Compose Tray */}
+          {explicitFoodTags.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto py-1.5 px-2.5 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/50 rounded-xl">
+              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                <Utensils className="w-3 h-3" />
+                {t.stagedItems || "Staged Items"}:
+              </span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                {explicitFoodTags.map((tag, tIdx) => {
+                  const thumbSrc = tag.imageUrl || (tag.originalLog ? resolveFoodImage(tag.originalLog.imageUrl || tag.originalLog.imageUrls?.[0], activeFoodLogs) : undefined);
+                  return (
+                    <div key={tag.dbId || tIdx} className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-lg px-2 py-1 shadow-sm shrink-0">
+                      {thumbSrc ? (
+                        <PreviousMealThumbnail
+                          src={thumbSrc}
+                          alt={tag.name}
+                          fallbackLabel={tag.name}
+                        />
+                      ) : (
+                        <div className="w-5 h-5 rounded bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
+                          {(tag.name || 'F').charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 max-w-[120px] truncate">
+                        {tag.name}
+                      </span>
+                      {tag.weightGrams ? (
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-700/50 px-1 py-0.5 rounded">
+                          {tag.weightGrams}g
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExplicitFoodTags(prev => prev.filter((_, i) => i !== tIdx));
+                          const escaped = (tag.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                          setInputText(prev => prev.replace(new RegExp(`\\[+${escaped}(?:\\s+\\d+g)?\\]+`, 'gi'), '').trim());
+                        }}
+                        className="p-0.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-rose-500 rounded transition-colors"
+                        title="Remove item"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {isCompressing && (
             <div className="flex items-center gap-2 p-2 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 rounded-xl">
               <Loader className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
