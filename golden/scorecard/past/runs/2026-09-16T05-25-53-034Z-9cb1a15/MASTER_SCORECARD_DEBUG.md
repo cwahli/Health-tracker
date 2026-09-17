@@ -1,19 +1,19 @@
 # Master Scorecard Debug
 
-Canonical JSON: [`LATEST.json`](./LATEST.json). Sealed all-green copy of current/. Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
+Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-17T09:55:52.193Z
-**Commit:** `b4bba8f`
-**Instruction hash:** `de1a3f248da4`
-**Seal:** `a964ee13160778b91dc92d1590340f41ff56b6d5d6605b4ae48b185a4c492461`
+**When:** 2026-09-16T05:25:53.034Z
+**Commit:** `9cb1a15`
+**Instruction hash:** `c5cbb90c42d3`
+**Seal:** `e7709c0cae5cd33eb5fc075e83d1799038fe3413d1854e5cfc17a5efbc2fab6f`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **ALL GREEN** — 726 pass / 0 fail / 0 skip
+**Overall:** **ALL GREEN** — 713 pass / 0 fail / 0 skip
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | PASS | 726 pass / 0 fail / 0 skip of 726 |
+| `overall_named_gates` | PASS | 713 pass / 0 fail / 0 skip of 713 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
 | `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
@@ -22,11 +22,11 @@ Canonical JSON: [`LATEST.json`](./LATEST.json). Sealed all-green copy of current
 | `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
 | `result_summary_sealed` | PASS | will write result_summary (overallPass) |
 | `area_localization` | PASS | 65 pass / 0 fail / 0 skip |
-| `area_meal_log` | PASS | 194 pass / 0 fail / 0 skip |
+| `area_meal_log` | PASS | 192 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
 | `area_biomarkers` | PASS | 154 pass / 0 fail / 0 skip |
 | `area_receptionist` | PASS | 49 pass / 0 fail / 0 skip |
-| `area_reliability` | PASS | 217 pass / 0 fail / 0 skip |
+| `area_reliability` | PASS | 206 pass / 0 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
 | `journey-guard` | PASS | exit 0 |
 | `biomarker-lifecycle-m31` | PASS | exit 0 |
@@ -37,11 +37,11 @@ Canonical JSON: [`LATEST.json`](./LATEST.json). Sealed all-green copy of current
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
 | Localization | PASS | 65 | 0 | 0 | 65 |
-| Meal Log | PASS | 194 | 0 | 0 | 194 |
+| Meal Log | PASS | 192 | 0 | 0 | 192 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
 | Biomarkers | PASS | 154 | 0 | 0 | 154 |
 | Receptionist | PASS | 49 | 0 | 0 | 49 |
-| Reliability | PASS | 217 | 0 | 0 | 217 |
+| Reliability | PASS | 206 | 0 | 0 | 206 |
 
 ## All failed (red)
 
@@ -53,7 +53,7 @@ _none_
 
 ## All passed (green)
 
-### Reliability (217)
+### Reliability (206)
 
 | Status | File | Test |
 |---|---|---|
@@ -112,8 +112,6 @@ _none_
 | PASS | `src/utils/debugPayload.test.ts` | debugPayload renders all sections and derivations matching Golden Meal specifications for meal logs |
 | PASS | `src/utils/debugPayload.test.ts` | debugPayload renders Mode D comparison sections matching Golden Meal 03 specifications |
 | PASS | `src/utils/debugPayload.test.ts` | debugPayload allowance table stops |
-| PASS | `src/utils/debugPayload.test.ts` | debugPayload renders Retry Sessions & Execution Attempts section when previousAttempts is provided |
-| PASS | `src/utils/debugPayload.test.ts` | debugPayload debugReportFromJobMsg carries forward previousAttempts and priorLogs |
 | PASS | `src/utils/dumpContract.test.ts` | dumpContract — display lag and complete-once flags happy-path with kcal but no session succeeded |
 | PASS | `src/utils/dumpContract.test.ts` | dumpContract — display lag and complete-once flags 90s scout stall that failed the job without a 3.1 hop |
 | PASS | `src/utils/dumpContract.test.ts` | dumpContract — display lag and complete-once does not flag a stall that already hopped to 3.1 on the same job |
@@ -183,10 +181,6 @@ _none_
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d drops data: copies once the same captures exist on /photos/ |
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d keeps local data: URLs when nothing has been uploaded yet |
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d dedupes an all-dead list to zero (orphaned hero-slider root cause) |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveNextPhotoUrl (previous-meal thumbnail self-heal) tries the local proxy path first, without hitting the network |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveNextPhotoUrl (previous-meal thumbnail self-heal) awaits the signed-URL API once proxy candidates are exhausted, and uses its returned URL |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveNextPhotoUrl (previous-meal thumbnail self-heal) falls back to the raw signed-URL endpoint if the fetch throws (network error), not to null |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveNextPhotoUrl (previous-meal thumbnail self-heal) returns null once every fallback has already been tried (permanently broken image) |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser scoreGoldenRun scores expected meal lines against a new pipeline foodLog |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser does not keep leftover category-fallback as a fail when identity ended on labels |
 | PASS | `src/utils/goldenScoreboard.test.ts` | goldenScoreboard parser captures declared never-match and log events |
@@ -228,11 +222,6 @@ _none_
 | PASS | `src/utils/syncUtils.regression.test.ts` | resolveInitialLanguage supports all four locales through the chosenLanguage path |
 | PASS | `src/utils/syncUtils.regression.test.ts` | mergeDeleteMaps takes the higher timestamp for the same id |
 | PASS | `src/utils/syncUtils.regression.test.ts` | mergeDeleteMaps never drops tombstones from either side |
-| PASS | `src/utils/syncUtils.regression.test.ts` | Profile language persistence laws mergeProfiles preserves local profile language when merging with serverProfile |
-| PASS | `src/utils/syncUtils.regression.test.ts` | Profile language persistence laws existing profile language is remembered and not clobbered when preferred_language is id |
-| PASS | `src/utils/syncUtils.regression.test.ts` | Profile language persistence laws unspecified or invalid profile language falls back to preferred_language |
-| PASS | `src/utils/syncUtils.regression.test.ts` | Settings Sync Indicator & Translations has localized syncNow and syncing keys in both en and id |
-| PASS | `src/utils/syncUtils.regression.test.ts` | Settings Sync Indicator & Translations determines spinning animation and amber styling when syncState is syncing |
 | PASS | `src/jobs/__tests__/JobSession.contract.test.ts` | JobSession contract (STALE_TURN) edit submit shows Updating meal while the prior meal is still on the job |
 | PASS | `src/jobs/__tests__/JobSession.contract.test.ts` | JobSession contract (STALE_TURN) same-meal succeeded echo does not complete the turn |
 | PASS | `src/jobs/__tests__/JobSession.contract.test.ts` | JobSession contract (STALE_TURN) new Unsweetened snapshot completes to Analysis completed |
@@ -275,7 +264,7 @@ _none_
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_contract_not_painted |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_no_slice_scripts |
 
-### Meal Log (194)
+### Meal Log (192)
 
 | Status | File | Test |
 |---|---|---|
@@ -328,8 +317,6 @@ _none_
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize does not treat unit-count "1 serving (70g)" as 1 gram (Pia 100 Nanas) |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize does not treat "1 pcs" or "1 porsi" as 1 gram |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize finalizes a 70g labeled serving |
-| PASS | `server_dish_finalize.test.ts` | server_dish_finalize finalizes a 65g almond pack |
-| PASS | `server_dish_finalize.test.ts` | server_dish_finalize does not explode to 5199 kcal when serving count 2.25 or "2.5 sajian" is passed as servingSize / servingGrams |
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger diffs identity + weight into structural commands |
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger enforces identity locks against scout regression |
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger invalidates stale manis sibling metadata on identity change |
@@ -530,12 +517,12 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) keeps the placeholders the job card interpolates (no silent no-op replace) |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) renders the edit/retry running job card in Indonesian |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) never regresses a scanned key back to the Title-Case humanization of its key |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
-| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
 | PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
+| PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |
@@ -809,6 +796,9 @@ _none_
 | PASS | `src/server/food/server_food_scout_source.test.ts` | Turn 2 Portion Selection — multi-dish preservation applyScoutResultState promotes allExtractedDishes when compare items is empty (Mode D heal) |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | Turn 2 Portion Selection — multi-dish preservation applyScoutResultState leaves populated compare items untouched (heal is empty-only) |
 
+## i18n t() keys missing from packs (complete)
+
+_none_
 ## Notes
 
 - Named gates only. Playwright live specs are not in this dump (quota).
