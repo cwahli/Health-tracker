@@ -406,6 +406,9 @@ export default function Header({
   const [gender, setGender] = useState<string>(profile.gender || 'Unknown');
   const [unitPreference, setUnitPreference] = useState<string>(profile.unitPreference || 'SI');
   const [timezone, setTimezone] = useState<string>(profile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [language, setLanguage] = useState<'en' | 'fr' | 'zh' | 'id'>(() => {
+    return (profile?.language && ['en', 'fr', 'zh', 'id'].includes(profile.language)) ? (profile.language as 'en' | 'fr' | 'zh' | 'id') : 'en';
+  });
   const [now, setNow] = useState(Date.now());
   const t = translations[profile.language] || translations.en;
 
@@ -1099,6 +1102,9 @@ export default function Header({
     setGender(profile.gender || 'Unknown');
     setUnitPreference(profile.unitPreference || 'SI');
     setTimezone(profile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
+    if (profile.language && ['en', 'fr', 'zh', 'id'].includes(profile.language)) {
+      setLanguage(profile.language as 'en' | 'fr' | 'zh' | 'id');
+    }
   }, [profile]);
 
   const handleSave = () => {
@@ -1112,8 +1118,11 @@ export default function Header({
       bloodType,
       gender,
       unitPreference: unitPreference as 'SI' | 'US',
-      timezone
+      timezone,
+      language: (language || profile.language || 'en') as 'en' | 'fr' | 'zh' | 'id',
+      lastUpdatedAt: Date.now()
     };
+    localStorage.setItem('preferred_language', finalProfile.language);
     if (onSaveProfile) {
       onSaveProfile(finalProfile);
     } else {
@@ -1660,11 +1669,20 @@ export default function Header({
                   <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">{t.languageLabel}</label>
                   <select
                     id="lang-selector"
-                    value={profile.language}
+                    value={language}
                     onChange={(e) => {
-                      const newLang = e.target.value as any;
+                      const newLang = e.target.value as 'en' | 'fr' | 'zh' | 'id';
+                      setLanguage(newLang);
                       localStorage.setItem('preferred_language', newLang);
-                      setProfile({ ...profile, language: newLang });
+                      const updated = {
+                        ...profile,
+                        language: newLang,
+                        lastUpdatedAt: Date.now()
+                      };
+                      setProfile(updated);
+                      if (onSaveProfile) {
+                        onSaveProfile(updated);
+                      }
                     }}
                     className="w-full text-sm font-sans bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >

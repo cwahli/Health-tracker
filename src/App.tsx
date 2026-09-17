@@ -225,7 +225,7 @@ function sanitizeProfile(incomingProfile: any, activeEmail?: string): any {
       height: 175,
       gender: 'Male',
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      language: 'en',
+      language: resolveInitialLanguage(),
       userType: 'Admin',
       topNutrientsToMonitor: PRIMARY_NUTRIENTS
     };
@@ -1996,9 +1996,12 @@ export default function App() {
           setBiomarkerHistory(mergedBioHist);
         }
         if (serverProfile) {
-          const mergedProf = mergeProfiles(serverProfile, profile);
+          const mergedProf = mergeProfiles(serverProfile, localProfile || profile);
           if (mergedProf) {
             setProfile(sanitizeProfile(mergedProf, activeEmail));
+            if (mergedProf.language) {
+              localStorage.setItem('preferred_language', mergedProf.language);
+            }
             // Recompute active biomarkers state
             const computedBios: { [key: string]: number | string } = {};
             [...mergedBioHist].filter(b => b.sync_state !== 'delete' && !(mergedProf.deletedBiomarkerLogIds?.[b.id] && (mergedProf.deletedBiomarkerLogIds?.[b.id] || 0) >= (b.updated_at || 0))).sort((a, b) => toYYYYMMDD(a.date).localeCompare(toYYYYMMDD(b.date))).forEach(log => {
@@ -2124,6 +2127,9 @@ export default function App() {
           });
 
         setProfile(sanitizeProfile(authProfile, activeEmail));
+        if (authProfile?.language) {
+          localStorage.setItem('preferred_language', authProfile.language);
+        }
         setFoodLogs(mergedFoods);
         setBiomarkerHistory(mergedBioHistory);
         setBiomarkers(computedBiomarkers);
@@ -2863,15 +2869,15 @@ export default function App() {
           await saveAndSync(mergedProfile, mergedFoods, tempBiomarkers, mergedBioHistory, mergedActions, mergedBenefits, resolvedReport, { type: 'profile' });
         }
 
-        // Theme/appearance settings are profile-specific. They must always reflect
+        // Theme/appearance and language settings are profile-specific. They must always reflect
         // whichever copy (local device or cloud) was actually updated most recently —
-        // never let a stale cloud profile silently reapply an old theme just because
+        // never let a stale cloud profile silently reapply an old theme or language just because
         // the rest of the profile merge logic happened to prefer the cloud copy.
-        const THEME_FIELDS: (keyof UserProfile)[] = ['themePalette', 'fontFamily', 'fontMono', 'fontSize', 'marginScale', 'paddingScale', 'cornerRadius', 'shadowScale', 'themeOverrides', 'customColors', 'fontSizeTitle', 'fontSizeSubtitle', 'fontSizeDescription', 'fontSizeBodySmall', 'fontSizeSubtitleSmall', 'fontSizeKeyMetric', 'fontSizeXS', 'fontSizeBody', 'customFonts', 'themePresets', 'systemPresetOverrides'];
+        const PREFERENCE_FIELDS: (keyof UserProfile)[] = ['language', 'themePalette', 'fontFamily', 'fontMono', 'fontSize', 'marginScale', 'paddingScale', 'cornerRadius', 'shadowScale', 'themeOverrides', 'customColors', 'fontSizeTitle', 'fontSizeSubtitle', 'fontSizeDescription', 'fontSizeBodySmall', 'fontSizeSubtitleSmall', 'fontSizeKeyMetric', 'fontSizeXS', 'fontSizeBody', 'customFonts', 'themePresets', 'systemPresetOverrides'];
         const hasLocalThemeOverride = sessionStorage.getItem('localThemeOverridesCloud') === 'true';
         if (!forceReplaceLocal && (hasLocalThemeOverride || (localProfile && (localProfile.lastUpdatedAt || 0) >= (cloudProfile?.lastUpdatedAt || 0)))) {
           const newerLocalProfile = localProfile;
-          THEME_FIELDS.forEach(field => {
+          PREFERENCE_FIELDS.forEach(field => {
             if (newerLocalProfile[field] !== undefined) {
               (mergedProfile as any)[field] = newerLocalProfile[field];
             }
@@ -2884,6 +2890,9 @@ export default function App() {
         // B7.6: fold live parallel alias keys into their master (or tombstone empties).
         const dedupedMerged = mergeParallelAliasGroups(cleanedMerged.profile, cleanedMerged.history);
         mergedProfile = dedupedMerged.profile as UserProfile;
+        if (mergedProfile?.language) {
+          localStorage.setItem('preferred_language', mergedProfile.language);
+        }
         mergedBioHistory = dedupedMerged.history;
         setProfile(sanitizeProfile(mergedProfile, activeEmail));
         // Final safety: dedupe + rehydrate once more before React state / IndexedDB
@@ -3181,7 +3190,7 @@ export default function App() {
         height: '' as any,
         gender: 'Unknown',
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        language: 'en',
+        language: resolveInitialLanguage(chosenLanguage),
         userType: 'Standard',
         topNutrientsToMonitor: PRIMARY_NUTRIENTS
       };
@@ -3195,13 +3204,10 @@ export default function App() {
         loadedProfile.topNutrientsToMonitor = PRIMARY_NUTRIENTS;
       }
     }
-    if (chosenLanguage && loadedProfile) {
-      loadedProfile.language = chosenLanguage;
-    } else if (loadedProfile && (!loadedProfile.language || loadedProfile.language === 'en')) {
-      const preferred = localStorage.getItem('preferred_language') as any;
-      if (preferred && ['en', 'fr', 'zh', 'id'].includes(preferred)) {
-        loadedProfile.language = preferred;
-      }
+    if (chosenLanguage && ['en', 'fr', 'zh', 'id'].includes(chosenLanguage)) {
+      loadedProfile.language = chosenLanguage as any;
+    } else if (loadedProfile && (!loadedProfile.language || !['en', 'fr', 'zh', 'id'].includes(loadedProfile.language))) {
+      loadedProfile.language = resolveInitialLanguage();
     }
     if (loadedProfile?.language) {
       localStorage.setItem('preferred_language', loadedProfile.language);
@@ -6183,6 +6189,10 @@ export default function App() {
               lastUpdatedAt: now
             };
 
+            if (updatedProfile.language) {
+              localStorage.setItem('preferred_language', updatedProfile.language);
+            }
+
             const bundle = {
               profile: updatedProfile,
               foodLogs,
@@ -6201,6 +6211,9 @@ export default function App() {
         onSaveProfile={async (p) => {
           // B7.5: fingerprint diff (ageBand|gender|ethnicity), not raw fields.
           let updatedProfile = maybeRecalibrateDemographicOverlays(profile, { ...p });
+          if (updatedProfile.language) {
+            localStorage.setItem('preferred_language', updatedProfile.language);
+          }
           const { updatedHistory, updatedBiomarkers, changed } = logBmiIfProfileWeightHeightChanged(profile, updatedProfile, biomarkerHistory, biomarkers);
           setProfile(updatedProfile);
           if (changed) {

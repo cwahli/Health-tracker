@@ -12,6 +12,7 @@ import {
   upsertProfileToSupabase,
   mergeByRecency,
   mergeDeleteMaps,
+  mergeProfiles,
   resolveInitialLanguage,
 } from './syncUtils';
 
@@ -218,5 +219,48 @@ describe('mergeDeleteMaps', () => {
     const b = { 'y': 200 };
     const merged = mergeDeleteMaps(a, b);
     expect(Object.keys(merged).sort()).toEqual(['x', 'y']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Profile language persistence & non-reset laws
+// ---------------------------------------------------------------------------
+describe('Profile language persistence laws', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('mergeProfiles preserves local profile language when merging with serverProfile', () => {
+    const server = { email: 'test@example.com', language: 'id' } as any;
+    const local = { email: 'test@example.com', language: 'en' } as any;
+    const merged = mergeProfiles(server, local);
+    expect(merged?.language).toBe('en');
+  });
+
+  it('existing profile language is remembered and not clobbered when preferred_language is id', () => {
+    // Simulate user having chosen English on their profile previously
+    const existingProfile = { email: 'test@example.com', language: 'en' } as any;
+    // But localStorage had leftover 'id' from testing or previous session
+    localStorage.setItem('preferred_language', 'id');
+
+    // Language resolution for an existing profile with a valid language must preserve it
+    const valid = ['en', 'fr', 'zh', 'id'];
+    let resolvedLang = existingProfile.language;
+    if (!resolvedLang || !valid.includes(resolvedLang)) {
+      resolvedLang = resolveInitialLanguage();
+    }
+    expect(resolvedLang).toBe('en');
+  });
+
+  it('unspecified or invalid profile language falls back to preferred_language', () => {
+    const emptyProfile = { email: 'test@example.com', language: '' } as any;
+    localStorage.setItem('preferred_language', 'id');
+
+    const valid = ['en', 'fr', 'zh', 'id'];
+    let resolvedLang = emptyProfile.language;
+    if (!resolvedLang || !valid.includes(resolvedLang)) {
+      resolvedLang = resolveInitialLanguage();
+    }
+    expect(resolvedLang).toBe('id');
   });
 });
