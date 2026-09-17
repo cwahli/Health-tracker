@@ -52,6 +52,17 @@ Umbrella laws apply (`specs/active/Q-11.md`). Promote `auto_go` after Q-11.5 is 
    action it has today. The a14abea attempt shipped placeholder cards on Home; that is a failed
    milestone even with green gates.
 
+## Measured starting point (2026-09-17, `818808f`)
+
+The region this milestone moves is `src/App.tsx` **6016–6321** (305 lines: `main` + `Suspense` +
+the four `{activeTab === …}` blocks) and it references **97** App-scope declarations — state values,
+setters and ~50 `handle*` callbacks. The `AppModals` half is the `{(() => { … })()}` dialogs host at
+**6361–7497** (1,138 lines) plus the `LogChat` mounts at 7500–8744. So size the two typed props
+interfaces (~100 lines each) as part of the work, not as an afterthought: they are the reason this
+milestone shrinks `App.tsx` a lot while adding two files that are *not* ≤ 300 lines on day one.
+Packet law 2 (no deletions) and law 1 (move-only) still hold — no placeholder cards, no dropped
+handlers: every modal and every tab must stay bound to the action it has today.
+
 ## Done means
 
 - `src/App.tsx` ≤ 6,600 lines; `dialog-inventory` and `key-journeys` green.

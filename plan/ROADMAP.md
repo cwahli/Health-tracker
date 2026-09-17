@@ -447,15 +447,23 @@ ratchet the `CATALOG.json` ceiling of any file that shrinks):
 
 ```text
 q-11-1-pures        utils/appProfileUtils.ts (move + unit test)      App.tsx 9,101 -> 9,004    DONE 06df05b guardrails + Q-11.1
-q-11-2-auth-session hooks/useAuthSession.ts (auth + real sign-out)   9,004 -> 8,803          DONE
-q-11-3-job-poller   hooks/useJobPoller.ts (JobStore poll loop)       -> ~8,600                auto_go (promoted)
+q-11-2-auth-session hooks/useAuthSession.ts (auth + real sign-out)   9,004 -> 8,803          DONE 818808f
+q-11-3-job-poller   hooks/useJobRuntime.ts (job lifecycle + credits) -> <= 8,550              BLOCKED on 3a/3b prep (re-scoped; evidence in packet)
+q-11-3a-state-order hoist 4 useState decls + the isFoodChatOpen dep  App.tsx unchanged        prep for 3c, its own commit
+q-11-3b-persist-ref inject the saveAndSync callback through a ref    App.tsx unchanged        prep for 3c, its own commit
 q-11-4-profile-hook hooks/useAppProfile.ts (real profile source)     -> ~8,000                human go
 q-11-5-sync-hook    hooks/useAppSync.ts (Supabase/Firestore merge)   -> ~7,300                human go; no stubs
-q-11-6-tabs-modals  components/App{Tabs,Modals}.tsx                 -> ~6,600                human go
+q-11-6-tabs-modals  components/App{Tabs,Modals}.tsx                 -> ~6,600                human go; 97-prop surface measured
 q-11-7-shell-header components/AppShell.tsx + Header/ProfileModal   -> ~6,200                human go
-q-11-8-i18n-split   utils/translations/{en,fr,zh,id}.ts             App.tsx unchanged        human go
+q-11-8-i18n-split   utils/translations/{en,fr,zh,id}.ts             App.tsx unchanged        DONE (1,998-line packs; was a 190KB file)
 q-11-9-assembly     src/App.tsx as a hook wiring layer              -> <= 1,200              human go
 ```
+
+Standing reds as of 2026-09-17: `assert-budgets` is **green** (LogChat trimmed to its ceiling, not
+raised) and the vitest suite is **1,777 passed / 0 failed**. The one remaining scorecard failure is
+`journey-guard: spec_ambiguous`, caused by `F-13.md` / `Q-11.md` / `R-13.md` being active at the same
+time — the scorecard's gate manifest calls `journey-guard` with no id and is hash-sealed, so that
+needs a process call by the F-13/R-13 owners.
 
 Any agent: pick the lowest milestone that is not committed, pass its `node scripts/journey-guard.mjs
 <id>` and `node scripts/assert-spec-diff.mjs <id>` gates, and stop when it is green. Do not chain
