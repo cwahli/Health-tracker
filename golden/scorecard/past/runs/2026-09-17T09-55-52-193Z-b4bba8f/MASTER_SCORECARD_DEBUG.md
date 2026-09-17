@@ -1,20 +1,19 @@
 # Master Scorecard Debug
 
-Canonical JSON: [`LATEST.json`](./LATEST.json). Sealed all-green copy of current/. Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
+Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-17T15:12:12.926Z
-**Commit:** `5615f1e`
-**Instruction hash:** `e75cb0d186da`
-**Seal:** `f5c0fe8650d5a0fdeb4ca276e1cec8837b6c17042f3f0620cad804cf634cc9b2`
+**When:** 2026-09-17T09:55:52.193Z
+**Commit:** `b4bba8f`
+**Instruction hash:** `de1a3f248da4`
+**Seal:** `a964ee13160778b91dc92d1590340f41ff56b6d5d6605b4ae48b185a4c492461`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **ALL GREEN** — 744 pass / 0 fail / 0 skip
-**Archived previous current →** `golden/scorecard/past/runs/2026-09-17T09-55-52-193Z-b4bba8f`
+**Overall:** **ALL GREEN** — 726 pass / 0 fail / 0 skip
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | PASS | 744 pass / 0 fail / 0 skip of 744 |
+| `overall_named_gates` | PASS | 726 pass / 0 fail / 0 skip of 726 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
 | `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
@@ -23,7 +22,7 @@ Canonical JSON: [`LATEST.json`](./LATEST.json). Sealed all-green copy of current
 | `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
 | `result_summary_sealed` | PASS | will write result_summary (overallPass) |
 | `area_localization` | PASS | 65 pass / 0 fail / 0 skip |
-| `area_meal_log` | PASS | 212 pass / 0 fail / 0 skip |
+| `area_meal_log` | PASS | 194 pass / 0 fail / 0 skip |
 | `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
 | `area_biomarkers` | PASS | 154 pass / 0 fail / 0 skip |
 | `area_receptionist` | PASS | 49 pass / 0 fail / 0 skip |
@@ -32,14 +31,13 @@ Canonical JSON: [`LATEST.json`](./LATEST.json). Sealed all-green copy of current
 | `journey-guard` | PASS | exit 0 |
 | `biomarker-lifecycle-m31` | PASS | exit 0 |
 | `scorecard-live` | PASS | exit 0 |
-| `meal-04-bench` | PASS | exit 0 |
 
 ## Area rollup
 
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
 | Localization | PASS | 65 | 0 | 0 | 65 |
-| Meal Log | PASS | 212 | 0 | 0 | 212 |
+| Meal Log | PASS | 194 | 0 | 0 | 194 |
 | Compare | PASS | 47 | 0 | 0 | 47 |
 | Biomarkers | PASS | 154 | 0 | 0 | 154 |
 | Receptionist | PASS | 49 | 0 | 0 | 49 |
@@ -277,7 +275,7 @@ _none_
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_contract_not_painted |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_no_slice_scripts |
 
-### Meal Log (212)
+### Meal Log (194)
 
 | Status | File | Test |
 |---|---|---|
@@ -430,23 +428,6 @@ _none_
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling keeps diet-agent per-food boundingBox2D on unrolled top-level previews |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling slices a parent crop by weight when the diet agent omits per-food boxes |
 | PASS | `server_vision_scout.test.ts` | server_vision_scout bracketed content handling unrolls a sole Nasi Uduk dish (job_1789430040929) with a dengan-dan compound name and zero boxes |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 1. Food Autocomplete, Photo Linking & Multi-Item Staging isolates autocomplete search terms while ignoring existing bracket tags in chat input |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 1. Food Autocomplete, Photo Linking & Multi-Item Staging maps catalog matches and previous meal logs with their correct photo links |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 1. Food Autocomplete, Photo Linking & Multi-Item Staging allows staging multiple saved meals and brand items sequentially in the chat input |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 2. Direct Portion Editing in Chat Brackets parses grams, multipliers, and servings from chat bracket patterns |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 2. Direct Portion Editing in Chat Brackets updates portion quantity in-place in chat text |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 2. Direct Portion Editing in Chat Brackets removes specific bracket item cleanly without corrupting other staged tags |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 3. Photo Disambiguation & Non-Duplication links only the photo matching sourceImageIndex in multi-photo meals |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 3. Photo Disambiguation & Non-Duplication deduplicates identical photos when aggregating composite meals |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 4. Admin Pull Food from History & Full Brand Overwrite completely overwrites brand item with meal log nutrition, serving size, and photo |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 4. Admin Pull Food from History & Full Brand Overwrite supports direct photo addition to brand items without a meal log |
-| PASS | `tests/food_autocomplete_composition.contract.test.ts` | Master Scorecard: Food Autocomplete, Composition, Photos & Admin Overwrite 5. Multi-Item Composition, Photo Accumulation & Exact Calculation accumulates photos and dishes, correctly scaling composite nutrition totals for |
-| PASS | `tests/golden_meal12_chat_saved_meal.test.ts` | golden meal 12 — chat-modal saved-meal journey (offline) case files are complete (bench parity) |
-| PASS | `tests/golden_meal12_chat_saved_meal.test.ts` | golden meal 12 — chat-modal saved-meal journey (offline) expected.json is FINAL with finite Mode-A totals |
-| PASS | `tests/golden_meal12_chat_saved_meal.test.ts` | golden meal 12 — chat-modal saved-meal journey (offline) turn-2 FINAL ledger: identity, locks, 32-key nutrients, exact sums |
-| PASS | `tests/golden_meal12_chat_saved_meal.test.ts` | golden meal 12 — chat-modal saved-meal journey (offline) turn-1 log: three dishes with the tray edit recorded |
-| PASS | `tests/golden_meal12_chat_saved_meal.test.ts` | golden meal 12 — chat-modal saved-meal journey (offline) estimate bands contain the observed live values |
-| PASS | `tests/golden_meal12_chat_saved_meal.test.ts` | golden meal 12 — chat-modal saved-meal journey (offline) correct_results.md is honestly marked with sources |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set registers exactly the official goldens |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set each golden has Instruction.md, expected.json, and every listed photo |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match dictionary locks resolve to the pinned local canonical id |
@@ -483,7 +464,6 @@ _none_
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) under-target and on-target wording; no percent without a target |
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) returns empty with no usable days |
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) pickExplicitTargets keeps only finite positive target keys |
-| PASS | `node scripts/meal-golden-bench.mjs` | meal-04-bench |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_getTopTargetNutrientKeys |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_isLimitNutrient |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_NutrientTargetRow |
@@ -829,6 +809,9 @@ _none_
 | PASS | `src/server/food/server_food_scout_source.test.ts` | Turn 2 Portion Selection — multi-dish preservation applyScoutResultState promotes allExtractedDishes when compare items is empty (Mode D heal) |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | Turn 2 Portion Selection — multi-dish preservation applyScoutResultState leaves populated compare items untouched (heal is empty-only) |
 
+## i18n t() keys missing from packs (complete)
+
+_none_
 ## Notes
 
 - Named gates only. Playwright live specs are not in this dump (quota).
