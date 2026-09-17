@@ -3199,12 +3199,15 @@ export default function Header({
                 {onCloudSync && (
                   <button
                     onClick={() => {
-                      if (onCloudSync) onCloudSync();
+                      if (onCloudSync && syncState !== 'syncing') onCloudSync();
                     }}
-                    className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold shrink-0"
-                    title="Manual Sync"
+                    className={`p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold shrink-0 ${
+                      syncState === 'syncing' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-300'
+                    }`}
+                    title={syncState === 'syncing' ? (t.syncing || 'Syncing...') : (t.syncNow || 'Sync Now')}
                   >
-                    <RefreshCw className="w-4 h-4" /> <span className="hidden md:inline">Sync Now</span>
+                    <RefreshCw className={`w-4 h-4 ${syncState === 'syncing' ? 'text-amber-500 animate-spin' : ''}`} />
+                    <span className="hidden md:inline">{syncState === 'syncing' ? (t.syncing || 'Syncing...') : (t.syncNow || 'Sync Now')}</span>
                   </button>
                 )}
               </div>
@@ -3486,7 +3489,7 @@ export default function Header({
                         : 'bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-850 text-slate-750 dark:text-slate-300 border-slate-200 dark:border-slate-800'
                     }`}
                   >
-                    <RefreshCw className={`w-4 h-4 ${!autoSyncDisabled ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`w-4 h-4 ${(!autoSyncDisabled || syncState === 'syncing') ? 'animate-spin' : ''}`} />
                     <span>Auto Sync</span>
                   </button>
 

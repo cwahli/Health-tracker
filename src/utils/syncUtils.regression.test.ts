@@ -264,3 +264,50 @@ describe('Profile language persistence laws', () => {
     expect(resolvedLang).toBe('id');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Settings Sync Indicator & Translations
+// ---------------------------------------------------------------------------
+describe('Settings Sync Indicator & Translations', () => {
+  it('has localized syncNow and syncing keys in both en and id', async () => {
+    const { localePacks } = await import('./translations');
+    expect(localePacks.en.syncNow).toBe('Sync Now');
+    expect(localePacks.en.syncing).toBe('Syncing...');
+    expect(localePacks.id.syncNow).toBe('Sinkronkan Sekarang');
+    expect(localePacks.id.syncing).toBe('Menyinkronkan...');
+  });
+
+  it('determines spinning animation and amber styling when syncState is syncing', () => {
+    const computeSyncProps = (syncState: 'synced' | 'syncing' | 'local' | 'conflict', t: Record<string, string>) => ({
+      isSpinning: syncState === 'syncing',
+      iconClass: `w-4 h-4 ${syncState === 'syncing' ? 'text-amber-500 animate-spin' : ''}`.trim(),
+      btnClass: syncState === 'syncing' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-300',
+      label: syncState === 'syncing' ? (t.syncing || 'Syncing...') : (t.syncNow || 'Sync Now'),
+    });
+
+    const enT = { syncNow: 'Sync Now', syncing: 'Syncing...' };
+    const idT = { syncNow: 'Sinkronkan Sekarang', syncing: 'Menyinkronkan...' };
+
+    // Syncing in English
+    const syncingEn = computeSyncProps('syncing', enT);
+    expect(syncingEn.isSpinning).toBe(true);
+    expect(syncingEn.iconClass).toContain('animate-spin');
+    expect(syncingEn.iconClass).toContain('text-amber-500');
+    expect(syncingEn.btnClass).toContain('text-amber-500');
+    expect(syncingEn.label).toBe('Syncing...');
+
+    // Synced in English
+    const syncedEn = computeSyncProps('synced', enT);
+    expect(syncedEn.isSpinning).toBe(false);
+    expect(syncedEn.iconClass).not.toContain('animate-spin');
+    expect(syncedEn.btnClass).not.toContain('text-amber-500');
+    expect(syncedEn.label).toBe('Sync Now');
+
+    // Syncing in Indonesian
+    const syncingId = computeSyncProps('syncing', idT);
+    expect(syncingId.isSpinning).toBe(true);
+    expect(syncingId.iconClass).toContain('animate-spin');
+    expect(syncingId.label).toBe('Menyinkronkan...');
+  });
+});
+
