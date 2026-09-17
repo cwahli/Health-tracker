@@ -9,6 +9,7 @@ auto_go: false # re-scoped 2026-09-17 — see "Re-scope" below; needs 3a + 3b fi
 blocked_by: 3a-state-declarations, 3b-persist-injection
 allowed_files:
   - src/App.tsx
+  - src/hooks/useJobRuntime.ts
   - src/hooks/useJobPoller.ts
   - src/components/CATALOG.json
 frozen_files:
@@ -55,6 +56,13 @@ a finding, not a refactor invented inside a move-only packet. Concrete measureme
    which is exactly where `saveAndSync` (3283) is unavailable. Hence 3a + 3b.
 4. **`handleOpenJob` needs setters declared after the hook site** — `setIsMedicalChatOpen` (1534),
    `setIsFrontDeskOpen` (1563), `setActiveAgentType` (1564), `setActiveReviewBiomarkerKey` (1565).
+
+## Commit sequence (3a/3b reuse this packet id)
+
+Each prep step is its own commit and runs this packet's gate list with `q-11-3-job-poller` as the id,
+because the ladder's guard needs a packet to validate `allowed_files` and the umbrella forbids more
+than one milestone per commit. 3a and 3b are expected to be **net-zero on `src/App.tsx`**: they
+reorder declarations and add one ref, they do not shrink the file.
 
 ## Re-scope
 

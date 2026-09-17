@@ -623,6 +623,10 @@ export default function App() {
   // Chat window visibility modals
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeFrontDeskJobId, setActiveFrontDeskJobId] = useState<string | null>(null);
+  const [isMedicalChatOpen, setIsMedicalChatOpen] = useState(false);
+  const [isFrontDeskOpen, setIsFrontDeskOpen] = useState(false);
+  const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'health_baseline' | 'agent7' | 'data_review' | 'biomarker_review' | null>(null);
+  const [activeReviewBiomarkerKey, setActiveReviewBiomarkerKey] = useState<string | undefined>(undefined);
   const [isFloatingOpen, setIsFloatingOpen] = useState(false);
 
   // Keep latest states in refs for the background runner to read without stale closures
@@ -1531,7 +1535,6 @@ export default function App() {
   };
   const [isManualFoodLogOpen, setIsManualFoodLogOpen] = useState(false);
   const [manualFoodLogError, setManualFoodLogError] = useState<string | null>(null);
-  const [isMedicalChatOpen, setIsMedicalChatOpen] = useState(false);
 
   const handleOpenJob = (jobId: string) => {
     setActiveJobId(jobId);
@@ -1560,9 +1563,6 @@ export default function App() {
       handleOpenJob(activeJobId);
     }
   }, [activeJobId]);
-  const [isFrontDeskOpen, setIsFrontDeskOpen] = useState(false);
-  const [activeAgentType, setActiveAgentType] = useState<'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5' | 'health_baseline' | 'agent7' | 'data_review' | 'biomarker_review' | null>(null);
-  const [activeReviewBiomarkerKey, setActiveReviewBiomarkerKey] = useState<string | undefined>(undefined);
   const [activeDataReviewBatchIdx, setActiveDataReviewBatchIdx] = useState<number | string | null>(null);
   const [activeDataReviewBatchKeys, setActiveDataReviewBatchKeys] = useState<string[]>([]);
   const [activeDataReviewExtractedYaml, setActiveDataReviewExtractedYaml] = useState<any[]>([]);
