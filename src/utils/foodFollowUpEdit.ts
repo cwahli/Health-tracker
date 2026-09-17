@@ -96,11 +96,10 @@ export function isMealFollowUpEdit(ctx: FollowUpEditContext): boolean {
   if (ctx.imageCount > 0) return false;
   if (!hasEditIntent(ctx.text)) return false;
 
-  const logs = ctx.foodLogs || [];
-  const active = logs.filter((l) => l && l.sync_state !== 'delete');
-  if (active.length === 0) return false;
+  const recent = mostRecentActiveMeal(ctx.foodLogs);
+  if (!recent) return false;
 
-  const lastAt = mealTimestamp(active[active.length - 1]);
+  const lastAt = mealTimestamp(recent);
   if (lastAt == null) return false;
 
   const nowMs = typeof ctx.nowMs === 'number' ? ctx.nowMs : Date.now();
@@ -108,4 +107,31 @@ export function isMealFollowUpEdit(ctx: FollowUpEditContext): boolean {
   // Negative age means clock skew / a future-dated log: treat as just-now.
   if (age < 0) return true;
   return age <= (ctx.maxAgeMs ?? FOLLOW_UP_EDIT_MAX_AGE_MS);
+}
+
+/**
+ * Newest active meal by timestamp.
+ *
+ * `foodLogs` is newest-first after `mergeFoodLogsDeduped` (date DESC, then
+ * updated_at DESC), so `array[array.length - 1]` is the *oldest* meal — using
+ * that as the continuation target made live T2 fall through to `review` whenever
+ * any older-than-24h log sat at the tail (common on demo/synced profiles).
+ */
+export function mostRecentActiveMeal<T extends FollowUpMealLike>(
+  foodLogs: T[] | null | undefined,
+): T | null {
+  const active = (foodLogs || []).filter((l) => l && l.sync_state !== 'delete');
+  if (active.length === 0) return null;
+  let best: T | null = null;
+  let bestAt = -Infinity;
+  for (const log of active) {
+    const at = mealTimestamp(log);
+    if (at == null) continue;
+    if (at >= bestAt) {
+      bestAt = at;
+      best = log;
+    }
+  }
+  // If nothing had a parseable timestamp, fall back to insertion-last (legacy).
+  return best ?? active[active.length - 1];
 }

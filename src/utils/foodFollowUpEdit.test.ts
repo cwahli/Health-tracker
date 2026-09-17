@@ -3,6 +3,7 @@ import {
   isMealFollowUpEdit,
   mealTimestamp,
   hasEditIntent,
+  mostRecentActiveMeal,
   FOLLOW_UP_EDIT_MAX_AGE_MS,
 } from './foodFollowUpEdit';
 
@@ -85,11 +86,24 @@ describe('isMealFollowUpEdit', () => {
     );
   });
 
-  it('uses the newest active log, taking the last insertion', () => {
-    const older = { date: '2026-09-17T09:00:00' };
-    const newest = { date: '2026-09-17T17:59:00' };
+  it('uses the newest active log by timestamp, not array position', () => {
+    const older = { date: '2026-09-17T09:00:00', updated_at: NOW - 9 * 3600_000 };
+    const newest = { date: '2026-09-17T17:59:00', updated_at: NOW - 60_000 };
     expect(isMealFollowUpEdit({ ...base, foodLogs: [older, newest] })).toBe(true);
     expect(isMealFollowUpEdit({ ...base, foodLogs: [newest, older] })).toBe(true);
+    expect(mostRecentActiveMeal([older, newest])).toEqual(newest);
+    expect(mostRecentActiveMeal([newest, older])).toEqual(newest);
+  });
+
+  it('still fires when newest-first array ends with a stale meal (live T2 regression)', () => {
+    // mergeFoodLogsDeduped sorts newest-first; the old code used array[-1] (oldest)
+    // and rejected the follow-up whenever any >24h log sat at the tail.
+    const newest = { updated_at: NOW - 60_000 };
+    const stale = { updated_at: NOW - FOLLOW_UP_EDIT_MAX_AGE_MS - 60_000 };
+    expect(isMealFollowUpEdit({ ...base, foodLogs: [newest, stale] })).toBe(true);
+    expect(isMealFollowUpEdit({ ...base, foodLogs: [stale, newest] })).toBe(true);
+    // Only stale → still false
+    expect(isMealFollowUpEdit({ ...base, foodLogs: [stale] })).toBe(false);
   });
 
   it('does not fire for a stale meal outside the continuation window', () => {

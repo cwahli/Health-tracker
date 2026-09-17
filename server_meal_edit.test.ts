@@ -3554,4 +3554,86 @@ describe('golden', () => {
     expect(merged.calories).toBe(400);
     expect(result.nutrients.calories).toBe(400);
   });
+
+  it('F-13.1 add_item: composer [Mr Oat Rolled Oats] beats short scout/estimate name', async () => {
+    const result = await applyMealEdits({
+      items: [
+        {
+          scoutIndex: 0,
+          name: 'White Coffee',
+          weightGrams: 215,
+          calories: 50,
+          nutrients: { calories: 50, protein: 2, carbohydrates: 5, totalFat: 2, saturatedFat: 1, sodium: 40 },
+        },
+        {
+          scoutIndex: 1,
+          name: 'Big Mac',
+          weightGrams: 215,
+          calories: 508,
+          nutrients: { calories: 508, protein: 26, carbohydrates: 41, totalFat: 26, saturatedFat: 9, sodium: 920 },
+        },
+        {
+          scoutIndex: 2,
+          name: 'Coconut Juice',
+          weightGrams: 200,
+          calories: 40,
+          nutrients: { calories: 40, protein: 0, carbohydrates: 9, totalFat: 0, saturatedFat: 0, sodium: 50 },
+        },
+      ],
+      userMessage: '[Mr Oat Rolled Oats] [40g] add oats, drop the coconut',
+      commands: [
+        { action: 'remove_item', itemName: 'Coconut Juice' },
+        {
+          action: 'add_item',
+          itemName: 'Rolled Oats',
+          newItemName: 'Rolled Oats',
+          newWeightGrams: 40,
+          // Short scout estimate foodName must not clobber the richer bracket tag.
+          estimate: {
+            foodName: 'Rolled Oats',
+            protein: 5,
+            carbohydrates: 27,
+            totalFat: 2.5,
+            saturatedFat: 0.5,
+            sodium: 2,
+            totalFibre: 4,
+          },
+        },
+      ],
+    });
+    const names = result.items.map((i: any) => i.name);
+    expect(names).toContain('Mr Oat Rolled Oats');
+    expect(names.join('|')).not.toMatch(/Coconut/i);
+    expect(result.items).toHaveLength(3);
+    const oats = result.items.find((i: any) => i.name === 'Mr Oat Rolled Oats');
+    expect(oats?.weightGrams).toBe(40);
+  });
+
+  it('F-13.1 replace_identity: bracket tag upgrades short replacement name', async () => {
+    const result = await applyMealEdits({
+      items: [
+        {
+          scoutIndex: 0,
+          name: 'Coconut Juice',
+          weightGrams: 200,
+          calories: 40,
+          nutrients: { calories: 40, protein: 0, carbohydrates: 9, totalFat: 0, saturatedFat: 0, sodium: 50 },
+        },
+      ],
+      userMessage: '[Mr Oat Rolled Oats] [40g] swap coconut for oats',
+      commands: [
+        {
+          action: 'replace_identity',
+          itemName: 'Coconut Juice',
+          newItemName: 'Rolled Oats',
+          newWeightGrams: 40,
+          estimate: { foodName: 'Rolled Oats', protein: 5, carbohydrates: 27, totalFat: 2.5 },
+        },
+      ],
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].name).toBe('Mr Oat Rolled Oats');
+    expect(result.items[0].weightGrams).toBe(40);
+  });
+
 });

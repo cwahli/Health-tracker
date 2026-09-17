@@ -47,6 +47,8 @@ export interface FinalizeInput {
 }
 
 export interface DishLedger {
+  /** Official brand menu dish name when brand_official matched. */
+  brandDisplayName?: string | null;
   scoutIndex: number;
   originalName: string;
   keyword?: string;
@@ -252,6 +254,7 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
   let dbId: string | null = null;
   let brandLock: FinalizeInput['storedBrandLock'] = input.storedBrandLock || null;
   let bindStatus: DishLedger['bindStatus'] = null;
+  let brandDisplayName: string | null = null;
   const usdaQueries: string[] = [];
 
   // 1. Check OCR label truth
@@ -281,6 +284,15 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
       dbSource = 'brand_official';
       bindStatus = 'HIT';
       dbId = brandLock.id;
+      // Prefer a human dish label over a raw id when the lock was keyed by dish_name.
+      const lockLabel = String(brandLock.id || '').trim();
+      if (lockLabel && !/^\d+$/.test(lockLabel) && lockLabel.length > 2) {
+        brandDisplayName = lockLabel;
+      }
+      if (!brandDisplayName) {
+        const fromItem = String(item.foodName || item.canonicalDbName || item.originalName || '').trim();
+        if (fromItem) brandDisplayName = fromItem;
+      }
       for (const [k, v] of Object.entries(brandLock.valuesAtBasis)) {
         if (brandLock.basisType === 'per_100g') {
           nutrients[k] = Math.round(v * (consumedWeight / 100) * 10) / 10;
@@ -306,6 +318,7 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
       if (brandMatch.matched && brandMatch.hit) {
         dbSource = 'brand_official';
         dbId = String(brandMatch.hit.id || brandMatch.hit.dish_name || originalName);
+        brandDisplayName = String(brandMatch.hit.dish_name || brandMatch.hit.name || '').trim() || null;
         brandLock = {
           id: dbId,
           basisType: brandMatch.basisType || 'per_dish',
@@ -727,6 +740,9 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
   return {
     scoutIndex,
     originalName,
+    // Prefer official brand menu label when matched (e.g. "Mr Oat Rolled Oats"
+    // instead of the scout short name "Rolled Oats").
+    brandDisplayName,
     keyword,
     chainName,
     weightGrams: consumedWeight,

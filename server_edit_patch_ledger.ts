@@ -496,21 +496,41 @@ export function diffScoutToEditCommands(args: {
       if (scout.targetDishIndex != null && Number.isFinite(Number(scout.targetDishIndex))) {
         const rawIdx = Number(scout.targetDishIndex);
         const oneBased = rawIdx - 1;
-        if (rep) {
-          if (oneBased >= 0 && oneBased < priorItems.length && !usedPrior.has(oneBased) &&
-              itemAllNames(priorItems[oneBased]).some(n => n.toLowerCase() === rep || namesReferSame(n, rep) || namesShareSubstance(n, rep))) {
-            priorIdx = oneBased;
-          } else if (rawIdx >= 0 && rawIdx < priorItems.length && !usedPrior.has(rawIdx) &&
-              itemAllNames(priorItems[rawIdx]).some(n => n.toLowerCase() === rep || namesReferSame(n, rep) || namesShareSubstance(n, rep))) {
-            priorIdx = rawIdx;
+        const indexCandidates = [oneBased, rawIdx].filter(
+          (i) => i >= 0 && i < priorItems.length && !usedPrior.has(i),
+        );
+        const nameAligned = (i: number) => {
+          const names = itemAllNames(priorItems[i]);
+          if (rep) {
+            return names.some(
+              (n) => n.toLowerCase() === rep || namesReferSame(n, rep) || namesShareSubstance(n, rep),
+            );
           }
-        } else {
+          // Ambiguous 0-based vs 1-based indexes: prefer the candidate that
+          // matches the scout dishName (live T2: targetDishIndex=2 +
+          // dishName="Coconut Juice" must not remove Big Mac at 1-based slot 2).
+          return (
+            namesReferSame(displayName(priorItems[i]), sName) ||
+            itemsReferSame(priorItems[i], scout) ||
+            itemsShareSubstance(priorItems[i], scout) ||
+            names.some((n) => namesReferSame(n, sName) || namesShareSubstance(n, sName))
+          );
+        };
+        const aligned = indexCandidates.find(nameAligned);
+        if (aligned != null) {
+          priorIdx = aligned;
+        } else if (rep) {
+          // keeps priorIdx=-1 so replacesDish / name match can recover
+        } else if (!(isExplicitDelete || isExplicitReplace)) {
+          // Non-delete/replace: keep legacy 1-based-then-0-based preference.
           if (oneBased >= 0 && oneBased < priorItems.length && !usedPrior.has(oneBased)) {
             priorIdx = oneBased;
           } else if (rawIdx >= 0 && rawIdx < priorItems.length && !usedPrior.has(rawIdx)) {
             priorIdx = rawIdx;
           }
         }
+        // For explicit delete/replace with no name-aligned index, fall through
+        // to dishName / replacesDish matching instead of guessing the index base.
       }
 
       // 2. Explicit replacesDish from agent

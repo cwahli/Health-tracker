@@ -21,7 +21,7 @@ import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { computeRemainingAllowance } from '../utils/compositeFoodCalculation';
-import { isMealFollowUpEdit } from '../utils/foodFollowUpEdit';
+import { isMealFollowUpEdit, mostRecentActiveMeal } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
@@ -2501,7 +2501,7 @@ ${logsText}`);
           // original photos). submissionMode === 'edit' already scopes this fallback
           // correctly, so gating on image count is unnecessary and causes edits to be
           // silently rejected server-side with "No active meal exists in Firestore".
-          (submissionMode === 'edit' && !extraOptions?.portionChoices && activeFoodLogs && activeFoodLogs.length > 0 ? activeFoodLogs[activeFoodLogs.length - 1] : null);
+          (submissionMode === 'edit' && !extraOptions?.portionChoices && activeFoodLogs && activeFoodLogs.length > 0 ? (mostRecentActiveMeal(activeFoodLogs) || activeFoodLogs[activeFoodLogs.length - 1]) : null);
         let prunedMealForJob = null;
         if (lastFoodLogForJob) {
           try {
