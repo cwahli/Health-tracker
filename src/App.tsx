@@ -14,6 +14,7 @@ const TrendsTab = lazyWithRetry(() => import('./components/TrendsTab'));
 import ConflictResolutionModal from './components/ConflictResolutionModal';
 const LogChat = lazyWithRetry(() => import('./components/LogChat'));
 import { JobStore, isStalePriorTurn } from './jobs/JobStore';
+import { useAuthSession } from './hooks/useAuthSession';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from './jobs/mergeFoodEditMessages';
 import { JobQueueRunner } from './jobs/JobQueueRunner';
 import { initSupabaseJobSync, hydrateUserJobs, upsertJobToSupabase } from './jobs/SupabaseJobSync';
@@ -117,7 +118,6 @@ import type { DemoProfileType } from './utils/demoData';
 import { getAvailableCredits, deductAgentCredits } from './utils/creditManager';
 import { Plus, HeartHandshake, RefreshCw, Sparkles, Stethoscope, Utensils, Loader, CloudLightning, AlertTriangle, Activity, X } from 'lucide-react';
 import { auth, db } from './firebase';
-import { onAuthStateChanged, signOut as fbSignOut } from 'firebase/auth';
 import { trackApiCall, setActiveQueryId, generateQueryId, initializeFetchInterceptor } from './utils/apiTracker';
 import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, getDocFromServer, getDocsFromServer, getDocsFromCache, writeBatch } from 'firebase/firestore';
 import { sanitizeForFirestore, checkQuotaFlag, handleRetryQuota } from './utils/firestoreUtils';
@@ -128,7 +128,7 @@ import { mergeParallelAliasGroups } from './utils/biomarkerAuditEngine';
 import { extractFallbackModifications } from './components/chat-cards/BiomarkerReviewCard';
 import { formatOptimalTargetValue } from './utils/agentCalibration';
 import { standardizeUnit, CONVERSION_FACTORS } from './utils/unitConversion';
-import { get, set, pruneLocalStorageToFreeSpace, getStorageKey, getSnapshotKey, saveLocalSnapshot, loadLocalSnapshots, deleteLocalSnapshot, safeSaveToLocalStorage, getAggregatedAppData, clearCachedAppData, clearChatMemoryKeys } from './utils/storageUtils';
+import { get, set, pruneLocalStorageToFreeSpace, getStorageKey, getSnapshotKey, saveLocalSnapshot, loadLocalSnapshots, deleteLocalSnapshot, safeSaveToLocalStorage, getAggregatedAppData, clearChatMemoryKeys } from './utils/storageUtils';
 import { maybeRecalibrateDemographicOverlays, pushPendingObservation, isDeepEqual, sanitizeProfile } from './utils/appProfileUtils';
 
 const FIRESTORE_READ_BUDGET = 3000; // generous for one real session; a runaway loop hits this fast
@@ -143,7 +143,7 @@ function firestoreReadGuard(label: string, docCount: number = 1): boolean {
   return true;
 }
 import { runCleanupMigration } from './utils/migrationTask';
-import { supabase, isSupabaseConfigured, cleanupAuthUrlParams } from './utils/supabaseClient';
+import { supabase, isSupabaseConfigured } from './utils/supabaseClient';
 import { syncLogsWithTimeBuckets, fetchAllConsolidatedLogs, fetchFoodLogsPage, subscribeToSupabaseLogs, upsertProfileToSupabase, pushLogsToServer, mergeByRecency, mergeActions, mergeBenefits, mergeFoodIdeas, mergeReports, mergeProfiles, mergeBiomarkerHistory, mergeDeleteMaps, supabaseRowToFoodLog, supabaseRowToBiomarkerLog, resolveInitialLanguage } from "./utils/syncUtils";
 import { mergeFoodLogsDeduped, rehydrateFoodImagesFromDonors, foodLogFingerprint } from "./utils/foodLogDedupe";
 import { isUsableImageUrl, uniqueMealImageUrls } from "./utils/foodImageSources";
@@ -1711,26 +1711,6 @@ export default function App() {
   // Initialize from Firebase Auth and Firestore on mount
 
 
-  const getEffectiveUser = () => {
-    if (profile?.email) {
-      const cleanEmail = profile.email.toLowerCase().trim();
-      const uid = profile.uid || ('usr_' + cleanEmail.replace(/[^a-z0-9]/gi, '_'));
-      return {
-        uid,
-        email: profile.email,
-        displayName: profile.nickname || 'User'
-      };
-    }
-    if (auth.currentUser) {
-      return {
-        uid: auth.currentUser.uid,
-        email: auth.currentUser.email || '',
-        displayName: auth.currentUser.displayName || ''
-      };
-    }
-    return null;
-  };
-
   const lastSyncTrigger = useRef<number>(0);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -3189,10 +3169,8 @@ export default function App() {
     }
   };
 
-  // Initialize from Firebase Auth / Supabase Auth on mount
+  // Data hygiene, not auth: migrate legacy localStorage snapshots into IndexedDB.
   useEffect(() => {
-    let unsubs: (() => void)[] = [];
-    
     // Cleanup legacy storage from localStorage to IndexedDB
     try {
       (async () => {
@@ -3223,143 +3201,32 @@ export default function App() {
     } catch (e) {
       console.error('Error scanning localStorage for legacy data', e);
     }
-
-    const fallbackTimeout = setTimeout(() => {
-      console.warn("Auth check timed out.");
-      setIsAuthChecking(false);
-      setIsInitialDataLoading(false);
-    }, 6000);
-
-    const resolveSbNick = (u: any) => {
-      const uEmail = (u?.email || '').toLowerCase().trim();
-      const cached = uEmail ? localStorage.getItem(`signup_nickname_${uEmail}`) : null;
-      return (
-        u?.user_metadata?.nickname ||
-        u?.user_metadata?.full_name ||
-        u?.user_metadata?.name ||
-        u?.user_metadata?.displayName ||
-        cached ||
-        (uEmail ? uEmail.split('@')[0] : '') ||
-        'User'
-      ).trim();
-    };
-
-    const initializeAuthAndData = async () => {
-      // Step A: Process Supabase Auth callback params and check Supabase session
-      if (isSupabaseConfigured && supabase) {
-        if (typeof window !== 'undefined') {
-          const urlParams = new URLSearchParams(window.location.search);
-          const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-          const tokenHash = urlParams.get('token_hash') || hashParams.get('token_hash');
-          const type = (urlParams.get('type') || hashParams.get('type')) as any;
-          const code = urlParams.get('code') || hashParams.get('code');
-
-          if (tokenHash && type) {
-            try {
-              await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
-            } catch (err) {
-              console.warn("[Auth] verifyOtp error:", err);
-            }
-            cleanupAuthUrlParams();
-          } else if (code) {
-            try {
-              await supabase.auth.exchangeCodeForSession(code);
-            } catch (err) {
-              console.warn("[Auth] exchangeCodeForSession error:", err);
-            }
-            cleanupAuthUrlParams();
-          }
-        }
-
-        // Listen for Supabase Auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-          clearTimeout(fallbackTimeout);
-          if (session?.user) {
-            cleanupAuthUrlParams();
-            const u = session.user;
-            await loadUserData(
-              u.id,
-              u.email || '',
-              resolveSbNick(u),
-              u.user_metadata?.avatar_url || ''
-            );
-          } else if (event === 'SIGNED_OUT' || !session) {
-            setProfile(null);
-            setFoodLogs([]);
-            setBiomarkers({});
-            setBiomarkerHistory([]);
-            setActions([]);
-            setDailyBenefits([]);
-            setReport(null);
-            setIsAuthChecking(false);
-            setIsInitialDataLoading(false);
-          }
-        });
-        unsubs.push(() => subscription.unsubscribe());
-
-        // Check active Supabase session
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            cleanupAuthUrlParams();
-            const u = session.user;
-            await loadUserData(
-              u.id,
-              u.email || '',
-              resolveSbNick(u),
-              u.user_metadata?.avatar_url || ''
-            );
-            clearTimeout(fallbackTimeout);
-            return;
-          }
-        } catch (sbErr) {
-          console.warn("[Auth] getSession error:", sbErr);
-        }
-      }
-
-      // Listen for Firebase Auth events (supports Google Login via Firebase)
-      const unsubscribeFb = onAuthStateChanged(auth, async (user) => {
-        if (user) {
-          clearTimeout(fallbackTimeout);
-          await loadUserData(
-            user.uid,
-            user.email || '',
-            user.displayName || '',
-            user.photoURL || ''
-          );
-        }
-      });
-      unsubs.push(unsubscribeFb);
-
-      if (!isSupabaseConfigured || !supabase) {
-        // No Supabase source of truth exists in this build, so this is the only
-        // signal we get. Firebase-only mode still applies here.
-        clearTimeout(fallbackTimeout);
-        setIsAuthChecking(false);
-      }
-      // When Supabase IS configured, do NOT force isAuthChecking to false here.
-      // The initial getSession() call above can race with Supabase's own
-      // session-restore-from-storage step and return an empty session before
-      // the real one loads, which was causing the auth screen to flash
-      // on-screen for a moment before flipping back to the logged-in view.
-      // The onAuthStateChange listener registered above always fires once on
-      // subscribe with the definitive state (either a session, which calls
-      // loadUserData and sets isAuthChecking false itself, or no session,
-      // which hits the "SIGNED_OUT || !session" branch and sets it false).
-      // The 10s fallbackTimeout above remains as a safety net in case that
-      // listener never fires for some reason.
-    };
-
-    initializeAuthAndData().catch(err => {
-      console.error("[Auth] Initial auth setup failed:", err);
-      setIsAuthChecking(false);
-    });
-
-    return () => {
-      clearTimeout(fallbackTimeout);
-      unsubs.forEach(u => u());
-    };
   }, []);
+
+  // Q-11.2: every session-scoped React state, cleared together on sign-out.
+  const clearSessionState = () => {
+    setProfile(null);
+    setFoodLogs([]);
+    setBiomarkers({});
+    setBiomarkerHistory([]);
+    setActions([]);
+    setDailyBenefits([]);
+    setReport(null);
+    setSyncState('local');
+  };
+
+  const { getEffectiveUser, handleLogin, handleSignOut } = useAuthSession({
+    profile,
+    isAuthChecking,
+    setIsAuthChecking,
+    onAuthResolved: () => setIsInitialDataLoading(false),
+    onUser: loadUserData,
+    clearSessionState,
+    applyLoginProfile: (next: UserProfile) => {
+      setProfile(next);
+      setSyncState('local');
+    },
+  });
   // Keep localStorage updated with React states so that hasLocal and canSkipFetch work flawlessly!
   useEffect(() => {
     // Prevent overwriting local storage with empty arrays during initial loading/syncing
@@ -3986,74 +3853,6 @@ export default function App() {
     }
   };
 
-  // Sync Check on Login / Fetch user record if existing on server
-  const handleLogin = async (loggedProfile: UserProfile) => {
-    if (loggedProfile.language) {
-      localStorage.setItem('preferred_language', loggedProfile.language);
-    }
-    setProfile(loggedProfile);
-    if (loggedProfile.email) {
-      localStorage.setItem('last_active_email', loggedProfile.email.toLowerCase().trim());
-    }
-    setSyncState('local');
-    setIsAuthChecking(false);
-    setIsInitialDataLoading(false);
-    if (loggedProfile.email) {
-      await loadUserData(
-        loggedProfile.uid || 'user',
-        loggedProfile.email,
-        loggedProfile.nickname,
-        loggedProfile.photoUrl,
-        loggedProfile.language
-      );
-    }
-  };
-  const handleSignOut = async () => {
-    try {
-      // Clear all React state immediately so no glimpse of user data after sign-out
-      setProfile(null);
-      setFoodLogs([]);
-      setBiomarkers({});
-      setBiomarkerHistory([]);
-      setActions([]);
-      setDailyBenefits([]);
-      setReport(null);
-      setSyncState('local');
-      localStorage.removeItem('last_active_email');
-      localStorage.removeItem('demo_profile_type');
-      localStorage.removeItem('demo_fresh_login');
-      sessionStorage.clear();
-      // Clear IndexedDB + localStorage app cache so the next login starts clean
-      // instead of resurrecting this user's stale state.
-      try {
-        await clearCachedAppData(profile?.email);
-      } catch (e) {
-        console.warn('Failed to clear cached app data on sign-out:', e);
-      }
-      JobStore.resetAllJobs();
-
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && (key.includes('supabase.auth.token') || key.startsWith('sb-') || key.includes('auth-token'))) {
-          localStorage.removeItem(key);
-        }
-      }
-
-      if (isSupabaseConfigured && supabase) {
-        try {
-          await supabase.auth.signOut();
-        } catch (sbErr) {
-          console.warn("Failed to sign out from Supabase:", sbErr);
-        }
-      }
-      await fbSignOut(auth);
-    } catch (e) {
-      console.error("Failed to sign out:", e);
-    } finally {
-      setProfile(null);
-      setIsAuthChecking(false);
-    }
-  };
   // Selected LLM Engine shared across sections - highest RPD model is the default, and we persist the user selection
   const [selectedModelId, setSelectedModelIdState] = useState<string>(() => {
     const saved = localStorage.getItem('selectedModelId');

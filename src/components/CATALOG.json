@@ -19,7 +19,7 @@
     "note": "B8.0 Option B: Auto-Fix banned from Home. Informational warning banner preserved on Home pointing to Health / Sanitize."
   },
   "ceilings": {
-    "src/App.tsx": 9010,
+    "src/App.tsx": 8810,
     "src/components/BiomarkerDictionaryModal.tsx": 6640,
     "src/components/chat-cards/FoodCard.tsx": 4200,
     "src/components/HomeTab.tsx": 3200,

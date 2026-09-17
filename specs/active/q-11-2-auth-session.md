@@ -35,6 +35,10 @@ gate:
 
 # Packet: Q-11.2 — auth & session into a hook (milestone 2 of 9)
 
+> **LANDED** (`dc19a18` is the parent; see the progress log in `specs/active/Q-11.md`).
+> `src/hooks/useAuthSession.ts` 283 lines, `App.tsx` 9,004 → 8,803, CATALOG ceiling 9,010 → 8,810.
+> Kept in `specs/active/` so its gates stay runnable; `auto_go` off.
+
 Umbrella laws apply (`specs/active/Q-11.md`). Promote `auto_go` only after Q-11.1 is committed.
 
 ## Scope

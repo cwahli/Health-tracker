@@ -5,7 +5,7 @@ class: GOD_FILE_GROWTH
 skill: specify
 edit_mode: patch
 who: any-agent
-auto_go: false
+auto_go: true # promoted 2026-09-17 after Q-11.2 landed
 allowed_files:
   - src/App.tsx
   - src/hooks/useJobPoller.ts

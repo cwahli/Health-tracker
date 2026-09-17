@@ -447,8 +447,8 @@ ratchet the `CATALOG.json` ceiling of any file that shrinks):
 
 ```text
 q-11-1-pures        utils/appProfileUtils.ts (move + unit test)      App.tsx 9,101 -> 9,004    DONE 06df05b guardrails + Q-11.1
-q-11-2-auth-session hooks/useAuthSession.ts (auth + real sign-out)   -> ~8,600                human go
-q-11-3-job-poller   hooks/useJobPoller.ts (JobStore poll loop)       -> ~8,300                human go
+q-11-2-auth-session hooks/useAuthSession.ts (auth + real sign-out)   9,004 -> 8,803          DONE
+q-11-3-job-poller   hooks/useJobPoller.ts (JobStore poll loop)       -> ~8,600                auto_go (promoted)
 q-11-4-profile-hook hooks/useAppProfile.ts (real profile source)     -> ~8,000                human go
 q-11-5-sync-hook    hooks/useAppSync.ts (Supabase/Firestore merge)   -> ~7,300                human go; no stubs
 q-11-6-tabs-modals  components/App{Tabs,Modals}.tsx                 -> ~6,600                human go

@@ -1,15 +1,15 @@
 {
   "note": "Q-11 parity baseline. Regenerated only with --update; falling metrics are a regression.",
-  "capturedFromCommit": "06df05b",
+  "capturedFromCommit": "dc19a18",
   "types": {
     "lines": 558,
     "declarations": 30,
     "anyAliases": 0
   },
   "i18nKeys": 3960,
-  "appLines": 9004,
+  "appLines": 8803,
   "ceilings": {
-    "src/App.tsx": 9010,
+    "src/App.tsx": 8810,
     "src/components/BiomarkerDictionaryModal.tsx": 6640,
     "src/components/chat-cards/FoodCard.tsx": 4200,
     "src/components/HomeTab.tsx": 3200,
@@ -21,7 +21,7 @@
   },
   "tsNoCheckFiles": 0,
   "godFiles": {
-    "src/App.tsx": 9004,
+    "src/App.tsx": 8803,
     "src/components/LogChat.tsx": 7011,
     "src/components/BiomarkerDictionaryModal.tsx": 6229,
     "src/utils/biomarkers.ts": 4204,
