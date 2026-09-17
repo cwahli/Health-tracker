@@ -37,8 +37,8 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 are **shipped**. D
 
 **Do this, in order. Packets are locked = go.**
 
-1. **Q-4** — `specs/active/q-4-agent-result-table.md` (`auto_go: true`). Extract-only `KIT_DRIFT`. Any builder.
-2. **Q-10** — `specs/active/q-10-dependency-audit.md` (`auto_go: true`). Hygiene only, after Q-4 gates green. Any builder.
+1. **Q-4 DONE** — q-4a→q-4b→q-4c→q-4d COMPLETE (`specs/done/`), ART 2975→1501, ceiling 1800, on `journey/q-4-thin` (pushed, pending merge). Parent packet `superseded`.
+2. **Q-10 COMPLETE** — `specs/done/q-10-dependency-audit.md`, removals only, on `journey/q-10-dependency-audit` (pending merge).
 3. **R-13.1** — `specs/active/R-13.md` (`auto_go: true`). **R-13.0 preflight PASS 2026-09-17** (agent CLI). Do not start R-13.4 / R-5 / a second Cloud Run go-live in the same PR.
 
 **Still `blocked_human`:** **L-5** only (name a locale first — do not invent `fr`/`zh` copy). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, Header/`App.tsx` split without a new packet, ConfirmBar as a side quest.
