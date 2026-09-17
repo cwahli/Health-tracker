@@ -1,0 +1,9 @@
+{
+  "id": "G-B6",
+  "class": "WRONG_DOOR",
+  "classes": ["WRONG_DOOR"],
+  "text": "Heartburn score 2/3 for the last 3 days, acid reflux after dinner and joint pain in knees.",
+  "fixture": {
+    "sourceKind": "symptom"
+  }
+}

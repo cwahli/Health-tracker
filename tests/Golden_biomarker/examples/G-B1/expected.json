@@ -1,0 +1,38 @@
+{
+  "id": "G-B1",
+  "class": "APPLY_MISS",
+  "conversions": {
+    "hdl": {
+      "fromValue": 50,
+      "fromUnit": "mg/dL",
+      "toUnit": "mmol/L",
+      "expected": 1.293
+    },
+    "triglycerides": {
+      "fromValue": 125,
+      "fromUnit": "mg/dL",
+      "toUnit": "mmol/L",
+      "expected": 1.411
+    },
+    "ldl": {
+      "fromValue": 130,
+      "fromUnit": "mg/dL",
+      "toUnit": "mmol/L",
+      "expected": 3.362
+    },
+    "creatinine": {
+      "fromValue": 0.9,
+      "fromUnit": "mg/dL",
+      "toUnit": "umol/L",
+      "expected": 79.56
+    },
+    "total_bilirubin": {
+      "fromValue": 0.8,
+      "fromUnit": "mg/dL",
+      "toUnit": "umol/L",
+      "expected": 13.68
+    }
+  },
+  "lockedNumbers": [1.293, 1.411, 3.362, 79.56, 13.68],
+  "untouchedSI": [1.43, 1.07, 4.2, 100, 16, 72, 13]
+}

@@ -7,6 +7,8 @@ import {
   getMappedBiomarkerKey,
   normalizeBiomarkerName,
 } from "../../utils/biomarkers.js";
+import { convertViaTable as convertViaSharedTable } from "../../utils/biomarkerLifecycle.js";
+import { ANALYTE_CONVERSIONS } from "../../utils/analyteConversions.js";
 import type {
   BiomarkerTemplate,
   CatalogSnapshot,
@@ -183,18 +185,38 @@ export function convertViaTable(row: IntakeRow, mappedKey: string): IntakeRow {
     }
   }
 
-  // 2. Convert to catalog SI units if needed
-  const newUnitLower = (unit || "").trim().toLowerCase();
-  if (mappedKey === "hba1c" && (newUnitLower === "%" || newUnitLower === "percent")) {
+  // 2. Convert via the single per-analyte table (ANALYTE_CONVERSIONS).
+  // No local factors here: a local cholesterol-factor branch silently
+  // converted triglycerides 125 mg/dL to 3.23 mmol/L live (locked: 1.411).
+  // HbA1c keeps its legacy branch (verbatim): the shared converter has no
+  // hba1c table row, so its hba1c special-case is unreachable from here.
+  const tableSpec = ANALYTE_CONVERSIONS[mappedKey];
+  const targetUnit = catalogSnapshot(mappedKey)?.unit || tableSpec?.to || unit;
+  if (mappedKey === "hba1c" && ["%", "percent"].includes((unit || "").trim().toLowerCase())) {
     value = Math.round((value - 2.15) * 10.929);
     unit = "mmol/mol";
-  } else if (["ldl", "hdl", "total_cholesterol", "triglycerides"].includes(mappedKey) && newUnitLower === "mg/dl") {
-    value = Number((value * 0.02586).toFixed(2));
-    unit = "mmol/L";
-  } else if (mappedKey === "creatinine" && newUnitLower === "mg/dl") {
-    value = Math.round(value * 88.42);
-    unit = "umol/L";
-  } else if (mappedKey === "bun" && newUnitLower === "mg/dl") {
+  } else if (targetUnit && unit) {
+    const converted = convertViaSharedTable(mappedKey, value, unit, targetUnit);
+    if (converted.ok) {
+      value = converted.value;
+      // The table spells SI targets lowercase ('umol/l'); stored history
+      // uses catalog case ('umol/L'). Normalize so extract and Review
+      // write identical unit strings for the same analyte.
+      const lower = String(targetUnit).toLowerCase();
+      unit =
+        lower === 'mmol/l'
+          ? 'mmol/L'
+          : lower === 'umol/l'
+            ? 'umol/L'
+            : lower === 'g/l'
+              ? 'g/L'
+              : lower === 'l/l'
+                ? 'L/L'
+                : targetUnit;
+    }
+  }
+  // BUN has no table row: legacy branch preserved verbatim (no behavior change).
+  if (mappedKey === "bun" && (unit || "").trim().toLowerCase() === "mg/dl") {
     value = Number((value * 0.357).toFixed(2));
     unit = "mmol/L";
   }

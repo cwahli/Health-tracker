@@ -1,0 +1,11 @@
+{
+  "id": "G-B4",
+  "title": "G-B4 — Specimen Guard False Friend",
+  "class": "IDENTITY_FALSE_FRIEND",
+  "classes": ["IDENTITY_FALSE_FRIEND"],
+  "status": "frozen",
+  "description": "G-B4 verifies that dissimilar specimens or subsets do not accidentally map to canonical keys due to naive matching.",
+  "fixture": {
+    "keys": ["urine_albumin", "mean_corpuscular_hemoglobin", "mch", "albumin", "urine albumin g/L"]
+  }
+}

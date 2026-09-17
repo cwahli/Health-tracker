@@ -1,0 +1,10 @@
+{
+  "id": "G-B2",
+  "class": "OUTER_REGRESSION",
+  "classCounts": {
+    "CONFORMANCE_SHAPE": 140,
+    "IDENTITY_PARALLEL_KEY": 91,
+    "CONFORMANCE_UNIT": 12
+  },
+  "assertByClassCounts": true
+}

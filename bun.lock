@@ -7,14 +7,12 @@
       "dependencies": {
         "@aws-sdk/client-s3": "^3.1105.0",
         "@aws-sdk/s3-request-presigner": "^3.0.0",
-        "@google-cloud/firestore": "^8.6.0",
         "@google/genai": "^2.4.0",
         "@supabase/supabase-js": "^2.45.0",
         "@tailwindcss/vite": "^4.1.14",
         "@types/compression": "^1.8.1",
         "@types/pg": "^8.23.1",
         "@vitejs/plugin-react": "^5.0.4",
-        "@zip.js/zip.js": "^2.8.26",
         "cheerio": "^1.2.0",
         "compression": "^1.8.1",
         "dotenv": "^17.2.3",
@@ -632,8 +630,6 @@
     "@vitest/spy": ["@vitest/spy@4.1.10", "", {}, "sha512-PLf/Ugvoq5wO/b4rwYCR1h2PSIdXz7wnkQFMiUpLdtM7l6pqVFcQIBEHyT1+l+cj7mNwAfZHzqXqDyjvOuwbDw=="],
 
     "@vitest/utils": ["@vitest/utils@4.1.10", "", { "dependencies": { "@vitest/pretty-format": "4.1.10", "convert-source-map": "^2.0.0", "tinyrainbow": "^3.1.0" } }, "sha512-fy9am/HWxbaGt/Sawrp90vt6Y6jQwf1RX77cz3uwoJwJVMli/e1IEwRPnMNJ7vKfPTwo0diXifkpPvwH9v7nGA=="],
-
-    "@zip.js/zip.js": ["@zip.js/zip.js@2.8.26", "", {}, "sha512-RQ4h9F6DOiHxpdocUDrOl6xBM+yOtz+LkUol47AVWcfebGBDpZ7w7Xvz9PS24JgXvLGiXXzSAfdCdVy1tPlaFA=="],
 
     "abort-controller": ["abort-controller@3.0.0", "", { "dependencies": { "event-target-shim": "^5.0.0" } }, "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg=="],
 

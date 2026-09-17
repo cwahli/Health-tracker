@@ -1,0 +1,9 @@
+{
+  "id": "G-B5",
+  "class": "WRONG_DOOR",
+  "classes": ["WRONG_DOOR"],
+  "text": "Had a chicken caesar salad for lunch, about 450 calories, grilled chicken breast with parmesan and croutons.",
+  "fixture": {
+    "sourceKind": "prose"
+  }
+}

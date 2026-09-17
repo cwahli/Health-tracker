@@ -1,0 +1,71 @@
+{
+  "id": "G2",
+  "title": "Sainsbury oats 60g + latte + fruit",
+  "mode": "new_log",
+  "passes": [
+    {
+      "id": "identify",
+      "prompt": "I added 60g of Sainsbury oat in my late + fruits",
+      "photos": [
+        "PXL_20260810_090417151.jpg",
+        "PXL_20260810_105056448.jpg"
+      ],
+      "notes": "Instruction mentioned 3 pictures; folder has mug + fruit bowl. Oats packet / nutrition panel is not in the folder."
+    }
+  ],
+  "expectedItems": [
+    {
+      "key": "sainsbury_oats",
+      "names": ["Sainsbury's Scottish Whole Rolled Oats", "Sainsbury rolled oats"],
+      "source": "brand_official",
+      "chainName": "Sainsbury's",
+      "chainKey": "sainsbury",
+      "weightGrams": 60,
+      "brandDishKey": "sainsbury_scottish_whole_rolled_oats",
+      "lockedPer100g": {
+        "calories": 362.5,
+        "protein": 11.0,
+        "totalFat": 6.5,
+        "saturatedFat": 1.25,
+        "carbohydrates": 60.1,
+        "sugar": 1.1,
+        "totalFibre": 9.1
+      },
+      "lockedFor60g": {
+        "calories": 217.5,
+        "protein": 6.6,
+        "totalFat": 3.9,
+        "carbohydrates": 36.06
+      }
+    },
+    {
+      "key": "latte",
+      "names": ["latte", "coffee with milk"],
+      "source": "canonical",
+      "notes": "Own line. Not merged into the oats brand row. Not generic rolled oats."
+    },
+    {
+      "key": "fruits",
+      "names": ["fruit", "banana", "apple", "nectarine", "plum", "grapes"],
+      "source": "canonical",
+      "notes": "Own line(s). Visible: banana, apple, nectarine/peach, plum, red grapes."
+    }
+  ],
+  "resolveLocks": [
+    { "query": "banana", "expectId": "banana" },
+    { "query": "apple", "expectId": "apple" },
+    { "query": "nectarine", "expectId": "nectarine" },
+    { "query": "plum", "expectId": "plum" },
+    { "query": "grapes", "expectId": "grapes" }
+  ],
+  "catalogGaps": [],
+  "neverMatch": [
+    { "query": "Sainsbury oat", "forbiddenNames": ["Sainsbury oat with milk"] },
+    { "query": "granola", "forbiddenNames": ["Sainsbury's Scottish Whole Rolled Oats"] }
+  ],
+  "invariants": [
+    "Official brand oats row is displayed as the nutrition label, scaled to 60g",
+    "Oats, latte, and fruit are separate breakdown lines",
+    "User text 60g is the oats weight, not the whole mug"
+  ]
+}

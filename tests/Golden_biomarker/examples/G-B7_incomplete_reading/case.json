@@ -1,0 +1,12 @@
+{
+  "id": "G-B7",
+  "class": "COMPLETENESS",
+  "classes": ["COMPLETENESS"],
+  "text": "Serum Sodium; Serum Potassium 4.2 mmol/L",
+  "fixture": {
+    "rawRows": [
+      ["Serum Sodium"],
+      ["Serum Potassium", "4.2", "mmol/L"]
+    ]
+  }
+}

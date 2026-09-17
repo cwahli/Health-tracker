@@ -1,0 +1,30 @@
+{
+  "id": "G6",
+  "title": "Sambal Bakar Pencok 89 menu compare",
+  "mode": "evaluation",
+  "passes": [
+    {
+      "id": "compare",
+      "prompt": "",
+      "photos": ["Menu_page_1.jpg", "Menu_page_2.jpg"],
+      "kind": "compare_menu"
+    }
+  ],
+  "expectedItems": [
+    { "key": "paket_hemat_ayam", "names": ["Paket Ayam", "Paket Hemat Ayam"] },
+    { "key": "nasi_putih", "names": ["Nasi Putih"] },
+    { "key": "sate_taichan", "names": ["Sate Taichan Juara"] },
+    { "key": "pencok_kacang", "names": ["Pencok Kacang"] }
+  ],
+  "resolveLocks": [],
+  "catalogGaps": [],
+  "neverMatch": [],
+  "invariants": [
+    "Mode D — compare menu items, do not log them as eaten",
+    "Do not open a portion-clarify card (Instruction.md was wrongly a portion prompt; this is a menu)",
+    "Extract distinct dishes across both pages; do not treat the paper menu as food",
+    "diningEnvironment is casual_restaurant / unknown, not home_cooked",
+    "No live USDA search for every Indonesian dish name on the hot path"
+  ],
+  "minExtractedDishes": 12
+}

@@ -1,0 +1,23 @@
+{
+  "id": "G-B1",
+  "title": "G-B1 — Five Locked Unit Conversions & Review Apply",
+  "class": "APPLY_MISS",
+  "classes": ["APPLY_MISS", "SILENT_REWRITE", "CONFORMANCE_UNIT"],
+  "status": "frozen",
+  "description": "G-B1 pins the five locked unit conversions (HDL 50->1.293, TG 125->1.411, LDL 130->3.362, Creatinine 0.9->79.56, Total Bilirubin 0.8->13.68) and ensures older SI historical values remain untouched without silent rewrites.",
+  "fixture": {
+    "history": [
+      { "date": "14-08-2026", "biomarkers": { "hdl": 50, "triglycerides": 125, "ldl": 130, "creatinine": 0.9, "total_bilirubin": 0.8 } },
+      { "date": "02-08-2026", "biomarkers": { "hdl": 1.43, "triglycerides": 1.07, "ldl": 4.2, "creatinine": 100, "total_bilirubin": 16 } },
+      { "date": "05-06-2026", "biomarkers": { "hdl": 1.43, "triglycerides": 1.07, "ldl": 4.2, "creatinine": 100, "total_bilirubin": 16 } },
+      { "date": "03-04-2024", "biomarkers": { "hdl": 1.43, "triglycerides": 1.07, "creatinine": 72, "total_bilirubin": 13 } }
+    ],
+    "targetUnits": {
+      "hdl": "mmol/L",
+      "triglycerides": "mmol/L",
+      "ldl": "mmol/L",
+      "creatinine": "umol/L",
+      "total_bilirubin": "umol/L"
+    }
+  }
+}

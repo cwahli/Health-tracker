@@ -1,0 +1,9 @@
+{
+  "trace": {
+    "sourceKind": "prose",
+    "bucket": "skip",
+    "class": "WRONG_DOOR",
+    "skippedCount": 1,
+    "reason": "Food log content routed away from medical/biomarker parser"
+  }
+}

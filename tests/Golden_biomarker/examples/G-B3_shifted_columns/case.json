@@ -1,0 +1,14 @@
+{
+  "id": "G-B3",
+  "class": "CONFORMANCE_SHAPE",
+  "classes": ["CONFORMANCE_SHAPE"],
+  "text": "Full Blood Count Panel\nWhite Blood Cell Count\t7.2\t10*9/L\t[4.0-11.0]\nPlatelet Count\t250\t10^9/L\t[150-400]\nHaemoglobin\t145\tg/L\t[130-175]",
+  "fixture": {
+    "rawRows": [
+      ["Full Blood Count Panel"],
+      ["White Blood Cell Count", "7.2", "10*9/L", "[4.0-11.0]"],
+      ["Platelet Count", "250", "10^9/L", "[150-400]"],
+      ["Haemoglobin", "145", "g/L", "[130-175]"]
+    ]
+  }
+}
