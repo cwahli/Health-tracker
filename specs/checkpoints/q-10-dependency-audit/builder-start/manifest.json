@@ -1,0 +1,16 @@
+{
+  "slug": "q-10-dependency-audit",
+  "node": "builder-start",
+  "at": "2026-09-17T08:45:37.519Z",
+  "git": {
+    "head": "a7fdde76b70dbb1b8491fc9344614a0160488420",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/q-10-dependency-audit.md"
+  ]
+}
