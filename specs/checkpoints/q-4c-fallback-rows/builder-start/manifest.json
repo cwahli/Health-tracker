@@ -1,0 +1,16 @@
+{
+  "slug": "q-4c-fallback-rows",
+  "node": "builder-start",
+  "at": "2026-09-17T08:31:15.032Z",
+  "git": {
+    "head": "69298fbdd113cabe5f4a6c04a066823c94cc030f",
+    "stashCommit": "37bea7f242dafe78627d170da0a59f5de3472bc1"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/q-4c-fallback-rows.md"
+  ]
+}

@@ -1,4 +1,5 @@
 import { buildAgent1BatchRows } from './agentResultRowsBatch';
+import { buildBiomarkerReviewRows } from './agentResultRowsFallback';
 
 export interface AgentResultRowsArgs {
   agentResult: any;
@@ -20,6 +21,9 @@ export function buildAgentResultRows(args: AgentResultRowsArgs): any[] | null {
     agentResult.batchBiomarkers.length > 0
   ) {
     return buildAgent1BatchRows(args);
+  }
+  if (agentType === 'biomarker_review') {
+    return buildBiomarkerReviewRows(args);
   }
   return null;
 }
