@@ -26,6 +26,46 @@ import {
 
 export const CONDIMENT_NAME_RE = /\b(sauce|dressing|dip|mayo|mayonnaise|ketchup|vinaigrette|gravy|sambal|sos)\b/i;
 
+/**
+ * Prefer an explicit composer tag like [Mr Oat Rolled Oats] over a short
+ * scout/edit label ("Rolled Oats") when the tag clearly names the same food.
+ */
+export function preferBracketTaggedName(shortName: string, userMessage?: string | null): string {
+  const short = String(shortName || '').trim();
+  if (!short) return short;
+  const bracketNames: string[] = [];
+  const bracketRe = /\[([^\[\]]+)\]/g;
+  let bm: RegExpExecArray | null;
+  while ((bm = bracketRe.exec(String(userMessage || ''))) !== null) {
+    const b = String(bm[1] || '').trim();
+    if (!b || /^\d/.test(b) || /^\d+(\.\d+)?\s*g$/i.test(b)) continue;
+    bracketNames.push(b);
+  }
+  const shortL = short.toLowerCase();
+  const richer = bracketNames.find((b) => {
+    const bl = b.toLowerCase();
+    return bl !== shortL && (bl.includes(shortL) || shortL.includes(bl));
+  });
+  return richer || short;
+}
+
+/** Pick the longest non-empty label that still refers to the same food. */
+export function preferRicherFoodDisplayName(...candidates: Array<string | null | undefined>): string {
+  const cleaned = candidates.map((c) => String(c || '').trim()).filter(Boolean);
+  if (cleaned.length === 0) return '';
+  let best = cleaned[0];
+  for (const c of cleaned.slice(1)) {
+    const bl = best.toLowerCase();
+    const cl = c.toLowerCase();
+    if (cl === bl) continue;
+    const related = cl.includes(bl) || bl.includes(cl);
+    if (!related) continue;
+    if (c.length > best.length) best = c;
+  }
+  return best;
+}
+
+
 export type ScoutEstimate = {
   protein?: number | null;
   carbohydrates?: number | null;
@@ -181,12 +221,26 @@ async function finalizeFromEstimate(name: string, grams: number, estimate: Scout
     diningEnvironment: estimate?.diningEnvironment || media?.diningEnvironment,
   });
   const n = { ...(ledger.nutrients || {}) };
+  // Prefer the richest label among brand menu, estimate foodName, and the
+  // command name (often upgraded from a [Mr Oat Rolled Oats] composer tag).
+  // Do NOT let a short estimate foodName ("Rolled Oats") clobber a richer
+  // command/tag name — that was the live T2 dish-list miss.
+  const estAny = estimate as any;
+  const estimateFoodName = String(
+    estAny?.foodName ||
+    estAny?.canonicalDbName ||
+    estAny?.originalName ||
+    (Array.isArray(estAny?.foods) && estAny.foods[0] && (estAny.foods[0].foodName || estAny.foods[0].name)) ||
+    ''
+  ).trim();
+  const brandName = String((ledger as any).brandDisplayName || '').trim();
+  const displayName = preferRicherFoodDisplayName(brandName, name, estimateFoodName) || name;
   return {
     scoutIndex,
-    name,
-    canonicalDbName: name,
-    originalName: name,
-    keyword: name,
+    name: displayName,
+    canonicalDbName: displayName,
+    originalName: displayName,
+    keyword: displayName,
     weightGrams: grams,
     calories: n.calories ?? 0,
     protein: n.protein ?? 0,
@@ -833,7 +887,10 @@ export async function applyMealEdits(opts: {
     } else if (action === 'replace_identity') {
       if (idx < 0) { notes.push(`replace_identity: no item "${itemName}"`); continue; }
       const prev = items[idx];
-      const newName = raw.newItemName || raw.replacementItemName || itemName;
+      const newName = preferBracketTaggedName(
+        raw.newItemName || raw.replacementItemName || itemName,
+        opts.userMessage,
+      );
       const grams = Number(raw.newWeightGrams) > 0 ? Number(raw.newWeightGrams) : Number(prev.weightGrams) || 100;
       const media = {
         boundingBox2D: prev.boundingBox2D || raw.boundingBox2D || null,
@@ -1028,7 +1085,10 @@ export async function applyMealEdits(opts: {
       items = [...items.slice(0, idx), ...created, ...items.slice(idx + 1)];
       notes.push(`split_item "${itemName}" → ${created.map((c) => c.name).join(', ')}`);
     } else if (action === 'add_item') {
-      const newName = raw.newItemName || raw.itemName || 'Item';
+      let newName = preferBracketTaggedName(
+        raw.newItemName || raw.itemName || 'Item',
+        opts.userMessage,
+      );
       const grams = Number(raw.newWeightGrams) > 0 ? Number(raw.newWeightGrams) : 100;
       const media = {
         boundingBox2D: raw.boundingBox2D ?? null,

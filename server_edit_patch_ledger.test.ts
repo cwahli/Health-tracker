@@ -600,4 +600,38 @@ describe('edit patch ledger', () => {
       expect(merge.newWeightGrams).toBe(100);
     });
   });
+
+  it('F-13.1 delete: ambiguous targetDishIndex prefers dishName over 1-based guess', () => {
+    // Live T2 regression: scout emitted Coconut Juice delete with targetDishIndex=2.
+    // Legacy code treated 2 as 1-based → prior[1] Big Mac. Prefer name alignment.
+    const prior = [
+      { scoutIndex: 0, name: 'Unsweetened White Coffee', weightGrams: 215 },
+      { scoutIndex: 1, name: 'Big Mac', weightGrams: 215 },
+      { scoutIndex: 2, name: 'Coconut Juice', weightGrams: 200 },
+    ];
+    const scout = [
+      {
+        dishName: 'Mr Oat Rolled Oats',
+        action: 'add',
+        estimatedWeightGrams: 40,
+        foods: [{ foodName: 'Rolled Oats', weightGrams: 40, action: 'add' }],
+      },
+      {
+        dishName: 'Coconut Juice',
+        action: 'delete',
+        targetDishIndex: 2,
+        estimatedWeightGrams: 200,
+        foods: [{ foodName: 'Coconut Juice', weightGrams: 200, action: 'delete' }],
+      },
+    ];
+    const cmds = diffScoutToEditCommands({
+      priorItems: prior,
+      scoutItems: scout,
+      userMessage: '[Mr Oat Rolled Oats] [40g] add oats, drop the coconut',
+    });
+    const removes = cmds.filter((c) => c.action === 'remove_item');
+    expect(removes.some((c) => /Coconut/i.test(String(c.itemName)))).toBe(true);
+    expect(removes.some((c) => /Big Mac/i.test(String(c.itemName)))).toBe(false);
+  });
+
 });

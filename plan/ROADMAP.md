@@ -13,7 +13,7 @@
 Laws: `docs/agent/domains/{biomarkers,food-calc,sync}.md`  
 WIP: `AI_HANDOVER.md` (header only) · Completed: `archive/` · `plan/archive/`
 
-**As of 2026-09-17.** Scorecard sealed ALL GREEN **713/0/0** (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent (Gemini / OpenCode / Cline / Antigravity). Do not reopen FDC or put curator back on Analyze.
+**As of 2026-09-17.** Scorecard sealed ALL GREEN **744/0/0** @ `5615f1e` (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent (Gemini / OpenCode / Cline / Antigravity). Do not reopen FDC or put curator back on Analyze.
 
 ---
 
@@ -39,11 +39,11 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 are **shipped**. D
 
 1. **Q-4 DONE** — q-4a→q-4b→q-4c→q-4d COMPLETE (`specs/done/`), ART 2975→1501, ceiling 1800, merged to `main`. Parent packet `superseded`.
 2. **Q-10 COMPLETE** — `specs/done/q-10-dependency-audit.md`, removals only, merged to `main`.
-3. **R-13.1** — `specs/active/R-13.md` (`auto_go: true`). **R-13.0 preflight PASS 2026-09-17** (agent CLI). Do not start R-13.4 / R-5 / a second Cloud Run go-live in the same PR.
+3. **R-13.1 IN PROGRESS** — `specs/active/R-13.md` (`auto_go: true`). **R-13.0 preflight PASS 2026-09-17** (agent CLI). Green so far on `journey/r-13.1`: `specs/active/R-13.md` restored (was missing), `wrangler.jsonc` (assets-only SPA), `server.ts` `PORT` env with 3000 default — tsc 0, 53 vitest, free-tier MASTER PASS, Guard PASS, spec-diff PASS, Vite-on-3000 parity re-proven. **Remaining is blocked on a human providing cloud credentials** and unlocking §12.10 Decision 1 (Containers vs Cloud Run) + Decision 2 (public hostname): the "Done when" needs a live public URL. Do not start R-13.4 / R-5 / a second Cloud Run go-live in the same PR. Do not buy Workers Paid (§12.4 vs §12.7 conflict — see AI_HANDOVER).
 
 **Still `blocked_human`:** **L-5** only (name a locale first — do not invent `fr`/`zh` copy). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, Header/`App.tsx` split without a new packet, ConfirmBar as a side quest.
 
-**Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 705/0/0 at `3ff047d`, `golden/scorecard/result_summary/LATEST.md`).
+**Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
 **Human ops DONE 2026-09-14 (site live, not Gemini):** Render serves `GET /api/scorecard/contract` (`live_origin` PASS in sealed run); `supabase/migrations/20260913_brand_menu_items_status.sql` applied to live Supabase by hand; Home Top Targets confirmed (sat fat over target red).
 
@@ -328,6 +328,15 @@ Today: curator LLM skipped on Analyze. Brand **match** in finalize. Brand **TS s
 | **F-11.3** | **Shipped 2026-09-16**. One name: wire `curator` (`t1/curator`, `agent: 'curator'`). Dual-accept `food_resolver` / `resolver`. | Debug `t1/curator` or nothing — never both | Wire id `meal_agent` / `dietitian` (meal agent is `diet`) |
 
 M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` + `food-calc.md` Database Curator (brand-only). Same change as F-11.2/11.3.
+
+### F-13 — Case-12 T2: same-thread meal edit (add/remove)
+
+**Packet:** `specs/active/F-13.md` (locked).  **Evidence:** `golden/meal/Meal_04_log/12_chat_saved_meal/correct_results.md` §4.  **Not:** `App.tsx` (frozen), `JobStore`, per-100g *tag* rescale (gap 1), `brand_menu_local_*` resolution (gap 3).
+
+| ID | Item | Done when | Do not |
+|---|---|---|---|
+| **F-13.1** | **Shipped 2026-09-17.** `src/utils/foodFollowUpEdit.ts` — text-only follow-up on a blank draft + recent meal ⇒ `submissionMode = 'edit'`, so the existing `activeMeal` fallback (`LogChat.tsx:2498`) supplies the prior meal. 24/24 vitest. | Text-only follow-up reports `mode === 'edit'` with the prior meal's dishes carried | Adopt the newest meal unconditionally — T1 sends a photo and must stay a new scan |
+| **F-13.2** | Lock-merge basis consistency in `server_dish_finalize.ts` residual fill. **Not started: no hard evidence** — the golden path succeeded with oats *estimated* (turn-2 capture has zero `per_100g`), so the recorded numbers are prose only. Do not guess math in the sole kcal writer. | A live T2 capture that actually exercises a `per_100g` brand lock at a non-100 g weight | Change `finalizeDishLedger` basis on prose alone |
 
 ---
 
