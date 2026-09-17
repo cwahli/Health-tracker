@@ -3,6 +3,7 @@
  * Handles typed queries and mutations for food_logs, biomarker_logs, profiles, and agent_jobs.
  */
 import { d1Query, safeJsonParse, isD1Configured, D1QueryResult } from './server_d1.js';
+export { isD1Configured };
 
 // ==========================================
 // FOOD LOGS
@@ -287,6 +288,7 @@ export interface D1PullOptions {
   possibleUids: string[];
   listOnly?: boolean;
   pageSize?: number;
+  offset?: number;
   cursor?: { updated_at?: string; id?: string };
   lastSyncTime?: string;
 }
@@ -295,15 +297,17 @@ export async function d1PullSync(opts: D1PullOptions): Promise<{
   foods: any[];
   biomarkers: any[];
   profiles: any[];
+  totalFoodsCount?: number;
+  totalBiomarkersCount?: number;
   error?: string;
 }> {
   if (!isD1Configured()) {
     return { foods: [], biomarkers: [], profiles: [], error: 'D1 not configured' };
   }
 
-  const { possibleUids, listOnly = true, pageSize = 500, cursor, lastSyncTime } = opts;
+  const { possibleUids, listOnly = true, pageSize = 500, offset, cursor, lastSyncTime } = opts;
   if (!possibleUids || possibleUids.length === 0) {
-    return { foods: [], biomarkers: [], profiles: [] };
+    return { foods: [], biomarkers: [], profiles: [], totalFoodsCount: 0, totalBiomarkersCount: 0 };
   }
 
   const limit = Math.min(pageSize || 500, 1000);
@@ -327,6 +331,10 @@ export async function d1PullSync(opts: D1PullOptions): Promise<{
   }
   foodSql += ` ORDER BY updated_at DESC, id DESC LIMIT ?`;
   foodParams.push(limit);
+  if (typeof offset === 'number' && offset > 0) {
+    foodSql += ` OFFSET ?`;
+    foodParams.push(offset);
+  }
 
   // Build biomarker query
   let bioSql = `SELECT id, firebase_uid, date, biomarkers, note, summary, tests, updated_at FROM biomarker_logs WHERE firebase_uid IN (${uidPlaceholders})`;
@@ -341,16 +349,26 @@ export async function d1PullSync(opts: D1PullOptions): Promise<{
   }
   bioSql += ` ORDER BY updated_at DESC, id DESC LIMIT ?`;
   bioParams.push(limit);
+  if (typeof offset === 'number' && offset > 0) {
+    bioSql += ` OFFSET ?`;
+    bioParams.push(offset);
+  }
 
   // Build profiles query
   const profSql = `SELECT firebase_uid, data, updated_at FROM profiles WHERE firebase_uid IN (${uidPlaceholders})`;
   const profParams: any[] = [...possibleUids];
 
+  // Count queries for accurate total counts
+  const countFoodSql = `SELECT count(*) as cnt FROM food_logs WHERE firebase_uid IN (${uidPlaceholders})`;
+  const countBioSql = `SELECT count(*) as cnt FROM biomarker_logs WHERE firebase_uid IN (${uidPlaceholders})`;
+
   // Execute concurrently
-  const [foodRes, bioRes, profRes] = await Promise.all([
+  const [foodRes, bioRes, profRes, countFoodRes, countBioRes] = await Promise.all([
     d1Query<any>(foodSql, foodParams),
     d1Query<any>(bioSql, bioParams),
-    d1Query<any>(profSql, profParams)
+    d1Query<any>(profSql, profParams),
+    d1Query<any>(countFoodSql, possibleUids),
+    d1Query<any>(countBioSql, possibleUids)
   ]);
 
   if (!foodRes.success) console.error('[D1 Pull] food query error:', foodRes.error);
@@ -377,7 +395,39 @@ export async function d1PullSync(opts: D1PullOptions): Promise<{
     data: safeJsonParse(row.data, {}),
   }));
 
-  return { foods: rawFoods, biomarkers: rawBiomarkers, profiles };
+  const totalFoodsCount = countFoodRes.success && countFoodRes.results?.[0]?.cnt != null
+    ? Number(countFoodRes.results[0].cnt)
+    : rawFoods.length;
+  const totalBiomarkersCount = countBioRes.success && countBioRes.results?.[0]?.cnt != null
+    ? Number(countBioRes.results[0].cnt)
+    : rawBiomarkers.length;
+
+  return { foods: rawFoods, biomarkers: rawBiomarkers, profiles, totalFoodsCount, totalBiomarkersCount };
+}
+
+export interface D1SearchFoodOptions {
+  possibleUids: string[];
+  query: string;
+  limit?: number;
+}
+
+export async function d1SearchUserFoodLogs(opts: D1SearchFoodOptions): Promise<any[]> {
+  if (!isD1Configured() || !opts.possibleUids?.length || !opts.query?.trim()) return [];
+  const limit = Math.min(opts.limit || 5, 20);
+  const uidPlaceholders = opts.possibleUids.map(() => '?').join(', ');
+  const sql = `SELECT id, name, calories, nutrients, items_breakdown, image_urls, date, weight_grams, quantity, consumed_amount 
+               FROM food_logs 
+               WHERE firebase_uid IN (${uidPlaceholders}) AND name LIKE ? 
+               ORDER BY updated_at DESC LIMIT ?`;
+  const pattern = `%${opts.query.trim()}%`;
+  const res = await d1Query<any>(sql, [...opts.possibleUids, pattern, limit]);
+  if (!res.success || !res.results) return [];
+  return res.results.map((row: any) => ({
+    ...row,
+    nutrients: safeJsonParse(row.nutrients, {}),
+    items_breakdown: safeJsonParse(row.items_breakdown, []),
+    image_urls: safeJsonParse(row.image_urls, []),
+  }));
 }
 
 // ==========================================

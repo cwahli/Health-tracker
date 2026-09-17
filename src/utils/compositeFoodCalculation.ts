@@ -94,15 +94,15 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
 
     if (tag.source === 'previous_meal' && tag.originalLog) {
       const orig = tag.originalLog;
-      const origWeight = Number(orig.weightGrams || orig.portionGrams) || 100;
+      const origWeight = Number(orig.weightGrams || orig.portionGrams || orig.weight_grams || orig.consumed_amount) || 100;
       const factor = tag.weightGrams ? Number(tag.weightGrams) / origWeight : 1;
       const origNutr = orig.nutrients || {};
       cal = (Number(orig.calories ?? origNutr.calories) || 0) * factor;
       prot = (Number(orig.protein ?? origNutr.protein) || 0) * factor;
-      carb = (Number(orig.carbohydrates ?? origNutr.carbohydrates) || 0) * factor;
-      fat = (Number(orig.totalFat ?? orig.fat ?? origNutr.totalFat ?? origNutr.fat) || 0) * factor;
-      sat = (Number(orig.saturatedFat ?? origNutr.saturatedFat) || 0) * factor;
-      fib = (Number(orig.totalFibre ?? orig.fiber ?? origNutr.totalFibre ?? origNutr.fiber) || 0) * factor;
+      carb = (Number(orig.carbohydrates ?? origNutr.carbohydrates ?? origNutr.carbs) || 0) * factor;
+      fat = (Number(orig.totalFat ?? orig.fat ?? origNutr.totalFat ?? origNutr.fat ?? origNutr.total_fat) || 0) * factor;
+      sat = (Number(orig.saturatedFat ?? orig.saturated_fat ?? origNutr.saturatedFat ?? origNutr.saturated_fat) || 0) * factor;
+      fib = (Number(orig.totalFibre ?? orig.fiber ?? origNutr.totalFibre ?? origNutr.fiber ?? origNutr.total_fibre) || 0) * factor;
       sod = (Number(orig.sodium ?? origNutr.sodium) || 0) * factor;
       weight = tag.weightGrams ? Number(tag.weightGrams) : origWeight;
       if (!img) {

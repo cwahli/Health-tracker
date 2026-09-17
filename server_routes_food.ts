@@ -9,19 +9,104 @@ foodRouter.get('/api/food/health', (req, res) => {
 });
 
 foodRouter.get('/api/food/search', async (req, res) => {
-  const query = req.query.q as string;
+  const query = (req.query.q as string || '').trim();
+  const uid = (req.query.uid as string || '').trim();
+  const email = (req.query.email as string || '').trim();
   if (!query) return res.json({ results: [] });
   try {
+    let userFoodMatches: any[] = [];
+    if (uid || email) {
+      const normalizedEmailUid = email ? 'admin_' + email.toLowerCase().trim().replace(/[^a-z0-9]/gi, '_') : null;
+      const isCwah = (email && (email.toLowerCase().includes('cwah.liu') || email.toLowerCase().includes('chiwah.liu'))) || 
+                     (uid && (uid.includes('cwah_liu') || uid.includes('chiwah_liu') || uid === 'hiJun2hTdDTk2igwerun2LKvwb42'));
+      const possibleUids = Array.from(new Set([
+        uid,
+        email,
+        normalizedEmailUid,
+        isCwah ? 'hiJun2hTdDTk2igwerun2LKvwb42' : null,
+        isCwah ? 'cwah.liu@gmail.com' : null,
+        isCwah ? 'chiwah.liu@gmail.com' : null,
+        isCwah ? 'admin_cwah_liu_gmail_com' : null,
+        isCwah ? 'admin_chiwah_liu_gmail_com' : null
+      ].filter(Boolean) as string[]));
+
+      if (possibleUids.length > 0) {
+        const { isD1Configured, d1SearchUserFoodLogs } = await import('./server_db_d1.js');
+        if (isD1Configured()) {
+          const rawPast = await d1SearchUserFoodLogs({ possibleUids, query, limit: 5 });
+          userFoodMatches = rawPast.map((f: any) => ({
+            id: f.id,
+            name: f.name,
+            food_id: f.id,
+            dish_name: f.name,
+            display_name: f.name,
+            calories: f.calories,
+            nutrients: f.nutrients,
+            portionGrams: f.weight_grams || f.consumed_amount || 100,
+            weightGrams: f.weight_grams || f.consumed_amount || 100,
+            items_breakdown: f.items_breakdown,
+            imageUrl: Array.isArray(f.image_urls) && f.image_urls.length > 0 ? f.image_urls[0] : (typeof f.image_urls === 'string' ? f.image_urls : undefined),
+            imageUrls: Array.isArray(f.image_urls) ? f.image_urls : [],
+            type: 'previous_meal',
+            date: f.date
+          }));
+        } else {
+          const { supabaseAdmin } = await import('./supabaseAdmin.js');
+          if (supabaseAdmin) {
+            const { data: supaPast } = await supabaseAdmin
+              .from('food_logs')
+              .select('id, name, calories, nutrients, items_breakdown, image_urls, date, weight_grams, consumed_amount')
+              .in('firebase_uid', possibleUids)
+              .ilike('name', `%${query}%`)
+              .order('updated_at', { ascending: false })
+              .limit(5);
+            if (Array.isArray(supaPast)) {
+              userFoodMatches = supaPast.map((f: any) => ({
+                id: f.id,
+                name: f.name,
+                food_id: f.id,
+                dish_name: f.name,
+                display_name: f.name,
+                calories: f.calories,
+                nutrients: f.nutrients,
+                portionGrams: f.weight_grams || f.consumed_amount || 100,
+                weightGrams: f.weight_grams || f.consumed_amount || 100,
+                items_breakdown: f.items_breakdown,
+                imageUrl: Array.isArray(f.image_urls) && f.image_urls.length > 0 ? f.image_urls[0] : (typeof f.image_urls === 'string' ? f.image_urls : undefined),
+                imageUrls: Array.isArray(f.image_urls) ? f.image_urls : [],
+                type: 'previous_meal',
+                date: f.date
+              }));
+            }
+          }
+        }
+      }
+    }
+
     const { searchBrandMenuItems } = await import('./serverBrandMenu.js');
     const brandMatches = await searchBrandMenuItems(query);
-    const results = brandMatches.slice(0, 10).map((m: any) => ({
+    const brandResults = brandMatches.slice(0, 10).map((m: any) => ({
       food_id: m.dish_key || m.id || m.name,
       dish_name: m.dish_name || m.name,
       chain_name: m.chain_name || m.chainName || m.brandOwner,
       display_name: m.dish_name || m.name,
       imageUrl: m.imageUrl || m.image_url || undefined,
+      serving_grams: m.serving_grams,
+      nutrients: m.nutrients,
       type: 'brand'
     }));
+
+    // Deduplicate: avoid duplicate names between past logs and brand
+    const seen = new Set<string>();
+    const results: any[] = [];
+    for (const item of [...userFoodMatches, ...brandResults]) {
+      const key = `${item.type}:${(item.dish_name || item.name || '').toLowerCase().trim()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push(item);
+      }
+    }
+
     res.json({ results });
   } catch (err) {
     console.error('[Search Error]', err);

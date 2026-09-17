@@ -49,6 +49,8 @@ interface FoodHistoryTabProps {
   initiallyExpandedFoodId?: string | null;
   onClearInitiallyExpandedFoodId?: () => void;
   onViewJob?: (jobId: string) => void;
+  totalFoodsCount?: number;
+  onFetchMoreFoods?: (page: number) => Promise<void>;
 }
 
 function cleanData<T>(obj: T): T {
@@ -116,7 +118,9 @@ export default function FoodHistoryTab({
   report,
   initiallyExpandedFoodId,
   onClearInitiallyExpandedFoodId,
-  onViewJob
+  onViewJob,
+  totalFoodsCount,
+  onFetchMoreFoods
 }: FoodHistoryTabProps) {
   const t = translations[profile.language] || translations.en;
   const [searchTerm, setSearchTerm] = useState('');
@@ -711,6 +715,29 @@ export default function FoodHistoryTab({
       }
     });
   }, [combinedItems, searchTerm]);
+
+  const totalItemsCount = Math.max(totalFoodsCount || 0, combinedItems.length);
+  const totalPages = searchTerm
+    ? Math.max(1, Math.ceil(filteredLogs.length / itemsPerPage))
+    : Math.max(1, Math.ceil(totalItemsCount / itemsPerPage));
+
+  const [isLoadingMoreFoods, setIsLoadingMoreFoods] = useState(false);
+
+  const handlePageChange = async (targetPage: number) => {
+    if (targetPage < 1 || targetPage > totalPages) return;
+    if (targetPage === currentPage) return;
+
+    const neededIndex = (targetPage - 1) * itemsPerPage;
+    if (!searchTerm && onFetchMoreFoods && neededIndex >= filteredLogs.length && filteredLogs.length < totalItemsCount) {
+      setIsLoadingMoreFoods(true);
+      try {
+        await onFetchMoreFoods(targetPage);
+      } finally {
+        setIsLoadingMoreFoods(false);
+      }
+    }
+    setCurrentPage(targetPage);
+  };
 
   // Auto-navigate to the correct pagination page and expand initiallyExpandedFoodId (e.g. clicked from TrendsTab)
   useEffect(() => {
@@ -2195,22 +2222,25 @@ export default function FoodHistoryTab({
             );
           })}
           {/* Pagination Controls */}
-          {filteredLogs.length > itemsPerPage && (
+          {(totalPages > 1 || filteredLogs.length > itemsPerPage) && (
             <div className="flex items-center justify-between pt-6 pb-4 px-2">
               <button 
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-800 dark:text-slate-300 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700"
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1 || isLoadingMoreFoods}
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-800 dark:text-slate-300 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center gap-1.5"
               >
                 {t.previousPage}
               </button>
-              <span className="text-sm font-medium text-theme-text-secondary">
-                {t.page} {currentPage} {t.of} {Math.ceil(filteredLogs.length / itemsPerPage)}
-              </span>
+              <div className="flex items-center gap-2">
+                {isLoadingMoreFoods && <Loader className="w-3.5 h-3.5 animate-spin text-indigo-500" />}
+                <span className="text-sm font-medium text-theme-text-secondary">
+                  {t.page} {currentPage} {t.of} {totalPages}
+                </span>
+              </div>
               <button 
-                onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredLogs.length / itemsPerPage), p + 1))}
-                disabled={currentPage === Math.ceil(filteredLogs.length / itemsPerPage)}
-                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-800 dark:text-slate-300 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700"
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage >= totalPages || isLoadingMoreFoods}
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-800 dark:text-slate-300 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center gap-1.5"
               >
                 {t.nextPage}
               </button>

@@ -246,7 +246,7 @@ export async function fetchAllConsolidatedLogs(
   deleteMapBiomarkers: Record<string, number> = {},
   deleteMapCustomKeys: Record<string, number> = {},
   email?: string,
-  options: { timeoutMs?: number; skipFirebaseFallback?: boolean; lastSyncTime?: number; listOnly?: boolean } = {}
+  options: { timeoutMs?: number; skipFirebaseFallback?: boolean; lastSyncTime?: number; listOnly?: boolean; pageSize?: number; offset?: number; cursor?: { updated_at?: string; id?: string } } = {}
 ): Promise<{
   serverFoods: FoodLog[];
   serverBiomarkers: BiomarkerLog[];
@@ -254,6 +254,8 @@ export async function fetchAllConsolidatedLogs(
   serverActions?: HealthAction[];
   serverBenefits?: DailyBenefit[];
   serverReport?: RecommendationReport | null;
+  totalFoodsCount?: number;
+  totalBiomarkersCount?: number;
 }> {
   const serverFoods: FoodLog[] = [];
   const serverBiomarkers: BiomarkerLog[] = [];
@@ -261,6 +263,8 @@ export async function fetchAllConsolidatedLogs(
   let serverActions: HealthAction[] = [];
   let serverBenefits: DailyBenefit[] = [];
   let serverReport: RecommendationReport | null = null;
+  let totalFoodsCount: number | undefined;
+  let totalBiomarkersCount: number | undefined;
 
   // 1. Primary path: Server-side proxy /api/sync/supabase-pull (handles D1, SupabaseAdmin, and multiple UID aliases)
   try {
@@ -273,7 +277,10 @@ export async function fetchAllConsolidatedLogs(
         uid,
         email,
         lastSyncTime: options.lastSyncTime,
-        listOnly: options.listOnly ?? false
+        listOnly: options.listOnly ?? false,
+        pageSize: options.pageSize,
+        offset: options.offset,
+        cursor: options.cursor
       }),
       signal: controller.signal
     });
@@ -282,6 +289,8 @@ export async function fetchAllConsolidatedLogs(
     if (resp.ok) {
       const data = await resp.json();
       if (data && data.success) {
+        if (data.totalFoodsCount != null) totalFoodsCount = Number(data.totalFoodsCount);
+        if (data.totalBiomarkersCount != null) totalBiomarkersCount = Number(data.totalBiomarkersCount);
         if (Array.isArray(data.foods)) {
           data.foods.forEach((r: any) => {
             if (r && r.id && !deleteMapFoods[r.id]) {
@@ -342,7 +351,39 @@ export async function fetchAllConsolidatedLogs(
     }
   }
 
-  return { serverFoods, serverBiomarkers, serverProfile, serverActions, serverBenefits, serverReport };
+  return { serverFoods, serverBiomarkers, serverProfile, serverActions, serverBenefits, serverReport, totalFoodsCount, totalBiomarkersCount };
+}
+
+export async function fetchFoodLogsPage(
+  uid: string,
+  page: number,
+  pageSize: number = 15,
+  email?: string
+): Promise<{ foods: FoodLog[]; totalFoodsCount: number }> {
+  const offset = Math.max(0, (page - 1) * pageSize);
+  try {
+    const resp = await fetch('/api/sync/supabase-pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid,
+        email,
+        listOnly: true,
+        pageSize,
+        offset
+      })
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.success && Array.isArray(data.foods)) {
+        const foods = data.foods.map((r: any) => supabaseRowToFoodLog(r));
+        return { foods, totalFoodsCount: data.totalFoodsCount ?? data.meta?.totalFoodsCount ?? foods.length };
+      }
+    }
+  } catch (err) {
+    console.warn('[syncUtils] fetchFoodLogsPage error:', err);
+  }
+  return { foods: [], totalFoodsCount: 0 };
 }
 
 export async function fetchFoodLogDetail(

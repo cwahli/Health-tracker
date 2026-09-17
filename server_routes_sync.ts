@@ -337,7 +337,7 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
   try {
     await verifyFirebaseIdToken(req).catch(() => null);
 
-    const { uid, email, lastSyncTime, listOnly = true, pageSize = 50, cursor } = req.body;
+    const { uid, email, lastSyncTime, listOnly = true, pageSize = 15, offset, cursor } = req.body;
     if (!uid) {
       return res.status(400).json({ error: "uid is required" });
     }
@@ -362,12 +362,16 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
     let rawFoods: any[] = [];
     let rawBiomarkers: any[] = [];
     let profiles: any[] = [];
+    let totalFoodsCount: number | undefined;
+    let totalBiomarkersCount: number | undefined;
 
     if (isD1Configured()) {
-      const d1Res = await d1PullSync({ possibleUids, listOnly, pageSize, cursor, lastSyncTime });
+      const d1Res = await d1PullSync({ possibleUids, listOnly, pageSize, offset, cursor, lastSyncTime });
       rawFoods = d1Res.foods;
       rawBiomarkers = d1Res.biomarkers;
       profiles = d1Res.profiles;
+      totalFoodsCount = d1Res.totalFoodsCount;
+      totalBiomarkersCount = d1Res.totalBiomarkersCount;
     } else {
       // Lightweight columns for list view (always included)
       const lightColumns = 'id, firebase_uid, date, name, composition, weight_grams, quantity, consumed_amount, benefits, risks, health_impact, recommendation, calories, saturated_fat, sodium, added_sugar, nutrients, updated_at, verdict, description, message, debug_url, image_urls';
@@ -377,19 +381,29 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
 
       let foodQuery = supabaseAdmin
         .from('food_logs')
-        .select(foodSelectColumns)
+        .select(foodSelectColumns, { count: 'exact' })
         .in('firebase_uid', possibleUids)
         .order('updated_at', { ascending: false })
-        .order('id', { ascending: false })
-        .limit(Math.min(pageSize || 500, 1000));
+        .order('id', { ascending: false });
+
+      if (typeof offset === 'number' && offset > 0) {
+        foodQuery = foodQuery.range(offset, offset + (pageSize || 15) - 1);
+      } else {
+        foodQuery = foodQuery.limit(Math.min(pageSize || 15, 1000));
+      }
 
       let bioQuery = supabaseAdmin
         .from('biomarker_logs')
-        .select('id, firebase_uid, date, biomarkers, note, summary, tests, updated_at')
+        .select('id, firebase_uid, date, biomarkers, note, summary, tests, updated_at', { count: 'exact' })
         .in('firebase_uid', possibleUids)
         .order('updated_at', { ascending: false })
-        .order('id', { ascending: false })
-        .limit(Math.min(pageSize || 500, 1000));
+        .order('id', { ascending: false });
+
+      if (typeof offset === 'number' && offset > 0) {
+        bioQuery = bioQuery.range(offset, offset + (pageSize || 15) - 1);
+      } else {
+        bioQuery = bioQuery.limit(Math.min(pageSize || 15, 1000));
+      }
 
       if (cursor?.updated_at && cursor?.id) {
         foodQuery = foodQuery.lt('updated_at', cursor.updated_at);
@@ -413,6 +427,8 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
       rawFoods = foodRes.error ? [] : (foodRes.data || []);
       rawBiomarkers = bioRes.error ? [] : (bioRes.data || []);
       profiles = profileRes.error ? [] : (profileRes.data || []);
+      totalFoodsCount = foodRes.count ?? undefined;
+      totalBiomarkersCount = bioRes.count ?? undefined;
     }
 
     // Deduplicate foods by ID (keeping newest updated_at)
@@ -547,9 +563,13 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
       foods: activeFoods,
       biomarkers: activeBiomarkers,
       profileData,
+      totalFoodsCount: totalFoodsCount ?? activeFoods.length,
+      totalBiomarkersCount: totalBiomarkersCount ?? activeBiomarkers.length,
       meta: {
         foodCount: activeFoods.length,
+        totalFoodsCount: totalFoodsCount ?? activeFoods.length,
         biomarkerCount: activeBiomarkers.length,
+        totalBiomarkersCount: totalBiomarkersCount ?? activeBiomarkers.length,
         hasProfileData: !!profileData,
         queriedUids: possibleUids
       }

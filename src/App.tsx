@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 import { isCompareOnlyResult } from './utils/compareMealLogGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -178,7 +178,7 @@ function firestoreReadGuard(label: string, docCount: number = 1): boolean {
 }
 import { runCleanupMigration } from './utils/migrationTask';
 import { supabase, isSupabaseConfigured, cleanupAuthUrlParams } from './utils/supabaseClient';
-import { syncLogsWithTimeBuckets, fetchAllConsolidatedLogs, subscribeToSupabaseLogs, upsertProfileToSupabase, pushLogsToServer, mergeByRecency, mergeActions, mergeBenefits, mergeFoodIdeas, mergeReports, mergeProfiles, mergeBiomarkerHistory, mergeDeleteMaps, supabaseRowToFoodLog, supabaseRowToBiomarkerLog, resolveInitialLanguage } from "./utils/syncUtils";
+import { syncLogsWithTimeBuckets, fetchAllConsolidatedLogs, fetchFoodLogsPage, subscribeToSupabaseLogs, upsertProfileToSupabase, pushLogsToServer, mergeByRecency, mergeActions, mergeBenefits, mergeFoodIdeas, mergeReports, mergeProfiles, mergeBiomarkerHistory, mergeDeleteMaps, supabaseRowToFoodLog, supabaseRowToBiomarkerLog, resolveInitialLanguage } from "./utils/syncUtils";
 import { mergeFoodLogsDeduped, rehydrateFoodImagesFromDonors, foodLogFingerprint } from "./utils/foodLogDedupe";
 import { isUsableImageUrl, uniqueMealImageUrls } from "./utils/foodImageSources";
 import { sanitizeBiomarkerHistoryOnLoad } from "./utils/biomarkers";
@@ -667,6 +667,7 @@ export default function App() {
   };
   // Core logs and targets states
   const [foodLogs, setFoodLogsRaw] = useState<FoodLog[]>([]);
+  const [totalFoodsCount, setTotalFoodsCount] = useState<number | undefined>(undefined);
   // B11: every write path collapses id + soft name/kcal/day duplicates (YOLK variants, retries)
   const setFoodLogs = (val: FoodLog[] | ((prev: FoodLog[]) => FoodLog[])) => {
     setFoodLogsRaw((prev) => {
@@ -675,6 +676,19 @@ export default function App() {
       return mergeFoodLogsDeduped(next, []);
     });
   };
+
+  const handleFetchMoreFoods = useCallback(async (page: number) => {
+    const uid = auth.currentUser?.uid || profile?.uid;
+    const email = auth.currentUser?.email || profile?.email || undefined;
+    if (!uid) return;
+    const { foods: newFoods, totalFoodsCount: newTotal } = await fetchFoodLogsPage(uid, page, 15, email);
+    if (newFoods.length > 0) {
+      setFoodLogs(prev => mergeFoodLogsDeduped(prev, newFoods));
+    }
+    if (typeof newTotal === 'number' && newTotal > 0) {
+      setTotalFoodsCount(newTotal);
+    }
+  }, [profile?.uid, profile?.email]);
   const [biomarkers, setBiomarkers] = useState<{ [key: string]: number | string }>({});
   const [biomarkerHistoryRaw, setBiomarkerHistoryRaw] = useState<BiomarkerLog[]>([]);
   const setBiomarkerHistory = (val: BiomarkerLog[] | ((prev: BiomarkerLog[]) => BiomarkerLog[])) => {
@@ -1977,7 +1991,7 @@ export default function App() {
         });
 
         const userEmail = profile?.email || auth.currentUser?.email || undefined;
-        const { serverFoods, serverBiomarkers, serverProfile, serverActions, serverBenefits, serverReport } = await fetchAllConsolidatedLogs(
+        const { serverFoods, serverBiomarkers, serverProfile, serverActions, serverBenefits, serverReport, totalFoodsCount: fetchedTotalFoods } = await fetchAllConsolidatedLogs(
           db,
           uid,
           deletedFoods,
@@ -1986,6 +2000,9 @@ export default function App() {
           userEmail,
           { lastSyncTime: (forcePull || forceReplaceLocal) ? undefined : (parsedLocal.lastSyncedAt || 0) }
         );
+        if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
+          setTotalFoodsCount(fetchedTotalFoods);
+        }
         
         let mergedBioHist = sb;
         if (serverFoods.length > 0) {
@@ -2048,7 +2065,8 @@ export default function App() {
           serverProfile,
           serverActions,
           serverBenefits,
-          serverReport
+          serverReport,
+          totalFoodsCount: fetchedTotalFoods
         } = await fetchAllConsolidatedLogs(
           null,
           uid,
@@ -2058,6 +2076,9 @@ export default function App() {
           activeEmail,
           { timeoutMs: 90000, skipFirebaseFallback: true }
         );
+        if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
+          setTotalFoodsCount(fetchedTotalFoods);
+        }
 
         if (!serverProfile && serverBiomarkers.length === 0 && serverFoods.length === 0) {
           throw new Error('Force Pull failed: Supabase returned no profile and no logs. Force Push from the master device first.');
@@ -2332,7 +2353,7 @@ export default function App() {
           // and won't throw if offline, gracefully degrading to cached data.
           try {
             try {
-              const { serverFoods, serverBiomarkers, serverProfile, serverActions, serverBenefits, serverReport } = await fetchAllConsolidatedLogs(
+              const { serverFoods, serverBiomarkers, serverProfile, serverActions, serverBenefits, serverReport, totalFoodsCount: fetchedTotalFoods } = await fetchAllConsolidatedLogs(
                 checkQuotaFlag() ? null : db, 
                 uid, 
                 deletedFoods || cloudProfile?.deletedFoodLogIds || localProfile?.deletedFoodLogIds || {}, 
@@ -2345,6 +2366,9 @@ export default function App() {
                   lastSyncTime: (forcePull || forceReplaceLocal || !parsedLocal.lastSyncedAt || !localFoods || localFoods.length === 0) ? undefined : (parsedLocal.lastSyncedAt || 0)
                 }
               );
+              if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
+                setTotalFoodsCount(fetchedTotalFoods);
+              }
               const isIncrementalPull = !forcePull && !forceReplaceLocal && !!parsedLocal.lastSyncedAt && Array.isArray(localFoods) && localFoods.length > 0;
               const activeDeletedFoodIds = {
                 ...(localProfile?.deletedFoodLogIds || {}),
@@ -6359,6 +6383,8 @@ export default function App() {
           <FoodHistoryTab
             profile={profile}
             foodLogs={foodLogs}
+            totalFoodsCount={totalFoodsCount}
+            onFetchMoreFoods={handleFetchMoreFoods}
             onUpdateFoodLog={handleUpdateFoodLog}
             onDeleteFoodLog={handleDeleteFoodLog}
             onReplaceFoodLogs={async (foods) => {

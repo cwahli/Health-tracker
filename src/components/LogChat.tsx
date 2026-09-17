@@ -892,11 +892,14 @@ ${logsText}`);
       }
 
       try {
-        const res = await fetch(`/api/food/search?q=${encodeURIComponent(searchTerms)}`);
+        const uid = auth.currentUser?.uid || profile?.uid || '';
+        const email = auth.currentUser?.email || profile?.email || '';
+        const url = `/api/food/search?q=${encodeURIComponent(searchTerms)}${uid ? `&uid=${encodeURIComponent(uid)}` : ''}${email ? `&email=${encodeURIComponent(email)}` : ''}`;
+        const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
-          if (data.results && data.results.length > 0 && data.results.length < 4) {
-            setCatalogMatches(data.results);
+          if (Array.isArray(data.results) && data.results.length > 0) {
+            setCatalogMatches(data.results.slice(0, 6));
             setActiveSearchTerms(searchTerms);
           } else {
             setCatalogMatches([]);
@@ -6250,11 +6253,19 @@ ${logsText}`);
         {/* Input Dock */}
         <div className="bg-theme-bg-card border-t border-theme-border/80 p-3 flex flex-col gap-2 shrink-0 relative">
           {(() => {
-            const combinedMatches = [
-              ...catalogMatches.map(m => ({ ...m, _listType: 'brand' })),
-              ...matchingPreviousLogs.map(m => ({ ...m, _listType: 'previous_meal' }))
-            ].filter(m => !explicitFoodTags.some(tag => tag.dbId === (m._listType === 'brand' ? m.food_id : m.id)));
-            if (combinedMatches.length === 0) return null;
+            const seen = new Set<string>();
+            const combinedMatches: any[] = [];
+            const addMatch = (m: any, listType: 'brand' | 'previous_meal') => {
+              const idKey = String(m.id || m.food_id || m.name || m.dish_name || '').toLowerCase().trim();
+              if (!idKey || seen.has(idKey)) return;
+              seen.add(idKey);
+              combinedMatches.push({ ...m, _listType: listType });
+            };
+            catalogMatches.forEach(m => addMatch(m, m.type === 'previous_meal' ? 'previous_meal' : 'brand'));
+            matchingPreviousLogs.forEach(m => addMatch(m, 'previous_meal'));
+
+            const filteredMatches = combinedMatches.filter(m => !explicitFoodTags.some(tag => tag.dbId === (m._listType === 'brand' ? (m.food_id || m.id) : (m.id || m.food_id))));
+            if (filteredMatches.length === 0) return null;
             return (
               <div className="absolute bottom-full left-0 right-0 mb-2 mx-3 bg-white dark:bg-slate-800 border border-theme-border/80 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto z-50 animate-fade-in font-sans">
                 <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700/50 flex justify-between items-center">
@@ -6262,19 +6273,22 @@ ${logsText}`);
                   <span className="text-[9px] text-slate-400">{t.clickAddToInline || "Click Add to inline"}</span>
                 </div>
                 <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                  {combinedMatches.map((item, idx) => (
-                    <div key={item._listType === 'brand' ? (item.food_id || idx) : item.id} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
+                  {filteredMatches.map((item, idx) => {
+                    const itemName = item.name || item.dish_name || '';
+                    const thumbSrc = item.imageUrl || (Array.isArray(item.imageUrls) ? item.imageUrls[0] : (item.image_url || ''));
+                    return (
+                    <div key={item._listType === 'brand' ? (item.food_id || idx) : (item.id || idx)} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
                       <div className="flex items-center gap-2.5 min-w-0">
                         {item._listType === 'previous_meal' ? (
-                          (item.imageUrl || (item.imageUrls && item.imageUrls.length > 0)) ? (
+                          thumbSrc ? (
                             <PreviousMealThumbnail
-                              src={resolveFoodImage(item.imageUrl || item.imageUrls?.[0], activeFoodLogs) || ''}
-                              alt={item.name}
-                              fallbackLabel={item.name}
+                              src={resolveFoodImage(thumbSrc, activeFoodLogs) || thumbSrc}
+                              alt={itemName}
+                              fallbackLabel={itemName}
                             />
                           ) : (
                             <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-500 font-bold text-xs shrink-0">
-                              {item.name.charAt(0).toUpperCase()}
+                              {itemName.charAt(0).toUpperCase()}
                             </div>
                           )
                         ) : (
@@ -6292,7 +6306,7 @@ ${logsText}`);
                         )}
                         <div className="min-w-0 flex flex-col">
                           <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">
-                            {item._listType === 'brand' ? item.dish_name : item.name}
+                            {item._listType === 'brand' ? item.dish_name : itemName}
                           </div>
                           <div className="text-[10px] text-theme-text-secondary truncate mt-0.5">
                             {item._listType === 'brand' ? item.chain_name : (
@@ -6318,8 +6332,8 @@ ${logsText}`);
                           <>
                             <input 
                               type="number" 
-                              defaultValue={item.portionGrams || item.weightGrams || 100}
-                              id={`prev-portion-${item.id}`}
+                              defaultValue={item.portionGrams || item.weightGrams || item.weight_grams || 100}
+                              id={`prev-portion-${item.id || idx}`}
                               className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center font-mono" 
                             />
                             <span className="text-xs text-slate-500">g</span>
@@ -6341,17 +6355,17 @@ ${logsText}`);
                               }]);
                               setInputText(prev => updateOrAddBracketItem(prev, item.dish_name, `${w}g`));
                             } else {
-                              const inputEl = document.getElementById(`prev-portion-${item.id}`) as HTMLInputElement;
-                              const w = Number(inputEl?.value) || item.portionGrams || item.weightGrams || 100;
+                              const inputEl = document.getElementById(`prev-portion-${item.id || idx}`) as HTMLInputElement;
+                              const w = Number(inputEl?.value) || item.portionGrams || item.weightGrams || item.weight_grams || 100;
                               setExplicitFoodTags(prev => [...prev, { 
-                                dbId: item.id, 
-                                name: item.name, 
+                                dbId: item.id || item.food_id, 
+                                name: itemName, 
                                 source: 'previous_meal', 
                                 originalLog: item,
-                                imageUrl: item.imageUrl || item.imageUrls?.[0],
+                                imageUrl: thumbSrc || undefined,
                                 weightGrams: Number(w)
                               }]);
-                              setInputText(prev => updateOrAddBracketItem(prev, item.name, `${w}g`));
+                              setInputText(prev => updateOrAddBracketItem(prev, itemName, `${w}g`));
                             }
                             setCatalogMatches([]);
                             setActiveSearchTerms('');
@@ -6363,7 +6377,8 @@ ${logsText}`);
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );
