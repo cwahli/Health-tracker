@@ -74,7 +74,7 @@ if (standingRun.status !== 0) {
   });
 }
 
-const currentWorkOrder = ['q-4-agent-result-table', 'q-10-dependency-audit'];
+const currentWorkOrder = ['q-4-agent-result-table', 'q-10-dependency-audit', 'R-13'];
 const packets = listActivePackets();
 packets.sort((a, b) => {
   const ia = currentWorkOrder.indexOf(a.id);

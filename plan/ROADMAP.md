@@ -39,9 +39,9 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 are **shipped**. D
 
 1. **Q-4** — `specs/active/q-4-agent-result-table.md` (`auto_go: true`). Extract-only `KIT_DRIFT`. Any builder.
 2. **Q-10** — `specs/active/q-10-dependency-audit.md` (`auto_go: true`). Hygiene only, after Q-4 gates green. Any builder.
-3. **R-13.1** — `specs/active/R-13.md`. Code allowed now. **R-13.0** (Workers Paid, secrets, Firebase hosts) is `blocked_human` — do not invent secrets. Do not start R-13.4 / R-5 / a second Cloud Run go-live in the same PR.
+3. **R-13.1** — `specs/active/R-13.md` (`auto_go: true`). **R-13.0 preflight PASS 2026-09-17** (agent CLI). Do not start R-13.4 / R-5 / a second Cloud Run go-live in the same PR.
 
-**Still `blocked_human`:** **L-5** (no milestone locale), **R-13.0** checklist. **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, Header/`App.tsx` split without a new packet, ConfirmBar as a side quest.
+**Still `blocked_human`:** **L-5** only (name a locale first — do not invent `fr`/`zh` copy). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, Header/`App.tsx` split without a new packet, ConfirmBar as a side quest.
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 705/0/0 at `3ff047d`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -82,12 +82,12 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
-| Make the site live / Cloudflare | **R-13** — [RELIABILITY.md](./RELIABILITY.md) **§12**. Packet `specs/active/R-13.md` **locked**. R-13.1 any agent; R-13.0 human. Not R-2. Not Pages Functions importing `server.ts`. |
+| Make the site live / Cloudflare | **R-13** — [RELIABILITY.md](./RELIABILITY.md) **§12**. Packet locked. R-13.0 preflight PASS. R-13.1 any agent. Not R-2. Not Pages Functions importing `server.ts`. |
 | Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: putting curator back on Analyze, reopening FDC, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive. **R-13.1** is unlocked (packet locked); **R-13.0** stays human.  
+Do **not** start: putting curator back on Analyze, reopening FDC, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive. **R-13.0** is agent preflight (PASS); **R-13.1** is next. **L-5** stays human until a locale is named.  
 Do **not** add a sixth plan file. F-10 lives here + [FOOD.md](./FOOD.md) Process.
 
 ---
@@ -350,13 +350,13 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | **R-10** | Header code-split | `themeRegistry` audit, Drive backup, `FoodCatalogAdminTab`, quota checkers lazy; Header line count may not grow | After R-9 |
 | **R-11** | `HomeTab` / `LogChat` stay out of other tabs’ first paint | Already lazy-tabbed; do not eagerly import them from Insights / History | Regression after R-10 |
 | **R-12** | One-line stall/503 count (free-tier hang rate) | After F-8.13 JSON tree has `latency_ms` / error on dispatches. A number in `AI_HANDOVER.md`, **not** a metrics product. RELIABILITY.md §11.12 **H** | LangSmith; Grafana; inner-loop Gemini |
-| **R-13** | Cloudflare go-live + AI Studio parity | Packet **locked** `specs/active/R-13.md`. R-13.1 any agent; R-13.0 `blocked_human`. Not R-2. |
+| **R-13** | Cloudflare go-live + AI Studio parity | Packet **locked**. R-13.0 agent preflight **PASS**. R-13.1 any agent. Not R-2. |
 
 ### R-13 sub-IDs (one at a time after lock)
 
 | ID | Still to do | Done when | Do not |
 |---|---|---|---|
-| **R-13.0** | Preconditions: Workers Paid, D1/R2/CORS, runtime secrets, Firebase + OAuth exact hosts, `NODE_ENV=production` | Checklist ticked in `AI_HANDOVER.md`. No `src/` / `server.ts` diff | `*.pages.dev` wildcard; `ALLOW_UNAUTH_SYNC=1` |
+| **R-13.0** | **Shipped 2026-09-17 (agent).** `scripts/r13-0-preflight.mjs`: D1+R2 exist, R2 CORS applied, Workers Paid not required, secrets stay in env, Dockerfile already `NODE_ENV=production`. Firebase exact-host allowlist is after 13.1 has a URL. | Preflight all PASS | `*.pages.dev` wildcard; `ALLOW_UNAUTH_SYNC=1`; commit `.env` |
 | **R-13.1** | Static SPA (`build:web`) + GCP Cloud Run (Option A 100% Free Plan, parallel to Render) + Firebase Spark plan | `npm run dev` still Vite on 3000; Cloud Run min-instances=0 ($0/mo, ~1.5s cold start vs Render 50s splash); job submit → D1 + R2; Google login on exact host; fresh Firebase config in `firebase-applet-config.json` ([plan/GCP_FREE_TIER_MIGRATION.md](./GCP_FREE_TIER_MIGRATION.md)) | Import `server.ts` into Pages Functions; skip `listen` on `CF_PAGES`; min-instances > 0 (incurs cost) |
 | **R-13.2** | Loopback SSE `: ping`; keep 180s abort; align stale-fail copy | Silent 180s behind orange-cloud does not 524; `server_sse_json.test.ts` green | Raise Worker CPU to “make 3 min work” on V8 |
 | **R-13.3** | `server_auth.ts` localhost-only skip; popup/redirect fallback; preview policy | Spoofed `uid` rejected in prod; Google + email verify + Drive backup on prod host | `NODE_ENV !== 'production'` as a localhost synonym |
@@ -428,7 +428,7 @@ F-11.2 / F-11.3 curator LLM  ← shipped (2026-09-16 brandCurator + t1/curator w
 Q-9 website consolidation    ← shipped (extract-only)
 Q-4 AgentResultTable thin    ← Current work (packet locked; any agent)
 Q-10 dependency audit        ← after Q-4 (packet locked; any agent)
-R-13.1 Cloudflare go-live    ← after Q-10 or in parallel if no shared files; R-13.0 human
+R-13.1 Cloudflare go-live    ← after Q-10 or in parallel if no shared files; R-13.0 PASS
 ```
 
 Do **not** open a Dictionary/FoodCard/`App.tsx` breakup without a locked packet. Q-9/Q-8.2 are green. Do **not** skip Q-4’s extract-only nodes.

@@ -167,7 +167,7 @@ Absorbed from archived `Reliability_perf.md`. **Do not start these to “finish 
 |---|---|---|---|
 | R-1 | Re-measure Firestore writes / Supabase egress on a normal day | Quota or bill spike | — |
 | R-2 | Cloudflare Pages for `dist/` only (no API) | Global static latency actually hurts | Never required for personal use. **Go-live is R-13**, not this row. |
-| R-13 | Cloudflare go-live + AI Studio parity | Human wants a public URL | See §12. Packet **locked**. R-13.1 any agent; R-13.0 human. |
+| R-13 | Cloudflare go-live + AI Studio parity | Human wants a public URL | See §12. Packet **locked**. R-13.0 preflight PASS. R-13.1 any agent. |
 | R-3 | Playwright leftover-English crawl plus Kosong empty Front Desk | After Track **S-1** string list is green; not a 10-case meal loop | Not a substitute for class goldens |
 | R-4 | Extract `server.ts` routes (food / jobs / biomarkers) | Touching the monolith anyway | Do not big-bang for free-tier |
 | R-5 | Investigate D1 as primary SQL | **After** R-1, free tier still fails | Default: stay on thin Supabase + R2 |
@@ -626,7 +626,7 @@ Do **not** import LangSmith. Do **not** add a fourth live-testing tier.
 ## 12. Cloudflare go-live (R-13) — AI Studio parity
 
 **Execute IDs:** [ROADMAP.md](./ROADMAP.md) Track R **R-13.0–R-13.5**.  
-**Locked contract:** `specs/active/R-13.md` (locked 2026-09-17; R-13.1 any agent, R-13.0 human).  
+**Locked contract:** `specs/active/R-13.md` (R-13.0 agent preflight PASS 2026-09-17; R-13.1 any agent).  
 **Class:** `LIVE_DEPLOY`. Class X when touching auth, jobs, or sync.  
 **Do not** add a sixth `plan/` file. This section is the architecture.
 
@@ -730,7 +730,7 @@ Firebase project `kempt-charmer-0r5vm`. OAuth client `615352013376-mm2cuakcdfosd
 
 ### 12.7 Phases (one ID at a time)
 
-**R-13.0 Preconditions (no app code).** Workers Paid. D1 + R2 exist; schema applied. R2 CORS for SPA origin + `http://localhost:3000`. Secrets on the **runtime** process (not the Vite build): `GEMINI_API_KEY`, D1 REST trio (Studio/Container), R2 keys, Firebase project. `NODE_ENV=production`. Firebase + OAuth allowlists (§12.5).
+**R-13.0 Preconditions (no app code, agent CLI).** `node --env-file=.env scripts/r13-0-preflight.mjs`. Workers Paid is **not** required (API is Node). D1 + R2 already exist. R2 CORS for `http://localhost:3000` + live Render origin. Secrets stay on the **runtime** process (copy from env at deploy; never Vite build, never git). `NODE_ENV=production` is already in the Dockerfile. Firebase + OAuth allowlists (§12.5) after 13.1 prints the exact prod host.
 
 **R-13.1 Ship: static SPA + existing Express in a Node process.** Default host: **Cloudflare Containers**. Alternative: Cloud Run behind Cloudflare (human pick at lock).
 

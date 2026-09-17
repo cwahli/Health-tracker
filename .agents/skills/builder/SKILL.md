@@ -5,7 +5,7 @@ description: Implement a locked journey packet. Patch Allowed files only. Do not
 
 # Builder
 
-Only after the packet is `status: locked`. ROADMAP Current work + `auto_go: true` on `specs/active/<slug>.md` **is go** — do not wait for Grok. If `auto_go: false`, wait for the human (R-13.0).
+Only after the packet is `status: locked`. ROADMAP Current work + `auto_go: true` on `specs/active/<slug>.md` **is go** — do not wait for Grok. If `auto_go: false`, wait for the human.
 
 1. Read `specs/active/<slug>.md`. If missing or `draft`, stop — that is Planner’s job. Guard will FAIL `interrupt_before builder` if you touch `src/` while draft.
 2. Check `specs/rejected/<slug>.json` to ensure the planned approach does not collide with a known-failed hypothesis.
