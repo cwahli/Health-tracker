@@ -14,6 +14,7 @@ Canonical **meal log** benchmark reference (parity with Meal_03_compare’s rigo
 | `06_menu_receipt_log` | 06 | restaurant_menu, receipt |
 | `09_restaurant_plates` | 09 | restaurant_plate, multi_image |
 | `01_branded_plate` | 01 | branded_restaurant_plate |
+| `12_chat_saved_meal` | — (app chat journey) | chat_compose_photo, brand_autocomplete_chip, saved_meal_chip, intray_portion_edit, photo_note, post_log_add_remove_edit |
 
 ## Artifacts per case
 `photos/`, `Instruction.md`, `expected.json`, `correct_results.md`, `benchmark_result.md`, `MODEL.md`, `debug_runs/`

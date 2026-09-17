@@ -19,6 +19,7 @@ const SLUGS = [
   '09_restaurant_plates',
   '10_barcode_hotpot',
   '11_seafood_oats',
+  '12_chat_saved_meal',
 ];
 const MACROS = ['weight', 'calories', 'protein', 'carbs', 'fat', 'satFat', 'fibre', 'sodium'];
 

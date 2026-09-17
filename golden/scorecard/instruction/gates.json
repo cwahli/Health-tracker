@@ -28,7 +28,9 @@
       "src/utils/nutritionTargetStatus.test.ts",
       "src/components/NutrientPieChart.test.tsx",
       "src/components/NutrientTargetRow.test.tsx",
-      "tests/golden_meals.test.ts"
+      "tests/golden_meals.test.ts",
+      "tests/golden_meal12_chat_saved_meal.test.ts",
+      "tests/food_autocomplete_composition.contract.test.ts"
     ],
     "Compare": [
       "src/utils/compareMealLogGuard.test.ts",
@@ -79,6 +81,12 @@
       "args": ["scripts/assert-scorecard-live.mjs"],
       "area": "Reliability",
       "timeout_ms": 200000
+    },
+    {
+      "id": "meal-04-bench",
+      "cmd": "node",
+      "args": ["scripts/meal-golden-bench.mjs"],
+      "area": "Meal Log"
     }
   ]
 }

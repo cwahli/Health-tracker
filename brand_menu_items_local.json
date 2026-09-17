@@ -9,7 +9,7 @@
     "serving_grams": 100,
     "nutrients": {
       "calories": 362.5,
-      "protein": 11.0,
+      "protein": 11,
       "totalFat": 6.5,
       "saturatedFat": 1.25,
       "carbohydrates": 60.1,
@@ -34,7 +34,7 @@
     "serving_grams": 100,
     "nutrients": {
       "calories": 362.5,
-      "protein": 11.0,
+      "protein": 11,
       "totalFat": 6.5,
       "saturatedFat": 1.25,
       "carbohydrates": 60.1,
@@ -109,9 +109,9 @@
       "protein": 11.7,
       "totalFat": 11.7,
       "saturatedFat": 1.7,
-      "carbohydrates": 70.0,
+      "carbohydrates": 70,
       "sugar": 0,
-      "totalFibre": 10.0,
+      "totalFibre": 10,
       "salt": 0,
       "sodium": 0
     },
@@ -145,5 +145,27 @@
     "notes": "F-8.12 brand facts scaled to per_100g from the 330 ml can lock used in-app (100 kcal, 25 g carbs, 125 mg vitamin C per can). 38 mg vitamin C per 100 g is the brand fact — never the 1000 mg can-name dose.",
     "enabled": true,
     "updated_at": "2026-09-11T00:00:00.000Z"
+  },
+  {
+    "country_code": "GB",
+    "chain_key": "mcdonalds",
+    "dish_name": "Big Mac",
+    "dish_name_key": "big_mac",
+    "serving_grams": 215,
+    "nutrients": {
+      "calories": 508,
+      "protein": 26,
+      "carbohydrates": 43,
+      "totalFat": 25,
+      "saturatedFat": 9.5,
+      "sugar": 9,
+      "totalFibre": 3.6,
+      "salt": 2.3,
+      "sodium": 920
+    },
+    "source_url": "https://www.calorieking.com/gb/en/foods/f/calories-in-sandwiches-burgers-big-mac/k5hwrgM0TOWODNnuV6LhVg",
+    "notes": "McDonald's UK published nutrition per serving (508 kcal); seeded 2026-09-17 for golden Meal_04 case 12.",
+    "enabled": true,
+    "updated_at": "2026-09-17T13:25:15.859Z"
   }
 ]

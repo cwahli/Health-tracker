@@ -1,0 +1,264 @@
+{
+ "caseId": "12",
+ "slug": "12_chat_saved_meal",
+ "mode": "log",
+ "status": "FINAL",
+ "modelRequired": "gemini-3.5-flash-lite",
+ "inputTypes": [
+  "chat_compose_photo",
+  "brand_autocomplete_chip",
+  "saved_meal_chip",
+  "intray_portion_edit",
+  "photo_note",
+  "post_log_add_remove_edit"
+ ],
+ "photos": [
+  "12_cup_white_coffee.jpg"
+ ],
+ "mealTotals": {
+  "weight": 455,
+  "calories": 681,
+  "protein": 33.0,
+  "carbs": 73.0,
+  "fat": 27.7,
+  "satFat": 10.7,
+  "fibre": 7.6,
+  "sodium": 952
+ },
+ "gtSource": "live food_log jobs job_g12_turn1_meal + job_g12_turn2_edit on local :3000 with gemini-3.5-flash-lite, 2026-09-17 (debug_runs/)",
+ "fullNutrientsAvailable": true,
+ "lockedLabelTruth": {
+  "Big Mac": {
+   "basis": "per_dish 215g",
+   "valuesAtBasis": {
+    "calories": 508,
+    "protein": 26,
+    "totalFat": 25,
+    "saturatedFat": 9.5,
+    "carbohydrates": 43,
+    "sugar": 9,
+    "totalFibre": 3.6,
+    "sodium": 920,
+    "salt": 2.3
+   },
+   "source": "McDonalds UK published via CalorieKing GB"
+  }
+ },
+ "turns": {
+  "turn1_log": {
+   "jobId": "job_g12_turn1_meal",
+   "mode": "new",
+   "text": "[Big Mac] [215g] [Coconut Juice] [200g] unsweetened white coffee, small cup",
+   "dishes": [
+    {
+     "name": "White Coffee",
+     "weightGrams": 200,
+     "source": "estimated",
+     "brandLock": false,
+     "macros": {
+      "calories": 43,
+      "protein": 2,
+      "carbohydrates": 3,
+      "totalFat": 2.5,
+      "saturatedFat": 1,
+      "sodium": 30
+     }
+    },
+    {
+     "name": "Big Mac",
+     "weightGrams": 215,
+     "source": "brand_official",
+     "brandLock": true,
+     "macros": {
+      "calories": 508,
+      "protein": 26,
+      "carbohydrates": 43,
+      "totalFat": 25,
+      "saturatedFat": 9.5,
+      "sodium": 920
+     }
+    },
+    {
+     "name": "Coconut Juice",
+     "weightGrams": 200,
+     "source": "estimated",
+     "brandLock": false,
+     "macros": {
+      "calories": 46,
+      "protein": 0.7,
+      "carbohydrates": 9,
+      "totalFat": 0.8,
+      "saturatedFat": 0.5,
+      "sodium": 25
+     }
+    }
+   ],
+   "mealKcal": 597,
+   "mealWeightGrams": 615
+  },
+  "turn2_edit": {
+   "jobId": "job_g12_turn2_edit",
+   "mode": "edit",
+   "text": "[Mr Oat Rolled Oats] [40g] add oats, drop the coconut",
+   "dishes": [
+    {
+     "name": "White Coffee",
+     "weightGrams": 200,
+     "source": "estimated",
+     "brandLock": false,
+     "nutrients": {
+      "calories": 43,
+      "protein": 2,
+      "totalFat": 2.5,
+      "saturatedFat": 1,
+      "transFat": 0,
+      "unsaturatedFat": 1.5,
+      "omega3": 0,
+      "carbohydrates": 3,
+      "sugar": 3,
+      "addedSugar": 0,
+      "totalFibre": 0,
+      "solubleFibre": 0,
+      "sodium": 30,
+      "potassium": 150,
+      "magnesium": 1.29,
+      "calcium": 3.23,
+      "iron": 0,
+      "zinc": 0,
+      "selenium": 0,
+      "iodine": 0,
+      "phosphorus": 0,
+      "vitaminD": 0,
+      "vitaminB12": 0,
+      "folate": 0,
+      "vitaminC": 0,
+      "vitaminE": 0,
+      "vitaminK": 0,
+      "vitaminA": 0,
+      "vitaminB6": 0,
+      "thiamine": 0,
+      "riboflavin": 0,
+      "niacin": 0
+     }
+    },
+    {
+     "name": "Big Mac",
+     "weightGrams": 215,
+     "source": "brand_official",
+     "brandLock": true,
+     "nutrients": {
+      "calories": 508,
+      "protein": 26,
+      "totalFat": 25,
+      "saturatedFat": 9.5,
+      "transFat": null,
+      "unsaturatedFat": 15.5,
+      "omega3": null,
+      "carbohydrates": 43,
+      "sugar": 9,
+      "addedSugar": 0,
+      "totalFibre": 3.6,
+      "solubleFibre": 1,
+      "sodium": 920,
+      "potassium": null,
+      "magnesium": null,
+      "calcium": null,
+      "iron": null,
+      "zinc": null,
+      "selenium": null,
+      "iodine": null,
+      "phosphorus": null,
+      "vitaminD": null,
+      "vitaminB12": null,
+      "folate": null,
+      "vitaminC": null,
+      "vitaminE": null,
+      "vitaminK": null,
+      "vitaminA": null,
+      "vitaminB6": null,
+      "thiamine": null,
+      "riboflavin": null,
+      "niacin": null
+     }
+    },
+    {
+     "name": "Mr Oat Rolled Oats",
+     "weightGrams": 40,
+     "source": "estimated",
+     "brandLock": false,
+     "nutrients": {
+      "calories": 130,
+      "protein": 5,
+      "totalFat": 0.2,
+      "saturatedFat": 0.2,
+      "transFat": null,
+      "unsaturatedFat": 2.6,
+      "omega3": 0,
+      "carbohydrates": 27,
+      "sugar": 0.4,
+      "addedSugar": 0,
+      "totalFibre": 4,
+      "solubleFibre": 1.5,
+      "sodium": 2,
+      "potassium": 150,
+      "magnesium": 50,
+      "calcium": 20,
+      "iron": 1.5,
+      "zinc": 1,
+      "selenium": 6,
+      "iodine": 2,
+      "phosphorus": 104,
+      "vitaminD": 0,
+      "vitaminB12": null,
+      "folate": 24,
+      "vitaminC": 0.2,
+      "vitaminE": 0.8,
+      "vitaminK": 0.8,
+      "vitaminA": 4,
+      "vitaminB6": 0.12,
+      "thiamine": 0.16,
+      "riboflavin": 0.12,
+      "niacin": 1.6
+     }
+    }
+   ],
+   "mealKcal": 681,
+   "mealWeightGrams": 455
+  }
+ },
+ "estimateBands": {
+  "White Coffee @~200g": {
+   "weightGrams": [
+    180,
+    260
+   ],
+   "calories": [
+    35,
+    55
+   ],
+   "note": "vision estimate jitter observed 200g/43kcal then 240g/47kcal across runs"
+  },
+  "Mr Oat Rolled Oats @40g": {
+   "calories": [
+    100,
+    165
+   ],
+   "note": "estimated (no brand lock: local-file tag id unresolvable); label-implied 160kcal; portion dry-vs-cooked basis ambiguous"
+  }
+ },
+ "provenance": {
+  "setup": "turn0 coconut 250ml analyzed live (debug_runs/debug-job_g12_turn0_coconut.md) -> setup/prior_coconut_log.json",
+  "brandSeed": "Big Mac via POST /api/brand-menu-items/import (McDonalds UK published), D1",
+  "photoCrop": "cup rect left=1100 top=20 w=420 h=490 @1600x1204 from prototype/meallog/images/05_cafe_waffles_coffee.jpg"
+ },
+ "verifyFlags": [
+  "coconut_200g_carries_250ml_log_macros_verbatim (previous_meal tag: no portion rescale; weight recorded 200g)",
+  "oats_estimated_no_brand_lock (local tag id)",
+  "oats_dry_vs_cooked_basis_ambiguous",
+  "coffee_vision_jitter_banded",
+  "turn2_column_sums_equal_meal_totals_exactly",
+  "no_phantom_dishes",
+  "coconut_absent_turn2"
+ ],
+ "sourceOfTruth": "golden/meal/Meal_04_log/12_chat_saved_meal (this folder); live reruns must stay inside estimateBands with exact turn-2 column sums"
+}

@@ -10,7 +10,7 @@ Each `Meal_NN/` folder is one computation use case: photos + `Instruction.md`
 | Meal_01 | 3 (log → portion patch → correction patch) | edit = verdict/advice patch + full `dishUpdates` with coordinates, never regeneration | `tests/golden_meal01.test.ts` (parity, no LLM) + `prototype/tests/meal01-golden.live.spec.ts` (demo always; live soak behind `LIVE_MEAL01=1`) |
 | Meal_02 | 1 (auto-split 5+4 parallel workers) | 19 refIds across 9 photos (barcodes, grocery receipts, prepared foods); merge by refId | `prototype/tests/armC-meal02.spec.ts` (Arm C Playwright fixture & live soak) |
 | Meal_03_compare | 1–2 (pre-meal evaluate → optional log) | 6 retail & dining sets (menus, labels, shelves); 10-nutrient allowance vectors (serving & 100g); <=10% macro variance grouping; OCR lock; bounding box quadrants; intra-group health sorting | `tests/golden_meal03.test.ts` (parity, non-LLM) + `prototype/tests/compare-mode-six-cases.spec.ts` (Playwright E2E 6/6 cases) |
-| Meal_04_log | 1–2 (log; portion-clarify/edit on 08/11) | Mode A matrix from prototype 01/02/06/08/09/10/11: nutrition label, brand pack, barcode, menu-as-log, restaurant plates, receipt+brackets | Fill `benchmark_result.md` per case via Vertex flash-lite; runner harness `npm run test:benchmark:food` |
+| Meal_04_log | 1–2 (log; portion-clarify/edit on 08/11; chat chips + post-log add/remove on 12) | Mode A matrix from prototype 01/02/06/08/09/10/11 plus app-chat case 12: nutrition label, brand pack, barcode, menu-as-log, restaurant plates, receipt+brackets, brand/saved-meal autocomplete chips, photo note, in-tray portion edit | Fill `benchmark_result.md` per case via Vertex flash-lite; runner harness `npm run test:benchmark:food` |
 
 ## Bench entrypoint
 
