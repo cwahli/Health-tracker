@@ -25,3 +25,4 @@ tmp/
 # Aider local
 .aider*
 scripts/_qwen_ping.txt
+.freebuff/
