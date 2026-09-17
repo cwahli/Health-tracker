@@ -446,7 +446,7 @@ R-13.1 Cloudflare go-live    ← after Q-10 or in parallel if no shared files; R
 ratchet the `CATALOG.json` ceiling of any file that shrinks):
 
 ```text
-q-11-1-pures        utils/appProfileUtils.ts (move + unit test)      App.tsx 9,101 -> ~9,003   auto_go: true
+q-11-1-pures        utils/appProfileUtils.ts (move + unit test)      App.tsx 9,101 -> 9,004    DONE 06df05b guardrails + Q-11.1
 q-11-2-auth-session hooks/useAuthSession.ts (auth + real sign-out)   -> ~8,600                human go
 q-11-3-job-poller   hooks/useJobPoller.ts (JobStore poll loop)       -> ~8,300                human go
 q-11-4-profile-hook hooks/useAppProfile.ts (real profile source)     -> ~8,000                human go

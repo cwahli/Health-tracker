@@ -84,6 +84,15 @@ function lineCount(rel) {
   return t.split(/\r?\n/).length;
 }
 
+function existsAtHead(rel) {
+  try {
+    execSync(`git cat-file -e ${JSON.stringify(`HEAD:${rel}`)}`, { cwd: root, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function changedLineCount(rel) {
   try {
     const diff = execSync(`git diff HEAD -- ${JSON.stringify(rel)}`, {
@@ -181,6 +190,10 @@ for (const file of changed) {
   if (frozen.has(norm) && isApplication(norm)) frozenTouched.push(norm);
   if (!allowed.has(norm) && isApplication(norm)) extras.push(norm);
   if (allowed.has(norm) && (meta.edit_mode || 'patch') === 'patch') {
+    // A path that does not exist at HEAD cannot be a rewrite — its whole body is
+    // an addition. Without this, every packet that adds a module (Q-11) fails on
+    // its own new files. In-place rewrites of existing files are still caught.
+    if (!existsAtHead(norm)) continue;
     const total = lineCount(norm);
     const { added, removed } = changedLineCount(norm);
     const churn = added + removed;

@@ -1,15 +1,15 @@
 {
-  "note": "Q-11 parity baseline (captured at 338b252; ratcheted per milestone via --update).",
-  "capturedFromCommit": "338b252",
+  "note": "Q-11 parity baseline. Regenerated only with --update; falling metrics are a regression.",
+  "capturedFromCommit": "06df05b",
   "types": {
     "lines": 558,
     "declarations": 30,
     "anyAliases": 0
   },
   "i18nKeys": 3960,
-  "appLines": 9101,
+  "appLines": 9004,
   "ceilings": {
-    "src/App.tsx": 9200,
+    "src/App.tsx": 9010,
     "src/components/BiomarkerDictionaryModal.tsx": 6640,
     "src/components/chat-cards/FoodCard.tsx": 4200,
     "src/components/HomeTab.tsx": 3200,

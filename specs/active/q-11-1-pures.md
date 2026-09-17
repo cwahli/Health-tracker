@@ -5,7 +5,7 @@ class: GOD_FILE_GROWTH
 skill: specify
 edit_mode: patch
 who: any-agent
-auto_go: true
+auto_go: false # LANDED — do not re-execute; see the progress log in specs/active/Q-11.md
 allowed_files:
   - src/App.tsx
   - src/utils/appProfileUtils.ts
@@ -39,6 +39,9 @@ gate:
 ---
 
 # Packet: Q-11.1 — pure helpers out of `App.tsx` (milestone 1 of 9)
+
+> **LANDED** in `763793a` (guardrails `06df05b`). `App.tsx` 9,101 → 9,004; `CATALOG.json` ceiling
+> 9,200 → 9,010. Kept in `specs/active/` so its gate commands stay runnable; `auto_go` is off.
 
 Part of the umbrella `specs/active/Q-11.md`. Read its Laws first; they override anything here.
 
