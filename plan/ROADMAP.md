@@ -42,7 +42,7 @@ Q-11 **is not done.** `7d94def` stubbed the shell; `q-11-restore-auth-profile` p
 1. **Q-11.7 DONE** — `31aece2` (ProfileModal out of `Header.tsx`). Packet retired to `specs/done/q-11-7-header-profile.SUPERSEDED.md`; its `≤ 1,200 / < 200 KB` target was unreachable from the profile portal alone and is carried by 11.12.
 2. **Q-11.10 DONE** — `e2ab233`. App `handle*` bodies → `useFoodLogActions` / `useBiomarkerActions` / `useReportActions` (App.tsx 3,114 → 1,098). `specs/done/`.
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
-4. **Q-11.12 OPEN** — `specs/active/q-11-12-header-residual.md`. The last god file: `Header.tsx` 3,544 / 208 KB → ≤ 1,200 lines / < 200 KB. Measured scope: theme-customizer portal 1,330 lines / 98 KB + ~700 lines of theme state → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`; DB overlay 746 / 51 KB → `DbInteractionsOverlay.tsx`; inspector 70 / 4 KB. Studio-blocking. Do this next, one node per commit.
+4. **Q-11.12 OPEN (node 2 DONE)** — `specs/active/q-11-12-header-residual.md`. The last god file. **Node 2 landed (`cdbf2cd`)**: `#db-interactions-overlay` → `DbInteractionsOverlay.tsx`, moved byte-identically, so `Header.tsx` is 3,545 → **2,840 lines / 160 KB** — the >200 KB Studio blocker is gone. **Next is node 1**: theme customizer (1,330-line portal + ~700 lines of theme state) → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, to reach ≤ 1,200 lines. Measured scope: theme-customizer portal 1,330 lines / 98 KB + ~700 lines of theme state → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`; DB overlay 746 / 51 KB → `DbInteractionsOverlay.tsx`; inspector 70 / 4 KB. Studio-blocking. Do this next, one node per commit.
 5. **R-13.1 PARKED** — `specs/active/R-13.md`. Site is already live on Render. Extra Cloudflare/Containers public URL is optional infra, not a blocker for Q-11. Do not start it in the same working tree as a Q-11 packet.
 6. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-11 files.
 
@@ -461,7 +461,9 @@ q-11-restore-auth-profile  real sync + AppShell/Tabs/Modals         DONE 4acc632
 q-11-7-header-profile    Header → ProfileModal                      DONE 31aece2 (residual → 11.12)
 q-11-10-app-handlers     use{FoodLog,Biomarker,Report}Actions       DONE e2ab233  App.tsx → 1,098
 q-11-11-wiring-ratchet   App.tsx wiring only                        DONE App.tsx → 350 / 14,416 B
-q-11-12-header-residual  useThemeCustomizer + 2 screen files        OPEN  Header 3,544 / 208 KB → ≤ 1,200
+q-11-12-header-residual  useThemeCustomizer + 2 screen files        OPEN  Header 3,545/208KB → 2,840/160KB; theme screen left
+                         Node 2 DONE cdbf2cd  DbInteractionsOverlay.tsx (746 lines moved byte-identical)
+                         Node 1 NEXT — theme customizer (1,330-line portal + ~700 lines of theme state) → ≤ 1,200
 ```
 
 Burned: `a14abea` and `7d94def` rewrote instead of moving (deleted AuthScreen, stubbed
