@@ -95,4 +95,42 @@ test.describe('Track T: staged tray', () => {
     await expect(rowBare.locator('img')).toHaveCount(0);
     expect(requested.filter((u) => u.includes('pm_bare'))).toEqual([]);
   });
+
+  test('T-2: gram inputs keep readable text color in dark mode', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.route('**/api/food/search*', async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            results: [
+              { food_id: 'b1', dish_name: 'Oat Brand Cereal', imageUrl: PIXEL, serving_grams: 100 },
+              { type: 'previous_meal', id: 'pm2', name: 'Oat Morning Porridge', portionGrams: 280 },
+            ],
+          }),
+        });
+      });
+
+      await page.locator('#food-chat-input').fill('oat');
+
+      const brandInput = page.locator('#tag-portion-b1');
+      const prevInput = page.locator('#prev-portion-pm2');
+      await expect(brandInput).toBeVisible({ timeout: 15000 });
+      await expect(prevInput).toBeVisible({ timeout: 15000 });
+      // Text must be light in dark mode (pre-fix it computed to rgb(0,0,0) on dark slate).
+      const lightnessOf = (selector: string) =>
+        page.locator(selector).evaluate((el) => {
+          const color = getComputedStyle(el as HTMLInputElement).color;
+          const oklch = color.match(/oklch\(\s*([\d.]+)/);
+          if (oklch) return Number(oklch[1]);
+          const m = (color.match(/[\d.]+/g) || []).map(Number);
+          const [r, g, b] = [m[0] || 0, m[1] || 0, m[2] || 0].map((v) => {
+            v /= 255;
+            return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        });
+      expect(await lightnessOf('#tag-portion-b1')).toBeGreaterThanOrEqual(0.5);
+      expect(await lightnessOf('#prev-portion-pm2')).toBeGreaterThanOrEqual(0.5);
+    });
 });

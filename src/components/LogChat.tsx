@@ -6313,7 +6313,7 @@ ${logsText}`);
                               type="number" 
                               defaultValue={item.serving_grams || tagPortionPreFill || 100}
                               id={`tag-portion-${item.food_id || idx}`}
-                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center font-mono" 
+                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-center font-mono" 
                             />
                             <span className="text-xs text-slate-500">g</span>
                           </>
@@ -6323,7 +6323,7 @@ ${logsText}`);
                               type="number" 
                               defaultValue={item.portionGrams || item.weightGrams || item.weight_grams || 100}
                               id={`prev-portion-${item.id || idx}`}
-                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center font-mono" 
+                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-center font-mono" 
                             />
                             <span className="text-xs text-slate-500">g</span>
                           </>
