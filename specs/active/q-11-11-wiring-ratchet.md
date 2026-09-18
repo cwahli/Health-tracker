@@ -9,6 +9,7 @@ auto_go: true
 blocked_by: q-11-10-app-handlers
 allowed_files:
   - src/App.tsx
+  - src/hooks/useAppShellState.ts
   - src/components/CATALOG.json
   - scripts/parity-baseline.json
   - AI_HANDOVER.md
@@ -58,6 +59,14 @@ ratcheted to the achieved count. Record final sizes in `AI_HANDOVER.md`.
 1. Move leftover `useState` / `useEffect` that are not already in a hook
    into the hook that owns that domain (food / biomarker / report / sync).
    Prefer extending Q-11.10 hooks over new files.
+   **Amendment 2026-09-18 (human-approved: new shell-state hook path):**
+   all Q-11.10 hooks are frozen, so leftovers go into one new module
+   `src/hooks/useAppShellState.ts` with two hooks: `useAppShellState()`
+   (no params — owns every store, wrapper, ref-target-independent
+   callback, and store-only effect) and `useAppShellEffects()` (late
+   call — owns `isFoodChatOpen` derivation plus the effects that close
+   over `profile` / `saveAndSync` / `activeJobId`). Bodies move verbatim;
+   `useRef(profile)`-style first-render ref values stay in App.tsx.
 2. App.tsx: imports, hook calls, `return <AppShell … />`. No `handle*`
    function bodies.
 3. `CATALOG.json` `src/App.tsx` ceiling = achieved line count.

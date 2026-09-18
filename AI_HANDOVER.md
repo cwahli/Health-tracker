@@ -51,6 +51,7 @@
 
 ## Now
 - **2026-09-18 Q-11.7 LANDED (`31aece2`) + Q-11.10 LANDED (`e2ab233`):** ProfileModal extracted (Header 3937→3544, residual: theme/db splits need own packets); App.tsx 3114→1098 via useFoodLogActions/useBiomarkerActions/useReportActions, CATALOG ratcheted. All named gates green on each packet.
+- **2026-09-18 Q-11.11 LANDED:** App.tsx 1098→**350 lines / 14,416 B** (wiring only) via amended-packet `src/hooks/useAppShellState.ts` (769 lines: `useAppShellState` stores + `useAppShellEffects` late effects; first-render `useRef` values stay in App; `profileForSanitizeRef` late-bind). Final: Header 3544, AppModals 2634, useFoodLogActions 352, useBiomarkerActions 1770, useReportActions 175. CATALOG App ceiling →350; parity `--update` (appLines 8803→350, types/i18n unchanged). Gates: tsc 0, parity/budgets/egress PASS, build:web 6s, auth-session 2/2, guard PASS, spec-diff 4/4, shell-smoke 11/11. Note: `npm run build:web` regenerates `src/git-version.generated.ts` — reverted before guard (not part of packet).
 - **2026-09-18 Q-11.11 STOPPED per its own escape hatch (no code changed):** App.tsx 1098 lines / 48KB; every leftover state's owning hook is frozen by the packet and allowed_files permits no new file — needs a packet revision (unfreeze one hook or approve a fourth file) before the ≤350 / <30KB wiring goal is reachable.
 
 ## Notes
