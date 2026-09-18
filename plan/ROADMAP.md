@@ -13,7 +13,7 @@
 Laws: `docs/agent/domains/{biomarkers,food-calc,sync}.md`  
 WIP: `AI_HANDOVER.md` (header only) · Completed: `archive/` · `plan/archive/`
 
-**As of 2026-09-17.** Scorecard sealed ALL GREEN **744/0/0** @ `5615f1e` (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent (Gemini / OpenCode / Cline / Antigravity). Do not reopen FDC or put curator back on Analyze.
+**As of 2026-09-18.** Scorecard sealed ALL GREEN **744/0/0** @ `5615f1e` (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Q-11 shell split is in progress** — App.tsx is Studio-sized (3,114 / 135 KB) with real auth/sync; Header and remaining App handlers are not done. **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent. Do not reopen FDC or put curator back on Analyze.
 
 ---
 
@@ -31,17 +31,21 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ---
 
-## Current work — Grok lock done; any agent executes packets (2026-09-17)
+## Current work — finish Q-11 (2026-09-18)
 
-B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 are **shipped**. Do not restart them.
+B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are **shipped**. Do not restart them.
 
-**Do this, in order. Packets are locked = go.**
+Q-11 **is not done.** `7d94def` stubbed the shell; `q-11-restore-auth-profile` put real auth/sync back into Studio-sized files. Remaining is extract-only, one packet per commit.
 
-1. **Q-4 DONE** — q-4a→q-4b→q-4c→q-4d COMPLETE (`specs/done/`), ART 2975→1501, ceiling 1800, merged to `main`. Parent packet `superseded`.
-2. **Q-10 COMPLETE** — `specs/done/q-10-dependency-audit.md`, removals only, merged to `main`.
-3. **R-13.1 IN PROGRESS** — `specs/active/R-13.md` (`auto_go: true`). **R-13.0 preflight PASS 2026-09-17** (agent CLI). Green so far on `journey/r-13.1`: `specs/active/R-13.md` restored (was missing), `wrangler.jsonc` (assets-only SPA), `server.ts` `PORT` env with 3000 default — tsc 0, 53 vitest, free-tier MASTER PASS, Guard PASS, spec-diff PASS, Vite-on-3000 parity re-proven. **Remaining is blocked on a human providing cloud credentials** and unlocking §12.10 Decision 1 (Containers vs Cloud Run) + Decision 2 (public hostname): the "Done when" needs a live public URL. Do not start R-13.4 / R-5 / a second Cloud Run go-live in the same PR. Do not buy Workers Paid (§12.4 vs §12.7 conflict — see AI_HANDOVER).
+**Do this, in order. Packets are locked = go (`auto_go: true`).**
 
-**Still `blocked_human`:** **L-5** only (name a locale first — do not invent `fr`/`zh` copy). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, Header/`App.tsx` split without a new packet, ConfirmBar as a side quest.
+1. **Q-11.7 OPEN** — `specs/active/q-11-7-header-profile.md`. Extract ProfileModal from `Header.tsx` (3,937 / 231 KB → Header < 200 KB, ≤ 1,200 lines). Studio-blocking. Do this first.
+2. **Q-11.10 OPEN** — `specs/active/q-11-10-app-handlers.md`. Move remaining `handle*` bodies out of `App.tsx` (3,114 → ≤ 1,200) into `useFoodLogActions` / `useBiomarkerActions` / `useReportActions`. After 11.7.
+3. **Q-11.11 OPEN** — `specs/active/q-11-11-wiring-ratchet.md`. App.tsx ≤ 350 lines / < 30 KB wiring only; ratchet CATALOG. After 11.10.
+4. **R-13.1 PARKED** — `specs/active/R-13.md`. Site is already live on Render. Extra Cloudflare/Containers public URL is optional infra, not a blocker for Q-11. Do not start it in the same working tree as a Q-11 packet.
+5. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-11 files.
+
+**Still `blocked_human`:** **L-5** only (name a locale first — do not invent `fr`/`zh` copy). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -435,47 +439,45 @@ B0 / fill-template C1–C7     ← shipped
 Q-8.6 / F-10.8 outer         ← shipped (2026-09-16 job_1789535793972, 74/74 pass, 0 stalls)
 F-11.2 / F-11.3 curator LLM  ← shipped (2026-09-16 brandCurator + t1/curator wire)
 Q-9 website consolidation    ← shipped (extract-only)
-Q-4 AgentResultTable thin    ← Current work (q-4a→q-4b→q-4c→q-4d locked; any agent)
-Q-10 dependency audit        ← after Q-4 (packet locked; any agent)
-Q-11 App shell decoupling     ← umbrella locked (specs/active/Q-11.md); milestone ladder below; move-only, parity-guarded
-R-13.1 Cloudflare go-live    ← after Q-10 or in parallel if no shared files; R-13.0 PASS
+Q-4 AgentResultTable thin    ← shipped
+Q-10 dependency audit        ← shipped
+Q-11 App shell decoupling     ← IN PROGRESS — finish 11.7 → 11.10 → 11.11 (packets in specs/active/)
+R-13.1 Cloudflare extra URL  ← PARKED; Render already live
 ```
 
-**Q-11 milestone ladder** (one milestone per commit, one module per milestone; umbrella laws in
-`specs/active/Q-11.md` — move-only, no deletions, `src/types.ts` frozen, parity guard green,
-ratchet the `CATALOG.json` ceiling of any file that shrinks):
+**Q-11 milestone ladder** (one milestone per commit; move-only; `src/types.ts` frozen;
+parity guard green; ratchet `CATALOG.json` when a file shrinks). Measured `main` @ `4acc632`:
 
 ```text
-q-11-1-pures        utils/appProfileUtils.ts (move + unit test)      App.tsx 9,101 -> 9,004    DONE 06df05b guardrails + Q-11.1
-q-11-2-auth-session hooks/useAuthSession.ts (auth + real sign-out)   9,004 -> 8,803          DONE 818808f
-q-11-3-job-poller   hooks/useJobRuntime.ts (job lifecycle + credits) -> <= 8,550              BLOCKED on 3a/3b prep (re-scoped; evidence in packet)
-q-11-3a-state-order hoist 4 useState decls + the isFoodChatOpen dep  App.tsx unchanged        prep for 3c, its own commit
-q-11-3b-persist-ref inject the saveAndSync callback through a ref    App.tsx unchanged        prep for 3c, its own commit
-q-11-4-profile-hook hooks/useAppProfile.ts (real profile source)     -> ~8,000                human go
-q-11-5-sync-hook    hooks/useAppSync.ts (Supabase/Firestore merge)   -> ~7,300                human go; no stubs
-q-11-6-tabs-modals  components/App{Tabs,Modals}.tsx                 -> ~6,600                human go; 97-prop surface measured
-q-11-7-shell-header components/AppShell.tsx + Header/ProfileModal   -> ~6,200                human go
-q-11-8-i18n-split   utils/translations/{en,fr,zh,id}.ts             App.tsx unchanged        DONE (1,998-line packs; was a 190KB file)
-q-11-9-assembly     src/App.tsx as a hook wiring layer              -> <= 1,200              human go
+q-11-1-pures             appProfileUtils.ts                         DONE
+q-11-2-auth-session      useAuthSession.ts (real sign-out)          DONE 818808f
+q-11-3a/b/c              useJobRuntime.ts                           DONE acb278e
+q-11-4-profile-hook      useAppProfile.ts (loadUserData)            DONE ce20b19
+q-11-8-i18n-split        translations/{en,id,fr,zh}.ts             DONE 23ddc83
+q-11-restore-auth-profile  real sync + AppShell/Tabs/Modals         DONE 4acc632
+                         App.tsx 9,101/373KB → 3,114/135KB
+                         (11.5–11.6+11.9-partial; no stubs)
+q-11-7-header-profile    Header → ProfileModal                      OPEN  (Header 3,937 / 231 KB)
+q-11-10-app-handlers     use{FoodLog,Biomarker,Report}Actions       OPEN  App.tsx → ≤ 1,200
+q-11-11-wiring-ratchet   App.tsx wiring only                        OPEN  App.tsx → ≤ 350
 ```
 
-Standing reds as of 2026-09-17: `assert-budgets` is **green** (LogChat trimmed to its ceiling, not
-raised) and the vitest suite is **1,777 passed / 0 failed**. The one remaining scorecard failure is
-`journey-guard: spec_ambiguous`, caused by `F-13.md` / `Q-11.md` / `R-13.md` being active at the same
-time — the scorecard's gate manifest calls `journey-guard` with no id and is hash-sealed, so that
-needs a process call by the F-13/R-13 owners.
+Burned: `a14abea` and `7d94def` rewrote instead of moving (deleted AuthScreen, stubbed
+sync). Do not retry. `specs/done/q-11-5`…`q-11-9` were marked done without landing —
+do not execute those files; use the OPEN ids above.
 
-Any agent: pick the lowest milestone that is not committed, pass its `node scripts/journey-guard.mjs
-<id>` and `node scripts/assert-spec-diff.mjs <id>` gates, and stop when it is green. Do not chain
-two milestones in one working tree — they all edit `src/App.tsx`.
+Always run `node scripts/journey-guard.mjs <id>` (F-13 + R-13 + these packets make a
+bare `journey-guard` `spec_ambiguous` — pre-existing). Do not chain two OPEN
+milestones in one working tree.
 
-Do **not** open a Dictionary/FoodCard/`App.tsx` breakup without a locked packet. `App.tsx` has one: **Q-11** (`specs/active/Q-11.md`, move-only, `src/types.ts` frozen). Dictionary/FoodCard still need their own. Q-9/Q-8.2 are green. Do **not** skip Q-4’s extract-only nodes.
+Do **not** open a Dictionary/FoodCard/`LogChat.tsx` breakup without a **new** locked
+packet. Q-9/Q-8.2 are green.
 
 ### Who does which
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work packets: **Q-4** then **Q-10** then **R-13.1**. One class, named vitest. | Catalog / process lock only when a **new** primitive or new god-file split is needed. Already done for Q-4/Q-10/R-13. |
+| Prefer | Current work: **Q-11.7** then **Q-11.10** then **Q-11.11**. One class, named vitest. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---
