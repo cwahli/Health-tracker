@@ -198,3 +198,16 @@ export function extractAutocompleteQuery(text: string): string {
 }
 
 
+
+/**
+ * Clears search-term residue from the composer after a match is staged (T-5).
+ * Returns '' only when the text holds nothing but the active search terms
+ * (exact match, case-insensitive) — genuine questions are left untouched.
+ */
+export function stripSearchResidue(text: string, searchTerms: string): string {
+  const t = (text || '').trim();
+  const q = (searchTerms || '').trim().toLowerCase();
+  if (!t || !q) return text;
+  if (t.toLowerCase() === q) return '';
+  return text;
+}

@@ -40,7 +40,7 @@ import { checkQuotaFlag } from '../utils/firestoreUtils';
 import { get as idbGet } from 'idb-keyval';
 import { pruneLocalStorageToFreeSpace, safeIdbSet } from '../utils/storageUtils';
 import { resolveFoodImage } from '../utils/imageResolver';
-import { removeBracketItem, parseBracketItems, extractAutocompleteQuery } from '../utils/bracketPortionParser';
+import { removeBracketItem, parseBracketItems, extractAutocompleteQuery, stripSearchResidue } from '../utils/bracketPortionParser';
 import { JobStore } from '../jobs/JobStore';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
 import { executeFoodAgent } from '../jobs/FoodAgentExecutor';
@@ -1949,8 +1949,8 @@ ${logsText}`);
         textToSend = 'Please review my full set of biomarker data and log history.';
       }
     }
-    if (!textToSend && finalImages.length === 0) {
-      console.log('[handleSend] Blocked — both text and images are empty.');
+    if (!textToSend && finalImages.length === 0 && explicitFoodTags.length === 0) {
+      console.log('[handleSend] Blocked — text, images and staged tags are all empty.');
       return;
     }
     const isHandoffContinuation = !!extraOptions?.isHandoffContinuation;
@@ -6354,6 +6354,9 @@ ${logsText}`);
                                 weightGrams: Number(w)
                               }]);
                             }
+                            // T-5: residue-only query text served its purpose — clear it so
+                            // submit routes the staged tray via the composite path.
+                            setInputText(prev => stripSearchResidue(prev, activeSearchTerms));
                             setCatalogMatches([]);
                             setActiveSearchTerms('');
                           }}
@@ -6757,7 +6760,7 @@ ${logsText}`);
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !isAnalyzing && !isSubmitting && !isSendingRef.current && !isCompressing) {
                     const triggerText = inputText.trim() || autoSendMessage || (reviewBiomarkerKey ? buildBiomarkerReviewPrefill(reviewBiomarkerKey, undefined, biomarkers, profile) : (selectedImages.length > 0 ? 'Analyze this meal photo.' : ''));
-                    if (triggerText || selectedImages.length > 0) {
+                    if (triggerText || selectedImages.length > 0 || explicitFoodTags.length > 0) {
                       handleSend(triggerText || undefined);
                     }
                   }
@@ -6771,7 +6774,7 @@ ${logsText}`);
                 onClick={() => {
                   if (isAnalyzing || isSubmitting || isSendingRef.current || isCompressing) return;
                   const triggerText = inputText.trim() || autoSendMessage || (reviewBiomarkerKey ? buildBiomarkerReviewPrefill(reviewBiomarkerKey, undefined, biomarkers, profile) : (selectedImages.length > 0 ? 'Analyze this meal photo.' : ''));
-                  if (triggerText || selectedImages.length > 0) {
+                  if (triggerText || selectedImages.length > 0 || explicitFoodTags.length > 0) {
                     handleSend(triggerText || undefined);
                   }
                 }}

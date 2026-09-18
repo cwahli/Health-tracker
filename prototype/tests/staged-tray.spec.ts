@@ -197,7 +197,74 @@ test.describe('Track T: staged tray', () => {
     await expect(page.getByText('STAGED ITEMS')).toBeVisible({ timeout: 15000 });
     await expect(page.getByText('Oat Single Porridge', { exact: true }).first()).toBeVisible();
 
-    // Chat box must NOT echo the bracket tag.
-    await expect(composer).toHaveValue('oat');
+    // Chat box must NOT echo the bracket tag (residue-only query is cleared).
+    await expect(composer).toHaveValue('');
+  });
+
+  test('T-5: staged-only submit composes instantly', async ({ page }) => {
+    await page.route('**/api/food/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          results: [
+            { type: 'previous_meal', id: 'pm5', name: 'Oat Submit Porridge', portionGrams: 130, calories: 150, protein: 5, carbohydrates: 27, totalFat: 3 },
+          ],
+        }),
+      });
+    });
+
+    const composer = page.locator('#food-chat-input');
+    await composer.fill('oat');
+    const row = page
+      .getByText('Oat Submit Porridge', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await row.getByRole('button', { name: /add/i }).click();
+    await expect(page.getByText('STAGED ITEMS')).toBeVisible({ timeout: 15000 });
+
+    await page.locator('#food-chat-send-btn').click();
+
+    // Instant composite path: breakdown card appears, tray clears.
+    await expect(page.getByText(/Here is the nutrition breakdown for.*Oat Submit Porridge/i).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('STAGED ITEMS')).toHaveCount(0);
+  });
+
+  test('T-5: staged plus genuine question still routes to agent', async ({ page }) => {
+    let submitCalled = false;
+    await page.route('**/api/jobs/submit', async (route) => {
+      submitCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, jobId: 'job_stub_t5', status: 'running' }),
+      });
+    });
+
+    await page.route('**/api/food/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          results: [
+            { type: 'previous_meal', id: 'pm6', name: 'Oat Question Porridge', portionGrams: 130 },
+          ],
+        }),
+      });
+    });
+
+    const composer = page.locator('#food-chat-input');
+    await composer.fill('oat');
+    const row = page
+      .getByText('Oat Question Porridge', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await row.getByRole('button', { name: /add/i }).click();
+    await expect(page.getByText('STAGED ITEMS')).toBeVisible({ timeout: 15000 });
+
+    // A genuine question is preserved and takes the agent path, not composite.
+    await composer.fill('is this healthy');
+    await page.locator('#food-chat-send-btn').click();
+    await page.waitForTimeout(3000);
+    expect(submitCalled).toBe(true);
+    await expect(page.getByText(/Here is the nutrition breakdown for/i)).toHaveCount(0);
   });
 });

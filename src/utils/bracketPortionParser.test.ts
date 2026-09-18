@@ -4,7 +4,8 @@ import {
   parseBracketItems,
   formatBracketItem,
   updateOrAddBracketItem,
-  removeBracketItem
+  removeBracketItem,
+  stripSearchResidue
 } from './bracketPortionParser';
 
 describe('bracketPortionParser', () => {
@@ -61,5 +62,18 @@ describe('bracketPortionParser', () => {
     const text = 'I had [Pret Egg Sandwich] [150g] and [Coffee] [1 serving]';
     const removed = removeBracketItem(text, 'Pret Egg Sandwich');
     expect(removed).toBe('I had and [Coffee] [1 serving]');
+  });
+});
+
+describe('stripSearchResidue (T-5)', () => {
+  it('clears residue-only text after staging', () => {
+    expect(stripSearchResidue('oat', 'oat')).toBe('');
+    expect(stripSearchResidue('  Oat Porridge  ', 'oat porridge')).toBe('');
+  });
+
+  it('keeps genuine questions and empty inputs untouched', () => {
+    expect(stripSearchResidue('is oat healthy', 'oat')).toBe('is oat healthy');
+    expect(stripSearchResidue('', 'oat')).toBe('');
+    expect(stripSearchResidue('oat', '')).toBe('oat');
   });
 });
