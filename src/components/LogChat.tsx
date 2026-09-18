@@ -19,12 +19,12 @@ import LLMSelector from './LLMSelector';
 import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
-import { computeRemainingAllowance } from '../utils/compositeFoodCalculation';
+import { computeRemainingAllowance, calculateCompositeMeal } from '../utils/compositeFoodCalculation';
 import { isMealFollowUpEdit, mostRecentActiveMeal } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
-import { blobToDurableDataUrl } from '../utils/foodImageSources';
+import { blobToDurableDataUrl, collectSavedMealImageUrls } from '../utils/foodImageSources';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 const FullScreenLogViewer = lazyWithRetry(() => import('./FullScreenLogViewer'));
 const frontDeskAbortControllers = new Map<string, AbortController>();
@@ -41,7 +41,6 @@ import { get as idbGet } from 'idb-keyval';
 import { pruneLocalStorageToFreeSpace, safeIdbSet } from '../utils/storageUtils';
 import { resolveFoodImage } from '../utils/imageResolver';
 import { updateOrAddBracketItem, removeBracketItem, parseBracketItems, extractAutocompleteQuery } from '../utils/bracketPortionParser';
-import { calculateCompositeMeal } from '../utils/compositeFoodCalculation';
 import { JobStore } from '../jobs/JobStore';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
 import { executeFoodAgent } from '../jobs/FoodAgentExecutor';
@@ -6264,7 +6263,8 @@ ${logsText}`);
                 <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
                   {filteredMatches.map((item, idx) => {
                     const itemName = item.name || item.dish_name || '';
-                    const thumbSrc = item.imageUrl || (Array.isArray(item.imageUrls) ? item.imageUrls[0] : (item.image_url || ''));
+                    const savedImgs = collectSavedMealImageUrls(item, activeFoodLogs);
+                    const thumbSrc = savedImgs[0] || '';
                     return (
                     <div key={item._listType === 'brand' ? (item.food_id || idx) : (item.id || idx)} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -6350,7 +6350,7 @@ ${logsText}`);
                                 dbId: item.id || item.food_id, 
                                 name: itemName, 
                                 source: 'previous_meal', 
-                                originalLog: item,
+                                originalLog: { ...item, imageUrl: thumbSrc || item.imageUrl, imageUrls: savedImgs },
                                 imageUrl: thumbSrc || undefined,
                                 weightGrams: Number(w)
                               }]);
@@ -6381,7 +6381,7 @@ ${logsText}`);
               </span>
               <div className="flex items-center gap-1.5 min-w-0">
                 {explicitFoodTags.map((tag, tIdx) => {
-                  const thumbSrc = tag.imageUrl || (tag.originalLog ? resolveFoodImage(tag.originalLog.imageUrl || tag.originalLog.imageUrls?.[0], activeFoodLogs) : undefined);
+                  const thumbSrc = collectSavedMealImageUrls(tag, activeFoodLogs)[0];
                   return (
                     <div key={tag.dbId || tIdx} className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-lg px-2 py-1 shadow-sm shrink-0">
                       {thumbSrc ? (

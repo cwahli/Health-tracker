@@ -11,6 +11,7 @@ describe('calculateCompositeMeal', () => {
       originalLog: {
         id: 'food_123',
         name: 'Chicken Rice',
+        imageUrl: 'https://pub-xxx.r2.dev/photos/food_123.jpg',
         weight_grams: 300,
         calories: 600,
         nutrients: {
@@ -27,6 +28,7 @@ describe('calculateCompositeMeal', () => {
 
     const result = calculateCompositeMeal([previousMealTag]);
     expect(result.dishName).toBe('Chicken Rice');
+    expect(result.primaryImageUrl).toBe('/photos/food_123.jpg');
     expect(result.totalWeight).toBe(300);
     expect(result.roundedCal).toBe(600);
     expect(result.roundedProt).toBe(35);
