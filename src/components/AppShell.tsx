@@ -15,8 +15,7 @@ import type { UserProfile } from '../types';
 import AppTabs from './AppTabs';
 import AppModals from './AppModals';
 
-export type AppViewProps = Record<string, any>;
-
+import type { AppViewProps } from './AppViewProps';
 export default function AppShell(p: AppViewProps) {
   const {
     actions,
@@ -271,10 +270,10 @@ export default function AppShell(p: AppViewProps) {
         setHideSensitive={setHideSensitive}
         syncState={syncState}
         onSignOut={handleSignOut}
-        onCloudSync={() => checkForDbChanges(undefined, true)}
+        onCloudSync={async () => { await checkForDbChanges(undefined, true); }}
         onForcePush={() => saveAndSync(profile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'fullPush', cloudFoods: [], cloudBioHistory: [], forceOverwrite: true, includeFoods: false } as any)}
         onForcePushWithFoods={() => saveAndSync(profile, foodLogs, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'fullPush', cloudFoods: [], cloudBioHistory: [], forceOverwrite: true, includeFoods: true } as any)}
-        onForcePull={() => checkForDbChanges(undefined, true, true)}
+        onForcePull={async () => { await checkForDbChanges(undefined, true, true); }}
         dbInteractions={dbInteractions}
         quota={quota}
         foodLogs={foodLogs}

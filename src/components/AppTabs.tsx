@@ -7,7 +7,7 @@ import { hasBmiPendingAlert } from '../utils/biomarkers';
 import { maybeRecalibrateDemographicOverlays } from '../utils/appProfileUtils';
 import { resolveAgentDestination } from '../utils/biomarkerLifecycle';
 import type { SanitizeProposal } from '../utils/dataSanitize';
-import type { AppViewProps } from './AppShell';
+import type { AppViewProps } from './AppViewProps';
 
 const HomeTab = lazyWithRetry(() => import('./HomeTab'));
 const InsightsTab = lazyWithRetry(() => import('./InsightsTab'));

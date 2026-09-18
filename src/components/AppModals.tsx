@@ -12,7 +12,7 @@ import { formatOptimalTargetValue } from '../utils/agentCalibration';
 import { isCoreNutrient, isAdditionalNutrient } from '../utils/nutrients';
 import { translations } from '../utils/translations';
 import type { HealthAction } from '../types';
-import type { AppViewProps } from './AppShell';
+import type { AppViewProps } from './AppViewProps';
 
 const LogChat = lazyWithRetry(() => import('./LogChat'));
 
