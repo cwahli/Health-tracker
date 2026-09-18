@@ -42,7 +42,8 @@ export function useJobPoller(): UseJobPollerReturn {
               type: 'ServerStatus',
               id: serverJob.id,
               status: serverJob.status,
-              cleanResult: serverJob.clean_result,
+              clean_result: serverJob.clean_result,
+              result: serverJob.result || serverJob.clean_result,
               error: serverJob.error,
               steps: serverJob.steps,
               updatedAt: serverJob.updated_at

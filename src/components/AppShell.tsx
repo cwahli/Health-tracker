@@ -1,18 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile, FoodLog, BiomarkerLog, DbInteraction, QuotaData } from '../types';
 import Header from './Header';
+import AuthScreen from './AuthScreen';
+import BottomNav from './BottomNav';
+import { createDefaultProfile } from '../utils/appProfileUtils';
 import { getDynamicStyles } from './AppDynamicStyles';
 import {
-  Home,
-  Activity,
-  Utensils,
-  TrendingUp,
-  Lightbulb,
   Plus,
   MessageSquare,
   Sparkles,
   Stethoscope,
   Scale,
+  Utensils,
   X
 } from 'lucide-react';
 
@@ -20,7 +19,7 @@ export interface AppShellProps {
   children: React.ReactNode;
   activeTab: 'home' | 'insights' | 'food' | 'medical' | 'trends';
   onNavigateTab: (tab: 'home' | 'insights' | 'food' | 'medical' | 'trends') => void;
-  profile: UserProfile;
+  profile: UserProfile | null;
   setProfile: (p: UserProfile | ((prev: UserProfile) => UserProfile) | any) => void;
   onSaveProfile?: (p: UserProfile) => Promise<void>;
   hideSensitive: boolean;
@@ -44,7 +43,10 @@ export interface AppShellProps {
   viewingJobId?: string | null;
   onViewJob?: (jobId: string) => void;
   isLoggedIn: boolean;
-  onLoginDemo: () => void;
+  onLoginDemo: (demoType?: any) => void;
+  onLoginSuccess?: (profile: UserProfile, token?: string) => void;
+  language?: string;
+  onOpenChat?: () => void;
 }
 
 export default function AppShell({
@@ -75,12 +77,16 @@ export default function AppShell({
   viewingJobId = null,
   onViewJob,
   isLoggedIn,
-  onLoginDemo
+  onLoginDemo,
+  onLoginSuccess,
+  language,
+  onOpenChat
 }: AppShellProps) {
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
   const quickActionRef = useRef<HTMLDivElement>(null);
-  const isId = profile?.language === 'id';
-  const styles = getDynamicStyles(profile?.theme, true);
+  const isId = (language || profile?.language) === 'id';
+  const effectiveProfile = profile || createDefaultProfile();
+  const styles = getDynamicStyles(effectiveProfile?.theme, true);
 
   // Close quick action popover on outside click
   useEffect(() => {
@@ -98,29 +104,11 @@ export default function AppShell({
   // If not logged in, render authentication / demo entrance screen
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 shadow-xl text-center">
-          <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-950/60 rounded-2xl flex items-center justify-center mx-auto mb-5 text-indigo-600 dark:text-indigo-400">
-            <Activity className="w-8 h-8" />
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight mb-2">
-            Health Cockpit
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-8">
-            {isId
-              ? 'Asisten kesehatan, nutrisi, dan biomarker cerdas Anda.'
-              : 'Your personalized clinical nutrition, biomarker, and health cockpit.'}
-          </p>
-          <button
-            id="demo-login-btn"
-            onClick={onLoginDemo}
-            className="w-full py-3.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Sparkles className="w-5 h-5" />
-            <span>{isId ? 'Masuk dengan Akun Demo' : 'Enter as Demo User'}</span>
-          </button>
-        </div>
-      </div>
+      <AuthScreen
+        onLoginDemo={onLoginDemo}
+        onLoginSuccess={onLoginSuccess}
+        language={language || profile?.language || 'en'}
+      />
     );
   }
 
@@ -128,7 +116,7 @@ export default function AppShell({
     <div style={styles.shellContainerStyle} className="relative antialiased selection:bg-indigo-500 selection:text-white">
       {/* Top Header */}
       <Header
-        profile={profile}
+        profile={effectiveProfile}
         setProfile={setProfile}
         onSaveProfile={onSaveProfile}
         hideSensitive={hideSensitive}
@@ -250,77 +238,11 @@ export default function AppShell({
       </div>
 
       {/* Bottom Sticky Navigation Bar */}
-      <nav
-        id="app-bottom-nav"
-        className="fixed bottom-0 inset-x-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 safe-area-pb"
-      >
-        <div className="max-w-md mx-auto flex items-center justify-around h-16 px-2">
-          <button
-            id="nav-tab-home"
-            onClick={() => onNavigateTab('home')}
-            className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-              activeTab === 'home'
-                ? 'text-indigo-600 dark:text-indigo-400'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <Home className="w-5 h-5 mb-1" />
-            <span>{isId ? 'Beranda' : 'Home'}</span>
-          </button>
-
-          <button
-            id="nav-tab-health"
-            onClick={() => onNavigateTab('medical')}
-            className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-              activeTab === 'medical'
-                ? 'text-indigo-600 dark:text-indigo-400'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <Activity className="w-5 h-5 mb-1" />
-            <span>{isId ? 'Kesehatan' : 'Health'}</span>
-          </button>
-
-          <button
-            id="nav-tab-food"
-            onClick={() => onNavigateTab('food')}
-            className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-              activeTab === 'food'
-                ? 'text-indigo-600 dark:text-indigo-400'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <Utensils className="w-5 h-5 mb-1" />
-            <span>{isId ? 'Makanan' : 'Food'}</span>
-          </button>
-
-          <button
-            id="nav-tab-trends"
-            onClick={() => onNavigateTab('trends')}
-            className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-              activeTab === 'trends'
-                ? 'text-indigo-600 dark:text-indigo-400'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <TrendingUp className="w-5 h-5 mb-1" />
-            <span>{isId ? 'Tren' : 'Trends'}</span>
-          </button>
-
-          <button
-            id="nav-tab-insights"
-            onClick={() => onNavigateTab('insights')}
-            className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-              activeTab === 'insights'
-                ? 'text-indigo-600 dark:text-indigo-400'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-            }`}
-          >
-            <Lightbulb className="w-5 h-5 mb-1" />
-            <span>{isId ? 'Wawasan' : 'Insights'}</span>
-          </button>
-        </div>
-      </nav>
+      <BottomNav
+        activeTab={activeTab}
+        onNavigateTab={onNavigateTab}
+        isId={isId}
+      />
     </div>
   );
 }

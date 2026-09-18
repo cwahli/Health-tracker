@@ -7,6 +7,7 @@ import AppShell from './components/AppShell';
 import AppTabs from './components/AppTabs';
 import AppModals from './components/AppModals';
 import { UserProfile } from './types';
+import { createDefaultProfile } from './utils/appProfileUtils';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'insights' | 'food' | 'medical' | 'trends'>('home');
@@ -25,6 +26,8 @@ export default function App() {
     loginAsDemo,
     signOut
   } = useAppProfile();
+
+  const effectiveProfile = profile || createDefaultProfile();
 
   const {
     foodLogs,
@@ -133,10 +136,11 @@ export default function App() {
       onViewJob={handleViewJob}
       isLoggedIn={isLoggedIn}
       onLoginDemo={loginAsDemo}
+      onLoginSuccess={(newProfile) => setProfile(newProfile)}
     >
       <AppTabs
         activeTab={activeTab}
-        profile={profile}
+        profile={effectiveProfile}
         foodLogs={foodLogs}
         setFoodLogs={setFoodLogs}
         biomarkers={biomarkers}
@@ -167,7 +171,7 @@ export default function App() {
         agentType={agentType}
         activeJobId={activeJobId}
         onCloseChat={handleCloseChat}
-        profile={profile}
+        profile={effectiveProfile}
         selectedModelId={selectedModelId}
         onChangeModelId={setSelectedModelId}
         foodLogs={foodLogs}

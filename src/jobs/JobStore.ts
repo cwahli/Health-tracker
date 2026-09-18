@@ -118,12 +118,14 @@ class JobStoreClass {
   apply(eventOrJob: any): void {
     if (!eventOrJob) return;
     if (eventOrJob.type === 'ServerStatus' && eventOrJob.id) {
+      const cleanRes = eventOrJob.clean_result !== undefined ? eventOrJob.clean_result : eventOrJob.cleanResult;
+      const resVal = eventOrJob.result !== undefined ? eventOrJob.result : cleanRes;
       const existing = this.jobs.get(eventOrJob.id);
       if (existing) {
         this.updateJob(eventOrJob.id, {
           status: eventOrJob.status || existing.status,
-          clean_result: eventOrJob.clean_result !== undefined ? eventOrJob.clean_result : existing.clean_result,
-          result: eventOrJob.result !== undefined ? eventOrJob.result : existing.result,
+          clean_result: cleanRes !== undefined ? cleanRes : existing.clean_result,
+          result: resVal !== undefined ? resVal : existing.result,
           error: eventOrJob.error !== undefined ? eventOrJob.error : existing.error,
           progress_percent: eventOrJob.progress_percent !== undefined ? eventOrJob.progress_percent : existing.progress_percent,
         });
@@ -131,8 +133,8 @@ class JobStoreClass {
         this.createJob({
           id: eventOrJob.id,
           status: eventOrJob.status || 'running',
-          clean_result: eventOrJob.clean_result,
-          result: eventOrJob.result,
+          clean_result: cleanRes,
+          result: resVal,
         });
       }
       return;

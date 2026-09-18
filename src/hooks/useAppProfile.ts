@@ -1,34 +1,55 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UserProfile } from '../types';
 import { sanitizeProfile, createDefaultProfile } from '../utils/appProfileUtils';
+import { getStorageKey, clearCachedAppData } from '../utils/storageUtils';
+import { JobStore } from '../jobs/JobStore';
+import { signOut as firebaseSignOut } from 'firebase/auth';
+import { auth } from '../firebase';
 
-const PROFILE_STORAGE_KEY = 'user_profile';
+const STORAGE_LAST_ACTIVE_EMAIL = 'last_active_email';
+const STORAGE_DEMO_TYPE = 'demo_profile_type';
+const STORAGE_DEMO_FRESH = 'demo_fresh_login';
 const SENSITIVE_STORAGE_KEY = 'hide_sensitive';
 
 export interface UseAppProfileReturn {
-  profile: UserProfile;
-  setProfile: React.Dispatch<React.SetStateAction<UserProfile>>;
+  profile: UserProfile | null;
+  setProfile: React.Dispatch<React.SetStateAction<UserProfile | null>>;
   saveProfile: (nextProfile: UserProfile) => Promise<void>;
   hideSensitive: boolean;
   setHideSensitive: (hide: boolean) => void;
   isLoadingProfile: boolean;
-  loginAsDemo: () => void;
+  loginAsDemo: (demoType?: 'average' | 'empty' | 'complex') => void;
   signOut: () => void;
 }
 
 export function useAppProfile(): UseAppProfileReturn {
-  const [profile, setProfile] = useState<UserProfile>(() => {
+  const [profile, setProfile] = useState<UserProfile | null>(() => {
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
-        const stored = localStorage.getItem(PROFILE_STORAGE_KEY);
+        const lastActiveEmail = localStorage.getItem(STORAGE_LAST_ACTIVE_EMAIL);
+        if (!lastActiveEmail) {
+          return null;
+        }
+        if (lastActiveEmail === 'demo@healthcockpit.com') {
+          const demoType = (localStorage.getItem(STORAGE_DEMO_TYPE) as any) || 'average';
+          const demo = createDefaultProfile();
+          if (demoType === 'empty') {
+            demo.pendingObservations = [];
+            demo.customBiomarkers = {};
+          }
+          return demo;
+        }
+        const storageKey = getStorageKey(lastActiveEmail);
+        const stored = localStorage.getItem(storageKey);
         if (stored) {
           return sanitizeProfile(JSON.parse(stored));
         }
+        return sanitizeProfile({ email: lastActiveEmail, name: lastActiveEmail.split('@')[0] });
       } catch {
         // parsing failed fallback
       }
     }
-    return createDefaultProfile();
+    return null;
   });
 
   const [hideSensitive, setHideSensitiveState] = useState<boolean>(() => {
@@ -40,13 +61,17 @@ export function useAppProfile(): UseAppProfileReturn {
 
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
 
-  // Sync to localStorage on state change
+  // Sync to storage on state change
   useEffect(() => {
     if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-      } catch {
-        // quota exceeded or private mode
+      if (profile && profile.email) {
+        try {
+          const storageKey = getStorageKey(profile.email);
+          localStorage.setItem(storageKey, JSON.stringify(profile));
+          localStorage.setItem(STORAGE_LAST_ACTIVE_EMAIL, profile.email);
+        } catch {
+          // quota exceeded or private mode
+        }
       }
     }
   }, [profile]);
@@ -63,10 +88,12 @@ export function useAppProfile(): UseAppProfileReturn {
     const sanitized = sanitizeProfile(nextProfile);
     setProfile(sanitized);
 
-    // Save to localStorage
+    // Save to storage
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
-        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(sanitized));
+        const storageKey = getStorageKey(sanitized.email);
+        localStorage.setItem(storageKey, JSON.stringify(sanitized));
+        localStorage.setItem(STORAGE_LAST_ACTIVE_EMAIL, sanitized.email);
       } catch {}
     }
 
@@ -75,7 +102,7 @@ export function useAppProfile(): UseAppProfileReturn {
       await fetch('/api/profile/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile: sanitized })
+        body: JSON.stringify({ profile: sanitized }),
       });
     } catch {
       // offline fallback is safe
@@ -84,19 +111,52 @@ export function useAppProfile(): UseAppProfileReturn {
     }
   }, []);
 
-  const loginAsDemo = useCallback(() => {
+  const loginAsDemo = useCallback((demoType: 'average' | 'empty' | 'complex' = 'average') => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem(STORAGE_LAST_ACTIVE_EMAIL, 'demo@healthcockpit.com');
+      localStorage.setItem(STORAGE_DEMO_TYPE, demoType);
+      localStorage.setItem(STORAGE_DEMO_FRESH, '1');
+    }
     const demo = createDefaultProfile();
+    demo.name = 'Demo User';
+    demo.email = 'demo@healthcockpit.com';
+    demo.userType = 'Demo';
+    if (demoType === 'empty') {
+      demo.pendingObservations = [];
+      demo.customBiomarkers = {};
+    }
     setProfile(demo);
   }, []);
 
   const signOut = useCallback(() => {
-    const defaultProfile = createDefaultProfile();
-    setProfile(defaultProfile);
+    const activeEmail =
+      profile?.email ||
+      (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_LAST_ACTIVE_EMAIL) : null);
+
+    try {
+      firebaseSignOut(auth).catch(() => {});
+    } catch {}
+
+    try {
+      JobStore.resetAllJobs();
+    } catch {}
+
+    if (activeEmail) {
+      try {
+        clearCachedAppData(activeEmail);
+      } catch {}
+    }
+
     if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.removeItem(PROFILE_STORAGE_KEY);
+      localStorage.removeItem(STORAGE_LAST_ACTIVE_EMAIL);
+      localStorage.removeItem(STORAGE_DEMO_TYPE);
+      localStorage.removeItem(STORAGE_DEMO_FRESH);
+      localStorage.removeItem('auth_token');
       sessionStorage.clear();
     }
-  }, []);
+
+    setProfile(null);
+  }, [profile]);
 
   return {
     profile,
@@ -106,6 +166,8 @@ export function useAppProfile(): UseAppProfileReturn {
     setHideSensitive,
     isLoadingProfile,
     loginAsDemo,
-    signOut
+    signOut,
   };
 }
+
+export default useAppProfile;

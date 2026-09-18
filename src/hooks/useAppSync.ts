@@ -42,7 +42,7 @@ export interface UseAppSyncReturn {
   ) => Promise<void>;
 }
 
-export function useAppSync(profile: UserProfile): UseAppSyncReturn {
+export function useAppSync(profile: UserProfile | null): UseAppSyncReturn {
   const [foodLogs, setFoodLogs] = useState<FoodLog[]>(() => {
     try {
       const val = localStorage.getItem(FOOD_LOGS_KEY);
