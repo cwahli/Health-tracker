@@ -107,6 +107,14 @@ describe('collectSavedMealImageUrls', () => {
     expect(collectSavedMealImageUrls({ id: 'food_nophoto' }, null, { allowSynthesized: false })).toEqual([]);
   });
 
+  it('merges donor full-size images after source urls (T-6 multiples)', () => {
+    const urls = collectSavedMealImageUrls(
+      { id: 'pm8', imageUrl: '/photos/pm8_preview.jpg' },
+      [{ id: 'pm8', imageUrl: '/photos/pm8_preview.jpg', imageUrls: ['/photos/pm8_preview.jpg', '/photos/pm8_full1.jpg', '/photos/pm8_full2.jpg'] }],
+    );
+    expect(urls).toEqual(['/photos/pm8_preview.jpg', '/photos/pm8_full1.jpg', '/photos/pm8_full2.jpg']);
+  });
+
   it('keeps real stored urls when allowSynthesized is false', () => {
     const urls = collectSavedMealImageUrls(
       { id: 'food_real', imageUrls: ['/photos/food_real.jpg'] },

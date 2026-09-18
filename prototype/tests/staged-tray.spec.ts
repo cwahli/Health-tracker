@@ -267,4 +267,34 @@ test.describe('Track T: staged tray', () => {
     expect(submitCalled).toBe(true);
     await expect(page.getByText(/Here is the nutrition breakdown for/i)).toHaveCount(0);
   });
+
+  test('T-6: composite card gallery shows every staged image', async ({ page }) => {
+    const px1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const px2 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/w8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+    await page.route('**/api/food/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          results: [
+            { type: 'previous_meal', id: 'pm9', name: 'Oat Gallery Porridge', portionGrams: 130, calories: 150, imageUrl: px1, imageUrls: [px1, px2] },
+          ],
+        }),
+      });
+    });
+
+    await page.locator('#food-chat-input').fill('oat');
+    const row = page
+      .getByText('Oat Gallery Porridge', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await row.getByRole('button', { name: /add/i }).click();
+    await expect(page.getByText('STAGED ITEMS')).toBeVisible({ timeout: 15000 });
+
+    await page.locator('#food-chat-send-btn').click();
+    await expect(page.getByText(/Here is the nutrition breakdown for.*Oat Gallery Porridge/i).first()).toBeVisible({ timeout: 15000 });
+
+    // Preview (first) and full second image both render in the card gallery.
+    await expect(page.locator(`img[src="${px1}"]`).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.locator(`img[src="${px2}"]`).first()).toBeVisible({ timeout: 15000 });
+  });
 });

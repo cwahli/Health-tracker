@@ -213,10 +213,16 @@ export function collectSavedMealImageUrls(
   pushFrom(source.item);
   let urls = uniqueMealImageUrls(raw as Array<string | null | undefined>);
   const id = String(source.dbId || source.id || source.food_id || source.originalLog?.id || '').trim();
-  if (urls.length === 0 && foodLogs?.length && id) {
+  // Union donor images from in-memory logs (T-6): API search results often
+  // carry only a single preview imageUrl while the full log holds the rest.
+  // Donor urls append after source urls, so primary-image order is unchanged.
+  if (foodLogs?.length && id) {
     const donor = foodLogs.find((f) => f && String(f.id) === id);
     if (donor) {
-      urls = uniqueMealImageUrls([donor.imageUrl, ...(Array.isArray(donor.imageUrls) ? donor.imageUrls : [])]);
+      const donorUrls = uniqueMealImageUrls([donor.imageUrl, ...(Array.isArray(donor.imageUrls) ? donor.imageUrls : [])]);
+      for (const u of donorUrls) {
+        if (u && !urls.includes(u)) urls.push(u);
+      }
     }
   }
   if (urls.length === 0 && allowSynthesized && id && !id.startsWith('brand_')) {
