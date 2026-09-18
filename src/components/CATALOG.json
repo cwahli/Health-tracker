@@ -19,7 +19,7 @@
     "note": "B8.0 Option B: Auto-Fix banned from Home. Informational warning banner preserved on Home pointing to Health / Sanitize."
   },
   "ceilings": {
-    "src/App.tsx": 7685,
+    "src/App.tsx": 1098,
     "src/utils/translations.ts": 40,
     "src/utils/translations/en.ts": 2010,
     "src/utils/translations/id.ts": 2010,
