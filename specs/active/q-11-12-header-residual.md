@@ -13,6 +13,8 @@ allowed_files:
   - src/hooks/useThemeCustomizer.ts
   - src/components/CATALOG.json
   - scripts/parity-baseline.json
+  - prototype/tests/header-chrome.spec.ts
+  - scripts/assert-shell-smoke.mjs
 frozen_files:
   - src/App.tsx
   - src/types.ts
@@ -43,7 +45,7 @@ gate:
   - node scripts/assert-parity.mjs
   - node scripts/assert-budgets.mjs
   - node scripts/assert-egress-bomb.mjs
-  - npx playwright test prototype/tests/auth-session.spec.ts prototype/tests/key-journeys.spec.ts
+  - npx playwright test prototype/tests/auth-session.spec.ts prototype/tests/key-journeys.spec.ts prototype/tests/header-chrome.spec.ts
   - node scripts/journey-guard.mjs q-11-12-header-residual
   - node scripts/assert-spec-diff.mjs q-11-12-header-residual
   - node scripts/assert-shell-smoke.mjs
@@ -83,6 +85,22 @@ and its real owners so no invented scope is needed.
 `src/components/Header.tsx` ≤ **1,200 lines** and < **200 KB**, with the theme
 customizer, the DB overlay and the inspector owning their own files. Verbatim
 moves only. Sign-out still lands on `#auth-card`.
+
+## Amendment 2026-09-18 (node order + new coverage)
+
+Node 2 (DB overlay) was executed **first** — it is one contiguous, brace-balanced
+region (measured: 746 lines, 50,751 B, 38 Header-scope props) and it is the move
+that takes Header under the 200 KB Studio ceiling in a single commit, so it
+retires the standing blocker before the larger, interleaved theme-screen work.
+Node 1 (theme customizer) and Node 3 (ratchet) are unchanged.
+
+`prototype/tests/header-chrome.spec.ts` is **new and allowed**, and is wired into
+`scripts/assert-shell-smoke.mjs` (both added to `allowed_files` above). Reason:
+neither `#db-interactions-overlay` nor `#theme-customizer-screen` had any standing
+coverage, so a verbatim move that failed to mount would have passed every gate.
+Adding a spec to the smoke runner **strengthens** the gate; no threshold, ceiling
+or existing check was weakened, and `scripts/assert-shell-smoke.mjs` stays
+otherwise untouched.
 
 ## In scope
 

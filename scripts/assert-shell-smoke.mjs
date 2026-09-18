@@ -14,6 +14,10 @@ const specs = [
   'prototype/tests/dialog-inventory.spec.ts',
   // Q-11: a shell that renders but cannot sign in / sign out is still broken.
   'prototype/tests/auth-session.spec.ts',
+  // Q-11.12: Header's extracted screens (settings overlay, theme customizer)
+  // were moved verbatim with no standing coverage; a move that fails to mount
+  // used to pass every gate.
+  'prototype/tests/header-chrome.spec.ts',
 ];
 
 console.log('── shell-smoke (Playwright stubs, no Gemini) ──');
