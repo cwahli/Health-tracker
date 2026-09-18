@@ -172,4 +172,32 @@ test.describe('Track T: staged tray', () => {
     await page.locator('#food-chat-input').click();
     await expect(gramInput).toHaveValue('1');
   });
+
+  test('T-4: add stages without mirroring into chat box', async ({ page }) => {
+    await page.route('**/api/food/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          results: [
+            { type: 'previous_meal', id: 'pm4', name: 'Oat Single Porridge', portionGrams: 130 },
+          ],
+        }),
+      });
+    });
+
+    const composer = page.locator('#food-chat-input');
+    await composer.fill('oat');
+    const row = page
+      .getByText('Oat Single Porridge', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await row.getByRole('button', { name: /add/i }).click();
+
+    // Tray confirms the staged item (single place of confirmation).
+    await expect(page.getByText('STAGED ITEMS')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Oat Single Porridge', { exact: true }).first()).toBeVisible();
+
+    // Chat box must NOT echo the bracket tag.
+    await expect(composer).toHaveValue('oat');
+  });
 });

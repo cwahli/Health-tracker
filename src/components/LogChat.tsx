@@ -40,7 +40,7 @@ import { checkQuotaFlag } from '../utils/firestoreUtils';
 import { get as idbGet } from 'idb-keyval';
 import { pruneLocalStorageToFreeSpace, safeIdbSet } from '../utils/storageUtils';
 import { resolveFoodImage } from '../utils/imageResolver';
-import { updateOrAddBracketItem, removeBracketItem, parseBracketItems, extractAutocompleteQuery } from '../utils/bracketPortionParser';
+import { removeBracketItem, parseBracketItems, extractAutocompleteQuery } from '../utils/bracketPortionParser';
 import { JobStore } from '../jobs/JobStore';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
 import { executeFoodAgent } from '../jobs/FoodAgentExecutor';
@@ -6342,7 +6342,6 @@ ${logsText}`);
                                 imageUrl: item.imageUrl || item.image_url,
                                 item 
                               }]);
-                              setInputText(prev => updateOrAddBracketItem(prev, item.dish_name, `${w}g`));
                             } else {
                               const inputEl = document.getElementById(`prev-portion-${item.id || idx}`) as HTMLInputElement;
                               const w = Number(inputEl?.value) || item.portionGrams || item.weightGrams || item.weight_grams || 100;
@@ -6354,7 +6353,6 @@ ${logsText}`);
                                 imageUrl: thumbSrc || undefined,
                                 weightGrams: Number(w)
                               }]);
-                              setInputText(prev => updateOrAddBracketItem(prev, itemName, `${w}g`));
                             }
                             setCatalogMatches([]);
                             setActiveSearchTerms('');
@@ -6405,9 +6403,6 @@ ${logsText}`);
                           onChange={(e) => {
                             const parsed = parseTrayGramInput(e.target.value);
                             setExplicitFoodTags(prev => prev.map((item, i) => i === tIdx ? { ...item, weightGrams: parsed } : item));
-                            if (parsed !== undefined) {
-                              setInputText(prev => updateOrAddBracketItem(prev, tag.name, `${parsed}g`));
-                            }
                           }}
                           onBlur={() => {
                             setExplicitFoodTags(prev => prev.map((item, i) => i === tIdx ? { ...item, weightGrams: normalizeTrayGrams(item.weightGrams) } : item));
@@ -6421,7 +6416,6 @@ ${logsText}`);
                         type="button"
                         onClick={() => {
                           setExplicitFoodTags(prev => prev.filter((_, i) => i !== tIdx));
-                          setInputText(prev => removeBracketItem(prev, tag.name));
                         }}
                         className="p-0.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-rose-500 rounded transition-colors"
                         title="Remove item"
