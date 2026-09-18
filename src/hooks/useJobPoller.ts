@@ -39,13 +39,10 @@ export function useJobPoller(): UseJobPollerReturn {
           const serverJob = data.jobs.find((j: any) => j.id === jobId);
           if (serverJob) {
             JobStore.apply({
-              type: 'ServerStatus',
+              type: 'RealtimeRow',
               id: serverJob.id,
               status: serverJob.status,
-              clean_result: serverJob.clean_result,
               result: serverJob.result || serverJob.clean_result,
-              error: serverJob.error,
-              steps: serverJob.steps,
               updatedAt: serverJob.updated_at
             });
 

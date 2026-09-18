@@ -162,5 +162,33 @@ describe('purgeHallucinatedAndCorruptedData', () => {
     expect(res.profileUpdates.deletedBiomarkerLogIds?.['synth_1']).toBeDefined();
     expect(res.profileUpdates.deletedBiomarkerLogIds?.['bmi_phantom_1']).toBeDefined();
   });
+
+  it('buildDataSanitizePlan creates proposals for transposed dates, canonical range backfill, and qualitative swabs', () => {
+    const history = [
+      { id: 'h1', date: '04-02-2024', biomarkers: { hemoglobin: 164, creatinine: 72 } },
+      { id: 'h2', date: '02-04-2024', biomarkers: { hemoglobin: 164 } },
+      { id: 'h3', date: '09-06-2026', biomarkers: { sars_cov_2_rna_detection: 'NEGATIVE' } },
+    ];
+    const profile = {
+      customBiomarkers: {
+        serum_potassium: { name: 'Serum Potassium', normalRange: 'Unknown' },
+        sars_cov_2_rna_detection: { name: 'Sars Cov 2 Rna Detection' },
+      },
+    };
+
+    const plan = buildDataSanitizePlan({
+      biomarkerHistory: history,
+      profile,
+      biomarkers: {},
+    });
+
+    expect(plan.summary.transposedMerges).toBeGreaterThan(0);
+    expect(plan.summary.rangeBackfills).toBeGreaterThan(0);
+    expect(plan.summary.qualitativeArchives).toBeGreaterThan(0);
+
+    const backfill = plan.proposals.find((p) => p.kind === 'backfill_canonical_range');
+    expect(backfill?.key).toBe('serum_potassium');
+    expect(backfill?.canonicalRange).toBe('3.5 - 5.0');
+  });
 });
 

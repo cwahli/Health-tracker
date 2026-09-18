@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { UserProfile, BiomarkerLog, ChatMessage, FoodLog } from '../types';
 import { translations } from '../utils/translations';
 import { displayStatusLabel, displayCategoryLabel, displayBiomarkerName, displayConditionName } from '../utils/i18n';
-import { ShieldAlert, ClipboardList, Trash2, ChevronDown, ChevronUp, LineChart as LineChartIcon, BrainCircuit, AlertCircle, Clock, CheckCircle2, EyeOff } from 'lucide-react';
+import { ShieldAlert, ClipboardList, Trash2, ChevronDown, ChevronUp, LineChart as LineChartIcon, BrainCircuit, AlertCircle, Clock, CheckCircle2, EyeOff, Sparkles } from 'lucide-react';
 import { standardizeUnit, reverseStandardizeUnit, formatNormalRange } from '../utils/unitConversion';
 import { getBiomarkerRangeSourceInfo } from '../utils/biomarkerLifecycle';
 import { generateDynamicInsight } from '../utils/biomarkerInsights';
@@ -19,6 +19,7 @@ import CombineBiomarkersModal from './CombineBiomarkersModal';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 const BiomarkerDictionaryModal = lazyWithRetry(() => import('./BiomarkerDictionaryModal'));
 import NotUsedBiomarkersModal from './NotUsedBiomarkersModal';
+import DataSanitizeApprovalModal from './DataSanitizeApprovalModal';
 import TaskPlaceholderCard from './TaskPlaceholderCard';
 import { JobStore, isJobBlank } from '../jobs/JobStore';
 
@@ -45,8 +46,10 @@ interface MedicalHistoryTabProps {
   onEditBiomarkerLog: (id: string, key: string, value: string | number, newDate?: string) => void;
   onLogMedical?: (biomarkers: { [key: string]: number | string }, profileUpdates?: Partial<UserProfile>, date?: string, entries?: any, modificationCommand?: any, skipClose?: boolean) => void;
   onCombineBiomarkers?: (
-    sourceKey: string,
-    targetKey: string
+    targetKey: string,
+    targetDef: { name: string; unit: string; normalRange: string; description: string },
+    mergedLogs: { date: string; value: number | string }[],
+    sourceKeysToDelete: string[]
   ) => void;
   onBatchConsolidate?: (mapping: { [key: string]: string }) => void;
   onReviewWithAgent?: (keys: string[]) => void;
@@ -97,8 +100,11 @@ export default function MedicalHistoryTab({
   onAgentAnalysisSaved,
   onDeleteAnalysis,
   onViewJob,
+  onApplyDataSanitize,
+  foodLogs = [],
 }: MedicalHistoryTabProps) {
   const t = translations[profile.language] || translations.en;
+  const [showSanitizeModal, setShowSanitizeModal] = useState(false);
   
   const [jobs, setJobs] = useState(() => JobStore.getAllJobs().filter(j => (j.kind === 'medical' || j.kind === 'front_desk') && !isJobBlank(j)));
   useEffect(() => {
@@ -258,7 +264,7 @@ export default function MedicalHistoryTab({
   const highlightKeys = ['ldl', 'apob', 'hba1c', 'egfr', 'hscrp'];
 
   // Combine definitions with dynamic ones from `biomarkers` object and profile.customBiomarkers
-  const allDefinitions = useMemo(() => {
+  const allDefinitionsWithNotUsed = useMemo(() => {
     // ONLY show definitions in MedicalHistoryTab if they have recorded non-empty data!
     const hasData = (key: string) => {
       const v = biomarkers ? biomarkers[key] : undefined;
@@ -268,7 +274,7 @@ export default function MedicalHistoryTab({
         return val !== undefined && val !== null && !isValEmpty(val);
       });
     };
-    const combined = biomarkerDefinitions.filter(d => hasData(d.key)).map(d => {
+    const combined = biomarkerDefinitions.filter(d => hasData(d.key) && d.key !== 'weight' && d.key !== 'height' && d.key !== 'age').map(d => {
       if (d.key === 'bmi') {
         const isAsian = isAsianEthnicity(profile.ethnicity);
         const gender = (profile.gender || 'male').toLowerCase();
@@ -390,8 +396,12 @@ export default function MedicalHistoryTab({
         potentialMedicalConditions: meta.potentialMedicalConditions
       };
     });
-    return withMetadata.filter(d => hasData(d.key) && !isKeyNotUsedInMedicalHistory(d.key) && !aliasKeysToHide.has(d.key));
-  }, [biomarkers, activeHistory, profile.customBiomarkers, profile.ethnicity, profile.gender, profile.height, isKeyNotUsedInMedicalHistory, aliasKeysToHide]);
+    return withMetadata.filter(d => hasData(d.key) && !aliasKeysToHide.has(d.key));
+  }, [biomarkers, activeHistory, profile.customBiomarkers, profile.ethnicity, profile.gender, profile.height, aliasKeysToHide]);
+
+  const allDefinitions = useMemo(() => {
+    return allDefinitionsWithNotUsed.filter(d => !isKeyNotUsedInMedicalHistory(d.key));
+  }, [allDefinitionsWithNotUsed, isKeyNotUsedInMedicalHistory]);
 
   
 
@@ -417,7 +427,7 @@ export default function MedicalHistoryTab({
       "Not Used"
     ];
 
-    const exportList = allDefinitions;
+    const exportList = allDefinitionsWithNotUsed.filter(def => biomarkers[def.key] !== undefined || profile.customBiomarkers?.[def.key]);
     const rows = exportList.map(def => {
       const customDef = getCustomBiomarkerDef(profile, def.key);
       const name = def.name || customDef?.name || def.key;
@@ -436,7 +446,7 @@ export default function MedicalHistoryTab({
       const optVal = customDef?.optimalValue || (agentCal ? formatOptimalTargetValue(agentCal) : '');
       const latestLogForUnit = [...activeHistory].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).find(h => h.biomarkers && h.biomarkers[key] !== undefined);
       
-      const rangeSourceInfo = getBiomarkerRangeSourceInfo(key, def, profile, latestLogForUnit as any, agentCal);
+      const rangeSourceInfo = getBiomarkerRangeSourceInfo(key, def, profile, latestLogForUnit, agentCal);
       let clinicalReferenceRange = rangeSourceInfo.sourceRange || normalRange;
       const activeRule = getActiveStructuredRangeRule(def, profile);
       if (activeRule && activeRule.name) {
@@ -930,7 +940,7 @@ export default function MedicalHistoryTab({
                 if (onViewJob) onViewJob(id);
               }}
               onDelete={async (id) => {
-                await JobStore.removeJob(id);
+                await JobStore.deleteJob(id);
               }}
               onCancel={(id) => {
                 const j = JobStore.getJob(id);
@@ -1236,23 +1246,38 @@ export default function MedicalHistoryTab({
         <div className="flex flex-wrap items-center gap-6 text-xs text-theme-text-secondary font-medium">
           <div className="flex items-center gap-2">
             <ClipboardList className="w-4 h-4 text-indigo-500" />
-            <span onClick={exportBiomarkersToCSV} className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title={t.downloadAsCsv}>{t.trackedBiomarkers}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{totalUniqueBiomarkers}</strong></span>
+            <span id="download-biomarkers-csv-btn" onClick={exportBiomarkersToCSV} className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title={t.downloadAsCsv}>{t.trackedBiomarkers}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{totalUniqueBiomarkers}</strong></span>
           </div>
           <div className="flex items-center gap-2">
             <BrainCircuit className="w-4 h-4 text-indigo-500" />
-            <span onClick={exportLogEntriesToCSV} className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title={t.downloadAsCsv}>{t.totalLogEntries}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{activeHistory.reduce((sum, h) => sum + Object.keys(h.biomarkers).length, 0)}</strong></span>
+            <span id="download-logs-csv-btn" onClick={exportLogEntriesToCSV} className="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title={t.downloadAsCsv}>{t.totalLogEntries}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{activeHistory.reduce((sum, h) => sum + Object.keys(h.biomarkers).length, 0)}</strong></span>
           </div>
         </div>
       </div>
 
       <div className="mt-6 flex flex-col items-center gap-3 pb-8">
-        <button
-          onClick={() => setShowDictionaryModal(true)}
-          className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-bold text-xs rounded-xl border border-indigo-100 dark:border-indigo-800/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer flex items-center gap-2"
-        >
-          <ClipboardList className="w-4 h-4" />
-          {t.openBiomarkerDictionary}
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            id="open-biomarker-dictionary-btn"
+            onClick={() => setShowDictionaryModal(true)}
+            className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-bold text-xs rounded-xl border border-indigo-100 dark:border-indigo-800/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer flex items-center gap-2"
+          >
+            <ClipboardList className="w-4 h-4" />
+            {t.openBiomarkerDictionary}
+          </button>
+
+          {onApplyDataSanitize && (
+            <button
+              type="button"
+              id="sanitize-data-btn"
+              onClick={() => setShowSanitizeModal(true)}
+              className="px-4 py-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 font-bold text-xs rounded-xl border border-emerald-100 dark:border-emerald-800/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer flex items-center gap-2"
+            >
+              <Sparkles className="w-4 h-4 text-emerald-500" />
+              Clean &amp; Sanitize Data
+            </button>
+          )}
+        </div>
 
         {Object.keys(profile?.notUsedInMedicalHistory || {}).length > 0 && (
           <button
@@ -1332,6 +1357,19 @@ export default function MedicalHistoryTab({
           if (onRestoreNotUsedLocal) onRestoreNotUsedLocal(k);
         }}
       />
+
+      {/* DATA SANITIZE APPROVAL MODAL */}
+      {showSanitizeModal && onApplyDataSanitize && (
+        <DataSanitizeApprovalModal
+          isOpen={showSanitizeModal}
+          onClose={() => setShowSanitizeModal(false)}
+          profile={profile}
+          biomarkers={biomarkers}
+          biomarkerHistory={biomarkerHistory}
+          foodLogs={foodLogs}
+          onApply={onApplyDataSanitize}
+        />
+      )}
     </div>
   );
 }

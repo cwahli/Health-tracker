@@ -1,90 +1,72 @@
-import { getTopTargetNutrientKeys, isLimitNutrient, PRIMARY_NUTRIENTS, NUTRIENT_KEYS } from './nutrients.js';
-import { ANALYTE_CONVERSIONS } from './analyteConversions.js';
-import { GIT_COMMIT_HASH } from '../git-version.generated.js';
+/**
+ * Live scorecard contract. One writer. Frozen inventories in
+ * golden/scorecard/instruction/inventories/structure.json must match this payload.
+ * Render serves GET /api/scorecard/contract from this module (bundled into dist).
+ */
+import { GIT_COMMIT_HASH, GIT_COMMIT_TIME } from '../git-version.generated';
+import { ANALYTE_CONVERSIONS } from './analyteConversions';
+import {
+  LIMIT_NUTRIENT_KEYS,
+  NUTRIENT_KEYS,
+  PRIMARY_NUTRIENTS,
+} from './nutrients';
 
-export interface ScorecardContract {
-  pack: 'scorecard';
-  commit: string;
-  commitSource: string;
-  inventories: {
-    top_targets: {
-      helper: string;
-      polarity_helper: string;
-      fallback: string[];
-      exclude: string[];
-      limit_keys: string[];
-    };
-    meal_ledger: {
-      kcal_writer: string;
-      nutrient_keys: string[];
-      nutrient_key_count: number;
-    };
-    biomarkers: {
-      convert_via: string;
-      multiply: {
-        hdl: number;
-        ldl: number;
-        triglycerides: number;
-        creatinine: number;
-        total_bilirubin: number;
-      };
-      locked_apply: {
-        hdl: number;
-        tg: number;
-        ldl: number;
-        creat: number;
-        bili: number;
-      };
-    };
-  };
+function roundN(n: number, digits: number): number {
+  const f = 10 ** digits;
+  return Math.round(n * f) / f;
 }
 
-export function buildScorecardContract(): ScorecardContract {
+export function scorecardCommit(): { commit: string; commitSource: 'env' | 'generated'; time: string } {
+  const envCommit = String(
+    process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || process.env.GITHUB_SHA || '',
+  ).trim();
+  if (envCommit) {
+    return { commit: envCommit.slice(0, 7), commitSource: 'env', time: new Date().toISOString() };
+  }
+  return { commit: GIT_COMMIT_HASH, commitSource: 'generated', time: GIT_COMMIT_TIME };
+}
+
+export function buildScorecardContract() {
+  const ident = scorecardCommit();
+  const hdlMul = ANALYTE_CONVERSIONS.hdl.multiply;
+  const tgMul = ANALYTE_CONVERSIONS.triglycerides.multiply;
+  const ldlMul = ANALYTE_CONVERSIONS.ldl.multiply;
+  const creatMul = ANALYTE_CONVERSIONS.creatinine.multiply;
+  const biliMul = ANALYTE_CONVERSIONS.total_bilirubin.multiply;
   return {
-    pack: 'scorecard',
-    commit: GIT_COMMIT_HASH || 'unknown',
-    commitSource: 'git-version.generated',
+    pack: 'scorecard' as const,
+    ...ident,
     inventories: {
       top_targets: {
         helper: 'getTopTargetNutrientKeys',
         polarity_helper: 'isLimitNutrient',
-        fallback: [...PRIMARY_NUTRIENTS],
+        fallback: PRIMARY_NUTRIENTS.filter((k) => k !== 'steps'),
         exclude: ['steps'],
-        limit_keys: [
-          'calories',
-          'totalFat',
-          'saturatedFat',
-          'transFat',
-          'cholesterol',
-          'sodium',
-          'salt',
-          'sugar',
-          'addedSugar',
-          'carbohydrates',
-        ],
+        limit_keys: [...LIMIT_NUTRIENT_KEYS],
       },
       meal_ledger: {
         kcal_writer: 'finalizeDishLedger',
         nutrient_keys: [...NUTRIENT_KEYS],
-        nutrient_key_count: NUTRIENT_KEYS.length,
       },
       biomarkers: {
         convert_via: 'ANALYTE_CONVERSIONS',
         multiply: {
-          hdl: ANALYTE_CONVERSIONS.hdl.multiply,
-          ldl: ANALYTE_CONVERSIONS.ldl.multiply,
-          triglycerides: ANALYTE_CONVERSIONS.triglycerides.multiply,
-          creatinine: ANALYTE_CONVERSIONS.creatinine.multiply,
-          total_bilirubin: ANALYTE_CONVERSIONS.total_bilirubin.multiply,
+          hdl: hdlMul,
+          ldl: ldlMul,
+          triglycerides: tgMul,
+          creatinine: creatMul,
+          total_bilirubin: biliMul,
         },
         locked_apply: {
-          hdl: 1.293,
-          tg: 1.411,
-          ldl: 3.362,
-          creat: 79.56,
-          bili: 13.68,
+          hdl: roundN(50 * hdlMul, 3),
+          tg: roundN(125 * tgMul, 3),
+          ldl: roundN(130 * ldlMul, 3),
+          creat: roundN(0.9 * creatMul, 2),
+          bili: roundN(0.8 * biliMul, 2),
         },
       },
     },
   };
 }
+
+export type ScorecardContract = ReturnType<typeof buildScorecardContract>;
