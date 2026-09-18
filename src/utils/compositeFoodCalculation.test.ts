@@ -141,3 +141,43 @@ describe('parseTrayGramInput / normalizeTrayGrams (T-3 clear-to-edit)', () => {
     expect(normalizeTrayGrams(130)).toBe(130);
   });
 });
+
+describe('OCR passthrough (T-7, no agent call)', () => {
+  const ocrTag: any = {
+    name: 'Oat Label Porridge',
+    dbId: 'pm_ocr',
+    source: 'previous_meal',
+    weightGrams: 200,
+    originalLog: {
+      id: 'pm_ocr',
+      name: 'Oat Label Porridge',
+      weightGrams: 100,
+      calories: 150,
+      nutrients: { calories: 150, protein: 5 },
+      dbSource: 'label',
+      rawNutritionLabel: { servingSize: '100g', calories: '150' },
+      labelNutrientsPerServing: { calories: 150, protein: 5 },
+    },
+  };
+
+  it('carries dbSource/raw label onto the composite item and scales label nutrients', () => {
+    const result = calculateCompositeMeal([ocrTag]);
+    const item = result.itemsBreakdown[0];
+    expect(item.dbSource).toBe('label');
+    expect(item.rawNutritionLabel).toEqual({ servingSize: '100g', calories: '150' });
+    expect(item.labelNutrientsPerServing).toEqual({ calories: 300, protein: 10 });
+  });
+
+  it('leaves non-OCR items untouched', () => {
+    const plain: any = {
+      name: 'Plain Oats',
+      source: 'previous_meal',
+      weightGrams: 100,
+      originalLog: { id: 'pm_plain', name: 'Plain Oats', weightGrams: 100, calories: 100, nutrients: { calories: 100 } },
+    };
+    const item = calculateCompositeMeal([plain]).itemsBreakdown[0];
+    expect(item.dbSource).toBeUndefined();
+    expect(item.rawNutritionLabel).toBeUndefined();
+    expect(item.labelNutrientsPerServing).toBeUndefined();
+  });
+});

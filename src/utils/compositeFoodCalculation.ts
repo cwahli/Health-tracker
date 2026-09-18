@@ -46,6 +46,9 @@ export interface CompositeItemBreakdown {
   imageUrl?: string;
   source: string;
   scoutIndex: number;
+  dbSource?: string;
+  rawNutritionLabel?: any;
+  labelNutrientsPerServing?: any;
 }
 
 export interface CompositeMealCalculation {
@@ -70,6 +73,36 @@ export interface CompositeMealCalculation {
   itemsBreakdown: CompositeItemBreakdown[];
 }
 
+/**
+ * OCR evidence passthrough (T-7): when a staged source already carries
+ * label-OCR fields (dbSource 'label', rawNutritionLabel,
+ * labelNutrientsPerServing), carry them onto the composite item so the card
+ * can badge "Nutrition Facts (OCR Label)" with no new agent call. Label
+ * per-serving nutrients scale with the portion factor; the raw label is
+ * evidence and passes through unscaled.
+ */
+function tagOcrFields(src: any, factor: number): Record<string, any> {
+  if (!src || typeof src !== 'object') return {};
+  const db = src.dbSource;
+  const raw = src.rawNutritionLabel;
+  const label = src.labelNutrientsPerServing;
+  const hasRaw = raw && typeof raw === 'object' && Object.keys(raw).length > 0;
+  const hasLabel = label && typeof label === 'object' && Object.keys(label).length > 0;
+  if (db !== 'label' && !hasRaw && !hasLabel) return {};
+  let scaledLabel = label;
+  if (hasLabel && Number.isFinite(factor) && factor !== 1) {
+    scaledLabel = {};
+    for (const [k, v] of Object.entries(label)) {
+      scaledLabel[k] = typeof v === 'number' && Number.isFinite(v) ? Math.round((v as number) * factor * 100) / 100 : v;
+    }
+  }
+  return {
+    dbSource: db || 'label',
+    ...(hasRaw ? { rawNutritionLabel: raw } : {}),
+    ...(scaledLabel ? { labelNutrientsPerServing: scaledLabel } : {}),
+  };
+}
+
 export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): CompositeMealCalculation {
   let totalCalories = 0;
   let totalProtein = 0;
@@ -92,6 +125,7 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
     let sod = 0;
     let weight = Number(tag.weightGrams) || 100;
     let img = collectSavedMealImageUrls(tag)[0] || tag.imageUrl;
+    let ocrFields: Record<string, any> = {};
 
     if (tag.source === 'previous_meal' && tag.originalLog) {
       const orig = tag.originalLog;
@@ -109,6 +143,7 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
       if (!img) {
         img = collectSavedMealImageUrls({ ...tag, originalLog: orig })[0];
       }
+      ocrFields = tagOcrFields(orig, factor);
     } else {
       const item = tag.item || {};
       const nutr = item.nutrients || tag.nutrients || {};
@@ -125,6 +160,7 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
       if (!img) {
         img = collectSavedMealImageUrls({ ...tag, item })[0];
       }
+      ocrFields = tagOcrFields(item, factor);
     }
 
     const extraImgs = collectSavedMealImageUrls(tag);
@@ -163,6 +199,7 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
       sodium: Math.round(sod),
       salt: Math.round((sod / 400) * 10) / 10,
       imageUrl: img,
+      ...ocrFields,
       source: tag.source || 'catalog_tag',
       scoutIndex: idx
     });

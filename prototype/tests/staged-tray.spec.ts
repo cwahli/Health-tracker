@@ -297,4 +297,45 @@ test.describe('Track T: staged tray', () => {
     await expect(page.locator(`img[src="${px1}"]`).first()).toBeVisible({ timeout: 15000 });
     await expect(page.locator(`img[src="${px2}"]`).first()).toBeVisible({ timeout: 15000 });
   });
+
+  test('T-7: restaged OCR meal shows label badge with no agent call', async ({ page }) => {
+    const apiPosts: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/')) apiPosts.push(req.url());
+    });
+
+    await page.route('**/api/food/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          results: [
+            {
+              type: 'previous_meal', id: 'pm10', name: 'Oat OCR Porridge', portionGrams: 100,
+              calories: 150, protein: 5, carbohydrates: 27, totalFat: 3,
+              dbSource: 'label',
+              rawNutritionLabel: { servingSize: '100g', calories: '150' },
+              labelNutrientsPerServing: { calories: 150, protein: 5 },
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.locator('#food-chat-input').fill('oat');
+    const row = page
+      .getByText('Oat OCR Porridge', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await row.getByRole('button', { name: /add/i }).click();
+    await expect(page.getByText('STAGED ITEMS')).toBeVisible({ timeout: 15000 });
+
+    await page.locator('#food-chat-send-btn').click();
+    await expect(page.getByText(/Here is the nutrition breakdown for.*Oat OCR Porridge/i).first()).toBeVisible({ timeout: 15000 });
+
+    // Open the item tile label view and expect the OCR badge from the original meal — no agent involved.
+    const tile = page.locator('span.text-\\[10px\\]', { has: page.getByText('Oat OCR Porridge', { exact: true }) });
+    await tile.getByText('Oat OCR Porridge', { exact: true }).click();
+    await expect(page.getByText('Nutrition Facts (OCR Label)').first()).toBeVisible({ timeout: 15000 });
+    expect(apiPosts).toEqual([]);
+  });
 });
