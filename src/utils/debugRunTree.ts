@@ -41,7 +41,7 @@ export interface DialogInventory {
 }
 
 export interface DispatchTrace {
-  id: string; // e.g. "t1/scout", "t1/resolver", "fd/front_desk"
+  id: string; // e.g. "t1/scout", "t1/curator", "fd/front_desk"
   parent?: string | null;
   turn?: number | string;
   agent?: string;
@@ -108,6 +108,7 @@ export interface CanonicalRunTree {
   /** Clinical/health-coach report output (medical pack verification). */
   report?: any;
   comparisonData?: any;
+  previousAttempts?: any[];
 }
 
 /** Determines which operational pack this run belongs to */
@@ -242,13 +243,13 @@ export function parseUnifiedTimingAll(logs: string): { stage: string; ms: number
  *  on skip paths, so those are deliberately NOT evidence. `[scout_answer]` is
  *  kept as legacy evidence: old exports predate usage/timing lines and scout
  *  always calls. (The dietitian agent is removed; its stages never call.) */
-export function hasCallEvidence(logs: string, stage: 'scout' | 'resolver'): boolean {
+export function hasCallEvidence(logs: string, stage: 'scout' | 'resolver' | 'curator'): boolean {
   if (!logs || typeof logs !== 'string') return false;
   const tag = `\\[UnifiedLLM:${stage}\\]|\\[UnifiedLLM-Prompt:${stage}\\]|\\[UnifiedLLM-Usage:${stage}\\]|\\[UnifiedLLM-Timing:${stage}\\]|\\[UnifiedLLM-Response:${stage}\\]`;
   if (stage === 'scout') {
     return new RegExp(`${tag}|\\[scout_answer\\]|\\[Vision Scout\\] Retrying`).test(logs);
   }
-  return new RegExp(`${tag}|food_resolver|Food Resolver agent`).test(logs);
+  return new RegExp(`${tag}|\\[UnifiedLLM:(?:food_)?resolver\\]|\\[UnifiedLLM-Usage:(?:food_)?resolver\\]|\\[UnifiedLLM-Timing:(?:food_)?resolver\\]|\\[UnifiedLLM:curator\\]|\\[UnifiedLLM-Usage:curator\\]|\\[UnifiedLLM-Timing:curator\\]|food_resolver|Food Resolver agent|curator|brandCurator|\\[curator_answer\\]`).test(logs);
 }
 
 /** Prefix a log line with [jobId] unless blank or already tagged (contract §9: joinable lines) */
@@ -382,20 +383,20 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
       return copy;
     });
 
-    const hasResolver = Boolean(
-      /food_resolver|Food Resolver/i.test(logs) ||
-      usages.some(u => u.stage === 'food_resolver') ||
-      timings.some(t => t.stage === 'food_resolver')
+    const hasCurator = Boolean(
+      /food_resolver|Food Resolver|curator/i.test(logs) ||
+      usages.some(u => u.stage === 'food_resolver' || u.stage === 'curator') ||
+      timings.some(t => t.stage === 'food_resolver' || t.stage === 'curator')
     );
-    if (hasResolver && !enriched.some(d => d.agent === 'resolver')) {
-      const u = usages.find(x => x.stage === 'food_resolver');
-      const t = timings.find(x => x.stage === 'food_resolver');
-      const rModelMatch = logs.match(/Food Resolver.*?Calling (gemini-[^\s]+)|Calling (gemini-[^\s]+).*?[Rr]esolver/i);
+    if (hasCurator && !enriched.some(d => d.agent === 'curator' || d.agent === 'resolver')) {
+      const u = usages.find(x => x.stage === 'curator' || x.stage === 'food_resolver');
+      const t = timings.find(x => x.stage === 'curator' || x.stage === 'food_resolver');
+      const rModelMatch = logs.match(/(?:Food Resolver|Curator).*?Calling (gemini-[^\s]+)|Calling (gemini-[^\s]+).*?(?:[Rr]esolver|[Cc]urator)/i);
       enriched.push({
-        id: 't1/resolver',
+        id: 't1/curator',
         parent: enriched[0]?.id || null,
         turn: 1,
-        agent: 'resolver',
+        agent: 'curator',
         user: undefined,
         received: { gapItems: true },
         instruction: undefined,
@@ -472,9 +473,26 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
           model: modelMatch ? (modelMatch[1] || modelMatch[2]) : 'gemini-3.5-flash-lite',
           latency_ms: scoutTiming?.ms ?? 1500,
           tokens: scoutUsage?.total ?? undefined,
-          error: null,
+          error: input.error || null,
         };
         enriched.unshift(scoutDisp);
+      }
+
+      const hasFallbackInLogs = /falling back to gemini-3\.1-flash-lite/i.test(logs);
+      if (hasFallbackInLogs && !enriched.some(d => d.model?.includes('3.1'))) {
+        const stallMatches = Array.from(logs.matchAll(/Stream stalled:\s*Vision Scout\s*(?:\(([^)]+)\))?[^\n]*/gi));
+        const fbErr = (stallMatches[1] && stallMatches[1][0].trim()) || input.error || null;
+        enriched.push({
+          id: 't1/scout-fallback',
+          parent: 't1/scout',
+          turn: 1,
+          agent: 'scout',
+          user: 'Analyze this meal photo.',
+          received: { fallbackFrom: 't1/scout', reason: 'stall_or_quota' },
+          model: 'gemini-3.1-flash-lite',
+          latency_ms: stallMatches.length > 0 ? 90000 : 1500,
+          error: fbErr,
+        });
       }
 
       const turnSet = new Set(enriched.map(d => Number(d.turn) || 1));
@@ -496,6 +514,18 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
             };
             matchingScout.output = matchingScout.output || emission;
             matchingScout.rawEmission = matchingScout.rawEmission || emission;
+          }
+        }
+      }
+    }
+
+    if (Array.isArray((input as any).previousAttempts) && (input as any).previousAttempts.length > 0) {
+      for (const prev of (input as any).previousAttempts) {
+        if (Array.isArray(prev.dispatches)) {
+          for (const pd of prev.dispatches) {
+            if (pd && pd.id && !enriched.some(d => d.id === pd.id)) {
+              enriched.unshift(pd);
+            }
           }
         }
       }
@@ -556,7 +586,7 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
   const hasScout = Boolean(
     input.scoutItems?.length ||
     input.rawScout ||
-    /\[Vision Scout\]|\[UnifiedLLM-Prompt:scout\]/i.test(logs)
+    /\bVision Scout\b|\[UnifiedLLM-Prompt:scout\]|gemini-|Stream stalled/i.test(logs)
   );
 
   if (hasScout) {
@@ -565,16 +595,139 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
     const scoutUsages = parseUnifiedUsageAll(logs).filter(u => u.stage === 'scout');
     const scoutTimings = parseUnifiedTimingAll(logs).filter(t => t.stage === 'scout');
 
+    // Check if there are continuation / retry turns in logs
+    const continuationSplitRegex = /\n--- (?:USER|RETRY|RETRY \/ CONTINUATION) CONTINUATION \(TURN (\d+)\) ---\n/gi;
+    const continuationMatches = Array.from(logs.matchAll(continuationSplitRegex));
+
     // Check if there are multiple prompt sections in logs
     const promptSplitRegex = /\[UnifiedLLM-Prompt:scout\] System Instruction:\n/g;
-    const matches = Array.from(logs.matchAll(promptSplitRegex));
+    const promptMatches = Array.from(logs.matchAll(promptSplitRegex));
 
-    if (matches.length > 1) {
+    if (continuationMatches.length > 0) {
+      // Multi-turn run across retry / continuation sessions!
+      const turnSections: { turnNum: number; section: string }[] = [];
+      let lastIndex = 0;
+      for (let i = 0; i < continuationMatches.length; i++) {
+        const match = continuationMatches[i];
+        turnSections.push({
+          turnNum: i + 1,
+          section: logs.slice(lastIndex, match.index!),
+        });
+        lastIndex = match.index! + match[0].length;
+      }
+      turnSections.push({
+        turnNum: continuationMatches.length + 1,
+        section: logs.slice(lastIndex),
+      });
+
+      for (const { turnNum, section } of turnSections) {
+        let turnSysInst = '';
+        let turnUserPrompt = '';
+        const sysMatch = section.match(/\[UnifiedLLM-Prompt:scout\] System Instruction:\n([\s\S]+?)(?=\n\[UnifiedLLM-Prompt:scout\] User Prompt:|\n\[scout_|\n\[dietitian_|\n\[Vision Scout\]|$)/);
+        if (sysMatch) turnSysInst = sysMatch[1].trim();
+        const usrMatch = section.match(/\[UnifiedLLM-Prompt:scout\] User Prompt:\n([\s\S]+?)(?=\n\[UnifiedLLM-Prompt:|\n\[scout_|\n\[dietitian_|\n\[Vision Scout\]|$)/);
+        if (usrMatch) turnUserPrompt = usrMatch[1].trim();
+
+        if (!turnSysInst) {
+          turnSysInst = "- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs, set 'weightGrams' to a single unit/serving size and 'packGrams' to the container total.";
+        }
+
+        const fullInstruction = turnSysInst
+          ? (turnUserPrompt ? `=== SYSTEM INSTRUCTION ===\n${turnSysInst}\n\n=== USER PROMPT ===\n${turnUserPrompt}` : turnSysInst)
+          : turnUserPrompt;
+
+        let turnUserText = turnNum === 1 ? defaultUserPrompt : undefined;
+        if (turnNum > 1 && turnUserPrompt) {
+          const modMatch = turnUserPrompt.match(/User modification instruction:\s*"([^"]+)"/i);
+          if (modMatch) turnUserText = modMatch[1];
+          else if (input.message && turnNum === turnSections.length) turnUserText = input.message;
+        }
+
+        const turnModelMatch = section.match(/Vision Scout \(([^)]+)\)|\[UnifiedLLM\] Calling (gemini-[^\s]+)/i);
+        const turnLatencyMatch = section.match(/(?:Vision Scout|UnifiedLLM).*?(\d+(?:\.\d+)?)ms/i);
+        const turnScoutUsages = parseUnifiedUsageAll(section).filter(u => u.stage === 'scout');
+        const turnScoutTimings = parseUnifiedTimingAll(section).filter(t => t.stage === 'scout');
+
+        const stallMatches = Array.from(section.matchAll(/Stream stalled:\s*Vision Scout\s*(?:\(([^)]+)\))?[^\n]*/gi));
+        const fallbackMatch = section.match(/(?:falling back to|Switch to)\s*(gemini-[^\s]+)/i);
+
+        if (stallMatches.length > 0) {
+          const m1 = stallMatches[0][1] || turnModelMatch?.[1] || turnModelMatch?.[2] || 'gemini-3.5-flash-lite';
+          dispatches.push({
+            id: `t${turnNum}/scout`,
+            parent: turnNum > 1 ? `t${turnNum - 1}/scout` : null,
+            turn: turnNum,
+            agent: 'scout',
+            user: turnUserText,
+            received: {
+              turn: turnNum,
+              mode: turnNum === 1 ? (input.mode || 'new_log') : 'edit',
+              ...(turnNum === 1 ? { photoCount: input.photoUrls?.length || (input.photoUrl ? 1 : 0) } : {}),
+              ...(turnUserText ? { userMessage: turnUserText } : {}),
+            },
+            systemInstruction: turnSysInst || undefined,
+            userPrompt: turnUserPrompt || undefined,
+            instruction: fullInstruction || undefined,
+            model: m1,
+            latency_ms: 90000,
+            tokens: turnScoutUsages[0]?.total || undefined,
+            error: stallMatches[0][0].trim(),
+          });
+
+          if (stallMatches.length > 1 || fallbackMatch) {
+            const m2 = (stallMatches[1] && stallMatches[1][1]) || fallbackMatch?.[1] || 'gemini-3.1-flash-lite';
+            const err2 = (stallMatches[1] && stallMatches[1][0].trim()) || (turnNum === turnSections.length ? input.error : null) || null;
+            dispatches.push({
+              id: `t${turnNum}/scout-fallback`,
+              parent: `t${turnNum}/scout`,
+              turn: turnNum,
+              agent: 'scout',
+              user: turnUserText,
+              received: {
+                turn: turnNum,
+                fallbackFrom: `t${turnNum}/scout`,
+                reason: 'stall_or_quota',
+              },
+              systemInstruction: turnSysInst || undefined,
+              userPrompt: turnUserPrompt || undefined,
+              instruction: fullInstruction || undefined,
+              model: m2,
+              latency_ms: (stallMatches[1] ? 90000 : (turnScoutTimings[1]?.ms || 1500)),
+              tokens: turnScoutUsages[1]?.total || undefined,
+              error: err2,
+            });
+          }
+        } else {
+          dispatches.push({
+            id: `t${turnNum}/scout`,
+            parent: turnNum > 1 ? `t${turnNum - 1}/scout` : null,
+            turn: turnNum,
+            agent: 'scout',
+            user: turnUserText,
+            received: {
+              turn: turnNum,
+              mode: turnNum === 1 ? (input.mode || 'new_log') : 'edit',
+              ...(turnNum === 1 ? { photoCount: input.photoUrls?.length || (input.photoUrl ? 1 : 0) } : {}),
+              ...(turnUserText ? { userMessage: turnUserText } : {}),
+            },
+            systemInstruction: turnSysInst || undefined,
+            userPrompt: turnUserPrompt || undefined,
+            instruction: fullInstruction || undefined,
+            output: turnNum === turnSections.length ? (input.rawScout || input.scoutItems) : undefined,
+            rawEmission: turnNum === turnSections.length ? (input.rawScout || undefined) : undefined,
+            model: turnModelMatch ? (turnModelMatch[1] || turnModelMatch[2]) : 'gemini-3.5-flash-lite',
+            latency_ms: turnScoutTimings[0]?.ms ?? (turnLatencyMatch ? Math.round(Number(turnLatencyMatch[1])) : 1500),
+            tokens: turnScoutUsages[0]?.total || undefined,
+            error: turnNum === turnSections.length ? (input.error || null) : null,
+          });
+        }
+      }
+    } else if (promptMatches.length > 1) {
       // Multi-turn run detected in logs!
-      for (let i = 0; i < matches.length; i++) {
+      for (let i = 0; i < promptMatches.length; i++) {
         const turnNum = i + 1;
-        const startIndex = matches[i].index!;
-        const nextIndex = i + 1 < matches.length ? matches[i + 1].index! : logs.length;
+        const startIndex = promptMatches[i].index!;
+        const nextIndex = i + 1 < promptMatches.length ? promptMatches[i + 1].index! : logs.length;
         const turnLogSection = logs.slice(startIndex, nextIndex);
 
         let turnSysInst = '';
@@ -592,7 +745,7 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
         if (turnNum > 1 && turnUserPrompt) {
           const modMatch = turnUserPrompt.match(/User modification instruction:\s*"([^"]+)"/i);
           if (modMatch) turnUserText = modMatch[1];
-          else if (input.message && turnNum === matches.length) turnUserText = input.message;
+          else if (input.message && turnNum === promptMatches.length) turnUserText = input.message;
         }
 
         dispatches.push({
@@ -610,12 +763,12 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
           systemInstruction: turnSysInst || undefined,
           userPrompt: turnUserPrompt || undefined,
           instruction: fullInstruction || undefined,
-          output: turnNum === matches.length ? (input.rawScout || input.scoutItems) : undefined,
-          rawEmission: turnNum === matches.length ? (input.rawScout || undefined) : undefined,
+          output: turnNum === promptMatches.length ? (input.rawScout || input.scoutItems) : undefined,
+          rawEmission: turnNum === promptMatches.length ? (input.rawScout || undefined) : undefined,
           model: modelMatch ? (modelMatch[1] || modelMatch[2]) : 'gemini-3.5-flash-lite',
           latency_ms: scoutTimings[i]?.ms ?? scoutTimings[scoutTimings.length - 1]?.ms ?? (latencyMatch ? Math.round(Number(latencyMatch[1])) : 1500),
           tokens: scoutUsages[i]?.total ?? scoutUsages[scoutUsages.length - 1]?.total ?? undefined,
-          error: turnNum === matches.length ? (input.error || null) : null,
+          error: turnNum === promptMatches.length ? (input.error || null) : null,
         });
       }
     } else {
@@ -657,49 +810,105 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
         ? (extractedUserPrompt ? `=== SYSTEM INSTRUCTION ===\n${extractedSystemInstruction}\n\n=== USER PROMPT ===\n${extractedUserPrompt}` : extractedSystemInstruction)
         : extractedUserPrompt;
 
-      dispatches.push({
-        id: 't1/scout',
-        parent: null,
-        turn: 1,
-        agent: 'scout',
-        user: defaultUserPrompt,
-        received: {
-          photoCount: input.photoUrls?.length || (input.photoUrl ? 1 : 0),
-          ...(input.photoUrls?.length ? { photoUrls: input.photoUrls } : (input.photoUrl ? { photoUrl: input.photoUrl } : {})),
-          ...(input.userPrompt ? { userMessage: input.userPrompt } : (input.userMessage ? { userMessage: input.userMessage } : (!hasPhotos && input.message ? { userMessage: input.message } : {}))),
-          ...(input.mode ? { mode: input.mode } : {}),
-          ...(input.diningEnvironment ? { diningEnvironment: input.diningEnvironment } : {}),
-        },
-        systemInstruction: extractedSystemInstruction,
-        userPrompt: extractedUserPrompt,
-        instruction: fullInstruction,
-        output: input.rawScout || input.scoutItems,
-        rawEmission: input.rawScout || undefined,
-        model: modelMatch ? (modelMatch[1] || modelMatch[2]) : 'gemini-3.5-flash-lite',
-        latency_ms: scoutTimings[0]?.ms || (latencyMatch ? Math.round(Number(latencyMatch[1])) : 1500),
-        tokens: scoutUsages[0]?.total || undefined,
-        error: input.error || null,
-      });
+      const stallMatches = Array.from(logs.matchAll(/Stream stalled:\s*Vision Scout\s*(?:\(([^)]+)\))?[^\n]*/gi));
+      const fallbackMatch = logs.match(/(?:falling back to|Switch to)\s*(gemini-[^\s]+)/i);
+
+      if (stallMatches.length > 0) {
+        const m1 = stallMatches[0][1] || (modelMatch ? (modelMatch[1] || modelMatch[2]) : 'gemini-3.5-flash-lite');
+        dispatches.push({
+          id: 't1/scout',
+          parent: null,
+          turn: 1,
+          agent: 'scout',
+          user: defaultUserPrompt,
+          received: {
+            photoCount: input.photoUrls?.length || (input.photoUrl ? 1 : 0),
+            ...(input.photoUrls?.length ? { photoUrls: input.photoUrls } : (input.photoUrl ? { photoUrl: input.photoUrl } : {})),
+            ...(input.userPrompt ? { userMessage: input.userPrompt } : (input.userMessage ? { userMessage: input.userMessage } : (!hasPhotos && input.message ? { userMessage: input.message } : {}))),
+            ...(input.mode ? { mode: input.mode } : {}),
+            ...(input.diningEnvironment ? { diningEnvironment: input.diningEnvironment } : {}),
+          },
+          systemInstruction: extractedSystemInstruction,
+          userPrompt: extractedUserPrompt,
+          instruction: fullInstruction,
+          output: input.rawScout || input.scoutItems,
+          rawEmission: input.rawScout || undefined,
+          model: m1,
+          latency_ms: 90000,
+          tokens: scoutUsages[0]?.total || undefined,
+          error: stallMatches[0][0].trim(),
+        });
+
+        if (stallMatches.length > 1 || fallbackMatch) {
+          const m2 = (stallMatches[1] && stallMatches[1][1]) || fallbackMatch?.[1] || 'gemini-3.1-flash-lite';
+          const err2 = (stallMatches[1] && stallMatches[1][0].trim()) || input.error || null;
+          dispatches.push({
+            id: 't1/scout-fallback',
+            parent: 't1/scout',
+            turn: 1,
+            agent: 'scout',
+            user: defaultUserPrompt,
+            received: {
+              photoCount: input.photoUrls?.length || (input.photoUrl ? 1 : 0),
+              fallbackFrom: 't1/scout',
+              reason: 'stall_or_quota',
+            },
+            systemInstruction: extractedSystemInstruction,
+            userPrompt: extractedUserPrompt,
+            instruction: fullInstruction,
+            output: input.rawScout || input.scoutItems,
+            rawEmission: input.rawScout || undefined,
+            model: m2,
+            latency_ms: (stallMatches[1] ? 90000 : (scoutTimings[1]?.ms || 1500)),
+            tokens: scoutUsages[1]?.total || undefined,
+            error: err2,
+          });
+        }
+      } else {
+        dispatches.push({
+          id: 't1/scout',
+          parent: null,
+          turn: 1,
+          agent: 'scout',
+          user: defaultUserPrompt,
+          received: {
+            photoCount: input.photoUrls?.length || (input.photoUrl ? 1 : 0),
+            ...(input.photoUrls?.length ? { photoUrls: input.photoUrls } : (input.photoUrl ? { photoUrl: input.photoUrl } : {})),
+            ...(input.userPrompt ? { userMessage: input.userPrompt } : (input.userMessage ? { userMessage: input.userMessage } : (!hasPhotos && input.message ? { userMessage: input.message } : {}))),
+            ...(input.mode ? { mode: input.mode } : {}),
+            ...(input.diningEnvironment ? { diningEnvironment: input.diningEnvironment } : {}),
+          },
+          systemInstruction: extractedSystemInstruction,
+          userPrompt: extractedUserPrompt,
+          instruction: fullInstruction,
+          output: input.rawScout || input.scoutItems,
+          rawEmission: input.rawScout || undefined,
+          model: modelMatch ? (modelMatch[1] || modelMatch[2]) : 'gemini-3.5-flash-lite',
+          latency_ms: scoutTimings[0]?.ms || (latencyMatch ? Math.round(Number(latencyMatch[1])) : 1500),
+          tokens: scoutUsages[0]?.total || undefined,
+          error: input.error || null,
+        });
+      }
     }
   }
 
-  // Food Resolver: runs inside DB search for gap items (unknown foods needing
-  // resolution). Evidence: streamed `food_resolver` status lines or usage/timing.
-  const hasResolver = Boolean(
-    /food_resolver|Food Resolver/i.test(logs) ||
-    parseUnifiedUsageLines(logs).some(u => u.stage === 'food_resolver') ||
-    parseUnifiedTimingLines(logs).some(t => t.stage === 'food_resolver')
+  // Brand Curator (formerly Food Resolver): runs inside DB search / brand clean for gap items or catalog curation.
+  // Evidence: streamed `curator` / `food_resolver` status lines or usage/timing.
+  const hasCurator = Boolean(
+    /food_resolver|Food Resolver|curator/i.test(logs) ||
+    parseUnifiedUsageLines(logs).some(u => u.stage === 'curator' || u.stage === 'food_resolver') ||
+    parseUnifiedTimingLines(logs).some(t => t.stage === 'curator' || t.stage === 'food_resolver')
   );
 
-  if (hasResolver) {
-    const usage = parseUnifiedUsageLines(logs).find(u => u.stage === 'food_resolver');
-    const timing = parseUnifiedTimingLines(logs).find(t => t.stage === 'food_resolver');
-    const modelMatch = logs.match(/Food Resolver.*?Calling (gemini-[^\s]+)|Calling (gemini-[^\s]+).*?[Rr]esolver/i);
+  if (hasCurator) {
+    const usage = parseUnifiedUsageLines(logs).find(u => u.stage === 'curator' || u.stage === 'food_resolver');
+    const timing = parseUnifiedTimingLines(logs).find(t => t.stage === 'curator' || t.stage === 'food_resolver');
+    const modelMatch = logs.match(/(?:Food Resolver|Curator).*?Calling (gemini-[^\s]+)|Calling (gemini-[^\s]+).*?(?:[Rr]esolver|[Cc]urator)/i);
     dispatches.push({
-      id: 't1/resolver',
+      id: 't1/curator',
       parent: hasScout ? 't1/scout' : null,
       turn: 1,
-      agent: 'resolver',
+      agent: 'curator',
       user: undefined,
       received: { gapItems: true },
       instruction: undefined,
@@ -728,6 +937,18 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
         };
         scoutDispatch.output = scoutDispatch.output || emission;
         scoutDispatch.rawEmission = scoutDispatch.rawEmission || emission;
+      }
+    }
+  }
+
+  if (Array.isArray((input as any).previousAttempts) && (input as any).previousAttempts.length > 0) {
+    for (const prev of (input as any).previousAttempts) {
+      if (Array.isArray(prev.dispatches)) {
+        for (const pd of prev.dispatches) {
+          if (pd && pd.id && !dispatches.some(d => d.id === pd.id)) {
+            dispatches.unshift(pd);
+          }
+        }
       }
     }
   }
@@ -830,6 +1051,7 @@ export function buildCanonicalRunTree(input: DebugReportInput): CanonicalRunTree
     extractedData: input.extractedData,
     report: (input as any).report,
     comparisonData: input.comparisonData || (input as any).result?.comparisonData || (input as any).result?.comparison || null,
+    previousAttempts: Array.isArray((input as any).previousAttempts) ? (input as any).previousAttempts : [],
   };
 
   // Evaluate contracts on the populated tree

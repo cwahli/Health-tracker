@@ -135,6 +135,8 @@ export type DebugReportInput = {
   extractedData?: any;
   comparisonData?: any;
   patientContext?: any;
+  previousAttempts?: any[];
+  priorLogs?: string | string[];
 };
 
 /**
@@ -733,6 +735,26 @@ export function buildDebugMarkdownReport(input: DebugReportInput): string {
       lines.push('_This was the first message in the conversation — no previous steps._');
       lines.push('');
     }
+  }
+
+  // Previous retry sessions / execution attempts
+  const previousAttempts = Array.isArray(input.previousAttempts) && input.previousAttempts.length > 0
+    ? input.previousAttempts
+    : (Array.isArray((tree as any).previousAttempts) && (tree as any).previousAttempts.length > 0
+      ? (tree as any).previousAttempts
+      : []);
+
+  if (previousAttempts.length > 0) {
+    lines.push(`## 🔄 Retry Sessions & Execution Attempts (${previousAttempts.length})`);
+    lines.push('');
+    lines.push(`| Attempt / Turn | Status | Completed At | Error / Details |`);
+    lines.push(`|---|---|---|---|`);
+    for (const att of previousAttempts) {
+      const errStr = att.error ? (typeof att.error === 'object' ? (att.error.message || JSON.stringify(att.error)) : String(att.error)) : 'none';
+      const timeStr = att.completedAt ? att.completedAt : 'n/a';
+      lines.push(`| **Attempt ${att.turn || att.attempt || 1}** | \`${att.status || 'unknown'}\` | ${timeStr} | ${errStr} |`);
+    }
+    lines.push('');
   }
 
   // 1. Last User Action
@@ -1632,6 +1654,8 @@ export function debugReportFromJobMsg(job: any, msg: any): DebugReportInput {
     dispatches: job?.dispatches || msg?.data?.dispatches || job?.result?.dispatches,
     agentInstructions: result.agentInstructions || msg?.data?.agentInstructions || msg?.data?.agentResult?.agentInstructions || job?.result?.agentInstructions || job?.inputSnapshot?.agentInstructions,
     photoUrls: result.photoUrls || job?.photoUrls || msg?.data?.photoUrls || (food?.imageUrl ? [food.imageUrl] : undefined),
+    previousAttempts: job?.previousAttempts || result?.previousAttempts || job?.clean_result?.previousAttempts,
+    priorLogs: job?.priorLogs || result?.priorLogs,
   };
 
   // Ensure dispatches is an array, and attempt to augment it for 'EDIT' turns

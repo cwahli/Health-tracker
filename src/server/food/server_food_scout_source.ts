@@ -229,9 +229,11 @@ export function injectExplicitFoodTags(args: ExplicitTagsArgs): void {
         keyword: tag.name,
         originalName: tag.name,
         estimatedWeightGrams: tag.weightGrams,
-        source: 'catalog_tag',
+        source: tag.source || 'catalog_tag',
         dbId: tag.dbId,
-        dbSource: 'internal_catalog',
+        dbSource: tag.source === 'previous_meal' ? 'previous_meal' : 'internal_catalog',
+        imageUrl: tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0] || undefined,
+        nutrients: tag.nutrients || tag.originalLog?.nutrients || undefined,
       });
     }
   });

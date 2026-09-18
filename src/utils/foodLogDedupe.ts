@@ -171,6 +171,8 @@ function pickBetter<T extends DedupableFoodLog>(a: T, b: T): T {
 
   const resolved = {
     ...winner,
+    verdict: (winner as any).verdict || (loser as any).verdict,
+    clinicalAdvice: (winner as any).clinicalAdvice || (loser as any).clinicalAdvice,
     sync_state: resolvedSyncState,
   };
   if (candidates.length === 0) return resolved;

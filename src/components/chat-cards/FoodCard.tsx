@@ -2930,7 +2930,9 @@ export const FoodCard: React.FC<AgentCardProps & {
                                   verdict: logTarget.verdict || msg.data?.agentResult?.verdict || msg.data?.verdict,
                                   message: logTarget.message || msg.data?.agentResult?.message || msg.data?.message || logTarget.description || msg.data?.agentResult?.description || msg.data?.description,
                                   healthImpact: logTarget.healthImpact || msg.data?.agentResult?.healthImpact || msg.data?.healthImpact || msg.data?.agentResult?.data?.healthImpact,
-                                  composition: logTarget.composition || msg.data?.agentResult?.composition || msg.data?.composition,
+                                  jobId: (logTarget as any).jobId || msg.data?.jobId || (msg as any).jobId,
+                                  debugUrl: (logTarget as any).debugUrl || msg.data?.debugUrl || msg.data?.agentResult?.debugUrl || (msg as any).debugUrl,
+                                  backendLogs: (logTarget as any).backendLogs || msg.data?.backendLogs || msg.data?.agentResult?.backendLogs,
                                   chatTranscript: (messages || []).map((m: any) => ({
                                     role: m.role,
                                     content: m.content || '',
