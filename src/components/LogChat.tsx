@@ -2246,6 +2246,28 @@ ${logsText}`);
             userMsgImageUrl = userMsgImageUrls[0];
           }
         }
+        // T-6b: staged previous-meal photos ride on the user message for
+        // display (card hero + thread search). They deliberately stay out of
+        // scout input (finalImages/imageRefs) — the photo documents the
+        // staged dish, it is not a new capture to analyze.
+        if (explicitFoodTags.length > 0) {
+          const stagedUrls: string[] = [];
+          explicitFoodTags.forEach((t) => {
+            collectSavedMealImageUrls(t, activeFoodLogs, { allowSynthesized: false }).forEach((u) => {
+              if (u && !stagedUrls.includes(u)) stagedUrls.push(u);
+            });
+          });
+          if (stagedUrls.length > 0) {
+            const merged = [...(userMsgImageUrls || [])];
+            stagedUrls.forEach((u) => {
+              if (!merged.includes(u)) merged.push(u);
+            });
+            userMsgImageUrls = merged;
+            if (!userMsgImageUrl) {
+              userMsgImageUrl = merged[0];
+            }
+          }
+        }
         const userMsg: ChatMessage = {
           id: `msg_user_${Date.now()}`,
           role: 'user',
@@ -6313,7 +6335,7 @@ ${logsText}`);
                               type="number" 
                               defaultValue={item.serving_grams || tagPortionPreFill || 100}
                               id={`tag-portion-${item.food_id || idx}`}
-                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-center font-mono" 
+                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-center font-mono" 
                             />
                             <span className="text-xs text-slate-500">g</span>
                           </>
@@ -6323,7 +6345,7 @@ ${logsText}`);
                               type="number" 
                               defaultValue={item.portionGrams || item.weightGrams || item.weight_grams || 100}
                               id={`prev-portion-${item.id || idx}`}
-                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-center font-mono" 
+                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-center font-mono" 
                             />
                             <span className="text-xs text-slate-500">g</span>
                           </>
@@ -6410,7 +6432,7 @@ ${logsText}`);
                           onBlur={() => {
                             setExplicitFoodTags(prev => prev.map((item, i) => i === tIdx ? { ...item, weightGrams: normalizeTrayGrams(item.weightGrams) } : item));
                           }}
-                          className="w-10 text-[10px] text-center font-mono bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none"
+                          className="w-10 text-[10px] text-center font-mono bg-transparent text-slate-800 dark:text-white focus:outline-none"
                           min="1"
                         />
                         <span className="text-[9px] text-slate-500 dark:text-slate-400 font-mono">g</span>
