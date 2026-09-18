@@ -6263,7 +6263,7 @@ ${logsText}`);
                 <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
                   {filteredMatches.map((item, idx) => {
                     const itemName = item.name || item.dish_name || '';
-                    const savedImgs = collectSavedMealImageUrls(item, activeFoodLogs);
+                    const savedImgs = collectSavedMealImageUrls(item, activeFoodLogs, { allowSynthesized: false });
                     const thumbSrc = savedImgs[0] || '';
                     return (
                     <div key={item._listType === 'brand' ? (item.food_id || idx) : (item.id || idx)} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
@@ -6381,7 +6381,7 @@ ${logsText}`);
               </span>
               <div className="flex items-center gap-1.5 min-w-0">
                 {explicitFoodTags.map((tag, tIdx) => {
-                  const thumbSrc = collectSavedMealImageUrls(tag, activeFoodLogs)[0];
+                  const thumbSrc = collectSavedMealImageUrls(tag, activeFoodLogs, { allowSynthesized: false })[0];
                   return (
                     <div key={tag.dbId || tIdx} className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-lg px-2 py-1 shadow-sm shrink-0">
                       {thumbSrc ? (

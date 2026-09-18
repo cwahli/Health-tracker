@@ -102,6 +102,19 @@ describe('collectSavedMealImageUrls', () => {
   it('falls back to photos/{id}.jpg when nothing else is stored', () => {
     expect(collectSavedMealImageUrls({ id: 'food_nophoto' })).toEqual(['/photos/food_nophoto.jpg']);
   });
+
+  it('omits the synthesized guess when allowSynthesized is false (display path)', () => {
+    expect(collectSavedMealImageUrls({ id: 'food_nophoto' }, null, { allowSynthesized: false })).toEqual([]);
+  });
+
+  it('keeps real stored urls when allowSynthesized is false', () => {
+    const urls = collectSavedMealImageUrls(
+      { id: 'food_real', imageUrls: ['/photos/food_real.jpg'] },
+      null,
+      { allowSynthesized: false },
+    );
+    expect(urls).toEqual(['/photos/food_real.jpg']);
+  });
 });
 
 describe('resolveNextPhotoUrl (previous-meal thumbnail self-heal)', () => {

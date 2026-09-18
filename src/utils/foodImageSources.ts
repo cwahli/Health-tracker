@@ -190,8 +190,10 @@ export function collectSavedMealImageUrls(
     food_id?: string;
   } | null | undefined,
   foodLogs?: Array<{ id?: string; imageUrl?: string; imageUrls?: string[] }> | null,
+  opts?: { allowSynthesized?: boolean },
 ): string[] {
   if (!source) return [];
+  const allowSynthesized = opts?.allowSynthesized !== false;
   const raw: unknown[] = [];
   const pushFrom = (obj: any) => {
     if (!obj || typeof obj !== 'object') return;
@@ -217,7 +219,7 @@ export function collectSavedMealImageUrls(
       urls = uniqueMealImageUrls([donor.imageUrl, ...(Array.isArray(donor.imageUrls) ? donor.imageUrls : [])]);
     }
   }
-  if (urls.length === 0 && id && !id.startsWith('brand_')) {
+  if (urls.length === 0 && allowSynthesized && id && !id.startsWith('brand_')) {
     const safe = id.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
     urls = uniqueMealImageUrls([`${PHOTO_PROXY_PREFIX}${safe}.jpg`]);
   }
