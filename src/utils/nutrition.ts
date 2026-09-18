@@ -1,7 +1,7 @@
 import { NutrientBreakdown } from '../types';
 
 export interface NutrientMeta {
-  key: string;
+  key: keyof NutrientBreakdown;
   category: 'macro' | 'mineral' | 'vitamin';
   unit: string;
   labels: { [lang: string]: string };

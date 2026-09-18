@@ -13,29 +13,35 @@ export function resolveFoodImage(img: string | undefined | null, foodLogs: FoodL
   if (typeof targetImg !== 'string' || !targetImg.startsWith('ref:')) {
     result = targetImg;
   } else {
-    const primaryId = targetImg.replace('ref:', '');
-    const primaryLog = foodLogs.find(f => f.id === primaryId);
-    if (primaryLog) {
-      const baseImg = primaryLog.imageUrl || primaryLog.imageUrls?.[0];
-      if (baseImg) {
-        if (typeof baseImg === 'string' && !baseImg.startsWith('ref:')) {
-          result = baseImg;
-        } else if (typeof baseImg === 'string') {
-          const nextId = baseImg.replace('ref:', '');
-          const nextLog = foodLogs.find(f => f.id === nextId);
-          const nextImg = nextLog?.imageUrl || nextLog?.imageUrls?.[0];
-          if (typeof nextImg === 'string' && !nextImg.startsWith('ref:')) {
-            result = nextImg;
-          } else if (typeof nextImg === 'string' && nextImg.startsWith('ref:')) {
-            result = `/photos/${nextImg.replace('ref:', '')}.jpg`;
+    const primaryId = targetImg.replace(/^ref:/, '');
+    if (primaryId.startsWith('http://') || primaryId.startsWith('https://') || primaryId.startsWith('/photos/') || primaryId.startsWith('photos/')) {
+      result = primaryId.startsWith('/') || primaryId.startsWith('http') ? primaryId : `/${primaryId}`;
+    } else if (primaryId.startsWith('brand_')) {
+      result = `/photos/${primaryId}.jpg`;
+    } else {
+      const primaryLog = foodLogs.find(f => f.id === primaryId);
+      if (primaryLog) {
+        const baseImg = primaryLog.imageUrl || primaryLog.imageUrls?.[0];
+        if (baseImg) {
+          if (typeof baseImg === 'string' && !baseImg.startsWith('ref:')) {
+            result = baseImg;
+          } else if (typeof baseImg === 'string') {
+            const nextId = baseImg.replace(/^ref:/, '');
+            const nextLog = foodLogs.find(f => f.id === nextId);
+            const nextImg = nextLog?.imageUrl || nextLog?.imageUrls?.[0];
+            if (typeof nextImg === 'string' && !nextImg.startsWith('ref:')) {
+              result = nextImg;
+            } else if (typeof nextImg === 'string') {
+              result = `/photos/${nextImg.replace(/^ref:/, '')}.jpg`;
+            }
           }
+        } else {
+          result = `/photos/${primaryId}.jpg`;
         }
       } else {
+        // Direct R2 fallback when referenced donor log is not loaded in current slice
         result = `/photos/${primaryId}.jpg`;
       }
-    } else {
-      // Direct R2 fallback when referenced donor log is not loaded in current slice
-      result = `/photos/${primaryId}.jpg`;
     }
   }
 
@@ -45,7 +51,7 @@ export function resolveFoodImage(img: string | undefined | null, foodLogs: FoodL
   return undefined;
 }
 /**
- * Resolves an array of potentially referenced image strings.
+ * Resolves an array of potentially referenced image strings with deduplication.
  */
 export function resolveFoodImages(imgs: string[] | undefined | null, foodLogs: FoodLog[], parentLog?: FoodLog): string[] {
   let list = imgs && imgs.length > 0 ? [...imgs] : [];
@@ -55,7 +61,7 @@ export function resolveFoodImages(imgs: string[] | undefined | null, foodLogs: F
   if (list.length === 0) return [];
   
   const resolved = list.map(img => resolveFoodImage(img, foodLogs, parentLog)).filter((u): u is string => !!u);
-  return resolved;
+  return Array.from(new Set(resolved));
 }
 
 /* isUsableImageUrl normalizeMealImageUrl */

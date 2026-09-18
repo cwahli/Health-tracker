@@ -1,90 +1,108 @@
 import React from 'react';
-import { Home, Activity, Utensils, TrendingUp, Lightbulb } from 'lucide-react';
+import { Home, Activity, Utensils, TrendingUp, Plus } from 'lucide-react';
+import { translations } from '../utils/translations';
 
-export interface BottomNavProps {
-  activeTab: 'home' | 'insights' | 'food' | 'medical' | 'trends';
-  onNavigateTab: (tab: 'home' | 'insights' | 'food' | 'medical' | 'trends') => void;
-  isId?: boolean;
+interface BottomNavProps {
+  activeTab: 'home' | 'insights' | 'health' | 'food' | 'medical' | 'trends';
+  setActiveTab: (tab: 'home' | 'insights' | 'health' | 'food' | 'medical' | 'trends') => void;
+  language: string;
+  onPlusClick?: () => void;
+  isFloatingOpen?: boolean;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({
-  activeTab,
-  onNavigateTab,
-  isId = false,
-}) => {
+export default function BottomNav({ activeTab, setActiveTab, language, onPlusClick, isFloatingOpen }: BottomNavProps) {
+  const t = translations[language] || translations.en;
+
+  const leftTabs = [
+    { id: 'home', icon: Home, label: t.home },
+    { id: 'health', icon: Activity, label: t.health },
+  ] as const;
+
+  const rightTabs = [
+    { id: 'food', icon: Utensils, label: t.foodHistory },
+    { id: 'trends', icon: TrendingUp, label: t.trends },
+  ] as const;
+
   return (
-    <nav
-      id="app-bottom-nav"
-      className="fixed bottom-0 inset-x-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 safe-area-pb"
-    >
-      <div className="max-w-md mx-auto flex items-center justify-around h-16 px-2">
-        <button
-          id="nav-tab-home"
-          onClick={() => onNavigateTab('home')}
-          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-            activeTab === 'home'
-              ? 'text-indigo-600 dark:text-indigo-400'
-              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-          }`}
-        >
-          <Home className="w-5 h-5 mb-1" />
-          <span>{isId ? 'Beranda' : 'Home'}</span>
-        </button>
+    <nav className="fixed bottom-0 left-0 right-0 bg-theme-bg-card border-t border-theme-border shadow-lg py-2 px-4 z-40 transition-colors duration-200">
+      <div className="max-w-md mx-auto flex items-center justify-between relative">
+        {/* Left tabs */}
+        <div className="flex items-center justify-around flex-1">
+          {leftTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id || (tab.id === 'health' && (activeTab === 'insights' || activeTab === 'medical'));
+            return (
+              <button
+                key={tab.id}
+                id={`nav-tab-${tab.id}`}
+                onClick={() => setActiveTab(tab.id)}
+                className="relative p-3 rounded-2xl flex flex-col items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/20 group"
+                aria-label={tab.label}
+              >
+                <span
+                  className={`absolute inset-0 rounded-2xl scale-95 transition-all duration-300 ${
+                    isActive
+                      ? 'bg-indigo-600/10 scale-100'
+                      : 'bg-transparent group-hover:bg-theme-border/40'
+                  }`}
+                />
+                <Icon
+                  className={`w-6 h-6 relative z-10 transition-all duration-300 ${
+                    isActive
+                      ? 'text-indigo-600 stroke-[2.5px] scale-110'
+                      : 'text-theme-text-secondary opacity-70 group-hover:opacity-100'
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
 
-        <button
-          id="nav-tab-health"
-          onClick={() => onNavigateTab('medical')}
-          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-            activeTab === 'medical'
-              ? 'text-indigo-600 dark:text-indigo-400'
-              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-          }`}
-        >
-          <Activity className="w-5 h-5 mb-1" />
-          <span>{isId ? 'Kesehatan' : 'Health'}</span>
-        </button>
+        {/* Center elevated + button */}
+        <div className="flex justify-center px-4 relative -top-5">
+          <button
+            onClick={onPlusClick}
+            className={`w-14 h-14 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-xl hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all focus:outline-none focus:ring-4 focus:ring-indigo-500/20 z-50 ${
+              isFloatingOpen ? 'rotate-45 bg-rose-600 hover:bg-rose-700' : ''
+            }`}
+            title={t.openQuickActions}
+          >
+            <Plus className="w-7 h-7 stroke-[2.5px]" />
+          </button>
+        </div>
 
-        <button
-          id="nav-tab-food"
-          onClick={() => onNavigateTab('food')}
-          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-            activeTab === 'food'
-              ? 'text-indigo-600 dark:text-indigo-400'
-              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-          }`}
-        >
-          <Utensils className="w-5 h-5 mb-1" />
-          <span>{isId ? 'Makanan' : 'Food'}</span>
-        </button>
-
-        <button
-          id="nav-tab-trends"
-          onClick={() => onNavigateTab('trends')}
-          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-            activeTab === 'trends'
-              ? 'text-indigo-600 dark:text-indigo-400'
-              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-          }`}
-        >
-          <TrendingUp className="w-5 h-5 mb-1" />
-          <span>{isId ? 'Tren' : 'Trends'}</span>
-        </button>
-
-        <button
-          id="nav-tab-insights"
-          onClick={() => onNavigateTab('insights')}
-          className={`flex flex-col items-center justify-center flex-1 h-full py-1 text-xs font-medium transition-colors cursor-pointer ${
-            activeTab === 'insights'
-              ? 'text-indigo-600 dark:text-indigo-400'
-              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-          }`}
-        >
-          <Lightbulb className="w-5 h-5 mb-1" />
-          <span>{isId ? 'Wawasan' : 'Insights'}</span>
-        </button>
+        {/* Right tabs */}
+        <div className="flex items-center justify-around flex-1">
+          {rightTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                id={`nav-tab-${tab.id}`}
+                onClick={() => setActiveTab(tab.id)}
+                className="relative p-3 rounded-2xl flex flex-col items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/20 group"
+                aria-label={tab.label}
+              >
+                <span
+                  className={`absolute inset-0 rounded-2xl scale-95 transition-all duration-300 ${
+                    isActive
+                      ? 'bg-indigo-600/10 scale-100'
+                      : 'bg-transparent group-hover:bg-theme-border/40'
+                  }`}
+                />
+                <Icon
+                  className={`w-6 h-6 relative z-10 transition-all duration-300 ${
+                    isActive
+                      ? 'text-indigo-600 stroke-[2.5px] scale-110'
+                      : 'text-theme-text-secondary opacity-70 group-hover:opacity-100'
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
       </div>
     </nav>
   );
-};
-
-export default BottomNav;
+}

@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   isUsableImageUrl,
   normalizeMealImageUrl,
   photoKeyFromUrl,
   nextPhotoFallbackUrl,
   uniqueMealImageUrls,
+  resolveNextPhotoUrl,
   PHOTO_PROXY_PREFIX,
 } from './foodImageSources';
 
@@ -72,5 +73,73 @@ describe('foodImageSources B11d', () => {
     expect(uniqueMealImageUrls(['', '   ', null, undefined])).toEqual([]);
     expect(uniqueMealImageUrls(['[image_removed_for_snapshot]', 'Image reference preserved'])).toEqual([]);
     expect(uniqueMealImageUrls(['blob:revoked-after-reload'])).toEqual(['blob:revoked-after-reload']);
+  });
+});
+
+describe('resolveNextPhotoUrl (previous-meal thumbnail self-heal)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('tries the local proxy path first, without hitting the network', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const tried = new Set<string>();
+    const next = await resolveNextPhotoUrl(
+      'https://x.r2.dev/photos/job_almond.jpg',
+      'https://x.r2.dev/photos/job_almond.jpg',
+      tried
+    );
+    expect(next).toBe(`${PHOTO_PROXY_PREFIX}job_almond.jpg`);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('awaits the signed-URL API once proxy candidates are exhausted, and uses its returned URL', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ proxyUrl: '/photos/job_almond.jpg?fresh=1' }),
+      })
+    );
+    const tried = new Set<string>([
+      `${PHOTO_PROXY_PREFIX}job_almond.jpg`,
+      '/api/r2/photos/job_almond.jpg',
+    ]);
+    const next = await resolveNextPhotoUrl(
+      'https://x.r2.dev/photos/job_almond.jpg',
+      'https://x.r2.dev/photos/job_almond.jpg',
+      tried
+    );
+    expect(next).toBe('/photos/job_almond.jpg?fresh=1');
+  });
+
+  it('falls back to the raw signed-URL endpoint if the fetch throws (network error), not to null', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    const tried = new Set<string>([
+      `${PHOTO_PROXY_PREFIX}job_almond.jpg`,
+      '/api/r2/photos/job_almond.jpg',
+    ]);
+    const next = await resolveNextPhotoUrl(
+      'https://x.r2.dev/photos/job_almond.jpg',
+      'https://x.r2.dev/photos/job_almond.jpg',
+      tried
+    );
+    expect(next).toBe(`/api/r2/photo-url?key=${encodeURIComponent('job_almond.jpg')}`);
+  });
+
+  it('returns null once every fallback has already been tried (permanently broken image)', async () => {
+    const key = 'job_almond.jpg';
+    const tried = new Set<string>([
+      `${PHOTO_PROXY_PREFIX}${key}`,
+      `/api/r2/photos/${key}`,
+      `/api/r2/photo-url?key=${encodeURIComponent(key)}`,
+    ]);
+    const next = await resolveNextPhotoUrl(
+      'https://x.r2.dev/photos/job_almond.jpg',
+      'https://x.r2.dev/photos/job_almond.jpg',
+      tried
+    );
+    expect(next).toBeNull();
   });
 });
