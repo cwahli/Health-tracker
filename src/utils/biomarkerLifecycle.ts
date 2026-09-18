@@ -1024,7 +1024,7 @@ export function applyModificationCommands(
   const enriched = enrichReviewModificationCommands(commands, history, catalogUnitByKey);
   if (!enriched.length) return { history, applied: 0 };
   let applied = 0;
-  const next: BiomarkerLog[] = history.map((h) => ({
+  const next = history.map((h) => ({
     ...h,
     biomarkers: { ...(h.biomarkers || {}) },
     observationMeta: h.observationMeta ? JSON.parse(JSON.stringify(h.observationMeta)) : undefined,
@@ -1061,7 +1061,7 @@ export function applyModificationCommands(
               rawValue: cmd.oldValue !== undefined ? cmd.oldValue : val,
             },
           },
-          notes: cmd.reason || 'Corrected by Review',
+          note: cmd.reason || 'Corrected by Review',
           sync_state: 'update',
           updated_at: Date.now(),
         });

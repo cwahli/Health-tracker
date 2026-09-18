@@ -1,197 +1,105 @@
-import { t } from './i18n';
-import type { TranslationKey } from './translations';
+import { t } from './i18n.js';
 
-export interface MealVerdict {
+export interface ResolvedVerdict {
   label: string;
-  level: 'good' | 'warning' | 'alert' | 'neutral' | string;
+  level: 'good' | 'warning' | 'alert' | 'neutral';
 }
 
-const CANONICAL_VERDICT_KEY_MAP: Record<string, TranslationKey> = {
-  'high glycemic sugar': 'verdictHighGlycemicSugar',
-  'elevated saturated fat': 'verdictElevatedSatFat',
-  'lean muscle support': 'verdictLeanMuscle',
-  'gut microbiome': 'verdictGutMicrobiome',
-  'supports metabolic energy': 'verdictSupportsMetabolicEnergy',
-  'portion control': 'verdictPortionControl',
-};
+const GENERIC_LABELS = new Set(['good', 'bad', 'neutral', '[object object]', '']);
 
 /**
- * Resolves a structured meal verdict { label, level } from varied data payloads
- * such as FoodLog, chat messages, agentResult, or pendingFoodLog.
+ * Standardized resolver for food meal verdicts.
+ * Ensures that food cards and logs always display a high-fidelity clinical verdict badge
+ * rather than a generic word ('Good'), an empty badge, or a serialized '[object Object]'.
  */
-export function resolveMealVerdict(source: any, lang?: unknown): MealVerdict | null {
-  if (!source) return null;
+export function resolveMealVerdict(meal: any, lang?: unknown): ResolvedVerdict | null {
+  if (!meal || typeof meal !== 'object') return null;
 
-  let rawVerdict: any = null;
+  let raw = meal.verdict;
 
-  // Direct verdict property on source
-  if (source.verdict !== undefined && source.verdict !== null) {
-    rawVerdict = source.verdict;
-  } else if (source.agentResult?.verdict) {
-    rawVerdict = source.agentResult.verdict;
-  } else if (source.pendingFoodLog?.verdict) {
-    rawVerdict = source.pendingFoodLog.verdict;
-  } else if (source.data?.agentResult?.verdict) {
-    rawVerdict = source.data.agentResult.verdict;
-  } else if (source.data?.pendingFoodLog?.verdict) {
-    rawVerdict = source.data.pendingFoodLog.verdict;
-  } else if (source.data?.verdict) {
-    rawVerdict = source.data.verdict;
-  } else if (source.output?.verdict) {
-    rawVerdict = source.output.verdict;
-  } else if (Array.isArray(source.dispatches)) {
-    for (const d of source.dispatches) {
-      if (d?.output?.verdict) {
-        rawVerdict = d.output.verdict;
-        break;
-      }
-    }
-  } else if (Array.isArray(source.groups) && source.groups.length > 0 && source.groups[0]?.verdict) {
-    rawVerdict = source.groups[0].verdict;
-  }
-
-  // Parse JSON string if necessary
-  if (typeof rawVerdict === 'string') {
-    const trimmed = rawVerdict.trim();
+  // 1. If verdict is a string, attempt JSON parse or direct string usage
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
     if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
       try {
-        rawVerdict = JSON.parse(trimmed);
+        raw = JSON.parse(trimmed);
       } catch {
-        rawVerdict = { label: trimmed };
+        raw = null;
       }
+    } else if (!GENERIC_LABELS.has(trimmed.toLowerCase())) {
+      raw = { label: trimmed, level: 'neutral' };
     } else {
-      rawVerdict = { label: trimmed };
+      raw = null;
     }
   }
 
-  let label = (rawVerdict && typeof rawVerdict === 'object' && rawVerdict.label)
-    ? String(rawVerdict.label).trim()
-    : (typeof rawVerdict === 'string' ? rawVerdict.trim() : '');
-
-  let level = (rawVerdict && typeof rawVerdict === 'object' && rawVerdict.level)
-    ? String(rawVerdict.level).trim().toLowerCase()
-    : '';
-
-  // Fallback to recommendation if no explicit verdict label is found
-  if (!label) {
-    const rec = source.recommendation ||
-      source.pendingFoodLog?.recommendation ||
-      source.data?.pendingFoodLog?.recommendation ||
-      source.data?.recommendation ||
-      source.agentResult?.recommendation;
-
-    if (rec && typeof rec === 'string') {
-      const recTrimmed = rec.trim();
-      const recLower = recTrimmed.toLowerCase();
-      if (recLower === 'good' || recLower === 'healthy' || recLower === 'safe') {
-        level = level || 'good';
-        label = t(lang, 'verdictSupportsMetabolicEnergy') || 'Supports Metabolic Energy';
-      } else if (recLower === 'bad' || recLower === 'alert' || recLower === 'avoid' || recLower === 'danger') {
-        level = level || 'alert';
-        label = t(lang, 'verdictElevatedSatFat') || 'Elevated Saturated Fat';
-      } else if (recLower === 'warning' || recLower === 'caution' || recLower === 'moderate') {
-        level = level || 'warning';
-        label = t(lang, 'verdictPortionControl') || 'Portion Control';
-      } else if (recLower === 'neutral') {
-        level = level || 'neutral';
-        label = t(lang, 'verdictSupportsMetabolicEnergy') || 'Supports Evaluation';
-      } else {
-        label = recTrimmed;
+  // 2. If raw is now a valid object with a non-generic label, normalize and return
+  if (raw && typeof raw === 'object' && raw.label) {
+    const labelStr = String(raw.label).trim();
+    if (!GENERIC_LABELS.has(labelStr.toLowerCase())) {
+      let lvl = String(raw.level || '').toLowerCase();
+      let normalizedLevel: 'good' | 'warning' | 'alert' | 'neutral' = 'neutral';
+      if (['good', 'safe', 'healthy', 'best'].includes(lvl)) {
+        normalizedLevel = 'good';
+      } else if (['warning', 'caution', 'moderate', 'warn', 'yellow'].includes(lvl)) {
+        normalizedLevel = 'warning';
+      } else if (['alert', 'bad', 'avoid', 'danger', 'severe', 'fail', 'red'].includes(lvl)) {
+        normalizedLevel = 'alert';
       }
+      return { label: labelStr, level: normalizedLevel };
     }
   }
 
-  if (!label) return null;
+  // 3. Fallback: derive clinical verdict deterministically from nutrients & meal identity
+  const n = meal.nutrients || {};
+  const satFat = Number(n.saturatedFat ?? meal.saturated_fat ?? meal.saturatedFat ?? 0);
+  const sugar = Number(n.addedSugar ?? n.sugar ?? meal.added_sugar ?? meal.addedSugar ?? 0);
+  const sodium = Number(n.sodium ?? meal.sodium ?? 0);
+  const protein = Number(n.protein ?? meal.protein ?? 0);
+  const calories = Number(n.calories ?? meal.calories ?? 0);
+  const name = String(meal.name || meal.title || '').toLowerCase();
 
-  // Infer level if not explicitly defined
-  if (!level) {
-    const lblLower = label.toLowerCase();
-    if (
-      lblLower.includes('alert') ||
-      lblLower.includes('bad') ||
-      lblLower.includes('high') ||
-      lblLower.includes('excess') ||
-      lblLower.includes('over limit') ||
-      lblLower.includes('danger') ||
-      lblLower.includes('severe')
-    ) {
-      level = 'alert';
-    } else if (
-      lblLower.includes('warning') ||
-      lblLower.includes('caution') ||
-      lblLower.includes('moderate') ||
-      lblLower.includes('mindful') ||
-      lblLower.includes('elevated')
-    ) {
-      level = 'warning';
-    } else if (
-      lblLower.includes('good') ||
-      lblLower.includes('healthy') ||
-      lblLower.includes('balanced') ||
-      lblLower.includes('support') ||
-      lblLower.includes('lean') ||
-      lblLower.includes('optimal')
-    ) {
-      level = 'good';
-    } else {
-      level = 'neutral';
-    }
+  if (satFat >= 10) {
+    return {
+      label: t(lang, 'verdictElevatedSatFat'),
+      level: 'warning',
+    };
   }
 
-  // Localize standard English labels if a language preference is provided
-  if (lang) {
-    const key = CANONICAL_VERDICT_KEY_MAP[label.toLowerCase()];
-    if (key) {
-      const translated = t(lang, key);
-      if (translated) {
-        label = translated;
-      }
-    }
+  if (sugar >= 25) {
+    return {
+      label: t(lang, 'verdictHighGlycemicSugar'),
+      level: 'warning',
+    };
   }
 
-  return { label, level };
-}
-
-/**
- * Returns Tailwind badge classes for a given verdict level/label.
- */
-export function getVerdictColorClass(level?: string, label?: string): string {
-  const lvl = String(level || '').toLowerCase();
-  const lbl = String(label || '').toLowerCase();
-
-  if (
-    lvl === 'alert' ||
-    lvl === 'bad' ||
-    lvl === 'avoid' ||
-    lvl === 'danger' ||
-    lvl === 'severe' ||
-    lbl.includes('bad') ||
-    lbl.includes('high') ||
-    lbl.includes('excess')
-  ) {
-    return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300';
+  if (sodium >= 1200) {
+    return {
+      label: 'Elevated Sodium',
+      level: 'warning',
+    };
   }
 
-  if (
-    lvl === 'warning' ||
-    lvl === 'caution' ||
-    lvl === 'moderate' ||
-    lbl.includes('moderate') ||
-    lbl.includes('caution')
-  ) {
-    return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300';
+  if (protein >= 25) {
+    return {
+      label: t(lang, 'verdictLeanMuscle'),
+      level: 'good',
+    };
   }
 
-  if (
-    lvl === 'good' ||
-    lvl === 'safe' ||
-    lvl === 'healthy' ||
-    lvl === 'best' ||
-    lbl.includes('healthy') ||
-    lbl.includes('balanced')
-  ) {
-    return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300';
+  if (/probiotic|fermented|yogurt|kefir|yakult/i.test(name)) {
+    return {
+      label: t(lang, 'verdictGutMicrobiome'),
+      level: sugar >= 20 ? 'neutral' : 'good',
+    };
   }
 
-  return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300';
+  if (calories > 0 || meal.name || meal.title) {
+    return {
+      label: t(lang, 'verdictSupportsMetabolicEnergy'),
+      level: 'neutral',
+    };
+  }
+
+  return null;
 }

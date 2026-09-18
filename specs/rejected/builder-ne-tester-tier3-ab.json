@@ -1,0 +1,22 @@
+{
+  "slug": "builder-ne-tester-tier3-ab",
+  "timestamp": "2026-09-10T21:00:00Z",
+  "failed_hypotheses": [
+    {
+      "id": "h1-spoiler-biased-graph-ab",
+      "summary": "Same Builder authored procedural-graph Arm B with dish-name spoilers and claimed clinical/speed superiority vs production",
+      "why_failed": "Fair/same-schema Vertex Set 3 retests showed clinical lift was coached; speed/cost was schema compactness + incomplete grouping, not graph gates",
+      "signature": "Do NOT put mackerel/kembung in the warning tier|procedural graph superiority|compare_set3_live",
+      "divergent_node": "prototype/meallog/procedural_graph/run_compare_set3_live.ts",
+      "guard_fail_id": "PROCESS_GAP_builder_as_tester"
+    },
+    {
+      "id": "h2-one-call-step-labels-as-graph",
+      "summary": "Single generateContent with STEP 1..4 labels sold as procedural graph benefit",
+      "why_failed": "Compare remains one API call; without multi-call gates there is no Maker≠Checker stage boundary",
+      "signature": "proceduralSystem Steps: 1) EXTRACTION 2) CLUSTERING",
+      "divergent_node": "prototype/meallog/procedural_graph/run_compare_set3_unbiased_vertex.ts",
+      "guard_fail_id": "PROCESS_GAP_fake_graph"
+    }
+  ]
+}

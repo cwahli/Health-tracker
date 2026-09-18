@@ -1,18 +1,7 @@
 import { FoodLog, BiomarkerLog, HealthAction, DailyBenefit, FoodIdea, RecommendationReport, UserProfile } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-
-export function resolveInitialLanguage(lang?: string | null): string {
-  if (lang && typeof lang === 'string' && lang.trim()) {
-    return lang.trim();
-  }
-  if (typeof window !== 'undefined' && window.localStorage) {
-    try {
-      const stored = localStorage.getItem('preferred_language');
-      if (stored) return stored;
-    } catch {}
-  }
-  return 'en';
-}
+import { resolveMealVerdict } from './verdictUtils.js';
+import { translations } from './translations';
 
 export function mergeByRecency<T extends { id?: string; updated_at?: number | string; date?: string; timestamp?: string }>(
   listA: T[] = [],
@@ -68,6 +57,34 @@ export function mergeReports(a?: RecommendationReport | null, b?: Recommendation
   return timeB >= timeA ? b : a;
 }
 
+// Every place in the app that constructs a brand-new UserProfile needs to
+// pick an initial language the same way: prefer an explicit choice made this
+// session (e.g. passed through from the just-completed login/signup flow),
+// then fall back to whatever the person selected on the language picker
+// before they logged in (persisted to localStorage), and only default to
+// English if neither is available. Before this helper existed, some call
+// sites (loadUserData's new-profile branch) implemented this correctly while
+// others (checkForDbChanges' "brand new sign up, no cloud doc yet" branch)
+// hardcoded 'en' with no fallback at all - a race between the two on a
+// fresh signup could let the hardcoded English default win and overwrite
+// the language the person had just picked, even though nothing was ever
+// "wrong" from either code path's own local point of view.
+export function resolveInitialLanguage(chosenLanguage?: string | null): 'en' | 'fr' | 'zh' | 'id' {
+  const valid = ['en', 'fr', 'zh', 'id'];
+  if (chosenLanguage && valid.includes(chosenLanguage)) {
+    return chosenLanguage as 'en' | 'fr' | 'zh' | 'id';
+  }
+  try {
+    const preferred = typeof localStorage !== 'undefined' ? localStorage.getItem('preferred_language') : null;
+    if (preferred && valid.includes(preferred)) {
+      return preferred as 'en' | 'fr' | 'zh' | 'id';
+    }
+  } catch {
+    // localStorage unavailable (SSR/sandboxed) - fall through to default
+  }
+  return 'en';
+}
+
 export function mergeProfiles(a?: UserProfile | null, b?: UserProfile | null): UserProfile | null {
   if (!a) return b || null;
   if (!b) return a;
@@ -101,7 +118,7 @@ export function mergeDeleteMaps(a: Record<string, number> = {}, b: Record<string
   return res;
 }
 
-export function supabaseRowToFoodLog(row: any): FoodLog {
+export function supabaseRowToFoodLog(row: any, language?: string): FoodLog {
   const dateStr = row.date || new Date().toISOString().split('T')[0];
   const updatedTime = row.updated_at
     ? (typeof row.updated_at === 'number' ? row.updated_at : new Date(row.updated_at).getTime())
@@ -169,18 +186,9 @@ export function supabaseRowToFoodLog(row: any): FoodLog {
     try { scoutItems = JSON.parse(scoutItems); } catch (e) { scoutItems = []; }
   }
 
-  let verdict = row.verdict;
-  if (typeof verdict === 'string') {
-    if (verdict.startsWith('{')) {
-      try { verdict = JSON.parse(verdict); } catch (e) { verdict = { label: verdict }; }
-    } else if (verdict === '[object Object]') {
-      verdict = row.recommendation ? { label: row.recommendation } : undefined;
-    } else if (verdict.trim()) {
-      verdict = { label: verdict };
-    } else {
-      verdict = undefined;
-    }
-  }
+  const resolvedVerdict = resolveMealVerdict({ ...row, nutrients });
+  const verdict = resolvedVerdict ? { label: resolvedVerdict.label, level: resolvedVerdict.level } : undefined;
+  const dict = translations[language || 'en'] || translations.en;
 
   return {
     ...row,
@@ -189,7 +197,7 @@ export function supabaseRowToFoodLog(row: any): FoodLog {
     name: row.name || row.description || 'Meal',
     composition: row.composition || '',
     weightGrams: Number(row.weightGrams ?? row.weight_grams ?? 0),
-    quantity: row.quantity || '1 serving',
+    quantity: row.quantity || dict.oneServingDefault,
     consumedAmount: Number(row.consumedAmount ?? row.consumed_amount ?? 1),
     benefits: Array.isArray(row.benefits) ? row.benefits.join(', ') : (row.benefits || ''),
     risks: Array.isArray(row.risks) ? row.risks.join(', ') : (row.risks || ''),
@@ -238,7 +246,7 @@ export async function fetchAllConsolidatedLogs(
   deleteMapBiomarkers: Record<string, number> = {},
   deleteMapCustomKeys: Record<string, number> = {},
   email?: string,
-  options: { timeoutMs?: number; skipFirebaseFallback?: boolean; lastSyncTime?: number; listOnly?: boolean } = {}
+  options: { timeoutMs?: number; skipFirebaseFallback?: boolean; lastSyncTime?: number; listOnly?: boolean; pageSize?: number; offset?: number; cursor?: { updated_at?: string; id?: string } } = {}
 ): Promise<{
   serverFoods: FoodLog[];
   serverBiomarkers: BiomarkerLog[];
@@ -246,6 +254,8 @@ export async function fetchAllConsolidatedLogs(
   serverActions?: HealthAction[];
   serverBenefits?: DailyBenefit[];
   serverReport?: RecommendationReport | null;
+  totalFoodsCount?: number;
+  totalBiomarkersCount?: number;
 }> {
   const serverFoods: FoodLog[] = [];
   const serverBiomarkers: BiomarkerLog[] = [];
@@ -253,6 +263,8 @@ export async function fetchAllConsolidatedLogs(
   let serverActions: HealthAction[] = [];
   let serverBenefits: DailyBenefit[] = [];
   let serverReport: RecommendationReport | null = null;
+  let totalFoodsCount: number | undefined;
+  let totalBiomarkersCount: number | undefined;
 
   // 1. Primary path: Server-side proxy /api/sync/supabase-pull (handles D1, SupabaseAdmin, and multiple UID aliases)
   try {
@@ -265,7 +277,10 @@ export async function fetchAllConsolidatedLogs(
         uid,
         email,
         lastSyncTime: options.lastSyncTime,
-        listOnly: options.listOnly ?? false
+        listOnly: options.listOnly ?? false,
+        pageSize: options.pageSize,
+        offset: options.offset,
+        cursor: options.cursor
       }),
       signal: controller.signal
     });
@@ -274,6 +289,8 @@ export async function fetchAllConsolidatedLogs(
     if (resp.ok) {
       const data = await resp.json();
       if (data && data.success) {
+        if (data.totalFoodsCount != null) totalFoodsCount = Number(data.totalFoodsCount);
+        if (data.totalBiomarkersCount != null) totalBiomarkersCount = Number(data.totalBiomarkersCount);
         if (Array.isArray(data.foods)) {
           data.foods.forEach((r: any) => {
             if (r && r.id && !deleteMapFoods[r.id]) {
@@ -334,7 +351,39 @@ export async function fetchAllConsolidatedLogs(
     }
   }
 
-  return { serverFoods, serverBiomarkers, serverProfile, serverActions, serverBenefits, serverReport };
+  return { serverFoods, serverBiomarkers, serverProfile, serverActions, serverBenefits, serverReport, totalFoodsCount, totalBiomarkersCount };
+}
+
+export async function fetchFoodLogsPage(
+  uid: string,
+  page: number,
+  pageSize: number = 15,
+  email?: string
+): Promise<{ foods: FoodLog[]; totalFoodsCount: number }> {
+  const offset = Math.max(0, (page - 1) * pageSize);
+  try {
+    const resp = await fetch('/api/sync/supabase-pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid,
+        email,
+        listOnly: true,
+        pageSize,
+        offset
+      })
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.success && Array.isArray(data.foods)) {
+        const foods = data.foods.map((r: any) => supabaseRowToFoodLog(r));
+        return { foods, totalFoodsCount: data.totalFoodsCount ?? data.meta?.totalFoodsCount ?? foods.length };
+      }
+    }
+  } catch (err) {
+    console.warn('[syncUtils] fetchFoodLogsPage error:', err);
+  }
+  return { foods: [], totalFoodsCount: 0 };
 }
 
 export async function fetchFoodLogDetail(
@@ -429,28 +478,24 @@ export function subscribeToSupabaseLogs(
 export async function upsertProfileToSupabase(
   profile: any,
   uid?: string,
-  extra?: { actions?: any[]; dailyBenefits?: any[]; report?: any; email?: string }
+  extra?: { actions?: any[]; dailyBenefits?: any[]; report?: any; email?: string; forceOverwrite?: boolean }
 ): Promise<void> {
-  if (!isSupabaseConfigured || !supabase || !profile) return;
-  try {
-    const userUid = uid || profile.uid || profile.firebase_uid;
-    await supabase.from('profiles').upsert({
-      firebase_uid: userUid,
-      email: extra?.email || profile.email,
-      nickname: profile.nickname,
-      updated_at: new Date().toISOString(),
-      data: {
-        profile,
-        actions: extra?.actions,
-        dailyBenefits: extra?.dailyBenefits,
-        report: extra?.report
-      }
-    });
-  } catch (err) {
-    console.warn('[syncUtils] upsertProfileToSupabase failed:', err);
-  }
+  if (!profile) return;
+  const effectiveUid = uid || profile.uid || profile.firebase_uid;
+  if (!effectiveUid) return;
+  pushLogsToServer({
+    uid: effectiveUid,
+    email: extra?.email || profile.email,
+    profile,
+    actions: extra?.actions,
+    dailyBenefits: extra?.dailyBenefits,
+    report: extra?.report ?? null,
+    forceOverwrite: extra?.forceOverwrite
+  }).catch((err: any) => console.warn('[syncUtils] upsertProfileToSupabase push failed:', err));
 }
 
+// Firebase backup writes for food/biomarker logs removed — all food/biomarker
+// persistence goes through Cloudflare D1 via /api/sync/supabase-push (D1-backed).
 export async function pushLogsToServer(params: {
   uid: string;
   email?: string;
@@ -465,6 +510,7 @@ export async function pushLogsToServer(params: {
   deletedFoodLogIds?: Record<string, number> | string[];
   deletedBiomarkerLogIds?: Record<string, number> | string[];
 }): Promise<{ success: boolean; foodCount?: number; bioCount?: number; error?: string }> {
+  if (!params.uid) return { success: false, error: 'uid required' };
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -490,8 +536,11 @@ export async function pushLogsToServer(params: {
       })
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      return { success: false, error: err.error || res.statusText };
+      let err: any = {};
+      try {
+        err = typeof res.json === 'function' ? await res.json() : {};
+      } catch {}
+      return { success: false, error: err?.error || `HTTP ${res.status} ${res.statusText || ''}`.trim() };
     }
     const data = await res.json();
     return { success: true, foodCount: data.foodCount, bioCount: data.bioCount };
