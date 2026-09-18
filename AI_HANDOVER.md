@@ -49,6 +49,10 @@
 - **2026-09-14 Scorecard continuation:** re-baselined at `9ad8aab` (670/1, food unroll adds 4 green, no regressions); fixed duplicate #6–#8 numbering (now 1–11); triaged 242 callsite keys → fixed 4 true `recep*` leaks en+id, remaining 238 ALL parked Track L (seed*/outlier* L-2, dict/table/batch/img/del/backup/sanitize/audit L-4) — needs human unpark, not a dump here.
 - **2026-09-14 Scorecard #1–#5 code-COMPLETE (666/1, was 620/24):** #1 closeDialog/modalDialog en+id + analyzingMeal id; #2 restored S-10 `quantityText.ts`+test (root cause `1c868ab`/`a5bf1ce` gut, not `158dc14`); #3 restored 9 G-B fixture dirs (18/18 execute, 0 skip); #4 restored Golden_meal fixtures + retargeted 33 locks `expectFdcId`→local `expectId` (F-12.4); #5 scorer engine (trial-balance accepts `balanced`, restored `tidyDishName` + blob splitter). Residual: 242 callsite keys (parked i18n pass, not a 242-key dump here) + human ops (Render deploy, brand `status` migration missing from repo, B0 live Apply smoke, I18N-A11Y live).
 
+## Now
+- **2026-09-18 Q-11.7 LANDED (`31aece2`) + Q-11.10 LANDED (`e2ab233`):** ProfileModal extracted (Header 3937→3544, residual: theme/db splits need own packets); App.tsx 3114→1098 via useFoodLogActions/useBiomarkerActions/useReportActions, CATALOG ratcheted. All named gates green on each packet.
+- **2026-09-18 Q-11.11 STOPPED per its own escape hatch (no code changed):** App.tsx 1098 lines / 48KB; every leftover state's owning hook is frozen by the packet and allowed_files permits no new file — needs a packet revision (unfreeze one hook or approve a fourth file) before the ≤350 / <30KB wiring goal is reachable.
+
 ## Notes
 - `scripts/assert-biomarker-cases.mjs` was correctly transformed to a node script that spawns `tsx prototype/biomarkers/runner.ts --only all`.
 - `LogChat.tsx` client-side chunk extraction loop remains for backward compatibility, but for unified medical agents, `hasMoreMarkers` is no longer emitted by the server, so it smoothly completes the extraction in a single HTTP lifecycle.
