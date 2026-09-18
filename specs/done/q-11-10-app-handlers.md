@@ -5,7 +5,9 @@ class: GOD_FILE_GROWTH
 skill: specify
 edit_mode: extract
 who: any-agent
-auto_go: true
+# DONE 2026-09-18 (`e2ab233`) — App.tsx 3,114 → 1,098 via useFoodLogActions /
+# useBiomarkerActions / useReportActions. Do not re-execute.
+auto_go: false
 blocked_by: q-11-7-header-profile
 allowed_files:
   - src/App.tsx

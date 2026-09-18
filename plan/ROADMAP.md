@@ -13,7 +13,7 @@
 Laws: `docs/agent/domains/{biomarkers,food-calc,sync}.md`  
 WIP: `AI_HANDOVER.md` (header only) · Completed: `archive/` · `plan/archive/`
 
-**As of 2026-09-18.** Scorecard sealed ALL GREEN **744/0/0** @ `5615f1e` (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Q-11 shell split is in progress** — App.tsx is Studio-sized (3,114 / 135 KB) with real auth/sync; Header and remaining App handlers are not done. **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent. Do not reopen FDC or put curator back on Analyze.
+**As of 2026-09-18.** Scorecard sealed ALL GREEN **744/0/0** @ `5615f1e` (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Q-11 shell split is nearly done** — App.tsx is wiring-only (350 / 14 KB) with real auth/sync; `Header.tsx` is the last god file (3,544 / 208 KB, residual packet `q-11-12`). **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent. Do not reopen FDC or put curator back on Analyze.
 
 ---
 
@@ -39,11 +39,12 @@ Q-11 **is not done.** `7d94def` stubbed the shell; `q-11-restore-auth-profile` p
 
 **Do this, in order. Packets are locked = go (`auto_go: true`).**
 
-1. **Q-11.7 OPEN** — `specs/active/q-11-7-header-profile.md`. Extract ProfileModal from `Header.tsx` (3,937 / 231 KB → Header < 200 KB, ≤ 1,200 lines). Studio-blocking. Do this first.
-2. **Q-11.10 OPEN** — `specs/active/q-11-10-app-handlers.md`. Move remaining `handle*` bodies out of `App.tsx` (3,114 → ≤ 1,200) into `useFoodLogActions` / `useBiomarkerActions` / `useReportActions`. After 11.7.
-3. **Q-11.11 OPEN** — `specs/active/q-11-11-wiring-ratchet.md`. App.tsx ≤ 350 lines / < 30 KB wiring only; ratchet CATALOG. After 11.10.
-4. **R-13.1 PARKED** — `specs/active/R-13.md`. Site is already live on Render. Extra Cloudflare/Containers public URL is optional infra, not a blocker for Q-11. Do not start it in the same working tree as a Q-11 packet.
-5. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-11 files.
+1. **Q-11.7 DONE** — `31aece2` (ProfileModal out of `Header.tsx`). Packet retired to `specs/done/q-11-7-header-profile.SUPERSEDED.md`; its `≤ 1,200 / < 200 KB` target was unreachable from the profile portal alone and is carried by 11.12.
+2. **Q-11.10 DONE** — `e2ab233`. App `handle*` bodies → `useFoodLogActions` / `useBiomarkerActions` / `useReportActions` (App.tsx 3,114 → 1,098). `specs/done/`.
+3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
+4. **Q-11.12 OPEN** — `specs/active/q-11-12-header-residual.md`. The last god file: `Header.tsx` 3,544 / 208 KB → ≤ 1,200 lines / < 200 KB. Measured scope: theme-customizer portal 1,330 lines / 98 KB + ~700 lines of theme state → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`; DB overlay 746 / 51 KB → `DbInteractionsOverlay.tsx`; inspector 70 / 4 KB. Studio-blocking. Do this next, one node per commit.
+5. **R-13.1 PARKED** — `specs/active/R-13.md`. Site is already live on Render. Extra Cloudflare/Containers public URL is optional infra, not a blocker for Q-11. Do not start it in the same working tree as a Q-11 packet.
+6. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-11 files.
 
 **Still `blocked_human`:** **L-5** only (name a locale first — do not invent `fr`/`zh` copy). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
@@ -457,17 +458,18 @@ q-11-8-i18n-split        translations/{en,id,fr,zh}.ts             DONE 23ddc83
 q-11-restore-auth-profile  real sync + AppShell/Tabs/Modals         DONE 4acc632
                          App.tsx 9,101/373KB → 3,114/135KB
                          (11.5–11.6+11.9-partial; no stubs)
-q-11-7-header-profile    Header → ProfileModal                      OPEN  (Header 3,937 / 231 KB)
-q-11-10-app-handlers     use{FoodLog,Biomarker,Report}Actions       OPEN  App.tsx → ≤ 1,200
-q-11-11-wiring-ratchet   App.tsx wiring only                        OPEN  App.tsx → ≤ 350
+q-11-7-header-profile    Header → ProfileModal                      DONE 31aece2 (residual → 11.12)
+q-11-10-app-handlers     use{FoodLog,Biomarker,Report}Actions       DONE e2ab233  App.tsx → 1,098
+q-11-11-wiring-ratchet   App.tsx wiring only                        DONE App.tsx → 350 / 14,416 B
+q-11-12-header-residual  useThemeCustomizer + 2 screen files        OPEN  Header 3,544 / 208 KB → ≤ 1,200
 ```
 
 Burned: `a14abea` and `7d94def` rewrote instead of moving (deleted AuthScreen, stubbed
 sync). Do not retry. `specs/done/q-11-5`…`q-11-9` were marked done without landing —
 do not execute those files; use the OPEN ids above.
 
-Always run `node scripts/journey-guard.mjs <id>` (F-13 + R-13 + these packets make a
-bare `journey-guard` `spec_ambiguous` — pre-existing). Do not chain two OPEN
+Always run `node scripts/journey-guard.mjs <id>` (F-13 + R-13 make a bare
+`journey-guard` `spec_ambiguous` — pre-existing; pass the id). Do not chain two OPEN
 milestones in one working tree.
 
 Do **not** open a Dictionary/FoodCard/`LogChat.tsx` breakup without a **new** locked
@@ -477,7 +479,7 @@ packet. Q-9/Q-8.2 are green.
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work: **Q-11.7** then **Q-11.10** then **Q-11.11**. One class, named vitest. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
+| Prefer | Current work: **Q-11.12** (Header residual — theme screen, DB overlay). One class, named vitest. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---

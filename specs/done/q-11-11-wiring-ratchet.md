@@ -5,7 +5,9 @@ class: GOD_FILE_GROWTH
 skill: specify
 edit_mode: extract
 who: any-agent
-auto_go: true
+# DONE 2026-09-18 — App.tsx 1,098 → 350 lines / 14,416 B via useAppShellState.ts;
+# CATALOG App ceiling 350; parity re-recorded. Do not re-execute.
+auto_go: false
 blocked_by: q-11-10-app-handlers
 allowed_files:
   - src/App.tsx

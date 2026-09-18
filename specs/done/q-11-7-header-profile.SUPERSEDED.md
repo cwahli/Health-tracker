@@ -1,11 +1,16 @@
 ---
 id: q-11-7-header-profile
-status: locked
+status: superseded
 class: GOD_FILE_GROWTH
 skill: specify
 edit_mode: extract
 who: any-agent
-auto_go: true
+# SUPERSEDED 2026-09-18: Node 1 (ProfileModal extract) LANDED in `31aece2` —
+# Header 3,937/231 KB → 3,544/208 KB. The `≤ 1,200 lines / < 200 KB` target is
+# arithmetically unreachable from the profile portal alone (343 lines / 21 KB)
+# and is carried by specs/active/q-11-12-header-residual.md (theme customizer,
+# DB overlay, inspector — measured regions). Do not re-execute this packet.
+auto_go: false
 allowed_files:
   - src/components/Header.tsx
   - src/components/ProfileModal.tsx
