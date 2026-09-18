@@ -4,6 +4,26 @@ import { buildFoodSearchQuerySet } from './server_query_set.js';
 
 export const foodRouter = Router();
 
+function previousMealImageUrls(f: any): string[] {
+  const raw = Array.isArray(f?.image_urls)
+    ? f.image_urls
+    : Array.isArray(f?.imageUrls)
+      ? f.imageUrls
+      : (f?.image_urls || f?.imageUrl || f?.image_url ? [f.image_urls || f.imageUrl || f.image_url] : []);
+  const urls = raw.filter((u: unknown) =>
+    typeof u === 'string' &&
+    u.trim() &&
+    !u.includes('image_removed_for_snapshot') &&
+    !u.includes('Image reference preserved') &&
+    u !== 'loading'
+  );
+  if (urls.length > 0) return urls;
+  const id = String(f?.id || '').trim();
+  if (!id || id.startsWith('brand_')) return [];
+  const safe = id.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
+  return [`/photos/${safe}.jpg`];
+}
+
 foodRouter.get('/api/food/health', (req, res) => {
   res.json({ status: 'ok', domain: 'food', timestamp: new Date().toISOString() });
 });
@@ -34,7 +54,9 @@ foodRouter.get('/api/food/search', async (req, res) => {
         const { isD1Configured, d1SearchUserFoodLogs } = await import('./server_db_d1.js');
         if (isD1Configured()) {
           const rawPast = await d1SearchUserFoodLogs({ possibleUids, query, limit: 5 });
-          userFoodMatches = rawPast.map((f: any) => ({
+          userFoodMatches = rawPast.map((f: any) => {
+            const imageUrls = previousMealImageUrls(f);
+            return {
             id: f.id,
             name: f.name,
             food_id: f.id,
@@ -45,11 +67,12 @@ foodRouter.get('/api/food/search', async (req, res) => {
             portionGrams: f.weight_grams || f.consumed_amount || 100,
             weightGrams: f.weight_grams || f.consumed_amount || 100,
             items_breakdown: f.items_breakdown,
-            imageUrl: Array.isArray(f.image_urls) && f.image_urls.length > 0 ? f.image_urls[0] : (typeof f.image_urls === 'string' ? f.image_urls : undefined),
-            imageUrls: Array.isArray(f.image_urls) ? f.image_urls : [],
+            imageUrl: imageUrls[0],
+            imageUrls,
             type: 'previous_meal',
             date: f.date
-          }));
+          };
+          });
         } else {
           const { supabaseAdmin } = await import('./supabaseAdmin.js');
           if (supabaseAdmin) {
@@ -61,7 +84,9 @@ foodRouter.get('/api/food/search', async (req, res) => {
               .order('updated_at', { ascending: false })
               .limit(5);
             if (Array.isArray(supaPast)) {
-              userFoodMatches = supaPast.map((f: any) => ({
+              userFoodMatches = supaPast.map((f: any) => {
+                const imageUrls = previousMealImageUrls(f);
+                return {
                 id: f.id,
                 name: f.name,
                 food_id: f.id,
@@ -72,11 +97,12 @@ foodRouter.get('/api/food/search', async (req, res) => {
                 portionGrams: f.weight_grams || f.consumed_amount || 100,
                 weightGrams: f.weight_grams || f.consumed_amount || 100,
                 items_breakdown: f.items_breakdown,
-                imageUrl: Array.isArray(f.image_urls) && f.image_urls.length > 0 ? f.image_urls[0] : (typeof f.image_urls === 'string' ? f.image_urls : undefined),
-                imageUrls: Array.isArray(f.image_urls) ? f.image_urls : [],
+                imageUrl: imageUrls[0],
+                imageUrls,
                 type: 'previous_meal',
                 date: f.date
-              }));
+              };
+              });
             }
           }
         }

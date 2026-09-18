@@ -6,6 +6,7 @@ import {
   nextPhotoFallbackUrl,
   uniqueMealImageUrls,
   resolveNextPhotoUrl,
+  collectSavedMealImageUrls,
   PHOTO_PROXY_PREFIX,
 } from './foodImageSources';
 
@@ -73,6 +74,33 @@ describe('foodImageSources B11d', () => {
     expect(uniqueMealImageUrls(['', '   ', null, undefined])).toEqual([]);
     expect(uniqueMealImageUrls(['[image_removed_for_snapshot]', 'Image reference preserved'])).toEqual([]);
     expect(uniqueMealImageUrls(['blob:revoked-after-reload'])).toEqual(['blob:revoked-after-reload']);
+  });
+});
+
+describe('collectSavedMealImageUrls', () => {
+  it('uses originalLog photos when the tag itself has none', () => {
+    const urls = collectSavedMealImageUrls({
+      originalLog: {
+        id: 'food_abc',
+        imageUrls: ['https://pub-xxx.r2.dev/photos/food_abc.jpg'],
+      },
+    });
+    expect(urls).toEqual(['/photos/food_abc.jpg']);
+  });
+
+  it('hydrates from in-memory foodLogs by id when stored urls are placeholders', () => {
+    const urls = collectSavedMealImageUrls(
+      {
+        id: 'food_123',
+        imageUrl: '[image_removed_for_snapshot]',
+      },
+      [{ id: 'food_123', imageUrls: ['/photos/food_123.jpg'] }],
+    );
+    expect(urls).toEqual(['/photos/food_123.jpg']);
+  });
+
+  it('falls back to photos/{id}.jpg when nothing else is stored', () => {
+    expect(collectSavedMealImageUrls({ id: 'food_nophoto' })).toEqual(['/photos/food_nophoto.jpg']);
   });
 });
 

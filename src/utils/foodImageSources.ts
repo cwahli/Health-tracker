@@ -173,6 +173,58 @@ export function uniqueMealImageUrls(urls: Array<string | null | undefined>): str
 }
 
 /**
+ * Photos to show when reusing a saved / previous meal. Walks the tag, original
+ * log, in-memory foodLogs, then the R2 key convention photos/{id}.jpg.
+ */
+export function collectSavedMealImageUrls(
+  source: {
+    imageUrl?: string;
+    imageUrls?: string[] | string;
+    photoUrl?: string;
+    image_url?: string;
+    image_urls?: string[] | string;
+    originalLog?: any;
+    item?: any;
+    dbId?: string;
+    id?: string;
+    food_id?: string;
+  } | null | undefined,
+  foodLogs?: Array<{ id?: string; imageUrl?: string; imageUrls?: string[] }> | null,
+): string[] {
+  if (!source) return [];
+  const raw: unknown[] = [];
+  const pushFrom = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return;
+    raw.push(obj.imageUrl, obj.photoUrl, obj.image_url);
+    const arr = obj.imageUrls ?? obj.image_urls;
+    if (Array.isArray(arr)) raw.push(...arr);
+    else if (typeof arr === 'string' && arr) raw.push(arr);
+    if (Array.isArray(obj.itemsBreakdown)) {
+      for (const it of obj.itemsBreakdown) {
+        if (!it) continue;
+        raw.push(it.imageUrl, Array.isArray(it.imageUrls) ? it.imageUrls[0] : undefined);
+      }
+    }
+  };
+  pushFrom(source);
+  pushFrom(source.originalLog);
+  pushFrom(source.item);
+  let urls = uniqueMealImageUrls(raw as Array<string | null | undefined>);
+  const id = String(source.dbId || source.id || source.food_id || source.originalLog?.id || '').trim();
+  if (urls.length === 0 && foodLogs?.length && id) {
+    const donor = foodLogs.find((f) => f && String(f.id) === id);
+    if (donor) {
+      urls = uniqueMealImageUrls([donor.imageUrl, ...(Array.isArray(donor.imageUrls) ? donor.imageUrls : [])]);
+    }
+  }
+  if (urls.length === 0 && id && !id.startsWith('brand_')) {
+    const safe = id.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
+    urls = uniqueMealImageUrls([`${PHOTO_PROXY_PREFIX}${safe}.jpg`]);
+  }
+  return urls;
+}
+
+/**
  * Convert a captured Blob/File into a durable base64 data URL instead of a
  * throwaway blob: object URL. blob: URLs only resolve in the browser tab/session
  * that created them, so they must never be persisted into any object that is

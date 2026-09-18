@@ -196,8 +196,8 @@ export async function runDatabaseSearchStage(
           carbohydrates: log.carbohydrates != null ? Number(log.carbohydrates) : undefined,
           totalFibre: log.totalFibre != null ? Number(log.totalFibre) : (log.fiber != null ? Number(log.fiber) : undefined),
           sodium: log.sodium != null ? Number(log.sodium) : undefined,
-          imageUrl: log.imageUrl || log.imageUrls?.[0] || tag.imageUrl || undefined,
-          imageUrls: log.imageUrls || (log.imageUrl ? [log.imageUrl] : []),
+          imageUrl: log.imageUrl || log.imageUrls?.[0] || tag.imageUrl || (tag.dbId || log.id ? `/photos/${String(tag.dbId || log.id).replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120)}.jpg` : undefined),
+          imageUrls: log.imageUrls || (log.imageUrl ? [log.imageUrl] : (tag.imageUrl ? [tag.imageUrl] : [])),
           nutrients: {
             basisType: 'per_dish',
             calories: log.calories != null ? Number(log.calories) : 0,

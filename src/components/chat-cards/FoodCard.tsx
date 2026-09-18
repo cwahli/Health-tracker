@@ -20,7 +20,7 @@ import { JobStore } from '../../jobs/JobStore';
 import { toPendingFoodLog } from '../../mealBuild/adapters';
 import { namesReferToSameFood } from '../../../server_scout_reconcile';
 import { extractMostRecentImageDate, getCurrentDateInTimezone } from '../../utils/dateUtils';
-import { normalizeMealImageUrl, uniqueMealImageUrls, isUsableImageUrl } from '../../utils/foodImageSources';
+import { normalizeMealImageUrl, uniqueMealImageUrls, isUsableImageUrl, collectSavedMealImageUrls } from '../../utils/foodImageSources';
 import { scaleMealPortion, scaleSingleDishPortion } from '../../utils/portionUtils';
 import { threadHasUnansweredPortionClarify } from '../../utils/chatMessageDedupe';
 import { mapDisplayedScoutItems, resolveTileImageIndex } from '../../utils/foodCompositionTiles';
@@ -460,7 +460,9 @@ export const resolveHistoricalImgSrc = (item: any, messageImages: string[], food
     }
   }
 
-  if (isExplicit) return getFoodImageUrl(item.keyword || item.originalName || item.name);
+  const savedPhoto = collectSavedMealImageUrls(item, foodLogs)[0];
+  if (savedPhoto) return savedPhoto;
+  if (isExplicit) return getFoodImageUrl(item.keyword || item.originalName || item.name, item.imageUrl);
 
   if (typeof imgIdxOverride === 'number' && imgIdxOverride >= 0 && imgIdxOverride < messageImages.length) {
     return messageImages.length > 0 ? messageImages[imgIdxOverride] : getFoodImageUrl(item.keyword || item.originalName || item.name);
@@ -1535,9 +1537,10 @@ export const FoodCard: React.FC<AgentCardProps & {
                                       const imgIdx = typeof firstItem.sourceImageIndex === 'number' 
                                         ? firstItem.sourceImageIndex 
                                         : (matchingScout && typeof matchingScout.sourceImageIndex === 'number' ? matchingScout.sourceImageIndex : 0);
+                                      const savedPhoto = collectSavedMealImageUrls(firstItem, foodLogs)[0];
                                       const resolvedImgSrc = (resolvedMessageImages.length > 0)
                                         ? resolvedMessageImages[imgIdx >= 0 && imgIdx < resolvedMessageImages.length ? imgIdx : 0]
-                                        : getFoodImageUrl(firstItem.name, '');
+                                        : (savedPhoto || getFoodImageUrl(firstItem.name, firstItem.imageUrl || ''));
                                       const bb = isValidBoundingBox(firstItem.boundingBox2D) 
                                         ? firstItem.boundingBox2D 
                                         : (isValidBoundingBox(group.boundingBox2D) 

@@ -3,6 +3,7 @@
  * Used by LogChat compose tray and verified by the master scorecard.
  */
 import { getCurrentDateInTimezone } from './dateUtils';
+import { collectSavedMealImageUrls } from './foodImageSources';
 
 
 export interface StagedFoodTag {
@@ -90,7 +91,7 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
     let fib = 0;
     let sod = 0;
     let weight = Number(tag.weightGrams) || 100;
-    let img = tag.imageUrl;
+    let img = collectSavedMealImageUrls(tag)[0] || tag.imageUrl;
 
     if (tag.source === 'previous_meal' && tag.originalLog) {
       const orig = tag.originalLog;
@@ -106,7 +107,7 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
       sod = (Number(orig.sodium ?? origNutr.sodium) || 0) * factor;
       weight = tag.weightGrams ? Number(tag.weightGrams) : origWeight;
       if (!img) {
-        img = orig.imageUrl || orig.imageUrls?.[0];
+        img = collectSavedMealImageUrls({ ...tag, originalLog: orig })[0];
       }
     } else {
       const item = tag.item || {};
@@ -122,9 +123,14 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
       sod = (Number(item.sodium ?? nutr.sodium ?? tag.sodium) || 0) * factor;
       weight = tag.weightGrams ? Number(tag.weightGrams) : baseServing;
       if (!img) {
-        img = item.image_url || item.imageUrl || tag.imageUrl;
+        img = collectSavedMealImageUrls({ ...tag, item })[0];
       }
     }
+
+    const extraImgs = collectSavedMealImageUrls(tag);
+    extraImgs.forEach((u) => {
+      if (u && !allImages.includes(u)) allImages.push(u);
+    });
 
     totalCalories += cal;
     totalProtein += prot;
