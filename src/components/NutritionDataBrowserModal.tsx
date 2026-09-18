@@ -18,7 +18,6 @@ import {
   AlertCircle,
   UploadCloud,
   Sparkles,
-  Camera,
 } from 'lucide-react';
 import { parseMenuNutritionPaste, parseMenuNutritionBulkPaste, cleanDescriptionText } from '../utils/parseMenuNutritionPaste';
 import { ComprehensiveNutrientsTable } from './chat-cards/ComprehensiveNutrientsTable';
@@ -201,134 +200,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
   const [globalSearchResults, setGlobalSearchResults] = useState<any[] | null>(null);
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
 
-  // Meal photo linking state
-  const [showMealLinkModal, setShowMealLinkModal] = useState(false);
-  const [mealLinkTargetItem, setMealLinkTargetItem] = useState<any>(null);
-  const [mealsWithPhotos, setMealsWithPhotos] = useState<any[]>([]);
-  const [loadingMealsWithPhotos, setLoadingMealsWithPhotos] = useState(false);
-  const [selectedMealForLink, setSelectedMealForLink] = useState<any>(null);
-  const [selectedPhotoIndexForLink, setSelectedPhotoIndexForLink] = useState(0);
-  const [copyNutrientsOnLink, setCopyNutrientsOnLink] = useState(true);
-
-  const openMealLinkPicker = async (item: any) => {
-    setMealLinkTargetItem(item);
-    setSelectedMealForLink(null);
-    setSelectedPhotoIndexForLink(0);
-    setCopyNutrientsOnLink(!item.nutrients?.calories && !item.calories);
-    setShowMealLinkModal(true);
-    setLoadingMealsWithPhotos(true);
-    try {
-      const res = await fetch('/api/admin/meals-with-photos');
-      const json = await res.json();
-      if (json.success && Array.isArray(json.meals)) {
-        setMealsWithPhotos(json.meals);
-      }
-    } catch (e) {
-      console.warn('Failed to load meals with photos:', e);
-    } finally {
-      setLoadingMealsWithPhotos(false);
-    }
-  };
-
-  const confirmMealLink = async () => {
-    if (!mealLinkTargetItem || !selectedMealForLink) return;
-    const photoUrls = selectedMealForLink.imageUrls?.length > 0 ? selectedMealForLink.imageUrls : (selectedMealForLink.imageUrl ? [selectedMealForLink.imageUrl] : []);
-    const chosenPhoto = photoUrls[selectedPhotoIndexForLink] || selectedMealForLink.imageUrl;
-    if (!chosenPhoto) {
-      alert("Selected meal has no valid photo URL");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const res = await fetch('/api/admin/brand-menu-items/link-meal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          brandItemId: mealLinkTargetItem.id,
-          chain_key: mealLinkTargetItem.chain_key,
-          dish_name_key: mealLinkTargetItem.dish_name_key,
-          mealLogId: selectedMealForLink.id,
-          photoIndex: selectedPhotoIndexForLink,
-          copyNutrients: copyNutrientsOnLink,
-          photoUrl: chosenPhoto
-        })
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || "Failed to link meal");
-
-      setEditForm((prev: any) => ({
-        ...prev,
-        image_url: chosenPhoto,
-        ...(copyNutrientsOnLink && selectedMealForLink.calories ? {
-          calories: selectedMealForLink.calories,
-          protein: selectedMealForLink.protein ?? prev.protein,
-          carbohydrates: selectedMealForLink.carbohydrates ?? prev.carbohydrates,
-          totalFat: selectedMealForLink.totalFat ?? prev.totalFat,
-          saturatedFat: selectedMealForLink.saturatedFat ?? prev.saturatedFat,
-          sodium: selectedMealForLink.sodium ?? prev.sodium
-        } : {})
-      }));
-
-      if (mealLinkTargetItem.chain_key) {
-        await loadChainItems(mealLinkTargetItem.chain_key);
-      }
-      if (globalSearch.trim()) {
-        await runGlobalSearch(globalSearch);
-      }
-
-      setShowMealLinkModal(false);
-      setSyncBanner(`Linked meal photo to ${mealLinkTargetItem.dish_name}`);
-      setTimeout(() => setSyncBanner(null), 4000);
-    } catch (err: any) {
-      alert(err?.message || "Failed to link meal");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const directUploadPhotoForItem = async (item: any, file: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const b64 = reader.result as string;
-      setBusy(true);
-      try {
-        const upRes = await fetch('/api/r2/upload-photo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payload: b64, id: `brand_${Date.now()}` })
-        });
-        const upData = await upRes.json();
-        const photoUrl = upData.url || upData.proxyUrl;
-        if (!photoUrl) throw new Error("Failed to obtain photo URL");
-
-        const editRes = await fetch('/api/brand-menu-items/edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            country_code: item.country_code || 'GB',
-            chain_key: item.chain_key,
-            dish_name_key: item.dish_name_key,
-            dish_name: item.dish_name,
-            image_url: photoUrl
-          })
-        });
-        if (!editRes.ok) throw new Error("Failed to save brand photo");
-
-        if (item.chain_key) await loadChainItems(item.chain_key);
-        if (globalSearch.trim()) await runGlobalSearch(globalSearch);
-        setSyncBanner(`Photo added to ${item.dish_name}`);
-        setTimeout(() => setSyncBanner(null), 3500);
-      } catch (e: any) {
-        alert(e?.message || "Failed to add photo");
-      } finally {
-        setBusy(false);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
   const saveChainSource = async () => {
     if (!editChainForm.display_name.trim() || !editChainForm.url.trim()) {
       alert(t.browserAlertChainRequired);
@@ -402,7 +273,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
     sodium: '',
     notes: '',
     ingredients: '',
-    image_url: '',
     basis_type: 'per_dish',
     serving_grams: ''
   });
@@ -434,7 +304,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
           dish_name: editForm.dish_name,
           serving_grams: editForm.serving_grams === '' ? null : Number(editForm.serving_grams),
           basis_type: finalBasis,
-          image_url: editForm.image_url ? String(editForm.image_url).trim() : null,
           nutrients: {
             calories: editForm.calories === '' ? null : Number(editForm.calories),
             protein: editForm.protein === '' ? null : Number(editForm.protein),
@@ -1048,64 +917,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                               onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
                             />
                           </div>
-                          <div className="space-y-1">
-                            <label className="text-[9px] text-white/50 block font-bold">Image URL / Photo</label>
-                            <div className="flex items-center gap-2">
-                              {editForm.image_url ? (
-                                <img
-                                  src={editForm.image_url}
-                                  alt="Brand preview"
-                                  className="w-7 h-7 rounded object-cover border border-white/20 shrink-0"
-                                />
-                              ) : null}
-                              <input
-                                type="text"
-                                placeholder="https://... or /photos/..."
-                                className="flex-1 bg-slate-900 border border-white/10 rounded px-2 py-1 text-[10px] text-white font-mono"
-                                value={editForm.image_url || ''}
-                                onChange={(e) => setEditForm({ ...editForm, image_url: e.target.value })}
-                              />
-                              <label className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded cursor-pointer text-[9px] font-bold shrink-0">
-                                Upload
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  className="hidden"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0];
-                                    if (!file) return;
-                                    const reader = new FileReader();
-                                    reader.onload = async () => {
-                                      const b64 = reader.result as string;
-                                      try {
-                                        const res = await fetch('/api/r2/upload-photo', {
-                                          method: 'POST',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({ payload: b64, id: `brand_${Date.now()}` })
-                                        });
-                                        const data = await res.json();
-                                        if (data.url || data.proxyUrl) {
-                                          setEditForm((prev: any) => ({ ...prev, image_url: data.url || data.proxyUrl }));
-                                        }
-                                      } catch (upErr) {
-                                        console.error('Failed to upload brand image', upErr);
-                                      }
-                                    };
-                                    reader.readAsDataURL(file);
-                                  }}
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => openMealLinkPicker(item)}
-                                className="px-2 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-[9px] font-bold shrink-0 flex items-center gap-1"
-                                title="Link photo and nutrients from a logged meal"
-                              >
-                                <Link2 className="w-3 h-3" />
-                                Link Meal
-                              </button>
-                            </div>
-                          </div>
                           <div className="flex gap-1.5 justify-end pt-1">
                             <button
                               type="button"
@@ -1147,21 +958,13 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                             sodium: item.nutrients?.sodium ?? (item.nutrients?.salt ? Math.round(item.nutrients.salt * 400) : ''),
                             notes: cleanDescriptionText(item.notes || ''),
                             ingredients: cleanDescriptionText(item.ingredients || ''),
-                            image_url: item.image_url || item.imageUrl || '',
                             basis_type: item.basis_type || 'per_dish',
                             serving_grams: item.serving_grams ?? ''
                           });
                         }}
                       >
                         <div className="flex items-center justify-between gap-2 min-w-0">
-                          <span className="font-bold text-white flex items-center gap-1.5 truncate min-w-0">
-                            {(item.image_url || item.imageUrl) ? (
-                              <img
-                                src={item.image_url || item.imageUrl}
-                                alt={item.dish_name}
-                                className="w-5 h-5 rounded object-cover border border-white/10 shrink-0"
-                              />
-                            ) : null}
+                          <span className="font-bold text-white flex items-center gap-1 truncate min-w-0">
                             {item._source === 'supabase' ? (
                               <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" aria-label={t.syncedToSupabase} />
                             ) : (
@@ -1171,15 +974,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                             <span className="text-white/40 font-normal">· {item.chain_key}</span>
                           </span>
                           <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => openMealLinkPicker(item)}
-                              className="p-1 rounded hover:bg-white/10 text-white/80 hover:text-violet-300 disabled:opacity-30"
-                              title="Link photo & nutrients from logged meal"
-                            >
-                              <Link2 className="w-3.5 h-3.5" />
-                            </button>
                             <button
                               type="button"
                               disabled={busy || deletingItemId === itemKey || deletingItemId === item.dish_name_key}
@@ -1606,64 +1400,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                                       onChange={(e) => setEditForm({ ...editForm, ingredients: e.target.value })}
                                     />
                                   </div>
-                                  <div className="space-y-1">
-                                    <label className="text-[9px] text-white/50 block font-bold">Image URL / Photo</label>
-                                    <div className="flex items-center gap-2">
-                                      {editForm.image_url ? (
-                                        <img
-                                          src={editForm.image_url}
-                                          alt="Brand preview"
-                                          className="w-7 h-7 rounded object-cover border border-white/20 shrink-0"
-                                        />
-                                      ) : null}
-                                      <input
-                                        type="text"
-                                        placeholder="https://... or /photos/..."
-                                        className="flex-1 bg-slate-900 border border-white/10 rounded px-2 py-1 text-[10px] text-white font-mono"
-                                        value={editForm.image_url || ''}
-                                        onChange={(e) => setEditForm({ ...editForm, image_url: e.target.value })}
-                                      />
-                                      <label className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded cursor-pointer text-[9px] font-bold shrink-0">
-                                        Upload
-                                        <input
-                                          type="file"
-                                          accept="image/*"
-                                          className="hidden"
-                                          onChange={async (e) => {
-                                            const file = e.target.files?.[0];
-                                            if (!file) return;
-                                            const reader = new FileReader();
-                                            reader.onload = async () => {
-                                              const b64 = reader.result as string;
-                                              try {
-                                                const res = await fetch('/api/r2/upload-photo', {
-                                                  method: 'POST',
-                                                  headers: { 'Content-Type': 'application/json' },
-                                                  body: JSON.stringify({ payload: b64, id: `brand_${Date.now()}` })
-                                                });
-                                                const data = await res.json();
-                                                if (data.url || data.proxyUrl) {
-                                                  setEditForm((prev: any) => ({ ...prev, image_url: data.url || data.proxyUrl }));
-                                                }
-                                              } catch (upErr) {
-                                                console.error('Failed to upload brand image', upErr);
-                                              }
-                                            };
-                                            reader.readAsDataURL(file);
-                                          }}
-                                        />
-                                      </label>
-                                      <button
-                                        type="button"
-                                        onClick={() => openMealLinkPicker(item)}
-                                        className="px-2 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-[9px] font-bold shrink-0 flex items-center gap-1"
-                                        title="Link photo and nutrients from a logged meal"
-                                      >
-                                        <Link2 className="w-3 h-3" />
-                                        Link Meal
-                                      </button>
-                                    </div>
-                                  </div>
                                 </div>
                               );
                             }
@@ -1671,14 +1407,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                             return (
                               <div key={item.dish_name_key || item.id} className="text-[10px] bg-black/25 p-2 rounded-lg flex flex-col items-stretch gap-2 border border-white/5 hover:border-white/15 transition-all">
                                 <div className="flex items-center justify-between gap-2 min-w-0">
-                                  <span className="font-bold text-white flex items-center gap-1.5 truncate min-w-0">
-                                    {(item.image_url || item.imageUrl) ? (
-                                      <img
-                                        src={item.image_url || item.imageUrl}
-                                        alt={item.dish_name}
-                                        className="w-5 h-5 rounded object-cover border border-white/10 shrink-0"
-                                      />
-                                    ) : null}
+                                  <span className="font-bold text-white flex items-center gap-1 truncate min-w-0">
                                     {item._source === 'supabase' ? (
                                       <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" aria-label={t.syncedToSupabase} />
                                     ) : (
@@ -1687,15 +1416,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                                     <span className="truncate">{item.dish_name}</span>
                                   </span>
                                   <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                                    <button
-                                      type="button"
-                                      disabled={busy}
-                                      onClick={() => openMealLinkPicker(item)}
-                                      className="p-1 rounded hover:bg-white/10 text-white/80 hover:text-violet-300 disabled:opacity-30"
-                                      title="Link photo & nutrients from logged meal"
-                                    >
-                                      <Link2 className="w-3.5 h-3.5" />
-                                    </button>
                                     <button
                                       type="button"
                                       disabled={busy || deletingItemId === item.dish_name_key || deletingItemId === `${key}:${item.dish_name_key}`}
@@ -1714,7 +1434,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                                           sodium: item.nutrients?.sodium ?? (item.nutrients?.salt ? Math.round(item.nutrients.salt * 400) : ''),
                                           notes: cleanDescriptionText(item.notes || ''),
                                           ingredients: cleanDescriptionText(item.ingredients || ''),
-                                          image_url: item.image_url || item.imageUrl || '',
                                           basis_type: item.basis_type || 'per_dish',
                                           serving_grams: item.serving_grams ?? ''
                                         });
@@ -2189,147 +1908,6 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
               ))}
             </div>
           )}
-        {showMealLinkModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in font-sans">
-            <div className="bg-slate-900 border border-white/20 rounded-2xl max-w-xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-              {/* Header */}
-              <div className="p-4 border-b border-white/10 flex items-center justify-between bg-slate-800/80">
-                <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Link2 className="w-4 h-4 text-violet-400" />
-                    Link Meal to Brand Item
-                  </h3>
-                  <p className="text-xs text-white/60 truncate mt-0.5">
-                    Target: <span className="text-violet-300 font-semibold">{mealLinkTargetItem?.dish_name}</span> ({mealLinkTargetItem?.chain_key})
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowMealLinkModal(false)}
-                  className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Body: list of meals */}
-              <div className="p-4 overflow-y-auto space-y-3 flex-1">
-                {loadingMealsWithPhotos ? (
-                  <div className="flex items-center justify-center py-12 text-white/50 gap-2">
-                    <RefreshCw className="w-4 h-4 animate-spin text-violet-400" />
-                    <span className="text-xs">Loading recent meals with photos...</span>
-                  </div>
-                ) : mealsWithPhotos.length === 0 ? (
-                  <div className="text-center py-12 text-white/50 text-xs">
-                    No recent meals with photos found in database.
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    <p className="text-[11px] text-white/70">
-                      Select a meal log below to link its photo. If multiple photos exist, click the specific photo corresponding to this brand food:
-                    </p>
-                    {mealsWithPhotos.map((meal) => {
-                      const photos: string[] = meal.imageUrls?.length > 0 ? meal.imageUrls : (meal.imageUrl ? [meal.imageUrl] : []);
-                      const isSelected = selectedMealForLink?.id === meal.id;
-                      return (
-                        <div
-                          key={meal.id}
-                          onClick={() => {
-                            setSelectedMealForLink(meal);
-                            if (selectedMealForLink?.id !== meal.id) setSelectedPhotoIndexForLink(0);
-                          }}
-                          className={`p-3 rounded-xl border transition-all cursor-pointer ${
-                            isSelected
-                              ? 'border-violet-500 bg-violet-950/40 ring-1 ring-violet-500'
-                              : 'border-white/10 bg-slate-800/60 hover:bg-slate-800'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold text-white truncate max-w-[300px]">{meal.name}</span>
-                            <div className="flex items-center gap-2 text-[10px] text-white/50">
-                              <span>{meal.date}</span>
-                              {meal.calories ? <span className="text-violet-300 font-mono font-bold">{meal.calories} kcal</span> : null}
-                            </div>
-                          </div>
-
-                          {/* Photos Grid */}
-                          <div className="flex items-center gap-2 overflow-x-auto py-1">
-                            {photos.map((pUrl, pIdx) => {
-                              const isPhotoChosen = isSelected && selectedPhotoIndexForLink === pIdx;
-                              return (
-                                <div
-                                  key={pIdx}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedMealForLink(meal);
-                                    setSelectedPhotoIndexForLink(pIdx);
-                                  }}
-                                  className={`relative rounded-lg overflow-hidden border-2 transition-all ${
-                                    isPhotoChosen
-                                      ? 'border-violet-400 ring-2 ring-violet-400/50 scale-105'
-                                      : 'border-white/20 hover:border-white/60 opacity-80 hover:opacity-100'
-                                  }`}
-                                >
-                                  <img
-                                    src={pUrl}
-                                    alt={`Photo ${pIdx + 1}`}
-                                    className="w-16 h-16 object-cover bg-black/30"
-                                  />
-                                  {photos.length > 1 && (
-                                    <span className="absolute bottom-0 inset-x-0 bg-black/75 text-[9px] text-center font-bold text-white py-0.5">
-                                      Photo {pIdx + 1}
-                                    </span>
-                                  )}
-                                  {isPhotoChosen && (
-                                    <div className="absolute top-1 right-1 bg-violet-600 rounded-full p-0.5 text-white">
-                                      <CheckCircle2 className="w-3 h-3" />
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Footer Options & Actions */}
-              <div className="p-4 border-t border-white/10 bg-slate-800/80 flex flex-col gap-3">
-                <label className="flex items-center gap-2 text-xs text-white/90 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={copyNutrientsOnLink}
-                    onChange={(e) => setCopyNutrientsOnLink(e.target.checked)}
-                    className="rounded border-white/20 bg-slate-900 text-violet-600 focus:ring-violet-500"
-                  />
-                  <span>Also copy nutrients from selected meal (calories, protein, carbs, fat, sodium)</span>
-                </label>
-
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowMealLinkModal(false)}
-                    className="px-3 py-1.5 rounded-lg text-xs text-white/70 hover:text-white hover:bg-white/10"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!selectedMealForLink || busy}
-                    onClick={confirmMealLink}
-                    className="px-4 py-1.5 rounded-lg text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 flex items-center gap-1.5 shadow-lg"
-                  >
-                    {busy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
-                    Confirm Link
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
         </div>
       </div>
     </div>,

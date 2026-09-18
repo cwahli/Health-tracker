@@ -1,7 +1,0 @@
-{
-  "slug": "same-meal-package-prepared",
-  "date": "2026-09-13",
-  "hypothesis": "Prompt line + regex on 'same meal' / '1 dish' is enough to merge package vs prepared oats; scout replace of one dish completes the merge.",
-  "why_burned": "job_1789312118652_j8t9nsbxz: user said 'It's only 1 meal. Just combine them'. Regex missed '1 meal' and 'combine'. Scout emitted replace of dish 0; diffScoutToEditCommands left dish 1. applySameMealClarification skipped usedPrior. Create-path resolvePackageAndContextItems skipped different sourceImageIndex and 40g serving (not bulk >=500g).",
-  "signature": "2-dish ledger from package+cooked photos; editCommands replace_identity without merge_dishes; leftover porridge kcal still in totals"
-}

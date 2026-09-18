@@ -324,15 +324,6 @@ export function retainGoldenOutcomes(
   return result;
 }
 
-function tidyDishName(name: string): string {
-  return String(name || '')
-    .replace(/\s+50%\s*Duroc Breed/i, '')
-    .replace(/,\s*Cured and Cooked/i, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 42);
-}
-
 export function deriveGoldenTitle(input: { foodLog?: any; scout?: any; jobId?: string; fallback?: string }): string {
   const foodLog = input.foodLog;
   const items = Array.isArray(foodLog?.itemsBreakdown)
@@ -346,7 +337,7 @@ export function deriveGoldenTitle(input: { foodLog?: any; scout?: any; jobId?: s
     : [];
   if (items.length > 0) {
     const names = items
-      .map((it: any) => tidyDishName(it.originalName || it.name || it.canonicalDbName))
+      .map((it: any) => it.originalName || it.name || it.canonicalDbName)
       .filter(Boolean);
     if (names.length === 1) return names[0];
     if (names.length === 2) return `${names[0]} + ${names[1]}`;
@@ -386,13 +377,12 @@ export function statsFromJourney(rows: any[]): { sampled: number; curator: numbe
 }
 
 export function splitExtraIssueText(text: string): string[] {
-  const raw = String(text || '').trim();
-  if (!raw) return [];
-  const parts = raw
-    .split(/(?<=\.)\s+(?=[A-Z][A-Za-z0-9 /&-]{2,40}:\s)/)
+  if (!text) return [];
+  const chunks = text
+    .split(/(?=[A-Z][a-zA-Z\s]+:\s+)/)
     .map((s) => s.trim())
     .filter(Boolean);
-  return parts.length ? parts : [raw];
+  return chunks.length > 0 ? chunks : [text.trim()];
 }
 
 export function journeyToOutcomes(

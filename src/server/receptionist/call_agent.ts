@@ -797,77 +797,6 @@ export function enforceReadyHandoffContract(output: any, ctx: HandoffRepairConte
  * 1. Deduplicating and capping keyInsights at 7 distilled facts.
  * 2. Capping workHistoryLog at 5 entries (preserving milestone + last 4 recent events).
  */
-/**
- * Deterministic demographic extraction from the user message / form-submit
- * text (EN + ID labels). Additive backstop for the model: fills snapshot
- * holes so already-given fields are never re-asked. Never overwrites.
- * Class: COLLECTED_DATA_DROP (live job_frontdesk_1789468175766 turn 2).
- */
-export function extractDemographicsFromText(text: string): {
-  age?: number; gender?: string; heightCm?: number; weightKg?: number;
-  targetWeightKg?: number; activityLevel?: string;
-} {
-  const out: { age?: number; gender?: string; heightCm?: number; weightKg?: number; targetWeightKg?: number; activityLevel?: string } = {};
-  const s = String(text || '');
-  // [^0-9\n]*? skips filler words between label and number ("Tinggi Badan: 145").
-  const num = (m: RegExpMatchArray | null, min: number, max: number): number | undefined => {
-    if (!m) return undefined;
-    const v = parseFloat(m[1].replace(',', '.'));
-    return Number.isFinite(v) && v >= min && v <= max ? v : undefined;
-  };
-  const age = num(s.match(/(?:\bage\b|\busia\b)[^0-9\n]*?(\d{1,3})/i), 5, 120);
-  if (age !== undefined) out.age = age;
-  // Female/wanita first: "female" contains "male".
-  if (/(wanita|female)/i.test(s)) out.gender = 'Female';
-  else if (/(pria|\bmale\b)/i.test(s)) out.gender = 'Male';
-  const height = num(s.match(/(?:\bheight\b|tinggi(?:\s*badan)?)[^0-9\n]*?(\d{2,3})/i), 50, 250);
-  if (height !== undefined) out.heightCm = height;
-  const target = num(s.match(/(?:berat\s*badan\s*target|target\s*weight)[^0-9\n]*?(\d{2,3}(?:[.,]\d+)?)/i), 20, 400);
-  if (target !== undefined) out.targetWeightKg = target;
-  const weight = num(s.match(/(?:berat\s*badan\s*saat\s*ini|current\s*weight|\bweight\b|\bberat\b(?!\s*badan\s*target))[^0-9\n]*?(\d{2,3}(?:[.,]\d+)?)/i), 20, 400);
-  if (weight !== undefined && weight !== target) out.weightKg = weight;
-  const lower = s.toLowerCase();
-  if (/sedentary/i.test(s)) out.activityLevel = 'sedentary';
-  else if (/lightly\s*active|light\s*exercise|\blight\b/i.test(s)) out.activityLevel = 'lightly_active';
-  else if (/moderately\s*active|moderate\s*exercise|\bmoderate\b/i.test(s)) out.activityLevel = 'moderately_active';
-  else if (/very\s*active|heavy\s*exercise|\bintense\b|\bvery\b/i.test(s)) out.activityLevel = 'very_active';
-  else if (/extra\s*active|\bathlete\b/i.test(s)) out.activityLevel = 'extra_active';
-  else if (/mahasiswa|pelajar|\bstudent\b|kantoran|kantor|\boffice\b|ringan|sedentari/i.test(lower)) out.activityLevel = 'lightly_active';
-  return out;
-}
-
-/**
- * Normalize model-provided uiForm labels toward the form language.
- * The post-process rewrite below is keyed off field.name; generically-named
- * fields (q1, field_1…) slip through with English labels. This matches on the
- * English label TEXT instead. Unknown labels pass through. Class: FORM_LABEL_EN.
- */
-const UI_FORM_LABEL_KEYS = [
-  'gender', 'age', 'height', 'recepCurrentWeight', 'recepActivityLevel',
-  'medicalHistory', 'recepTargetWeight',
-] as const;
-
-export function normalizeUiFormLanguage(uiForm: any, formLang: string): any {
-  if (!uiForm || !Array.isArray((uiForm as any).fields)) return uiForm;
-  const lang = normalizeLocale(formLang || 'en');
-  if (lang === 'en') return uiForm;
-  const byEnLabel = new Map<string, string>();
-  UI_FORM_LABEL_KEYS.forEach((k) => byEnLabel.set(String(t('en', k)).trim().toLowerCase(), k));
-  return {
-    ...uiForm,
-    fields: uiForm.fields.map((f: any) => {
-      if (!f || typeof f.label !== 'string') return f;
-      const key = byEnLabel.get(f.label.trim().toLowerCase());
-      if (!key) return f;
-      return {
-        ...f,
-        label: t(lang, key as any),
-        unit: f.unit === 'years' && lang === 'id' ? 'tahun' : f.unit,
-      };
-    }),
-  };
-}
-
 export function compactUserMemory(memory: any): any {
   if (!memory) return memory;
 
@@ -1076,37 +1005,6 @@ export async function callReceptionistAgent(
   // Check if currentUserMessage contains activity level or if form submitted it
   const userMsg = String(payload.currentUserMessage || "").trim();
   const userMsgLower = userMsg.toLowerCase();
-  // Deterministic demographic backstop (COLLECTED_DATA_DROP): fill snapshot
-  // holes from the submit text so already-given fields are never re-asked.
-  // Additive only — never overwrites model or existing values.
-  if (output.memory?.userProfileSnapshot) {
-    const dSnap = output.memory.userProfileSnapshot;
-    const found = extractDemographicsFromText(userMsg);
-    const missFrag: Record<string, string> = {
-      age: 'age', gender: 'gender', heightCm: 'height',
-      weightKg: 'weight', targetWeightKg: 'targetweight', activityLevel: 'activity',
-    };
-    (Object.entries(found) as Array<[keyof typeof found, any]>).forEach(([k, v]) => {
-      if (v === undefined) return;
-      if ((dSnap as any)[k] === undefined || (dSnap as any)[k] === null) (dSnap as any)[k] = v;
-      if (output.collectedData && ((output.collectedData as any)[k] === undefined || (output.collectedData as any)[k] === null)) {
-        (output.collectedData as any)[k] = v;
-      }
-      const frag = missFrag[k];
-      const norm = (x: any) => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
-      // Exact normalized match only ('weight' must not clear 'target_weight').
-      const clears = (entry: any) => {
-        const e = norm(entry);
-        return e === frag || (frag === 'activity' && e === 'activitylevel');
-      };
-      if (Array.isArray(output.missingFields)) {
-        output.missingFields = output.missingFields.filter((f: any) => !clears(f));
-      }
-      if (Array.isArray((output.memory as any)?.pendingItems)) {
-        (output.memory as any).pendingItems = (output.memory as any).pendingItems.filter((p: any) => !clears(p));
-      }
-    });
-  }
   let detectedActivity: string | null = null;
   if (/sedentary/i.test(userMsgLower)) detectedActivity = 'sedentary';
   else if (/lightly\s*active|light\s*exercise|\blight\b/i.test(userMsgLower)) detectedActivity = 'lightly_active';
@@ -1270,8 +1168,6 @@ export async function callReceptionistAgent(
         return { ...field, label };
       });
     }
-    // Label-text fallback for generically-named model fields (FORM_LABEL_EN).
-    output.uiForm = normalizeUiFormLanguage(output.uiForm, replyLang);
   }
   if (!String(output.userResponse || "").trim()) {
     output.userResponse =

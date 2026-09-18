@@ -1054,7 +1054,7 @@ describe("server_vision_scout", () => {
     });
 
     it("slices a parent crop by weight when the diet agent omits per-food boxes", () => {
-      expect(sliceParentBoxByWeights([0, 0, 100, 100], [50, 50], 0)[2]).toBe(50);
+      expect(sliceParentBoxByWeights([0, 0, 100, 100], [{weightGrams: 50}, {weightGrams: 50}])[0][2]).toBe(50);
       expect(boxForUnrolledFood(null, [190, 0, 960, 1000], [150, 100], 0)[0]).toBe(190);
       expect(boxForUnrolledFood(null, [190, 0, 960, 1000], [150, 100], 1)[2]).toBe(960);
     });

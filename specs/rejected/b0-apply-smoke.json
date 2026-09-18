@@ -1,7 +1,0 @@
-{
-  "slug": "b0-apply-smoke",
-  "date": "2026-09-14",
-  "hypothesis": "Server-polling (pollJobUntilTerminal) settles a front-desk lab send; extracted history rows carry observationMeta with canonical-keyed maps assertable from localStorage.",
-  "why_burned": "job_frontdesk_1789420747281: 8 min lastStatus unknown while the desk run had completed on screen. Front-desk jobs are client-only by design (SupabaseJobSync excludes them from cloud sync + hydration polling), so no server endpoint will ever know the id. Second burn: persisted-state asserts guessed extract-path storage (observationMeta + canonical map); extract auto-land stores converted values directly and observationMeta is Review-path only. Fixed by client-signal settle (pollFrontDeskSettled) + panel/history UI asserts; meta stays with G-B1 unit tests.",
-  "signature": "live spec red on lastStatus unknown with a completed reply on screen; or red on localStorage bundle shape with exact locks visible in the panel"
-}

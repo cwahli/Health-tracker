@@ -69,24 +69,14 @@ export default function TaskPlaceholderCard({
     
     // Create a deep copy of pendingFoodLog to avoid mutating state directly
     const logToSave = JSON.parse(JSON.stringify(pendingFoodLog));
-    if (job?.id && !logToSave.jobId) {
-      logToSave.jobId = job.id;
-    }
-    const resolvedDebugUrl = job.result?.debugUrl || (job as any).debugUrl || job.result?.clean_result?.debugUrl;
-    if (resolvedDebugUrl && !logToSave.debugUrl) {
-      logToSave.debugUrl = resolvedDebugUrl;
-    }
-    const resolvedBackendLogs = job.result?.backendLogs || (job as any).backendLogs || job.result?.clean_result?.backendLogs;
-    if (resolvedBackendLogs && !logToSave.backendLogs) {
-      logToSave.backendLogs = resolvedBackendLogs;
-    }
     
     try {
       let finalImageUrl = '';
       let finalImageUrls: string[] = [];
 
       // 1. Try fetching and converting raw images from ImageStore
-      const images = await ImageStore.getImages(job.id);
+      const img = await ImageStore.getImage(job.id);
+      const images = img ? [img] : [];
       if (images && images.length > 0) {
         const dataUrls = await Promise.all(
           images.map(async (img) => {
@@ -216,7 +206,8 @@ export default function TaskPlaceholderCard({
 
         // 1. Check ImageStore first for raw bytes / staged blobs
         try {
-          const images = await ImageStore.getImages(job.id);
+          const img = await ImageStore.getImage(job.id);
+          const images = img ? [img] : [];
           if (images && images.length > 0) {
             rawCandidates.push(...images);
           }
@@ -232,7 +223,8 @@ export default function TaskPlaceholderCard({
                 rawCandidates.push(ref);
               } else if (typeof ref === 'string') {
                 try {
-                  const refImgs = await ImageStore.getImages(ref);
+                  const refImg = await ImageStore.getImage(ref);
+                  const refImgs = refImg ? [refImg] : [];
                   if (refImgs && refImgs.length > 0) {
                     rawCandidates.push(...refImgs);
                   }
@@ -413,7 +405,7 @@ export default function TaskPlaceholderCard({
   );
 
   const turnInFlight = isTurnInFlight(job);
-  const effectiveStatus: AgentJob['status'] = previewStatus(job);
+  const effectiveStatus = previewStatus(job) as AgentJob['status'];
 
   const isActivelyRetryingOrRunning =
     effectiveStatus === 'running' ||
@@ -535,15 +527,8 @@ export default function TaskPlaceholderCard({
 
   const detectedName = extractMealName();
   const rawInputText = (job.inputSnapshot?.text?.trim() || '').replace(/^Portion Selection:\s*/i, '');
-
-  const isAwaitingPortion =
-    job.status === 'awaiting_user' &&
-    !job.result?.portionClarifyAnswered &&
-    !job.result?.clean_result?.portionClarifyAnswered &&
-    !(job as any).clean_result?.portionClarifyAnswered;
-
   const displayTitle =
-    isAwaitingPortion
+    job.status === 'awaiting_user'
       ? (detectedName
           ? (t.portionSelectionNeeded ? t.portionSelectionNeeded.replace('{name}', detectedName) : `${detectedName} — Portion Selection Needed`)
           : job.result?.portionClarify?.promptMessage ||
@@ -563,7 +548,7 @@ export default function TaskPlaceholderCard({
 
   return (
     <div id={`task-card-${job.id}`} data-testid="task-placeholder-card" className={`bg-theme-bg-card border rounded-3xl py-4 pl-0 pr-4 shadow-sm mx-0 mb-4 w-full transition-all hover:shadow-md overflow-hidden ${
-      isAwaitingPortion
+      job.status === 'awaiting_user'
         ? 'border-purple-300 dark:border-purple-700 bg-purple-50/30 dark:bg-purple-950/20'
         : 'border-theme-border'
     }`}>
@@ -671,7 +656,7 @@ export default function TaskPlaceholderCard({
 
             {isFailedOrTimedOut && (() => {
               const raw =
-                job.error?.message ||
+                (typeof job.error === 'object' && job.error !== null ? (job.error as any).message : job.error) ||
                 (job.statusMessage && !['Analyzing on server...', 'Analyzing your meal...'].includes(job.statusMessage) ? job.statusMessage : null) ||
                 (typeof job.result?.message === 'string' && job.result.message ? job.result.message : null) ||
                 (typeof lastMsgContent === 'string' ? lastMsgContent : '') ||

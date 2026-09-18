@@ -1,0 +1,50 @@
+
+Running 1 test using 1 worker
+
+
+======================================================
+[Playwright Benchmark] Starting Case 1: Set 1: Bakery Shelf & SilverQueen Chocolate
+[Playwright Benchmark] User Input: "" (BLANK / PURE PHOTOS ONLY)
+[Playwright Benchmark] Photos: set1_saybread_bakery_shelf.jpg, set1_silverqueen_chocolate_front.jpg, set1_silverqueen_nutrition_label.jpg
+BROWSER_LOG: [vite] connecting...
+BROWSER_LOG: [vite] connecting...
+BROWSER_LOG: [vite] connected.
+BROWSER_LOG: [vite] connected.
+BROWSER_LOG: %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+BROWSER_LOG: %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+BROWSER_ERROR: useEffect is not defined
+BROWSER_LOG: %s
+
+%s
+ An error occurred in the <App> component. Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+BROWSER_LOG: %s
+
+%s
+ An error occurred in the <App> component. Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+  ✘  1 [chromium] › prototype/tests/meal03-compare-benchmark.spec.ts:130:5 › Meal 03 Compare Mode — 6 Cases Benchmark (Blank User Input) › Benchmark Case 1: Set 1: Bakery Shelf & SilverQueen Chocolate [Blank User Input] (42.6s)
+
+
+  1) [chromium] › prototype/tests/meal03-compare-benchmark.spec.ts:130:5 › Meal 03 Compare Mode — 6 Cases Benchmark (Blank User Input) › Benchmark Case 1: Set 1: Bakery Shelf & SilverQueen Chocolate [Blank User Input] 
+
+    TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
+    Call log:
+      - waiting for locator('#nav-tab-home')
+
+
+      248 |         await demoBtn.click();
+      249 |       }
+    > 250 |       await page.locator('#nav-tab-home').waitFor({ state: 'attached', timeout: 30000 });
+          |                                           ^
+      251 |
+      252 |       // Open quick action sheet -> Compare
+      253 |       const quickActionBtn = page.locator('button[title="Open quick actions"], button.w-14.h-14').first();
+        at /app/applet/prototype/tests/meal03-compare-benchmark.spec.ts:250:43
+
+    Error Context: test-results/meal03-compare-benchmark-M-ceb74-Chocolate-Blank-User-Input--chromium/error-context.md
+
+    Error Context: test-results/meal03-compare-benchmark-M-ceb74-Chocolate-Blank-User-Input--chromium/error-context.md
+
+  1 failed
+    [chromium] › prototype/tests/meal03-compare-benchmark.spec.ts:130:5 › Meal 03 Compare Mode — 6 Cases Benchmark (Blank User Input) › Benchmark Case 1: Set 1: Bakery Shelf & SilverQueen Chocolate [Blank User Input] 

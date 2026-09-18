@@ -1,558 +1,451 @@
-export type Severity = 'Normal' | 'Borderline at risk' | 'At risk' | 'Critical' | string;
-export interface RangeConfig {
-  type?: 'simple' | 'bracket' | string;
-  conditions?: any[];
-  brackets?: any[];
-  filters?: any;
-  range?: any;
+/**
+ * Core type declarations and domain models for the health & nutrition platform.
+ * 
+ * Reconstructed under Q-11 parity guard to eliminate `any` aliases while
+ * maintaining comprehensive structural contracts across all domains.
+ */
+
+// ============================================================================
+// 1. User & Identity Models
+// ============================================================================
+
+export interface UserTargetBreakdown {
+  calories?: number;
+  protein?: number;
+  totalFat?: number;
+  saturatedFat?: number;
+  carbohydrates?: number;
+  totalFibre?: number;
+  solubleFibre?: number;
+  addedSugar?: number;
+  sodium?: number;
+  potassium?: number;
+  [key: string]: number | undefined;
 }
-export interface CustomRangeFilter {
-  gender?: string;
-  minAge?: number | '';
-  maxAge?: number | '';
-  ethnicity?: string;
-}
-export interface SimpleRange {
-  type?: 'simple' | string;
-  conditions?: any[];
-}
-export interface BracketRange {
-  type?: 'bracket' | string;
-  brackets?: any[];
-}
-export interface CustomRangeDef {
+
+export interface PrioritizedCondition {
   id?: string;
-  key?: string;
-  name?: string;
-  type?: string;
-  conditions?: any[];
-  brackets?: any[];
-  filters?: CustomRangeFilter;
-  range?: RangeConfig | any;
+  name: string;
+  priority?: number;
+  severity?: string;
+  biomarkers?: { key: string; name?: string; target?: string | number }[];
+  biomarkerKeys?: string[];
+  dietaryRecommendations?: string[];
+  [key: string]: any;
 }
-export interface AgentAnalysis {
-  id?: string;
-  timestamp?: string;
-  agentId?: string;
-  summary?: string;
-  date?: string;
-  result?: any;
-  archived?: boolean;
-  agentType?: string;
-}
-export interface PendingObservation {
-  id?: string;
-  printedName: string;
-  suggestedKey?: string;
-  date: string;
-  rawValue: number | string;
-  rawUnit?: string;
-  sourceJobId?: string;
-  printedRange?: string;
-  labFlag?: string;
-  createdAt?: number;
+
+export interface CustomBiomarkerDef {
+  key: string;
+  name: string;
+  unit: string;
+  normalRange?: string;
+  standardMedicalGrouping?: string;
+  riskCategories?: string[];
+  catalogApproved?: boolean;
+  notes?: string;
+  [key: string]: any;
 }
 
 export interface UserProfile {
   uid?: string;
+  name?: string;
   email?: string;
-  nickname?: string;
-  photoUrl?: string;
-  age?: any;
-  gender?: string;
+  age?: number;
+  gender?: 'male' | 'female' | 'other' | string;
   ethnicity?: string;
-  height?: any;
-  weight?: any;
-  bloodType?: string;
+  heightCm?: number;
+  weightKg?: number;
   language?: string;
-  timezone?: string;
-  unitPreference?: string;
-  targetCalories?: any;
-  targetCarbs?: any;
-  targetFats?: any;
-  targetFibre?: any;
-  targetProtein?: any;
-  targetSaturatedFat?: any;
-  targetSodium?: any;
-  targetSugar?: any;
+  accountType?: string;
+  credits?: number;
+  targets?: UserTargetBreakdown;
+  topTargetNutrientKeys?: string[];
   topNutrientsToMonitor?: string[];
-  
-  fontSize?: string;
-  fontSizeTitle?: string;
-  fontSizeSubtitle?: string;
-  fontSizeDescription?: string;
-  fontSizeBody?: string;
-  fontSizeBodySmall?: string;
-  fontSizeSubtitleSmall?: string;
-  fontSizeKeyMetric?: string;
-  fontSizeXS?: string;
-  fontFamily?: string;
-  fontMono?: string;
-  marginScale?: 'compact' | 'normal' | 'relaxed';
-  paddingScale?: 'compact' | 'normal' | 'relaxed';
-  cornerRadius?: 'none' | 'small' | 'normal' | 'large' | 'pill';
-  shadowScale?: 'none' | 'light' | 'normal' | 'heavy';
-  themePresets?: any[];
-  systemPresetOverrides?: { [presetName: string]: any };
-  themeOverrides?: any[];
-  customColors?: any[];
-  customFonts?: any[];
-  themePalette?: {
-    button?: string;
-    background?: string;
-    border?: string;
-    warning?: string;
-    caution?: string;
-    success?: string;
-    text?: string;
-    textSecondary?: string;
-    textDarkPrimary?: string;
-    textDarkSecondary?: string;
-    textAccent?: string;
-    textMuted?: string;
-    textSuccess?: string;
-    textError?: string;
-    bgApp?: string;
-    bgCard?: string;
-    neutralSetting?: string;
-    [key: string]: string | undefined;
-  };
-  customBiomarkers?: {
-    [key: string]: {
-      name: string;
-      unit: string;
-      normalRange: string;
-      optimalValue?: string;
-      profileAdjustedNormalRange?: string;
-      specificRiskContext?: string;
-      status?: string;
-      userValue?: number | string;
-      needsApproval?: boolean;
-      rangeConfig?: RangeConfig;
-      customRanges?: CustomRangeDef[];
-      structuredRanges?: {
-        id: string;
-        name: string;
-        min?: number | '';
-        max?: number | '';
-        isNormal?: boolean;
-        targetGender?: string;
-        targetAgeMin?: number | '';
-        targetAgeMax?: number | '';
-        targetEthnicity?: string;
-        targetBiomarkerKey?: string;
-        targetBiomarkerMin?: number | '';
-        targetBiomarkerMax?: number | '';
-      }[];
-      description: string;
-      benefitRisk?: string;
-      riskCategories?: string[];
-      standardMedicalGrouping?: string;
-      potentialMedicalConditions?: string[];
-      updatedAt?: number;
-      /** Overlay fingerprint: ageBand|sex|ethnicity */
-      overlayFingerprint?: string;
-      sameAsCatalog?: boolean;
-      catalogApproved?: boolean;
-      rangeVariesBy?: ('age' | 'sex' | 'ethnicity')[];
-      rangeBrackets?: { name?: string; label?: string; range?: string; min?: number | null; max?: number | null; severity?: number | string }[];
-    }
-  };
-  lastUpdatedAt?: number;
-  agentTriageSummary?: string;       // Agent 1 summary
-  agentDiagnosticSummary?: string;   // Agent 2 summary
-  agentContextualizerSummary?: string;// Agent 3 summary
-  agentInterventionSummary?: string; // Agent 4 summary
-  agentLiteratureSummary?: string;   // Agent 5 summary
-  agentMemory?: any;                 // Persistent UserMemory across sessions
-  agentAnalyses?: AgentAnalysis[];
-  agent2TimelineProjections?: {
-    year2: string;
-    year5: string;
-    year10: string;
-  };
-  agent2GapTasks?: string[];
-  agent4Projections?: string[];
-  deletedFoodLogIds?: Record<string, number>;
-  deletedBiomarkerLogIds?: Record<string, number>;
-  deletedCustomBiomarkerKeys?: Record<string, number>;
-  deletedDailyBenefitIds?: Record<string, number>;
-  notUsedBiomarkers?: Record<string, { flaggedAt: number }>;
-  deletedNotUsedBiomarkerKeys?: Record<string, number>;
-  notUsedInMedicalHistory?: Record<string, { flaggedAt: number }>;
-  bmiAutoLogged?: boolean;
+  conditions?: string[];
+  prioritizedConditions?: PrioritizedCondition[];
+  medications?: string[];
+  customBiomarkers?: Record<string, CustomBiomarkerDef>;
   pendingObservations?: PendingObservation[];
-  approved_agent1_batches?: { [key: string]: boolean };
-  approved_data_review_batches?: { [key: string]: boolean };
-  userType?: 'Admin' | 'Demo' | 'Standard';
-  agentCredits?: {
-    totalUsed: number;
-    dailyQuota: number;
-    remaining: number;
-    lastResetTime: string; // ISO String
-    grantedCredits?: {
-      amount: number;
-      expiresAt: string; // ISO String duration
-      grantedAt: string; // ISO String
-    }[];
-    modelUsage?: {
-      [modelId: string]: number;
-    };
-  };
-  metadata?: {
-    legacyMigrated?: boolean;
-    [key: string]: any;
-  };
-  lastLogin?: string;
+  preferences?: Record<string, any>;
+  [key: string]: any;
 }
 
+// ============================================================================
+// 2. Nutrition & Food Domain
+// ============================================================================
+
 export interface NutrientBreakdown {
-  calories: number;        // kcal
-  protein: number;         // g
-  totalFat: number;        // g
-  saturatedFat: number;    // g
-  transFat?: number;       // g
-  unsaturatedFat: number;  // g
-  omega3: number;          // g
-  carbohydrates: number;   // g
-  sugar?: number;          // g, total sugar (natural + added)
-  addedSugar?: number;     // g
-  totalFibre: number;      // g
-  solubleFibre: number;    // g
-  sodium: number;          // mg
-  potassium: number;       // mg
-  magnesium: number;       // mg
-  calcium: number;         // mg
-  iron: number;            // mg
-  zinc: number;            // mg
-  selenium: number;        // mcg
-  iodine: number;          // mcg
-  phosphorus: number;      // mg
-  vitaminD: number;        // IU
-  vitaminB12: number;      // mcg
-  folate: number;          // mcg
-  vitaminC: number;        // mg
-  vitaminE: number;        // mg
-  vitaminK: number;        // mcg
-  vitaminA: number;        // mcg
-  vitaminB6: number;       // mg
-  thiamine: number;        // mg
-  riboflavin: number;      // mg
-  niacin: number;          // mg
+  calories?: number;
+  protein?: number;
+  totalFat?: number;
+  saturatedFat?: number;
+  transFat?: number;
+  unsaturatedFat?: number;
+  omega3?: number;
+  carbohydrates?: number;
+  sugar?: number;
+  addedSugar?: number;
+  totalFibre?: number;
+  solubleFibre?: number;
+  sodium?: number;
+  potassium?: number;
+  magnesium?: number;
+  calcium?: number;
+  iron?: number;
+  zinc?: number;
+  selenium?: number;
+  iodine?: number;
+  phosphorus?: number;
+  vitaminD?: number;
+  vitaminB12?: number;
+  folate?: number;
+  vitaminC?: number;
+  vitaminE?: number;
+  vitaminK?: number;
+  vitaminA?: number;
+  vitaminB6?: number;
+  thiamine?: number;
+  riboflavin?: number;
+  niacin?: number;
+  [key: string]: number | undefined;
+}
+
+export interface NutrientTarget {
+  key: string;
+  name: string;
+  targetValue: number;
+  unit: string;
+  isMaximum?: boolean;
+  tolerance?: number;
+}
+
+export interface NutrientDef {
+  key: string;
+  name: string;
+  unit: string;
+  category?: 'macro' | 'mineral' | 'vitamin' | string;
+  labels?: Record<string, string>;
 }
 
 export interface PhysicalFormClassification {
-  physicalForm: 'LIQUID_BEVERAGE' | 'SOLID_CHEESE_DAIRY' | 'VISCOUS_SAUCE' | 'SOLID_MEAT_FISH' | 'SOLID_GRAIN_BAKERY' | 'SOLID_FRUIT_VEG' | 'POWDER_OIL_FAT' | 'COMPOUND_MEAL' | 'UNKNOWN_SOLID';
+  physicalForm: string;
   primaryCategory: string;
-  matchedTokens: string[];
-  explanation: string;
+  matchedTokens?: string[];
+  explanation?: string;
+  [key: string]: any;
 }
 
 export interface FoodItemBreakdown {
   name: string;
   canonicalDbName?: string;
-  originalLocalName?: string | null;
-  weightGrams: number;
-  calories: number;
-  saturatedFat: number;
-  sodium: number;
-  dbSource?: string;
-  dbId?: string | null;
-  cookingMethod?: string | null;
-  visualIngredients?: string[] | string | null;
-  components?: string[] | string | null;
-  confidenceRating?: 'Low' | 'Medium' | 'High';
-  confidenceComment?: string;
-  packGrams?: number | null;
-  portionRatio?: number;
-  portionAccepted?: boolean;
-  portionDescription?: string;
+  originalLocalName?: string;
+  weightGrams?: number;
+  calories?: number;
+  protein?: number;
+  totalFat?: number;
+  saturatedFat?: number;
+  carbohydrates?: number;
+  totalFibre?: number;
+  sugar?: number;
+  sodium?: number;
+  potassium?: number;
   physicalFormClassification?: PhysicalFormClassification;
-  matchReasonInfo?: {
-    matchType?: string;
-    physicalForm?: string;
-    matchedKeywords?: string[];
-    explanation?: string;
-  };
+  nutrients?: NutrientBreakdown;
+  confidence?: number;
+  scoutIndex?: number;
   [key: string]: any;
 }
 
-export type SyncState = 'synced' | 'new' | 'update' | 'delete';
-
 export interface FoodLog {
   id: string;
-  date: string; // ISO string or YYYY-MM-DD
   name: string;
-  composition: string;
-  weightGrams: number;
-  quantity: string;
-  consumedAmount?: number;
-  packGrams?: number | null;
-  portionRatio?: number;
-  portionAccepted?: boolean;
-  portionDescription?: string;
-  benefits?: string;
-  risks?: string;
-  healthImpact?: string;
-  recommendation?: 'good' | 'bad' | 'neutral' | string;
-  verdict?: { label?: string; level?: string };
-  description?: string;
-  message?: string;
-  nutrients: NutrientBreakdown;
+  date: string;
+  time?: string;
+  mealType?: 'breakfast' | 'lunch' | 'dinner' | 'snack' | string;
+  calories?: number;
+  nutrients?: NutrientBreakdown;
+  items?: FoodItemBreakdown[];
   imageUrl?: string;
   imageUrls?: string[];
-  debugUrl?: string;
-  itemsBreakdown?: FoodItemBreakdown[];
-  scoutItems?: any[];
-  chatTranscript?: { role: 'user' | 'assistant'; content: string; timestamp?: string }[];
-  sync_state?: SyncState;
-  updated_at?: number;
-}
-
-export interface BiomarkerValue {
-  id: string;
-  name: string;
-  value: any;
-  unit: string;
-  category: string;
-  status: 'normal' | 'low' | 'high' | 'critical' | 'unknown';
-  timestamp: string; // ISO string
-}
-
-export interface ExtractedTestDetail {
-  key: string;
-  originalTestName?: string;
-  valueNumeric?: number | null;
-  valueString?: string | null;
-  unit?: string;
-  normalRange?: string;
-  doctorComment?: string;
-}
-
-export interface BiomarkerLog {
-  id: string;
-  date: string; // YYYY-MM-DD
-  biomarkers: { [key: string]: any };
-  note?: string;
-  summary?: string;
-  tests?: ExtractedTestDetail[];
-  sync_state?: SyncState;
-  updated_at?: number;
-  /** Same extract of the same report — upsert / same-day merge key */
-  sourceReportId?: string;
-  observationMeta?: {
-    [key: string]: {
-      rawUnit?: string;
-      rawValue?: string | number;
-      printedRange?: string;
-      labFlag?: string;
-    };
-  };
-}
-
-export interface HealthAction {
-  id: string;
-  task: string;
-  explanation: string;
-  priority: 'high' | 'medium' | 'low';
-  completed: boolean;
-  type: 'doctor' | 'test' | 'lifestyle';
-  testName?: string;
-  timeframe?: string;
-  createdAt?: number;
-  updated_at?: number;
-}
-
-export interface DailyBenefit {
-  id: string;
-  activity: string;
-  target: string;
-  completed: boolean;
-  updated_at?: number;
-}
-
-export interface InsightArticle {
-  title: string;
-  summary: string;
-  link: string;
-}
-
-export interface HealthRiskForecast {
-  year5: string;
-  year10: string;
-  year20: string;
-  optimized5: string;
-  optimized10: string;
-  optimized20: string;
+  photoUrl?: string;
+  notes?: string;
+  verified?: boolean;
+  createdAt?: string | number;
+  updatedAt?: string | number;
+  [key: string]: any;
 }
 
 export interface FoodIdea {
+  id?: string;
+  title: string;
+  description?: string;
+  mealType?: string;
+  tags?: string[];
+  nutrients?: NutrientBreakdown;
+  ingredients?: string[];
+  prepTimeMinutes?: number;
+  [key: string]: any;
+}
+
+export interface ComparisonSet {
+  id?: string;
+  title?: string;
+  items?: any[];
+  groups?: any[];
+  verdict?: string;
+  timestamp?: number;
+  [key: string]: any;
+}
+
+// ============================================================================
+// 3. Biomarker Domain
+// ============================================================================
+
+export type Severity = 'optimal' | 'normal' | 'warning' | 'critical' | 'low' | 'high' | string;
+
+export interface SimpleRange {
+  min?: number;
+  max?: number;
+  unit?: string;
+}
+
+export interface BracketRange {
+  label: string;
+  min?: number;
+  max?: number;
+  severity?: Severity;
+  unit?: string;
+  description?: string;
+}
+
+export interface CustomRangeFilter {
+  ageMin?: number;
+  ageMax?: number;
+  sex?: 'male' | 'female' | 'all' | string;
+  ethnicity?: string;
+}
+
+export interface CustomRangeDef {
+  id?: string;
+  key: string;
+  name?: string;
+  filter?: CustomRangeFilter;
+  ranges?: BracketRange[];
+  normalRange?: string;
+  unit?: string;
+  [key: string]: any;
+}
+
+export interface RangeConfig {
+  biomarkerKey: string;
+  ranges: BracketRange[];
+  defaultUnit?: string;
+  description?: string;
+  [key: string]: any;
+}
+
+export interface BiomarkerLog {
+  id?: string;
+  date: string;
+  biomarkers: Record<string, number | string>;
+  notes?: string;
+  tests?: any[];
+  source?: string;
+  createdAt?: string | number;
+  [key: string]: any;
+}
+
+export interface BiomarkerEntry {
+  biomarker: string;
+  date: string;
+  value: number | string;
+  unit?: string;
+  status?: string;
+  referenceRange?: string;
+  [key: string]: any;
+}
+
+export interface PendingObservation {
   id: string;
-  name: string;
-  placeName?: string;
-  address?: string;
-  lat?: number;
-  lng?: number;
-  locationLink?: string;
-  menuLink?: string;
-  benefitExplanation: string;
-  tags: string[];
-  distanceKm?: number;
-  estimatedBudget?: string;
-  dishImageUrl?: string;
-  openingHours?: string;
+  printedName: string;
+  suggestedKey: string;
+  date: string;
+  rawValue: string | number;
+  rawUnit?: string;
+  printedRange?: string;
+  labFlag?: string;
+  createdAt: number;
+  status?: 'pending' | 'approved' | 'rejected';
+  [key: string]: any;
 }
 
-export interface RecommendationReport {
-  timestamp: string;
-  dailyNutrientTargets: { [key in keyof NutrientBreakdown]?: string } & { [key: string]: string | undefined };
-  generalNutrientTargets?: any;
-  weeklyNutrientTargets?: any;
-  topWeeklyNutrientTargets?: any;
-  mostImportantNextStep: string;
-  actions: HealthAction[];
-  dailyBenefits: DailyBenefit[];
-  latestInsights: InsightArticle[];
-  healthRiskForecast: HealthRiskForecast;
-  healthBaselineCategories?: any[]; // Stores accepted risk-category analysis
-  topNutrientTargets?: string[];
-  nutrientRankingRationale?: string;
+export interface AnalyteConversionSpec {
+  analyte: string;
+  fromUnit: string;
+  toUnit: string;
+  factor: number;
+  operation: 'multiply' | 'divide';
+  notes?: string;
 }
 
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-  imageUrl?: string;
-  imageUrls?: string[];
-  agentUnavailable?: boolean;
-  isError?: boolean;
-  data?: Record<string, any>;
-  pendingFoodLog?: any;
-  pendingFoodIdeas?: any;
-  pendingBiomarkers?: any;
-  pendingBiomarkerEntries?: any;
-  pendingCustomBiomarkerDefs?: any;
-  proposal?: any;
-  bucketMapping?: any;
-  agentResult?: any;
+// ============================================================================
+// 4. Ingestion, OCR & Trace Infrastructure
+// ============================================================================
 
-
-
-
-
-
-
-
-
-  // parsed data for intermediate approval
-
-
-
-
-  pendingProfile?: Partial<UserProfile>;
-  pendingDate?: string;
-  mode?: 'new_log' | 'discussion' | 'modify' | 'plan' | 'extract_chunk';
-  status?: 'completed' | 'needs_continuation' | 'waiting_for_user';
-  planningDetails?: {
-    estimatedTotalMetrics: number | null;
-    batchesRequired: number | null;
-    maxMetricsPerBatch: number;
-  };
-  lastProcessedItem?: string | null;
-  lastProcessedIndex?: number | null;
-  modificationCommand?: {
-    action: 'update_biomarker' | 'update_profile' | 'remove_biomarker';
-    keyName: string;
-    newValue?: string | number;
-    date?: string;
-  }[];
-
-
-  agentType?: string | null;
-  agentTypeStep?: string;
-  extractedData?: string;
-  isLive?: boolean;
-  ingestTrace?: IngestTrace;
-}
-
-export type BiomarkerClassId =
-  | 'IDENTITY_FALSE_FRIEND'
-  | 'IDENTITY_PARALLEL_KEY'
-  | 'CONFORMANCE_UNIT'
-  | 'CONFORMANCE_SHAPE'
-  | 'PLAUSIBILITY'
-  | 'COMPLETENESS'
-  | 'SILENT_REWRITE'
-  | 'APPLY_MISS'
-  | 'USE_SURFACE_LEAK'
-  | 'WRONG_DOOR'
-  | 'UPSERT_IDENTITY'
-  | 'HALLUCINATED_KEY'
-  | 'CURRENCY';
-
-export type ClassId = BiomarkerClassId;
+export type ClassId = string;
 
 export interface IngestTraceRow {
-  sourceRowIndex?: number;
-  printedName?: string;
-  rawValue?: number | string | null;
-  rawUnit?: string;
-  canonicalKey?: string;
-  bucket?: 'high_confidence' | 'flagged' | 'unmatched' | 'skip';
-  class?: ClassId;
+  sourceRowIndex: number;
+  bucket: 'skip' | 'high_confidence' | 'flagged' | 'unmatched';
   why?: string;
-  date?: string | null;
-  qualitativeValue?: string;
+  printedName?: string;
+  mappedKey?: string;
+  rawValue?: string | number;
+  parsedValue?: number;
+  unit?: string;
+  flag?: string;
   printedRange?: string;
-  comment?: string;
+  [key: string]: any;
+}
+
+export interface IngestTraceHandoff {
+  dualRawInjection?: boolean;
+  sentToParserCount?: number;
+  sentToReviewCount?: number;
+  [key: string]: any;
 }
 
 export interface IngestTrace {
   version: number;
   jobId?: string;
-  sourceKind?: 'table' | 'prose' | 'image' | 'structured' | 'symptom';
-  totalInputRows?: number;
-  highConfidenceCount?: number;
-  flaggedCount?: number;
-  unmatchedCount?: number;
-  skippedCount?: number;
-  rows?: IngestTraceRow[];
-  handoff?: {
-    dualRawInjection?: boolean;
-    sentToParserCount?: number;
-    sentToReviewCount?: number;
-  };
-  abortedTablePath?: boolean;
-  warnings?: string[];
-  createdAt?: string;
+  sourceKind?: string;
+  totalInputRows: number;
+  highConfidenceCount: number;
+  flaggedCount: number;
+  unmatchedCount: number;
+  skippedCount: number;
+  rows: IngestTraceRow[];
+  handoff: IngestTraceHandoff;
+  [key: string]: any;
 }
 
-export interface DbInteraction {
+// ============================================================================
+// 5. Health Actions, Reports & Benefits
+// ============================================================================
+
+export interface HealthAction {
+  id?: string;
+  title?: string;
+  task?: string;
+  explanation?: string;
+  description?: string;
+  category?: string;
+  impact?: string;
+  priority?: 'high' | 'medium' | 'low' | string;
+  completed?: boolean;
+  biomarkers?: string[];
+  dueDate?: string;
+  actionType?: string;
+  type?: string;
+  [key: string]: any;
+}
+
+export interface DailyBenefit {
+  id?: string;
+  title?: string;
+  benefit?: string;
+  explanation?: string;
+  description?: string;
+  category?: string;
+  score?: number;
+  icon?: string;
+  biomarkersAffected?: string[];
+  [key: string]: any;
+}
+
+export interface RecommendationReport {
+  id?: string;
+  date?: string;
+  summary?: string;
+  dailyNutrientTargets?: Record<string, number | string>;
+  topTargetNutrientKeys?: string[];
+  recommendations?: any[];
+  actions?: HealthAction[];
+  benefits?: DailyBenefit[];
+  generatedAt?: string | number;
+  [key: string]: any;
+}
+
+// ============================================================================
+// 6. Chat, Agent & Job Messaging
+// ============================================================================
+
+export interface ChatMessage {
   id: string;
-  timestamp: string;
-  type: 'upload' | 'download' | 'delete' | 'sync';
-  path: string;
-  sizeBytes: number;
-  status: 'pending' | 'completed' | 'failed';
-  errorMessage?: string;
-  startTimeMs: number;
-  docCount?: number;
-  database?: 'Firebase' | 'Supabase';
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp?: string | number;
+  data?: any;
+  isError?: boolean;
+  agentUnavailable?: boolean;
+  agentType?: string;
+  [key: string]: any;
+}
+
+export interface SessionEvent {
+  id?: string;
+  sessionId: string;
+  eventType: string;
+  timestamp: number;
+  payload?: any;
+}
+
+export interface UserActionBreadcrumb {
+  timestamp: number;
+  action: string;
+  metadata?: Record<string, any>;
+}
+
+export interface AgentJobState {
+  id: string;
+  status: 'idle' | 'queued' | 'running' | 'processing' | 'succeeded' | 'failed' | 'cancelled' | 'draft' | 'cancel_requested';
+  progress?: number;
+  step?: string;
+  result?: any;
+  error?: string | null;
+}
+
+// ============================================================================
+// 7. System, Quota & Database Auditing
+// ============================================================================
+
+export interface DbInteraction {
+  id?: string;
+  type: string;
+  timestamp: string | number;
+  collection?: string;
+  docId?: string;
+  success?: boolean;
+  error?: string;
+  details?: any;
+  [key: string]: any;
 }
 
 export interface QuotaData {
-  date: string;
-  reads: number;
-  writes: number;
-  deletes: number;
-  imageCount?: number;
-  imageStorageBytes?: number;
+  callsCount?: number;
+  tokensCount?: number;
+  resetDate?: string;
+  limit?: number;
+  isExceeded?: boolean;
+  tier?: string;
+  [key: string]: any;
 }
 
-declare global {
-  interface Window {
-    sessionSyncTriggered?: boolean;
-  }
+export interface HistoryLogEntry {
+  id: string;
+  timestamp: string | number;
+  type: string;
+  data?: any;
+  userUid?: string;
+  [key: string]: any;
 }

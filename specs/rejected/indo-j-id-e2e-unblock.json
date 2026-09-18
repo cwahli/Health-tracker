@@ -1,6 +1,0 @@
-{
-  "slug": "indo-j-id-e2e-unblock",
-  "hypothesis": "meal composer lives on Home dashboard",
-  "status": "rejected",
-  "reason": "Accessibility and DOM snapshots confirm Home tab only renders navigation, telemetry, and quick actions FAB. The meal composer (#food-chat-input) requires opening quick actions or selecting 'Catat Makanan' / 'Log meal' before mounting."
-}

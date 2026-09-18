@@ -167,7 +167,7 @@ export default function ImageSlider({
     const tried = triedFallbacks.current[original];
     tried.add(current);
 
-    const next = await resolveNextPhotoUrl(original, current, tried);
+    const next = await resolveNextPhotoUrl(current, tried);
     if (next) {
       tried.add(next);
       setSrcMap((prev) => ({ ...prev, [original]: next }));

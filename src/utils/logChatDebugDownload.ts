@@ -168,9 +168,6 @@ export async function downloadJobDebugReport(args: {
         lastUserAction,
         dialogInventory,
         dispatches,
-        backendLogs: initialBackendLogs,
-        priorLogs: initialBackendLogs,
-        previousAttempts: (job as any)?.previousAttempts || (job as any)?.clean_result?.previousAttempts,
       }),
     });
     if (res.ok) {
@@ -280,7 +277,7 @@ export async function downloadJobDebugReport(args: {
       receiptTable,
       comparisonData,
       patientContext: job?.result?.patientContext || msg?.data?.patientContext,
-      error: job?.error?.message || msg?.data?.error || msg?.data?.originalError || (msg?.isError || msg?.agentUnavailable ? msg?.content : undefined),
+      error: (job?.error as any)?.message || (typeof job?.error === 'string' ? job.error : undefined) || msg?.data?.error || msg?.data?.originalError || (msg?.isError || msg?.agentUnavailable ? msg?.content : undefined),
       lastUserAction: lastUserAction || job?.result?.lastUserAction || w.__lastUserAction,
       sessionEvents: getSessionLog(resolvedJobId).length > 0
         ? getSessionLog(resolvedJobId)

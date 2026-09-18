@@ -255,11 +255,6 @@ export const visionScoutResponseSchema = {
                 weightGrams: { type: Type.NUMBER },
                 packGrams: { type: Type.NUMBER, nullable: true },
                 sourceImageIndex: { type: Type.INTEGER, nullable: true },
-                boundingBox2D: {
-                  type: Type.ARRAY,
-                  items: { type: Type.INTEGER },
-                  description: "Per-food crop [ymin, xmin, ymax, xmax] in 0-1000 for top-level image preview after unroll.",
-                },
                 rawNutritionLabel: {
                   type: Type.OBJECT,
                   nullable: true,
@@ -293,7 +288,7 @@ export const visionScoutResponseSchema = {
                   required: ["protein", "saturatedFat", "addedSugar", "totalFibre", "sodium", "carbohydrates"],
                 },
               },
-              required: ["foodName", "weightGrams", "nutrients", "boundingBox2D"],
+              required: ["foodName", "weightGrams", "nutrients"],
             },
           },
           dishNutrients: {

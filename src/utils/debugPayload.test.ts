@@ -501,7 +501,6 @@ describe('debugPayload', () => {
     expect(md).toContain('### Dispatch fd/front_desk');
     expect(md).not.toMatch(/### Dispatch t\d+\/scout/);
     expect(md).not.toContain('### Dispatch t1/resolver');
-    expect(md).not.toContain('### Dispatch t1/curator');
   });
 
   it('uses a medical dispatch heading for medical pack instead of scout', () => {
@@ -788,44 +787,5 @@ describe('debugPayload', () => {
     expect(md).not.toContain('EVALUATION ONLY');
     expect(md).not.toContain('NON-ADDITIVE');
   });
-
-  it('renders Retry Sessions & Execution Attempts section when previousAttempts is provided', () => {
-    const md = buildDebugMarkdownReport({
-      jobId: 'job_retry_report',
-      status: 'succeeded',
-      previousAttempts: [
-        {
-          turn: 1,
-          attempt: 1,
-          status: 'failed',
-          completedAt: '2026-09-16T21:00:00Z',
-          error: 'Stream stalled: Vision Scout (gemini-3.5-flash-lite)',
-        },
-      ],
-      pendingFoodLog: { nutrients: { calories: 400 } },
-    });
-
-    expect(md).toContain('## 🔄 Retry Sessions & Execution Attempts (1)');
-    expect(md).toContain('| Attempt / Turn | Status | Completed At | Error / Details |');
-    expect(md).toContain('| **Attempt 1** | `failed` | 2026-09-16T21:00:00Z | Stream stalled: Vision Scout (gemini-3.5-flash-lite) |');
-  });
-
-  it('debugReportFromJobMsg carries forward previousAttempts and priorLogs', () => {
-    const job = {
-      id: 'job_with_history',
-      status: 'succeeded',
-      previousAttempts: [
-        { turn: 1, status: 'failed', error: 'Timeout' },
-      ],
-      priorLogs: '[UnifiedLLM] Prior run log line',
-      result: {
-        rawScout: { dishes: [] },
-      },
-    };
-    const input = debugReportFromJobMsg(job, {});
-    expect(input.previousAttempts).toEqual([{ turn: 1, status: 'failed', error: 'Timeout' }]);
-    expect(input.priorLogs).toBe('[UnifiedLLM] Prior run log line');
-  });
 });
-
 

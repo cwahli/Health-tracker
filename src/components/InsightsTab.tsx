@@ -58,10 +58,8 @@ interface InsightsTabProps {
   calibratingBatchIdx?: number | null;
   calibratingAgentType?: string | null;
   onCombineBiomarkers?: (
-    targetKey: string,
-    targetDef: any,
-    mergedLogs: any[],
-    sourceKeysToDelete: string[]
+    sourceKey: string,
+    targetKey: string
   ) => void;
   onBatchConsolidate?: (mapping: { [key: string]: string }) => void;
   onAgentAnalysisSaved?: (agentType: string, agentResult: any, existingId?: string) => Promise<string | void>;
@@ -1123,6 +1121,7 @@ export default function InsightsTab({
 
             if (!updatedCustoms[key]) {
               updatedCustoms[key] = {
+                key: key,
                 name: row.display_name || row.name || row.biomarker || key,
                 unit: row.unit || '',
                 normalRange: row.reference_range || row.normalRange || '',

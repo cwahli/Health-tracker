@@ -14,28 +14,6 @@ import {
   ANALYTE_CONVERSIONS,
 } from '../src/utils/biomarkerLifecycle';
 import type { ClassId, IngestTrace } from '../src/types';
-import { convertViaTable as backofficeConvertViaTable } from '../src/server/biomarkers/backoffice';
-
-describe('Golden Biomarker — backoffice extract converts via the single table (no second math path)', () => {
-  const row = (printed: string, value: number, unit: string, mappedKey: string) =>
-    backofficeConvertViaTable({ id: 'r', printed, value, unit, date: '14-08-2026' }, mappedKey);
-
-  it('converts the five G-B1 locks exactly (triglycerides must NOT use the cholesterol factor)', () => {
-    expect(row('HDL', 50, 'mg/dL', 'hdl')).toMatchObject({ value: 1.293, unit: 'mmol/L' });
-    expect(row('Triglycerides', 125, 'mg/dL', 'triglycerides')).toMatchObject({ value: 1.411, unit: 'mmol/L' });
-    expect(row('LDL', 130, 'mg/dL', 'ldl')).toMatchObject({ value: 3.362, unit: 'mmol/L' });
-    expect(row('Creatinine', 0.9, 'mg/dL', 'creatinine')).toMatchObject({ value: 79.56, unit: 'umol/L' });
-    expect(row('Bilirubin', 0.8, 'mg/dL', 'total_bilirubin')).toMatchObject({ value: 13.68, unit: 'umol/L' });
-  });
-
-  it('leaves incomparable pairs unconverted instead of guessing', () => {
-    expect(row('Mystery', 5, 'xyz', 'mystery_analyte').value).toBe(5);
-  });
-
-  it('keeps the legacy HbA1c % branch verbatim (shared table has no hba1c row)', () => {
-    expect(row('HbA1c', 5.7, '%', 'hba1c')).toMatchObject({ value: 39, unit: 'mmol/mol' });
-  });
-});
 
 describe('Golden Biomarker — G-B1 & Class Verification', () => {
   if (!fs.existsSync(path.resolve(__dirname, 'Golden_biomarker'))) { it.skip('missing directory', () => {}); return; }

@@ -1,0 +1,46 @@
+
+Running 1 test using 1 worker
+
+
+======================================================
+[Playwright Benchmark] Starting Case 1: Set 1: Bakery Shelf & SilverQueen Chocolate
+[Playwright Benchmark] User Input: "" (BLANK / PURE PHOTOS ONLY)
+[Playwright Benchmark] Photos: set1_saybread_bakery_shelf.jpg, set1_silverqueen_chocolate_front.jpg, set1_silverqueen_nutrition_label.jpg
+BROWSER_LOG: [vite] connecting...
+BROWSER_LOG: [vite] connecting...
+BROWSER_LOG: [vite] connected.
+BROWSER_LOG: [vite] connected.
+BROWSER_LOG: %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+BROWSER_LOG: %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+  ✘  1 [chromium] › prototype/tests/meal03-compare-benchmark.spec.ts:130:5 › Meal 03 Compare Mode — 6 Cases Benchmark (Blank User Input) › Benchmark Case 1: Set 1: Bakery Shelf & SilverQueen Chocolate [Blank User Input] (28.7s)
+
+
+  1) [chromium] › prototype/tests/meal03-compare-benchmark.spec.ts:130:5 › Meal 03 Compare Mode — 6 Cases Benchmark (Blank User Input) › Benchmark Case 1: Set 1: Bakery Shelf & SilverQueen Chocolate [Blank User Input] 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-testid="compare-evaluation-card"]')
+    Expected: visible
+    Timeout: 15000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" locator('[data-testid="compare-evaluation-card"]') with timeout 15000ms
+      - waiting for locator('[data-testid="compare-evaluation-card"]')
+
+
+      308 |       // Assert UI components render correctly
+      309 |       const evalCard = page.locator('[data-testid="compare-evaluation-card"]');
+    > 310 |       await expect(evalCard).toBeVisible({ timeout: 15000 });
+          |                              ^
+      311 |       await expect(page.locator('[data-testid="compare-title"]')).toBeVisible();
+      312 |       await expect(page.locator('[data-testid="compare-group-card"]').first()).toBeVisible();
+      313 |       const sentenceLoc = page.locator('[data-testid="compare-sentence"]').first();
+        at /app/applet/prototype/tests/meal03-compare-benchmark.spec.ts:310:30
+
+    Error Context: test-results/meal03-compare-benchmark-M-ceb74-Chocolate-Blank-User-Input--chromium/error-context.md
+
+    Error Context: test-results/meal03-compare-benchmark-M-ceb74-Chocolate-Blank-User-Input--chromium/error-context.md
+
+  1 failed
+    [chromium] › prototype/tests/meal03-compare-benchmark.spec.ts:130:5 › Meal 03 Compare Mode — 6 Cases Benchmark (Blank User Input) › Benchmark Case 1: Set 1: Bakery Shelf & SilverQueen Chocolate [Blank User Input] 

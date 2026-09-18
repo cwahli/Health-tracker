@@ -20,10 +20,7 @@ export type SanitizeActionKind =
   | 'drop_value' // impossible / phantom reading
   | 'drop_history_log' // empty after drops or pure duplicate log row
   | 'drop_custom_key' // junk custom biomarker def (metric_N, no real data)
-  | 'merge_food' // food log duplicate collapsed
-  | 'merge_transposed_dates' // transposed day/month duplicate log merged onto valid date
-  | 'backfill_canonical_range' // missing range/unit backfilled from canonical definition
-  | 'archive_qualitative_or_survey'; // qualitative swab or granular survey checklist item archived
+  | 'merge_food'; // food log duplicate collapsed
 
 export type SanitizeProposal = {
   id: string;
@@ -33,11 +30,7 @@ export type SanitizeProposal = {
   /** Biomarker key if applicable */
   key?: string;
   logId?: string;
-  targetLogId?: string;
   date?: string;
-  targetDate?: string;
-  canonicalRange?: string;
-  canonicalUnit?: string;
   oldValue?: string | number;
   newValue?: string | number;
   /** For food merge: ids to remove after keeping keepId */
@@ -54,9 +47,6 @@ export type SanitizePlan = {
     historyDrops: number;
     customKeyDrops: number;
     foodMerges: number;
-    transposedMerges: number;
-    rangeBackfills: number;
-    qualitativeArchives: number;
   };
 };
 
@@ -261,173 +251,12 @@ export function buildDataSanitizePlan(opts: {
     });
   }
 
-  // Transposed date duplicates (DD-MM-YYYY vs MM-DD-YYYY or future dates)
-  const processedTransposedPairs = new Set<string>();
-  for (let i = 0; i < updatedHistory.length; i++) {
-    const logA = updatedHistory[i];
-    if (!logA || logA.sync_state === 'delete') continue;
-    const dateStrA = String(logA.date || '').trim();
-    const matchA = dateStrA.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-    if (!matchA) continue;
-    const dayA = parseInt(matchA[1], 10);
-    const monthA = parseInt(matchA[2], 10);
-    const yearA = matchA[3];
-    if (dayA > 12 || monthA > 12 || dayA === monthA) continue;
-
-    const transposedDate = `${String(monthA).padStart(2, '0')}-${String(dayA).padStart(2, '0')}-${yearA}`;
-
-    for (let j = 0; j < updatedHistory.length; j++) {
-      if (i === j) continue;
-      const logB = updatedHistory[j];
-      if (!logB || logB.sync_state === 'delete') continue;
-      const dateStrB = String(logB.date || '').trim();
-      if (dateStrB !== transposedDate) continue;
-
-      const pairKey = [logA.id, logB.id].sort().join('|');
-      if (processedTransposedPairs.has(pairKey)) continue;
-      processedTransposedPairs.add(pairKey);
-
-      const keysA = Object.keys(logA.biomarkers || {});
-      const keysB = Object.keys(logB.biomarkers || {});
-      const commonKeys = keysA.filter((k) => keysB.includes(k));
-      const hasMatchingVal = commonKeys.some((k) => String(logA.biomarkers[k]) === String(logB.biomarkers[k]));
-
-      if (hasMatchingVal || (commonKeys.length > 0 && (keysA.length >= 2 || keysB.length >= 2))) {
-        const parseD = (dStr: string) => {
-          const parts = dStr.split('-');
-          return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10)).getTime();
-        };
-        const timeA = parseD(dateStrA);
-        const timeB = parseD(dateStrB);
-        const nowThreshold = Date.now() + 86400000;
-
-        const hasCommentsA = (logA.tests || []).some((t: any) => t.doctorComment && !t.doctorComment.includes('Recovered') && !t.doctorComment.includes('Google Fit') && !t.doctorComment.includes('Clinical Data Parser'));
-        const hasCommentsB = (logB.tests || []).some((t: any) => t.doctorComment && !t.doctorComment.includes('Recovered') && !t.doctorComment.includes('Google Fit') && !t.doctorComment.includes('Clinical Data Parser'));
-
-        const getMonthDensity = (dStr: string) => {
-          const parts = dStr.split('-');
-          const m = parts[1];
-          const y = parts[2];
-          return updatedHistory.filter((h: any) => {
-            if (!h || h.id === logA.id || h.id === logB.id || h.sync_state === 'delete') return false;
-            const dp = String(h.date || '').split('-');
-            return dp[2] === y && dp[1] === m;
-          }).length;
-        };
-        const densityA = getMonthDensity(dateStrA);
-        const densityB = getMonthDensity(dateStrB);
-
-        let sourceLog = logA;
-        let targetLog = logB;
-        if (timeA > nowThreshold && timeB <= nowThreshold) {
-          sourceLog = logA;
-          targetLog = logB;
-        } else if (timeB > nowThreshold && timeA <= nowThreshold) {
-          sourceLog = logB;
-          targetLog = logA;
-        } else if (hasCommentsA && !hasCommentsB) {
-          sourceLog = logB;
-          targetLog = logA;
-        } else if (hasCommentsB && !hasCommentsA) {
-          sourceLog = logA;
-          targetLog = logB;
-        } else if (densityA - densityB >= 2) {
-          sourceLog = logB;
-          targetLog = logA;
-        } else if (densityB - densityA >= 2) {
-          sourceLog = logA;
-          targetLog = logB;
-        } else if (keysA.length >= keysB.length) {
-          sourceLog = logB;
-          targetLog = logA;
-        } else {
-          sourceLog = logA;
-          targetLog = logB;
-        }
-
-        proposals.push({
-          id: nextId(),
-          kind: 'merge_transposed_dates',
-          title: `Merge transposed date log (${sourceLog.date} -> ${targetLog.date})`,
-          detail: `Detected day/month parsing flip on ${sourceLog.date}. Merge test records onto ${targetLog.date}`,
-          logId: sourceLog.id,
-          targetLogId: targetLog.id,
-          date: sourceLog.date,
-          targetDate: targetLog.date,
-          selected: true,
-        });
-      }
-    }
-  }
-
-  // Backfill canonical ranges for custom biomarkers marked 'Unknown' or missing units
-  Object.entries(customs).forEach(([key, def]: [string, any]) => {
-    const canonicalKey = getMappedBiomarkerKey(key);
-    const canon = biomarkerDefinitions.find((d) => d.key === canonicalKey || d.key === key || d.aliases?.includes(key));
-    if (!canon) return;
-
-    const currentRange = def?.normalRange;
-    const isUnknownRange = !currentRange || typeof currentRange !== 'string' || currentRange.trim() === '' || currentRange.toLowerCase() === 'unknown' || currentRange.toLowerCase() === 'unset' || currentRange === '-';
-    const isMissingUnit = !def?.unit || String(def.unit).trim() === '';
-
-    if (isUnknownRange || (isMissingUnit && canon.unit)) {
-      proposals.push({
-        id: nextId(),
-        kind: 'backfill_canonical_range',
-        title: `Backfill standard reference range for ${canon.name}`,
-        detail: `Set standard range to "${canon.normalRange}" and unit to "${canon.unit}" (${canon.standardMedicalGrouping || canon.category})`,
-        key,
-        canonicalRange: canon.normalRange,
-        canonicalUnit: canon.unit,
-        selected: true,
-      });
-    }
-  });
-
-  // Archive qualitative non-biomarker swab/PCR tests or granular survey question items
-  const allCandidateKeys = new Set<string>();
-  Object.keys(customs).forEach((k) => allCandidateKeys.add(k));
-  if (opts.biomarkers) Object.keys(opts.biomarkers).forEach((k) => allCandidateKeys.add(k));
-  history.forEach((h) => {
-    if (h?.biomarkers) Object.keys(h.biomarkers).forEach((k) => allCandidateKeys.add(k));
-  });
-
-  allCandidateKeys.forEach((key) => {
-    const def = customs[key] || biomarkerDefinitions.find((d) => d.key === key);
-    if (def?.isNotUsed === true) return;
-    if (profile?.notUsedBiomarkers?.[key] || profile?.notUsedInMedicalHistory?.[key]) return;
-    const nameLower = String(def?.name || key).toLowerCase();
-    const isQualitativeSwab = /sars_cov|covid|chlamydia|gonorrho|strep|influenza|dna_detection|nucl_acid_detn/i.test(key) || /sars[-_ ]?cov|covid|chlamydia|gonorrho|strep/i.test(nameLower);
-    const isGranularSurvey = /^audit_?(guilt|remorse|memory|others_concerned|typical_consumption|drinking_frequency|binge|score_frequency|c_total|total)/i.test(key) || key === 'alcohol_consumption';
-
-    const historyVals = history.map((h) => h?.biomarkers?.[key]).filter((v) => v !== undefined && v !== null && v !== '');
-    const currentVal = opts.biomarkers?.[key];
-    const allVals = currentVal !== undefined && currentVal !== null && currentVal !== '' ? [...historyVals, currentVal] : historyVals;
-    const isAllStringQualitative = allVals.length > 0 && allVals.every((v) => /^(negative|positive|reactive|non-reactive|detected|not detected)$/i.test(String(v).trim()));
-
-    if (isQualitativeSwab || isGranularSurvey || isAllStringQualitative) {
-      proposals.push({
-        id: nextId(),
-        kind: 'archive_qualitative_or_survey',
-        title: `Archive non-continuous test / survey item “${def?.name || key}”`,
-        detail: isGranularSurvey
-          ? `Mark granular questionnaire sub-item as Not Used to keep dashboard focused on composite score`
-          : `Mark qualitative screening swab as Not Used to keep continuous clinical charts focused on quantitative biomarkers`,
-        key,
-        selected: true,
-      });
-    }
-  });
-
   const summary = {
     valueFixes: proposals.filter((p) => p.kind === 'fix_value').length,
     valueDrops: proposals.filter((p) => p.kind === 'drop_value').length,
     historyDrops: proposals.filter((p) => p.kind === 'drop_history_log').length,
     customKeyDrops: proposals.filter((p) => p.kind === 'drop_custom_key').length,
     foodMerges: proposals.filter((p) => p.kind === 'merge_food').length,
-    transposedMerges: proposals.filter((p) => p.kind === 'merge_transposed_dates').length,
-    rangeBackfills: proposals.filter((p) => p.kind === 'backfill_canonical_range').length,
-    qualitativeArchives: proposals.filter((p) => p.kind === 'archive_qualitative_or_survey').length,
   };
 
   // silence unused when fixedCount 0 but proposals from food only
@@ -470,8 +299,6 @@ export function applyDataSanitizePlan(
   const deletedLogIds: Record<string, number> = {
     ...(opts.profile?.deletedBiomarkerLogIds || {}),
   };
-  const notUsedBiomarkers = { ...(opts.profile?.notUsedBiomarkers || {}) };
-  const notUsedInMedicalHistory = { ...(opts.profile?.notUsedInMedicalHistory || {}) };
   let applied = 0;
 
   // First apply full normalize when any fix/drop_value selected
@@ -486,54 +313,6 @@ export function applyDataSanitizePlan(
       const now = Date.now();
       deletedLogIds[p.logId] = now;
       history = history.map((h) => h.id === p.logId ? { ...h, sync_state: 'delete' as const, updated_at: now } : h);
-      applied++;
-    }
-    if (p.kind === 'merge_transposed_dates' && p.logId) {
-      const now = Date.now();
-      const sourceLog = history.find((h) => h.id === p.logId);
-      if (p.targetLogId) {
-        const targetLog = history.find((h) => h.id === p.targetLogId);
-        if (targetLog && sourceLog) {
-          targetLog.biomarkers = {
-            ...(sourceLog.biomarkers || {}),
-            ...(targetLog.biomarkers || {}),
-          };
-          if (sourceLog.tests && Array.isArray(sourceLog.tests)) {
-            const existingKeys = new Set((targetLog.tests || []).map((t: any) => t.key));
-            const newTests = sourceLog.tests.filter((t: any) => !existingKeys.has(t.key));
-            targetLog.tests = [...(targetLog.tests || []), ...newTests];
-          }
-          if (sourceLog.note && !targetLog.note) {
-            targetLog.note = sourceLog.note;
-          }
-          targetLog.updated_at = now;
-        }
-      }
-      deletedLogIds[p.logId] = now;
-      history = history.map((h) => h.id === p.logId ? { ...h, sync_state: 'delete' as const, updated_at: now } : h);
-      applied++;
-    }
-    if (p.kind === 'backfill_canonical_range' && p.key) {
-      const existing = customs[p.key] || {};
-      const canon = biomarkerDefinitions.find((d) => d.key === p.key || d.aliases?.includes(p.key));
-      customs[p.key] = {
-        ...existing,
-        name: existing.name || canon?.name,
-        normalRange: p.canonicalRange || existing.normalRange,
-        unit: p.canonicalUnit || existing.unit || canon?.unit || '',
-        standardMedicalGrouping: (canon?.standardMedicalGrouping && (!existing.standardMedicalGrouping || existing.standardMedicalGrouping === 'Other')) ? canon.standardMedicalGrouping : (existing.standardMedicalGrouping || canon?.standardMedicalGrouping),
-        riskCategories: (canon?.riskCategories && (!existing.riskCategories || existing.riskCategories.length === 0 || (existing.riskCategories.length === 1 && existing.riskCategories[0] === 'Screenings & Wellness'))) ? canon.riskCategories : (existing.riskCategories || canon?.riskCategories),
-        potentialMedicalConditions: existing.potentialMedicalConditions || canon?.potentialMedicalConditions,
-        description: (canon?.descriptions?.en && (!existing.description || existing.description.trim() === '')) ? canon.descriptions.en : (existing.description || canon?.descriptions?.en),
-      };
-      applied++;
-    }
-    if (p.kind === 'archive_qualitative_or_survey' && p.key) {
-      if (customs[p.key]) {
-        customs[p.key] = { ...customs[p.key], isNotUsed: true };
-      }
-      notUsedBiomarkers[p.key] = { flaggedAt: Date.now() };
-      notUsedInMedicalHistory[p.key] = true;
       applied++;
     }
     if (p.kind === 'drop_custom_key' && p.key) {
@@ -595,8 +374,6 @@ export function applyDataSanitizePlan(
       customBiomarkers: cleanedCatalog.profile.customBiomarkers,
       deletedCustomBiomarkerKeys: cleanedCatalog.profile.deletedCustomBiomarkerKeys,
       deletedBiomarkerLogIds: deletedLogIds,
-      notUsedBiomarkers,
-      notUsedInMedicalHistory,
       ...(cleanedCatalog.profile.customRanges ? { customRanges: cleanedCatalog.profile.customRanges } : {}),
     },
     applied,

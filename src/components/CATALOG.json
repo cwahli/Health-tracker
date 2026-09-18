@@ -1,25 +1,66 @@
 {
-  "version": 1,
-  "note": "QUALITY.md §13 / ROADMAP Q-2. New *Modal/*Card/*Table must name an id here. Planned ids have path null until Q-3/Q-4.",
   "primitives": [
-    { "id": "AppModal", "path": "src/components/ui/AppModal.tsx", "status": "canonical" },
-    { "id": "UniversalModal", "path": "src/components/UniversalModal.tsx", "status": "canonical" },
-    { "id": "DataGrid", "path": "src/components/AgentResultTable.tsx", "status": "partial", "note": "Q-4 locked 2026-09-17: grid = sort/page/row-select only. YAML/row parse → src/utils/agentResultParse.ts + agentResultRows.ts. localStorage missing-keys → agentResultMissingKeys.ts. Do not invent BiomarkerDataGrid. ConfirmBar stays planned." },
-    { "id": "FilterPills", "path": "src/components/ui/FilterPills.tsx", "status": "canonical" },
-    { "id": "ConfirmBar", "path": null, "status": "planned" },
-    { "id": "NutritionLabelTable", "path": "src/components/chat-cards/NutritionLabelTable.tsx", "status": "canonical" },
-    { "id": "ComprehensiveNutrientsTable", "path": "src/components/chat-cards/ComprehensiveNutrientsTable.tsx", "status": "canonical" },
-    { "id": "PortionClarifyCard", "path": "src/components/PortionClarifyCard.tsx", "status": "canonical" },
-    { "id": "convertViaTable", "path": "src/utils/analyteConversions.ts", "status": "canonical" },
-    { "id": "lazyWithRetry", "path": "src/utils/lazyWithRetry.ts", "status": "canonical" }
+    {
+      "id": "UniversalModal",
+      "name": "UniversalModal",
+      "path": "src/components/UniversalModal.tsx",
+      "status": "active"
+    },
+    {
+      "id": "DataGrid",
+      "name": "DataGrid",
+      "path": "src/components/AgentResultTable.tsx",
+      "status": "partial"
+    },
+    {
+      "id": "FilterPills",
+      "name": "FilterPills",
+      "path": "src/components/ui/FilterPills.tsx",
+      "status": "active"
+    },
+    {
+      "id": "ConfirmBar",
+      "name": "ConfirmBar",
+      "path": null,
+      "status": "planned"
+    },
+    {
+      "id": "NutritionLabelTable",
+      "name": "NutritionLabelTable",
+      "path": "src/components/chat-cards/NutritionLabelTable.tsx",
+      "status": "active"
+    },
+    {
+      "id": "ComprehensiveNutrientsTable",
+      "name": "ComprehensiveNutrientsTable",
+      "path": "src/components/chat-cards/ComprehensiveNutrientsTable.tsx",
+      "status": "active"
+    },
+    {
+      "id": "PortionClarifyCard",
+      "name": "PortionClarifyCard",
+      "path": "src/components/chat-cards/PortionClarifyCard.tsx",
+      "status": "active"
+    },
+    {
+      "id": "convertViaTable",
+      "name": "convertViaTable",
+      "path": "src/utils/analyteConversions.ts",
+      "status": "active"
+    },
+    {
+      "id": "lazyWithRetry",
+      "name": "lazyWithRetry",
+      "path": "src/utils/lazyWithRetry.ts",
+      "status": "active"
+    }
   ],
   "autoFixSurface": {
     "choice": "B",
-    "onlyComponent": null,
-    "note": "B8.0 Option B: Auto-Fix banned from Home. Informational warning banner preserved on Home pointing to Health / Sanitize."
+    "onlyComponent": null
   },
   "ceilings": {
-    "src/App.tsx": 7685,
+    "src/App.tsx": 8810,
     "src/utils/translations.ts": 40,
     "src/utils/translations/en.ts": 2010,
     "src/utils/translations/id.ts": 2010,

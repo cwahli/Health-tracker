@@ -1,85 +1,61 @@
 import React from 'react';
-import { t } from '../../utils/i18n';
 
 export interface FilterPillItem<T extends string = string> {
   id: T;
-  label: React.ReactNode;
+  label: string;
   count?: number;
-  badge?: React.ReactNode;
-  icon?: React.ReactNode;
   activeColorClass?: string;
-  testId?: string;
 }
 
 export interface FilterPillsProps<T extends string = string> {
   items: FilterPillItem<T>[];
   activeId: T;
   onChange: (id: T) => void;
-  className?: string;
-  containerClassName?: string;
-  pillClassName?: string;
-  size?: 'xs' | 'sm' | 'md';
   ariaLabel?: string;
-  language?: string;
+  className?: string;
 }
 
 export function FilterPills<T extends string = string>({
   items,
   activeId,
   onChange,
+  ariaLabel = 'Filter options',
   className = '',
-  containerClassName = '',
-  pillClassName = '',
-  size = 'sm',
-  ariaLabel,
-  language,
 }: FilterPillsProps<T>) {
-  const resolvedAriaLabel = ariaLabel || t(language, 'filterOptions');
-  const sizeClasses = {
-    xs: 'px-2.5 py-1 text-[11px]',
-    sm: 'px-3 py-1.5 text-xs',
-    md: 'px-4 py-2 text-sm',
-  }[size];
-
   return (
     <div
-      role="tablist"
-      aria-label={resolvedAriaLabel}
-      className={`flex items-center gap-1 p-1 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shadow-xs ${containerClassName}`}
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className={`inline-flex items-center gap-1.5 p-1 rounded-lg bg-slate-200/60 dark:bg-slate-800/80 ${className}`}
     >
       {items.map((item) => {
         const isActive = item.id === activeId;
-        const defaultActiveColor = 'bg-amber-500 text-white shadow-xs';
-        const activeColor = item.activeColorClass || defaultActiveColor;
-        const inactiveColor =
-          'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60';
+        const activeClass = item.activeColorClass || 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-semibold';
+        const inactiveClass = 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/40 dark:hover:bg-slate-700/50';
 
         return (
           <button
             key={item.id}
             type="button"
-            role="tab"
-            aria-selected={isActive}
-            data-testid={item.testId || `filter-pill-${item.id}`}
+            role="radio"
+            aria-checked={isActive}
             onClick={() => onChange(item.id)}
-            className={`inline-flex items-center gap-1.5 rounded-lg font-bold transition-all cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-amber-500/40 ${sizeClasses} ${
-              isActive ? activeColor : inactiveColor
-            } ${pillClassName} ${className}`}
+            className={`px-2.5 py-1 text-xs rounded-md transition-all flex items-center gap-1.5 ${
+              isActive ? activeClass : inactiveClass
+            }`}
           >
-            {item.icon && <span className="shrink-0">{item.icon}</span>}
             <span>{item.label}</span>
             {item.count !== undefined && (
               <span
-                className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
                   isActive
                     ? 'bg-black/20 text-white'
-                    : 'bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                    : 'bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                 }`}
               >
                 {item.count}
               </span>
             )}
-            {item.badge}
           </button>
         );
       })}

@@ -1,41 +1,18 @@
-export function getProgressPercent(stepKey: string): number {
-  const weights: Record<string, number> = {
-    queued: 0,
-    starting: 5,
-    upload_prepare: 10,
-    scout: 35,
-    db_search: 50,
-    resolve: 60,
-    dietitian: 80,
-    finalize: 95,
-  };
-
-  if (weights[stepKey] !== undefined) {
-    return weights[stepKey];
-  }
-
-  const order = ['queued', 'starting', 'upload_prepare', 'scout', 'db_search', 'resolve', 'dietitian', 'finalize'];
-  let total = 0;
-  for (const key of order) {
-    total += weights[key] || 0;
-    if (key === stepKey) {
-      break;
-    }
-  }
-  return total || 10;
+export function getProgressPercent(job: any): number {
+  if (!job) return 0;
+  if (typeof job.progress_percent === 'number') return job.progress_percent;
+  if (job.status === 'succeeded' || job.status === 'done') return 100;
+  if (job.status === 'running') return 50;
+  if (job.status === 'queued') return 10;
+  return 0;
 }
 
-export function getStepCeiling(stepKey: string): number {
-  const stepCeilings: Record<string, number> = {
-    queued: 0,
-    starting: 15,
-    upload_prepare: 25,
-    scout: 50,
-    db_search: 65,
-    resolve: 75,
-    dietitian: 92,
-    finalize: 98,
-  };
-  return stepCeilings[stepKey] || 90;
+export function getStepCeiling(stage: string): number {
+  switch (stage) {
+    case 'upload': return 20;
+    case 'scout': return 50;
+    case 'dietitian': return 80;
+    case 'finalize': return 95;
+    default: return 100;
+  }
 }
-

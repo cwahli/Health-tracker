@@ -1,71 +1,408 @@
 import { formatMessageContent } from '../utils/formatUtils';
+import { ErrorBoundary } from './ErrorBoundary';
 import { agentCardRegistry } from './chat-cards';
 import { decideFrontDeskHandoff } from '../utils/handoffGuard';
-import { mapFrontDeskSpecialist } from '../utils/frontDeskRouting';
+import { mapFrontDeskSpecialist, specialistDisplayName } from '../utils/frontDeskRouting';
 import { dedupeConsecutiveAssistantMessages, dropAnsweredClarifyMessages, dropStaleTimeoutMessages, firstPortionClarifyMessageIndex, hasPortionClarifyPayload, retirePortionClarifyPayloads, shouldInjectPortionClarifyMessage } from '../utils/chatMessageDedupe';
 import { AgentThoughtBox } from './chat-cards/FoodCard';
 import { trackApiCall, setActiveQueryId, generateQueryId } from '../utils/apiTracker';
-import { saveAgentRequestLog } from '../utils/agentLogsTracker';
+import { saveAgentRequestLog, getAgentRequestLogs } from '../utils/agentLogsTracker';
 import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { ChatMessage, FoodLog, UserProfile, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
 import { displayStatusLabel, dictionaryFor } from '../utils/i18n';
 import { isCompareOnlyResult } from '../utils/compareMealLogGuard';
-import { X, Send, Image, Camera, FolderOpen, MessageSquare, Sparkles, Plus, Terminal, ChevronDown, ChevronUp, Loader, Trash2, Check, Table, RotateCcw, AlertTriangle, Flag, BrainCircuit, Download, Utensils } from 'lucide-react';
+import { X, Send, Image, Camera, FolderOpen, MessageSquare, Sparkles, Plus, Terminal, ChevronDown, ChevronUp, Loader, MapPin, Trash2, Check, Table, RotateCcw, RefreshCw, AlertTriangle, ShieldAlert, Edit2, Maximize2, Minimize2, Flag, BrainCircuit, Download } from 'lucide-react';
 import { UniversalModal } from './UniversalModal';
-import { biomarkerDefinitions, getBiomarkerStatus, getBiomarkerStatusLabel, isBiomarkerValueImprobable, getMergedBiomarkerDef, detectFlaggedTelemetryErrors, buildReviewBiomarkerContext, buildBiomarkerReviewPrefill, getMappedBiomarkerKey, isBiomarkerApproved, isCatalogBuiltIn, shouldStampExtractedDefPending } from '../utils/biomarkers';
+import { biomarkerDefinitions, getBiomarkerStatus, isAsianEthnicity, getBiomarkerStatusLabel, isBiomarkerValueImprobable, getMergedBiomarkerDef, detectFlaggedTelemetryErrors, buildReviewBiomarkerContext, buildBiomarkerReviewPrefill, getMappedBiomarkerKey, isBiomarkerApproved, isCatalogBuiltIn, shouldStampExtractedDefPending } from '../utils/biomarkers';
 import { BatchNavigator } from './BatchNavigator';
 import LLMSelector from './LLMSelector';
 import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
-import { computeRemainingAllowance } from '../utils/compositeFoodCalculation';
-import { isMealFollowUpEdit, mostRecentActiveMeal } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
-import PreviousMealThumbnail from './PreviousMealThumbnail';
 import { blobToDurableDataUrl } from '../utils/foodImageSources';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 const FullScreenLogViewer = lazyWithRetry(() => import('./FullScreenLogViewer'));
 const frontDeskAbortControllers = new Map<string, AbortController>();
 import FullScreenInstructionViewer from './FullScreenInstructionViewer';
 import { NutritionLabelTable } from './chat-cards/NutritionLabelTable';
+import { InteractivePlacesMap } from './InteractivePlacesMap';
 import { PortionClarifyCard } from './PortionClarifyCard';
 import { applyPortionChoicesToLog } from '../utils/portionUtils';
 import exifr from 'exifr';
-import { auth } from '../firebase';
-import { getAllAgentCalibrations } from '../utils/agentCalibration';
-import { query, where, limit } from 'firebase/firestore';
-import { checkQuotaFlag } from '../utils/firestoreUtils';
+import { auth, db } from '../firebase';
+import { getAgentCalibration, getAllAgentCalibrations } from '../utils/agentCalibration';
+import { collection, query, where, getDocs, setDoc, doc, deleteDoc, getDoc, limit, orderBy } from 'firebase/firestore';
+import { sanitizeForFirestore, checkQuotaFlag } from '../utils/firestoreUtils';
 import { get as idbGet } from 'idb-keyval';
 import { pruneLocalStorageToFreeSpace, safeIdbSet } from '../utils/storageUtils';
 import { resolveFoodImage } from '../utils/imageResolver';
-import { updateOrAddBracketItem, removeBracketItem, parseBracketItems, extractAutocompleteQuery } from '../utils/bracketPortionParser';
-import { calculateCompositeMeal } from '../utils/compositeFoodCalculation';
 import { JobStore } from '../jobs/JobStore';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
+import { toPendingFoodLog } from '../mealBuild/adapters';
 import { executeFoodAgent } from '../jobs/FoodAgentExecutor';
 import { downloadJobDebugReport } from '../utils/logChatDebugDownload';
 import { shouldRunHandoffAutoSend } from '../utils/chatAutoSend';
 import { getSessionLog } from '../jobs/sessionLog';
-import {
-  resolvePendingFoodLog,
-  formatNutrientValue,
-  safeJSONStringify,
-} from '../utils/logChatOffline';
-export { safeJSONStringify };
+function isValidFoodLog(log: any): boolean {
+  if (!log || typeof log !== 'object' || Array.isArray(log)) return false;
+  return !!(
+    log.name ||
+    log.title ||
+    (Array.isArray(log.itemsBreakdown) && log.itemsBreakdown.length > 0) ||
+    (Array.isArray(log.items) && log.items.length > 0) ||
+    (Array.isArray(log.scoutItems) && log.scoutItems.length > 0) ||
+    (log.nutrients && typeof log.nutrients === 'object' && Object.keys(log.nutrients).length > 0)
+  );
+}
+function resolvePendingFoodLog(job: any): any {
+  if (!job) return null;
+  const rawResult = job.result?.clean_result || job.result?.raw?.data || job.result?.data || job.result || (job as any).clean_result || {};
+  // Mode D boundary (sibling of extractPendingFoodLogFromCleanResult): a
+  // compare result is never a meal. Without this, compared products were
+  // fabricated into a pseudo food log (mega &-title, doubled rows).
+  if (isCompareOnlyResult(rawResult)) return null;
+  const candidates = [
+    job.result?.pendingFoodLog,
+    job.result?.clean_result?.pendingFoodLog,
+    rawResult.pendingFoodLog,
+    job.result?.foodData,
+    rawResult.foodData,
+    job.result?.data,
+    rawResult.data,
+    job.result?.mealBuild ? toPendingFoodLog(job.result.mealBuild) : null,
+    job.mealBuild ? toPendingFoodLog(job.mealBuild) : null,
+    rawResult.mealBuild ? toPendingFoodLog(rawResult.mealBuild) : null,
+    job.messages?.slice().reverse().find((m: any) => m.pendingFoodLog || m.data?.pendingFoodLog)?.pendingFoodLog,
+    job.messages?.slice().reverse().find((m: any) => m.data?.pendingFoodLog)?.data?.pendingFoodLog
+  ];
+  for (const cand of candidates) {
+    if (isValidFoodLog(cand)) return cand;
+  }
+  const items = rawResult.itemsBreakdown || rawResult.items || rawResult.scoutItems || job.result?.scoutItems || [];
+  if (items.length > 0 || rawResult.name || rawResult.title || job.result?.name) {
+    return {
+      itemsBreakdown: items,
+      items: items,
+      nutrients: rawResult.nutrients || job.result?.nutrients || {},
+      name: rawResult.name || rawResult.title || rawResult.content?.name || job.result?.name || 'Meal',
+      title: rawResult.name || rawResult.title || rawResult.content?.name || job.result?.name || 'Meal',
+      benefits: rawResult.benefits || rawResult.content?.benefits || [],
+      risks: rawResult.risks || rawResult.content?.risks || [],
+      recommendation: rawResult.recommendation || rawResult.content?.recommendation || '',
+      verdict: rawResult.verdict || rawResult.content?.verdict || '',
+      message: rawResult.message || rawResult.text || job.result?.message || job.result?.text || '',
+      imageUrls: rawResult.imageUrls || job.result?.imageUrls || [],
+      photoUrl: rawResult.photoUrl || job.result?.photoUrl || job.photoUrl
+    };
+  }
+  return null;
+}
 import { humanizeJobFailure } from '../utils/jobFailure';
 import { ImageStore } from '../jobs/ImageStore';
 import { reserveCredits } from '../jobs/credits';
 import { JobQueueRunner } from '../jobs/JobQueueRunner';
 import { recordBreadcrumb, setActiveJobScope } from '../utils/breadcrumbTracker';
 import { consumeGoldenAnalyzeToken, GOLDEN_NEW_ANALYZE_EVENT } from '../utils/goldenIngestClient';
-import { getTopTargetNutrientKeys } from '../utils/nutrients';
+import { PRIMARY_NUTRIENTS, formatNutrientDisplayValue, getTopTargetNutrientKeys } from '../utils/nutrients';
 import { AgentType, AGENT_REGISTRY, getAgentRolloutStatus } from '../utils/agentConfig';
 import { getAvailableCredits, deductAgentCredits, DEFAULT_AGENT_COSTS } from '../utils/creditManager';
 import { getAdminSettings } from '../utils/userManagement';
+const isValidValue = (v: unknown): boolean =>
+  v !== null && v !== undefined && v !== '' && v !== 'N/A' && v !== 'null';
+const formatNutrientValue = (value: unknown, unit: string): string => {
+  if (!isValidValue(value)) return '—';
+  return formatNutrientDisplayValue(value, unit);
+};
+interface BiomarkerEntry {
+  biomarker: string;
+  date: string;
+  value: number;
+  unit: string;
+}
+export function safeJSONStringify(obj: any): string {
+  const seen = new WeakSet();
+  return JSON.stringify(obj, (key, value) => {
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) {
+        return undefined;
+      }
+      seen.add(value);
+    }
+    return value;
+  });
+}
 type FoodAgentExecutorInput = any;
 async function* executeMedicalAgent(input: any): AsyncGenerator<any, void, unknown> {}
+function parseJsonOffline(jsonText: string): BiomarkerEntry[] {
+  const entries: BiomarkerEntry[] = [];
+  if (!jsonText) return entries;
+  try {
+    const cleanedText = jsonText.replace(/```(?:json)?/gi, '').trim();
+    const parsed = JSON.parse(cleanedText);
+    const rawList = Array.isArray(parsed) 
+      ? parsed 
+      : (parsed?.biomarkers || parsed?.entries || parsed?.data || []);
+    if (Array.isArray(rawList)) {
+      rawList.forEach((item: any) => {
+        if (item && typeof item === 'object') {
+          const bName = item.biomarker || item.name || item.key;
+          const bDate = item.date || item.timestamp;
+          const bVal = item.value !== undefined ? item.value : item.val;
+          if (bName && bDate) {
+            entries.push({
+              biomarker: String(bName),
+              date: String(bDate),
+              value: Number(bVal) || 0,
+              unit: item.unit ? String(item.unit) : ''
+            });
+          }
+        }
+      });
+    }
+  } catch (e) {
+    console.warn("parseJsonOffline: standard parser failed, falling back to regex", e);
+  }
+  if (entries.length > 0) {
+    return entries;
+  }
+  const lines = jsonText.split(/\r?\n|\\n/);
+  let currentEntry: Partial<BiomarkerEntry> = {};
+  for (let line of lines) {
+    line = line.trim();
+    if (line.startsWith('-') || line.startsWith('biomarker:')) {
+      if (currentEntry.biomarker) {
+        entries.push(currentEntry as BiomarkerEntry);
+      }
+      currentEntry = {};
+    }
+    const biomarkerMatch = line.match(/(?:-\s+)?biomarker:\s*(.*)/i);
+    if (biomarkerMatch) {
+      currentEntry.biomarker = biomarkerMatch[1].replace(/['"]/g, '').trim();
+      continue;
+    }
+    const dateMatch = line.match(/date:\s*([\d-]+)/i);
+    if (dateMatch) {
+      currentEntry.date = dateMatch[1].trim();
+      continue;
+    }
+    const valueMatch = line.match(/value:\s*([\d.]+)/i);
+    if (valueMatch) {
+      currentEntry.value = parseFloat(valueMatch[1]);
+      continue;
+    }
+    const unitMatch = line.match(/unit:\s*(.*)/i);
+    if (unitMatch) {
+      currentEntry.unit = unitMatch[1].replace(/['"]/g, '').trim();
+      continue;
+    }
+  }
+  if (currentEntry.biomarker) {
+    entries.push(currentEntry as BiomarkerEntry);
+  }
+  return entries;
+}
+function getOfflineCategorization(name: string) {
+  const lowerName = name.toLowerCase();
+  if (lowerName.includes('alt') || lowerName.includes('ast') || lowerName.includes('alp') || lowerName.includes('bilirubin') || lowerName.includes('liver') || lowerName.includes('ggt')) {
+    return {
+      riskCategories: ['Liver & hepatitis stress'],
+      standardMedicalGrouping: 'Hepatic',
+      potentialMedicalConditions: ['Fatty Liver', 'Hepatitis Stress']
+    };
+  }
+  if (lowerName.includes('creatinine') || lowerName.includes('egfr') || lowerName.includes('urea') || lowerName.includes('kidney') || lowerName.includes('bun') || lowerName.includes('uric acid')) {
+    return {
+      riskCategories: ['Kidney & hydration'],
+      standardMedicalGrouping: 'Renal',
+      potentialMedicalConditions: ['Chronic Kidney Disease', 'Hydration Issues']
+    };
+  }
+  if (lowerName.includes('glucose') || lowerName.includes('hba1c') || lowerName.includes('insulin') || lowerName.includes('cholesterol') || lowerName.includes('ldl') || lowerName.includes('hdl') || lowerName.includes('triglycerides') || lowerName.includes('tg') || lowerName.includes('sugar') || lowerName.includes('metabolic')) {
+    return {
+      riskCategories: ['Metabolic & glycemic', 'Cardiovascular'],
+      standardMedicalGrouping: 'Metabolic',
+      potentialMedicalConditions: ['Diabetes Risk', 'Insulin Resistance', 'Cardiovascular Risk']
+    };
+  }
+  if (lowerName.includes('hemoglobin') || lowerName.includes('hgb') || lowerName.includes('wbc') || lowerName.includes('rbc') || lowerName.includes('platelet') || lowerName.includes('plt') || lowerName.includes('hematocrit') || lowerName.includes('mcv') || lowerName.includes('mch') || lowerName.includes('anemia') || lowerName.includes('iron') || lowerName.includes('ferritin')) {
+    return {
+      riskCategories: ['Hematology'],
+      standardMedicalGrouping: 'Hematology',
+      potentialMedicalConditions: ['Anemia', 'Hematology Disbalance']
+    };
+  }
+  if (lowerName.includes('weight') || lowerName.includes('height') || lowerName.includes('bmi') || lowerName.includes('bp') || lowerName.includes('blood pressure') || lowerName.includes('heart rate') || lowerName.includes('pulse')) {
+    return {
+      riskCategories: ['Cardiovascular'],
+      standardMedicalGrouping: 'Biometrics',
+      potentialMedicalConditions: ['Hypertension', 'Obesity']
+    };
+  }
+  return {
+    riskCategories: ['General Health'],
+    standardMedicalGrouping: 'Other',
+    potentialMedicalConditions: ['General Imbalance']
+  };
+}
+function performOfflineDataAssembly(jsonText: string, bucketMapping: any) {
+  const entries = parseJsonOffline(jsonText);
+  const bucketsMap: Record<string, any> = {
+    'Metabolic': [],
+    'Hepatic': [],
+    'Renal': [],
+    'Hematology': [],
+    'Biometrics': [],
+    'Other': []
+  };
+  const biomarkerHistory: Record<string, { value: number; date: string; unit: string }[]> = {};
+  for (const entry of entries) {
+    if (!entry.biomarker) continue;
+    if (!biomarkerHistory[entry.biomarker]) {
+      biomarkerHistory[entry.biomarker] = [];
+    }
+    biomarkerHistory[entry.biomarker].push({
+      value: entry.value,
+      date: entry.date,
+      unit: entry.unit
+    });
+  }
+  for (const [name, history] of Object.entries(biomarkerHistory)) {
+    const mapping = bucketMapping[name] || getOfflineCategorization(name);
+    const grouping = mapping.standardMedicalGrouping || 'Other';
+    const sortedHistory = [...history].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const latest = sortedHistory[0];
+    const bObj = {
+      name,
+      riskCategories: mapping.riskCategories || [],
+      standardMedicalGrouping: grouping,
+      potentialMedicalConditions: mapping.potentialMedicalConditions || [],
+      history: history.map(h => {
+        const lower = name.toLowerCase();
+        let refRange = '0 - 100 ' + h.unit;
+        if (lower.includes('glucose')) refRange = '70 - 99 ' + h.unit;
+        else if (lower.includes('hba1c')) refRange = '4.0 - 5.6 ' + h.unit;
+        else if (lower.includes('alt')) refRange = '7 - 56 ' + h.unit;
+        else if (lower.includes('ast')) refRange = '10 - 40 ' + h.unit;
+        else if (lower.includes('creatinine')) refRange = '0.6 - 1.2 ' + h.unit;
+        return {
+          date: h.date,
+          value: h.value,
+          referenceRange: refRange,
+          level: "Normal"
+        };
+      })
+    };
+    if (bucketsMap[grouping]) {
+      bucketsMap[grouping].push(bObj);
+    } else {
+      bucketsMap['Other'].push(bObj);
+    }
+  }
+  const buckets = Object.entries(bucketsMap)
+    .filter(([_, list]) => list.length > 0)
+    .map(([systemName, biomarkers]) => ({
+      systemName,
+      biomarkers
+    }));
+  return {
+    text: "Data successfully processed and categorized offline.",
+    entriesCount: entries.length,
+    buckets
+  };
+}
+function extractBiomarkerKeysFromJson(jsonStr: string): string[] {
+  if (!jsonStr) return [];
+  const keys: string[] = [];
+  try {
+    const cleanedText = jsonStr.replace(/```(?:json)?/gi, '').trim();
+    const parsed = JSON.parse(cleanedText);
+    const rawList = Array.isArray(parsed) 
+      ? parsed 
+      : (parsed?.biomarkers || parsed?.entries || parsed?.data || []);
+    if (Array.isArray(rawList)) {
+      rawList.forEach((item: any) => {
+        if (item && typeof item === 'object') {
+          const bName = item.biomarker || item.name || item.key;
+          if (bName) {
+            keys.push(String(bName));
+          }
+        }
+      });
+    }
+  } catch (e) {
+    console.warn("extractBiomarkerKeysFromJson: standard parser failed, falling back to regex", e);
+  }
+  if (keys.length > 0) {
+    return Array.from(new Set(keys)).filter(Boolean);
+  }
+  const lines = jsonStr.split(/\r?\n|\\n/);
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^(?:-\s*)?biomarker\s*:\s*["']?([^"'\s:]+)["']?/i);
+    if (match && match[1]) {
+      keys.push(match[1]);
+    } else {
+      const keyValMatch = trimmed.match(/^([a-zA-Z0-9_-]+)\s*:\s*/);
+      if (keyValMatch && keyValMatch[1]) {
+        const k = keyValMatch[1].toLowerCase();
+        if (k !== 'date' && k !== 'value' && k !== 'unit' && k !== 'biomarker' && k !== 'name') {
+          keys.push(keyValMatch[1]);
+        }
+      }
+    }
+  });
+  return Array.from(new Set(keys)).filter(Boolean);
+}
+function extractBiomarkerKeysFromPrioritizedConditions(prioritizedConditions: any[]): string[] {
+  if (!Array.isArray(prioritizedConditions)) return [];
+  const keys: string[] = [];
+  prioritizedConditions.forEach(cond => {
+    if (cond) {
+      if (Array.isArray(cond.biomarkers)) {
+        cond.biomarkers.forEach((m: any) => {
+          if (m && typeof m.key === 'string') {
+            keys.push(m.key);
+          }
+        });
+      }
+      if (Array.isArray(cond.biomarkerKeys)) {
+        cond.biomarkerKeys.forEach((k: any) => {
+          if (typeof k === 'string') {
+            keys.push(k);
+          }
+        });
+      }
+    }
+  });
+  return Array.from(new Set(keys)).filter(Boolean);
+}
+function detectBiomarkersInText(text: string): string[] {
+  if (!text) return [];
+  const found = new Set<string>();
+  const lowerText = text.toLowerCase();
+  biomarkerDefinitions.forEach(def => {
+    const keyLower = def.key.toLowerCase().replace(/_/g, ' ');
+    const nameLower = def.name.toLowerCase();
+    // Check key (as a word boundary if short, otherwise substring)
+    const cleanKey = def.key.toLowerCase();
+    const isShortKey = cleanKey.length <= 4;
+    let isKeyInText = false;
+    if (isShortKey) {
+      const words = lowerText.split(/[^a-zA-Z0-9]/);
+      isKeyInText = words.includes(cleanKey);
+    } else {
+      isKeyInText = lowerText.includes(cleanKey);
+    }
+    const isNameInText = lowerText.includes(nameLower);
+    if (isNameInText || isKeyInText) {
+      found.add(def.name);
+    }
+  });
+  return Array.from(found);
+}
 interface LogChatProps {
   key?: string;
   type: AgentType;
@@ -872,23 +1209,21 @@ ${logsText}`);
       } else {
         setTagPortionPreFill(100);
       }
-      // Strip out anything inside brackets to isolate active search terms
-      const searchTerms = extractAutocompleteQuery(inputText);
-      if (!searchTerms) {
+      // Strip out anything inside brackets to avoid searching for already tagged items
+      const strippedInput = inputText.replace(/\[.*?\]/g, '').trim();
+      if (strippedInput.length < 3) {
         setCatalogMatches([]);
         setActiveSearchTerms('');
         return;
       }
-
+      const words = strippedInput.split(/\s+/);
+      const searchTerms = words.slice(Math.max(words.length - 4, 0)).join(' ');
       try {
-        const uid = auth.currentUser?.uid || profile?.uid || '';
-        const email = auth.currentUser?.email || profile?.email || '';
-        const url = `/api/food/search?q=${encodeURIComponent(searchTerms)}${uid ? `&uid=${encodeURIComponent(uid)}` : ''}${email ? `&email=${encodeURIComponent(email)}` : ''}`;
-        const res = await fetch(url);
+        const res = await fetch(`/api/food/search?q=${encodeURIComponent(searchTerms)}`);
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data.results) && data.results.length > 0) {
-            setCatalogMatches(data.results.slice(0, 6));
+          if (data.results && data.results.length > 0 && data.results.length < 4) {
+            setCatalogMatches(data.results);
             setActiveSearchTerms(searchTerms);
           } else {
             setCatalogMatches([]);
@@ -1135,7 +1470,8 @@ ${logsText}`);
         const remotePhotos = candidateRemotePhotos.length > 0 ? Array.from(new Set(candidateRemotePhotos)) : [`/photos/${activeJobId}.jpg`];
 
         try {
-          const realImages = await ImageStore.getImages(activeJobId);
+          const realImg = await ImageStore.getImage(activeJobId);
+          const realImages = realImg ? [realImg] : [];
           const rawRealUrls = (realImages && realImages.length > 0)
             ? await Promise.all(realImages.map((img: any) => typeof img === 'string' ? img : blobToDurableDataUrl(img as Blob)))
             : remotePhotos;
@@ -1326,7 +1662,7 @@ ${logsText}`);
             cleanMode: raw.mode,
             messages: dedupedBaseMsgs,
           })) {
-            setMessages(mergeFoodEditMessages(dedupedBaseMsgs, assistantMsg), false);
+            setMessages(mergeFoodEditMessages(dedupedBaseMsgs, [assistantMsg]) as any, false);
           } else {
             setMessages([...dedupedBaseMsgs.filter(m => !m.isLive), assistantMsg], false);
           }
@@ -1373,7 +1709,8 @@ ${logsText}`);
         };
         if ((job.inputSnapshot as any)?.hasImage || remotePhoto) {
           try {
-            const images = await ImageStore.getImages(activeJobId);
+            const img = await ImageStore.getImage(activeJobId);
+            const images = img ? [img] : [];
             if (images && images.length > 0) {
               userMsg.imageUrls = await Promise.all(images.map(img => typeof img === 'string' ? img : blobToDurableDataUrl(img as Blob)));
               userMsg.imageUrl = userMsg.imageUrls[0];
@@ -1393,7 +1730,8 @@ ${logsText}`);
           const foodLog = resolvePendingFoodLog(job);
           try {
             if (foodLog && (!foodLog.imageUrls || foodLog.imageUrls.length === 0 || foodLog.imageUrls.some((u: string) => u.startsWith('blob:')))) {
-              const imgs = await ImageStore.getImages(activeJobId);
+              const img = await ImageStore.getImage(activeJobId);
+              const imgs = img ? [img] : [];
               if (imgs?.length) {
                 const base64Imgs = await Promise.all(imgs.map(async (img) => {
                   if (typeof img === 'string') return img;
@@ -1557,7 +1895,7 @@ ${logsText}`);
           const assistantMsg: ChatMessage = {
             id: `msg_assistant_${activeJobId}`,
             role: 'assistant',
-            content: `⚠️ **${t.analysisFailed || 'Analysis failed'}**\n\n${humanizeJobFailure(job.error?.message)}`,
+            content: `⚠️ **${t.analysisFailed || 'Analysis failed'}**\n\n${humanizeJobFailure(typeof job.error === 'object' && job.error !== null ? (job.error as any).message : job.error)}`,
             timestamp: job.updatedAt || new Date().toISOString(),
             isError: true
           };
@@ -1836,7 +2174,105 @@ ${logsText}`);
     });
     return list;
   }, [biomarkers, profile?.ethnicity, activeHistory]);
-  const remainingAllowance = React.useMemo(() => computeRemainingAllowance({ profile, activeFoodLogs, report }), [foodLogs, report, profile?.timezone]);
+  const remainingAllowance = React.useMemo(() => {
+    const todayStr = getCurrentDateInTimezone(profile?.timezone);
+    const todaysFoods = activeFoodLogs ? activeFoodLogs.filter(f => f.date === todayStr) : [];
+    const todaysTotals = todaysFoods.reduce((acc, curr) => {
+      if (curr.nutrients) {
+        Object.keys(curr.nutrients).forEach(k => {
+          const key = k as keyof typeof curr.nutrients;
+          acc[key] = (Number(acc[key]) || 0) + (Number(curr.nutrients[key]) || 0);
+        });
+      }
+      return acc;
+    }, {} as { [key: string]: number });
+    const parseTarget = (val: any, fallback: number) => {
+      if (val === null || val === undefined) return fallback;
+      const cleanStr = String(val).replace(/,/g, '');
+      const matches = cleanStr.match(/\d+(\.\d+)?/g);
+      if (!matches || matches.length === 0) return fallback;
+      const parsed = parseFloat(matches[0]);
+      return isNaN(parsed) ? fallback : parsed;
+    };
+    const activeTargets = {
+      calories: Number(todaysTotals.calories || 0),
+      caloriesTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.calories, 1700) : 1800,
+      satFat: Number(todaysTotals.saturatedFat || 0),
+      satFatTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.saturatedFat, 15) : 15,
+      sodium: Number(todaysTotals.sodium || 0),
+      sodiumTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.sodium, 1200) : 1200,
+      addedSugar: Number(todaysTotals.addedSugar || 0),
+      addedSugarTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.addedSugar, 50) : 50,
+      carbohydrates: Number(todaysTotals.carbohydrates || 0),
+      carbohydratesTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.carbohydrates, 250) : 250,
+      solubleFibre: Number(todaysTotals.solubleFibre || 0),
+      solubleFibreTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.solubleFibre, 15) : 15,
+      protein: Number(todaysTotals.protein || 0),
+      proteinTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.protein, 50) : 50,
+      potassium: Number(todaysTotals.potassium || 0),
+      potassiumTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.potassium, 3500) : 3500,
+      unsaturatedFat: Number(todaysTotals.unsaturatedFat || 0),
+      unsaturatedFatTarget: report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.unsaturatedFat, 40) : 40,
+    };
+    const rollingDaysStr = localStorage.getItem('foodTracker_rollingDays');
+    const rollingDays = rollingDaysStr ? parseInt(rollingDaysStr, 10) : 7;
+    const showAverageInBar = localStorage.getItem('foodTracker_showAverageInBar') === 'true';
+    const getAverageIntake = (key: string, numDays: number) => {
+      let totalIntake = 0;
+      for (let d = 0; d < numDays; d++) {
+        const parts = todayStr.split('-');
+        const todayDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        const targetDate = new Date(todayDate);
+        targetDate.setDate(todayDate.getDate() - d);
+        const y = targetDate.getFullYear();
+        const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+        const day = String(targetDate.getDate()).padStart(2, '0');
+        const dStr = `${y}-${m}-${day}`;
+        const dayFoods = activeFoodLogs ? activeFoodLogs.filter(f => f.date === dStr) : [];
+        const dayTotal = dayFoods.reduce((acc, curr) => {
+          return acc + (Number(curr.nutrients?.[key as keyof typeof curr.nutrients]) || 0);
+        }, 0);
+        totalIntake += dayTotal;
+      }
+      return totalIntake / numDays;
+    };
+    const averages = {
+      calories: getAverageIntake('calories', rollingDays),
+      saturatedFat: getAverageIntake('saturatedFat', rollingDays),
+      sodium: getAverageIntake('sodium', rollingDays),
+      addedSugar: getAverageIntake('addedSugar', rollingDays),
+      carbohydrates: getAverageIntake('carbohydrates', rollingDays),
+      solubleFibre: getAverageIntake('solubleFibre', rollingDays),
+      protein: getAverageIntake('protein', rollingDays),
+      potassium: getAverageIntake('potassium', rollingDays),
+      unsaturatedFat: getAverageIntake('unsaturatedFat', rollingDays),
+    };
+    return {
+      calories: Math.max(0, activeTargets.caloriesTarget - activeTargets.calories),
+      saturatedFat: Math.max(0, activeTargets.satFatTarget - activeTargets.satFat),
+      sodium: Math.max(0, activeTargets.sodiumTarget - activeTargets.sodium),
+      addedSugar: Math.max(0, activeTargets.addedSugarTarget - activeTargets.addedSugar),
+      carbohydrates: Math.max(0, activeTargets.carbohydratesTarget - activeTargets.carbohydrates),
+      solubleFibre: Math.max(0, activeTargets.solubleFibreTarget - activeTargets.solubleFibre),
+      protein: Math.max(0, activeTargets.proteinTarget - activeTargets.protein),
+      potassium: Math.max(0, activeTargets.potassiumTarget - activeTargets.potassium),
+      unsaturatedFat: Math.max(0, activeTargets.unsaturatedFatTarget - activeTargets.unsaturatedFat),
+      caloriesLogged: activeTargets.calories,
+      saturatedFatLogged: activeTargets.satFat,
+      sodiumLogged: activeTargets.sodium,
+      caloriesTarget: activeTargets.caloriesTarget,
+      saturatedFatTarget: activeTargets.satFatTarget,
+      sodiumTarget: activeTargets.sodiumTarget,
+      addedSugarTarget: activeTargets.addedSugarTarget,
+      carbohydratesTarget: activeTargets.carbohydratesTarget,
+      solubleFibreTarget: activeTargets.solubleFibreTarget,
+      proteinTarget: activeTargets.proteinTarget,
+      potassiumTarget: activeTargets.potassiumTarget,
+      unsaturatedFatTarget: activeTargets.unsaturatedFatTarget,
+      averages,
+      rollingDays,
+    };
+  }, [foodLogs, report, profile?.timezone]);
   useEffect(() => {
     if (!isAnalyzing && messages.length > 1) {
       const lastMsg = messages[messages.length - 1];
@@ -1854,9 +2290,8 @@ ${logsText}`);
     }
   }, [isAnalyzing, messages, liveThoughts]);
   const matchingPreviousLogs = React.useMemo(() => {
-    if (type !== 'food' || !activeFoodLogs) return [];
-    const query = extractAutocompleteQuery(inputText).toLowerCase().trim();
-    if (query.length < 3) return [];
+    if (type !== 'food' || !activeFoodLogs || inputText.trim().length < 3) return [];
+    const query = inputText.toLowerCase().trim();
     const uniqueMatches: FoodLog[] = [];
     const seenNames = new Set<string>();
     const reversedLogs = [...activeFoodLogs].reverse();
@@ -2062,12 +2497,7 @@ ${logsText}`);
         let submissionMode: 'review' | 'compare' | 'edit' = mappedMode;
         const hasPriorResult = job && (job.status === 'succeeded' || job.result?.pendingFoodLog || job.result?.data?.pendingFoodLog || (job.messages && job.messages.some(m => m.data?.pendingFoodLog || m.pendingFoodLog)));
         const userExplicitlyChoseReview = mappedMode === 'review' && finalImages.length > 0;
-        // Case-12 T2: a text-only follow-up typed into a freshly reopened sheet carries a
-        // blank draft (no result, no messages), so it must edit the last logged meal rather
-        // than start a new `review` thread that double-counts the meal. An explicit edit
-        // verb is required so a plain new meal description stays a new scan.
-        const followUpEdit = isMealFollowUpEdit({ hasPriorResult: !!hasPriorResult, existingMessageCount: job?.messages?.length || 0, imageCount: finalImages.length, text: textToSend, mappedMode, foodLogs: activeFoodLogs, nowMs: Date.now() });
-        if ((hasPriorResult || followUpEdit) && !userExplicitlyChoseReview && mappedMode !== 'compare') {
+        if (hasPriorResult && !userExplicitlyChoseReview && mappedMode !== 'compare') {
           submissionMode = 'edit';
         } else if (family === 'D') {
           submissionMode = 'compare';
@@ -2076,7 +2506,7 @@ ${logsText}`);
         }
         // Stage images
         if (finalImages.length > 0) {
-          await ImageStore.putImages(currentJobId, finalImages);
+          await ImageStore.set(currentJobId, finalImages[0]);
         }
         const existingMsgs = (job?.messages && job.messages.length > 0)
           ? job.messages
@@ -2121,91 +2551,12 @@ ${logsText}`);
         }
         let strippedText = userContent || '';
         explicitFoodTags.forEach(t => {
-          strippedText = removeBracketItem(strippedText, t.name);
+          const escaped = (t.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          strippedText = strippedText.replace(new RegExp(`\\[+${escaped}(?:\\s+${t.weightGrams}g)?\\]+`, 'gi'), '').replace(/\s+/g, ' ').trim();
         });
         const hasAdditionalText = strippedText.replace(/\[+.*?\]+/g, '').replace(/^[+\s,.-]+/, '').trim().length > 0;
-        if (!hasAdditionalText && finalImages.length === 0 && explicitFoodTags.length >= 1) {
-          const todayDate = getCurrentDateInTimezone(profile?.timezone);
-          const {
-            dishName,
-            totalWeight,
-            roundedCal,
-            roundedProt,
-            roundedCarb,
-            roundedFat,
-            roundedSat,
-            roundedFib,
-            roundedSod,
-            allImages,
-            primaryImageUrl,
-            itemsBreakdown
-          } = calculateCompositeMeal(explicitFoodTags);
-
-
-          const compositeFoodLog: any = {
-            id: `food_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-            name: dishName,
-            title: dishName,
-            date: todayDate,
-            weightGrams: Math.round(totalWeight),
-            quantity: '1 serving',
-            composition: itemsBreakdown.map(i => `${i.name} (${i.weight})`).join(', '),
-            nutrients: {
-              calories: roundedCal,
-              protein: roundedProt,
-              carbohydrates: roundedCarb,
-              totalFat: roundedFat,
-              fat: roundedFat,
-              saturatedFat: roundedSat,
-              totalFibre: roundedFib,
-              fiber: roundedFib,
-              sodium: roundedSod,
-              salt: Math.round((roundedSod / 400) * 10) / 10,
-            },
-            calories: roundedCal,
-            protein: roundedProt,
-            carbohydrates: roundedCarb,
-            totalFat: roundedFat,
-            saturatedFat: roundedSat,
-            totalFibre: roundedFib,
-            sodium: roundedSod,
-            itemsBreakdown,
-            items: itemsBreakdown,
-            imageUrl: primaryImageUrl,
-            photoUrl: primaryImageUrl,
-            imageUrls: allImages.length > 0 ? allImages : undefined,
-            healthImpact: `Balanced intake from ${itemsBreakdown.length} selected item(s).`,
-            benefits: ['Accurate catalog nutrition', 'Portion verified'],
-            risks: [],
-            recommendation: 'good',
-            verdict: { label: 'Tracked', level: 'good' }
-          };
-
-          const userMsg: any = {
-            id: `msg_${Date.now()}_user`,
-            role: 'user',
-            content: userContent || dishName,
-            timestamp: new Date().toISOString(),
-            imageUrl: primaryImageUrl,
-            imageUrls: allImages.length > 0 ? allImages : undefined
-          };
-
-          const assistantMsg: any = {
-            id: `msg_${Date.now()}_assistant`,
-            role: 'assistant',
-            content: `Here is the nutrition breakdown for **${dishName}**:`,
-            timestamp: new Date().toISOString(),
-            data: {
-              pendingFoodLog: compositeFoodLog,
-              scoutItems: itemsBreakdown,
-              agentResult: {
-                status: 'success',
-                mode: 'new_log'
-              }
-            }
-          };
-
-          setMessages(prev => [...prev, userMsg, assistantMsg]);
+        if (!hasAdditionalText && finalImages.length === 0 && explicitFoodTags.length === 1 && explicitFoodTags[0].source === 'previous_meal') {
+          handleDuplicateFoodLog(explicitFoodTags[0].originalLog);
           setInputText('');
           setExplicitFoodTags([]);
           clearTimeout(failsafe);
@@ -2493,7 +2844,7 @@ ${logsText}`);
           // original photos). submissionMode === 'edit' already scopes this fallback
           // correctly, so gating on image count is unnecessary and causes edits to be
           // silently rejected server-side with "No active meal exists in Firestore".
-          (submissionMode === 'edit' && !extraOptions?.portionChoices && activeFoodLogs && activeFoodLogs.length > 0 ? (mostRecentActiveMeal(activeFoodLogs) || activeFoodLogs[activeFoodLogs.length - 1]) : null);
+          (submissionMode === 'edit' && !extraOptions?.portionChoices && foodLogs && foodLogs.length > 0 ? foodLogs[foodLogs.length - 1] : null);
         let prunedMealForJob = null;
         if (lastFoodLogForJob) {
           try {
@@ -5118,19 +5469,33 @@ ${logsText}`);
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              id="download-debug-logs-header-btn"
-              onClick={() => {
-                const targetMsg = [...messages].reverse().find(m => m.data?.jobId || m.data?.requestId || m.pendingFoodLog || m.data?.pendingFoodLog || m.data?.agentResult) || messages[messages.length - 1];
-                const downloadTargetId = jobId || targetMsg?.data?.jobId || targetMsg?.data?.requestId || targetMsg?.id || 'error_turn';
-                handleDownloadDebug(downloadTargetId, targetMsg);
-              }}
-              className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 transition-colors cursor-pointer"
-              title={t.downloadDebugLogsTitle || t.downloadDebugLogs || "Download Debug Logs"}
-            >
-              <Download className="w-5 h-5" />
-            </button>
+            {messages.length > 1 && (
+              <button
+                onClick={async () => {
+                  const welcome = getWelcomeMessage();
+                  setMessages([welcome], true);
+                  setLastSentPayload(null);
+                  sessionStorage.removeItem(chatStorageKey);
+                  sessionStorage.removeItem(payloadStorageKey);
+                  localStorage.removeItem(chatStorageKey);
+                  localStorage.removeItem(payloadStorageKey);
+                  if (activeConversationId) {
+                    const userId = auth.currentUser?.uid;
+                    if (userId) {
+                      await safeIdbSet(`${chatStorageKey}_${userId}_${activeConversationId}`, [welcome]);
+                      await safeIdbSet(`${payloadStorageKey}_${userId}_${activeConversationId}`, null);
+                    } else {
+                      await safeIdbSet(`${chatStorageKey}_guest_${activeConversationId}`, [welcome]);
+                      await safeIdbSet(`${payloadStorageKey}_guest_${activeConversationId}`, null);
+                    }
+                  }
+                }}
+                className="p-1.5 rounded-full hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 hover:text-rose-600 transition-colors cursor-pointer"
+                title={t.clearAll || "Clear all"}
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            )}
             <button
               onClick={() => setShowFullScreenDebugLogs(true)}
               className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 transition-colors"
@@ -5919,6 +6284,19 @@ ${logsText}`);
                                 <ChevronDown className="w-3 h-3" />
                               </button>
                             )}
+                            {(debugUrl || targetJobId || isErrorMsg) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleDownloadDebug(targetJobId || msg.data?.requestId || msg.id || 'error_turn', msg);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
+                                title={t.downloadDebugLogsTitle}
+                              >
+                                <Download className="w-3.5 h-3.5 text-indigo-500" />
+                                <span>{t.downloadDebugLogs || t.downloadDebugLog}</span>
+                              </button>
+                            )}
                             {isErrorMsg && (
                               <button
                                 type="button"
@@ -6242,19 +6620,11 @@ ${logsText}`);
         {/* Input Dock */}
         <div className="bg-theme-bg-card border-t border-theme-border/80 p-3 flex flex-col gap-2 shrink-0 relative">
           {(() => {
-            const seen = new Set<string>();
-            const combinedMatches: any[] = [];
-            const addMatch = (m: any, listType: 'brand' | 'previous_meal') => {
-              const idKey = String(m.id || m.food_id || m.name || m.dish_name || '').toLowerCase().trim();
-              if (!idKey || seen.has(idKey)) return;
-              seen.add(idKey);
-              combinedMatches.push({ ...m, _listType: listType });
-            };
-            catalogMatches.forEach(m => addMatch(m, m.type === 'previous_meal' ? 'previous_meal' : 'brand'));
-            matchingPreviousLogs.forEach(m => addMatch(m, 'previous_meal'));
-
-            const filteredMatches = combinedMatches.filter(m => !explicitFoodTags.some(tag => tag.dbId === (m._listType === 'brand' ? (m.food_id || m.id) : (m.id || m.food_id))));
-            if (filteredMatches.length === 0) return null;
+            const combinedMatches = [
+              ...catalogMatches.map(m => ({ ...m, _listType: 'brand' })),
+              ...matchingPreviousLogs.map(m => ({ ...m, _listType: 'previous_meal' }))
+            ].filter(m => !explicitFoodTags.some(tag => tag.dbId === (m._listType === 'brand' ? m.food_id : m.id)));
+            if (combinedMatches.length === 0) return null;
             return (
               <div className="absolute bottom-full left-0 right-0 mb-2 mx-3 bg-white dark:bg-slate-800 border border-theme-border/80 rounded-2xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto z-50 animate-fade-in font-sans">
                 <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700/50 flex justify-between items-center">
@@ -6262,40 +6632,26 @@ ${logsText}`);
                   <span className="text-[9px] text-slate-400">{t.clickAddToInline || "Click Add to inline"}</span>
                 </div>
                 <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                  {filteredMatches.map((item, idx) => {
-                    const itemName = item.name || item.dish_name || '';
-                    const thumbSrc = item.imageUrl || (Array.isArray(item.imageUrls) ? item.imageUrls[0] : (item.image_url || ''));
-                    return (
-                    <div key={item._listType === 'brand' ? (item.food_id || idx) : (item.id || idx)} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
+                  {combinedMatches.map((item, idx) => (
+                    <div key={item._listType === 'brand' ? (item.food_id || idx) : item.id} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        {item._listType === 'previous_meal' ? (
-                          thumbSrc ? (
-                            <PreviousMealThumbnail
-                              src={resolveFoodImage(thumbSrc, activeFoodLogs) || thumbSrc}
-                              alt={itemName}
-                              fallbackLabel={itemName}
+                        {item._listType === 'previous_meal' && (
+                          (item.imageUrl || (item.imageUrls && item.imageUrls.length > 0)) ? (
+                            <img 
+                              src={resolveFoodImage(item.imageUrl || item.imageUrls?.[0], activeFoodLogs)} 
+                              alt={item.name} 
+                              className="w-8 h-8 rounded-lg object-cover border border-slate-100 dark:border-slate-700 shrink-0"
+                              referrerPolicy="no-referrer"
                             />
                           ) : (
                             <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-500 font-bold text-xs shrink-0">
-                              {itemName.charAt(0).toUpperCase()}
-                            </div>
-                          )
-                        ) : (
-                          (item.imageUrl || item.image_url) ? (
-                            <PreviousMealThumbnail
-                              src={item.imageUrl || item.image_url}
-                              alt={item.dish_name}
-                              fallbackLabel={item.chain_name || item.dish_name}
-                            />
-                          ) : (
-                            <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0">
-                              {(item.chain_name || item.dish_name || 'B').charAt(0).toUpperCase()}
+                              {item.name.charAt(0).toUpperCase()}
                             </div>
                           )
                         )}
                         <div className="min-w-0 flex flex-col">
                           <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">
-                            {item._listType === 'brand' ? item.dish_name : itemName}
+                            {item._listType === 'brand' ? item.dish_name : item.name}
                           </div>
                           <div className="text-[10px] text-theme-text-secondary truncate mt-0.5">
                             {item._listType === 'brand' ? item.chain_name : (
@@ -6307,23 +6663,13 @@ ${logsText}`);
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {item._listType === 'brand' ? (
+                        {item._listType === 'brand' && (
                           <>
                             <input 
                               type="number" 
-                              defaultValue={item.serving_grams || tagPortionPreFill || 100}
-                              id={`tag-portion-${item.food_id || idx}`}
-                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center font-mono" 
-                            />
-                            <span className="text-xs text-slate-500">g</span>
-                          </>
-                        ) : (
-                          <>
-                            <input 
-                              type="number" 
-                              defaultValue={item.portionGrams || item.weightGrams || item.weight_grams || 100}
-                              id={`prev-portion-${item.id || idx}`}
-                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center font-mono" 
+                              defaultValue={tagPortionPreFill}
+                              id={`tag-portion-${item.food_id}`}
+                              className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-center" 
                             />
                             <span className="text-xs text-slate-500">g</span>
                           </>
@@ -6331,30 +6677,46 @@ ${logsText}`);
                         <button
                           type="button"
                           onClick={() => {
+                            const applyTag = (prev: string, searchTerms: string, tagContent: string) => {
+                              const trimmedPrev = prev.trimEnd();
+                              if (!trimmedPrev) return `[${tagContent}] `;
+                              const words = trimmedPrev.split(/\s+/);
+                              const tagWords = tagContent.toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+                              let matchCount = 0;
+                              for (let i = 1; i <= Math.min(words.length, 6); i++) {
+                                const firstWordOfSuffix = words[words.length - i].toLowerCase();
+                                const cleanWord = firstWordOfSuffix.replace(/[^a-z0-9]/g, '');
+                                if (!cleanWord) {
+                                  matchCount = i;
+                                  continue;
+                                }
+                                const isMatch = tagWords.some(tw => {
+                                  if (cleanWord.length < 3) {
+                                    return tw === cleanWord || tw.startsWith(cleanWord);
+                                  }
+                                  return tw.includes(cleanWord) || cleanWord.includes(tw);
+                                });
+                                if (isMatch) {
+                                  matchCount = i;
+                                } else {
+                                  break;
+                                }
+                              }
+                              if (matchCount > 0) {
+                                  const beforeWords = words.slice(0, words.length - matchCount);
+                                  const beforeStr = beforeWords.join(' ').replace(/\[+\s*$/, '').trim();
+                                  return (beforeStr ? beforeStr + ' ' : '') + `[${tagContent}] `;
+                                }
+                                const cleanedPrev = prev.replace(/\[+\s*$/, '').trim();
+                                return (cleanedPrev ? cleanedPrev + ' ' : '') + `[${tagContent}] `;
+                            };
                             if (item._listType === 'brand') {
-                              const inputEl = document.getElementById(`tag-portion-${item.food_id || idx}`) as HTMLInputElement;
-                              const w = Number(inputEl?.value) || item.serving_grams || tagPortionPreFill || 100;
-                              setExplicitFoodTags(prev => [...prev, { 
-                                dbId: item.food_id, 
-                                name: item.dish_name, 
-                                weightGrams: Number(w), 
-                                source: 'catalog_tag',
-                                imageUrl: item.imageUrl || item.image_url,
-                                item 
-                              }]);
-                              setInputText(prev => updateOrAddBracketItem(prev, item.dish_name, `${w}g`));
+                              const w = (document.getElementById(`tag-portion-${item.food_id}`) as HTMLInputElement)?.value || tagPortionPreFill;
+                              setExplicitFoodTags(prev => [...prev, { dbId: item.food_id, name: item.dish_name, weightGrams: Number(w), source: 'catalog_tag' }]);
+                              setInputText(prev => applyTag(prev, activeSearchTerms, `${item.dish_name} ${w}g`));
                             } else {
-                              const inputEl = document.getElementById(`prev-portion-${item.id || idx}`) as HTMLInputElement;
-                              const w = Number(inputEl?.value) || item.portionGrams || item.weightGrams || item.weight_grams || 100;
-                              setExplicitFoodTags(prev => [...prev, { 
-                                dbId: item.id || item.food_id, 
-                                name: itemName, 
-                                source: 'previous_meal', 
-                                originalLog: item,
-                                imageUrl: thumbSrc || undefined,
-                                weightGrams: Number(w)
-                              }]);
-                              setInputText(prev => updateOrAddBracketItem(prev, itemName, `${w}g`));
+                              setExplicitFoodTags(prev => [...prev, { dbId: item.id, name: item.name, source: 'previous_meal', originalLog: item }]);
+                              setInputText(prev => applyTag(prev, activeSearchTerms, item.name));
                             }
                             setCatalogMatches([]);
                             setActiveSearchTerms('');
@@ -6366,69 +6728,11 @@ ${logsText}`);
                         </button>
                       </div>
                     </div>
-                    );
-                  })}
+                  ))}
                 </div>
               </div>
             );
           })()}
-          {/* Staged Meal Compose Tray */}
-          {explicitFoodTags.length > 0 && (
-            <div className="flex items-center gap-2 overflow-x-auto py-1.5 px-2.5 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/50 rounded-xl">
-              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
-                <Utensils className="w-3 h-3" />
-                {t.stagedItems || "Staged Items"}:
-              </span>
-              <div className="flex items-center gap-1.5 min-w-0">
-                {explicitFoodTags.map((tag, tIdx) => {
-                  const thumbSrc = tag.imageUrl || (tag.originalLog ? resolveFoodImage(tag.originalLog.imageUrl || tag.originalLog.imageUrls?.[0], activeFoodLogs) : undefined);
-                  return (
-                    <div key={tag.dbId || tIdx} className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-lg px-2 py-1 shadow-sm shrink-0">
-                      {thumbSrc ? (
-                        <PreviousMealThumbnail
-                          src={thumbSrc}
-                          alt={tag.name}
-                          fallbackLabel={tag.name}
-                        />
-                      ) : (
-                        <div className="w-5 h-5 rounded bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
-                          {(tag.name || 'F').charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 max-w-[120px] truncate">
-                        {tag.name}
-                      </span>
-                      <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-700/50 px-1.5 py-0.5 rounded">
-                        <input
-                          type="number"
-                          value={tag.weightGrams ?? 100}
-                          onChange={(e) => {
-                            const newW = Math.max(1, Number(e.target.value) || 0);
-                            setExplicitFoodTags(prev => prev.map((item, i) => i === tIdx ? { ...item, weightGrams: newW } : item));
-                            setInputText(prev => updateOrAddBracketItem(prev, tag.name, `${newW}g`));
-                          }}
-                          className="w-10 text-[10px] text-center font-mono bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none"
-                          min="1"
-                        />
-                        <span className="text-[9px] text-slate-500 dark:text-slate-400 font-mono">g</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExplicitFoodTags(prev => prev.filter((_, i) => i !== tIdx));
-                          setInputText(prev => removeBracketItem(prev, tag.name));
-                        }}
-                        className="p-0.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-rose-500 rounded transition-colors"
-                        title="Remove item"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
           {isCompressing && (
             <div className="flex items-center gap-2 p-2 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 rounded-xl">
               <Loader className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
@@ -6735,26 +7039,7 @@ ${logsText}`);
                 id="food-chat-input"
                 type="text"
                 value={inputText}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setInputText(val);
-                  if (explicitFoodTags.length > 0) {
-                    const parsed = parseBracketItems(val);
-                    if (parsed.length > 0) {
-                      setExplicitFoodTags(prev => prev.map(tag => {
-                        const matched = parsed.find(p => p.name.toLowerCase() === tag.name.toLowerCase());
-                        if (matched && matched.scaling && matched.scaling.value > 0) {
-                          const base = tag.item?.serving_grams || tag.originalLog?.portionGrams || 100;
-                          const w = matched.scaling.unit === 'x' 
-                            ? base * matched.scaling.value
-                            : matched.scaling.value;
-                          return { ...tag, weightGrams: Math.round(w) };
-                        }
-                        return tag;
-                      }));
-                    }
-                  }
-                }}
+                onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !isAnalyzing && !isSubmitting && !isSendingRef.current && !isCompressing) {
                     const triggerText = inputText.trim() || autoSendMessage || (reviewBiomarkerKey ? buildBiomarkerReviewPrefill(reviewBiomarkerKey, undefined, biomarkers, profile) : (selectedImages.length > 0 ? 'Analyze this meal photo.' : ''));

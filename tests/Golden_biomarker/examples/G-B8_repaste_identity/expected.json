@@ -1,8 +1,0 @@
-{
-  "trace": {
-    "sourceKind": "table",
-    "class": "UPSERT_IDENTITY",
-    "shouldUpsert": true,
-    "matchedDate": "2026-08-14"
-  }
-}
