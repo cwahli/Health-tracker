@@ -133,4 +133,43 @@ test.describe('Track T: staged tray', () => {
       expect(await lightnessOf('#tag-portion-b1')).toBeGreaterThanOrEqual(0.5);
       expect(await lightnessOf('#prev-portion-pm2')).toBeGreaterThanOrEqual(0.5);
     });
+
+  test('T-3: tray gram field clears mid-edit and clamps on blur', async ({ page }) => {
+    await page.route('**/api/food/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          results: [
+            { type: 'previous_meal', id: 'pm3', name: 'Oat Tray Porridge', portionGrams: 130 },
+          ],
+        }),
+      });
+    });
+
+    await page.locator('#food-chat-input').fill('oat');
+    const row = page
+      .getByText('Oat Tray Porridge', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await row.getByRole('button', { name: /add/i }).click();
+
+    const tray = page
+      .getByText('STAGED ITEMS')
+      .locator('xpath=ancestor::div[.//input[@type="number"]][1]');
+    const gramInput = tray.locator('input[type="number"]');
+    await expect(gramInput).toBeVisible({ timeout: 15000 });
+    await expect(gramInput).toHaveValue('130');
+
+    // Clearing must stick (pre-fix it snapped straight back to 1).
+    await gramInput.fill('');
+    await expect(gramInput).toHaveValue('');
+
+    // 0 is allowed mid-edit.
+    await gramInput.fill('0');
+    await expect(gramInput).toHaveValue('0');
+
+    // Blur clamps to >= 1g.
+    await page.locator('#food-chat-input').click();
+    await expect(gramInput).toHaveValue('1');
+  });
 });

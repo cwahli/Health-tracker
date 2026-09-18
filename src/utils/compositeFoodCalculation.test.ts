@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateCompositeMeal } from './compositeFoodCalculation';
+import { calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams } from './compositeFoodCalculation';
 
 describe('calculateCompositeMeal', () => {
   it('calculates single previous meal correctly without scaling (same portion)', () => {
@@ -116,5 +116,28 @@ describe('calculateCompositeMeal', () => {
     expect(result.totalWeight).toBe(350);
     expect(result.roundedCal).toBe(94);
     expect(result.itemsBreakdown.length).toBe(2);
+  });
+});
+
+describe('parseTrayGramInput / normalizeTrayGrams (T-3 clear-to-edit)', () => {
+  it('returns undefined for empty input so the field can be cleared mid-edit', () => {
+    expect(parseTrayGramInput('')).toBeUndefined();
+    expect(parseTrayGramInput('   ')).toBeUndefined();
+  });
+
+  it('allows 0 mid-edit instead of snapping to 1', () => {
+    expect(parseTrayGramInput('0')).toBe(0);
+  });
+
+  it('rounds numeric input', () => {
+    expect(parseTrayGramInput('130')).toBe(130);
+    expect(parseTrayGramInput('12.6')).toBe(13);
+  });
+
+  it('clamps to >= 1g on blur/submit', () => {
+    expect(normalizeTrayGrams(undefined)).toBe(1);
+    expect(normalizeTrayGrams(0)).toBe(1);
+    expect(normalizeTrayGrams(-5)).toBe(1);
+    expect(normalizeTrayGrams(130)).toBe(130);
   });
 });

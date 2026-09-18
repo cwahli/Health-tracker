@@ -307,3 +307,21 @@ export function computeRemainingAllowance(args: RemainingAllowanceInput) {
       rollingDays,
     };
 }
+
+/**
+ * Parse a staged-tray gram field keystroke. Empty/non-numeric input yields
+ * undefined so the field can be cleared mid-edit (T-3); callers clamp with
+ * normalizeTrayGrams on blur/submit instead of snapping while typing.
+ */
+export function parseTrayGramInput(raw: string): number | undefined {
+  if (raw.trim() === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.round(n);
+}
+
+/** Clamp a parsed tray weight to the submittable range (≥ 1g). */
+export function normalizeTrayGrams(w: number | undefined): number {
+  if (w === undefined || !Number.isFinite(w)) return 1;
+  return Math.max(1, Math.round(w));
+}

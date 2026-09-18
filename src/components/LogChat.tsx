@@ -19,7 +19,7 @@ import LLMSelector from './LLMSelector';
 import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
-import { computeRemainingAllowance, calculateCompositeMeal } from '../utils/compositeFoodCalculation';
+import { computeRemainingAllowance, calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams } from '../utils/compositeFoodCalculation';
 import { isMealFollowUpEdit, mostRecentActiveMeal } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
@@ -6401,11 +6401,16 @@ ${logsText}`);
                       <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-700/50 px-1.5 py-0.5 rounded">
                         <input
                           type="number"
-                          value={tag.weightGrams ?? 100}
+                          value={tag.weightGrams ?? ''}
                           onChange={(e) => {
-                            const newW = Math.max(1, Number(e.target.value) || 0);
-                            setExplicitFoodTags(prev => prev.map((item, i) => i === tIdx ? { ...item, weightGrams: newW } : item));
-                            setInputText(prev => updateOrAddBracketItem(prev, tag.name, `${newW}g`));
+                            const parsed = parseTrayGramInput(e.target.value);
+                            setExplicitFoodTags(prev => prev.map((item, i) => i === tIdx ? { ...item, weightGrams: parsed } : item));
+                            if (parsed !== undefined) {
+                              setInputText(prev => updateOrAddBracketItem(prev, tag.name, `${parsed}g`));
+                            }
+                          }}
+                          onBlur={() => {
+                            setExplicitFoodTags(prev => prev.map((item, i) => i === tIdx ? { ...item, weightGrams: normalizeTrayGrams(item.weightGrams) } : item));
                           }}
                           className="w-10 text-[10px] text-center font-mono bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none"
                           min="1"
