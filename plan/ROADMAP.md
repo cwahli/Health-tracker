@@ -505,6 +505,24 @@ EN/ID UI chrome for login, home, chat, food history, insights, trends/health, pr
 
 **Gates while active:** `npm run scorecard:debug` (`i18n_required_chrome` PASS) + named i18n vitest (`i18n.test.ts`, `dietitianInstructions.i18n.test.ts`) + I18N-A11Y soak into `golden/scorecard/current/a11y/` when chrome changes.
 
+## Track T — Staged-meal compose fixes (2026-09-18, active)
+
+Screenshot-reported defects in the Matches / staged-tray / composite-card flow (`LogChat.tsx` Matches dropdown + tray, `compositeFoodCalculation.ts`, `FoodCard.tsx` + `NutritionLabelTable.tsx`). Work in this order. One class, one item, named tests.
+
+**Playwright rule (binding):** new spec file `prototype/tests/staged-tray.spec.ts`, Tier 2 stubbed like `dialog-inventory.spec.ts` (stub `/api/*`, drive DOM, **no live Gemini**). Each item below names its test; **that test must pass for the item to be COMPLETE** — a green vitest alone does not close the item. Per L16, each item also extends the most relevant existing vitest file (no one-off suites) and keeps the run inspectable via the Canonical Run Tree where states/dispatches change.
+
+| ID | Class | Item | Gate (inner vitest + Playwright, both green to complete) | Do not |
+|---|---|---|---|---|
+| **T-1** | `THUMB_FALLBACK` | Matches + tray thumbnails: real stored/donor photo renders; dead URL falls back to letter tile; proxy-guessed URLs are never used for display | `foodImageSources.test.ts` + `imageResolver` row · PW `staged tray: real photo shown, dead URL falls back, no broken-image icon` | Backfill fake images; live R2 calls in the loop |
+| **T-2** | `LEAK_UNREADABLE_CHROME` | Gram inputs readable in dark mode (explicit text color on both Matches inputs) | `i18n.test.ts` untouched (no copy change) · PW `gram inputs keep readable text color in dark mode` | Restyle the whole dock; translate chrome |
+| **T-3** | `PORTION_FUNNEL` | Tray gram field clear-to-edit: select-all+delete shows empty (no snap to 1); `0` allowed mid-edit; clamp ≥1 on blur/submit | `quantityText.test.ts` + tray unit in `server_food_multi_composition.test.ts` · PW `tray gram field clears and clamps` | Second LLM; per-country paths |
+| **T-4** | `DOUBLE_CONFIRM` | Single confirmation: `+ Add` stages only — chat input must NOT contain the bracket tag afterwards; unstage still cleans text | `bracketPortionParser.test.ts` · PW `add stages without mirroring into chat box` | Keep the mirror as "feature"; touch helper logic |
+| **T-5** | `STALE_SUBMIT` | Submit works staged-only: empty input + staged tags sends via instant composite path; staged + plain query text still routes composite (no silent agent-path drop) | `server_food_multi_composition.test.ts` · PW `staged-only submit composes instantly` + PW `staged plus query text still composes` | `POST /loop`; paint expected.json |
+| **T-6** | `MEAL_IMAGE_UNIQUE` | Card shows preview AND full image(s): composite `allImages` render as gallery (multi-image meal shows all), preview stays | `imageResolver.contract.test.ts` · PW `composite card gallery shows every staged image` | Duplicate R2 uploads; drop `preferred_language`-style widening |
+| **T-7** | `FALSE_FRIEND` | OCR badge on restaged meals: `dbSource`/`labelNutrientsPerServing`/`rawNutritionLabel` propagate tag → calc → card, "Nutrition Facts (OCR Label)" shows with **zero** extra agent calls (assert no unexpected `/api` POSTs in PW) | `brandCurator.test.ts` row + `debugPayload.test.ts` · PW `restaged OCR meal shows label badge with no agent call` | New agent/dispatch for OCR; invent a catalog primitive |
+
+**Process for Track T:**desk-check each item against `docs/agent/DOMAIN_REGRESSION_MAP.md` matching row; `tsc` + named vitest + the item's PW test per item; `journey-guard` + shell-smoke before COMPLETE. New user-visible copy (if any) goes in `translations.ts` en+id parity.
+
 ## Gates (named rows, not a pile)
 
 **Every COMPLETE:** `npx tsc --noEmit` + the [DOMAIN_REGRESSION_MAP.md](../docs/agent/DOMAIN_REGRESSION_MAP.md) row(s) for files you touched. That is the whole default. See `QUALITY.md` §1.4.
