@@ -13,7 +13,7 @@
 Laws: `docs/agent/domains/{biomarkers,food-calc,sync}.md`  
 WIP: `AI_HANDOVER.md` (header only) · Completed: `archive/` · `plan/archive/`
 
-**As of 2026-09-18.** Scorecard sealed ALL GREEN **744/0/0** @ `5615f1e` (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Q-11 shell split is nearly done** — App.tsx is wiring-only (350 / 14 KB) with real auth/sync; `Header.tsx` is the last god file (3,544 / 208 KB, residual packet `q-11-12`). **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent. Do not reopen FDC or put curator back on Analyze.
+**As of 2026-09-18.** Scorecard sealed ALL GREEN **744/0/0** @ `5615f1e` (`golden/scorecard/result_summary/LATEST.md`). Q-9 extract-only shipped. F-11.2 / F-11.3 curator LLM shipped. Q-8.6 outer soak shipped. **Q-11 shell split is COMPLETE** — App.tsx is wiring-only (350 / 14 KB) with real auth/sync, and `Header.tsx` is 690 lines / 28 KB (was 9,101 / 373 KB when Q-11 opened; the settings overlay and theme customizer now own their files). **Grok-only is retired** — locked packets in `specs/active/` are executable by any agent. Do not reopen FDC or put curator back on Analyze.
 
 ---
 
@@ -42,7 +42,7 @@ Q-11 **is not done.** `7d94def` stubbed the shell; `q-11-restore-auth-profile` p
 1. **Q-11.7 DONE** — `31aece2` (ProfileModal out of `Header.tsx`). Packet retired to `specs/done/q-11-7-header-profile.SUPERSEDED.md`; its `≤ 1,200 / < 200 KB` target was unreachable from the profile portal alone and is carried by 11.12.
 2. **Q-11.10 DONE** — `e2ab233`. App `handle*` bodies → `useFoodLogActions` / `useBiomarkerActions` / `useReportActions` (App.tsx 3,114 → 1,098). `specs/done/`.
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
-4. **Q-11.12 OPEN (node 2 DONE)** — `specs/active/q-11-12-header-residual.md`. The last god file. **Node 2 landed (`cdbf2cd`)**: `#db-interactions-overlay` → `DbInteractionsOverlay.tsx`, moved byte-identically, so `Header.tsx` is 3,545 → **2,840 lines / 160 KB** — the >200 KB Studio blocker is gone. **Next is node 1**: theme customizer (1,330-line portal + ~700 lines of theme state) → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, to reach ≤ 1,200 lines. Measured scope: theme-customizer portal 1,330 lines / 98 KB + ~700 lines of theme state → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`; DB overlay 746 / 51 KB → `DbInteractionsOverlay.tsx`; inspector 70 / 4 KB. Studio-blocking. Do this next, one node per commit.
+4. **Q-11.12 DONE** — nodes landed `cdbf2cd` (settings overlay → `DbInteractionsOverlay.tsx`) and `c92ec49` + `2fb8d88` (theme customizer → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, move-only, then its orphaned imports). `Header.tsx` 3,545 → **690 lines / 28,791 B**: the packet's ≤ 1,200-line and < 200 KB targets are both met, and every moved slice was proven byte-identical against the pre-move file. Packet retired to `specs/done/`. **The Q-11 ladder is complete** — no Q-11 packet is active.
 5. **R-13.1 PARKED** — `specs/active/R-13.md`. Site is already live on Render. Extra Cloudflare/Containers public URL is optional infra, not a blocker for Q-11. Do not start it in the same working tree as a Q-11 packet.
 6. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-11 files.
 
@@ -442,7 +442,7 @@ F-11.2 / F-11.3 curator LLM  ← shipped (2026-09-16 brandCurator + t1/curator w
 Q-9 website consolidation    ← shipped (extract-only)
 Q-4 AgentResultTable thin    ← shipped
 Q-10 dependency audit        ← shipped
-Q-11 App shell decoupling     ← IN PROGRESS — finish 11.7 → 11.10 → 11.11 (packets in specs/active/)
+Q-11 App shell decoupling     ← DONE — 11.7/11.10/11.11/11.12 landed (App 350, Header 690)
 R-13.1 Cloudflare extra URL  ← PARKED; Render already live
 ```
 
@@ -461,9 +461,9 @@ q-11-restore-auth-profile  real sync + AppShell/Tabs/Modals         DONE 4acc632
 q-11-7-header-profile    Header → ProfileModal                      DONE 31aece2 (residual → 11.12)
 q-11-10-app-handlers     use{FoodLog,Biomarker,Report}Actions       DONE e2ab233  App.tsx → 1,098
 q-11-11-wiring-ratchet   App.tsx wiring only                        DONE App.tsx → 350 / 14,416 B
-q-11-12-header-residual  useThemeCustomizer + 2 screen files        OPEN  Header 3,545/208KB → 2,840/160KB; theme screen left
-                         Node 2 DONE cdbf2cd  DbInteractionsOverlay.tsx (746 lines moved byte-identical)
-                         Node 1 NEXT — theme customizer (1,330-line portal + ~700 lines of theme state) → ≤ 1,200
+q-11-12-header-residual  useThemeCustomizer + 2 screen files        DONE  Header 3,545/208KB → 690/28.8KB
+                         node 2 cdbf2cd  DbInteractionsOverlay.tsx (746 lines moved byte-identical)
+                         node 1 c92ec49 + 2fb8d88  ThemeCustomizerScreen.tsx 1,616 / useThemeCustomizer.ts 680
 ```
 
 Burned: `a14abea` and `7d94def` rewrote instead of moving (deleted AuthScreen, stubbed
@@ -481,7 +481,7 @@ packet. Q-9/Q-8.2 are green.
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work: **Q-11.12** (Header residual — theme screen, DB overlay). One class, named vitest. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
+| Prefer | Current work: **Q-11 is complete** — next pick is `F-13` (food follow-up) or un-parking `R-13.1` with cloud credentials. One class, named vitest. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---

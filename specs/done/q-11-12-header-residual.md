@@ -5,7 +5,13 @@ class: GOD_FILE_GROWTH
 skill: specify
 edit_mode: extract
 who: any-agent
-auto_go: true
+# DONE 2026-09-18 — node 2 (`cdbf2cd`) moved `#db-interactions-overlay` to
+# DbInteractionsOverlay.tsx; node 1 (`c92ec49`) moved the theme customizer to
+# useThemeCustomizer.ts + ThemeCustomizerScreen.tsx; `2fb8d88` dropped the imports
+# the extraction orphaned. Header.tsx 3,545 -> 690 lines / 28,791 B (<= 1,200 and
+# < 200 KB targets met); every moved slice proved byte-identical; CATALOG Header
+# ceiling ratcheted 3544 -> 708. Do not re-execute.
+auto_go: false
 allowed_files:
   - src/components/Header.tsx
   - src/components/ThemeCustomizerScreen.tsx
