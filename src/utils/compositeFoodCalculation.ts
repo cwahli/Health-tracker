@@ -2,8 +2,9 @@
  * Pure calculation and data aggregation helper for composite multi-item meals.
  * Used by LogChat compose tray and verified by the master scorecard.
  */
-import { getCurrentDateInTimezone } from './dateUtils';
+import { getCurrentDateInTimezone, toYYYYMMDD } from './dateUtils';
 import { collectSavedMealImageUrls } from './foodImageSources';
+import { foodLogFingerprint, normalizeFoodName, hasUsableFoodImage } from './foodLogDedupe';
 
 
 export interface StagedFoodTag {
@@ -390,11 +391,63 @@ const isBlankDonorValue = (v: unknown): boolean => {
   return false;
 };
 
+/**
+ * Find the full log backing a thin previous_meal search row.
+ * Pass 1 is the exact id. Passes 2–3 cover the same record under a different
+ * id (sync/cloud copies, retries, per-date re-logs): exact fingerprint, else
+ * same-day + exact normalized name. Candidates holding a usable photo win so
+ * the search tile can render. API scalars still win field-by-field downstream.
+ */
+function findHydrationDonor(item: any, foodLogs: any[]): any | undefined {
+  const id = String(item?.id || item?.food_id || '').trim();
+  if (id) {
+    const exact = foodLogs.find((f) => f && typeof f === 'object' && String((f as any).id) === id);
+    if (exact) return exact;
+  }
+  let fp = '';
+  try {
+    fp = foodLogFingerprint({ ...(item as object), id: id || undefined } as any);
+  } catch {
+    fp = '';
+  }
+  const nameKey = normalizeFoodName((item as any)?.name || (item as any)?.dish_name);
+  const day = toYYYYMMDD((item as any)?.date);
+  if (!fp && !nameKey) return undefined;
+  const scored: Array<{ log: any; rank: number }> = [];
+  for (const log of foodLogs) {
+    if (!log || typeof log !== 'object') continue;
+    if (id && String((log as any).id) === id) continue;
+    let rank = 0;
+    if (fp) {
+      try {
+        if (foodLogFingerprint(log as any) === fp) rank = 2;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!rank && nameKey) {
+      const logDay = toYYYYMMDD((log as any).date);
+      if (normalizeFoodName((log as any).name) === nameKey && (!day || !logDay || logDay === day)) rank = 1;
+    }
+    if (rank) scored.push({ log, rank });
+  }
+  if (scored.length === 0) return undefined;
+  scored.sort((a, b) => {
+    const ai = hasUsableFoodImage(a.log) ? 0 : 1;
+    const bi = hasUsableFoodImage(b.log) ? 0 : 1;
+    if (ai !== bi) return ai - bi;
+    if (b.rank !== a.rank) return b.rank - a.rank;
+    return Number((b.log as any).updated_at || 0) - Number((a.log as any).updated_at || 0);
+  });
+  return scored[0].log;
+}
+
 export function hydratePreviousMealTag(item: any, foodLogs?: any[] | null): any {
   if (!item || typeof item !== 'object') return item;
   const id = String(item.id || item.food_id || '').trim();
-  if (!id || !Array.isArray(foodLogs)) return item;
-  const donor = foodLogs.find((f) => f && typeof f === 'object' && String((f as any).id) === id);
+  if (!id && !item.name && !item.dish_name) return item;
+  if (!Array.isArray(foodLogs)) return item;
+  const donor = findHydrationDonor(item, foodLogs);
   if (!donor) return item;
   const merged: any = { ...(donor as any), ...item };
   // Single-item composite saves keep per-item evidence (incl. OCR tags) on

@@ -225,6 +225,43 @@ describe('hydratePreviousMealTag (T-8 thin API rows)', () => {
     expect(hydratePreviousMealTag(thin, null)).toBe(thin);
   });
 
+  it('does not merge a same-day row with a different name', () => {
+    const thin: any = { type: 'previous_meal', id: 'other-id', name: 'Quinoa Bowl', date: '2026-09-16' };
+    const oatDonor: any = { ...donor, id: 'local-oat-16', date: '2026-09-16' };
+    expect(hydratePreviousMealTag(thin, [oatDonor])).toBe(thin);
+  });
+
+  it('does not merge same name on a different day', () => {
+    const thin: any = { type: 'previous_meal', id: 'cloud-copy', name: 'Oat Donor Porridge', date: '2026-09-10' };
+    const oatDonor: any = { ...donor, id: 'local-oat-16', date: '2026-09-16' };
+    expect(hydratePreviousMealTag(thin, [oatDonor])).toBe(thin);
+  });
+
+  it('rescues nutrients/OCR/photos from a same-day same-name donor under a different id', () => {
+    const localDonor: any = { ...donor, id: 'local-oat-16', date: '2026-09-16', updated_at: 5 };
+    const thin: any = { type: 'previous_meal', id: 'cloud-copy-9', name: 'Oat Donor Porridge', date: '2026-09-16', portionGrams: 130 };
+    const out = hydratePreviousMealTag(thin, [localDonor]);
+    expect(out).not.toBe(thin);
+    expect(out.nutrients).toEqual(localDonor.nutrients);
+    expect(out.dbSource).toBe('label');
+    expect(out.rawNutritionLabel).toEqual(localDonor.rawNutritionLabel);
+    expect(out.imageUrls).toEqual(['/photos/pm_donor_a.jpg', '/photos/pm_donor_b.jpg']);
+    // Thin-row identity wins: the API row id is kept, not the donor's.
+    expect(out.id).toBe('cloud-copy-9');
+  });
+
+  it('prefers the photo-holding copy when several same-name donors exist', () => {
+    const bare: any = {
+      id: 'local-oat-bare', name: 'Oat Donor Porridge', date: '2026-09-16', updated_at: 9,
+      nutrients: { calories: 150 }, imageUrls: [],
+    };
+    const rich: any = { ...donor, id: 'local-oat-rich', date: '2026-09-16', updated_at: 1 };
+    const thin: any = { type: 'previous_meal', id: 'cloud-copy-9', name: 'Oat Donor Porridge', date: '2026-09-16' };
+    const out = hydratePreviousMealTag(thin, [bare, rich]);
+    expect(out.imageUrls).toEqual(['/photos/pm_donor_a.jpg', '/photos/pm_donor_b.jpg']);
+    expect(out.rawNutritionLabel).toEqual(rich.rawNutritionLabel);
+  });
+
   it('treats zero/blank API scalars as unknown and hydrates from donor', () => {
     const thin: any = {
       type: 'previous_meal', id: 'pm_donor', name: 'Oat Donor Porridge',
