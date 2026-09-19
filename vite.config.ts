@@ -61,7 +61,11 @@ export default defineConfig(() => {
       },
     },
     test: {
-      exclude: ['**/node_modules/**', '**/dist/**', '**/studio/**', '**/archive/**'],
+      // `**/prototype/tests/**` are Playwright specs (run via `npm run test:e2e` /
+      // `scripts/assert-shell-smoke.mjs`). Without this entry vitest tries to
+      // collect them and `npm test` reports ~25 bogus file failures. It was added
+      // in 6c25141 and dropped by accident in 7d94def.
+      exclude: ['**/node_modules/**', '**/dist/**', '**/studio/**', '**/archive/**', '**/prototype/tests/**'],
     },
   };
 });
