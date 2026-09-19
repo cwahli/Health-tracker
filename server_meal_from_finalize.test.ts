@@ -61,3 +61,25 @@ describe('buildMealFromFinalizeLedgers', () => {
     expect(sum.protein).toBe(12);
   });
 });
+
+describe('label OCR evidence passthrough', () => {
+  it('keeps rawNutritionLabel and labelNutrientsPerServing on the savable item', () => {
+    const item = ledgerToFoodItem({
+      originalName: 'Mr. Oat Quick Cook Oatmeal',
+      weightGrams: 130,
+      nutrients: { calories: 498, protein: 16.4 },
+      dbSource: 'label',
+      rawNutritionLabel: { servingSize: '130g', calories: '498' },
+      labelNutrientsPerServing: { calories: 498, protein: 16.4 },
+    });
+    expect(item.dbSource).toBe('label');
+    expect(item.rawNutritionLabel).toEqual({ servingSize: '130g', calories: '498' });
+    expect(item.labelNutrientsPerServing).toEqual({ calories: 498, protein: 16.4 });
+  });
+
+  it('leaves estimated items without invented evidence', () => {
+    const item = ledgerToFoodItem({ originalName: 'A', weightGrams: 100, nutrients: { calories: 100 } });
+    expect(item.rawNutritionLabel).toBeNull();
+    expect(item.labelNutrientsPerServing).toBeNull();
+  });
+});

@@ -63,6 +63,12 @@ export interface DishLedger {
   dishClass: 'atomic' | 'composed';
   dbSource: 'label' | 'brand_official' | 'usda' | 'estimated';
   dbId: string | null;
+  /**
+   * Printed-label evidence (provenance for the OCR badge, never math).
+   * Set only when dbSource === 'label'; the badge requires rawNutritionLabel.
+   */
+  rawNutritionLabel?: Record<string, any> | null;
+  labelNutrientsPerServing?: Record<string, number> | null;
   /** Brand-rung residual: HIT / MULTI / MISS / SKIPPED. Honest MISS does not invent micronutrients. */
   bindStatus?: 'HIT' | 'MULTI' | 'MISS' | 'SKIPPED' | null;
   atwaterFlag: { deviationPct: number; flagged: boolean } | null;
@@ -740,7 +746,7 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
   return {
     scoutIndex,
     originalName,
-    // Prefer official brand menu label when matched (e.g. "Mr Oat Rolled Oats"
+    // Prefer official brand menu dish name when matched (e.g. "Mr Oat Rolled Oats"
     // instead of the scout short name "Rolled Oats").
     brandDisplayName,
     keyword,
@@ -755,6 +761,12 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
     dishClass,
     dbSource,
     dbId,
+    // Printed-label evidence for provenance/badging (never math). The raw label
+    // is only carried when it drove the numbers (dbSource label); per-serving
+    // label nutrients pass through when the scout provided them.
+    rawNutritionLabel: dbSource === 'label' && rawLabel && typeof rawLabel === 'object' ? rawLabel : null,
+    labelNutrientsPerServing:
+      item.labelNutrientsPerServing && typeof item.labelNutrientsPerServing === 'object' ? item.labelNutrientsPerServing : null,
     bindStatus,
     atwaterFlag,
     usdaQueries,

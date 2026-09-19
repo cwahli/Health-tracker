@@ -59,6 +59,10 @@ export function ledgerToFoodItem(ledger: any, extras: {
     lockedNutrientKeys: Array.isArray(ledger?.lockedNutrientKeys) ? ledger.lockedNutrientKeys : [],
     dbSource: ledger?.dbSource || 'estimated',
     dbId: ledger?.dbId || null,
+    // Printed-label evidence must survive to the savable item or no downstream
+    // consumer (badge, reuse projection, composite restage) can ever prove OCR.
+    rawNutritionLabel: (ledger as any)?.rawNutritionLabel || null,
+    labelNutrientsPerServing: (ledger as any)?.labelNutrientsPerServing || null,
     brandLock: ledger?.brandLock || null,
     atwaterFlag: ledger?.atwaterFlag || null,
     ingredientsList: ledger?.ingredientsList || (Array.isArray(ledger?.ingredients) ? ledger.ingredients.join(', ') : null),

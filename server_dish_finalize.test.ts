@@ -877,4 +877,41 @@ describe("server_dish_finalize", () => {
     expect(ledgerCountGrams.nutrients.protein).toBeLessThanOrEqual(21);
     expect(ledgerCountGrams.nutrients.totalFibre).toBeLessThanOrEqual(8);
   });
+
+  it('carries label evidence on the ledger for provenance/badging (never math)', () => {
+    return finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        originalName: 'Mr. Oat Quick Cook Oatmeal',
+        keyword: 'oatmeal',
+        estimatedWeightGrams: 130,
+        rawNutritionLabel: { servingSize: '130g', calories: '498', protein: '16.4 g' },
+        labelNutrientsPerServing: { calories: 498, protein: 16.4 },
+      },
+      nutrientBasisWeight: 130,
+      consumedWeight: 130,
+    }).then((ledger) => {
+      expect(ledger.dbSource).toBe('label');
+      expect(ledger.rawNutritionLabel).toEqual({ servingSize: '130g', calories: '498', protein: '16.4 g' });
+      expect(ledger.labelNutrientsPerServing).toEqual({ calories: 498, protein: 16.4 });
+    });
+  });
+
+  it('carries no label evidence for estimated items', () => {
+    return finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        originalName: 'Chicken Rice',
+        keyword: 'chicken rice',
+        estimatedWeightGrams: 300,
+        nutrients: { calories: 600, protein: 35 },
+      },
+      nutrientBasisWeight: 300,
+      consumedWeight: 300,
+    }).then((ledger) => {
+      expect(ledger.dbSource).toBe('estimated');
+      expect(ledger.rawNutritionLabel).toBeNull();
+      expect(ledger.labelNutrientsPerServing).toBeNull();
+    });
+  });
 });

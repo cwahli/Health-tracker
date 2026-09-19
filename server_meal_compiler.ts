@@ -50,6 +50,8 @@ export interface MealItem {
   primaryBaseMatchName?: string | null;
   primaryBaseWeightG?: number;
   labelNutrientsPerServing?: Record<string, number> | null;
+  /** Printed-label evidence (provenance for the OCR badge, never math). */
+  rawNutritionLabel?: Record<string, any> | null;
 }
 
 export interface MealState {
@@ -417,6 +419,10 @@ export async function compileMealState(
       nutrients: ledger.nutrients as Record<string, number>,
       dbSource: ledger.dbSource || it.dbSource,
       dbId: ledger.dbId ?? it.dbId,
+      // Printed-label evidence rides with the numbers it produced. Without
+      // this the savable item can never badge "Nutrition Facts (OCR Label)".
+      rawNutritionLabel: (ledger as any).rawNutritionLabel ?? (it as any).rawNutritionLabel ?? null,
+      labelNutrientsPerServing: (ledger as any).labelNutrientsPerServing ?? (it as any).labelNutrientsPerServing ?? null,
     });
     addDebugLog(`[MealCompiler] finalize idx=${idx} "${it.canonicalDbName}" kcal=${ledger.nutrients.calories} source=${ledger.dbSource}`);
   }
