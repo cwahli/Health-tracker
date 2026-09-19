@@ -109,4 +109,114 @@ test.describe('saved-meal reuse renders evidence', () => {
     await tile.getByText('Mr. Oat Quick Cook Oatmeal', { exact: true }).click();
     await expect(page.getByText('Nutrition Facts (OCR Label)').first()).toBeVisible({ timeout: 15000 });
   });
+
+  test('search tile resolves a ref: pointer to the primary photo', async ({ page }) => {
+    // Phase 1: save the rich meal so a primary with real photos exists in logs.
+    await page.locator('#food-chat-input').fill('mr oat');
+    const stageRow = page
+      .getByText('Mr. Oat Quick Cook Oatmeal', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await stageRow.getByRole('button', { name: /add/i }).click();
+    await expect(page.getByText('STAGED ITEMS')).toBeVisible({ timeout: 15000 });
+    await page.locator('#food-chat-send-btn').click();
+    await expect(page.getByText(/Here is the nutrition breakdown for.*Mr\. Oat/i).first()).toBeVisible({ timeout: 20000 });
+    await page.getByRole('button', { name: /log this/i }).first().click();
+    await expect(page.getByText('Saved to History')).toBeVisible({ timeout: 20000 });
+
+    const saved = await page.evaluate(() => {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        if (!k.startsWith('health_app_data_')) continue;
+        try {
+          const b = JSON.parse(localStorage.getItem(k) || '{}');
+          const f = (b.foodLogs || []).find(
+            (x: any) => /oat/i.test(x?.name || '') && Array.isArray(x?.imageUrls) && x.imageUrls.length > 0,
+          );
+          if (f) return { id: f.id, imageUrls: f.imageUrls };
+        } catch { /* ignore */ }
+      }
+      return null;
+    });
+    expect(saved?.id).toBeTruthy();
+
+    // Phase 2: the server now returns a duplicate-pointer row (ref:), as
+    // handleDuplicateFoodLog persists them. The tile must show the photo.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const navTab = page.locator('#nav-tab-home');
+    const demoBtn = page.locator('#demo-login-btn');
+    await Promise.race([
+      navTab.waitFor({ state: 'attached', timeout: 20000 }).catch(() => {}),
+      demoBtn.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {}),
+    ]);
+    if (await demoBtn.isVisible().catch(() => false)) {
+      await demoBtn.click();
+    }
+    await navTab.waitFor({ state: 'attached', timeout: 20000 });
+    await page.route('**/api/food/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          results: [
+            {
+              type: 'previous_meal',
+              id: 'cloud-ref-1',
+              name: 'Oat Ref Copy',
+              portionGrams: 175,
+              weightGrams: 175,
+              imageUrl: `ref:${(saved as any).id}`,
+              imageUrls: [`ref:${(saved as any).id}`],
+            },
+          ],
+        }),
+      });
+    });
+    const quickActionBtn = page.locator('button[title="Open quick actions"], button.w-14.h-14').first();
+    await quickActionBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await quickActionBtn.click();
+    await page.getByRole('button', { name: /Log Meal/i }).first().click();
+    await expect(page.locator('#food-chat-input')).toBeVisible({ timeout: 10000 });
+    await page.locator('#food-chat-input').fill('oat');
+
+    const row = page
+      .getByText('Oat Ref Copy', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await expect(row.getByRole('button', { name: /add/i })).toBeVisible({ timeout: 15000 });
+    const thumb = row.locator('img').first();
+    await expect(thumb).toBeVisible({ timeout: 15000 });
+    expect(await thumb.getAttribute('src')).toContain('data:image');
+  });
+
+  test('search tile falls back to the letter tile for an unresolvable ref:', async ({ page }) => {
+    // NOTE: beforeEach already opened the Log Meal composer — just override
+    // search and type. Re-clicking quick actions would hit the open dialog.
+    await page.route('**/api/food/search*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          results: [
+            {
+              type: 'previous_meal',
+              id: 'cloud-ref-2',
+              name: 'Oat Ref Copy',
+              portionGrams: 280,
+              weightGrams: 280,
+              imageUrl: 'ref:food_gone_zzz',
+              imageUrls: ['ref:food_gone_zzz'],
+            },
+          ],
+        }),
+      });
+    });
+    await expect(page.locator('#food-chat-input')).toBeVisible({ timeout: 10000 });
+    await page.locator('#food-chat-input').fill('oat');
+
+    const row = page
+      .getByText('Oat Ref Copy', { exact: true })
+      .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+    await expect(row.getByRole('button', { name: /add/i })).toBeVisible({ timeout: 15000 });
+    await expect(row.locator('img')).toHaveCount(0);
+    await expect(row.locator('div.w-8.h-8', { hasText: 'O' })).toBeVisible({ timeout: 15000 });
+  });
 });
