@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS food_logs (
   scout_items TEXT DEFAULT '[]',
   image_urls TEXT DEFAULT '[]',
   chat_transcript TEXT DEFAULT '[]',
+  source_meal_id TEXT DEFAULT '',
   updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_food_logs_uid_updated ON food_logs(firebase_uid, updated_at DESC);
@@ -319,6 +320,10 @@ export async function ensureD1Schema(): Promise<{ success: boolean; error?: stri
     // Safe migration check for existing D1 databases lacking image_url
     try {
       await d1Query('ALTER TABLE brand_menu_items ADD COLUMN image_url TEXT');
+    } catch (_) {}
+    // Saved-meal lineage pointer (duplicate/restage parent id).
+    try {
+      await d1Query('ALTER TABLE food_logs ADD COLUMN source_meal_id TEXT DEFAULT \'\'');
     } catch (_) {}
     await ensureNutritionD1Seed();
     return { success: true };

@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile, FoodLog, NutrientBreakdown, RecommendationReport } from '../types';
 import { translations } from '../utils/translations';
 import { displayNutrientName } from '../utils/i18n';
-import { Edit2, Trash2, Search, ChevronDown, ChevronUp, Image as ImageIcon, Save, Check, Plus, Loader, X, Camera, Download } from 'lucide-react';
+import { Edit2, Trash2, Search, ChevronDown, ChevronUp, Image as ImageIcon, Save, Check, Plus, Loader, X, Camera, Download, MessageCircle } from 'lucide-react';
 import { nutrientDefinitions, getNutrientColor } from '../utils/nutrition';
 import { formatNutrientDisplayValue } from '../utils/nutrients';
 import { db, auth } from '../firebase';
@@ -12,7 +12,9 @@ import { compressMultipleImages } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD, formatLogDateTime } from '../utils/dateUtils';
 import ImageSlider from './ImageSlider';
 import { resolveFoodImage, resolveFoodImages } from '../utils/imageResolver';
-import { mergeFoodLogsDeduped, foodLogFingerprint } from '../utils/foodLogDedupe';
+import { mergeFoodLogsDeduped, foodLogFingerprint, isLineageLinked } from '../utils/foodLogDedupe';
+import { findMasterMeal, propagateDownstream } from '../utils/savedMealLineage';
+import PreviousMealThumbnail from './PreviousMealThumbnail';
 import { fetchFoodLogDetail } from '../utils/syncUtils';
 import { resolveMealVerdict } from '../utils/verdictUtils';
 
@@ -40,6 +42,8 @@ interface FoodHistoryTabProps {
   /** Persist collapsed food list when sync left duplicates in state */
   onReplaceFoodLogs?: (foods: FoodLog[]) => void;
   onLogFood?: (food: FoodLog) => void;
+  /** Open the food chat seeded with this meal for re-review (saves back to the same id). */
+  onReviewMeal?: (log: FoodLog) => void;
   onEditingActiveChange?: (active: boolean) => void;
   isManualEntryOpen?: boolean;
   onManualEntryOpenChange?: (open: boolean) => void;
@@ -94,6 +98,7 @@ export default function FoodHistoryTab({
   onDeleteFoodLog,
   onReplaceFoodLogs,
   onLogFood,
+  onReviewMeal,
   onEditingActiveChange,
   isManualEntryOpen: propIsManualEntryOpen,
   onManualEntryOpenChange,
@@ -558,19 +563,29 @@ export default function FoodHistoryTab({
       }));
 
     const all = [...savedLogs, ...jobItems];
-    const seen = new Set<string>();
+    const seenFp = new Map<string, typeof all>();
     const deduped: typeof all = [];
     all.forEach(item => {
-      // Normalize date + calories so UI list cannot show oatmeal twice
+      // Normalize date + calories so UI list cannot show oatmeal twice.
+      // Lineage pairs (master + restaged child) intentionally share that
+      // fingerprint and must both stay visible.
       const key =
         item.type === 'log'
           ? foodLogFingerprint(item.data as any)
           : `job_${item.id}`;
       if (item.type === 'log') {
-        if (!seen.has(key)) {
-          seen.add(key);
+        const bucket = seenFp.get(key);
+        if (!bucket) {
+          seenFp.set(key, [item]);
+          deduped.push(item);
+          return;
+        }
+        const linked = bucket.some((kept) => kept.type === 'log' && isLineageLinked(kept.data as any, item.data as any));
+        if (linked) {
+          bucket.push(item);
           deduped.push(item);
         }
+        return;
       } else {
         const job = item.data as any;
         const isInFlight = ['queued', 'running', 'processing', 'awaiting_user', 'cancel_requested'].includes(job.status);
@@ -599,7 +614,7 @@ export default function FoodHistoryTab({
         }
         
         const jobFp = pending ? foodLogFingerprint(pending as any) : '';
-        if (jobFp && seen.has(jobFp)) return;
+        if (jobFp && seenFp.has(jobFp)) return;
         deduped.push(item);
       }
     });
@@ -657,6 +672,27 @@ export default function FoodHistoryTab({
       return getTime(b) - getTime(a);
     });
   }, [activeFoodLogs, jobs]);
+
+  // Saved-meal lineage: child log id → root master log (once per list render).
+  const masterByChildId = React.useMemo(() => {
+    const map = new Map<string, any>();
+    for (const log of activeFoodLogs) {
+      const pid = String((log as any)?.sourceMealId || (log as any)?.source_meal_id || '').trim();
+      if (!pid || !log?.id) continue;
+      map.set(String(log.id), findMasterMeal(log, activeFoodLogs));
+    }
+    return map;
+  }, [activeFoodLogs]);
+
+  const openMasterMeal = React.useCallback((log: FoodLog) => {
+    const master = masterByChildId.get(String(log.id));
+    if (!master || master.id === log.id) return;
+    const idx = combinedItems.findIndex((it: any) => it.type === 'log' && it.data?.id === master.id);
+    if (idx < 0) return;
+    if (searchTerm) setSearchTerm('');
+    setCurrentPage(Math.floor(idx / itemsPerPage) + 1);
+    setExpandedLogId(master.id);
+  }, [masterByChildId, combinedItems, searchTerm, itemsPerPage]);
 
   const filteredLogs = React.useMemo(() => {
     return combinedItems.filter(item => {
@@ -862,7 +898,15 @@ export default function FoodHistoryTab({
 
   const handleSaveEdit = () => {
     if (editLogState) {
-      onUpdateFoodLog(editLogState);
+      // Saved-meal lineage: an edited master refreshes its whole descendant
+      // subtree (nutrients re-scaled to each child's own weight; names and
+      // photos follow). Single save+sync via replace when available.
+      const downstream = propagateDownstream(editLogState, activeFoodLogs);
+      if (downstream.size > 1 && onReplaceFoodLogs) {
+        onReplaceFoodLogs(foodLogs.map((f) => downstream.get(String(f.id)) || f));
+      } else {
+        onUpdateFoodLog(editLogState);
+      }
     }
     setEditingLogId(null);
     setEditLogState(null);
@@ -1743,6 +1787,17 @@ export default function FoodHistoryTab({
                         >
                           <X className="w-6 h-6 stroke-[2.5px]" />
                         </button>
+                        {/* Review Button: re-analyze this meal in chat, saving back to the same log */}
+                        {onReviewMeal && editLogState && (
+                          <button
+                            type="button"
+                            onClick={() => onReviewMeal(editLogState)}
+                            className="w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 transition-all focus:outline-none focus:ring-4 focus:ring-indigo-500/20 cursor-pointer"
+                            title={t.reviewMeal || 'Review'}
+                          >
+                            <MessageCircle className="w-6 h-6 stroke-[2.5px]" />
+                          </button>
+                        )}
                         
                         {/* Save/Tick Button */}
                         <button
@@ -1767,6 +1822,29 @@ export default function FoodHistoryTab({
                             <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
                               {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
                             </span>
+                            {(() => {
+                              const pid = String((log as any)?.sourceMealId || (log as any)?.source_meal_id || '').trim();
+                              if (!pid) return null;
+                              const master = masterByChildId.get(String(log.id));
+                              const openable = Boolean(master && master.id !== log.id &&
+                                combinedItems.some((it: any) => it.type === 'log' && it.data?.id === master.id));
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={!openable}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openMasterMeal(log);
+                                  }}
+                                  title={openable ? `${t.savedMealTag || 'Saved meal'}: ${master.name}` : (t.savedMealTag || 'Saved meal')}
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wide ${openable
+                                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800 cursor-pointer'
+                                    : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 cursor-default'}`}
+                                >
+                                  {t.savedMealTag || 'Saved meal'}
+                                </button>
+                              );
+                            })()}
                             {(() => {
                               const v = resolveMealVerdict(log, profile?.language);
                               if (!v?.label) return null;
@@ -1966,14 +2044,12 @@ export default function FoodHistoryTab({
                                                   sourceImageIndex={rawIdx}
                                                 />
                                               ) : (
-                                                <img
+                                                <PreviousMealThumbnail
                                                   src={resolvedImgSrc}
                                                   alt={item.keyword || item.originalName}
+                                                  fallbackLabel={item.keyword || item.originalName || 'M'}
                                                   className="w-full h-full object-cover"
-                                                  onError={(e) => {
-                                                    const t = e.target as HTMLImageElement;
-                                                    if (!t.src.includes('unsplash.com')) t.src = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80&auto=format';
-                                                  }}
+                                                  fallbackClassName="w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-400 font-bold text-lg"
                                                 />
                                               )}
                                             </div>

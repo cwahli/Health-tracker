@@ -312,10 +312,25 @@ function pickBetter<T extends DedupableFoodLog>(a: T, b: T): T {
   );
 }
 
+/** Direct parent↔child link in either direction (never collapse these). */
+export function isLineageLinked(a: DedupableFoodLog, b: DedupableFoodLog): boolean {
+  const aId = a?.id ? String(a.id) : '';
+  const bId = b?.id ? String(b.id) : '';
+  if (!aId || !bId || aId === bId) return false;
+  const aParent = String((a as any)?.sourceMealId || (a as any)?.source_meal_id || '');
+  const bParent = String((b as any)?.sourceMealId || (b as any)?.source_meal_id || '');
+  return aParent === bId || bParent === aId;
+}
+
 function shouldSoftMerge(a: DedupableFoodLog, b: DedupableFoodLog): boolean {
   const da = toYYYYMMDD(a.date);
   const db = toYYYYMMDD(b.date);
   if (da !== db) return false;
+
+  // Saved-meal lineage: a restaged child must never collapse into its master
+  // (or vice versa) — same name/day/kcal is EXPECTED there, and merging
+  // destroys the intentional history. Same-id retries still merge at ingest.
+  if (isLineageLinked(a, b)) return false;
 
   const imgA = isUsableImageUrl(a.imageUrl)
     ? a.imageUrl
@@ -395,7 +410,12 @@ export function mergeFoodLogsDeduped<T extends DedupableFoodLog>(a: T[], b: T[])
       finalIds.push(id);
     } else {
       const kept = byId.get(existingId) as T;
-      byId.set(existingId, pickBetter(kept, log));
+      if (isLineageLinked(kept, log)) {
+        byFingerprint.set(`${fp}::${id}`, id);
+        finalIds.push(id);
+      } else {
+        byId.set(existingId, pickBetter(kept, log));
+      }
     }
   });
 
@@ -426,6 +446,9 @@ export function mergeFoodLogsDeduped<T extends DedupableFoodLog>(a: T[], b: T[])
     const existing = byAgg.get(ak);
     if (!existing) {
       byAgg.set(ak, id);
+      aggKept.push(id);
+    } else if (isLineageLinked(byId.get(existing) as T, log)) {
+      byAgg.set(`${ak}::${id}`, id);
       aggKept.push(id);
     } else {
       byId.set(existing, pickBetter(byId.get(existing) as T, log));

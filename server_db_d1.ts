@@ -35,6 +35,7 @@ export interface D1FoodRow {
   scout_items?: any;
   image_urls?: any;
   chat_transcript?: any;
+  source_meal_id?: string;
   updated_at?: string;
 }
 
@@ -42,7 +43,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
   if (!foods || foods.length === 0) return { success: true, count: 0 };
   if (!isD1Configured()) return { success: false, count: 0, error: 'D1 not configured' };
 
-  // Batch in chunks of 3 (3 * 26 = 78 variables) to stay strictly within Cloudflare D1 SQL variable limits
+  // Batch in chunks of 3 (3 * 27 = 81 variables) to stay strictly within Cloudflare D1 SQL variable limits
   const CHUNK_SIZE = 3;
   let totalUpserted = 0;
 
@@ -52,7 +53,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
     const params: any[] = [];
 
     for (const f of chunk) {
-      valuePlaceholders.push('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      valuePlaceholders.push('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
       params.push(
         f.id,
         f.firebase_uid,
@@ -79,6 +80,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
         Array.isArray(f.scout_items) ? JSON.stringify(f.scout_items) : (f.scout_items || '[]'),
         Array.isArray(f.image_urls) ? JSON.stringify(f.image_urls) : (f.image_urls || '[]'),
         Array.isArray(f.chat_transcript) ? JSON.stringify(f.chat_transcript) : (f.chat_transcript || '[]'),
+        typeof f.source_meal_id === 'string' ? f.source_meal_id : ((f as any).sourceMealId || ''),
         f.updated_at || new Date().toISOString()
       );
     }
@@ -88,7 +90,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
         id, firebase_uid, date, name, composition, weight_grams, quantity, consumed_amount,
         benefits, risks, health_impact, recommendation, verdict, description, message, debug_url,
         calories, saturated_fat, sodium, added_sugar, nutrients, items_breakdown, scout_items,
-        image_urls, chat_transcript, updated_at
+        image_urls, chat_transcript, source_meal_id, updated_at
       ) VALUES ${valuePlaceholders.join(', ')}
       ON CONFLICT(id) DO UPDATE SET
         firebase_uid = excluded.firebase_uid,
@@ -115,6 +117,7 @@ export async function d1UpsertFoods(foods: D1FoodRow[]): Promise<{ success: bool
         scout_items = excluded.scout_items,
         image_urls = excluded.image_urls,
         chat_transcript = excluded.chat_transcript,
+        source_meal_id = excluded.source_meal_id,
         updated_at = excluded.updated_at
     `;
 
@@ -314,7 +317,7 @@ export async function d1PullSync(opts: D1PullOptions): Promise<{
   const uidPlaceholders = possibleUids.map(() => '?').join(', ');
 
   // Columns
-  const lightCols = 'id, firebase_uid, date, name, composition, weight_grams, quantity, consumed_amount, benefits, risks, health_impact, recommendation, calories, saturated_fat, sodium, added_sugar, nutrients, updated_at, verdict, description, message, debug_url, image_urls';
+  const lightCols = 'id, firebase_uid, date, name, composition, weight_grams, quantity, consumed_amount, benefits, risks, health_impact, recommendation, calories, saturated_fat, sodium, added_sugar, nutrients, updated_at, verdict, description, message, debug_url, image_urls, source_meal_id';
   const fullCols = lightCols + ', items_breakdown, scout_items, chat_transcript';
   const foodCols = listOnly ? lightCols : fullCols;
 
@@ -415,7 +418,7 @@ export async function d1SearchUserFoodLogs(opts: D1SearchFoodOptions): Promise<a
   if (!isD1Configured() || !opts.possibleUids?.length || !opts.query?.trim()) return [];
   const limit = Math.min(opts.limit || 5, 20);
   const uidPlaceholders = opts.possibleUids.map(() => '?').join(', ');
-  const sql = `SELECT id, name, calories, nutrients, items_breakdown, image_urls, date, weight_grams, quantity, consumed_amount 
+  const sql = `SELECT id, name, calories, nutrients, items_breakdown, image_urls, date, weight_grams, quantity, consumed_amount, source_meal_id 
                FROM food_logs 
                WHERE firebase_uid IN (${uidPlaceholders}) AND name LIKE ? 
                ORDER BY updated_at DESC LIMIT ?`;

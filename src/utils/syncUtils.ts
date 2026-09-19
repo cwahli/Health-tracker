@@ -210,6 +210,7 @@ export function supabaseRowToFoodLog(row: any, language?: string): FoodLog {
     imageUrl,
     imageUrls,
     debugUrl: row.debugUrl || row.debug_url || '',
+    sourceMealId: row.sourceMealId || row.source_meal_id || undefined,
     itemsBreakdown,
     scoutItems,
     chatTranscript: Array.isArray(row.chatTranscript) ? row.chatTranscript : (Array.isArray(row.chat_transcript) ? row.chat_transcript : []),

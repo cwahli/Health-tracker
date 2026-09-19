@@ -1143,6 +1143,8 @@ export const id = {
   "previousFingerprints": "Previous Fingerprints",
   "previousItem": "Previous Item",
   "previousMeal": "Previous Meal",
+  "savedMealTag": "Makanan tersimpan",
+  "reviewMeal": "Ulas",
   "previousOutcomes": "Previous Outcomes",
   "previousPage": "Previous Page",
   "primaryBase100g": "Primary Base100g",

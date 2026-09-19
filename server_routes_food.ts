@@ -81,7 +81,7 @@ foodRouter.get('/api/food/search', async (req, res) => {
           if (supabaseAdmin) {
             const { data: supaPast } = await supabaseAdmin
               .from('food_logs')
-              .select('id, name, calories, nutrients, items_breakdown, image_urls, date, weight_grams, consumed_amount')
+              .select('id, name, calories, nutrients, items_breakdown, image_urls, date, weight_grams, consumed_amount, source_meal_id')
               .in('firebase_uid', possibleUids)
               .ilike('name', `%${query}%`)
               .order('updated_at', { ascending: false })

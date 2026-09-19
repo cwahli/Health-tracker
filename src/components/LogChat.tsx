@@ -20,6 +20,7 @@ import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { computeRemainingAllowance, calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag, buildCompositeHealthImpact } from '../utils/compositeFoodCalculation';
+import { stampChildLineage, applyReviewMealId } from '../utils/savedMealLineage';
 import { isMealFollowUpEdit, mostRecentActiveMeal } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
@@ -934,6 +935,39 @@ ${logsText}`);
   }, []);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [selectedImagesForAnalysis, setSelectedImagesForAnalysis] = useState<string[]>([]);
+  // Saved-meal re-review seed: a draft job carrying reviewMealId opens the
+  // composer prefilled with the meal's photos. Card saves in this session
+  // keep the reviewed log id (see reviewSaveOverride) instead of duplicating.
+  const reviewSeedConsumedRef = useRef<string | null>(null);
+  const reviewMealIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || !jobId) return;
+    let snap: any = null;
+    try {
+      snap = (JobStore.getJob(jobId) as any)?.inputSnapshot;
+    } catch {
+      snap = null;
+    }
+    const seedId = snap && typeof snap === 'object' && typeof snap.reviewMealId === 'string' ? snap.reviewMealId.trim() : '';
+    reviewMealIdRef.current = seedId || null;
+    if (!seedId || reviewSeedConsumedRef.current === jobId) return;
+    reviewSeedConsumedRef.current = jobId;
+    if (typeof snap.text === 'string' && snap.text) setInputText(snap.text);
+    const photos = Array.isArray(snap.reviewMealPhotos)
+      ? (snap.reviewMealPhotos as unknown[]).filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+      : [];
+    if (photos.length > 0) setSelectedImages((prev) => (prev.length > 0 ? prev : photos));
+  }, [jobId, isOpen]);
+  // Review sessions save card results back to the reviewed log id so a
+  // re-review updates the whole record instead of duplicating it.
+  const reviewSaveOverride = React.useCallback((food: any) => {
+    const targetId = reviewMealIdRef.current;
+    if (targetId && food && typeof food === 'object') {
+      onLogFood?.({ ...applyReviewMealId(food, targetId) });
+      return;
+    }
+    onLogFood?.(food);
+  }, [onLogFood]);
   const [imageDates, setImageDates] = useState<string[]>([]);
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressionProgress, setCompressionProgress] = useState({ current: 0, total: 0, percent: 0 });
@@ -2157,6 +2191,10 @@ ${logsText}`);
             itemsBreakdown
           } = calculateCompositeMeal(explicitFoodTags);
 
+          // Saved-meal lineage: pure restages become children of the master;
+          // mixed trays keep per-item parents only (see savedMealLineage).
+          const lineage = stampChildLineage(explicitFoodTags, itemsBreakdown);
+          const lineageItems = lineage.items;
 
           const compositeFoodLog: any = {
             id: `food_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
@@ -2185,8 +2223,9 @@ ${logsText}`);
             saturatedFat: roundedSat,
             totalFibre: roundedFib,
             sodium: roundedSod,
-            itemsBreakdown,
-            items: itemsBreakdown,
+            itemsBreakdown: lineageItems,
+            items: lineageItems,
+            ...(lineage.sourceMealId ? { sourceMealId: lineage.sourceMealId } : {}),
             imageUrl: primaryImageUrl,
             photoUrl: primaryImageUrl,
             imageUrls: allImages.length > 0 ? allImages : undefined,
@@ -2223,7 +2262,7 @@ ${logsText}`);
             timestamp: new Date().toISOString(),
             data: {
               pendingFoodLog: compositeFoodLog,
-              scoutItems: itemsBreakdown,
+              scoutItems: lineageItems,
               agentResult: {
                 status: 'success',
                 mode: 'new_log'
@@ -5118,6 +5157,7 @@ ${logsText}`);
       ...log,
       id: `food_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       date: todayDate,
+      sourceMealId: log.id,
       imageUrl: resolvedImageUrl,
       imageUrls: resolvedImageUrls
     };
@@ -6038,7 +6078,7 @@ ${logsText}`);
                           language={profile?.language || "en"}
                           t={t}
                           formatNutrientValue={formatNutrientValue}
-                          onLogFood={onLogFood}
+                          onLogFood={reviewSaveOverride}
                           onLogFoodIdeas={onLogFoodIdeas}
                           setLoggedMessageIds={setLoggedMessageIds}
                           loggedMessageIds={loggedMessageIds}

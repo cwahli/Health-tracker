@@ -338,3 +338,49 @@ describe('mergeFoodLogsDeduped carries evidence across a collapse', () => {
     expect(result[0].itemsBreakdown).toBe(result[0].items_breakdown);
   });
 });
+
+describe('lineage pairs survive dedupe', () => {
+  const master: any = {
+    id: 'oat-master',
+    name: 'Lineage Oat Bowl',
+    date: '2026-09-16',
+    weightGrams: 130,
+    updated_at: 100,
+    imageUrl: '/photos/master.jpg',
+    nutrients: { calories: 150, protein: 5 },
+  };
+  const child: any = {
+    id: 'oat-child-1',
+    name: 'Lineage Oat Bowl',
+    sourceMealId: 'oat-master',
+    date: '2026-09-16',
+    weightGrams: 130,
+    updated_at: 200,
+    imageUrl: '/photos/child.jpg',
+    nutrients: { calories: 150, protein: 5 },
+  };
+
+  it('keeps a restaged child and its master as two cards', () => {
+    const result = mergeFoodLogsDeduped([master, child], []);
+    expect(result.map((l) => l.id).sort()).toEqual(['oat-child-1', 'oat-master']);
+  });
+
+  it('keeps them apart regardless of ingest order', () => {
+    const result = mergeFoodLogsDeduped([child], [master]);
+    expect(result.map((l) => l.id).sort()).toEqual(['oat-child-1', 'oat-master']);
+  });
+
+  it('still collapses same-id retries of a lineage member', () => {
+    const retry = { ...child, updated_at: 300 };
+    const result = mergeFoodLogsDeduped([child], [retry]);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('oat-child-1');
+    expect(result[0].sourceMealId).toBe('oat-master');
+  });
+
+  it('still collapses unrelated same-name duplicates without lineage', () => {
+    const dupe = { ...master, id: 'oat-master-retry', updated_at: 150 };
+    const result = mergeFoodLogsDeduped([master], [dupe]);
+    expect(result).toHaveLength(1);
+  });
+});

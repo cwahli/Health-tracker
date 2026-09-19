@@ -44,10 +44,10 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
 4. **Q-11.12 DONE** — nodes landed `cdbf2cd` (settings overlay → `DbInteractionsOverlay.tsx`) and `c92ec49` + `2fb8d88` (theme customizer → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, move-only, then its orphaned imports). `Header.tsx` 3,545 → **690 lines / 28,791 B**: the packet's ≤ 1,200-line and < 200 KB targets are both met, and every moved slice was proven byte-identical against the pre-move file. Packet retired to `specs/done/`. **The Q-11 ladder is complete** — no Q-11 packet is active.
 5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (392 KB / 7,039 lines, 39 over its 7,000 ceiling).
-6. **R-13.1 PARKED** — `specs/active/R-13.md`. Site is already live on Render. Extra Cloudflare/Containers public URL is optional infra, not a blocker for Q-11. Do not start it in the same working tree as a Q-11 packet.
+6. **R-13.1 PARKED / retargeted** — host is **OVH VPS-2**, not Cloud Run and not Cloudflare Containers. Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md) **Track V**. Site stays on Render until Phase 4 (V-13…V-16). Extra Cloudflare/Containers URL stays parked. Do not start Track V or R-13.1 in the same working tree as F-13.
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
 
-**Still `blocked_human`:** **L-5** only (name a locale first — do not invent `fr`/`zh` copy). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
+**Still `blocked_human`:** **L-5** (name a locale first — do not invent `fr`/`zh` copy) and **Track V / R-13.1** (order VPS-2 first — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest, Cloud Run go-live, deleting Render. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -88,13 +88,13 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
-| Make the site live / Cloudflare | **R-13** — [RELIABILITY.md](./RELIABILITY.md) **§12**. Packet locked. R-13.0 preflight PASS. R-13.1 any agent. Not R-2. Not Pages Functions importing `server.ts`. |
+| Make the site live / leave Render | **Track V** then **R-13.1** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). OVH VPS-2. R-13.0 preflight PASS. R-13.1 is `blocked_human` until V-0. Not Cloud Run. Not Pages Functions importing `server.ts`. Not Cloudflare Containers. |
 | Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: putting curator back on Analyze, reopening FDC, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive. **R-13.0** is agent preflight (PASS); **R-13.1** is next. **L-5** stays human until a locale is named.  
-Do **not** add a sixth plan file. F-10 lives here + [FOOD.md](./FOOD.md) Process.
+Do **not** start: putting curator back on Analyze, reopening FDC, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render. **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is `blocked_human` until VPS-2 exists. **L-5** stays human until a locale is named.  
+F-10 lives here + [FOOD.md](./FOOD.md) Process. Track V lives here + [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md).
 
 ---
 
@@ -365,18 +365,44 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | **R-10** | Header code-split | `themeRegistry` audit, Drive backup, `FoodCatalogAdminTab`, quota checkers lazy; Header line count may not grow | After R-9 |
 | **R-11** | `HomeTab` / `LogChat` stay out of other tabs’ first paint | Already lazy-tabbed; do not eagerly import them from Insights / History | Regression after R-10 |
 | **R-12** | One-line stall/503 count (free-tier hang rate) | After F-8.13 JSON tree has `latency_ms` / error on dispatches. A number in `AI_HANDOVER.md`, **not** a metrics product. RELIABILITY.md §11.12 **H** | LangSmith; Grafana; inner-loop Gemini |
-| **R-13** | Cloudflare go-live + AI Studio parity | Packet **locked**. R-13.0 agent preflight **PASS**. R-13.1 any agent. Not R-2. |
+| **R-13** | VPS-2 go-live + AI Studio parity | Packet **locked**. R-13.0 agent preflight **PASS**. R-13.1 = Track V Phase 4, `blocked_human` until V-0. Not R-2. Not Cloud Run. |
 
 ### R-13 sub-IDs (one at a time after lock)
 
 | ID | Still to do | Done when | Do not |
 |---|---|---|---|
 | **R-13.0** | **Shipped 2026-09-17 (agent).** `scripts/r13-0-preflight.mjs`: D1+R2 exist, R2 CORS applied, Workers Paid not required, secrets stay in env, Dockerfile already `NODE_ENV=production`. Firebase exact-host allowlist is after 13.1 has a URL. | Preflight all PASS | `*.pages.dev` wildcard; `ALLOW_UNAUTH_SYNC=1`; commit `.env` |
-| **R-13.1** | Static SPA (`build:web`) + GCP Cloud Run (Option A 100% Free Plan, parallel to Render) + Firebase Spark plan | `npm run dev` still Vite on 3000; Cloud Run min-instances=0 ($0/mo, ~1.5s cold start vs Render 50s splash); job submit → D1 + R2; Google login on exact host; fresh Firebase config in `firebase-applet-config.json` ([plan/GCP_FREE_TIER_MIGRATION.md](./GCP_FREE_TIER_MIGRATION.md)) | Import `server.ts` into Pages Functions; skip `listen` on `CF_PAGES`; min-instances > 0 (incurs cost) |
+| **R-13.1** | **Retargeted.** Always-on Node on OVH VPS-2 (`node dist/server.cjs` + Caddy). Do **Track V** first (dev box + mobile + Grok/Agy/OpenCode), then Phase 4 cutover. Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). `blocked_human` until V-0 (VPS purchased). | `npm run dev` still Vite on 3000; public host always-on (no Render splash); job submit → D1 + R2; Google login on exact host; Render deleted only at V-17 | Import `server.ts` into Pages Functions; Cloud Run min-instances=0 as prod; Cloudflare Containers extra URL; skip `listen` on `CF_PAGES`; delete Render before V-16 PASS |
 | **R-13.2** | Loopback SSE `: ping`; keep 180s abort; align stale-fail copy | Silent 180s behind orange-cloud does not 524; `server_sse_json.test.ts` green | Raise Worker CPU to “make 3 min work” on V8 |
 | **R-13.3** | `server_auth.ts` localhost-only skip; popup/redirect fallback; preview policy | Spoofed `uid` rejected in prod; Google + email verify + Drive backup on prod host | `NODE_ENV !== 'production'` as a localhost synonym |
 | **R-13.4** | Native `env.DB` / `env.BUCKET`; in-process analyze; durable jobs | Worker can analyze without `127.0.0.1` and without `sharp` | Start this to unstick 13.1; D1-as-primary (that is **R-5**) |
 | **R-13.5** | Workers Logs; 1102/1027/524 alerts; static excluded from compute | Static `/assets/*` not billed as Functions | Pages Functions as the log host |
+
+### Track V — mobile → VPS-2 → live site (`blocked_human` until V-0)
+
+Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Do not execute from AI Studio. Do not mix with F-13.
+
+| ID | Phase | Done when |
+|---|---|---|
+| **V-0** | Buy OVH VPS-2 monthly, Ubuntu 24.04, region human-pick | SSH key login from Mac |
+| **V-1** | Tailscale + ufw; no public :22 | Phone and Mac see the VM on the tailnet |
+| **V-2** | Node 20, git, tmux, Caddy installed (not prod yet) | `node -v` is 20.x |
+| **V-3** | Clone repo, `npm ci` on the VM | `npx tsc --noEmit` exits 0 |
+| **V-4** | First phone SSH → tmux | Phone attach, `hostname` in the repo |
+| **V-5** | Live watch (tmux; optional Hermes web on Tailscale) | Watch a process 2 min from the phone |
+| **V-6** | Slim Hermes + Telegram on the VM | Phone Telegram → VM → reply |
+| **V-7** | Primary instruct=Telegram, watch=tmux; fill Runbook | Runbook has real hostnames |
+| **V-8** | Grok CLI + `grok login --device-auth` | `grok -p` pong |
+| **V-9** | Grok builds on the VM; branch/PR on GitHub | Commit authored on the VM |
+| **V-10** | Agy, one task, then stop | Agy not left idle |
+| **V-11** | OpenCode, one task, then stop | OpenCode not public |
+| **V-12** | One-CLI house rules; no Playwright browsers | htop under ~6 GB during Grok |
+| **V-13** | Staging site on Tailscale (Caddy + systemd) | `/api/status` 200 on MagicDNS |
+| **V-14** | Staging meal + Google login on exact host | One real meal on staging |
+| **V-15** | Public hostname, Firebase + R2 CORS, deploy loop | `/api/status` 200 off Tailscale |
+| **V-16** | DNS cutover; Render still up | Cellular load, no Render splash, meal works |
+| **V-17** | Delete Render; scrub `onrender.com` | Old origin dead |
+| **V-18** | Confirm Containers/Cloud Run stay off | Runbook matches prod |
 
 R-7 knip / `getBiomarkerStatus` memo as a reliability gate is **abandoned**.  
 R-8–R-11 are **client speed**, not a free-tier redo. Do not re-migrate images or re-kill Firestore writes.  
@@ -444,7 +470,8 @@ Q-9 website consolidation    ← shipped (extract-only)
 Q-4 AgentResultTable thin    ← shipped
 Q-10 dependency audit        ← shipped
 Q-11 App shell decoupling     ← DONE — 11.7/11.10/11.11/11.12 landed (App 350, Header 690)
-R-13.1 Cloudflare extra URL  ← PARKED; Render already live
+R-13.1 / Track V             ← PARKED blocked_human; host = OVH VPS-2 ([VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)); Cloudflare extra URL still parked; Render still live
+Cloud Run Option A           ← SUPERSEDED (plan/GCP_FREE_TIER_MIGRATION.md)
 ```
 
 **Q-11 milestone ladder** (one milestone per commit; move-only; `src/types.ts` frozen;
@@ -485,7 +512,7 @@ packet. Q-9/Q-8.2 are green.
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work: **Q-11 and Q-13 are complete** — the remaining >200 KB file is `LogChat.tsx`, which needs its own packet once the other agent's edits land. Otherwise next pick is `F-13` (food follow-up) or un-parking `R-13.1` with cloud credentials. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
+| Prefer | Current work: **Q-11 and Q-13 are complete** — the remaining >200 KB file is `LogChat.tsx`, which needs its own packet once the other agent's edits land. Otherwise next pick is `F-13` (food follow-up). **R-13.1 / Track V** stays `blocked_human` until a VPS-2 exists ([VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)). | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---

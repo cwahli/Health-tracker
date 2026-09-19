@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { resolveNextPhotoUrl } from '../utils/foodImageSources';
 
 interface PreviousMealThumbnailProps {
@@ -6,6 +6,10 @@ interface PreviousMealThumbnailProps {
   alt: string;
   /** Shown instead of the image once every fallback has been exhausted */
   fallbackLabel: string;
+  /** Override the <img> classes (default: 32px search tile). */
+  className?: string;
+  /** Override the letter-tile box classes (keeps the initial if omitted). */
+  fallbackClassName?: string;
 }
 
 /**
@@ -14,11 +18,22 @@ interface PreviousMealThumbnailProps {
  * broken image icon here (unlike ImageSlider, which already self-heals via
  * resolveNextPhotoUrl). This gives the same retry behavior to this smaller,
  * non-slider display spot instead of duplicating the retry logic inline.
+ *
+ * Reused by meal-composition galleries: a stock-photo fallback must never
+ * stand in for a real meal photo (a burger rendering salad stock), so the
+ * exhausted state is always the letter tile.
  */
-export default function PreviousMealThumbnail({ src, alt, fallbackLabel }: PreviousMealThumbnailProps) {
+export default function PreviousMealThumbnail({ src, alt, fallbackLabel, className, fallbackClassName }: PreviousMealThumbnailProps) {
   const [currentSrc, setCurrentSrc] = useState(src);
   const [broken, setBroken] = useState(false);
   const tried = useRef<Set<string>>(new Set());
+
+  // Plain <img> picks up new src on re-render; mirror that for gallery use.
+  useEffect(() => {
+    tried.current = new Set();
+    setBroken(false);
+    setCurrentSrc(src);
+  }, [src]);
 
   const handleError = async () => {
     tried.current.add(currentSrc);
@@ -33,7 +48,7 @@ export default function PreviousMealThumbnail({ src, alt, fallbackLabel }: Previ
 
   if (broken) {
     return (
-      <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-500 font-bold text-xs shrink-0">
+      <div className={fallbackClassName || 'w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-500 font-bold text-xs shrink-0'}>
         {fallbackLabel.charAt(0).toUpperCase()}
       </div>
     );
@@ -43,7 +58,7 @@ export default function PreviousMealThumbnail({ src, alt, fallbackLabel }: Previ
     <img
       src={currentSrc}
       alt={alt}
-      className="w-8 h-8 rounded-lg object-cover border border-slate-100 dark:border-slate-700 shrink-0"
+      className={className || 'w-8 h-8 rounded-lg object-cover border border-slate-100 dark:border-slate-700 shrink-0'}
       referrerPolicy="no-referrer"
       onError={handleError}
     />

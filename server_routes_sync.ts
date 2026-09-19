@@ -374,7 +374,7 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
       totalBiomarkersCount = d1Res.totalBiomarkersCount;
     } else {
       // Lightweight columns for list view (always included)
-      const lightColumns = 'id, firebase_uid, date, name, composition, weight_grams, quantity, consumed_amount, benefits, risks, health_impact, recommendation, calories, saturated_fat, sodium, added_sugar, nutrients, updated_at, verdict, description, message, debug_url, image_urls';
+      const lightColumns = 'id, firebase_uid, date, name, composition, weight_grams, quantity, consumed_amount, benefits, risks, health_impact, recommendation, calories, saturated_fat, sodium, added_sugar, nutrients, updated_at, verdict, description, message, debug_url, image_urls, source_meal_id';
       // Heavy JSON blob columns only included when listOnly is false
       const fullColumns = lightColumns + ', items_breakdown, scout_items, chat_transcript';
       const foodSelectColumns = listOnly ? lightColumns : fullColumns;
@@ -814,6 +814,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
       items_breakdown: food.itemsBreakdown || [],
       scout_items: food.scoutItems || [],
       image_urls: food.imageUrls || (food.imageUrl ? [food.imageUrl] : []),
+      source_meal_id: (food as any).sourceMealId || (food as any).source_meal_id || '',
       updated_at: food.updated_at ? new Date(food.updated_at).toISOString() : new Date().toISOString()
     });
 

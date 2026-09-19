@@ -120,6 +120,7 @@ export default function AppTabs(p: AppViewProps) {
     newLog,
     nextProfile,
     now,
+    onReviewMeal,
     op,
     parsed,
     prefillMessage,
@@ -262,6 +263,7 @@ export default function AppTabs(p: AppViewProps) {
               } as any);
             }}
             onLogFood={handleLogFood}
+            onReviewMeal={onReviewMeal}
             onEditingActiveChange={setIsEditingFoodLog}
             isManualEntryOpen={isManualFoodLogOpen}
             onManualEntryOpenChange={setIsManualFoodLogOpen}

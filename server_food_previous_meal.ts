@@ -209,6 +209,13 @@ export function mapPreviousMealRow(f: any): any {
     if (value !== ABSENT) result[key] = value;
   }
   if (Object.keys(nutrients).length > 0) result.nutrients = nutrients;
+  // Lineage: a restaged child must know its parent so the client can badge it
+  // and chain further restages to the root master.
+  const parentId = row.sourceMealId || row.source_meal_id;
+  if (typeof parentId === 'string' && parentId.trim()) {
+    result.sourceMealId = parentId.trim();
+    result.source_meal_id = parentId.trim();
+  }
   if (items.length > 0) {
     result.items_breakdown = items;
     // The client renders tiles and item photos from the camelCase spelling.

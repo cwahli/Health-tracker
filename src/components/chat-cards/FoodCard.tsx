@@ -24,6 +24,7 @@ import { normalizeMealImageUrl, uniqueMealImageUrls, isUsableImageUrl, collectSa
 import { scaleMealPortion, scaleSingleDishPortion } from '../../utils/portionUtils';
 import { threadHasUnansweredPortionClarify } from '../../utils/chatMessageDedupe';
 import { mapDisplayedScoutItems, resolveTileImageIndex } from '../../utils/foodCompositionTiles';
+import PreviousMealThumbnail from '../PreviousMealThumbnail';
 import ImageSlider from '../ImageSlider';
 import { NutrientPieChart } from '../NutrientPieChart';
 import { NutrientTargetRow } from '../NutrientTargetRow';
@@ -1388,11 +1389,12 @@ export const FoodCard: React.FC<AgentCardProps & {
                                            sourceImageIndex={imgIdx}
                                          />
                                        ) : (
-                                         <img 
-                                           src={resolvedImgSrc} 
-                                           alt={item.keyword} 
+                                         <PreviousMealThumbnail
+                                           src={resolvedImgSrc}
+                                           alt={item.keyword}
+                                           fallbackLabel={item.keyword || item.originalName || 'M'}
                                            className="w-full h-full object-cover"
-                                           onError={(e) => { const t = e.target as HTMLImageElement; if (!t.src.includes('unsplash.com')) t.src = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80&auto=format'; }}
+                                           fallbackClassName="w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-400 font-bold text-lg"
                                          />
                                        )}
                                      </div>
@@ -2287,17 +2289,15 @@ export const FoodCard: React.FC<AgentCardProps & {
                                              imageUrls={messageImages}
                                              sourceImageIndex={imgIdx}
                                            />
-                                         ) : (
-                                           <img 
-                                             src={resolvedImgSrc} 
-                                             alt={item.keyword} 
-                                             className="w-full h-full object-cover"
-                                             onError={(e) => {
-                                               const t = e.target as HTMLImageElement;
-                                               if (!t.src.includes('unsplash.com')) t.src = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80&auto=format';
-                                             }}
-                                           />
-                                         )}
+                                          ) : (
+                                            <PreviousMealThumbnail
+                                              src={resolvedImgSrc}
+                                              alt={item.keyword}
+                                              fallbackLabel={item.keyword || item.originalName || 'M'}
+                                              className="w-full h-full object-cover"
+                                              fallbackClassName="w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-400 font-bold text-lg"
+                                            />
+                                          )}
                                        </div>
                                        {/* Warning Icon for Low/Medium Confidence - Moved OUTSIDE the overflow-hidden div */}
                                        {(item.itemConfidence?.toLowerCase().includes('low') || item.itemConfidence?.toLowerCase().includes('medium')) && (

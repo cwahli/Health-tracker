@@ -307,6 +307,12 @@ export interface FoodLog {
   chatTranscript?: { role: 'user' | 'assistant'; content: string; timestamp?: string }[];
   sync_state?: SyncState;
   updated_at?: number;
+  /**
+   * Lineage: id of the saved meal this log was restaged/duplicated from.
+   * Absent on master (originally analyzed) meals. Chains nest: the master is
+   * the root ancestor found by walking sourceMealId links.
+   */
+  sourceMealId?: string;
 }
 
 export interface BiomarkerValue {

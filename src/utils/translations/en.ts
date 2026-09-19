@@ -1143,6 +1143,8 @@ export const en = {
   "previousFingerprints": "Previous Fingerprints",
   "previousItem": "Previous Item",
   "previousMeal": "Previous Meal",
+  "savedMealTag": "Saved meal",
+  "reviewMeal": "Review",
   "previousOutcomes": "Previous Outcomes",
   "previousPage": "Previous Page",
   "primaryBase100g": "Primary Base100g",

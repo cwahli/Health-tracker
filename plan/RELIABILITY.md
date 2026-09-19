@@ -92,7 +92,7 @@ D1 (HTTP today)        → thin rows: food_logs, biomarker_logs, profiles, agent
 Cloudflare R2          → photos, debug JSON, mealBuild blobs, backend logs
 Express (server.ts)    → AI + sync proxies + job workers (loopback 127.0.0.1, in-memory maps)
   AI Studio / local    → tsx server.ts, port 3000, Vite HMR
-  Production (R-13)    → same Express in a Node process (Cloudflare Container or Cloud Run)
+  Production (R-13)    → same Express in a Node process (OVH VPS-2 + Caddy; not Workers)
                          + Workers/Pages static assets for the Vite SPA
 Local IDB              → chat transcripts, offline cache, in-flight jobs
 ```
@@ -644,7 +644,7 @@ Trigger: the human wants a public URL. Not R-2 (static latency). Not R-5 (D1 as 
      npm run dev → tsx server.ts                     build:web → Workers/Pages static
      port 3000, runningViaTsx → Vite                 Express in a Node process:
      D1 via HTTP REST (server_d1.ts)                   Cloudflare Container (default)
-     R2 via S3 keys (server_routes_r2.ts)              or Cloud Run behind Cloudflare
+     R2 via S3 keys (server_routes_r2.ts)              or VPS origin behind Caddy / Cloudflare DNS
      data/sync on disk                                 INTERNAL_BASE_URL=127.0.0.1:$PORT
 ```
 
@@ -732,7 +732,7 @@ Firebase project `kempt-charmer-0r5vm`. OAuth client `615352013376-mm2cuakcdfosd
 
 **R-13.0 Preconditions (no app code, agent CLI).** `node --env-file=.env scripts/r13-0-preflight.mjs`. Workers Paid is **not** required (API is Node). D1 + R2 already exist. R2 CORS for `http://localhost:3000` + live Render origin. Secrets stay on the **runtime** process (copy from env at deploy; never Vite build, never git). `NODE_ENV=production` is already in the Dockerfile. Firebase + OAuth allowlists (§12.5) after 13.1 prints the exact prod host.
 
-**R-13.1 Ship: static SPA + existing Express in a Node process.** Default host: **Cloudflare Containers**. Alternative: Cloud Run behind Cloudflare (human pick at lock).
+**R-13.1 Ship: static SPA + existing Express in a Node process.** Host (locked 2026-09-19): **OVH VPS-2** (`node dist/server.cjs` behind Caddy). **Not** Cloudflare Containers and **not** Cloud Run. Mobile/dev box first, then site cutover: [plan/VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md) Track V. `blocked_human` until V-0. Cloudflare extra URL stays parked.
 
 - Split scripts: `build:web` = `vite build` only; `build:server` = current esbuild; `build` = both. Pages/Workers asset build uses **`build:web` only**.
 - `PORT` from env, **default 3000**. Replace hardcoded `http://localhost:3000` loopbacks with `http://127.0.0.1:${PORT}`. Keep `app.listen` gated by `NODE_ENV !== 'test' && !VITEST` only — **not** `CF_PAGES`.
@@ -795,11 +795,12 @@ node scripts/assert-free-tier-complete.mjs
 
 ### 12.10 Open questions (human at lock)
 
-1. **API host:** Cloudflare Containers (default) vs Cloud Run behind Cloudflare.
-2. **Public hostname:** `*.pages.dev` / `*.workers.dev` vs custom domain (needed for sane OAuth).
+1. **API host:** **Locked: OVH VPS-2** (Track V). Cloudflare Containers and Cloud Run are not the origin. See [plan/VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md).
+2. **Public hostname:** custom domain (needed for sane OAuth). Not `*.onrender.com` after V-17. Not `*.pages.dev`.
 3. **Preview Google login:** prod-only vs stable `preview.` host.
+4. **VPS region:** human at V-0 (EU vs SG). APAC is metered.
 
-Do **not** silently pick 2–3. Default 1 is Containers unless the human says Cloud Run.
+Do **not** silently pick 2–4. Do not unpark Containers or Cloud Run to unstick 13.1.
 
 ## 13. Agent purge program — narrator/dietitian + curator/resolver removal (2026-09-13)
 
