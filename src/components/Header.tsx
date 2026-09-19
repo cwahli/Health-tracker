@@ -1,20 +1,13 @@
-import { trackApiCall } from '../utils/apiTracker';
 import { getAgentRequestLogs } from '../utils/agentLogsTracker';
-import React, { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useEffect } from 'react';
+
 import { UserProfile, DbInteraction, QuotaData, FoodLog } from '../types';
 import { translations } from '../utils/translations';
-import { ETHNICITY_SELECT_OPTIONS, displayAccountType, interpolate } from '../utils/i18n';
-import { getAvailableCredits } from '../utils/creditManager';
-import { NutrientPieChart } from './NutrientPieChart';
-import {
-  Eye, EyeOff, CloudLightning, CloudCheck, RefreshCw, LogOut, Check, ShieldCheck,
-  Archive, FileSpreadsheet, KeyRound, Lock, Unlock, FileDown, FileUp, AlertTriangle,
-  CloudUpload, CloudDownload, HelpCircle, Terminal, User, Cloud, Coins, Users, Copy, RotateCcw,
-  Trash2
-} from 'lucide-react';
-import { db, auth } from '../firebase';
-import { doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { interpolate } from '../utils/i18n';
+
+import { CloudLightning, CloudCheck, RefreshCw, Check, User } from 'lucide-react';
+import { auth } from '../firebase';
+
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 const GoogleHealthIntegration = lazyWithRetry(() => import('./GoogleHealthIntegration'));
 const FullScreenLogViewer = lazyWithRetry(() => import('./FullScreenLogViewer'));
@@ -23,7 +16,7 @@ const SyncDiagnosticsModal = lazyWithRetry(() => import('./SyncDiagnosticsModal'
 const DedupeBiomarkerLogsModal = lazyWithRetry(() => import('./DedupeBiomarkerLogsModal'));
 const NutritionDataBrowserModal = lazyWithRetry(() => import('./NutritionDataBrowserModal'));
 const BugTrackerModal = lazyWithRetry(() => import('./BugTrackerModal'));
-import BugSnapshotFab, { BugSnapshotSettingsToggle } from './BugSnapshotFab';
+import BugSnapshotFab from './BugSnapshotFab';
 import ProfileModal from './ProfileModal';
 import DbInteractionsOverlay from './DbInteractionsOverlay';
 import ThemeCustomizerScreen from './ThemeCustomizerScreen';
@@ -33,14 +26,10 @@ const UserManagementTab = lazyWithRetry(() => import('./UserManagementTab'));
 const BackupRestoreTab = lazyWithRetry(() => import('./BackupRestoreTab'));
 const FoodCatalogAdminTab = lazyWithRetry(() => import('./FoodCatalogAdminTab').then(m => ({ default: m.FoodCatalogAdminTab })));
 const PhotoStorageAdminTab = lazyWithRetry(() => import('./PhotoStorageAdminTab').then(m => ({ default: m.PhotoStorageAdminTab })));
-import { Activity, Stethoscope, X, ChevronRight, Database, Bug, Loader, Image as ImageIcon } from 'lucide-react';
+import { X, Database, Loader } from 'lucide-react';
 import { JobStore, isJobBlank } from '../jobs/JobStore';
-import { compressImage } from '../utils/imageCompressor';
+
 import { checkQuotaFlag } from '../utils/firestoreUtils';
-import { auditColors, auditFonts, auditDesignTokens, auditComponents, auditElements } from '../utils/themeRegistry';
-import { GIT_COMMIT_HASH, GIT_COMMIT_TIME } from '../git-version.generated';
-
-
 
 const ColorPickerField = ({ label, value, onChange }: { label: string, value: string, onChange: (v: string) => void }) => (
   <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-2xl gap-2">
@@ -109,8 +98,6 @@ const getSessionId = (): string => {
   }
   return id;
 };
-
-
 
 export default function Header({
   profile,
@@ -274,7 +261,6 @@ export default function Header({
     } catch (e) {}
   };
 
-
   const [debugMode, setDebugMode] = useState(() => localStorage.getItem('agent_debug_mode') === 'true');
   const [serverStartTime, setServerStartTime] = useState<number | null>(null);
 
@@ -304,7 +290,6 @@ export default function Header({
     localStorage.setItem('agent_debug_mode', enabled ? 'true' : 'false');
   };
 
-
   // Fetch real server start time
   useEffect(() => {
     fetch('/api/status')
@@ -329,7 +314,6 @@ export default function Header({
       if (interval) clearInterval(interval);
     };
   }, [showDbInteractionsOverlay]);
-
 
   const isAdmin = profile?.userType === 'Admin' || profile?.email?.toLowerCase().trim() === 'cwah.liu@gmail.com';
 
@@ -585,7 +569,6 @@ export default function Header({
       )}
     </header>
 
-
       {/* Editing Dialog for Profile Parameters (Q-11.7: extracted to ProfileModal) */}
       {isEditing && (
         <ProfileModal
@@ -610,7 +593,6 @@ export default function Header({
 
       {/* Theme Customizer Screen + inspector portals (Q-11.12: extracted to ThemeCustomizerScreen, move-only) */}
       <ThemeCustomizerScreen theme={theme} />
-
 
       {/* Database Interactions Live Sync Overlay (Q-11.12: extracted to DbInteractionsOverlay, move-only) */}
       <DbInteractionsOverlay
