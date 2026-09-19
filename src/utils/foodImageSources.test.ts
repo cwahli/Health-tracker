@@ -6,6 +6,7 @@ import {
   nextPhotoFallbackUrl,
   uniqueMealImageUrls,
   resolveNextPhotoUrl,
+  resolveRefPhoto,
   collectSavedMealImageUrls,
   PHOTO_PROXY_PREFIX,
 } from './foodImageSources';
@@ -122,6 +123,63 @@ describe('collectSavedMealImageUrls', () => {
       { allowSynthesized: false },
     );
     expect(urls).toEqual(['/photos/food_real.jpg']);
+  });
+});
+
+describe('resolveRefPhoto (duplicate pointer records)', () => {
+  const pool = new Map<string, any>([
+    ['food_orig', { id: 'food_orig', imageUrls: ['/photos/job_oat.jpg', '/photos/job_oat_1.jpg'] }],
+    ['food_chain', { id: 'food_chain', imageUrls: ['ref:food_orig'] }],
+    ['food_bare', { id: 'food_bare', nutrients: { calories: 100 } }],
+    ['food_self', { id: 'food_self', imageUrls: ['ref:food_self'] }],
+  ]);
+
+  it('resolves a duplicate pointer to the primary real photo', () => {
+    expect(resolveRefPhoto('ref:food_orig', pool)).toBe('/photos/job_oat.jpg');
+  });
+
+  it('follows one chained hop (dup of a dup)', () => {
+    expect(resolveRefPhoto('ref:food_chain', pool)).toBe('/photos/job_oat.jpg');
+  });
+
+  it('returns undefined for a self-referencing pointer (no infinite loop)', () => {
+    expect(resolveRefPhoto('ref:food_self', pool)).toBeUndefined();
+  });
+
+  it('returns undefined when the primary is missing or holds no photo (no proxy guess)', () => {
+    expect(resolveRefPhoto('ref:food_gone', pool)).toBeUndefined();
+    expect(resolveRefPhoto('ref:food_bare', pool)).toBeUndefined();
+    expect(resolveRefPhoto('/photos/direct.jpg', pool)).toBeUndefined();
+  });
+
+  it('collectSavedMealImageUrls resolves the pointer for the display path', () => {
+    const urls = collectSavedMealImageUrls(
+      { id: 'food_dup', imageUrls: ['ref:food_orig'] },
+      [{ id: 'food_orig', imageUrls: ['/photos/job_oat.jpg'] }],
+      { allowSynthesized: false },
+    );
+    expect(urls).toEqual(['/photos/job_oat.jpg']);
+  });
+
+  it('collectSavedMealImageUrls resolves pointers held by the donor itself', () => {
+    const urls = collectSavedMealImageUrls(
+      { id: 'food_dup' },
+      [
+        { id: 'food_dup', imageUrls: ['ref:food_orig'] },
+        { id: 'food_orig', imageUrls: ['/photos/job_oat.jpg'] },
+      ],
+      { allowSynthesized: false },
+    );
+    expect(urls).toEqual(['/photos/job_oat.jpg']);
+  });
+
+  it('collectSavedMealImageUrls drops an unresolvable pointer instead of guessing', () => {
+    const urls = collectSavedMealImageUrls(
+      { id: 'food_dup', imageUrls: ['ref:food_gone'] },
+      [{ id: 'food_orig', imageUrls: ['/photos/job_oat.jpg'] }],
+      { allowSynthesized: false },
+    );
+    expect(urls).toEqual([]);
   });
 });
 

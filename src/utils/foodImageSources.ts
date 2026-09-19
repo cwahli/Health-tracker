@@ -173,6 +173,34 @@ export function uniqueMealImageUrls(urls: Array<string | null | undefined>): str
 }
 
 /**
+ * Resolve a `ref:<id>` photo pointer (written by duplicate-to-today instead of
+ * copying base64) to the primary record's real photo using the in-memory pool.
+ * One chained hop max (dup of a dup), cycle-safe. Returns undefined when the
+ * primary is not loaded or holds no real photo — deliberately emits NO
+ * `/photos/` proxy guess (T-1: guessed URLs are never used for display).
+ */
+export function resolveRefPhoto(
+  token: unknown,
+  pool: Map<string, any>,
+  seen: Set<string> = new Set(),
+): string | undefined {
+  if (typeof token !== 'string' || !token.startsWith('ref:')) return undefined;
+  const refId = token.slice(4).trim();
+  if (!refId || seen.has(refId)) return undefined;
+  if (/^https?:\/\//i.test(refId) || refId.startsWith('/')) {
+    return normalizeMealImageUrl(refId);
+  }
+  seen.add(refId);
+  const primary = pool.get(refId);
+  const base = primary && typeof primary === 'object'
+    ? (primary.imageUrl ?? primary.image_url ?? (Array.isArray(primary.imageUrls) ? primary.imageUrls[0] : undefined) ?? (Array.isArray(primary.image_urls) ? primary.image_urls[0] : undefined))
+    : undefined;
+  if (typeof base !== 'string' || !base) return undefined;
+  if (!base.startsWith('ref:')) return normalizeMealImageUrl(base);
+  return resolveRefPhoto(base, pool, seen);
+}
+
+/**
  * Photos to show when reusing a saved / previous meal. Walks the tag, original
  * log, in-memory foodLogs, then the R2 key convention photos/{id}.jpg.
  */
@@ -211,7 +239,23 @@ export function collectSavedMealImageUrls(
   pushFrom(source);
   pushFrom(source.originalLog);
   pushFrom(source.item);
-  let urls = uniqueMealImageUrls(raw as Array<string | null | undefined>);
+  // Resolve `ref:<id>` duplicate pointers to real photos. The pool is the
+  // in-memory logs plus the source family (a duplicate's primary is often the
+  // record it was copied from). Unresolvable refs are dropped, never guessed.
+  const pool = new Map<string, any>();
+  const addPool = (o: any) => {
+    if (o && typeof o === 'object') {
+      const pid = String(o.id || '').trim();
+      if (pid && !pool.has(pid)) pool.set(pid, o);
+    }
+  };
+  addPool(source);
+  addPool(source.originalLog);
+  addPool(source.item);
+  if (Array.isArray(foodLogs)) for (const f of foodLogs) addPool(f);
+  const resolveToken = (v: unknown) =>
+    typeof v === 'string' && v.startsWith('ref:') ? resolveRefPhoto(v, pool) : v;
+  let urls = uniqueMealImageUrls(raw.map(resolveToken) as Array<string | null | undefined>);
   const id = String(source.dbId || source.id || source.food_id || source.originalLog?.id || '').trim();
   // Union donor images from in-memory logs (T-6): API search results often
   // carry only a single preview imageUrl while the full log holds the rest.
@@ -219,7 +263,10 @@ export function collectSavedMealImageUrls(
   if (foodLogs?.length && id) {
     const donor = foodLogs.find((f) => f && String(f.id) === id);
     if (donor) {
-      const donorUrls = uniqueMealImageUrls([donor.imageUrl, ...(Array.isArray(donor.imageUrls) ? donor.imageUrls : [])]);
+      if (!pool.has(id)) pool.set(id, donor);
+      const donorUrls = uniqueMealImageUrls(
+        [donor.imageUrl, ...(Array.isArray(donor.imageUrls) ? donor.imageUrls : [])].map(resolveToken) as Array<string | null | undefined>,
+      );
       for (const u of donorUrls) {
         if (u && !urls.includes(u)) urls.push(u);
       }
