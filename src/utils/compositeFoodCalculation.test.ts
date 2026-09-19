@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag } from './compositeFoodCalculation';
+import { calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag, buildCompositeHealthImpact } from './compositeFoodCalculation';
 
 describe('calculateCompositeMeal', () => {
   it('calculates single previous meal correctly without scaling (same portion)', () => {
@@ -37,6 +37,57 @@ describe('calculateCompositeMeal', () => {
     expect(result.roundedSat).toBe(4);
     expect(result.roundedFib).toBe(3);
     expect(result.roundedSod).toBe(850);
+  });
+
+  it('mirrors flat values onto item.nutrients for nutrient-table consumers', () => {
+    const tag: any = {
+      name: 'Mr. Oat Quick Cook Oatmeal',
+      dbId: 'food_oat',
+      source: 'previous_meal',
+      weightGrams: 130,
+      originalLog: {
+        id: 'food_oat',
+        name: 'Mr. Oat Quick Cook Oatmeal',
+        weightGrams: 175,
+        calories: 280,
+        protein: 17.5,
+        nutrients: { calories: 280, protein: 17.5, carbohydrates: 40, totalFat: 5, sodium: 10 },
+      },
+    };
+    const item = calculateCompositeMeal([tag]).itemsBreakdown[0];
+    // 130/175 factor on 280 kcal → 208.
+    expect(item.calories).toBe(208);
+    expect(item.nutrients.calories).toBe(208);
+    expect(item.nutrients.protein).toBe(item.protein);
+    expect(item.nutrients.carbohydrates).toBe(item.carbohydrates);
+    expect(item.nutrients.totalFat).toBe(item.totalFat);
+    expect(item.nutrients.sodium).toBe(item.sodium);
+  });
+});
+
+describe('buildCompositeHealthImpact', () => {
+  it('derives the message from remaining allowance and targets', () => {
+    const msg = buildCompositeHealthImpact(
+      { calories: 208, protein: 13 },
+      { caloriesTarget: 1800, calories: 1400, proteinTarget: 50, proteinLogged: 20 },
+    );
+    expect(msg).toContain('208 kcal');
+    expect(msg).toContain('1192 kcal remaining of 1800 target');
+    expect(msg).toContain('33 of 50g');
+  });
+
+  it('clamps remaining at zero when over target', () => {
+    const msg = buildCompositeHealthImpact(
+      { calories: 900, protein: 10 },
+      { caloriesTarget: 1800, calories: 100, proteinTarget: 50, proteinLogged: 45 },
+    );
+    expect(msg).toContain('0 kcal remaining');
+  });
+
+  it('falls back to the generic line without allowance', () => {
+    expect(buildCompositeHealthImpact({ calories: 208, protein: 13 }, null)).toBe(
+      'Balanced intake from selected items.',
+    );
   });
 
   it('scales nutrients proportionally when weightGrams differs from original', () => {

@@ -19,7 +19,7 @@ import LLMSelector from './LLMSelector';
 import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
-import { computeRemainingAllowance, calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag } from '../utils/compositeFoodCalculation';
+import { computeRemainingAllowance, calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag, buildCompositeHealthImpact } from '../utils/compositeFoodCalculation';
 import { isMealFollowUpEdit, mostRecentActiveMeal } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
@@ -2190,7 +2190,17 @@ ${logsText}`);
             imageUrl: primaryImageUrl,
             photoUrl: primaryImageUrl,
             imageUrls: allImages.length > 0 ? allImages : undefined,
-            healthImpact: `Balanced intake from ${itemsBreakdown.length} selected item(s).`,
+            healthImpact: buildCompositeHealthImpact(
+              { calories: roundedCal, protein: roundedProt },
+              remainingAllowance
+                ? {
+                    caloriesTarget: remainingAllowance.caloriesTarget,
+                    calories: remainingAllowance.calories,
+                    proteinTarget: remainingAllowance.proteinTarget,
+                    proteinLogged: remainingAllowance.proteinLogged,
+                  }
+                : null,
+            ),
             benefits: ['Accurate catalog nutrition', 'Portion verified'],
             risks: [],
             recommendation: 'good',

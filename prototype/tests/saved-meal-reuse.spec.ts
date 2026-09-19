@@ -99,6 +99,9 @@ test.describe('saved-meal reuse renders evidence', () => {
     await expect(card.getByText(/Calories:\s*498/)).toBeVisible({ timeout: 15000 });
     await expect(card.getByText(/Protein:\s*16\.4/)).toBeVisible({ timeout: 15000 });
 
+    // Target-based summary (not the generic staged-tray line).
+    await expect(page.getByText(/kcal remaining of \d+ target/).first()).toBeVisible({ timeout: 15000 });
+
     // Pictures present.
     await expect(card.locator(`img[src="${PIXEL_A}"]`).first()).toBeVisible({ timeout: 15000 });
 

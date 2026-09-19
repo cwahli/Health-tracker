@@ -50,6 +50,12 @@ export interface CompositeItemBreakdown {
   dbSource?: string;
   rawNutritionLabel?: any;
   labelNutrientsPerServing?: any;
+  /**
+   * Mirror of the flat values above. Item tables (NutritionLabelTable) read
+   * `item.nutrients.*` / `item.truthNutrients.*` and never the flat fields,
+   * so a composite item without this object renders blank cells.
+   */
+  nutrients: Record<string, number>;
 }
 
 export interface CompositeMealCalculation {
@@ -199,6 +205,19 @@ export function calculateCompositeMeal(explicitFoodTags: StagedFoodTag[]): Compo
       fiber: Math.round(fib * 10) / 10,
       sodium: Math.round(sod),
       salt: Math.round((sod / 400) * 10) / 10,
+      nutrients: {
+        calories: Math.round(cal),
+        protein: Math.round(prot * 10) / 10,
+        carbohydrates: Math.round(carb * 10) / 10,
+        carbs: Math.round(carb * 10) / 10,
+        fat: Math.round(fat * 10) / 10,
+        totalFat: Math.round(fat * 10) / 10,
+        saturatedFat: Math.round(sat * 10) / 10,
+        fiber: Math.round(fib * 10) / 10,
+        totalFibre: Math.round(fib * 10) / 10,
+        sodium: Math.round(sod),
+        salt: Math.round((sod / 400) * 10) / 10,
+      },
       imageUrl: img,
       ...ocrFields,
       source: tag.source || 'catalog_tag',
@@ -332,6 +351,7 @@ export function computeRemainingAllowance(args: RemainingAllowanceInput) {
       caloriesLogged: activeTargets.calories,
       saturatedFatLogged: activeTargets.satFat,
       sodiumLogged: activeTargets.sodium,
+      proteinLogged: activeTargets.protein,
       caloriesTarget: activeTargets.caloriesTarget,
       saturatedFatTarget: activeTargets.satFatTarget,
       sodiumTarget: activeTargets.sodiumTarget,
@@ -362,6 +382,34 @@ export function parseTrayGramInput(raw: string): number | undefined {
 export function normalizeTrayGrams(w: number | undefined): number {
   if (w === undefined || !Number.isFinite(w)) return 1;
   return Math.max(1, Math.round(w));
+}
+
+/**
+ * Target-based summary for the instant composite path (no agent call, so no
+ * dietitian copy). Derives from the remaining allowance, which already encodes
+ * the user's daily targets: calories left after this meal plus protein
+ * progress. Falls back to the generic line when no allowance is available.
+ */
+export function buildCompositeHealthImpact(
+  meal: { calories: number; protein: number },
+  allowance?: {
+    caloriesTarget: number;
+    calories: number;
+    proteinTarget: number;
+    proteinLogged: number;
+  } | null,
+): string {
+  const cal = Math.round(Number(meal?.calories) || 0);
+  const prot = Math.round((Number(meal?.protein) || 0) * 10) / 10;
+  if (!allowance || !Number.isFinite(Number(allowance.caloriesTarget))) {
+    return 'Balanced intake from selected items.';
+  }
+  const target = Math.round(Number(allowance.caloriesTarget));
+  const remainingAfter = Math.max(0, Math.round(Number(allowance.calories) - cal));
+  const protTarget = Math.round(Number(allowance.proteinTarget) || 0);
+  const protAfter = Math.round((Number(allowance.proteinLogged) + (Number(meal?.protein) || 0)) * 10) / 10;
+  const protClause = protTarget > 0 ? ` · ${prot}g protein (${protAfter} of ${protTarget}g)` : ` · ${prot}g protein`;
+  return `${cal} kcal · ${remainingAfter} kcal remaining of ${target} target${protClause}`;
 }
 
 /**
