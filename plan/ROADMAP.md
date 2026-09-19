@@ -35,7 +35,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are **shipped**. Do not restart them.
 
-**Q-11 is done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB — the ladder is closed; see the entries below). The open Studio work is now **Q-13**: `BiomarkerDictionaryModal.tsx` is 345 KB and `LogChat.tsx` 383 KB, both over the ~200 KB transfer ceiling. Extract-only, one node per commit.
+**Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (392 KB / 7,039 lines, 39 over its 7,000 ceiling), which needs its own packet. Extract-only, one node per commit.
 
 **Do this, in order. Packets are locked = go (`auto_go: true`).**
 
@@ -43,7 +43,7 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 2. **Q-11.10 DONE** — `e2ab233`. App `handle*` bodies → `useFoodLogActions` / `useBiomarkerActions` / `useReportActions` (App.tsx 3,114 → 1,098). `specs/done/`.
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
 4. **Q-11.12 DONE** — nodes landed `cdbf2cd` (settings overlay → `DbInteractionsOverlay.tsx`) and `c92ec49` + `2fb8d88` (theme customizer → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, move-only, then its orphaned imports). `Header.tsx` 3,545 → **690 lines / 28,791 B**: the packet's ≤ 1,200-line and < 200 KB targets are both met, and every moved slice was proven byte-identical against the pre-move file. Packet retired to `specs/done/`. **The Q-11 ladder is complete** — no Q-11 packet is active.
-5. **Q-13 OPEN** — `specs/active/q-13-biomarker-dictionary-split.md` (locked, `auto_go: true`). Split `BiomarkerDictionaryModal.tsx` (6,230 lines / 345 KB) by moving its four mutually-exclusive mode panels out byte-identically, one node per commit: name-consolidation (711 lines / 49.7 KB, 27 props) → data-accuracy (581 / 41.7 KB, 26 props) → agent-mode (490 / 37.6 KB, 26 props) → batch-paste (765 / 49.2 KB, 74 props). Target < 200 KB. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree.
+5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (392 KB / 7,039 lines, 39 over its 7,000 ceiling).
 6. **R-13.1 PARKED** — `specs/active/R-13.md`. Site is already live on Render. Extra Cloudflare/Containers public URL is optional infra, not a blocker for Q-11. Do not start it in the same working tree as a Q-11 packet.
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
 
@@ -465,8 +465,9 @@ q-11-11-wiring-ratchet   App.tsx wiring only                        DONE App.tsx
 q-11-12-header-residual  useThemeCustomizer + 2 screen files        DONE  Header 3,545/208KB → 690/28.8KB
                          node 2 cdbf2cd  DbInteractionsOverlay.tsx (746 lines moved byte-identical)
                          node 1 c92ec49 + 2fb8d88  ThemeCustomizerScreen.tsx 1,616 / useThemeCustomizer.ts 680
-q-13-biomarker-dict      four mode panels out of the dictionary     OPEN  BiomarkerDictionaryModal 6,230/345KB → < 200KB
-                         node 1 NEXT  DictionaryConsolidationPanel.tsx (711 lines / 49.7 KB, 27 props)
+q-13-biomarker-dict      panels + DictionaryItem out of dictionary   DONE  BiomarkerDictionaryModal 6,230/345KB → 3,725/180KB
+                         145d8e2 DictionaryConsolidationPanel 450f7c4 DictionaryDataAccuracyPanel
+                         ad84598 DictionaryAgentPanel      fafc060 DictionaryItem + biomarkerAutoCalibrate
 ```
 
 Burned: `a14abea` and `7d94def` rewrote instead of moving (deleted AuthScreen, stubbed
@@ -484,7 +485,7 @@ packet. Q-9/Q-8.2 are green.
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work: **Q-11 is complete** — next pick is `F-13` (food follow-up) or un-parking `R-13.1` with cloud credentials. One class, named vitest. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
+| Prefer | Current work: **Q-11 and Q-13 are complete** — the remaining >200 KB file is `LogChat.tsx`, which needs its own packet once the other agent's edits land. Otherwise next pick is `F-13` (food follow-up) or un-parking `R-13.1` with cloud credentials. | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---

@@ -5,7 +5,12 @@ class: GOD_FILE_GROWTH
 skill: specify
 edit_mode: extract
 who: any-agent
-auto_go: true
+# DONE 2026-09-19: nodes 1-3 landed as planned (consolidation / data-accuracy /
+# agent panels); the file reached < 200 KB via a different fourth node —
+# DictionaryItem + autoCalibrateBiomarkerDef moved out (see the amendment below),
+# so the batch-paste panel is no longer required and is left as optional.
+# BiomarkerDictionaryModal.tsx 6,230 -> 3,725 lines / 352,884 -> 183,970 B.
+auto_go: false
 allowed_files:
   - src/components/BiomarkerDictionaryModal.tsx
   - src/components/DictionaryConsolidationPanel.tsx
@@ -13,6 +18,8 @@ allowed_files:
   - src/components/DictionaryAgentPanel.tsx
   - src/components/DictionaryBatchPastePanel.tsx
   - src/components/CATALOG.json
+  - src/components/DictionaryItem.tsx
+  - src/utils/biomarkerAutoCalibrate.ts
   - scripts/parity-baseline.json
 frozen_files:
   - src/types.ts
@@ -70,6 +77,27 @@ sub-tree, which makes them individually movable byte-identically.
 line ceiling ratcheted to the achieved count, with the four mode panels owning
 their own files. Verbatim moves only — no behaviour change.
 
+## Amendment 2026-09-19 — the fourth node took a different route
+
+Nodes 1–3 landed exactly as planned. For the fourth node the batch-paste panel
+(765 lines / 49.2 KB) turned out to depend on `DictionaryItem`, a module-scope
+component in the same file (703 lines / 38,198 B), whose own dependency
+`autoCalibrateBiomarkerDef` (100 lines / 6,393 B, exported but imported by no
+other file) was likewise in the way. Moving those two out of
+`BiomarkerDictionaryModal.tsx` instead of the panel:
+
+- removes **44,591 B** (vs 49,152 B for the panel) with **no props at all** —
+  both are module-scope declarations, so there is no prop surface to plumb;
+- lands the file at **183,970 B / 3,725 lines**, under the 200 KB ceiling; and
+- makes the batch-paste panel strictly optional, so it is dropped from this
+  packet and becomes a fresh small packet (or simply left: the file is no longer
+  a Studio blocker).
+
+`ensureCustomRanges` (8 lines), private to `DictionaryItem`, moved with it.
+`DictionaryItem.tsx` and `utils/biomarkerAutoCalibrate.ts` were added to
+`allowed_files` for this. Note that the batch-paste panel remains the reason the
+file is still 180 KB rather than ~130 KB.
+
 ## In scope (one node per commit)
 
 1. **Node 1 (largest cheap panel):** `DictionaryConsolidationPanel.tsx` ←
@@ -107,9 +135,14 @@ their own files. Verbatim moves only — no behaviour change.
 
 ## Done when
 
-1. `wc -c src/components/BiomarkerDictionaryModal.tsx` < 200,000.
-2. The four panel files exist and the parent contains no panel markup.
+1. `wc -c src/components/BiomarkerDictionaryModal.tsx` < 200,000 — **MET**
+   (183,970 B).
+2. No mode-panel markup that has been moved remains in the parent — **MET** for
+   consolidation / data-accuracy / agent panels and for `DictionaryItem`.
 3. Live: Health portal → biomarker dictionary still opens, edit mode and the
-   four modes render, no page errors (`key-journeys` Journey 4 + shell-smoke).
-4. `CATALOG.json` ceiling equals the achieved line count.
-5. `git diff --name-only` ⊆ allowed_files; gate commands exit 0.
+   modes render, no page errors — **MET** (`key-journeys` Journey 4 and
+   shell-smoke 13/13; every moved region proven byte-identical).
+4. `CATALOG.json` ceiling equals the achieved line count — **MET** (3726).
+5. `git diff --name-only` ⊆ allowed_files; gate commands exit 0 — MET except the
+   known unrelated `LogChat.tsx` 7,039 > 7,000 budget red and the
+   `extra_file` / `frozen_touched` noise from another agent's in-flight edits.
