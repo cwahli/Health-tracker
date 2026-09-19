@@ -362,3 +362,85 @@ export function normalizeTrayGrams(w: number | undefined): number {
   if (w === undefined || !Number.isFinite(w)) return 1;
   return Math.max(1, Math.round(w));
 }
+
+/**
+ * Donor hydration (T-8): /api/food/search previous_meal rows are thin
+ * (id/name/portion, sometimes a single preview image). The full log already
+ * in memory carries the nutrients, OCR evidence and full image set — merge it
+ * in wherever the API row is thin. API scalars always win when present.
+ */
+const DONOR_MERGE_KEYS = [
+  // Full nutrient alias union (matches foodLogDedupe EVIDENCE_NUTRIENT_KEYS +
+  // server NUTRIENT_KEYS): a thin row may miss any spelling, the donor may hold another.
+  'nutrients', 'calories', 'energy', 'protein', 'carbohydrates', 'carbs',
+  'totalCarbohydrate', 'totalFat', 'fat', 'saturatedFat', 'saturated_fat',
+  'totalFibre', 'total_fibre', 'fiber', 'sodium', 'salt', 'sugar',
+  'addedSugar', 'added_sugar', 'transFat',
+  'dbSource', 'rawNutritionLabel', 'labelNutrientsPerServing', 'nutritionFacts',
+  'items_breakdown', 'itemsBreakdown', 'weight_grams', 'consumed_amount',
+  'portionGrams', 'weightGrams', 'date',
+];
+
+const isBlankDonorValue = (v: unknown): boolean => {
+  if (v === undefined || v === null || v === '') return true;
+  if (typeof v === 'number') return !Number.isFinite(v) || v === 0;
+  if (typeof v === 'string') return v.trim() === '' || Number(v) === 0;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object') return Object.keys(v as object).length === 0;
+  return false;
+};
+
+export function hydratePreviousMealTag(item: any, foodLogs?: any[] | null): any {
+  if (!item || typeof item !== 'object') return item;
+  const id = String(item.id || item.food_id || '').trim();
+  if (!id || !Array.isArray(foodLogs)) return item;
+  const donor = foodLogs.find((f) => f && typeof f === 'object' && String((f as any).id) === id);
+  if (!donor) return item;
+  const merged: any = { ...(donor as any), ...item };
+  // Single-item composite saves keep per-item evidence (incl. OCR tags) on
+  // itemsBreakdown[0] rather than top level — consult it as donor fallback.
+  const soloList = Array.isArray((donor as any).itemsBreakdown) && (donor as any).itemsBreakdown.length === 1
+    ? (donor as any).itemsBreakdown
+    : (Array.isArray((donor as any).items_breakdown) && (donor as any).items_breakdown.length === 1
+      ? (donor as any).items_breakdown
+      : null);
+  const solo = soloList ? soloList[0] : null;
+  const donorVal = (k: string) => {
+    const top = (donor as any)[k];
+    if (!isBlankDonorValue(top)) return top;
+    if (solo && typeof solo === 'object') {
+      const s = (solo as any)[k];
+      if (!isBlankDonorValue(s)) return s;
+    }
+    return undefined;
+  };
+  const isEmpty = (v: any) => isBlankDonorValue(v);
+  for (const k of DONOR_MERGE_KEYS) {
+    if (isEmpty((item as any)[k])) {
+      const dv = donorVal(k);
+      if (dv !== undefined) merged[k] = dv;
+    }
+  }
+  // Keep both item-list spellings in sync: donors may carry only one.
+  if (Array.isArray(merged.items_breakdown) && !Array.isArray(merged.itemsBreakdown)) {
+    merged.itemsBreakdown = merged.items_breakdown;
+  } else if (Array.isArray(merged.itemsBreakdown) && !Array.isArray(merged.items_breakdown)) {
+    merged.items_breakdown = merged.itemsBreakdown;
+  }
+  const seen = new Set<string>();
+  const imgs: string[] = [];
+  for (const u of [
+    ...collectSavedMealImageUrls(merged, null, { allowSynthesized: false }),
+    ...collectSavedMealImageUrls(donor, null, { allowSynthesized: false }),
+  ]) {
+    if (typeof u === 'string' && u && !seen.has(u)) {
+      seen.add(u);
+      imgs.push(u);
+    }
+  }
+  if (imgs.length > 0) {
+    merged.imageUrls = imgs;
+    if (!merged.imageUrl) merged.imageUrl = imgs[0];
+  }
+  return merged;
+}

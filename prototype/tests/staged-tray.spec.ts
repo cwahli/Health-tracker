@@ -379,4 +379,95 @@ test.describe('Track T: staged tray', () => {
     await expect(page.getByText('Nutrition Facts (OCR Label)').first()).toBeVisible({ timeout: 15000 });
     expect(apiPosts).toEqual([]);
   });
+
+  test('T-8: thin restage hydrates nutrients, images and OCR from saved log', async ({ page }) => {
+    const pxA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const pxB = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/w8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+    await page.route('**/api/sync/**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, ok: true }) });
+    });
+    const setSearch = (results: any[]) =>
+      page.route('**/api/food/search*', async (route) => {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results }) });
+      });
+    const openComposer = async () => {
+      await page.locator('button[title="Open quick actions"], button.w-14.h-14').first().click();
+      await page.getByRole('button', { name: /Log Meal/i }).first().click();
+      await expect(page.locator('#food-chat-input')).toBeVisible({ timeout: 10000 });
+    };
+    const stageTop = async (name: string) => {
+      const row = page
+        .getByText(name, { exact: true })
+        .locator('xpath=ancestor::div[.//button[contains(normalize-space(.),"Add")]][1]');
+      await row.getByRole('button', { name: /add/i }).click();
+      await expect(page.getByText('STAGED ITEMS')).toBeVisible({ timeout: 15000 });
+    };
+
+    // Phase 1: rich meal in, save it to history (donor for phase 2).
+    await setSearch([{
+      type: 'previous_meal', id: 'pm_seed', name: 'Oat Donor Seed', portionGrams: 130,
+      calories: 150, protein: 5, carbohydrates: 27, totalFat: 3,
+      dbSource: 'label',
+      rawNutritionLabel: { servingSize: '100g', calories: '150' },
+      labelNutrientsPerServing: { calories: 150, protein: 5 },
+      imageUrl: pxA, imageUrls: [pxA, pxB],
+    }]);
+    await page.locator('#food-chat-input').fill('oat donor');
+    await stageTop('Oat Donor Seed');
+    await page.locator('#food-chat-send-btn').click();
+    await expect(page.getByText(/Here is the nutrition breakdown for.*Oat Donor Seed/i).first()).toBeVisible({ timeout: 15000 });
+    await page.getByRole('button', { name: /log this/i }).first().click();
+    await expect(page.getByText('Saved to History')).toBeVisible({ timeout: 20000 });
+
+    // The saved composite gets a fresh id — read it back so the thin
+    // restage matches the donor exactly like the real API flow.
+    // Poll: the persistence effect can lag the Saved confirmation.
+    let savedId: string | null = null;
+    await expect.poll(async () => {
+      savedId = await page.evaluate(() => {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i) || '';
+          if (!k.startsWith('health_app_data_')) continue;
+          try {
+            const b = JSON.parse(localStorage.getItem(k) || '{}');
+            const f = (b.foodLogs || []).find((x: any) => x.name === 'Oat Donor Seed');
+            if (f?.id) return f.id as string;
+          } catch { /* ignore */ }
+        }
+        return null;
+      });
+      return savedId;
+    }, { timeout: 15000 }).toBeTruthy();
+    expect(savedId).toBeTruthy();
+
+    // Phase 2: server now returns the thin row — hydration must fill the gaps.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const navTab = page.locator('#nav-tab-home');
+    const demoBtn = page.locator('#demo-login-btn');
+    await Promise.race([
+      navTab.waitFor({ state: 'attached', timeout: 20000 }).catch(() => {}),
+      demoBtn.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {}),
+    ]);
+    if (await demoBtn.isVisible().catch(() => false)) {
+      await demoBtn.click();
+    }
+    await navTab.waitFor({ state: 'attached', timeout: 20000 });
+    await setSearch([{
+      type: 'previous_meal', id: savedId, name: 'Oat Donor Seed', portionGrams: 130, weightGrams: 130,
+    }]);
+    await openComposer();
+    await page.locator('#food-chat-input').fill('oat donor');
+    await stageTop('Oat Donor Seed');
+    await page.locator('#food-chat-send-btn').click();
+
+    const card = page.getByText(/Here is the nutrition breakdown for.*Oat Donor Seed/i).last().locator('xpath=ancestor::div[contains(@class,"space-y-2.5")][1]');
+    await expect(card.getByText(/Here is the nutrition breakdown for.*Oat Donor Seed/i)).toBeVisible({ timeout: 20000 });
+    // Nutrients hydrated (not the 0.00s of the thin-row bug), hero shows donor photos.
+    await expect(card.getByText(/Calories:\s*150/)).toBeVisible({ timeout: 15000 });
+    await expect(card.locator(`img[src="${pxA}"]`).first()).toBeVisible({ timeout: 15000 });
+    // OCR evidence hydrated too.
+    const tile = card.locator('span.text-\\[10px\\]', { has: page.getByText('Oat Donor Seed', { exact: true }) });
+    await tile.getByText('Oat Donor Seed', { exact: true }).click();
+    await expect(page.getByText('Nutrition Facts (OCR Label)').first()).toBeVisible({ timeout: 15000 });
+  });
 });

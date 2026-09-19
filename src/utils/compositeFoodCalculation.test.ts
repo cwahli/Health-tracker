@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams } from './compositeFoodCalculation';
+import { calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag } from './compositeFoodCalculation';
 
 describe('calculateCompositeMeal', () => {
   it('calculates single previous meal correctly without scaling (same portion)', () => {
@@ -179,5 +179,75 @@ describe('OCR passthrough (T-7, no agent call)', () => {
     expect(item.dbSource).toBeUndefined();
     expect(item.rawNutritionLabel).toBeUndefined();
     expect(item.labelNutrientsPerServing).toBeUndefined();
+  });
+});
+
+describe('hydratePreviousMealTag (T-8 thin API rows)', () => {
+  const donor: any = {
+    id: 'pm_donor',
+    name: 'Oat Donor Porridge',
+    weight_grams: 130,
+    calories: 150,
+    nutrients: { calories: 150, protein: 5, carbohydrates: 27, totalFat: 3 },
+    dbSource: 'label',
+    rawNutritionLabel: { servingSize: '100g', calories: '150' },
+    labelNutrientsPerServing: { calories: 150, protein: 5 },
+    imageUrl: '/photos/pm_donor_a.jpg',
+    imageUrls: ['/photos/pm_donor_a.jpg', '/photos/pm_donor_b.jpg'],
+  };
+
+  it('fills thin API fields from the donor log', () => {
+    const thin: any = { type: 'previous_meal', id: 'pm_donor', name: 'Oat Donor Porridge', portionGrams: 130, weightGrams: 130 };
+    const out = hydratePreviousMealTag(thin, [donor]);
+    expect(out.nutrients).toEqual(donor.nutrients);
+    expect(out.calories).toBe(150);
+    expect(out.dbSource).toBe('label');
+    expect(out.rawNutritionLabel).toEqual(donor.rawNutritionLabel);
+    expect(out.imageUrls).toEqual(['/photos/pm_donor_a.jpg', '/photos/pm_donor_b.jpg']);
+  });
+
+  it('keeps API scalars where present and unions donor images', () => {
+    const thin: any = {
+      type: 'previous_meal', id: 'pm_donor', name: 'Oat Donor Porridge',
+      portionGrams: 200, weightGrams: 200,
+      imageUrl: '/photos/pm_donor_preview.jpg',
+    };
+    const out = hydratePreviousMealTag(thin, [donor]);
+    expect(out.portionGrams).toBe(200);
+    expect(out.weightGrams).toBe(200);
+    expect(out.imageUrls).toEqual(['/photos/pm_donor_preview.jpg', '/photos/pm_donor_a.jpg', '/photos/pm_donor_b.jpg']);
+    expect(out.nutrients).toEqual(donor.nutrients);
+  });
+
+  it('returns the item untouched with no matching donor', () => {
+    const thin: any = { type: 'previous_meal', id: 'pm_missing', name: 'Ghost Porridge' };
+    expect(hydratePreviousMealTag(thin, [donor])).toBe(thin);
+    expect(hydratePreviousMealTag(thin, null)).toBe(thin);
+  });
+
+  it('treats zero/blank API scalars as unknown and hydrates from donor', () => {
+    const thin: any = {
+      type: 'previous_meal', id: 'pm_donor', name: 'Oat Donor Porridge',
+      portionGrams: 130, weightGrams: 130,
+      calories: 0, protein: '', nutrients: {},
+    };
+    const out = hydratePreviousMealTag(thin, [donor]);
+    expect(out.calories).toBe(150);
+    // No top-level donor protein to fill from — stays blank, nutrients still hydrate.
+    expect(out.protein).toBe('');
+    expect(out.nutrients).toEqual(donor.nutrients);
+  });
+
+  it('hydrates alias spellings and syncs both item-list spellings', () => {
+    const donorWithBreakdown: any = {
+      ...donor,
+      sugar: 12,
+      items_breakdown: [{ name: 'Oat Donor Porridge', calories: 150, dbSource: 'label' }],
+    };
+    const thin: any = { type: 'previous_meal', id: 'pm_donor', name: 'Oat Donor Porridge', portionGrams: 130 };
+    const out = hydratePreviousMealTag(thin, [donorWithBreakdown]);
+    expect(out.sugar).toBe(12);
+    expect(out.items_breakdown).toHaveLength(1);
+    expect(out.itemsBreakdown).toBe(out.items_breakdown);
   });
 });

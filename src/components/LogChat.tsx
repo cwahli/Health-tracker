@@ -19,7 +19,7 @@ import LLMSelector from './LLMSelector';
 import { AVAILABLE_LLMS } from '../utils/llm';
 import { compressMultipleImages, compressImage } from '../utils/imageCompressor';
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
-import { computeRemainingAllowance, calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams } from '../utils/compositeFoodCalculation';
+import { computeRemainingAllowance, calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag } from '../utils/compositeFoodCalculation';
 import { isMealFollowUpEdit, mostRecentActiveMeal } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
@@ -854,6 +854,9 @@ ${logsText}`);
   }, [messages, lastSentPayload, activeConversationId]);
   const [inputText, setInputText] = useState('');
   const [explicitFoodTags, setExplicitFoodTags] = useState<any[]>([]);
+  // T-8: the search query consumed by the latest Add (snapshot — local rows
+  // can precede API results, so live search terms may still be empty).
+  const [stagedQuery, setStagedQuery] = useState('');
   const [catalogMatches, setCatalogMatches] = useState<any[]>([]);
   const [activeSearchTerms, setActiveSearchTerms] = useState<string>('');
   const [tagPortionPreFill, setTagPortionPreFill] = useState<number>(100);
@@ -2122,7 +2125,21 @@ ${logsText}`);
         explicitFoodTags.forEach(t => {
           strippedText = removeBracketItem(strippedText, t.name);
         });
-        const hasAdditionalText = strippedText.replace(/\[+.*?\]+/g, '').replace(/^[+\s,.-]+/, '').trim().length > 0;
+        // T-8: residue is judged against the query snapshot(s) from Add, so a
+        // locally-matched row (staged before API results land) routes the
+        // same as an API-matched one. Anything else is a genuine question.
+        // stagedQuery may hold several space-joined queries (multi-item tray):
+        // residue if the leftover equals the whole snapshot or any one query word.
+        const normalizedText = strippedText.replace(/\[+.*?\]+/g, '').replace(/^[+\s,.-]+/, '').trim();
+        let effectiveText = stagedQuery ? stripSearchResidue(normalizedText, stagedQuery) : normalizedText;
+        if (effectiveText && stagedQuery) {
+          const lowerLeft = normalizedText.toLowerCase();
+          const stagedWords = stagedQuery.toLowerCase().split(/\s+/).filter(Boolean);
+          if (stagedWords.length > 0 && (lowerLeft === stagedQuery.toLowerCase() || stagedWords.includes(lowerLeft))) {
+            effectiveText = '';
+          }
+        }
+        const hasAdditionalText = effectiveText.length > 0;
         if (!hasAdditionalText && finalImages.length === 0 && explicitFoodTags.length >= 1) {
           const todayDate = getCurrentDateInTimezone(profile?.timezone);
           const {
@@ -2207,6 +2224,7 @@ ${logsText}`);
           setMessages(prev => [...prev, userMsg, assistantMsg]);
           setInputText('');
           setExplicitFoodTags([]);
+          setStagedQuery('');
           clearTimeout(failsafe);
           isSendingRef.current = false;
           setIsSubmitting(false);
@@ -6285,7 +6303,9 @@ ${logsText}`);
                 <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
                   {filteredMatches.map((item, idx) => {
                     const itemName = item.name || item.dish_name || '';
-                    const savedImgs = collectSavedMealImageUrls(item, activeFoodLogs, { allowSynthesized: false });
+                    // T-8: API rows are thin — hydrate nutrients/OCR/images from the full local log.
+                    const hydratedItem = item._listType === 'previous_meal' ? hydratePreviousMealTag(item, activeFoodLogs) : item;
+                    const savedImgs = collectSavedMealImageUrls(hydratedItem, activeFoodLogs, { allowSynthesized: false });
                     const thumbSrc = savedImgs[0] || '';
                     return (
                     <div key={item._listType === 'brand' ? (item.food_id || idx) : (item.id || idx)} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
@@ -6368,17 +6388,25 @@ ${logsText}`);
                               const inputEl = document.getElementById(`prev-portion-${item.id || idx}`) as HTMLInputElement;
                               const w = Number(inputEl?.value) || item.portionGrams || item.weightGrams || item.weight_grams || 100;
                               setExplicitFoodTags(prev => [...prev, { 
-                                dbId: item.id || item.food_id, 
+                                dbId: hydratedItem.id || hydratedItem.food_id, 
                                 name: itemName, 
                                 source: 'previous_meal', 
-                                originalLog: { ...item, imageUrl: thumbSrc || item.imageUrl, imageUrls: savedImgs },
+                                originalLog: { ...hydratedItem, imageUrl: thumbSrc || hydratedItem.imageUrl, imageUrls: savedImgs },
                                 imageUrl: thumbSrc || undefined,
                                 weightGrams: Number(w)
                               }]);
                             }
-                            // T-5: residue-only query text served its purpose — clear it so
-                            // submit routes the staged tray via the composite path.
-                            setInputText(prev => stripSearchResidue(prev, activeSearchTerms));
+                            // T-5/T-8: snapshot the query this staging consumed and clear
+                            // residue-only text so submit routes the tray via the
+                            // composite path. Falls back to deriving the query from
+                            // text because local rows can precede API results.
+                            // Accumulate across multi-item trays so earlier queries
+                            // are still treated as residue on submit.
+                            const consumedQuery = activeSearchTerms || extractAutocompleteQuery(inputText);
+                            if (consumedQuery) {
+                              setStagedQuery(prev => (prev && prev.includes(consumedQuery) ? prev : [prev, consumedQuery].filter(Boolean).join(' ').trim()));
+                            }
+                            setInputText(prev => stripSearchResidue(prev, consumedQuery));
                             setCatalogMatches([]);
                             setActiveSearchTerms('');
                           }}
@@ -6440,7 +6468,11 @@ ${logsText}`);
                       <button
                         type="button"
                         onClick={() => {
-                          setExplicitFoodTags(prev => prev.filter((_, i) => i !== tIdx));
+                          setExplicitFoodTags(prev => {
+                            const next = prev.filter((_, i) => i !== tIdx);
+                            if (next.length === 0) setStagedQuery('');
+                            return next;
+                          });
                         }}
                         className="p-0.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-rose-500 rounded transition-colors"
                         title="Remove item"

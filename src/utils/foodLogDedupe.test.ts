@@ -196,3 +196,145 @@ describe('soft name merge (YOLK variants)', () => {
     expect(mergeFoodLogsDeduped([h1, h2], [])).toHaveLength(1);
   });
 });
+
+/**
+ * Saved-meal reuse loses pictures, nutrition values and OCR provenance when the
+ * sync list snapshot (which omits items_breakdown by egress design) wins the
+ * dedupe. Winner selection is about recency/photos; it must never erase
+ * evidence only the sibling holds.
+ */
+describe('mergeFoodLogsDeduped carries evidence across a collapse', () => {
+  const richLocal = (overrides: any = {}) => ({
+    id: 'local-1',
+    name: 'Mr. Oat Quick Cook Oatmeal',
+    date: '2026-08-08',
+    weightGrams: 130,
+    updated_at: 1,
+    imageUrl: '/photos/local-1.jpg',
+    imageUrls: ['/photos/local-1.jpg', '/photos/local-1-2.jpg'],
+    calories: 150,
+    protein: 5,
+    nutrients: { calories: 150, protein: 5, carbohydrates: 27 },
+    itemsBreakdown: [
+      {
+        id: 'local-1-i0',
+        name: 'Mr. Oat Quick Cook Oatmeal',
+        weight: '130g',
+        weightGrams: 130,
+        calories: 150,
+        protein: 5,
+        carbohydrates: 27,
+        imageUrl: '/photos/local-1-i0.jpg',
+        dbSource: 'label',
+        rawNutritionLabel: { servingSize: '100g', calories: '150' },
+        labelNutrientsPerServing: { calories: 150, protein: 5 },
+      },
+    ],
+    ...overrides,
+  });
+
+  // Exactly what the list/pull snapshot returns: no items_breakdown, no item images.
+  // Same id: the cloud copy and the local copy are the same food_logs record.
+  const trimmedCloud = (overrides: any = {}) => ({
+    id: 'local-1',
+    name: 'Mr. Oat Quick Cook Oatmeal',
+    date: '2026-08-08',
+    weightGrams: 130,
+    updated_at: 1_720_000_000_000,
+    imageUrl: '/photos/cloud-2.jpg',
+    imageUrls: ['/photos/cloud-2.jpg'],
+    calories: 150,
+    nutrients: { calories: 150 },
+    ...overrides,
+  });
+
+  it('keeps the sibling per-item list (nutrition + OCR evidence) when the cloud row wins', () => {
+    const result = mergeFoodLogsDeduped([richLocal()], [trimmedCloud()]);
+    expect(result).toHaveLength(1);
+    expect(result[0].imageUrl).toBe('/photos/cloud-2.jpg');
+    const items = result[0].itemsBreakdown;
+    expect(items).toHaveLength(1);
+    expect(items[0].calories).toBe(150);
+    expect(items[0].dbSource).toBe('label');
+    expect(items[0].rawNutritionLabel).toEqual({ servingSize: '100g', calories: '150' });
+    expect(items[0].labelNutrientsPerServing).toEqual({ calories: 150, protein: 5 });
+    expect(items[0].imageUrl).toBe('/photos/local-1-i0.jpg');
+  });
+
+  it('keeps macro values the winner does not carry', () => {
+    const result = mergeFoodLogsDeduped([richLocal()], [trimmedCloud()]);
+    expect(result[0].nutrients.calories).toBe(150);
+    expect(result[0].nutrients.protein).toBe(5);
+    expect(result[0].nutrients.carbohydrates).toBe(27);
+    expect(result[0].protein).toBe(5);
+  });
+
+  it('keeps nutrients when the winning row ships an empty nutrients object', () => {
+    const cloud = trimmedCloud({ nutrients: {}, calories: 0 });
+    const result = mergeFoodLogsDeduped([richLocal()], [cloud]);
+    expect(result[0].nutrients.calories).toBe(150);
+    expect(result[0].nutrients.carbohydrates).toBe(27);
+  });
+
+  it('carries item evidence onto the winning item when both sides describe the same item', () => {
+    const cloud = trimmedCloud({
+      itemsBreakdown: [{ id: 'cloud-2-i0', name: 'Mr. Oat Quick Cook Oatmeal', weight: '130g', weightGrams: 130 }],
+    });
+    const result = mergeFoodLogsDeduped([richLocal()], [cloud]);
+    const items = result[0].itemsBreakdown;
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe('cloud-2-i0');
+    expect(items[0].calories).toBe(150);
+    expect(items[0].dbSource).toBe('label');
+  });
+
+  it('carries evidence across a cross-device duplicate (different ids, same fingerprint)', () => {
+    const result = mergeFoodLogsDeduped([richLocal()], [trimmedCloud({ id: 'cloud-2' })]);
+    expect(result).toHaveLength(1);
+    const items = result[0].itemsBreakdown;
+    expect(items).toHaveLength(1);
+    expect(items[0].calories).toBe(150);
+    expect(items[0].dbSource).toBe('label');
+    expect(result[0].protein).toBe(5);
+  });
+
+  it('does not invent evidence when neither side has any', () => {
+    const bare: any = {
+      id: 'bare-1',
+      name: 'Mystery Meal',
+      date: '2026-08-08',
+      updated_at: 10,
+      imageUrl: '/photos/bare-1.jpg',
+      nutrients: { calories: 300 },
+    };
+    const other = { ...bare, id: 'bare-2', updated_at: 20, nutrients: { calories: 300 } };
+    const result = mergeFoodLogsDeduped([bare], [other]);
+    expect(result).toHaveLength(1);
+    expect(result[0].itemsBreakdown).toBeUndefined();
+    expect(result[0].nutrients.calories).toBe(300);
+  });
+
+  it('syncs both item-list spellings when only one side carries them', () => {
+    const localOnlySnake: any = {
+      id: 'sync-1',
+      name: 'Oat Sync Bowl',
+      date: '2026-08-08',
+      updated_at: 1,
+      imageUrl: '/photos/sync-1.jpg',
+      nutrients: { calories: 150 },
+      items_breakdown: [{ name: 'Oat Sync Bowl', calories: 150, dbSource: 'label' }],
+    };
+    const cloudBare: any = {
+      id: 'sync-1',
+      name: 'Oat Sync Bowl',
+      date: '2026-08-08',
+      updated_at: 1_720_000_000_000,
+      imageUrl: '/photos/sync-cloud.jpg',
+      nutrients: { calories: 150 },
+    };
+    const result = mergeFoodLogsDeduped([localOnlySnake], [cloudBare]);
+    expect(result).toHaveLength(1);
+    expect(result[0].items_breakdown).toHaveLength(1);
+    expect(result[0].itemsBreakdown).toBe(result[0].items_breakdown);
+  });
+});

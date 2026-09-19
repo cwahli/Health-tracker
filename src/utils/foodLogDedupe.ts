@@ -127,6 +127,131 @@ export function hasUsableFoodImage(log: DedupableFoodLog): boolean {
   return false;
 }
 
+/**
+ * Nutrition/evidence fields a trimmed sibling can hold while the winner lacks
+ * them. The sync list snapshot omits items_breakdown (egress design) and legacy
+ * rows ship empty nutrients, so without carrying these a re-synced saved meal
+ * renders its composition with no nutrition values and no OCR provenance.
+ */
+const EVIDENCE_NUTRIENT_KEYS = [
+  'calories',
+  'energy',
+  'protein',
+  'carbohydrates',
+  'carbs',
+  'totalCarbohydrate',
+  'totalFat',
+  'fat',
+  'saturatedFat',
+  'saturated_fat',
+  'totalFibre',
+  'total_fibre',
+  'fiber',
+  'sodium',
+  'salt',
+  'transFat',
+  'sugar',
+  'addedSugar',
+  'added_sugar',
+];
+
+/** Provenance fields that identify OCR-label evidence and must survive a collapse. */
+const EVIDENCE_PROVENANCE_KEYS = [
+  'dbSource',
+  'rawNutritionLabel',
+  'labelNutrientsPerServing',
+  'nutritionFacts',
+];
+
+/** Per-item arrays. `items_breakdown` is the DB spelling, `itemsBreakdown` the client one. */
+const EVIDENCE_ITEM_LIST_KEYS = ['itemsBreakdown', 'items_breakdown', 'scoutItems', 'scout_items'];
+
+const isBlankEvidence = (v: unknown): boolean =>
+  v === undefined ||
+  v === null ||
+  v === '' ||
+  (Array.isArray(v) && v.length === 0) ||
+  (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0);
+
+/** Blank or a numeric zero — a zero is "no value", not a measured zero. */
+const isBlankOrZeroEvidence = (v: unknown): boolean => {
+  if (isBlankEvidence(v)) return true;
+  if (typeof v === 'number') return !Number.isFinite(v) || v === 0;
+  if (typeof v === 'string') return v.trim() === '' || Number(v) === 0;
+  return false;
+};
+
+/** Key-wise nutrient merge: the winner's real values win, the loser fills its blanks. */
+function mergeNutrientObjects(winnerNutrients: unknown, loserNutrients: unknown): Record<string, any> {
+  const w = winnerNutrients && typeof winnerNutrients === 'object' ? (winnerNutrients as Record<string, any>) : {};
+  const l = loserNutrients && typeof loserNutrients === 'object' ? (loserNutrients as Record<string, any>) : {};
+  const out: Record<string, any> = { ...l, ...w };
+  for (const key of Object.keys(l)) {
+    if (isBlankOrZeroEvidence(out[key]) && !isBlankOrZeroEvidence(l[key])) out[key] = l[key];
+  }
+  return out;
+}
+
+/** Fill one item's blanks (macros, OCR provenance, its own photo) from its sibling copy. */
+function mergeItemEvidence(winnerItem: any, loserItem: any): any {
+  if (!winnerItem || typeof winnerItem !== 'object') return winnerItem;
+  if (!loserItem || typeof loserItem !== 'object') return winnerItem;
+  const out: any = { ...loserItem, ...winnerItem };
+  for (const key of [...EVIDENCE_NUTRIENT_KEYS, ...EVIDENCE_PROVENANCE_KEYS, 'imageUrl', 'imageUrls']) {
+    if (isBlankOrZeroEvidence(winnerItem[key]) && !isBlankOrZeroEvidence(loserItem[key])) {
+      out[key] = loserItem[key];
+    }
+  }
+  const nutrients = mergeNutrientObjects(winnerItem.nutrients, loserItem.nutrients);
+  if (Object.keys(nutrients).length > 0) out.nutrients = nutrients;
+  return out;
+}
+
+/**
+ * Winner selection decides recency and photos, never evidence. Everything the
+ * winner is missing (macros, OCR provenance, per-item rows) is carried over from
+ * the row it collapsed with.
+ */
+function carryEvidence<T extends DedupableFoodLog>(resolved: T, winner: T, loser: T): T {
+  const out: any = { ...resolved };
+  const winnerAny = winner as any;
+  const loserAny = loser as any;
+  for (const key of [...EVIDENCE_NUTRIENT_KEYS, ...EVIDENCE_PROVENANCE_KEYS]) {
+    if (isBlankOrZeroEvidence(out[key]) && !isBlankOrZeroEvidence(loserAny[key])) out[key] = loserAny[key];
+  }
+  const nutrients = mergeNutrientObjects(winner.nutrients, loser.nutrients);
+  if (Object.keys(nutrients).length > 0) out.nutrients = nutrients;
+  for (const key of EVIDENCE_ITEM_LIST_KEYS) {
+    const winnerList = Array.isArray(winnerAny[key]) ? winnerAny[key] : [];
+    const loserList = Array.isArray(loserAny[key]) ? loserAny[key] : [];
+    if (loserList.length === 0) continue;
+    if (winnerList.length === 0) {
+      out[key] = loserList;
+      continue;
+    }
+    out[key] = winnerList.map((winnerItem: any, idx: number) => {
+      const nameKey = normalizeFoodName(winnerItem?.name || winnerItem?.displayName || winnerItem?.keyword || '');
+      const byName = nameKey
+        ? loserList.find(
+            (loserItem: any) =>
+              normalizeFoodName(loserItem?.name || loserItem?.displayName || loserItem?.keyword || '') === nameKey,
+          )
+        : undefined;
+      return mergeItemEvidence(winnerItem, byName || loserList[idx]);
+    });
+  }
+  // Donors may carry only one item-list spelling — keep both in sync so
+  // consumers reading either spelling see the merged evidence.
+  const syncedItems =
+    (Array.isArray(out.itemsBreakdown) && out.itemsBreakdown.length > 0 ? out.itemsBreakdown : null) ||
+    (Array.isArray(out.items_breakdown) && out.items_breakdown.length > 0 ? out.items_breakdown : null);
+  if (syncedItems) {
+    out.itemsBreakdown = syncedItems;
+    out.items_breakdown = syncedItems;
+  }
+  return out as T;
+}
+
 /** Prefer row with real photos; then newer updated_at; merge image fields onto winner. */
 function pickBetter<T extends DedupableFoodLog>(a: T, b: T): T {
   const aImg = hasUsableFoodImage(a);
@@ -175,12 +300,16 @@ function pickBetter<T extends DedupableFoodLog>(a: T, b: T): T {
     clinicalAdvice: (winner as any).clinicalAdvice || (loser as any).clinicalAdvice,
     sync_state: resolvedSyncState,
   };
-  if (candidates.length === 0) return resolved;
-  return {
-    ...resolved,
-    imageUrl: candidates[0],
-    imageUrls: candidates,
-  };
+  if (candidates.length === 0) return carryEvidence(resolved as T, winner, loser);
+  return carryEvidence(
+    {
+      ...resolved,
+      imageUrl: candidates[0],
+      imageUrls: candidates,
+    } as T,
+    winner,
+    loser,
+  );
 }
 
 function shouldSoftMerge(a: DedupableFoodLog, b: DedupableFoodLog): boolean {
