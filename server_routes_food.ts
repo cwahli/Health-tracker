@@ -1,9 +1,48 @@
 import { Router } from 'express';
 import { lookupCanonicalBaseFood } from './server_food_db.js';
 import { buildFoodSearchQuerySet } from './server_query_set.js';
-import { mapPreviousMealRow } from './server_food_previous_meal.js';
+import { mapPreviousMealRow, collectRefPhotoIds, substituteRefPhotos } from './server_food_previous_meal.js';
 
 export const foodRouter = Router();
+
+/**
+ * Resolve `ref:<id>` duplicate photo pointers to the primary record's real
+ * photos, scoped to the caller's uids. Best-effort: a dangling pointer
+ * degrades to the letter tile instead of failing the search.
+ */
+async function resolveRefPhotos(rows: any[], possibleUids: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  let ids: string[] = [];
+  try {
+    ids = collectRefPhotoIds(rows);
+  } catch {
+    return out;
+  }
+  if (ids.length === 0) return out;
+  try {
+    const { isD1Configured, d1GetFoodLogImageUrls } = await import('./server_db_d1.js');
+    if (isD1Configured()) return d1GetFoodLogImageUrls(ids, possibleUids);
+    const { supabaseAdmin } = await import('./supabaseAdmin.js');
+    if (supabaseAdmin) {
+      const { data } = await supabaseAdmin.from('food_logs').select('id,image_urls').in('id', ids).in('firebase_uid', possibleUids);
+      for (const r of data || []) {
+        let raw: unknown = (r as any)?.image_urls;
+        if (typeof raw === 'string') {
+          try {
+            raw = JSON.parse(raw);
+          } catch {
+            /* keep raw string */
+          }
+        }
+        const list = (Array.isArray(raw) ? raw : [raw]).filter((u: unknown) => typeof u === 'string' && (u as string).trim());
+        if ((r as any)?.id && list.length > 0) out.set(String((r as any).id), list as string[]);
+      }
+    }
+  } catch {
+    /* best-effort */
+  }
+  return out;
+}
 
 foodRouter.get('/api/food/health', (req, res) => {
   res.json({ status: 'ok', domain: 'food', timestamp: new Date().toISOString() });
@@ -35,7 +74,8 @@ foodRouter.get('/api/food/search', async (req, res) => {
         const { isD1Configured, d1SearchUserFoodLogs } = await import('./server_db_d1.js');
         if (isD1Configured()) {
           const rawPast = await d1SearchUserFoodLogs({ possibleUids, query, limit: 5 });
-          userFoodMatches = rawPast.map(mapPreviousMealRow);
+          const refPhotos = await resolveRefPhotos(rawPast, possibleUids);
+          userFoodMatches = substituteRefPhotos(rawPast, refPhotos).map(mapPreviousMealRow);
         } else {
           const { supabaseAdmin } = await import('./supabaseAdmin.js');
           if (supabaseAdmin) {
@@ -47,7 +87,8 @@ foodRouter.get('/api/food/search', async (req, res) => {
               .order('updated_at', { ascending: false })
               .limit(5);
             if (Array.isArray(supaPast)) {
-              userFoodMatches = supaPast.map(mapPreviousMealRow);
+              const refPhotos = await resolveRefPhotos(supaPast, possibleUids);
+              userFoodMatches = substituteRefPhotos(supaPast, refPhotos).map(mapPreviousMealRow);
             }
           }
         }

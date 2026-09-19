@@ -57,6 +57,9 @@ const NUTRIENT_KEYS = [
   'transFat',
 ] as const;
 
+/** Prefix for duplicate-pointer photo tokens (see handleDuplicateFoodLog). */
+export const REF_PHOTO_PREFIX = 'ref:';
+
 /** Usable photo URLs for a stored food-log row, falling back to the photo proxy. */
 export function previousMealImageUrls(f: any): string[] {
   const raw = Array.isArray(f?.image_urls)
@@ -67,6 +70,7 @@ export function previousMealImageUrls(f: any): string[] {
   const urls = raw.filter((u: unknown) =>
     typeof u === 'string' &&
     u.trim() &&
+    !u.startsWith(REF_PHOTO_PREFIX) &&
     !u.includes('image_removed_for_snapshot') &&
     !u.includes('Image reference preserved') &&
     u !== 'loading'
@@ -76,6 +80,71 @@ export function previousMealImageUrls(f: any): string[] {
   if (!id || id.startsWith('brand_')) return [];
   const safe = id.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
   return [`/photos/${safe}.jpg`];
+}
+
+/**
+ * Collect `ref:<id>` photo-pointer ids from a batch of stored rows
+ * (top-level photo fields only — that is where duplicate-to-today writes them).
+ */
+export function collectRefPhotoIds(rows: any[]): string[] {
+  const ids: string[] = [];
+  for (const row of rows || []) {
+    if (!row || typeof row !== 'object') continue;
+    const fields = [row.imageUrl, row.image_url, row.image_urls, row.imageUrls];
+    for (const field of fields) {
+      const list = Array.isArray(field) ? field : [field];
+      for (const v of list) {
+        if (typeof v === 'string' && v.startsWith(REF_PHOTO_PREFIX)) {
+          const id = v.slice(REF_PHOTO_PREFIX.length).trim();
+          if (id && !ids.includes(id)) ids.push(id);
+        }
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * Substitute resolved primary photos for `ref:` tokens ahead of projection.
+ * `photoMap` maps primary id → its usable photo URLs. Unresolvable tokens are
+ * dropped (never shipped as dangling pointers).
+ */
+export function substituteRefPhotos(rows: any[], photoMap: Map<string, string[]>): any[] {
+  if (!photoMap || photoMap.size === 0) return rows;
+  const lookup = (token: string): string[] | undefined => {
+    const photos = photoMap.get(token.slice(REF_PHOTO_PREFIX.length).trim());
+    return photos && photos.length > 0 ? photos : undefined;
+  };
+  return (rows || []).map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    const out: any = { ...row };
+    for (const key of ['imageUrl', 'image_url'] as const) {
+      if (typeof out[key] === 'string' && out[key].startsWith(REF_PHOTO_PREFIX)) {
+        const photos = lookup(out[key]);
+        if (photos) out[key] = photos[0];
+        else delete out[key];
+      }
+    }
+    for (const key of ['imageUrls', 'image_urls'] as const) {
+      const cur = out[key];
+      if (Array.isArray(cur)) {
+        const next: string[] = [];
+        for (const v of cur) {
+          if (typeof v === 'string' && v.startsWith(REF_PHOTO_PREFIX)) {
+            const photos = lookup(v);
+            if (photos) next.push(...photos);
+          } else {
+            next.push(v);
+          }
+        }
+        out[key] = next;
+      } else if (typeof cur === 'string' && cur.startsWith(REF_PHOTO_PREFIX)) {
+        const photos = lookup(cur);
+        out[key] = photos ? [...photos] : [];
+      }
+    }
+    return out;
+  });
 }
 
 /**

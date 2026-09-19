@@ -430,6 +430,28 @@ export async function d1SearchUserFoodLogs(opts: D1SearchFoodOptions): Promise<a
   }));
 }
 
+/**
+ * Batch-fetch usable photo URLs for `ref:<id>` pointer targets.
+ * Scoped to the caller's uids so one user can never resolve another's photos.
+ */
+export async function d1GetFoodLogImageUrls(ids: string[], possibleUids: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const cleanIds = Array.from(new Set((ids || []).map((s) => String(s || '').trim()).filter(Boolean))).slice(0, 20);
+  const cleanUids = Array.from(new Set((possibleUids || []).map((s) => String(s || '').trim()).filter(Boolean)));
+  if (!isD1Configured() || cleanIds.length === 0 || cleanUids.length === 0) return out;
+  const idPlaceholders = cleanIds.map(() => '?').join(', ');
+  const uidPlaceholders = cleanUids.map(() => '?').join(', ');
+  const sql = `SELECT id, image_urls FROM food_logs WHERE id IN (${idPlaceholders}) AND firebase_uid IN (${uidPlaceholders})`;
+  const res = await d1Query<any>(sql, [...cleanIds, ...cleanUids]);
+  if (!res.success || !res.results) return out;
+  for (const row of res.results) {
+    const urls = safeJsonParse(row.image_urls, []);
+    const list = (Array.isArray(urls) ? urls : [urls]).filter((u: unknown) => typeof u === 'string' && (u as string).trim());
+    if (row?.id && list.length > 0) out.set(String(row.id), list as string[]);
+  }
+  return out;
+}
+
 // ==========================================
 // AGENT JOBS
 // ==========================================

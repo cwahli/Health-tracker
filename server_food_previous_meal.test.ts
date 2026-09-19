@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapPreviousMealRow, previousMealImageUrls } from './server_food_previous_meal';
+import { mapPreviousMealRow, previousMealImageUrls, collectRefPhotoIds, substituteRefPhotos } from './server_food_previous_meal';
 import { calculateCompositeMeal } from './src/utils/compositeFoodCalculation';
 
 /** The row a composite save writes: nutrition + OCR evidence live on item 0. */
@@ -186,5 +186,46 @@ describe('previousMealImageUrls', () => {
   it('synthesizes the proxy url for a real id but never for brand rows', () => {
     expect(previousMealImageUrls({ id: 'food_1' })).toEqual(['/photos/food_1.jpg']);
     expect(previousMealImageUrls({ id: 'brand_menu_oat' })).toEqual([]);
+  });
+
+  it('never ships a ref: pointer as a photo', () => {
+    expect(previousMealImageUrls({ id: 'food_dup', image_urls: ['ref:food_orig'] })).toEqual(['/photos/food_dup.jpg']);
+  });
+});
+
+describe('ref: photo pointer substitution', () => {
+  const dupRow = () => ({
+    id: 'food_dup_1',
+    name: 'Mr. Oat Quick Cook Oatmeal',
+    date: '2026-09-16',
+    weight_grams: 175,
+    calories: 280,
+    nutrients: {},
+    image_urls: ['ref:food_orig_1'],
+  });
+
+  it('collects pointer ids from top-level photo fields', () => {
+    expect(collectRefPhotoIds([dupRow(), { id: 'x', imageUrl: 'ref:food_orig_2' }, { id: 'y' }])).toEqual([
+      'food_orig_1',
+      'food_orig_2',
+    ]);
+  });
+
+  it('substitutes the primary real photos ahead of projection', () => {
+    const rows = substituteRefPhotos([dupRow()], new Map([['food_orig_1', ['/photos/job_oat.jpg']]]));
+    expect(rows[0].image_urls).toEqual(['/photos/job_oat.jpg']);
+    const projected = mapPreviousMealRow(rows[0]);
+    expect(projected.imageUrl).toBe('/photos/job_oat.jpg');
+    expect(projected.imageUrls).toEqual(['/photos/job_oat.jpg']);
+  });
+
+  it('drops dangling pointers instead of shipping them', () => {
+    const rows = substituteRefPhotos([dupRow()], new Map());
+    expect(rows).toHaveLength(1);
+    expect(rows[0].image_urls).toEqual(['ref:food_orig_1']);
+    // Without a resolved primary the pointer never reaches the client as a photo.
+    expect(previousMealImageUrls(rows[0])).toEqual(['/photos/food_dup_1.jpg']);
+    const rows2 = substituteRefPhotos([dupRow()], new Map([['other', ['/photos/x.jpg']]]));
+    expect(mapPreviousMealRow(rows2[0]).imageUrls).toEqual(['/photos/food_dup_1.jpg']);
   });
 });
