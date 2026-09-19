@@ -33,7 +33,7 @@
     "server_routes_food_analyze.ts": 700,
     "server_food_analyze_run.ts": 3800,
     "src/components/AgentResultTable.tsx": 1800,
-    "src/components/Header.tsx": 2840,
+    "src/components/Header.tsx": 708,
     "src/components/ProfileModal.tsx": 448
   }
 }
