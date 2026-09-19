@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractMostRecentImageDate, normalizeBiomarkerHistory } from './dateUtils';
+import { extractMostRecentImageDate, normalizeBiomarkerHistory, formatLogDateTime } from './dateUtils';
 
 describe('extractMostRecentImageDate', () => {
   it('returns null for empty, undefined, or non-array inputs', () => {
@@ -79,5 +79,31 @@ describe('normalizeBiomarkerHistory deduplication & merging', () => {
 
     const result = normalizeBiomarkerHistory(logs);
     expect(result.map(r => r.date)).toEqual(['16-08-2026', '25-06-2025', '02-04-2024']);
+  });
+});
+
+describe('formatLogDateTime', () => {
+  it('formats day, short month and 24h time in the given timezone', () => {
+    expect(formatLogDateTime('2026-09-19', '2026-09-19T19:57:00Z', 'UTC')).toBe('19 sep 19:57');
+    expect(formatLogDateTime('2026-09-19', Date.parse('2026-09-19T19:57:00Z'), 'UTC')).toBe('19 sep 19:57');
+  });
+
+  it('keeps day/month/time consistent from one instant across midnight', () => {
+    // 00:30 UTC is still the previous day in New York — all three parts agree.
+    expect(formatLogDateTime('2026-09-19', '2026-09-19T00:30:00Z', 'America/New_York')).toBe('18 sep 20:30');
+  });
+
+  it('renders midnight as 00:xx, never 24:xx', () => {
+    expect(formatLogDateTime('2026-09-19', '2026-09-19T00:05:00Z', 'UTC')).toBe('19 sep 00:05');
+  });
+
+  it('falls back to the bare day without a timestamp', () => {
+    expect(formatLogDateTime('2026-09-16', null, 'UTC')).toBe('16 sep');
+    expect(formatLogDateTime('2026-09-16')).toBe('16 sep');
+  });
+
+  it('passes garbage through and returns empty for nothing', () => {
+    expect(formatLogDateTime('not-a-date', 'garbage', 'UTC')).toBe('not-a-date');
+    expect(formatLogDateTime('', null, 'UTC')).toBe('');
   });
 });

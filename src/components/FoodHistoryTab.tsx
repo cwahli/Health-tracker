@@ -3,13 +3,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile, FoodLog, NutrientBreakdown, RecommendationReport } from '../types';
 import { translations } from '../utils/translations';
 import { displayNutrientName } from '../utils/i18n';
-import { Edit2, Trash2, Calendar, Search, ChevronDown, ChevronUp, Image as ImageIcon, Save, Check, Plus, Loader, X, Camera, Download } from 'lucide-react';
+import { Edit2, Trash2, Search, ChevronDown, ChevronUp, Image as ImageIcon, Save, Check, Plus, Loader, X, Camera, Download } from 'lucide-react';
 import { nutrientDefinitions, getNutrientColor } from '../utils/nutrition';
 import { formatNutrientDisplayValue } from '../utils/nutrients';
 import { db, auth } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { compressMultipleImages } from '../utils/imageCompressor';
-import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
+import { getCurrentDateInTimezone, toYYYYMMDD, formatLogDateTime } from '../utils/dateUtils';
 import ImageSlider from './ImageSlider';
 import { resolveFoodImage, resolveFoodImages } from '../utils/imageResolver';
 import { mergeFoodLogsDeduped, foodLogFingerprint } from '../utils/foodLogDedupe';
@@ -59,22 +59,6 @@ function cleanData<T>(obj: T): T {
     return value === undefined ? null : value;
   }));
 }
-
-const formatLogDate = (dateStr: string) => {
-  if (!dateStr) return '';
-  const parts = dateStr.split('-');
-  if (parts.length === 3) {
-    const day = parseInt(parts[2], 10);
-    const monthIndex = parseInt(parts[1], 10) - 1;
-    const months = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
-    ];
-    const monthName = months[monthIndex] || parts[1];
-    return `${day} ${monthName}`;
-  }
-  return dateStr;
-};
 
 const getRecommendationColorClass = (rec: string, level?: string) => {
   const lvl = String(level || '').toLowerCase();
@@ -1781,7 +1765,7 @@ export default function FoodHistoryTab({
                           
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                              <Calendar className="w-3 h-3" /> {formatLogDate(log.date)}
+                              {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
                             </span>
                             {(() => {
                               const v = resolveMealVerdict(log, profile?.language);

@@ -313,3 +313,52 @@ export function formatTimelineDate(dateStr: string): string {
   return dateStr;
 }
 
+const SHORT_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/**
+ * Compact log timestamp for history cards: "19 sep 19:57" (24h, no icon).
+ * Day/month/time all derive from the same instant in the given timezone so
+ * the three can never disagree across midnight. Falls back to the bare
+ * calendar day ("19 sep") when no usable timestamp is stored.
+ */
+export function formatLogDateTime(
+  dateStr?: string | null,
+  timestamp?: number | string | null,
+  timezone?: string | null,
+): string {
+  const tsEmpty = timestamp === undefined || timestamp === null || timestamp === '';
+  if (!tsEmpty) {
+    const d = typeof timestamp === 'number' ? new Date(timestamp) : new Date(String(timestamp).trim());
+    if (!isNaN(d.getTime())) {
+      try {
+        const parts = new Intl.DateTimeFormat('en-GB', {
+          ...(timezone ? { timeZone: timezone } : {}),
+          day: 'numeric',
+          month: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hourCycle: 'h23',
+        }).formatToParts(d);
+        const get = (t: string) => parts.find((p) => p.type === t)?.value || '';
+        const mon = Number(get('month'));
+        const time = `${get('hour')}:${get('minute')}`;
+        if (mon >= 1 && mon <= 12 && /^\d{2}:\d{2}$/.test(time)) {
+          return `${get('day')} ${SHORT_MONTHS[mon - 1]} ${time}`;
+        }
+      } catch {
+        /* fall through to date-only */
+      }
+    }
+  }
+  if (!dateStr) return '';
+  const parts = String(dateStr).trim().split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    const day = parseInt(parts[2], 10);
+    const mon = parseInt(parts[1], 10);
+    if (Number.isFinite(day) && mon >= 1 && mon <= 12) {
+      return `${day} ${SHORT_MONTHS[mon - 1]}`;
+    }
+  }
+  return String(dateStr);
+}
+
