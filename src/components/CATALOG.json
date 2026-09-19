@@ -25,7 +25,7 @@
     "src/utils/translations/id.ts": 2010,
     "src/utils/translations/fr.ts": 20,
     "src/utils/translations/zh.ts": 20,
-    "src/components/BiomarkerDictionaryModal.tsx": 6640,
+    "src/components/BiomarkerDictionaryModal.tsx": 5548,
     "src/components/chat-cards/FoodCard.tsx": 4200,
     "src/components/HomeTab.tsx": 3200,
     "src/components/LogChat.tsx": 7000,
