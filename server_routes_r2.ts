@@ -37,14 +37,13 @@ export function getS3Client() {
   return s3Client;
 }
 
-export async function uploadBase64ToR2(id: string, base64Data: string, index: number = 0): Promise<string> {
+export async function uploadBase64ToR2(id: string, base64Data: string, _index: number = 0): Promise<string> {
   const client = getS3Client();
-  const safeId = String(id || 'unknown').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
-  const suffix = index > 0 ? `_${index}` : '';
-  const fallbackProxyUrl = `/photos/${safeId}${suffix}.jpg`;
 
+  // D-9: empty/invalid input yields no key at all. Callers treat '' as skip
+  // (falsy) and keep their previous value — never mint a job-keyed phantom URL.
   if (!base64Data || typeof base64Data !== 'string') {
-    return fallbackProxyUrl;
+    return '';
   }
 
   // If already a valid URL or photo path, return without re-uploading
@@ -69,7 +68,7 @@ export async function uploadBase64ToR2(id: string, base64Data: string, index: nu
     }
   } catch (err) {
     console.error('[R2 uploadBase64ToR2] Failed decoding image buffer:', err);
-    return fallbackProxyUrl;
+    return '';
   }
 
   // SHA-256 Content-Addressable Storage (CAS) to guarantee zero duplicate image storage (Track D / D-9)
@@ -79,6 +78,8 @@ export async function uploadBase64ToR2(id: string, base64Data: string, index: nu
   const casProxyUrl = `/photos/sha256_${hash}.jpg`;
 
   if (!client) {
+    // D-9: client unconfigured — return the CAS proxy URL (computable without
+    // a PUT) instead of a job-keyed phantom. Next configured boot head-checks it.
     console.warn('[R2 uploadBase64ToR2] S3 Client not configured, returning casProxyUrl');
     return casProxyUrl;
   }
@@ -92,6 +93,7 @@ export async function uploadBase64ToR2(id: string, base64Data: string, index: nu
       });
       await client.send(headCmd);
       // Already present in R2: reuse existing CAS object without re-uploading
+      console.log(`[R2 CAS] deduplicated=true key=${casKey} bytes=${body.length}`);
       return casPublicUrl;
     } catch (headErr: any) {
       // Object not found yet in R2, proceed with write
@@ -104,6 +106,7 @@ export async function uploadBase64ToR2(id: string, base64Data: string, index: nu
       ContentType: contentType,
     });
     await client.send(command);
+    console.log(`[R2 CAS] deduplicated=false key=${casKey} bytes=${body.length}`);
     return casPublicUrl;
   } catch (err) {
     console.error('[R2 uploadBase64ToR2] Failed uploading to R2:', err);
@@ -286,29 +289,23 @@ r2Router.post(['/api/r2/upload-photo', '/api/upload'], async (req, res) => {
       return res.status(400).json({ error: 'Missing image payload' });
     }
 
-    const safeId = String(jobId || 'unknown').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
-    const objectKey = `photos/${safeId}.jpg`;
-    // B11d: same-origin proxy works with private buckets; publicUrl is secondary
-    const proxyUrl = `/photos/${safeId}.jpg`;
-    const publicUrl = `${CLOUDFLARE_R2_PUBLIC_URL}/${objectKey}`;
-    const client = getS3Client();
-    if (!client) {
-      return res.json({ url: proxyUrl, proxyUrl, publicUrl, key: objectKey });
-    }
-
     let body: Buffer;
     let contentType = 'image/jpeg';
 
-    if (payload.startsWith('data:')) {
-      const match = payload.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
-      if (match) {
-        contentType = match[1];
-        body = Buffer.from(match[2], 'base64');
+    try {
+      if (payload.startsWith('data:')) {
+        const match = payload.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+        if (match) {
+          contentType = match[1];
+          body = Buffer.from(match[2], 'base64');
+        } else {
+          body = Buffer.from(payload);
+        }
       } else {
         body = Buffer.from(payload);
       }
-    } else {
-      body = Buffer.from(payload);
+    } catch (decodeErr) {
+      return res.status(400).json({ error: 'Undecodable image payload' });
     }
 
     // SHA-256 Content-Addressable Storage (CAS) to guarantee zero duplicate image storage
@@ -316,6 +313,13 @@ r2Router.post(['/api/r2/upload-photo', '/api/upload'], async (req, res) => {
     const casKey = `photos/sha256_${hash}.jpg`;
     const casProxyUrl = `/photos/sha256_${hash}.jpg`;
     const casPublicUrl = `${CLOUDFLARE_R2_PUBLIC_URL}/${casKey}`;
+
+    // D-9: decode+hash happen before the client check so the no-client path
+    // returns the CAS URL, never a job-keyed phantom key.
+    const client = getS3Client();
+    if (!client) {
+      return res.json({ url: casProxyUrl, proxyUrl: casProxyUrl, publicUrl: casPublicUrl, key: casKey, deduplicated: false, clientUnconfigured: true });
+    }
 
     // Check if identical photo already exists in R2 bucket
     try {
@@ -325,6 +329,7 @@ r2Router.post(['/api/r2/upload-photo', '/api/upload'], async (req, res) => {
       });
       await client.send(headCmd);
       // Already present in R2! Skip re-upload and return existing deduplicated URL
+      console.log(`[R2 CAS] deduplicated=true key=${casKey} bytes=${body.length}`);
       return res.json({
         url: casProxyUrl,
         proxyUrl: casProxyUrl,
@@ -343,6 +348,7 @@ r2Router.post(['/api/r2/upload-photo', '/api/upload'], async (req, res) => {
       ContentType: contentType,
     });
     await client.send(command);
+    console.log(`[R2 CAS] deduplicated=false key=${casKey} bytes=${body.length}`);
 
     res.json({
       url: casProxyUrl,
