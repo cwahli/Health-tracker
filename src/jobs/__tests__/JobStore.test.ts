@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JobStore, isJobBlank, isStalePriorTurn } from '../JobStore';
 import { ImageStore } from '../ImageStore';
-import { processJobRows } from '../SupabaseJobSync';
+import { processJobRows } from '../BackendJobSync';
 import { uniqueMealImageUrls } from '../../utils/foodImageSources';
 
 vi.mock('idb-keyval', () => {

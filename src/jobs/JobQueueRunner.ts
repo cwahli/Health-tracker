@@ -1,7 +1,7 @@
 import { JobStore } from './JobStore';
 import { AgentJob } from './types';
 import { uploadPhotoToR2, uploadPhotosToR2, uploadDebugPayloadToR2 } from '../utils/r2Storage';
-import { upsertJobToSupabase } from './SupabaseJobSync';
+import { upsertJobToSupabase } from './BackendJobSync';
 import { ImageStore } from './ImageStore';
 import { auth } from '../firebase';
 import { getSessionLog } from './sessionLog';

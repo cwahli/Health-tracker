@@ -5,7 +5,7 @@ import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from './mergeFoodEditM
 import { ImageStore } from './ImageStore';
 import { MealBuild } from '../mealBuild/types';
 import { rebaseUserEdit } from '../mealBuild/consolidate';
-import { deleteJobFromBackend, scheduleCoalescedJobUpsert } from './SupabaseJobSync';
+import { deleteJobFromBackend, scheduleCoalescedJobUpsert } from './BackendJobSync';
 
 type Listener = () => void;
 

@@ -241,9 +241,8 @@ async function hydratePreviewFromJob(
     const { getInMemoryServerJob } = await import('./serverJobs.js');
     let job: any = getInMemoryServerJob(jobId);
     if (!job) {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const { data } = await supabaseAdmin.from('agent_jobs').select('*').eq('id', jobId).maybeSingle();
-      job = data;
+      const { d1GetJob } = await import('./server_db_d1.js');
+      job = await d1GetJob(jobId);
       if (job?.clean_result && typeof job.clean_result === 'object' && (job.clean_result as any).is_r2) {
         try {
           const { fetchJobResultFromR2 } = await import('./src/utils/r2Storage.js');

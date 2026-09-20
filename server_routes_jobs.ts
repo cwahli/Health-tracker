@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { verifyFirebaseIdToken } from './server_auth.js';
-import { supabaseAdmin } from './supabaseAdmin.js';
 import { uploadBase64ToR2, uploadDebugPayloadToR2Direct } from './server_routes_r2.js';
 import { isD1Configured } from './server_d1.js';
 import { d1UpsertJob, d1DeleteJob, d1ListJobs, d1GetJob, d1UpdateJob } from './server_db_d1.js';
+import { d1Query } from './server_d1.js';
 
 export const jobsRouter = Router();
 
@@ -29,13 +29,6 @@ jobsRouter.post('/api/jobs/upsert', async (req, res) => {
       if (!d1Res.success) {
         console.error('Failed to upsert job to D1 via server:', d1Res.error);
         return res.status(500).json({ error: d1Res.error });
-      }
-    } else if (supabaseAdmin) {
-      const { error } = await supabaseAdmin.from('agent_jobs').upsert(payload, { onConflict: 'id' });
-      console.log(`[DIAG4] /api/jobs/upsert supabaseAdmin.upsert finished for job ${payload.id} in ${Date.now() - diag4Start}ms`);
-      if (error) {
-        console.error('Failed to upsert job to Supabase via server:', error);
-        return res.status(500).json({ error: error.message });
       }
     }
     
@@ -63,12 +56,6 @@ jobsRouter.post('/api/jobs/delete', async (req, res) => {
   try {
     if (isD1Configured()) {
       await d1DeleteJob(String(jobId));
-    } else {
-      const { supabaseAdmin, isSupabaseConfigured } = await import('./supabaseAdmin.js');
-      if (isSupabaseConfigured) {
-        const { error } = await supabaseAdmin.from('agent_jobs').delete().eq('id', String(jobId));
-        if (error) console.warn('[jobs/delete] supabase:', error.message);
-      }
     }
   } catch (dbErr: any) {
     console.warn('[jobs/delete] db delete skipped:', dbErr?.message || dbErr);
@@ -231,89 +218,8 @@ jobsRouter.get('/api/jobs/status', async (req, res) => {
           return res.json({ jobs: memJobs });
         }
       } catch (d1Err) {
-        console.warn('[JobsStatus] D1 query failed or timed out, falling back to in-memory/Supabase store:', d1Err);
+        console.warn('[JobsStatus] D1 query failed or timed out, falling back to in-memory store:', d1Err);
       }
-    }
-
-    const { isSupabaseConfigured } = await import('./src/utils/supabaseClient.js');
-    if (!isSupabaseConfigured) {
-      if (jobId) {
-        const memJob = getInMemoryServerJob(String(jobId));
-        return res.json({ jobs: memJob ? [memJob] : [] });
-      }
-      return res.json({ jobs: listInMemoryServerJobs(userId ? String(userId) : undefined) });
-    }
-
-    try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const isFull = req.query.full === 'true';
-      const columns = isFull ? '*' : 'id, status, progress_percent, status_message, updated_at';
-      let query = supabaseAdmin.from('agent_jobs').select(columns);
-      if (jobId) {
-        query = query.eq('id', String(jobId));
-      } else if (userId) {
-        query = query.eq('user_id', String(userId));
-      } else {
-        return res.status(400).json({ error: 'jobId or userId parameter is required' });
-      }
-      query = query.order('updated_at', { ascending: false }).limit(20);
-
-      const queryPromise = Promise.resolve(query);
-      const timeoutPromise = new Promise<{ data: any; error: any }>((_, reject) =>
-        setTimeout(() => reject(new Error('Supabase query timed out after 3500ms')), 3500)
-      );
-      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        const now = Date.now();
-        const staleThresholdMs = 300000; // was 180000 (3 min); large multi-item edits can legitimately take longer
-        const processedJobs = await Promise.all((data || []).map(async (job: any) => {
-          if (job.clean_result && typeof job.clean_result === 'object' && (job.clean_result as any).is_r2) {
-            try {
-              const { fetchJobResultFromR2 } = await import('./src/utils/r2Storage.js');
-              const r2Promise = fetchJobResultFromR2(job.id);
-              const r2Timeout = new Promise<null>((resolve) =>
-                setTimeout(() => resolve(null), 5000)
-              );
-              const fullResult = await Promise.race([r2Promise, r2Timeout]);
-              if (fullResult) {
-                job.clean_result = fullResult;
-              }
-            } catch (r2FetchErr) {
-              console.error(`[JobsStatus] Failed to transparently fetch R2 clean_result for ${job.id}:`, r2FetchErr);
-            }
-          }
-
-          if (job.status === 'running' && job.updated_at) {
-            const updatedAtTime = new Date(job.updated_at).getTime();
-            if (now - updatedAtTime > staleThresholdMs) {
-              console.warn(`[JobsStatus] Auto-failing stale running job ${job.id} (updated ${Math.round((now - updatedAtTime) / 1000)}s ago)`);
-              const failedJob = {
-                ...job,
-                status: 'failed',
-                status_message: 'Analysis timed out on server (>3 min). Tap Retry to try again.',
-                updated_at: new Date().toISOString()
-              };
-              Promise.resolve(
-                supabaseAdmin.from('agent_jobs').update({
-                  status: 'failed',
-                  status_message: 'Analysis timed out on server (>3 min). Tap Retry to try again.',
-                  updated_at: new Date().toISOString()
-                }).eq('id', job.id)
-              ).catch((uErr: any) => {
-                console.error('[JobsStatus] Failed to update stale job status in DB:', uErr);
-              });
-              return failedJob;
-            }
-          }
-          return job;
-        }));
-
-        return res.json({ jobs: processedJobs });
-      }
-    } catch (dbErr) {
-      console.warn('[JobsStatus] Supabase query failed or timed out, falling back to in-memory store:', dbErr);
     }
 
     if (jobId) {
@@ -354,26 +260,6 @@ jobsRouter.all('/api/jobs/debug', async (req, res) => {
           job = await d1GetJob(cleanJobId) || await d1GetJob(rawJobId);
         } catch (d1Err) {
           console.warn('[JobsDebug] D1 lookup error:', d1Err);
-        }
-      } else {
-        const { isSupabaseConfigured } = await import('./src/utils/supabaseClient.js');
-        if (isSupabaseConfigured) {
-          try {
-            const { supabaseAdmin } = await import('./supabaseAdmin.js');
-            let query = supabaseAdmin
-              .from('agent_jobs')
-              .select('*')
-              .in('id', [cleanJobId, rawJobId]);
-            if (userId && String(userId) !== 'anonymous') {
-              query = query.eq('user_id', String(userId));
-            }
-            const { data, error } = await query.maybeSingle();
-            if (!error && data) {
-              job = data;
-            }
-          } catch (dbErr) {
-            console.warn('[JobsDebug] Supabase lookup error:', dbErr);
-          }
         }
       }
     }
@@ -680,10 +566,9 @@ jobsRouter.post(['/api/jobs/prune-debug-logs', '/api/debug-logs/prune'], async (
       return res.json(result);
     }
 
-    // If no specific userId, query distinct firebase_uids or current authenticated user
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    const { data: foods } = await supabaseAdmin.from('food_logs').select('firebase_uid');
-    const uids = Array.from(new Set((foods || []).map((f: any) => f.firebase_uid).filter(Boolean)));
+    // If no specific userId, query distinct firebase_uids from D1.
+    const foodRes = await d1Query<{ firebase_uid: string }>(`SELECT DISTINCT firebase_uid FROM food_logs`);
+    const uids = Array.from(new Set((foodRes.results || []).map((f: any) => f.firebase_uid).filter(Boolean)));
 
     let totalPruned = 0;
     let totalKept = 0;
@@ -715,9 +600,12 @@ jobsRouter.post(['/api/jobs/prune-debug-logs', '/api/debug-logs/prune'], async (
 
 jobsRouter.get('/api/debug-logs/protected-refs', async (_req, res) => {
   try {
+    // D-2 BLOCKED: the bug-tracker tables (issue_tags/issue_backlog/golden_cases)
+    // have no D1 table yet. getBugTrackerProtectedRefs() returns an empty set
+    // without a Supabase client, which is the correct degradation until the D1
+    // schema packet lands (no 402 is emitted).
     const { getBugTrackerProtectedRefs } = await import('./src/utils/debugLogRetention.js');
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    const refs = await getBugTrackerProtectedRefs(supabaseAdmin);
+    const refs = await getBugTrackerProtectedRefs(null);
     return res.json({ refs: Array.from(refs) });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Failed to get protected refs' });
@@ -725,7 +613,7 @@ jobsRouter.get('/api/debug-logs/protected-refs', async (_req, res) => {
 });
 
 // READ-ONLY DIAGNOSTIC — inspects the per-user in-flight job lock plus in-memory and
-// Supabase job state for a given uid. Added to investigate a bug where jobs across
+// D1 job state for a given uid. Added to investigate a bug where jobs across
 // unrelated features (e.g. biomarker "Start" and food logging) appear to queue behind
 // each other and get stuck for several minutes. Defaults to the cwah uid so it can be
 // hit directly from a mobile browser with no params. Does not mutate any state.
@@ -767,22 +655,6 @@ jobsRouter.get('/api/debug/job-lock-check', async (req, res) => {
         dbJobs = await d1ListJobs({ userId: uid, limit: 10 });
       } catch (dErr: any) {
         dbError = dErr?.message || String(dErr);
-      }
-    } else {
-      try {
-        const { supabaseAdmin, isSupabaseConfigured } = await import('./supabaseAdmin.js');
-        if (isSupabaseConfigured) {
-          const { data, error } = await supabaseAdmin
-            .from('agent_jobs')
-            .select('id, kind, mode, status, status_message, progress_percent, updated_at')
-            .eq('user_id', uid)
-            .order('updated_at', { ascending: false })
-            .limit(10);
-          if (error) dbError = error.message;
-          dbJobs = data || [];
-        }
-      } catch (sbErr: any) {
-        dbError = sbErr?.message || String(sbErr);
       }
     }
 
