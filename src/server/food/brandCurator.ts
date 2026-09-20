@@ -20,7 +20,7 @@
  * 7. Wire dispatch: id 't1/curator', agent 'curator', dual-accepting 'food_resolver'/'resolver'.
  */
 
-import { supabaseAdmin } from '../../../supabaseAdmin.js';
+import { d1Query, isD1Configured } from '../../../server_d1.js';
 import { normalizeChainKey, normalizeDishKey } from '../../../serverBrandMenu.js';
 import { foodResolverCuratorInstruction } from '../../../agents/foodResolverInstructions.js';
 
@@ -357,17 +357,56 @@ export function validateCuratorAction(
   return { valid: false, reason: `Unknown action type ${action.type}` };
 }
 
-/** Apply validated curator actions to database using soft quarantine */
+/** Apply validated curator actions to database using soft quarantine (D1-only). */
 export async function applyCuratorActions(
   actions: CuratorActionProposal[],
   candidatePool: BrandMenuItemRow[],
   adminClient: any,
   log: (msg: string) => void
 ): Promise<{ applied: number; quarantined: number; details: string[] }> {
-  const admin = adminClient || supabaseAdmin;
+  const admin = adminClient || null;
+  const useD1 = !admin && isD1Configured();
+  if (!admin && !useD1) {
+    log('[BrandCurator] D1 not configured and no adminClient; skipping curator writes (no 402).');
+  }
   let applied = 0;
   let quarantined = 0;
   const details: string[] = [];
+
+  async function quarantineByIds(ids: string[], notes: string): Promise<boolean> {
+    if (admin) {
+      const { error } = await admin
+        .from('brand_menu_items')
+        .update({ status: 'quarantined', notes, updated_at: new Date().toISOString() })
+        .in('id', ids);
+      if (error) throw error;
+      return true;
+    }
+    const placeholders = ids.map(() => '?').join(', ');
+    const res = await d1Query(
+      `UPDATE brand_menu_items SET status = 'quarantined', notes = ?, updated_at = datetime('now') WHERE id IN (${placeholders})`,
+      [notes, ...ids]
+    );
+    if (!res.success) throw new Error(res.error || 'D1 quarantine update failed');
+    return true;
+  }
+
+  async function quarantineOne(id: string, notes: string): Promise<boolean> {
+    if (admin) {
+      const { error } = await admin
+        .from('brand_menu_items')
+        .update({ status: 'quarantined', notes, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) throw error;
+      return true;
+    }
+    const res = await d1Query(
+      `UPDATE brand_menu_items SET status = 'quarantined', notes = ?, updated_at = datetime('now') WHERE id = ?`,
+      [notes, id]
+    );
+    if (!res.success) throw new Error(res.error || 'D1 quarantine update failed');
+    return true;
+  }
 
   for (const action of actions) {
     const check = validateCuratorAction(action, candidatePool);
@@ -384,16 +423,10 @@ export async function applyCuratorActions(
 
       if (losersToQuarantine.length > 0) {
         try {
-          const { error } = await admin
-            .from('brand_menu_items')
-            .update({
-              status: 'quarantined',
-              notes: `Merged into ${action.winnerId} by Brand Curator: ${action.reason || 'Deduplication'}`,
-              updated_at: new Date().toISOString(),
-            })
-            .in('id', losersToQuarantine);
-
-          if (error) throw error;
+          await quarantineByIds(
+            losersToQuarantine,
+            `Merged into ${action.winnerId} by Brand Curator: ${action.reason || 'Deduplication'}`
+          );
 
           applied++;
           quarantined += losersToQuarantine.length;
@@ -406,16 +439,10 @@ export async function applyCuratorActions(
       }
     } else if (action.type === 'quarantine' && action.chosenId) {
       try {
-        const { error } = await admin
-          .from('brand_menu_items')
-          .update({
-            status: 'quarantined',
-            notes: `Quarantined by Brand Curator: ${action.reason || 'Quality review'}`,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', String(action.chosenId));
-
-        if (error) throw error;
+        await quarantineOne(
+          String(action.chosenId),
+          `Quarantined by Brand Curator: ${action.reason || 'Quality review'}`
+        );
         applied++;
         quarantined++;
         details.push(`Quarantined ${action.chosenId}`);
