@@ -114,7 +114,41 @@ only (b), still gated on the Supabase comparison.
 2. Stop the base + `_0` double-write (589 twins and counting).
 3. Delete-cascade (or tombstone sweeper) for meal photos — see §3 orphans.
 
-## 5. Recommendations (mapped to Track D — do not execute from this file)
+## 5. Deletion candidacy (refined with job + golden references)
+
+`agent_jobs` (26 rows) and `golden_cases` (5 rows) were scanned for
+`photos/` references too. Result: **31 distinct keys from agent jobs**
+(all `job_*`), **0 from golden cases**. This reclassified 29 keys the §3
+pass had called orphans, and surfaced **2 referenced-but-missing keys**
+(broken job-history photos):
+
+- `photos/job_1789380364033_dwz71zixb.jpg` (absent)
+- `photos/job_1789382054849_jd1irnqy7.jpg\` (absent — note the trailing
+  backslash: a stored-URL escaping artifact worth fixing at write time)
+
+Machine-readable merge list: **`plan/R2_DELETE_CANDIDATES.json`**
+(per-key bytes, canonical keeps, generated 2026-09-20 by MD5-ETag groups
+joined with D1 `food_logs` + `agent_jobs` refs).
+
+| Tier | Meaning | Keys | Bytes | Rule |
+|---|---|---|---|---|
+| KEEP | Referenced in D1 (food 197 + jobs 31) | 226 in R2 | — | Never delete |
+| MISSING | Referenced but absent | 2 | — | Re-upload or drop the reference, don't delete |
+| TIER 1 | Byte-dup of a KEEP key | 96 | 23 MB | Safe delete (reference survives on the twin) |
+| TIER 2 | All-unreferenced dup groups, keep 1 of 287 | 1,593 delete | 411 MB | Delete all but canonical after §1 clears |
+| TIER 3 | Unique, unreferenced | 388 | 35 MB | Delete only post-Supabase + 30d grace |
+
+TIER 1 + TIER 2 together: **1,689 keys, ~435 MB** — the true cleanup set.
+TIER 3 needs the Supabase comparison first (a Supabase-only row could name
+any of them). The 307-byte shared placeholders stay (referenced; data-quality
+issue, not storage).
+
+Execution order when §1 clears: TIER 1 → rewrite D1 references to canonicals
+(mixed groups) → TIER 2 deletes → 30d → TIER 3 → re-run this audit to
+confirm zero groups. Root fixes from §4 (upload hash check, `_0` twin,
+delete-cascade) stop regrowth in parallel.
+
+## 6. Recommendations (mapped to Track D — do not execute from this file)
 1. **D-1:** When REST is no longer 402 (~24 Sep, unpaid) → rerun §1 → backfill D1 gaps (if any). Keep the project until then.
 2. **D-9:** Stop photo regrowth (content-hash reuse on PUT; no base+`_0` twin). No deletes.
 3. **D-10 (after D-1):** delete-cascade / tombstone sweeper; retention on `debug/` + `logs/` + `jobs/` + `bugs/`; then the candidate JSON.
