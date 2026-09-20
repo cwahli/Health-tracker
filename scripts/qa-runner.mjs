@@ -28,7 +28,7 @@ function getArg(name, defaultValue) {
 }
 
 const journey = getArg('journey', 'meal');
-const baseUrl = getArg('url', process.env.PLAYWRIGHT_TEST_BASE_URL || 'http://localhost:3000');
+const baseUrl = getArg('url', process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://health-tracking.duckdns.org');
 const outputDir = getArg('output-dir', path.join(process.cwd(), 'qa-evidence'));
 
 if (!fs.existsSync(outputDir)) {

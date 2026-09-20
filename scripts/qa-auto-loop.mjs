@@ -80,108 +80,143 @@ if (initialRun.status === 0) {
   process.exit(0);
 }
 
-// Step 2: Defect Detected! Read Bug Report
+// Step 2: Defect Detected! Read Bug Report & Enter Closed Loop
 console.log('[AutoLoop] Defect detected. Reading latest bug report...');
-const bugFiles = fs.readdirSync(qaEvidenceDir).filter(f => f.startsWith(`bug_${journey}_`) && f.endsWith('.json'));
-bugFiles.sort((a, b) => fs.statSync(path.join(qaEvidenceDir, b)).mtimeMs - fs.statSync(path.join(qaEvidenceDir, a)).mtimeMs);
 
-if (bugFiles.length === 0) {
+function getLatestBug() {
+  const bugFiles = fs.readdirSync(qaEvidenceDir).filter(f => f.startsWith(`bug_${journey}_`) && f.endsWith('.json'));
+  bugFiles.sort((a, b) => fs.statSync(path.join(qaEvidenceDir, b)).mtimeMs - fs.statSync(path.join(qaEvidenceDir, a)).mtimeMs);
+  if (bugFiles.length === 0) return null;
+  return JSON.parse(fs.readFileSync(path.join(qaEvidenceDir, bugFiles[0]), 'utf-8'));
+}
+
+let currentBug = getLatestBug();
+if (!currentBug) {
   console.error('[AutoLoop] Error: Bug file not found in evidence dir.');
   process.exit(1);
 }
 
-const bugData = JSON.parse(fs.readFileSync(path.join(qaEvidenceDir, bugFiles[0]), 'utf-8'));
-console.log(`[AutoLoop] Found bug: ${bugData.id} - ${bugData.title}`);
+console.log(`[AutoLoop] Found initial defect: ${currentBug.id} - ${currentBug.title}`);
 
-// Send Before Screenshot & Bug Details to Telegram
+// Send Initial Before Screenshot & Bug Details to Telegram
 sendTelegram({
-  photo: bugData.screenshot,
-  caption: `🚨 *[QA Bug Detected]* \`${bugData.id}\`\n\n*Journey:* ${journey}\n*Error:* ${bugData.title}\n\n*Suggested Fix:* ${bugData.suggested_fix}\n\n_Handing off to Orchestrator..._`
+  photo: currentBug.screenshot,
+  caption: `🚨 *[QA Bug Detected]* \`${currentBug.id}\`\n\n*Journey:* ${journey}\n*Error:* ${currentBug.title}\n\n*Suggested Fix:* ${currentBug.suggested_fix}\n\n_Handing off to Orchestrator self-healing loop..._`
 });
 
-// Step 3: Orchestrator Triage & Coding Dispatch
-sendTelegram({
-  text: `📋 *[Orchestrator]* Triaging \`${bugData.id}\`.\nEvaluating tool allowance (OpenCode, Cline, Grok) and dispatching autonomous agent...`
-});
-
+const MAX_ATTEMPTS = 2;
 const dispatchScript = path.join(rootDir, 'scripts', 'run-coding-dispatch.sh');
-const dispatchRun = spawnSync('bash', [
-  dispatchScript,
-  `--task=${bugData.title}. Suggested fix: ${bugData.suggested_fix}`,
-  `--bug-id=${bugData.id}`,
-  `--category=${journey}`,
-  `--tool=auto`
-], {
-  cwd: rootDir,
-  stdio: 'inherit'
-});
 
-if (dispatchRun.status !== 0) {
-  sendTelegram({
-    text: `🚨 *[Escalation to Human]* Neither OpenCode, Cline, nor Grok Build were able to resolve \`${bugData.id}\`. Human intervention required.`
-  });
-  process.exit(1);
-}
+for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  const isEscalation = attempt > 1;
+  const toolChoice = isEscalation ? 'cline' : 'auto';
+  const thinkingLevel = 'high';
 
-// Step 4: Await Webhook Deploy
-sendTelegram({
-  text: `🚀 *[Deploy]* Fix pushed to \`main\`. Awaiting live server rebuild (~40s)...`
-});
+  console.log(`\n[AutoLoop] === Loop Iteration ${attempt}/${MAX_ATTEMPTS} (Tool: ${toolChoice}, Thinking: ${thinkingLevel}) ===`);
 
-// Wait 45 seconds for VPS webhook build and restart
-execSync('sleep 45');
-
-// Step 5: Re-Verification with "After" Screenshot
-sendTelegram({
-  text: `🔄 *[QA Re-Test]* Re-running \`${journey}\` journey to verify bug resolution...`
-});
-
-const retestRun = spawnSync('node', ['scripts/qa-runner.mjs', `--journey=${journey}`], {
-  cwd: rootDir,
-  encoding: 'utf-8'
-});
-
-if (retestRun.status === 0) {
-  // Capture a fresh victory screenshot of the fixed journey
-  const afterScreenshotPath = path.join(qaEvidenceDir, `after_fixed_${journey}_${Date.now()}.png`);
-  
-  // Quick snapshot of the fixed page
-  try {
-    const { chromium } = await import('playwright');
-    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
-    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    await page.goto(process.env.PLAYWRIGHT_TEST_BASE_URL || 'http://localhost:3000');
-    const demoBtn = page.locator('#demo-login-btn');
-    if (await demoBtn.isVisible().catch(() => false)) await demoBtn.click();
-    await page.waitForTimeout(2000);
-    await page.screenshot({ path: afterScreenshotPath, fullPage: true });
-    await browser.close();
-  } catch (e) {
-    console.warn('[AutoLoop] Could not capture after-screenshot:', e.message);
+  if (isEscalation) {
+    sendTelegram({
+      text: `🔄 *[Orchestrator Escalation]* Attempt 1 did not fully clear all assertions for \`${currentBug.id}\`.\nEscalating to Tier 2 (Cline CLI with thinking=${thinkingLevel}) with fresh diagnostic evidence...`
+    });
   }
 
-  // Find resolving agent from audit log
-  let resolvedBy = 'Autonomous Agent';
-  try {
-    const auditPath = path.join(process.env.HOME || '', '.hermes', 'dispatch_audit.log');
-    if (fs.existsSync(auditPath)) {
-      const lines = fs.readFileSync(auditPath, 'utf-8').trim().split('\n');
-      const last = JSON.parse(lines[lines.length - 1]);
-      if (last.agent) resolvedBy = `${last.agent} (${last.model})`;
+  // Step 3: Orchestrator Triage & Coding Dispatch (with visual screenshot passed)
+  const dispatchArgs = [
+    dispatchScript,
+    `--task=${currentBug.title}. Suggested fix: ${currentBug.suggested_fix}`,
+    `--bug-id=${currentBug.id}`,
+    `--category=${journey}`,
+    `--tool=${toolChoice}`,
+    `--thinking=${thinkingLevel}`,
+    `--verify=false`
+  ];
+
+  if (currentBug.screenshot && fs.existsSync(currentBug.screenshot)) {
+    dispatchArgs.push(`--screenshot=${currentBug.screenshot}`);
+  }
+
+  const dispatchRun = spawnSync('bash', dispatchArgs, {
+    cwd: rootDir,
+    stdio: 'inherit'
+  });
+
+  if (dispatchRun.status !== 0) {
+    console.warn(`[AutoLoop] Dispatch attempt ${attempt} exited with non-zero status.`);
+    if (attempt === MAX_ATTEMPTS) {
+      sendTelegram({
+        text: `🚨 *[Escalation to Human]* Automated agents were unable to resolve \`${currentBug.id}\` after ${MAX_ATTEMPTS} attempts. Human intervention required.`
+      });
+      process.exit(1);
     }
-  } catch (e) {}
+    continue;
+  }
 
-  // Send Victory Summary to Telegram!
+  // Step 4: Await Webhook Deploy
   sendTelegram({
-    photo: fs.existsSync(afterScreenshotPath) ? afterScreenshotPath : bugData.screenshot,
-    caption: `🎉 *[BUG RESOLVED & VERIFIED]* \`${bugData.id}\`\n\n*Journey:* ${journey}\n*Resolved By:* ${resolvedBy}\n*Resolution:* Successfully fixed and verified on live site.\n*Tests:* All checks green, zero regressions detected!`
+    text: `🚀 *[Deploy]* Fix pushed to \`main\`. Awaiting live server rebuild (~40s)...`
   });
 
-  console.log('[AutoLoop] Loop completed with 100% resolution!');
-  process.exit(0);
-} else {
+  execSync('sleep 45');
+
+  // Step 5: Re-Verification
   sendTelegram({
-    text: `⚠️ *[Verification Failed]* Fix did not fully resolve \`${bugData.id}\`. Re-queuing in backlog.`
+    text: `🔄 *[QA Re-Test ${attempt}/${MAX_ATTEMPTS}]* Re-running \`${journey}\` journey to verify bug resolution...`
   });
-  process.exit(1);
+
+  const retestRun = spawnSync('node', ['scripts/qa-runner.mjs', `--journey=${journey}`], {
+    cwd: rootDir,
+    encoding: 'utf-8'
+  });
+
+  if (retestRun.status === 0) {
+    // PASS! Capture fresh victory screenshot
+    const afterScreenshotPath = path.join(qaEvidenceDir, `after_fixed_${journey}_${Date.now()}.png`);
+
+    try {
+      const { chromium } = await import('playwright');
+      const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      const testUrl = process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://health-tracking.duckdns.org';
+      await page.goto(testUrl, { waitUntil: 'commit', timeout: 30000 });
+      const demoBtn = page.locator('#demo-login-btn');
+      if (await demoBtn.isVisible().catch(() => false)) await demoBtn.click();
+      await page.waitForTimeout(2000);
+      await page.screenshot({ path: afterScreenshotPath, fullPage: true });
+      await browser.close();
+    } catch (e) {
+      console.warn('[AutoLoop] Could not capture after-screenshot:', e.message);
+    }
+
+    let resolvedBy = 'Autonomous Agent';
+    try {
+      const auditPath = path.join(process.env.HOME || '', '.hermes', 'dispatch_audit.log');
+      if (fs.existsSync(auditPath)) {
+        const lines = fs.readFileSync(auditPath, 'utf-8').trim().split('\n');
+        const last = JSON.parse(lines[lines.length - 1]);
+        if (last.agent) resolvedBy = `${last.agent} (${last.model})`;
+      }
+    } catch (e) {}
+
+    sendTelegram({
+      photo: fs.existsSync(afterScreenshotPath) ? afterScreenshotPath : currentBug.screenshot,
+      caption: `🎉 *[BUG RESOLVED & VERIFIED]* \`${currentBug.id}\`\n\n*Journey:* ${journey}\n*Resolved By:* ${resolvedBy}\n*Attempts:* ${attempt}/${MAX_ATTEMPTS}\n*Resolution:* Successfully verified on live site.\n*Tests:* All checks green, zero regressions!`
+    });
+
+    console.log(`[AutoLoop] Loop completed with 100% resolution on attempt ${attempt}!`);
+    process.exit(0);
+  } else {
+    console.warn(`[AutoLoop] Re-test failed on attempt ${attempt}.`);
+    const nextBug = getLatestBug();
+    if (nextBug) currentBug = nextBug;
+
+    if (attempt === MAX_ATTEMPTS) {
+      sendTelegram({
+        photo: currentBug.screenshot,
+        caption: `🚨 *[Escalation to Human]* Fix did not fully resolve \`${currentBug.id}\` after ${MAX_ATTEMPTS} attempts.\n\n*Error:* ${currentBug.title}\n*Status:* Escalated for human engineer review.`
+      });
+      process.exit(1);
+    }
+  }
 }
+
+process.exit(1);

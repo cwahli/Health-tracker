@@ -26,10 +26,12 @@ PREFERRED_MODEL="muse-spark-1.3"
 THINKING="high"
 SCREENSHOT=""
 
+PREFER_VERIFY="auto"
+
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none]"
+      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none] [--verify=true|false|auto]"
       exit 0
       ;;
     --task=*)    TASK="${arg#*=}" ;;
@@ -39,6 +41,7 @@ for arg in "$@"; do
     --model=*)   PREFERRED_MODEL="${arg#*=}" ;;
     --thinking=*) THINKING="${arg#*=}" ;;
     --screenshot=*) SCREENSHOT="${arg#*=}" ;;
+    --verify=*)  PREFER_VERIFY="${arg#*=}" ;;
     *)
       if [ -z "$TASK" ]; then TASK="$arg"; fi
       ;;
@@ -56,7 +59,32 @@ cd "$REPO_DIR"
 HERMES_DIR="${HOME}/.hermes"
 AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
 TELEGRAM_SCRIPT="${REPO_DIR}/scripts/telegram-send.sh"
+DISPATCH_LOCK="${HERMES_DIR}/dispatch_lock"
 mkdir -p "$HERMES_DIR"
+
+# ---------------------------------------------------------------
+# Heartbeat & Lock Cleanup Trap (V-23, V-24)
+# ---------------------------------------------------------------
+cleanup_dispatch() {
+  stop_heartbeat
+  rm -f "$DISPATCH_LOCK" 2>/dev/null || true
+}
+trap cleanup_dispatch EXIT INT TERM
+
+# Concurrency check
+if [ -f "$DISPATCH_LOCK" ]; then
+  LOCKED_INFO=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
+  LOCKED_PID=$(echo "$LOCKED_INFO" | cut -d: -f1)
+  LOCKED_BUG=$(echo "$LOCKED_INFO" | cut -d: -f2)
+  if [ -n "$LOCKED_PID" ] && kill -0 "$LOCKED_PID" 2>/dev/null; then
+    echo "[Dispatcher] Concurrency lock: PID $LOCKED_PID is active on $LOCKED_BUG."
+    bash "$TELEGRAM_SCRIPT" --text="⚠️ *[Orchestrator]* Concurrency Lock: Task \`$LOCKED_BUG\` is currently executing (PID \`$LOCKED_PID\`). Please wait for it to complete." 2>/dev/null || true
+    exit 0
+  else
+    rm -f "$DISPATCH_LOCK" 2>/dev/null || true
+  fi
+fi
+echo "$$:${BUG_ID}" > "$DISPATCH_LOCK"
 
 # Executable search paths
 OPENCODE_BIN=$(which opencode 2>/dev/null || echo "${HOME}/.opencode/bin/opencode")
@@ -335,38 +363,71 @@ done
 
 echo "[Dispatcher] Execution sequence: ${TOOL_SEQUENCE[*]}"
 
+verify_live_resolution() {
+  local tool_resolved="$1"
+  local should_verify=false
+
+  if [ "$PREFER_VERIFY" = "true" ]; then
+    should_verify=true
+  elif [ "$PREFER_VERIFY" = "auto" ]; then
+    case "$CATEGORY" in
+      meal|biomarker|onboarding) should_verify=true ;;
+      *) should_verify=false ;;
+    esac
+  fi
+
+  if [ "$should_verify" = "true" ] && [ -f "${REPO_DIR}/scripts/qa-runner.mjs" ]; then
+    tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` resolved by *$tool_resolved*!
+
+Fix pushed to \`main\`. Awaiting live webhook rebuild (~45s) to run automated QA verification..."
+    sleep 45
+
+    tg_msg "🔄 *[Orchestrator Verification]* Running automated test for \`${CATEGORY}\` journey on live site..."
+    if node "${REPO_DIR}/scripts/qa-runner.mjs" --journey="${CATEGORY}"; then
+      local clean_img
+      clean_img=$(ls -t "${REPO_DIR}/qa-evidence/clean_${CATEGORY}_"*.png 2>/dev/null | head -n1 || true)
+      if [ -n "$clean_img" ] && [ -f "$clean_img" ]; then
+        tg_msg "🎉 *[Orchestrator QA Verified]* Live site updated and verified with 0 defects! Screenshot attached." "$clean_img"
+      else
+        tg_msg "🎉 *[Orchestrator QA Verified]* Live site updated and verified cleanly on \`${CATEGORY}\` journey!"
+      fi
+    else
+      local bug_img
+      bug_img=$(ls -t "${REPO_DIR}/qa-evidence/bug_${CATEGORY}_"*.png 2>/dev/null | head -n1 || true)
+      if [ -n "$bug_img" ] && [ -f "$bug_img" ]; then
+        tg_msg "⚠️ *[Orchestrator QA Notice]* Fix deployed, but post-deploy check reported remaining issues." "$bug_img"
+      else
+        tg_msg "⚠️ *[Orchestrator QA Notice]* Fix deployed, but post-deploy verification test exited with errors."
+      fi
+    fi
+  else
+    tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` resolved by *$tool_resolved*!
+
+Fix pushed to main. Awaiting CI/CD deploy (~45s).
+QA bot will re-verify and send confirmation screenshot."
+  fi
+}
+
 for tool in "${TOOL_SEQUENCE[@]}"; do
   case $tool in
     opencode)
       if try_opencode "$PREFERRED_MODEL"; then
-        tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` resolved by *OpenCode*!
-
-Fix pushed to main. Awaiting CI/CD deploy (~45s).
-QA bot will re-verify and send confirmation screenshot."
+        verify_live_resolution "OpenCode"
         exit 0
       fi ;;
     cline)
       if try_cline; then
-        tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` resolved by *Cline CLI*!
-
-Fix pushed to main. Awaiting CI/CD deploy (~45s).
-QA bot will re-verify and send confirmation screenshot."
+        verify_live_resolution "Cline CLI"
         exit 0
       fi ;;
     grok)
       if try_grok; then
-        tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` resolved by *Grok Build*!
-
-Fix pushed to main. Awaiting CI/CD deploy (~45s).
-QA bot will re-verify and send confirmation screenshot."
+        verify_live_resolution "Grok Build"
         exit 0
       fi ;;
     agy)
       if try_agy; then
-        tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` resolved by *Antigravity*!
-
-Fix pushed to main. Awaiting CI/CD deploy (~45s).
-QA bot will re-verify and send confirmation screenshot."
+        verify_live_resolution "Antigravity"
         exit 0
       fi ;;
     *) echo "[Dispatcher] Unknown tool: $tool, skipping." ;;

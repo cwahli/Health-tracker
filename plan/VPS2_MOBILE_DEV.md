@@ -148,16 +148,16 @@ Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127
 
 ### Phase 6 — Autonomous Journey QA Fleet & Orchestrator Self-Healing Loop
 
-| ID | What | Done when | Do not |
+| ID | What | Done when | Status |
 |---|---|---|---|
-| **V-19** | **Screenshot Forwarding (Gap 1)**: Pass `--screenshot=${bugData.screenshot}` in `qa-auto-loop.mjs` dispatch call. | Coding agents inspect visual screenshot before writing code. | Dropping screenshot path from prompt |
-| **V-20** | **Manual Bug Report Re-Test Loop (Gap 2)**: Automate QA re-verification after Workflow B dispatch & webhook deploy. | User reporting a UI bug in Telegram automatically gets verification screenshot. | Stopping without re-test |
-| **V-21** | **Profile-Aware Telegram Routing (Gap 3)**: `telegram-send.sh` accepts `--profile=<name>` to source matching token/chat. | Multi-bot messages never route to wrong profile or thread. | Relying on first alphabetical .env |
-| **V-22** | **Autonomous Escalation Retry Loop (Gap 4)**: `qa-auto-loop.mjs` retry loop (`MAX_RETRIES=2`) with Cline high-thinking escalation. | Second attempt tries high reasoning before human escalation. | Aborting on single test failure |
-| **V-23** | **Heartbeat Process Lifecycle (Gap 5)**: Add `trap stop_heartbeat EXIT INT TERM` in `run-coding-dispatch.sh`. | Telegram ping background loop cleanly exits with the parent script. | Leaving zombie background pings |
-| **V-24** | **Dispatch Concurrency Lock (Gap 6)**: Write `~/.hermes/dispatch_lock` with active `BUG_ID`. | Concurrent QA runs prevented from conflicting in the same git working tree. | Allowing concurrent dispatches |
-| **V-25** | **Global DuckDNS Test Origin (Gap 7)**: Seed `PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org` in `~/.hermes/.env`. | Headless tests across all profiles default to live site. | Falling back to localhost:3000 |
-| **V-26** | **Orchestrator Post-Deploy Re-Verify (Gap 8)**: Orchestrator `/fix` triggers automated `qa-runner.mjs` after deploy sleep. | Orchestrator self-verifies resolution end-to-end. | Leaving verification manual |
+| **V-19** | **Screenshot Forwarding (Gap 1)**: Pass `--screenshot=${bugData.screenshot}` in `qa-auto-loop.mjs` dispatch call. | Coding agents inspect visual screenshot before writing code. | **COMPLETE** |
+| **V-20** | **Manual Bug Report Re-Test Loop (Gap 2)**: Automate QA re-verification after Workflow B dispatch & webhook deploy. | User reporting a UI bug in Telegram automatically gets verification screenshot. | **COMPLETE** |
+| **V-21** | **Profile-Aware Telegram Routing (Gap 3)**: `telegram-send.sh` accepts `--profile=<name>` to source matching token/chat. | Multi-bot messages never route to wrong profile or thread. | **COMPLETE** |
+| **V-22** | **Autonomous Escalation Retry Loop (Gap 4)**: `qa-auto-loop.mjs` retry loop (`MAX_RETRIES=2`) with Cline high-thinking escalation. | Second attempt tries high reasoning before human escalation. | **COMPLETE** |
+| **V-23** | **Heartbeat Process Lifecycle (Gap 5)**: Add `trap stop_heartbeat EXIT INT TERM` in `run-coding-dispatch.sh`. | Telegram ping background loop cleanly exits with the parent script. | **COMPLETE** |
+| **V-24** | **Dispatch Concurrency Lock (Gap 6)**: Write `~/.hermes/dispatch_lock` with active `BUG_ID`. | Concurrent QA runs prevented from conflicting in the same git working tree. | **COMPLETE** |
+| **V-25** | **Global DuckDNS Test Origin (Gap 7)**: Seed `PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org` in `~/.hermes/.env`. | Headless tests across all profiles default to live site. | **COMPLETE** |
+| **V-26** | **Orchestrator Post-Deploy Re-Verify (Gap 8)**: Orchestrator `/fix` triggers automated `qa-runner.mjs` after deploy sleep. | Orchestrator self-verifies resolution end-to-end. | **COMPLETE** |
 
 
 ---

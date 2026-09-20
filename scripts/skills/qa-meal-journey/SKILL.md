@@ -70,7 +70,8 @@ bash /home/ubuntu/src/Health-tracker/scripts/run-coding-dispatch.sh \
   --task="<Change needed sentence from above>" \
   --bug-id="BUG-$(date +%Y%m%d)-$(head /dev/urandom | tr -dc 0-9 | head -c 4)" \
   --category="<journey>" \
-  --tool=auto
+  --tool=auto \
+  --verify=true
 ```
 
 ### Step 4 — Reply and STOP
@@ -82,7 +83,7 @@ bash /home/ubuntu/src/Health-tracker/scripts/run-coding-dispatch.sh \
 • Observed: <actual>
 • Expected: <expected>
 • Fix needed: <change needed>
-• Status: Assigned to Dev Pool — I will re-verify once deployed.
+• Status: Assigned to Dev Pool with automated post-deploy verification. Once deployed, a live verification screenshot will be delivered automatically!
 ```
 
-**After sending this reply: STOP. Do not read files. Do not investigate further. Wait for deployment notification.**
+**After sending this reply: STOP. Do not read files. Do not investigate further. The automated loop handles re-verification.**

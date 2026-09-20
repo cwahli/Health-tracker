@@ -127,7 +127,23 @@ ORCH_EOF
 fi
 
 # ---------------------------------------------------------------
-# 4. SUMMARY
+# 4. GLOBAL ENVIRONMENT — Live Test URL (V-25)
+# ---------------------------------------------------------------
+HERMES_ENV="${HERMES_DIR}/.env"
+if [ -f "$HERMES_ENV" ]; then
+  if ! grep -q "PLAYWRIGHT_TEST_BASE_URL" "$HERMES_ENV"; then
+    echo "PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org" >> "$HERMES_ENV"
+    echo "  ✓ Global PLAYWRIGHT_TEST_BASE_URL appended to ~/.hermes/.env"
+  else
+    echo "  ~ Global PLAYWRIGHT_TEST_BASE_URL already present in ~/.hermes/.env"
+  fi
+else
+  echo "PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org" > "$HERMES_ENV"
+  echo "  ✓ ~/.hermes/.env created with PLAYWRIGHT_TEST_BASE_URL"
+fi
+
+# ---------------------------------------------------------------
+# 5. SUMMARY
 # ---------------------------------------------------------------
 echo ""
 echo "=========================================================="
@@ -139,4 +155,5 @@ echo ""
 echo " To verify:"
 echo "   cat ~/.hermes/SOUL.md"
 echo "   cat ~/.hermes/profiles/qa_meal/config.yaml"
+echo "   cat ~/.hermes/.env | grep PLAYWRIGHT_TEST_BASE_URL"
 echo "=========================================================="
