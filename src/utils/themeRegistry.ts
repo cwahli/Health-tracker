@@ -23,11 +23,11 @@ export interface ThemeTokenItem {
 }
 
 export const auditColors: ThemeColorItem[] = [
-  { key: 'background', label: 'App Background', defaultValue: '#f8fafc', category: 'Base' },
-  { key: 'bgCard', label: 'Card Background', defaultValue: '#ffffff', category: 'Base' },
-  { key: 'border', label: 'Border / Divider', defaultValue: '#e2e8f0', category: 'Base' },
-  { key: 'text', label: 'Primary Text (Light)', defaultValue: '#0f172a', category: 'Typography' },
-  { key: 'textSecondary', label: 'Secondary Text (Light)', defaultValue: '#475569', category: 'Typography' },
+  { key: 'background', label: 'App Background', defaultValue: '#0f172a', category: 'Base' },
+  { key: 'bgCard', label: 'Card Background', defaultValue: '#1e293b', category: 'Base' },
+  { key: 'border', label: 'Border / Divider', defaultValue: '#334155', category: 'Base' },
+  { key: 'text', label: 'Primary Text (Light)', defaultValue: '#f8fafc', category: 'Typography' },
+  { key: 'textSecondary', label: 'Secondary Text (Light)', defaultValue: '#94a3b8', category: 'Typography' },
   { key: 'textDarkPrimary', label: 'Primary Text (Dark)', defaultValue: '#f8fafc', category: 'Typography' },
   { key: 'textDarkSecondary', label: 'Secondary Text (Dark)', defaultValue: '#94a3b8', category: 'Typography' },
   { key: 'textAccent', label: 'Accent Highlight', defaultValue: '#6366f1', category: 'Typography' },
