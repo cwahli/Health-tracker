@@ -23,6 +23,12 @@ npm ci && npm run build && systemctl restart health-tracker
 
 It never touches `~/src` or `~/dev`.
 
+**Deploy concurrency:** rapid pushes fire several webhook deploys at once; they
+fight over git/npm/build (68 started vs 40 completed before the fix). `deploy.sh`
+now takes an exclusive `flock` on `/home/ubuntu/.deploy.lock`, so overlapping
+triggers **serialize** — a queued run re-fetches `origin/main`, so the last push
+wins and each deploy is atomic.
+
 ## Create a worktree
 
 ```bash
