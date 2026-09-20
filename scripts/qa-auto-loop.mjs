@@ -93,7 +93,7 @@ sendTelegram({
 
 // Step 3: Orchestrator Triage & Coding Dispatch
 sendTelegram({
-  text: `📋 *[Orchestrator]* Triaging \`${bugData.id}\`.\nAssigning to *OpenCode (muse-spark-1.3, High Thinking)* with Grok escalation fallback...`
+  text: `📋 *[Orchestrator]* Triaging \`${bugData.id}\`.\nEvaluating tool allowance (OpenCode, Cline, Grok) and dispatching autonomous agent...`
 });
 
 const dispatchScript = path.join(rootDir, 'scripts', 'run-coding-dispatch.sh');
@@ -101,7 +101,8 @@ const dispatchRun = spawnSync('bash', [
   dispatchScript,
   `--task=${bugData.title}. Suggested fix: ${bugData.suggested_fix}`,
   `--bug-id=${bugData.id}`,
-  `--category=${journey}`
+  `--category=${journey}`,
+  `--tool=auto`
 ], {
   cwd: rootDir,
   stdio: 'inherit'
@@ -109,7 +110,7 @@ const dispatchRun = spawnSync('bash', [
 
 if (dispatchRun.status !== 0) {
   sendTelegram({
-    text: `🚨 *[Escalation to Human]* Neither OpenCode nor Grok Build were able to resolve \`${bugData.id}\`. Human intervention required.`
+    text: `🚨 *[Escalation to Human]* Neither OpenCode, Cline, nor Grok Build were able to resolve \`${bugData.id}\`. Human intervention required.`
   });
   process.exit(1);
 }
@@ -151,10 +152,21 @@ if (retestRun.status === 0) {
     console.warn('[AutoLoop] Could not capture after-screenshot:', e.message);
   }
 
+  // Find resolving agent from audit log
+  let resolvedBy = 'Autonomous Agent';
+  try {
+    const auditPath = path.join(process.env.HOME || '', '.hermes', 'dispatch_audit.log');
+    if (fs.existsSync(auditPath)) {
+      const lines = fs.readFileSync(auditPath, 'utf-8').trim().split('\n');
+      const last = JSON.parse(lines[lines.length - 1]);
+      if (last.agent) resolvedBy = `${last.agent} (${last.model})`;
+    }
+  } catch (e) {}
+
   // Send Victory Summary to Telegram!
   sendTelegram({
     photo: fs.existsSync(afterScreenshotPath) ? afterScreenshotPath : bugData.screenshot,
-    caption: `🎉 *[BUG RESOLVED & VERIFIED]* \`${bugData.id}\`\n\n*Journey:* ${journey}\n*Resolution:* Successfully fixed and verified on live site.\n*Tests:* All checks green, zero regressions detected!`
+    caption: `🎉 *[BUG RESOLVED & VERIFIED]* \`${bugData.id}\`\n\n*Journey:* ${journey}\n*Resolved By:* ${resolvedBy}\n*Resolution:* Successfully fixed and verified on live site.\n*Tests:* All checks green, zero regressions detected!`
   });
 
   console.log('[AutoLoop] Loop completed with 100% resolution!');

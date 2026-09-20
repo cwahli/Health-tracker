@@ -147,9 +147,38 @@ async function testMealJourney(page) {
   await foodTab.waitFor({ state: 'visible', timeout: 15000 });
   await foodTab.click();
 
-  // Wait for Food History page content to mount (lazy loaded)
+  // Wait for lazy-loaded Suspense chunk to finish loading
+  const spinner = page.locator('main .animate-spin');
+  if (await spinner.isVisible().catch(() => false)) {
+    console.log('[QA Runner] Waiting for FoodHistoryTab lazy chunk to resolve...');
+    await spinner.waitFor({ state: 'hidden', timeout: 35000 }).catch(() => {});
+  }
+
+  // Wait for Food History page content to mount
   const searchInput = page.locator('#food-search-input');
-  await searchInput.waitFor({ state: 'visible', timeout: 20000 });
+  await searchInput.waitFor({ state: 'visible', timeout: 30000 });
+
+  // Test search interaction reactivity
+  console.log('[QA Runner] Testing food search reactivity...');
+  await searchInput.fill('Salad');
+  await page.waitForTimeout(500);
+  await searchInput.fill('');
+
+  // Verify manual entry modal can open and close
+  console.log('[QA Runner] Verifying manual food entry modal...');
+  const manualEntryBtn = page.locator('button:has-text("Manual Entry"), button:has-text("Input Manual")');
+  if (await manualEntryBtn.isVisible().catch(() => false)) {
+    await manualEntryBtn.click();
+    await page.waitForTimeout(600);
+    // Find close button or dismiss
+    const closeBtn = page.locator('button[aria-label="Close"], button:has-text("Cancel"), button:has-text("Batal")').first();
+    if (await closeBtn.isVisible().catch(() => false)) {
+      await closeBtn.click();
+    } else {
+      // press Escape
+      await page.keyboard.press('Escape');
+    }
+  }
 
   // Check that no major React render error / blank screen exists
   const hasError = await page.locator('.error-boundary, text="Something went wrong"').isVisible().catch(() => false);
