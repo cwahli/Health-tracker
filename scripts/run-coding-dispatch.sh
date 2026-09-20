@@ -162,9 +162,9 @@ check_git_and_tsc() {
   local tool_name="$1" model_desc="$2"
   echo "[Dispatcher] Verifying $tool_name changes with tsc..."
   if npx tsc --noEmit >/dev/null 2>&1; then
-    DIFF_COUNT=$(git status --porcelain | wc -l | tr -d ' ')
+    DIFF_COUNT=$(git status --porcelain | grep -v 'src/git-version.generated.ts' | wc -l | tr -d ' ')
     if [ "$DIFF_COUNT" -gt 0 ]; then
-      echo "[Dispatcher] tsc clean — committing..."
+      echo "[Dispatcher] tsc clean — committing real changes..."
       git add .
       git commit -m "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)" || true
       if ! git push origin main; then
