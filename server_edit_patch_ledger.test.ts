@@ -635,3 +635,54 @@ describe('edit patch ledger', () => {
   });
 
 });
+
+describe('F-13.1 live T2 (foods[]-only add/delete, no dish action)', () => {
+  // Exact shape of live review-mode emission `job_f13t2verify_1789907608510`
+  // (rawScout dishes): dish-level intent carried ONLY by foods[].action.
+  // Before the fix this synthesized add_component oats->coconut plus a
+  // remove_component no-op (ghost coconut @40g, no oats dish).
+  const prior = [
+    { scoutIndex: 0, name: 'White Coffee', weightGrams: 200 },
+    { scoutIndex: 1, name: 'Big Mac', weightGrams: 215 },
+    { scoutIndex: 2, name: 'Coconut Juice', weightGrams: 200 },
+  ];
+  const scout = [
+    {
+      dishName: 'Mr Oat Rolled Oats',
+      estimatedWeightGrams: 40,
+      targetDishIndex: 3,
+      foods: [{ foodName: 'Mr Oat Rolled Oats', weightGrams: 40, action: 'add', nutrients: { protein: 5.2, carbohydrates: 26.8 } }],
+    },
+    {
+      dishName: 'Coconut Juice',
+      estimatedWeightGrams: 200,
+      targetDishIndex: 2,
+      foods: [{ foodName: 'Coconut Juice', weightGrams: 200, action: 'delete' }],
+    },
+  ];
+
+  it('emits dish-level add_item for the new dish (never glued onto a prior by index)', () => {
+    const cmds = diffScoutToEditCommands({
+      priorItems: prior,
+      scoutItems: scout,
+      userMessage: '[Mr Oat Rolled Oats] [40g] add oats, drop the coconut',
+    });
+    const adds = cmds.filter((c) => c.action === 'add_item');
+    expect(adds).toHaveLength(1);
+    expect(adds[0].itemName).toBe('Mr Oat Rolled Oats');
+    expect(adds[0].newWeightGrams).toBe(40);
+    expect(cmds.some((c) => c.action === 'add_component')).toBe(false);
+  });
+
+  it('promotes self-named foods[] delete to dish-level remove_item', () => {
+    const cmds = diffScoutToEditCommands({
+      priorItems: prior,
+      scoutItems: scout,
+      userMessage: '[Mr Oat Rolled Oats] [40g] add oats, drop the coconut',
+    });
+    const removes = cmds.filter((c) => c.action === 'remove_item');
+    expect(removes.some((c) => /Coconut/i.test(String(c.itemName)))).toBe(true);
+    expect(removes.some((c) => /Big Mac/i.test(String(c.itemName)))).toBe(false);
+    expect(cmds.some((c) => c.action === 'remove_component')).toBe(false);
+  });
+});

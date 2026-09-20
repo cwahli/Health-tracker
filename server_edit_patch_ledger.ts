@@ -487,6 +487,12 @@ export function diffScoutToEditCommands(args: {
     const isExplicitAdd = scout.action === 'add';
     const isExplicitReplace = scout.action === 'replace';
     const isExplicitDelete = scout.action === 'delete' || scout.action === 'remove';
+    // F-13.1 live T2: foods[] carrying their own add/delete/replace actions is
+    // structural signal — an unaligned targetDishIndex must not glue such a
+    // dish onto a prior by legacy index preference (oats glued onto coconut).
+    const scoutFoodsEarly = Array.isArray(scout.foods) ? scout.foods : [];
+    const hasSubitemActions = scoutFoodsEarly.some((f: any) => f && typeof f === 'object' &&
+      (f.action === 'delete' || f.action === 'remove' || f.action === 'add' || f.action === 'replace'));
 
     let priorIdx = -1;
 
@@ -521,8 +527,9 @@ export function diffScoutToEditCommands(args: {
           priorIdx = aligned;
         } else if (rep) {
           // keeps priorIdx=-1 so replacesDish / name match can recover
-        } else if (!(isExplicitDelete || isExplicitReplace)) {
-          // Non-delete/replace: keep legacy 1-based-then-0-based preference.
+        } else if (!(isExplicitDelete || isExplicitReplace) && !hasSubitemActions) {
+          // Non-delete/replace: keep legacy 1-based-then-0-based preference,
+          // but only when the emission carries no subitem actions of its own.
           if (oneBased >= 0 && oneBased < priorItems.length && !usedPrior.has(oneBased)) {
             priorIdx = oneBased;
           } else if (rawIdx >= 0 && rawIdx < priorItems.length && !usedPrior.has(rawIdx)) {
@@ -570,9 +577,20 @@ export function diffScoutToEditCommands(args: {
             priorIdx = replaceIdx;
           }
         } else {
-          // Check if user message mentions substantive keywords of prior item or scout item
+          // Check if user message mentions substantive keywords of prior item or scout item.
+          // F-13.1 live T2: when the emission carries its own subitem actions,
+          // message-word coincidence must not glue a new dish onto a prior
+          // named for another intent ("drop the coconut" attached oats to
+          // coconut). Require token overlap between scout dish and candidate.
+          const sTokens = hasSubitemActions ? significantTokens(sName) : [];
           const keywordIdx = priorItems.findIndex((p, i) => {
             if (usedPrior.has(i)) return false;
+            if (hasSubitemActions) {
+              const sharesToken = itemAllNames(p).some((pn) =>
+                significantTokens(pn).some((t) => sTokens.includes(t)),
+              );
+              if (!sharesToken) return false;
+            }
             const pNames = itemAllNames(p);
             for (const pn of pNames) {
               if (msg.includes(pn.toLowerCase())) return true;
@@ -661,6 +679,23 @@ export function diffScoutToEditCommands(args: {
     const scoutFoods = Array.isArray(scout.foods) ? scout.foods : [];
     const subitemActions = scoutFoods.filter((f: any) => f && typeof f === 'object' && (f.action === 'delete' || f.action === 'remove' || f.action === 'add' || f.action === 'replace'));
     if (subitemActions.length > 0 && (!isSubstantiveRename || !isExplicitReplace)) {
+      // F-13.1 live T2: a foods[] delete that names the dish itself is a
+      // dish-level removal (Coconut Juice on Coconut Juice), not a component
+      // removal — demoting it keeps a ghost dish and corrupts the row.
+      const selfDelete = subitemActions.find((f: any) => {
+        const a = String(f?.action || '').toLowerCase();
+        const n = String(f?.foodName || f?.name || '').trim();
+        return (a === 'delete' || a === 'remove') && !!n && !!pName && namesReferSame(n, pName);
+      });
+      if (selfDelete) {
+        commands.push({
+          action: 'remove_item',
+          itemName: pName,
+          targetDbId: prior.dbId || null,
+          scoutIndex: sScoutIdx,
+        });
+        continue;
+      }
       for (const f of subitemActions) {
         const fAction = String(f.action).toLowerCase();
         const fName = String(f.foodName || f.name || '').trim();
