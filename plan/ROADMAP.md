@@ -421,7 +421,7 @@ Canonical plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 is superseded** (D1 is a
 | **D-6** | Human: keep D1 **or** cut over | `blocked_human` until D-5 | Decision box filled in DATA_PLANE.md |
 | **D-7** | SQLite WAL + Litestream → R2; freeze D1 | **Not scheduled** (only if D-6 = cut over) | One SQL writer on disk; restore drill PASS |
 | **D-8** | Keep D1; delete any SQLite adapter | **Not scheduled** (only if D-6 = keep D1) | No `better-sqlite3` in prod |
-| **D-9** | Stop R2 photo **regrowth** (hash reuse; no `_0` twin). Muse audit. No deletes. | Needs locked packet | New uploads do not mint duplicate keys |
+| **D-9** | Stop R2 photo **regrowth** (hash reuse; no `_0` twin). Muse audit. No deletes. | **DONE** (`cf19075`) | New uploads do not mint duplicate keys |
 | **D-10** | After D-1: apply [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json), sweeper, debug/logs retention | `blocked_human` until **D-1** | Audit re-run; no keys still referenced |
 
 **D-5 / D-6 decision rule:** user-visible sync extra wait **≤ ~100 ms p50** from the VPS → keep D1. **Consistently 500 ms–1 s** on sync/open-app → SQLite is in play. Meal analyze (~8 s Gemini) is not the yardstick. Do not dual-write. Do not keep D1 as a live spare.

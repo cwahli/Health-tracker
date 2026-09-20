@@ -106,7 +106,7 @@ Do **not** mix with F-13. D-9 is code-only. D-10 is deletes.
 
 | ID | What | Done when | Do not |
 |---|---|---|---|
-| **D-9** | Stop R2 photo **regrowth**: content-hash check on the PUT path (`server_routes_r2.ts`) reuse existing key on ETag/MD5 match; stop writing `key` **and** `key_0` twins. Locked packet. **No object deletes.** | New meal/job upload does not mint a duplicate key for identical bytes; named gates green. | Applying [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json); rewriting historical `image_urls` |
+| **D-9** | Stop R2 photo **regrowth**: content-hash check on the PUT path (`server_routes_r2.ts`) reuse existing key on ETag/MD5 match; stop writing `key` **and** `key_0` twins. Locked packet. **No object deletes.** | **DONE** (`cf19075`) — CAS bypasses killed, deduplicated logging active, 7/7 contract tests green. | Applying [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json); rewriting historical `image_urls` |
 | **D-10** | After **D-1**: re-run the audit; fix the two `missing_referenced_absent` keys; then (a) apply the candidate list with a 30-day grace for remaining orphans, (b) meal-photo delete-cascade or tombstone sweeper, (c) retention on `debug/` + `logs/` + `jobs/` + `bugs/`. | Audit re-run: duplicate groups → 0 or residual named; dump in R2. | Deleting before D-1; deleting keys still referenced by D1 **or** the recovered Supabase dump; emptying `golden/` |
 
 ### Phase 2 — SQLite is a benchmark, not a cutover
