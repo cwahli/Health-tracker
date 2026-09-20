@@ -217,7 +217,10 @@ test.describe('saved-meal lineage', () => {
     await openComposer(page);
     await page.locator('#food-chat-input').fill('lineage');
     await stageTop(page, 'Lineage Oat Bowl');
+    // Staging clears the dropdown — re-query for each further item.
+    await page.locator('#food-chat-input').fill('lineage');
     await stageTop(page, 'Lineage Rice Bowl');
+    await page.locator('#food-chat-input').fill('fresh');
     await stageTop(page, 'Fresh Banana');
     await saveStaged(page, 'Lineage Oat Bowl');
 
@@ -240,33 +243,6 @@ test.describe('saved-meal lineage', () => {
     let logs = await readLogs(page);
     const original = await waitLog(page, (l: any) => l.name === 'Lineage Review Oat');
     expect(original?.id).toBeTruthy();
-    const countBefore = logs.filter((l: any) => l.name === 'Lineage Review Oat').length;
-
-    await page.route('**/api/jobs/submit', async (route: any) => {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ ok: true, jobId: 'job_review_1', status: 'running' }),
-      });
-    });
-    await page.route('**/api/jobs/status*', async (route: any) => {
-      const nowIso = new Date().toISOString();
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({
-          jobs: [{
-            id: 'job_review_1', status: 'succeeded', created_at: nowIso, updated_at: nowIso,
-            clean_result: {
-              pendingFoodLog: {
-                name: 'Lineage Review Oat',
-                nutrients: { calories: 999, protein: 42 },
-                imageUrls: [PIXEL_A],
-              },
-              message: 'Logged Lineage Review Oat (999 kcal)',
-            },
-          }],
-        }),
-      });
-    });
 
     await gotoHistory(page);
     const card = page.locator(`#food-log-item-${original.id}`);
@@ -276,16 +252,34 @@ test.describe('saved-meal lineage', () => {
 
     await expect(page.locator('#food-chat-input')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#food-chat-input')).toHaveValue(/Lineage Review Oat/, { timeout: 15000 });
+    // Seeded photos arrive as composer previews; drop them so the restage
+    // below takes the deterministic instant-composite path (the agent inbox
+    // save carrying the same id is covered by resolveInboxSaveId unit tests).
+    const thumbs = page.locator('img[alt="Preview thumbnail"]');
+    await expect(thumbs.first()).toBeVisible({ timeout: 15000 });
+    while ((await thumbs.count()) > 0) {
+      await thumbs.first().locator('xpath=../button').click();
+    }
+
+    // Restage the same meal as a thin row and save via the instant composite
+    // path: the review-session override must keep the reviewed log id, so the
+    // record updates instead of duplicating. A non-matching query keeps the
+    // local twin out of the dropdown so the thin API row is staged for sure.
+    await searchStub(page, [{ type: 'previous_meal', id: original.id, name: 'Lineage Review Oat', portionGrams: 130, weightGrams: 130, calories: 777, nutrients: { calories: 777 } }]);
+    await page.locator('#food-chat-input').fill('');
+    await page.locator('#food-chat-input').fill('xyz123q');
+    await stageTop(page, 'Lineage Review Oat');
     await page.locator('#food-chat-send-btn').click();
-    await expect(page.getByText(/Lineage Review Oat/i).first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/Here is the nutrition breakdown for.*Lineage Review Oat/i).first()).toBeVisible({ timeout: 20000 });
     await page.getByRole('button', { name: /log this/i }).first().click();
+    await expect(page.getByText('Saved to History')).toBeVisible({ timeout: 20000 });
 
     await expect.poll(async () => {
       const all = await readLogs(page);
       return all.find((l: any) => l.id === original.id)?.nutrients?.calories;
-    }, { timeout: 20000 }).toBe(999);
+    }, { timeout: 20000 }).toBe(777);
     logs = await readLogs(page);
-    expect(logs.filter((l: any) => l.name === 'Lineage Review Oat')).toHaveLength(countBefore);
+    expect(logs.filter((l: any) => l.id === original.id)).toHaveLength(1);
   });
 
   test('L6: dead tile photos degrade to letter, never stock', async ({ page }) => {

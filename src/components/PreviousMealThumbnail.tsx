@@ -10,6 +10,8 @@ interface PreviousMealThumbnailProps {
   className?: string;
   /** Override the letter-tile box classes (keeps the initial if omitted). */
   fallbackClassName?: string;
+  /** Optional tap handler (e.g. open the photo viewer). */
+  onClick?: () => void;
 }
 
 /**
@@ -23,7 +25,7 @@ interface PreviousMealThumbnailProps {
  * stand in for a real meal photo (a burger rendering salad stock), so the
  * exhausted state is always the letter tile.
  */
-export default function PreviousMealThumbnail({ src, alt, fallbackLabel, className, fallbackClassName }: PreviousMealThumbnailProps) {
+export default function PreviousMealThumbnail({ src, alt, fallbackLabel, className, fallbackClassName, onClick }: PreviousMealThumbnailProps) {
   const [currentSrc, setCurrentSrc] = useState(src);
   const [broken, setBroken] = useState(false);
   const tried = useRef<Set<string>>(new Set());
@@ -46,10 +48,10 @@ export default function PreviousMealThumbnail({ src, alt, fallbackLabel, classNa
     setBroken(true);
   };
 
-  if (broken) {
+  if (broken || !src || !src.trim()) {
     return (
       <div className={fallbackClassName || 'w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-500 font-bold text-xs shrink-0'}>
-        {fallbackLabel.charAt(0).toUpperCase()}
+        {(fallbackLabel || 'M').charAt(0).toUpperCase()}
       </div>
     );
   }
@@ -60,6 +62,7 @@ export default function PreviousMealThumbnail({ src, alt, fallbackLabel, classNa
       alt={alt}
       className={className || 'w-8 h-8 rounded-lg object-cover border border-slate-100 dark:border-slate-700 shrink-0'}
       referrerPolicy="no-referrer"
+      onClick={onClick}
       onError={handleError}
     />
   );

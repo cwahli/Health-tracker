@@ -941,7 +941,12 @@ ${logsText}`);
   const reviewSeedConsumedRef = useRef<string | null>(null);
   const reviewMealIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isOpen || !jobId) return;
+    if (!isOpen) {
+      reviewMealIdRef.current = null;
+      reviewSeedConsumedRef.current = null;
+      return;
+    }
+    if (!jobId) return;
     let snap: any = null;
     try {
       snap = (JobStore.getJob(jobId) as any)?.inputSnapshot;
@@ -949,20 +954,22 @@ ${logsText}`);
       snap = null;
     }
     const seedId = snap && typeof snap === 'object' && typeof snap.reviewMealId === 'string' ? snap.reviewMealId.trim() : '';
-    reviewMealIdRef.current = seedId || null;
     if (!seedId || reviewSeedConsumedRef.current === jobId) return;
     reviewSeedConsumedRef.current = jobId;
+    reviewMealIdRef.current = seedId;
     if (typeof snap.text === 'string' && snap.text) setInputText(snap.text);
     const photos = Array.isArray(snap.reviewMealPhotos)
       ? (snap.reviewMealPhotos as unknown[]).filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
       : [];
     if (photos.length > 0) setSelectedImages((prev) => (prev.length > 0 ? prev : photos));
   }, [jobId, isOpen]);
-  // Review sessions save card results back to the reviewed log id so a
-  // re-review updates the whole record instead of duplicating it.
+  // Review sessions save the first card result back to the reviewed log id
+  // (one-shot) so a re-review updates the whole record instead of
+  // duplicating it. Later saves in the same session get fresh ids.
   const reviewSaveOverride = React.useCallback((food: any) => {
     const targetId = reviewMealIdRef.current;
     if (targetId && food && typeof food === 'object') {
+      reviewMealIdRef.current = null;
       onLogFood?.({ ...applyReviewMealId(food, targetId) });
       return;
     }
@@ -2285,6 +2292,9 @@ ${logsText}`);
           imageRefs: [],
           imageDates: tempDates.length > 0 ? tempDates : (extraOptions?.imageDates || job?.inputSnapshot?.imageDates || undefined),
           hasImage: finalImages.length > 0,
+          // Re-review sessions: carry the reviewed log id onto the analysis
+          // job so inbox saves update the same record (see TaskPlaceholderCard).
+          reviewMealId: reviewMealIdRef.current || (job?.inputSnapshot as any)?.reviewMealId || undefined,
           mode: submissionMode,
           portionChoices: extraOptions?.portionChoices,
           activeScoutItems: scoutItemsForJob,

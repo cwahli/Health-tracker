@@ -35,7 +35,7 @@ import { FoodLog } from '../../types';
 import { resolveFoodImage } from '../../utils/imageResolver';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { ZoomableImage } from '../ZoomableImage';
-import { FoodScoutItemPreview, OnlineFoodImage } from './FoodScoutItemPreview';
+import { FoodScoutItemPreview } from './FoodScoutItemPreview';
 import { FoodEvaluationComparisonCard } from './FoodEvaluationComparisonCard';
 import { translations } from '../../utils/translations';
 import { resolveMealVerdict } from '../../utils/verdictUtils';
@@ -194,19 +194,16 @@ export const CroppedFoodImage: React.FC<CroppedFoodImageProps> = ({
 
   if (error) {
     if (!isValidBoundingBox(boundingBox)) {
+      // No bounding box + error: render a letter tile (never a stock photo).
+      const letter = (alt || '?').charAt(0).toUpperCase();
       return (
-        <img 
-          src={baseImageSrc} 
-          alt={alt} 
-          className={className}
-          referrerPolicy="no-referrer"
+        <div
+          className={className || 'w-full h-full flex items-center justify-center bg-indigo-50 dark:bg-indigo-950/40 text-indigo-500 font-bold text-lg rounded-lg'}
           onClick={onTap}
-          onError={(e) => {
-            const t = e.target as HTMLImageElement;
-            const fallback = getFoodImageUrl(alt || 'food');
-            if (t.src !== fallback) t.src = fallback;
-          }}
-        />
+          title={alt}
+        >
+          {letter}
+        </div>
       );
     }
     const [ymin, xmin, ymax, xmax] = boundingBox;
@@ -231,18 +228,10 @@ export const CroppedFoodImage: React.FC<CroppedFoodImageProps> = ({
             height: `${100 * scaleY}%`,
             objectFit: 'fill'
           }}
-          onError={(e) => {
-            const t = e.target as HTMLImageElement;
-            const fallback = getFoodImageUrl(alt || 'food');
-            if (t.src !== fallback) {
-              t.src = fallback;
-              t.className = 'w-full h-full object-cover';
-              t.style.top = '0';
-              t.style.left = '0';
-              t.style.width = '100%';
-              t.style.height = '100%';
-              t.style.position = 'static';
-            }
+          onError={() => {
+            // Degrade to letter tile via broken state rather than swapping in
+            // a stock photo (THUMB_FALLBACK: a burger must not render salad art).
+            setError(true);
           }}
         />
       </div>
@@ -463,15 +452,17 @@ export const resolveHistoricalImgSrc = (item: any, messageImages: string[], food
 
   const savedPhoto = collectSavedMealImageUrls(item, foodLogs)[0];
   if (savedPhoto) return savedPhoto;
-  if (isExplicit) return getFoodImageUrl(item.keyword || item.originalName || item.name, item.imageUrl);
+  // No real photo anywhere: return empty and let callers render the letter
+  // tile. A stock photo here would misrepresent the meal (burger → salad).
+  if (isExplicit) return normalizeMealImageUrl(item.imageUrl) || '';
 
   if (typeof imgIdxOverride === 'number' && imgIdxOverride >= 0 && imgIdxOverride < messageImages.length) {
-    return messageImages.length > 0 ? messageImages[imgIdxOverride] : getFoodImageUrl(item.keyword || item.originalName || item.name);
+    return messageImages.length > 0 ? messageImages[imgIdxOverride] : '';
   }
 
   const rawIdx = typeof item.sourceImageIndex === 'number' ? item.sourceImageIndex : 0;
   const imgIdx = (messageImages.length > 0 && rawIdx >= 0 && rawIdx < messageImages.length) ? rawIdx : 0;
-  return (messageImages.length > 0) ? messageImages[imgIdx] : getFoodImageUrl(item.keyword || item.originalName || item.name);
+  return (messageImages.length > 0) ? messageImages[imgIdx] : '';
 };
 
 export const FoodCard: React.FC<AgentCardProps & {
@@ -1542,7 +1533,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                                       const savedPhoto = collectSavedMealImageUrls(firstItem, foodLogs)[0];
                                       const resolvedImgSrc = (resolvedMessageImages.length > 0)
                                         ? resolvedMessageImages[imgIdx >= 0 && imgIdx < resolvedMessageImages.length ? imgIdx : 0]
-                                        : (savedPhoto || getFoodImageUrl(firstItem.name, firstItem.imageUrl || ''));
+                                        : savedPhoto;
                                       const bb = isValidBoundingBox(firstItem.boundingBox2D) 
                                         ? firstItem.boundingBox2D 
                                         : (isValidBoundingBox(group.boundingBox2D) 
@@ -1568,29 +1559,27 @@ export const FoodCard: React.FC<AgentCardProps & {
                                             }}
                                           />
                                         );
-                                      } else {
+                                      } else if (resolvedImgSrc) {
                                         return (
-                                          <img 
-                                            src={resolvedImgSrc} 
-                                            alt={firstItem.name} 
+                                          <PreviousMealThumbnail
+                                            src={resolvedImgSrc}
+                                            alt={firstItem.name}
+                                            fallbackLabel={firstItem.name || firstItem.keyword || 'M'}
                                             className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
+                                            fallbackClassName="w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-400 font-bold text-lg"
                                             onClick={() => {
                                               setPreviewState({ groupIdx: idx, itemIdx: 0, resolvedImgSrc });
                                             }}
-                                            onError={(e) => { const t = e.target as HTMLImageElement; const fallback = getFoodImageUrl(firstItem?.name || firstItem?.keyword || 'food'); if (t.src !== fallback) t.src = fallback; }}
                                           />
                                         );
                                       }
                                     }
-                                    
-                                    // Fallback to stock online image if no visual is available
+
+                                    // No visual available: honest letter tile, never a stock photo.
                                     return (
-                                      <OnlineFoodImage 
-                                        foodName={(group.items?.[0]?.name?.replace(/^\[.*?\]\s*/, '')) || group.groupName || "food"} 
-                                        fallbackSrc={getFoodImageUrl(group.items?.[0]?.name?.replace(/^\[.*?\]\s*/, '') || "food")} 
-                                        className="w-full h-full object-cover"
-                                        searchMode="light"
-                                      />
+                                      <div className="w-full aspect-square rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50 flex items-center justify-center text-slate-400 font-bold text-2xl">
+                                        {(group.items?.[0]?.name?.replace(/^\[.*?\]\s*/, '') || group.groupName || 'M').charAt(0).toUpperCase()}
+                                      </div>
                                     );
                                   })()}
                                 </div>
@@ -1676,7 +1665,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                                          : (matchingScout && typeof matchingScout.sourceImageIndex === 'number' ? matchingScout.sourceImageIndex : 0);
                                        const resolvedImgSrc = (resolvedMessageImages.length > 0)
                                          ? resolvedMessageImages[imgIdx >= 0 && imgIdx < resolvedMessageImages.length ? imgIdx : 0]
-                                         : getFoodImageUrl(item.name, '');
+                                         : resolveHistoricalImgSrc(item, [], foodLogs || [], imgIdx);
                                        const bb = previewState?.overrideSrc ? null : (item.boundingBox2D || (matchingScout ? matchingScout.boundingBox2D : null));
                                        return { src: resolvedImgSrc, boundingBox: bb, foodName: item.name, imgIdx };
                                      });
@@ -2056,7 +2045,7 @@ export const FoodCard: React.FC<AgentCardProps & {
         const itemKeyForCache = `${msg.id}-${previewState.groupIdx}-${previewState.itemIdx}`;
         let resolvedImgSrc = onlineImageUrls[itemKeyForCache] || ((resolvedMessageImages.length > 0)
           ? resolvedMessageImages[imgIdx >= 0 && imgIdx < resolvedMessageImages.length ? imgIdx : 0]
-          : getFoodImageUrl(item.name, ''));
+          : resolveHistoricalImgSrc(item, [], foodLogs || [], imgIdx));
         
         if (previewState.resolvedImgSrc && previewState.itemIdx === 0) {
           resolvedImgSrc = previewState.resolvedImgSrc;
@@ -2278,7 +2267,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                                              ? 'bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-400 dark:border-amber-500 shadow-amber-500/20'
                                              : 'bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50'
                                          }`}
-                                         onClick={() => setScoutPreviewIdx(i)}
+                                         onClick={resolvedImgSrc ? () => setScoutPreviewIdx(i) : undefined}
                                        >
                                          {isValidBoundingBox(item.boundingBox2D) ? (
                                            <CroppedFoodImage 
@@ -3013,7 +3002,7 @@ export const FoodCard: React.FC<AgentCardProps & {
                       <div key={i} className="flex flex-col items-center gap-1 shrink-0 relative group w-[110px] sm:w-[130px]">
                         <div 
                           className="w-full aspect-square rounded-xl overflow-hidden cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-sm bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50"
-                          onClick={() => setScoutPreviewIdx(i)}
+                          onClick={resolvedImgSrc ? () => setScoutPreviewIdx(i) : undefined}
                         >
                           {isValidBoundingBox(item.boundingBox2D) ? (
                             <CroppedFoodImage 
@@ -3025,15 +3014,12 @@ export const FoodCard: React.FC<AgentCardProps & {
                               sourceImageIndex={imgIdx}
                             />
                           ) : (
-                            <img 
-                              src={resolvedImgSrc} 
-                              alt={item.keyword} 
+                            <PreviousMealThumbnail
+                              src={resolvedImgSrc}
+                              alt={item.keyword}
+                              fallbackLabel={item.keyword || item.originalName || 'M'}
                               className="w-full h-full object-cover"
-                              onError={(e) => {
-                                const t = e.target as HTMLImageElement;
-                                const fallback = getFoodImageUrl(item.keyword || item.originalName || 'food');
-                                if (t.src !== fallback) t.src = fallback;
-                              }}
+                              fallbackClassName="w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-400 font-bold text-lg"
                             />
                           )}
                         </div>

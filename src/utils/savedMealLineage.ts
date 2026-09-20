@@ -208,3 +208,17 @@ export function applyReviewMealId(food: any, reviewMealId: string | null | undef
   if (!food || typeof food !== 'object' || !id) return food;
   return { ...food, id };
 }
+
+/**
+ * Inbox-save id resolution: a re-review analysis job carries the reviewed log
+ * id in its inputSnapshot. Wins over the pending log's own id; falls back to
+ * undefined (caller mints a fresh id) when neither is present.
+ */
+export function resolveInboxSaveId(job: any, pendingLog: any): string | undefined {
+  const review = job && typeof job === 'object' ? (job.inputSnapshot as any)?.reviewMealId : undefined;
+  const reviewId = typeof review === 'string' && review.trim() ? review.trim() : undefined;
+  if (reviewId) return reviewId;
+  const pendingId = pendingLog && typeof pendingLog === 'object' ? pendingLog.id : undefined;
+  if (typeof pendingId === 'string' && pendingId.trim()) return pendingId.trim();
+  return undefined;
+}

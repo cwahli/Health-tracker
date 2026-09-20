@@ -2015,7 +2015,7 @@ export default function FoodHistoryTab({
                                       const rawIdx = typeof item.sourceImageIndex === 'number' ? item.sourceImageIndex : 0;
                                       const resolvedImgSrc = resolveHistoricalImgSrc(item, resolvedImgs, activeFoodLogs, undefined) || (resolvedImgs.length > 0
                                         ? (resolvedImgs[rawIdx] || resolvedImgs[0])
-                                        : (resolvedImg || getFoodImageUrl(item.keyword || item.originalName)));
+                                        : (resolvedImg || ''));
                                       const hasBbox = isValidBoundingBox(item.boundingBox2D);
                                       const isSelectedLabel = openLabelLogMap[log.id] === i;
 
@@ -2024,14 +2024,14 @@ export default function FoodHistoryTab({
                                           <div className="relative w-full">
                                             <div 
                                               className="w-full aspect-square rounded-xl overflow-hidden cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-sm bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50"
-                                              onClick={() => setZoomState({
+                                              onClick={resolvedImgSrc ? () => setZoomState({
                                                 src: resolvedImgSrc,
                                                 boundingBox: hasBbox ? item.boundingBox2D : null,
                                                 foodName: item.originalName || item.keyword,
                                                 items: scoutItemsList,
                                                 currentIdx: i,
                                                 resolvedImgs: resolvedImgs
-                                              })}
+                                              }) : undefined}
                                               title={t.clickToZoom}
                                             >
                                               {hasBbox ? (
@@ -2324,7 +2324,7 @@ export default function FoodHistoryTab({
             const rawIdx = typeof item.sourceImageIndex === 'number' ? item.sourceImageIndex : 0;
             const imgSrc = resolveHistoricalImgSrc(item, zoomState.resolvedImgs, activeFoodLogs, undefined) || ((zoomState.resolvedImgs.length > 0)
               ? (zoomState.resolvedImgs[rawIdx] || zoomState.resolvedImgs[0])
-              : getFoodImageUrl(item.keyword || item.originalName));
+              : '');
             setZoomState({
               ...zoomState,
               currentIdx: nextIdx,
@@ -2339,7 +2339,7 @@ export default function FoodHistoryTab({
             const rawIdx = typeof item.sourceImageIndex === 'number' ? item.sourceImageIndex : 0;
             const imgSrc = resolveHistoricalImgSrc(item, zoomState.resolvedImgs, activeFoodLogs, undefined) || ((zoomState.resolvedImgs.length > 0)
               ? (zoomState.resolvedImgs[rawIdx] || zoomState.resolvedImgs[0])
-              : getFoodImageUrl(item.keyword || item.originalName));
+              : '');
             setZoomState({
               ...zoomState,
               currentIdx: prevIdx,

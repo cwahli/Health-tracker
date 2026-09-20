@@ -7,6 +7,7 @@ import {
   propagateMasterUpdate,
   propagateDownstream,
   applyReviewMealId,
+  resolveInboxSaveId,
 } from './savedMealLineage';
 
 const savedTag = (dbId: string, name = 'Mr. Oat Quick Cook Oatmeal'): any => ({
@@ -181,5 +182,17 @@ describe('applyReviewMealId', () => {
     expect(applyReviewMealId(food, '')).toBe(food);
     expect(applyReviewMealId(food, null)).toBe(food);
     expect(applyReviewMealId(null, 'x')).toBeNull();
+  });
+});
+
+describe('resolveInboxSaveId', () => {
+  it('prefers the review link over the pending id', () => {
+    expect(resolveInboxSaveId({ inputSnapshot: { reviewMealId: 'food_orig_9' } }, { id: 'food_new_1' })).toBe('food_orig_9');
+  });
+
+  it('falls back to the pending id, then undefined', () => {
+    expect(resolveInboxSaveId({ inputSnapshot: {} }, { id: 'food_new_1' })).toBe('food_new_1');
+    expect(resolveInboxSaveId({}, {})).toBeUndefined();
+    expect(resolveInboxSaveId(null, null)).toBeUndefined();
   });
 });

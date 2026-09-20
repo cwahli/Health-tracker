@@ -14,6 +14,7 @@ import { ImageStore } from '../jobs/ImageStore';
 import { JobQueueRunner } from '../jobs/JobQueueRunner';
 import { ZoomableImage } from './ZoomableImage';
 import { normalizeMealImageUrl } from '../utils/foodImageSources';
+import { resolveInboxSaveId } from '../utils/savedMealLineage';
 import { getCurrentDateInTimezone } from '../utils/dateUtils';
 import { translations } from '../utils/translations';
 
@@ -258,8 +259,9 @@ export function AllAnalysesModal({
         const foodName = pendingLog?.name || pendingLog?.foodName || pendingLog?.mealName || job.inputSnapshot?.text || 'Logged Meal';
         const fallbackDate = profile?.timezone ? getCurrentDateInTimezone(profile.timezone) : new Date().toISOString().split('T')[0];
         const dict = translations[profile?.language || 'en'] || translations.en;
+        // Re-review sessions save back to the reviewed log id (no duplicate).
         const newLog: FoodLog = {
-          id: pendingLog?.id || `food_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          id: resolveInboxSaveId(job, pendingLog) || `food_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           date: pendingLog?.date || fallbackDate,
           name: foodName,
           composition: pendingLog?.composition || '',
@@ -269,6 +271,8 @@ export function AllAnalysesModal({
           nutrients: pendingLog?.nutrients || {},
           imageUrl: photoUrl || '',
           imageUrls: photoUrl ? [photoUrl] : [],
+          itemsBreakdown: pendingLog?.itemsBreakdown || [],
+          scoutItems: pendingLog?.scoutItems || [],
           sync_state: 'synced',
           updated_at: Date.now()
         };
