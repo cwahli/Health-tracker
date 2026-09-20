@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { scheduleCoalescedJobUpsert } from '../SupabaseJobSync';
+import { scheduleCoalescedJobUpsert } from '../BackendJobSync';
 
 /**
  * Upsert storm guard sensor: JobStore.apply fires on EVERY job event and

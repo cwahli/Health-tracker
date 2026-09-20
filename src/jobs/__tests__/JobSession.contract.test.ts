@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { JobStore } from '../JobStore';
 import { previewStatus, previewStatusLabel } from '../jobPreview';
 import { mergeFoodEditMessages } from '../mergeFoodEditMessages';
-import { scheduleCoalescedJobUpsert, upsertJobToSupabase } from '../SupabaseJobSync';
+import { scheduleCoalescedJobUpsert, upsertJobToSupabase } from '../BackendJobSync';
 
-vi.mock('../SupabaseJobSync', () => ({
+vi.mock('../BackendJobSync', () => ({
   deleteJobFromBackend: vi.fn(async () => {}),
   scheduleCoalescedJobUpsert: vi.fn(),
   upsertJobToSupabase: vi.fn(async () => {}),
