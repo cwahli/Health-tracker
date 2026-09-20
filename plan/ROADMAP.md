@@ -44,7 +44,7 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
 4. **Q-11.12 DONE** — nodes landed `cdbf2cd` (settings overlay → `DbInteractionsOverlay.tsx`) and `c92ec49` + `2fb8d88` (theme customizer → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, move-only, then its orphaned imports). `Header.tsx` 3,545 → **690 lines / 28,791 B**: the packet's ≤ 1,200-line and < 200 KB targets are both met, and every moved slice was proven byte-identical against the pre-move file. Packet retired to `specs/done/`. **The Q-11 ladder is complete** — no Q-11 packet is active.
 5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (392 KB / 7,039 lines, 39 over its 7,000 ceiling).
-6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md).
+6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. Next: Track V Phase 6 (V-19...V-26 Autonomous QA Bot fleet & Orchestrator self-healing loop). Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md).
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
 8. **Track D PARKED** — one SQL = **D1** (Firebase Auth + R2). Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Muse audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** = unpaid recovery when 402 lifts (~**2026-09-24**), not a paid dump. Drain **code** is D-2 (keep the project). R2 leak-stop is D-9; R2 deletes are **D-10 after D-1**. **SQLite on the VPS is D-5: extra testing and benchmark only, after V-16.** No cutover without D-6 human go.
 
@@ -89,7 +89,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
-| Make the site live / leave Render | **Track V / R-13.1 LIVE on OVH VPS-2** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Origin is `https://health-tracking.duckdns.org`. Next is V-17 (delete Render after 24h soak) + Autonomous Journey QA Bot fleet. |
+| Make the site live / leave Render | **Track V / R-13.1 LIVE on OVH VPS-2** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Origin is `https://health-tracking.duckdns.org`. Next is V-17 (delete Render after 24h soak) + Track V Phase 6 (V-19...V-26 Autonomous QA Bot fleet & Orchestrator self-healing loop). |
 | One database / drop Supabase / SQLite on the VPS / R2 photo junk | **Track D** — [DATA_PLANE.md](./DATA_PLANE.md). Live SQL is **D1**. Muse audit [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** unpaid recovery ~24 Sep. SQLite is a **D-5 benchmark after V-16**, then D-6 human go. Not R-5. |
 | Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
@@ -405,6 +405,22 @@ Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Live host: `https://
 | **V-16** | DNS cutover; Render still up | Cellular load, no Render splash, meal works | **COMPLETE & LIVE** |
 | **V-17** | Delete Render; scrub `onrender.com` | Old origin dead | **IN PROGRESS** (24-48h soak before deletion) |
 | **V-18** | Confirm Containers/Cloud Run stay off | Runbook matches prod | **PENDING** |
+
+### Track V Phase 6 — Autonomous Journey QA Fleet & Orchestrator Self-Healing Loop
+
+Target architecture: QA bot fleet (`@Meal-journey-QA`, `qa_bio`, `qa_onboarding`) tests live site, detects visual/functional defects, passes tickets to Orchestrator (`@Health-tracker-bot`), which evaluates tool allowances (OpenCode -> Cline -> Grok -> Agy) and dispatches autonomous fixers, auto-deploys via webhook, and signals QA to re-verify with clean screenshots.
+
+| ID | Phase / Gap | Done when | Status |
+|---|---|---|---|
+| **V-19** | **Screenshot Forwarding (Gap 1 - Critical)**: Pass `--screenshot=${bugData.screenshot}` in `qa-auto-loop.mjs` dispatch call. | Coding agents receive full path to visual screenshot in prompt; prompt instructs inspecting visual defect. | **OPEN** |
+| **V-20** | **Manual Bug Report Re-Test Loop (Gap 2 - Critical)**: Trigger automated QA re-verification after Workflow B (user-submitted screenshot/bug) completes dispatch and CI/CD deploy. | User reporting a UI bug in Telegram automatically gets verification screenshot once coding agent commits and webhook deploys. | **OPEN** |
+| **V-21** | **Profile-Aware Telegram Routing (Gap 3 - Critical)**: `telegram-send.sh` accepts `--profile=<name>` to load token and allowed chat ID from matching `~/.hermes/profiles/<name>/.env`. | Bot messages and screenshots never cross-post to wrong bot profile or thread. | **OPEN** |
+| **V-22** | **Autonomous Escalation Retry Loop (Gap 4 - Important)**: Wrap `qa-auto-loop.mjs` in multi-tier retry (`MAX_RETRIES=2`). First attempt OpenCode; if re-test fails, escalate to Cline with `--thinking=high` and new error diff. | Single failed re-test does not immediately abort to human if secondary high-thinking tier can resolve. | **OPEN** |
+| **V-23** | **Heartbeat Process Lifecycle (Gap 5 - Reliability)**: Add `trap stop_heartbeat EXIT INT TERM` in `run-coding-dispatch.sh`. | Background Telegram ping process never leaves orphaned subshells on timeouts or script exits. | **OPEN** |
+| **V-24** | **Dispatch Concurrency Lock (Gap 6 - Reliability)**: Write lockfile `~/.hermes/dispatch_lock` with active `BUG_ID`. | Multiple concurrent QA runs or rapid user reports do not trigger conflicting simultaneous git working-tree mutations. | **OPEN** |
+| **V-25** | **Global DuckDNS Test Origin (Gap 7 - Config)**: Seed `PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org` in `~/.hermes/.env` globally. | All scripts and bot profiles run headless tests against live production without localhost fallback. | **OPEN** |
+| **V-26** | **Orchestrator Post-Deploy Re-Verify (Gap 8 - Orchestrator UX)**: When direct `/fix` or dispatch is triggered from Orchestrator bot, dispatch automatically invokes `qa-runner.mjs` after 45s deploy sleep and reports result. | Orchestrator verifies its own commits end-to-end rather than requiring manual QA invocation. | **OPEN** |
+
 
 ### Track D — one database (D1 now; SQLite only after a VPS benchmark)
 
