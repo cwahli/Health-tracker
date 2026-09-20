@@ -167,7 +167,11 @@ check_git_and_tsc() {
       echo "[Dispatcher] tsc clean — committing..."
       git add .
       git commit -m "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)" || true
-      git push origin main
+      if ! git push origin main; then
+        echo "[Dispatcher] Error: git push origin main failed."
+        tg_msg "⚠️ *[Orchestrator]* Fix coded by *$tool_name*, but \`git push origin main\` failed. Check GitHub credentials on the VPS (SSH key or PAT)."
+        return 1
+      fi
       node scripts/tool-allowance.mjs report-result --tool="$tool_name" --status="success" --bug-id="$BUG_ID" --category="$CATEGORY" --duration=$(( $(date +%s) - START_TIME )) || true
       record_audit "$tool_name" "$model_desc" "resolved" "deployed_pending_qa"
       return 0
