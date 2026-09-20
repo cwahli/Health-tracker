@@ -21,7 +21,7 @@
    ```bash
    ~/dev/new-worktree.sh <area> [base-branch]   # creates /home/ubuntu/dev/<area>
    ```
-   One writer per area; keep hub files (`server.ts`, `serverJobs.ts`, `server_routes_*.ts`, `AGENTS.md`, `plan/ROADMAP.md`, `specs/**`) to a single agent at a time. Commit **and push** when a unit is done; never leave a long-lived uncommitted tree. Details: `docs/agent/WORKTREES.md`.
+   One writer per area; keep hub files (`server.ts`, `serverJobs.ts`, `server_routes_*.ts`, `AGENTS.md`, `plan/ROADMAP.md`, `specs/**`) to a single agent at a time. Commit **and push** when a unit is done; never leave a long-lived uncommitted tree. Details: `docs/agent/WORKTREES.md`. **Never push directly to `main`** — open a PR; `claim-guard` (no overlapping open PR) and `ci` are the merge gate, and `CODEOWNERS` owns hub paths. Details: `docs/agent/GITHUB_WORKFLOW.md`.
 
 ```text
 plan/ROADMAP.md     = remaining work (the only execute file)

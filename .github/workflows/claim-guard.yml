@@ -1,0 +1,85 @@
+name: claim-guard
+
+# Tier 2 of the multi-agent workflow ("the open PR is the lock").
+#
+# GitHub has no native temporary per-path lock. This check provides one:
+# a PR "claims" the files it changes; if another OPEN PR already changes any of
+# the same files, this run FAILS and names the conflicting PR + paths.
+#
+# Release is automatic: the claim ends when the PR is merged or closed.
+#
+# Enforcement: this is a *required status check* only if branch protection /
+# a ruleset on the base branch lists "claim-guard / no-overlap" as required.
+# Without that setting it is enforcement by convention + a visible red alarm
+# (still better than a silent collision). See docs/agent/GITHUB_WORKFLOW.md.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  no-overlap:
+    name: no-overlap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Detect file overlap with other open PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const me = context.payload.pull_request.number;
+
+            // Files changed by this PR.
+            const mine = await github.paginate(
+              github.rest.pulls.listFiles,
+              { owner, repo, pull_number: me, per_page: 100 },
+            );
+            const myFiles = new Set(mine.map(f => f.filename));
+
+            // Ignore paths that are expected to collide across agents.
+            const IGNORE = [
+              /^src\/git-version\.generated\.ts$/,
+              /^AI_HANDOVER\.md$/,
+            ];
+            const relevant = [...myFiles].filter(p => !IGNORE.some(re => re.test(p)));
+
+            // All other open PRs.
+            const open = await github.paginate(
+              github.rest.pulls.list,
+              { owner, repo, state: 'open', per_page: 100 },
+            );
+            const others = open.filter(pr => pr.number !== me);
+            // Skip drafts: a draft may be the *claim* itself being prepared.
+            const contested = others.filter(pr => !pr.draft);
+
+            const conflicts = [];
+            for (const pr of contested) {
+              const files = await github.paginate(
+                github.rest.pulls.listFiles,
+                { owner, repo, pull_number: pr.number, per_page: 100 },
+              );
+              const theirs = new Set(files.map(f => f.filename));
+              const shared = relevant.filter(p => theirs.has(p));
+              if (shared.length > 0) {
+                conflicts.push({ number: pr.number, title: pr.title, shared });
+              }
+            }
+
+            if (conflicts.length === 0) {
+              core.info(`No overlap for PR #${me} (${relevant.length} relevant file(s)).`);
+              return;
+            }
+
+            const lines = conflicts.flatMap(c =>
+              [`- #${c.number} "${c.title}" shares:`, ...c.shared.map(p => `    - ${p}`)],
+            );
+            const msg =
+              `claim-guard: this PR overlaps ${conflicts.length} other open PR(s). ` +
+              `One file, one owner — sequence the work or reduce scope.\n\n` +
+              lines.join('\n');
+            core.setFailed(msg);
