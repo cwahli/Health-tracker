@@ -70,6 +70,9 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
 
   # 2. Check global ~/.hermes/.env
   if [ -z "$TELEGRAM_BOT_TOKEN" ] && [ -f "$HOME/.hermes/.env" ]; then
+    if [ -n "$TARGET_PROFILE" ]; then
+      echo "[Telegram Send] ⚠️ WARNING: Profile '${TARGET_PROFILE}' has NO TELEGRAM_BOT_TOKEN in ~/.hermes/profiles/${TARGET_PROFILE}/.env! Falling back to global ~/.hermes/.env (@Health-tracker-bot)." >&2
+    fi
     TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
     if [ -n "$TOKEN" ]; then
       TELEGRAM_BOT_TOKEN="$TOKEN"
@@ -153,8 +156,33 @@ if [ -n "$PHOTO" ] && [ -f "$PHOTO" ]; then
     CURL_ARGS+=(-F "message_thread_id=${THREAD_ID}")
   fi
 
-  curl "${CURL_ARGS[@]}" > /dev/null
-  echo "[Telegram Send] Photo delivered: $PHOTO"
+  RAW_RESP=$(curl "${CURL_ARGS[@]}" 2>&1 || true)
+  if echo "$RAW_RESP" | grep -q '"ok":true'; then
+    echo "[Telegram Send] Photo delivered: $PHOTO"
+  else
+    if echo "$RAW_RESP" | grep -qi "can't parse entities"; then
+      echo "[Telegram Send] Markdown parse failed for photo caption. Retrying with plain text..." >&2
+      CURL_ARGS_PLAIN=(
+        -s -X POST "${API_URL}/sendPhoto"
+        -F "chat_id=${CHAT_ID}"
+        -F "photo=@${PHOTO}"
+      )
+      if [ -n "$CAPTION" ]; then
+        CURL_ARGS_PLAIN+=(-F "caption=${CAPTION}")
+      fi
+      if [ -n "$THREAD_ID" ]; then
+        CURL_ARGS_PLAIN+=(-F "message_thread_id=${THREAD_ID}")
+      fi
+      RETRY_RESP=$(curl "${CURL_ARGS_PLAIN[@]}" 2>&1 || true)
+      if echo "$RETRY_RESP" | grep -q '"ok":true'; then
+        echo "[Telegram Send] Photo delivered (plain text fallback): $PHOTO"
+      else
+        echo "[Telegram Send] ERROR: Failed to deliver photo: $RETRY_RESP" >&2
+      fi
+    else
+      echo "[Telegram Send] ERROR: Telegram API error sending photo: $RAW_RESP" >&2
+    fi
+  fi
 
 # 2. Send Text message
 elif [ -n "$TEXT" ]; then
@@ -168,8 +196,30 @@ elif [ -n "$TEXT" ]; then
     CURL_ARGS+=(-d "message_thread_id=${THREAD_ID}")
   fi
 
-  curl "${CURL_ARGS[@]}" > /dev/null 2>&1
-  echo "[Telegram Send] Message delivered to chat $CHAT_ID"
+  RAW_RESP=$(curl "${CURL_ARGS[@]}" 2>&1 || true)
+  if echo "$RAW_RESP" | grep -q '"ok":true'; then
+    echo "[Telegram Send] Message delivered to chat $CHAT_ID"
+  else
+    if echo "$RAW_RESP" | grep -qi "can't parse entities"; then
+      echo "[Telegram Send] Markdown parse failed for text message. Retrying with plain text..." >&2
+      CURL_ARGS_PLAIN=(
+        -s -X POST "${API_URL}/sendMessage"
+        -d "chat_id=${CHAT_ID}"
+        -d "text=${TEXT}"
+      )
+      if [ -n "$THREAD_ID" ]; then
+        CURL_ARGS_PLAIN+=(-d "message_thread_id=${THREAD_ID}")
+      fi
+      RETRY_RESP=$(curl "${CURL_ARGS_PLAIN[@]}" 2>&1 || true)
+      if echo "$RETRY_RESP" | grep -q '"ok":true'; then
+        echo "[Telegram Send] Message delivered (plain text fallback) to chat $CHAT_ID"
+      else
+        echo "[Telegram Send] ERROR: Failed to deliver message: $RETRY_RESP" >&2
+      fi
+    else
+      echo "[Telegram Send] ERROR: Telegram API error sending message: $RAW_RESP" >&2
+    fi
+  fi
 else
   echo "Usage: $0 --text='...' OR --photo='/path/to/file' [--caption='...'] [--thread-id=...]"
   exit 1

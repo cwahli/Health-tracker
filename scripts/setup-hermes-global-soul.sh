@@ -226,6 +226,21 @@ if [ -d "${PROFILES_DIR}" ]; then
     fi
   done
   echo "  ✓ All profile .env files configured with model=${DEFAULT_FREE_MODEL} and allowed users"
+
+  # Validate dedicated profile tokens
+  echo ""
+  echo " Profile Telegram Bot Token Status:"
+  for prof_name in "orchestrator" "qa_meal"; do
+    prof_env="${PROFILES_DIR}/${prof_name}/.env"
+    if [ -f "$prof_env" ] && grep -q '^TELEGRAM_BOT_TOKEN=' "$prof_env"; then
+      echo "  ✓ Profile '${prof_name}' has dedicated TELEGRAM_BOT_TOKEN"
+    else
+      echo "  ⚠️ [ACTION REQUIRED] Profile '${prof_name}' is MISSING dedicated TELEGRAM_BOT_TOKEN in ${prof_env}!"
+      echo "     Without this token, messages will fall back to default bot (@Health-tracker-bot)."
+      echo "     To set it up:"
+      echo "       echo \"TELEGRAM_BOT_TOKEN=<your-${prof_name}-token>\" >> ${prof_env}"
+    fi
+  done
 fi
 
 # ---------------------------------------------------------------

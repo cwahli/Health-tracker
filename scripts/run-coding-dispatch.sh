@@ -159,28 +159,63 @@ record_audit() {
 # tsc + git commit check
 # ---------------------------------------------------------------
 check_git_and_tsc() {
-  local tool_name="$1" model_desc="$2"
+  local tool_name="$1" model_desc="$2" log_file="${3:-}"
   echo "[Dispatcher] Verifying $tool_name changes with tsc..."
-  if npx tsc --noEmit >/dev/null 2>&1; then
-    DIFF_COUNT=$(git status --porcelain | grep -v 'src/git-version.generated.ts' | wc -l | tr -d ' ')
-    if [ "$DIFF_COUNT" -gt 0 ]; then
-      echo "[Dispatcher] tsc clean — committing real changes..."
-      git add .
-      git commit -m "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)" || true
-      if ! git push origin main; then
-        echo "[Dispatcher] Error: git push origin main failed."
-        tg_msg "⚠️ *[Orchestrator]* Fix coded by *$tool_name*, but \`git push origin main\` failed. Check GitHub credentials on the VPS (SSH key or PAT)."
-        return 1
-      fi
-      node scripts/tool-allowance.mjs report-result --tool="$tool_name" --status="success" --bug-id="$BUG_ID" --category="$CATEGORY" --duration=$(( $(date +%s) - START_TIME )) || true
-      record_audit "$tool_name" "$model_desc" "resolved" "deployed_pending_qa"
-      return 0
-    else
-      echo "[Dispatcher] No file changes produced by $tool_name."
+  
+  local diff_files
+  diff_files=$(git status --porcelain | grep -v 'src/git-version.generated.ts' || true)
+  local diff_count
+  diff_count=$(echo "$diff_files" | grep -c '[^[:space:]]' || true)
+
+  if [ "$diff_count" -eq 0 ]; then
+    echo "[Dispatcher] No code changes produced by $tool_name."
+    local tail_output=""
+    if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+      tail_output=$(tail -n 6 "$log_file" | tr -d '`' | cut -c1-300)
+    fi
+    tg_msg "⚠️ *[Orchestrator]* *$tool_name* made *0 code changes*.
+*Agent output tail:*
+\`\`\`
+${tail_output:-No output logged}
+\`\`\`"
+    return 1
+  fi
+
+  local diff_stat
+  diff_stat=$(git diff --stat | grep -v 'git-version' | head -10 || true)
+
+  tg_msg "📝 *[Orchestrator]* Code modified by *$tool_name*:
+\`\`\`
+$diff_stat
+\`\`\`
+Running TypeScript build check ('npx tsc --noEmit')..."
+
+  local tsc_output
+  if tsc_output=$(npx tsc --noEmit 2>&1); then
+    echo "[Dispatcher] tsc clean — committing real changes..."
+    git add .
+    git commit -m "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)" || true
+    if ! git push origin main; then
+      echo "[Dispatcher] Error: git push origin main failed."
+      tg_msg "⚠️ *[Orchestrator]* Fix coded by *$tool_name*, but \`git push origin main\` failed. Check GitHub credentials on VPS (SSH key or PAT)."
       return 1
     fi
+    local commit_hash
+    commit_hash=$(git rev-parse --short HEAD)
+    tg_msg "🚀 *[Orchestrator]* Fix committed and pushed to \`main\` (\`$commit_hash\`)."
+    node scripts/tool-allowance.mjs report-result --tool="$tool_name" --status="success" --bug-id="$BUG_ID" --category="$CATEGORY" --duration=$(( $(date +%s) - START_TIME )) || true
+    record_audit "$tool_name" "$model_desc" "resolved" "deployed_pending_qa"
+    return 0
   else
     echo "[Dispatcher] tsc failed after $tool_name."
+    local tsc_tail
+    tsc_tail=$(echo "$tsc_output" | head -n 6 | tr -d '`' | cut -c1-300)
+    tg_msg "❌ *[Orchestrator]* TypeScript compilation failed after *$tool_name*:
+\`\`\`
+$tsc_tail
+\`\`\`
+Reverting uncommitted changes..."
+    clean_workspace
     return 1
   fi
 }
@@ -191,14 +226,24 @@ clean_workspace() {
 }
 
 # ---------------------------------------------------------------
-# Build full task prompt including screenshot reference
+# Build full task prompt including screenshot reference & hints
 # ---------------------------------------------------------------
 build_prompt() {
   local base_prompt="Task for $BUG_ID ($CATEGORY): $TASK"
   if [ -n "$SCREENSHOT" ] && [ -f "$SCREENSHOT" ]; then
-    base_prompt="${base_prompt} The bug screenshot is at: ${SCREENSHOT} — use it to understand the visual defect."
+    base_prompt="${base_prompt}. The bug screenshot is at: ${SCREENSHOT} — inspect it to understand the visual defect."
   fi
-  base_prompt="${base_prompt} Think deeply before modifying files. Verify with npx tsc --noEmit before finishing."
+
+  if echo "$TASK" | grep -qiE "theme|dark|navy|#0f172a|#f8fafc|background|color"; then
+    base_prompt="${base_prompt}.
+[TARGET FILE HINTS]:
+- Root CSS variables & theme classes: 'src/index.css' (check --app-bg definition and dark class).
+- Dynamic styles injector: 'src/components/AppDynamicStyles.ts' (check root theme palette injection).
+- Shell / container: 'src/components/AppShell.tsx' (check root element background styling).
+Ensure the root page background renders the dark theme navy (#0f172a) properly for demo / dark mode users."
+  fi
+
+  base_prompt="${base_prompt}. Think deeply before modifying files. Verify with npx tsc --noEmit before finishing."
   echo "$base_prompt"
 }
 
@@ -214,13 +259,28 @@ try_opencode() {
     return 1
   fi
 
-  tg_msg "🤖 *[Orchestrator]* Dispatching to *OpenCode* ($model) for \`$BUG_ID\`..."
-  start_heartbeat "OpenCode"
-
   local prompt; prompt="$(build_prompt)"
-  local output
-  output=$(run_with_timeout 8m "$OPENCODE_BIN" -p "$prompt" 2>&1) || true
+  local log_dir="${HERMES_DIR}/logs"
+  mkdir -p "$log_dir"
+  local log_file="${log_dir}/dispatch_${BUG_ID}_opencode.log"
+  local prompt_preview
+  prompt_preview=$(echo "$prompt" | head -n 8 | tr -d '`' | cut -c1-350)
+
+  tg_msg "🤖 *[Orchestrator]* Dispatching to *OpenCode* ($model) for \`$BUG_ID\`
+
+📋 *Task:* $TASK
+📁 *Log:* \`$log_file\`
+
+💡 *Instruction Prompt:*
+\`\`\`
+$prompt_preview
+\`\`\`"
+
+  start_heartbeat "OpenCode"
+  run_with_timeout 8m "$OPENCODE_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
+
+  local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|insufficient credits|429|allowance"; then
     tg_msg "⚠️ *[Orchestrator]* OpenCode hit rate limit for \`$BUG_ID\`. Trying next tool..."
@@ -229,12 +289,13 @@ try_opencode() {
     return 2
   fi
 
-  if check_git_and_tsc "opencode" "$model"; then return 0; fi
+  if check_git_and_tsc "opencode" "$model" "$log_file"; then return 0; fi
 
   # One nudge attempt
   tg_msg "🔄 *[Orchestrator]* OpenCode nudged to retry \`$BUG_ID\`..."
-  run_with_timeout 4m "$OPENCODE_BIN" -p "Previous attempt for $BUG_ID had errors. Inspect git status, analyse errors, and complete the fix now." 2>&1 || true
-  if check_git_and_tsc "opencode" "$model"; then return 0; fi
+  local nudge_log="${log_dir}/dispatch_${BUG_ID}_opencode_nudge.log"
+  run_with_timeout 4m "$OPENCODE_BIN" -p "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." 2>&1 | tee "$nudge_log" || true
+  if check_git_and_tsc "opencode" "$model" "$nudge_log"; then return 0; fi
 
   tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`. Escalating to Cline..."
   clean_workspace
@@ -250,13 +311,28 @@ try_cline() {
     return 1
   fi
 
-  tg_msg "🤖 *[Orchestrator]* Dispatching to *Cline CLI* (thinking=$thinking) for \`$BUG_ID\`..."
-  start_heartbeat "Cline"
-
   local prompt; prompt="$(build_prompt)"
-  local output
-  output=$(run_with_timeout 8m "$CLINE_BIN" --auto-approve true --thinking "$thinking" "$prompt" 2>&1) || true
+  local log_dir="${HERMES_DIR}/logs"
+  mkdir -p "$log_dir"
+  local log_file="${log_dir}/dispatch_${BUG_ID}_cline.log"
+  local prompt_preview
+  prompt_preview=$(echo "$prompt" | head -n 8 | tr -d '`' | cut -c1-350)
+
+  tg_msg "🤖 *[Orchestrator]* Dispatching to *Cline CLI* (thinking=$thinking) for \`$BUG_ID\`
+
+📋 *Task:* $TASK
+📁 *Log:* \`$log_file\`
+
+💡 *Instruction Prompt:*
+\`\`\`
+$prompt_preview
+\`\`\`"
+
+  start_heartbeat "Cline"
+  run_with_timeout 8m "$CLINE_BIN" --auto-approve true --thinking "$thinking" "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
+
+  local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|insufficient credits|429|exhausted|allowance"; then
     tg_msg "⚠️ *[Orchestrator]* Cline hit rate limit for \`$BUG_ID\`. Trying next tool..."
@@ -265,7 +341,7 @@ try_cline() {
     return 2
   fi
 
-  if check_git_and_tsc "cline" "DeepSeek/thinking=$thinking"; then return 0; fi
+  if check_git_and_tsc "cline" "DeepSeek/thinking=$thinking" "$log_file"; then return 0; fi
 
   tg_msg "❌ *[Orchestrator]* Cline could not resolve \`$BUG_ID\`. Escalating to Grok..."
   clean_workspace
@@ -280,13 +356,28 @@ try_grok() {
     return 1
   fi
 
-  tg_msg "🤖 *[Orchestrator]* Dispatching to *Grok Build* (deep architecture reasoning) for \`$BUG_ID\`..."
-  start_heartbeat "Grok"
-
   local prompt; prompt="$(build_prompt) A lighter model was unable to resolve this — analyse the architecture deeply."
-  local output
-  output=$(run_with_timeout 10m "$GROK_BIN" -p "$prompt" 2>&1) || true
+  local log_dir="${HERMES_DIR}/logs"
+  mkdir -p "$log_dir"
+  local log_file="${log_dir}/dispatch_${BUG_ID}_grok.log"
+  local prompt_preview
+  prompt_preview=$(echo "$prompt" | head -n 8 | tr -d '`' | cut -c1-350)
+
+  tg_msg "🤖 *[Orchestrator]* Dispatching to *Grok Build* for \`$BUG_ID\`
+
+📋 *Task:* $TASK
+📁 *Log:* \`$log_file\`
+
+💡 *Instruction Prompt:*
+\`\`\`
+$prompt_preview
+\`\`\`"
+
+  start_heartbeat "Grok"
+  run_with_timeout 10m "$GROK_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
+
+  local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|429"; then
     tg_msg "⚠️ *[Orchestrator]* Grok hit rate limit for \`$BUG_ID\`. Trying Agy..."
@@ -295,7 +386,7 @@ try_grok() {
     return 2
   fi
 
-  if check_git_and_tsc "grok" "grok-build"; then return 0; fi
+  if check_git_and_tsc "grok" "grok-build" "$log_file"; then return 0; fi
 
   tg_msg "❌ *[Orchestrator]* Grok could not resolve \`$BUG_ID\`. Trying Agy..."
   clean_workspace
@@ -307,14 +398,30 @@ try_agy() {
   echo "[Dispatcher] --> Antigravity CLI"
   if [ ! -x "$AGY_BIN" ]; then return 1; fi
 
-  tg_msg "🤖 *[Orchestrator]* Dispatching to *Antigravity CLI* for \`$BUG_ID\`..."
-  start_heartbeat "Agy"
-
   local prompt; prompt="$(build_prompt)"
-  run_with_timeout 8m "$AGY_BIN" -p "$prompt" 2>&1 || true
+  local log_dir="${HERMES_DIR}/logs"
+  mkdir -p "$log_dir"
+  local log_file="${log_dir}/dispatch_${BUG_ID}_agy.log"
+  local prompt_preview
+  prompt_preview=$(echo "$prompt" | head -n 8 | tr -d '`' | cut -c1-350)
+
+  tg_msg "🤖 *[Orchestrator]* Dispatching to *Antigravity CLI* for \`$BUG_ID\`
+
+📋 *Task:* $TASK
+📁 *Log:* \`$log_file\`
+
+💡 *Instruction Prompt:*
+\`\`\`
+$prompt_preview
+\`\`\`"
+
+  start_heartbeat "Agy"
+  run_with_timeout 8m "$AGY_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
 
-  if check_git_and_tsc "agy" "antigravity"; then return 0; fi
+  local output; output=$(cat "$log_file" 2>/dev/null || true)
+
+  if check_git_and_tsc "agy" "antigravity" "$log_file"; then return 0; fi
 
   tg_msg "❌ *[Orchestrator]* Agy could not resolve \`$BUG_ID\`."
   clean_workspace
