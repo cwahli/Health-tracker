@@ -17,6 +17,12 @@
 7. **i18n (durable).** User-visible UI copy goes in `src/utils/translations.ts`. `en` is the source of truth; `id` must have the same keys (parity test). New languages: add a locale and fill keys; missing keys fall back to English. Agent system instructions must include `userProfile.language` and tell the model to write **user-visible answers** in that language (JSON keys, nutrient codes, biomarker keys stay English). Do not hardcode English chrome in new UI.
 8. **Load (AI Studio).** If preview or `tsc` does not start: restore the last green commit for that file. Forbidden class `LOAD_HACK`: `@ts-nocheck`, deleting a file in `golden/scorecard/instruction/gates.json`, gutting `getTopTargetNutrientKeys`. Do not delete tests to make the app load.
 
+9. **Worktree isolation (multi-agent box).** The VPS auto-deploy runs a **dedicated clone** at `/home/ubuntu/deploy/Health-tracker` (systemd `WorkingDirectory`) and may `git reset --hard` **only that clone**. `/home/ubuntu/src/Health-tracker` is the **dev/worktree base — never the deploy target**; do not run the deploy from it and do not treat a reset there as normal. Each active agent works in its **own worktree** under `/home/ubuntu/dev/<area>` on branch `agent/<area>`:
+   ```bash
+   ~/dev/new-worktree.sh <area> [base-branch]   # creates /home/ubuntu/dev/<area>
+   ```
+   One writer per area; keep hub files (`server.ts`, `serverJobs.ts`, `server_routes_*.ts`, `AGENTS.md`, `plan/ROADMAP.md`, `specs/**`) to a single agent at a time. Commit **and push** when a unit is done; never leave a long-lived uncommitted tree. Details: `docs/agent/WORKTREES.md`.
+
 ```text
 plan/ROADMAP.md     = remaining work (the only execute file)
 AI_HANDOVER.md      = short WIP board (update freely)
