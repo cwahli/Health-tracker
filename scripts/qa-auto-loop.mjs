@@ -55,7 +55,7 @@ function sendTelegram({ text, photo, caption }) {
 
 console.log(`[AutoLoop] Starting QA loop for journey: ${journey}`);
 sendTelegram({
-  text: `🔍 *[QA Bot]* Starting automated test for journey: \`${journey}\`...`
+  text: `🔍 *[QA Bot]* Starting automated test for journey: '${journey}'...`
 });
 
 // Step 1: Initial QA Run

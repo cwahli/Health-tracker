@@ -110,7 +110,7 @@ elif [ -n "$TEXT" ]; then
     CURL_ARGS+=(-d "message_thread_id=${THREAD_ID}")
   fi
 
-  curl "${CURL_ARGS[@]}" > /dev/null
+  curl "${CURL_ARGS[@]}" > /dev/null 2>&1
   echo "[Telegram Send] Message delivered to chat $CHAT_ID"
 else
   echo "Usage: $0 --text='...' OR --photo='/path/to/file' [--caption='...'] [--thread-id=...]"
