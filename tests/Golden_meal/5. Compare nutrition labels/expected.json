@@ -1,0 +1,95 @@
+{
+  "id": "G5",
+  "title": "Compare printed snack labels",
+  "mode": "evaluation",
+  "passes": [
+    {
+      "id": "compare",
+      "prompt": "",
+      "photos": [
+        "PXL_20260716_202623948.jpg",
+        "PXL_20260716_203120402.jpg",
+        "PXL_20260716_203925382.jpg",
+        "PXL_20260716_203945117.jpg",
+        "PXL_20260716_204340336.jpg"
+      ],
+      "kind": "compare_labels"
+    }
+  ],
+  "printedLabels": [
+    {
+      "photo": "PXL_20260716_202623948.jpg",
+      "key": "green_bar",
+      "servingSizeGrams": 23,
+      "servingsPerPack": 6,
+      "perServing": {
+        "calories": 90,
+        "totalFat": 3,
+        "saturatedFat": 1,
+        "protein": 1,
+        "carbohydrates": 15,
+        "sugar": 7,
+        "saltMg": 20
+      }
+    },
+    {
+      "photo": "PXL_20260716_203120402.jpg",
+      "key": "banana_chips_front",
+      "name": "Keripik Pisang Kepok",
+      "notes": "Front / composition only. No per-100g panel in this shot — do not invent macros."
+    },
+    {
+      "photo": "PXL_20260716_203925382.jpg",
+      "key": "green_bread",
+      "servingSizeGrams": 55,
+      "servingsPerPack": 4,
+      "perServing": {
+        "totalFat": 3,
+        "saturatedFat": 2,
+        "protein": 4,
+        "carbohydrates": 26,
+        "sugar": 3,
+        "saltMg": 200
+      }
+    },
+    {
+      "photo": "PXL_20260716_203945117.jpg",
+      "key": "yellow_cake",
+      "servingSizeGrams": 75,
+      "servingsPerPack": 2,
+      "perServing": {
+        "calories": 250,
+        "totalFat": 6,
+        "saturatedFat": 4.5,
+        "protein": 6,
+        "carbohydrates": 42,
+        "sugar": 19,
+        "saltMg": 125
+      }
+    },
+    {
+      "photo": "PXL_20260716_204340336.jpg",
+      "key": "blue_bread",
+      "servingSizeGrams": 44,
+      "servingsPerPack": 5,
+      "perServing": {
+        "calories": 120,
+        "totalFat": 2.5,
+        "saturatedFat": 1.5,
+        "protein": 4,
+        "carbohydrates": 21,
+        "sugar": 2,
+        "saltMg": 150
+      }
+    }
+  ],
+  "resolveLocks": [],
+  "catalogGaps": [],
+  "neverMatch": [],
+  "invariants": [
+    "Mode D evaluation / compare — not a consumed meal log",
+    "Use printed per-serving numbers; do not hop to a missing per-100g column",
+    "Salt on ID labels is salt (or sodium if labelled Natrium) — do not copy sugar into addedSugar",
+    "Front-only pack with no numbers stays unknown, not category fallback"
+  ]
+}
