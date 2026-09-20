@@ -2,8 +2,6 @@ import { uploadBase64ToR2, uploadPhotosToR2Direct, uploadDebugPayloadToR2Direct,
 // [FreeTier] thin clean_result
 import { isD1Configured } from './server_d1.js';
 import { d1UpsertJob, d1UpdateJob, d1GetStuckJobs } from './server_db_d1.js';
-import { supabaseAdmin, isSupabaseConfigured as isSupabaseAdminConfigured } from './supabaseAdmin';
-import { supabase, isSupabaseConfigured } from './src/utils/supabaseClient';
 import { remainingQuotaCooldownMs, nextGeminiFallbackEngine } from './server_gemini_retry.js';
 import { extractMostRecentImageDate } from './src/utils/dateUtils';
 
@@ -237,70 +235,6 @@ export async function recoverInterruptedServerJobs(): Promise<number> {
       } catch (d1Err) {
         console.error('[ServerJobs Worker] Failed to query stuck jobs from D1:', d1Err);
       }
-    } else if (isSupabaseConfigured && isSupabaseAdminConfigured) {
-      // Only recover jobs stuck for >3 min (matches D1 threshold) but <2 hrs.
-      // Without the lower bound, every server restart re-runs ALL historical
-      // running jobs in Supabase — spawning N simultaneous LLM pipelines and
-      // pegging CPU at 99% while hammering Supabase with progress writes.
-      const STUCK_MIN_MS = 180_000;   // 3 min  — same as d1GetStuckJobs
-      const STUCK_MAX_MS = 7_200_000; // 2 hrs  — older jobs are unrecoverable
-      const now = Date.now();
-      const stuckAfter  = new Date(now - STUCK_MAX_MS).toISOString();
-      const stuckBefore = new Date(now - STUCK_MIN_MS).toISOString();
-
-      const { data: stuckJobs, error } = await supabaseAdmin
-        .from('agent_jobs')
-        .select('id, user_id, kind, mode, status, progress_percent, status_message, photo_url, updated_at, clean_result')
-        .in('status', ['running', 'pending'])
-        .gt('updated_at', stuckAfter)   // not older than 2 hrs
-        .lt('updated_at', stuckBefore); // stuck for at least 3 min
-
-      if (error) {
-        console.error('[ServerJobs Worker] Failed to query stuck jobs from Supabase:', error);
-      } else if (stuckJobs && stuckJobs.length > 0) {
-        // Cap concurrent boot-time recoveries to 2 to avoid CPU storm on restart.
-        // Additional jobs remain in Supabase as 'running' and will be auto-failed
-        // by the stale-threshold check in the /api/jobs/status route after 5 min.
-        const MAX_BOOT_RECOVERIES = 2;
-        let bootRecoveries = 0;
-
-        for (const dbJob of stuckJobs) {
-          if (inMemoryServerJobs.has(dbJob.id)) continue;
-
-          if (bootRecoveries >= MAX_BOOT_RECOVERIES) {
-            console.warn(`[ServerJobs Worker] Boot recovery cap (${MAX_BOOT_RECOVERIES}) reached — skipping Supabase job ${dbJob.id}. Marking failed.`);
-            // Mark it failed immediately so the client doesn't spin-poll forever.
-            void Promise.resolve(
-              supabaseAdmin.from('agent_jobs').update({
-                status: 'failed',
-                status_message: 'Server restarted — analysis could not be recovered. Please retry.',
-                updated_at: new Date().toISOString(),
-              }).eq('id', dbJob.id)
-            ).catch(() => {});
-            continue;
-          }
-
-          console.log(`[ServerJobs Worker] Recovering Supabase job ${dbJob.id}...`);
-          inMemoryServerJobs.set(dbJob.id, {
-            ...dbJob,
-            status: 'running',
-            status_message: 'Resuming analysis after process restart...',
-            updated_at: new Date().toISOString()
-          });
-          recoveredCount++;
-          bootRecoveries++;
-
-          submitServerJob({
-            jobId: dbJob.id,
-            userId: dbJob.user_id,
-            kind: dbJob.kind,
-            mode: dbJob.mode,
-            text: (dbJob as any).input_snapshot?.message || dbJob.clean_result?.text || '',
-            imageUrls: dbJob.photo_url ? [dbJob.photo_url] : [],
-            activeMeal: dbJob.clean_result?.mealBuild || dbJob.clean_result?.pendingFoodLog
-          }).catch(e => console.error(`[ServerJobs Worker] Error resuming Supabase job ${dbJob.id}:`, e));
-        }
-      }
     }
   } catch (err) {
     console.error('[ServerJobs Worker] Recovery loop encountered error:', err);
@@ -408,7 +342,7 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
   // /api/jobs/submit response, or a slow/unreachable Supabase call turns into
   // a platform-level 502 on the outer request instead of a clean in-app error)
   let initialUpsertError: string | null = null;
-  if (isSupabaseConfigured) {
+  {
     const upsertOnce = (async () => {
       try {
         const dbRecord = {
@@ -430,12 +364,6 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
           if (!d1Res.success) {
             console.error('[ServerJobs] initial D1 upsert failed:', d1Res.error);
             initialUpsertError = `[ServerJobs] initial D1 upsert failed: ${d1Res.error}`;
-          }
-        } else if (isSupabaseConfigured && isSupabaseAdminConfigured) {
-          const { error } = await supabaseAdmin.from('agent_jobs').upsert(dbRecord, { onConflict: 'id' });
-          if (error) {
-            console.error('[ServerJobs] initial upsert failed:', error);
-            initialUpsertError = `[ServerJobs] initial upsert failed: ${error.message || JSON.stringify(error)}`;
           }
         }
       } catch (e: any) {
@@ -492,20 +420,6 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
             status_message: message,
             photo_url: photoUrl || null,
           }).catch(e => console.error('[ServerJobs] Failed to update progress in D1:', e));
-        } else if (isSupabaseConfigured) {
-          try {
-            const { error } = await supabaseAdmin.from('agent_jobs').update({
-              progress_percent: progress,
-              status_message: message,
-              photo_url: photoUrl || null,
-              updated_at: new Date().toISOString()
-            }).eq('id', jobId);
-            if (error) {
-              console.error('[ServerJobs] Failed to update progress in Supabase:', error);
-            }
-          } catch (e) {
-            console.error('[ServerJobs] Failed to update progress (exception):', e);
-          }
         }
       }
     };
@@ -887,7 +801,7 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
         // Not actively in flight while paused for user input — release the lock so the
         // user isn't blocked from starting something else while this awaits their reply.
         releaseUserJobLock(userId, jobId);
-        if (isSupabaseConfigured) {
+        {
           let lightweightFinalData = { ...finalData };
           try {
             const { uploadJobResultToR2 } = await import('./src/utils/r2Storage');
@@ -924,13 +838,6 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
               status_message: finalData.message || 'Please clarify portion sizes.',
               clean_result: lightweightFinalData,
             });
-          } else if (isSupabaseConfigured) {
-            await supabaseAdmin.from('agent_jobs').update({
-              status: 'awaiting_user',
-              status_message: finalData.message || 'Please clarify portion sizes.',
-              clean_result: lightweightFinalData, // contains lightweight R2 reference
-              updated_at: new Date().toISOString()
-            }).eq('id', jobId);
           }
         }
         return;
@@ -1266,7 +1173,7 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
         }
         releaseUserJobLock(userId, jobId);
 
-        if (isSupabaseConfigured) {
+        {
           let lightweightResult = { ...cleanResult };
           try {
             const { uploadJobResultToR2 } = await import('./src/utils/r2Storage');
@@ -1301,19 +1208,6 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
             });
             if (!d1Res.success) {
               console.error('[ServerJobs] Failed to update success state in D1:', d1Res.error);
-            }
-          } else if (isSupabaseConfigured) {
-            const { error: supaErr } = await supabaseAdmin.from('agent_jobs').update({
-              status: 'succeeded',
-              progress_percent: 100,
-              status_message: 'Analysis complete',
-              photo_url: photoUrl || null,
-              debug_url: cleanResult.debugUrl || null,
-              clean_result: lightweightResult, // lightweight R2 reference in DB!
-              updated_at: new Date().toISOString(),
-            }).eq('id', jobId);
-            if (supaErr) {
-              console.error('[ServerJobs] Failed to update success state in Supabase:', supaErr);
             }
           }
         }
@@ -1443,19 +1337,6 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
           });
         } catch (uErr) {
           console.error('[ServerJobs] Failed to update error state in D1:', uErr);
-        }
-      } else if (isSupabaseConfigured) {
-        try {
-          await supabaseAdmin.from('agent_jobs').update({
-            status: 'failed',
-            status_message: abortReason || 'Server analysis failed',
-            photo_url: photoUrl || null,
-            debug_url: errorCleanResult.debugUrl || null,
-            clean_result: errorCleanResult,
-            updated_at: new Date().toISOString(),
-          }).eq('id', jobId);
-        } catch (uErr) {
-          console.error('[ServerJobs] Failed to update error state in Supabase:', uErr);
         }
       }
 
