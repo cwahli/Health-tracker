@@ -28,7 +28,6 @@ import {
   normalizeDishKey,
   resolveMealCountry,
   enqueueBrandClean,
-  selfCleanBrandDatabase,
 } from './serverBrandMenu.js';
 import {
   resolveInternalFood,
@@ -136,8 +135,6 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
         upsertFoodAlias: dbDeps?.upsertFoodAlias || upsertFoodAlias,
         callUnifiedLLM: ctx.callUnifiedLLM || callUnifiedLLM,
         executeFoodResolverCurator: dbDeps?.executeFoodResolverCurator || executeFoodResolverCurator,
-        importSupabaseAdmin: async () => await import('./supabaseAdmin.js'),
-        selfCleanBrandDatabase: dbDeps?.selfCleanBrandDatabase || selfCleanBrandDatabase,
       }
     );
   }

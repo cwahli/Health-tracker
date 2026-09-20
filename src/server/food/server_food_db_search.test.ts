@@ -30,8 +30,6 @@ function stubSetup(overrides: Record<string, any> = {}) {
     upsertFoodAlias: async () => {},
     callUnifiedLLM: async () => '{}',
     executeFoodResolverCurator: async () => [],
-    importSupabaseAdmin: async () => ({}),
-    selfCleanBrandDatabase: async () => ({ removedUnofficialCount: 0, deletedDuplicatesCount: 0 }),
     ...overrides,
   };
   return { logs, deps };

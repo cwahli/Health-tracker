@@ -55,8 +55,6 @@ export interface DbSearchStageDeps {
   upsertFoodAlias: (event: any) => Promise<any>;
   callUnifiedLLM: (args: any) => Promise<any>;
   executeFoodResolverCurator: (...args: any[]) => Promise<any[]>;
-  importSupabaseAdmin: () => Promise<any>;
-  selfCleanBrandDatabase: (admin: any, region: string, onLog: (msg: string) => void) => Promise<any>;
 }
 
 export async function runDatabaseSearchStage(
@@ -100,8 +98,6 @@ export async function runDatabaseSearchStage(
     upsertFoodAlias,
     callUnifiedLLM,
     executeFoodResolverCurator,
-    importSupabaseAdmin,
-    selfCleanBrandDatabase,
   } = deps;
 
   let databaseMatches = "";
@@ -569,18 +565,8 @@ export async function runDatabaseSearchStage(
         addDebugLog(`[Food Resolver Integration] Injected resolved nutrients for "${rg.query}" into databaseMatchesArray: ${JSON.stringify(rg.nutrientsPer100g)}`);
       }
     });
-    // Trigger self-cleaning pass on brand database during Food Resolver review
-    try {
-      const { supabaseAdmin } = await importSupabaseAdmin();
-      if (supabaseAdmin) {
-        const cleanResult = await selfCleanBrandDatabase(supabaseAdmin, 'GB', addDebugLog);
-        if (cleanResult.removedUnofficialCount > 0 || cleanResult.deletedDuplicatesCount > 0) {
-          sendLog('status', 'food_resolver', `Self-healing database pass: Purged ${cleanResult.removedUnofficialCount} non-branded/unofficial item(s) and ${cleanResult.deletedDuplicatesCount} duplicate(s).`);
-        }
-      }
-    } catch (cleanErr: any) {
-      addDebugLog(`[Food Resolver Self-Clean] Background cleaning notice: ${cleanErr?.message || cleanErr}`);
-    }
+    // D-2: Supabase brand self-clean removed. Brand hygiene is D1-only via
+    // enqueueBrandClean / serverBrandMenu (no Supabase fallback, no 402).
     // Record deferred gaps & category fallbacks for queries that couldn't be resolved from candidates
     const resolvedQuerySet = new Set(resolvedGaps.filter(rg => rg.nutrientsPer100g).map(rg => normalizeFoodKey(rg.query)));
     uniqueQueries.forEach(query => {
