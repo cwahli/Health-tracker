@@ -9,6 +9,8 @@ import {
   extractHandoffs,
   extractPortionAdjustment,
   buildCanonicalRunTree,
+  buildTurnTimeline,
+  resolveTurnImages,
   deduplicateBreadcrumbs,
   deduplicateSessionEvents,
   isCompareRunTree,
@@ -832,6 +834,142 @@ describe('retry sessions & stalled stream dispatches', () => {
     expect(tree.previousAttempts).toHaveLength(1);
     expect(tree.dispatches.some(d => d.id === 't1/scout')).toBe(true);
     expect(tree.dispatches.some(d => d.id === 't2/scout')).toBe(true);
+  });
+});
+
+describe('resolveTurnImages — distribute photos across turns (debugmeal1 class)', () => {
+  it('splits 3 photos into turn 1 (2) and turn 2 (1) using submit breadcrumbs', () => {
+    const perTurn = resolveTurnImages({
+      jobId: 'job_images_split',
+      photoUrls: ['p1.jpg', 'p2.jpg', 'p3.jpg'],
+      userActionBreadcrumbs: [
+        { action: 'submit_initiated', details: { prompt: 'Analyze this meal photo.', imageCount: 2 } },
+        { action: 'submit_initiated', details: { prompt: 'the selada is chicken', imageCount: 1 } },
+      ],
+    });
+    expect(perTurn).toEqual([['p1.jpg', 'p2.jpg'], ['p3.jpg']]);
+  });
+
+  it('falls back to all photos on turn 1 when no breadcrumbs declare counts', () => {
+    const perTurn = resolveTurnImages({
+      jobId: 'job_images_no_crumbs',
+      photoUrls: ['p1.jpg', 'p2.jpg'],
+    });
+    expect(perTurn).toEqual([['p1.jpg', 'p2.jpg']]);
+  });
+
+  it('returns per-turn counts even when only counts (not order) are known', () => {
+    const perTurn = resolveTurnImages({
+      jobId: 'job_images_counts_only',
+      photoUrls: ['a.jpg', 'b.jpg', 'c.jpg'],
+      userActionBreadcrumbs: [
+        { action: 'submit_initiated', details: { prompt: 'Analyze this meal photo.', imageCount: 2 } },
+        { action: 'submit_initiated', details: { prompt: 'this is chicken', imageCount: 1 } },
+      ],
+    });
+    expect(perTurn.reduce((n, arr) => n + arr.length, 0)).toBe(3);
+    expect(perTurn[0]).toHaveLength(2);
+    expect(perTurn[1]).toHaveLength(1);
+  });
+});
+
+describe('buildTurnTimeline — create + photo-edit journey is reproducible', () => {
+  it('shows each turn prompt, its own photos, and its own agent answer (turn 2 edit photo)', () => {
+    // Faithful to debug-job_1789920526160_7rwiexoqd: turn 1 = 2 photos create,
+    // turn 2 = 1 clarification photo + "the daun selada krt is chicken".
+    const logs = [
+      '[scout_answer] Scout identified 4 item(s): J Acar Polos (~115g), Enoki Mushroom (~150g), Kcg Tanah Kulit (~210g), Daun Selada Krt (~165g)',
+      '[info] [UnifiedLLM-Timing:scout] ms=11863',
+      '[diet_answer] Your selection of enoki mushrooms, baby corn, and peanuts delivers strong plant protein.',
+      '',
+      '--- USER CONTINUATION (TURN 2) ---',
+      '',
+      '[scout_answer] Scout identified 2 item(s): Kcg Tanah Kulit (~105g), Ayam Rebus (~165g)',
+      '[info] [UnifiedLLM-Timing:scout] ms=8673',
+      '[diet_answer] The clean chicken and vegetables deliver strong protein and fiber.',
+    ].join('\n');
+
+    const input = {
+      jobId: 'job_turn_timeline',
+      status: 'succeeded',
+      mode: 'edit',
+      backendLogs: logs,
+      photoUrls: ['https://cdn.example.com/t1_a.jpg', 'https://cdn.example.com/t1_b.jpg', 'https://cdn.example.com/t2_edit.jpg'],
+      userActionBreadcrumbs: [
+        { action: 'submit_initiated', details: { prompt: 'Analyze this meal photo.', imageCount: 2 } },
+        { action: 'submit_initiated', details: { prompt: 'the daun selada krt is chicken as shown on picture', imageCount: 1 } },
+      ],
+    };
+
+    const tree = buildCanonicalRunTree(input);
+    expect(tree.turns).toHaveLength(2);
+
+    // Turn 1: 2 photos, create answer.
+    expect(tree.turns[0].imageCount).toBe(2);
+    expect(tree.turns[0].images).toEqual(['https://cdn.example.com/t1_a.jpg', 'https://cdn.example.com/t1_b.jpg']);
+    expect(tree.turns[0].answer).toMatch(/enoki mushrooms/i);
+    expect(tree.turns[0].prompt).toBe('Analyze this meal photo.');
+
+    // Turn 2: 1 clarification photo, its own prompt, its own answer.
+    expect(tree.turns[1].imageCount).toBe(1);
+    expect(tree.turns[1].images).toEqual(['https://cdn.example.com/t2_edit.jpg']);
+    expect(tree.turns[1].prompt).toBe('the daun selada krt is chicken as shown on picture');
+    expect(tree.turns[1].answer).toMatch(/clean chicken and vegetables/i);
+  });
+
+  it('attaches per-turn images to the reconstructed t2 dispatch (not only t1)', () => {
+    const logs = [
+      '[scout_answer] Scout identified 2 item(s): Rice (~150g), Chicken (~165g)',
+      '',
+      '--- USER CONTINUATION (TURN 2) ---',
+      '',
+      '[diet_answer] The chicken is a lean protein win.',
+    ].join('\n');
+    const dispatches = extractDispatches({
+      jobId: 'job_turn2_images',
+      status: 'succeeded',
+      backendLogs: logs,
+      photoUrls: ['https://cdn.example.com/a.jpg', 'https://cdn.example.com/b.jpg', 'https://cdn.example.com/edit.jpg'],
+      userActionBreadcrumbs: [
+        { action: 'submit_initiated', details: { prompt: 'Analyze this meal photo.', imageCount: 2 } },
+        { action: 'submit_initiated', details: { prompt: 'this is chicken', imageCount: 1 } },
+      ],
+    });
+    const t2 = dispatches.find(d => d.turn === 2);
+    expect(t2).toBeTruthy();
+    expect(t2!.images).toEqual(['https://cdn.example.com/edit.jpg']);
+    expect(t2!.imageCount).toBe(1);
+  });
+
+  it('prefers the per-dispatch received.photoUrls for turn attribution', () => {
+    // Server-recorded dispatches: each turn's photos are on its own `received`.
+    // The stored union order is deliberately mixed, and the timeline must still
+    // credit turn 1 with its 2 photos and turn 2 with its 1 clarification photo.
+    const tree = buildCanonicalRunTree({
+      jobId: 'job_per_dispatch_urls',
+      status: 'succeeded',
+      dispatches: [
+        {
+          id: 't1/scout', agent: 'scout', turn: 1, user: 'Analyze this meal photo.',
+          received: { mode: 'review', photoCount: 2, imageCount: 2, photoUrls: ['https://cdn.example.com/t1a.jpg', 'https://cdn.example.com/t1b.jpg'] },
+          output: { dishes: [] },
+        },
+        {
+          id: 't2/scout', agent: 'scout', turn: 2, user: 'this is chicken and I ate less of the peanuts',
+          received: { mode: 'edit', photoCount: 1, imageCount: 1, photoUrls: ['https://cdn.example.com/edit.jpg'] },
+          output: { dishes: [], message: 'The chicken is a lean protein win.' },
+        },
+      ],
+      photoUrls: ['https://cdn.example.com/edit.jpg', 'https://cdn.example.com/t1b.jpg', 'https://cdn.example.com/t1a.jpg'],
+      userActionBreadcrumbs: [
+        { action: 'submit_initiated', details: { prompt: 'Analyze this meal photo.', imageCount: 2 } },
+        { action: 'submit_initiated', details: { prompt: 'this is chicken and I ate less of the peanuts', imageCount: 1 } },
+      ],
+    });
+    expect(tree.turns).toHaveLength(2);
+    expect(tree.turns[0].images.sort()).toEqual(['https://cdn.example.com/t1a.jpg', 'https://cdn.example.com/t1b.jpg']);
+    expect(tree.turns[1].images).toEqual(['https://cdn.example.com/edit.jpg']);
+    expect(tree.turns[1].imageCount).toBe(1);
   });
 });
 

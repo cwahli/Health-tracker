@@ -811,6 +811,45 @@ describe("server_dish_finalize", () => {
     expect(ledger.componentsDetailList[1].calories).toBeGreaterThan(0);
   });
 
+  it("re-derives unsaturatedFat + salt after the composite child-sum overwrite (debugmeal1 class)", async () => {
+    // Live repro: debug-job_1789920526160_7rwiexoqd turn 2 (3928 photo update).
+    // Scout dish carries NO top-level nutrients (macros live in foods[]), so
+    // step 5 derives unsat/salt from the estimated fallback while step 7 then
+    // sums the children into P=43.4/C=18.8/F=1.3/sat=1.3/Na=158. Without a
+    // re-derive the stale unsat (>> totalFat) and salt survive onto the ledger,
+    // the meal total, and the debug comprehensive table (the 29.2-style row).
+    const item = {
+      scoutIndex: 0,
+      originalName: "Steamboat Ayam dan Sayur",
+      estimatedWeightGrams: 450,
+      nutrientBasisWeight: 450,
+      cookingMethod: "steamed",
+      diningEnvironment: "home_cooked",
+      foods: [
+        { foodName: "Ayam", weightGrams: 180, nutrients: { protein: 38, saturatedFat: 1.1, addedSugar: 0, totalFibre: 0, sodium: 120, carbohydrates: 0 } },
+        { foodName: "Jamur Enoki", weightGrams: 80, nutrients: { protein: 2.2, saturatedFat: 0.1, addedSugar: 0, totalFibre: 2.2, sodium: 3, carbohydrates: 6.2 } },
+        { foodName: "Jagung", weightGrams: 100, nutrients: { protein: 2, saturatedFat: 0.1, addedSugar: 0, totalFibre: 2, sodium: 15, carbohydrates: 10 } },
+        { foodName: "Selada", weightGrams: 90, nutrients: { protein: 1.2, saturatedFat: 0, addedSugar: 0, totalFibre: 1.1, sodium: 20, carbohydrates: 2.6 } },
+      ],
+      dishNutrients: { saturatedFat: 1.3, totalFat: 4.5, totalSugar: 2.5, potassium: 650, omega3: 0.1, calcium: 60, iron: 2.1, magnesium: 70, vitaminD: 0 },
+    };
+
+    const ledger = await finalizeDishLedger({
+      item,
+      nutrientBasisWeight: 450,
+      consumedWeight: 450,
+      diningEnvironment: "home_cooked",
+    });
+
+    expect(ledger.nutrients.totalFat).toBe(1.3);
+    expect(ledger.nutrients.saturatedFat).toBe(1.3);
+    expect(ledger.nutrients.sodium).toBe(158);
+    // Derived values must follow the FINAL (post-sum) macros, not the fallback.
+    expect(ledger.nutrients.unsaturatedFat).toBe(0); // max(0, 1.3 - 1.3 - 0)
+    expect(ledger.nutrients.salt).toBeCloseTo(0.4, 2); // 158 * 2.54 / 1000
+    expect(Number(ledger.nutrients.unsaturatedFat)).toBeLessThanOrEqual(Number(ledger.nutrients.totalFat));
+  });
+
   it('does not treat unit-count "1 serving (70g)" as 1 gram (Pia 100 Nanas)', () => {
     const { ocrNutrients } = parseOcrLabel({
       servingSize: '1 serving (70g)',

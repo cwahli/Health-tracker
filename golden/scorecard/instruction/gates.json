@@ -62,6 +62,7 @@
    "src/utils/creditManager.test.ts",
    "src/utils/dumpContract.test.ts",
    "src/utils/debugPayload.test.ts",
+   "src/utils/debugRunTree.test.ts",
    "src/utils/syncUtils.regression.test.ts",
    "src/utils/goldenScoreboard.test.ts",
    "src/utils/foodImageSources.test.ts",
@@ -119,6 +120,17 @@
     "playwright",
     "test",
     "prototype/tests/saved-meal-lineage.spec.ts"
+   ],
+   "area": "Meal Log",
+   "timeout_ms": 420000
+  },
+  {
+   "id": "golden-photo-edit-pw",
+   "cmd": "npx",
+   "args": [
+    "playwright",
+    "test",
+    "prototype/tests/photo-edit-replace-dish.spec.ts"
    ],
    "area": "Meal Log",
    "timeout_ms": 420000

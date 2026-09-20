@@ -73,6 +73,8 @@ GitHub PRs on `cwahli/Health-tracker` (all closed with merge timestamps): **#1**
 | `I18N_A11Y_UNRUN` | Localization | `current/a11y/` empty | live Playwright, quota |
 | `CROSS_DEVICE_SYNC` | Reliability | second-device test added (`JobStore.test.ts`) | `src/jobs/__tests__/JobStore.test.ts` |
 | `SINGLE_DISH_FLATTEN` | Meal Log | live Mie Ayam stayed 1 nested dish; inner unroll now gated | `npx vitest run server_vision_scout.test.ts` (J-ID-01 / G8 journey, not a new pack) |
+| `PHOTO_EDIT_SINGLE_DISH` | Meal Log | photo clarification replaces only one dish + appends photo to the list | `tests/golden_meals.test.ts` (G10) + `server_meal_edit.test.ts` + `npx playwright test prototype/tests/photo-edit-replace-dish.spec.ts` |
+| `DEBUG_TURN_TIMELINE` | Reliability | multi-turn export dropped the edit turn + per-turn photos | `npx vitest run src/utils/debugRunTree.test.ts src/utils/debugPayload.test.ts` |
 
 ---
 
@@ -164,6 +166,7 @@ Ratchet: `TRANSLATION_DUMP` (table above). Next: actions #1 then #6.
 
 ```
 npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server_edit_patch_ledger.test.ts server_derivation.test.ts server_dish_finalize.test.ts src/utils/nutrients.test.ts src/utils/nutritionTargetStatus.test.ts src/components/NutrientPieChart.test.tsx src/components/NutrientTargetRow.test.tsx tests/golden_meals.test.ts tests/golden_meal12_chat_saved_meal.test.ts tests/food_autocomplete_composition.contract.test.ts
+npx playwright test prototype/tests/photo-edit-replace-dish.spec.ts
 ```
 
 | Check | Status | Evidence |
@@ -173,9 +176,10 @@ npx vitest run server_portion_clarify.test.ts server_vision_scout.test.ts server
 | Same-meal package+prepared | PASS + standing | `588154c` |
 | **Single-dish flatten** | ✅ PASS sealed (was live FAIL `job_1789414917685`) | `server_vision_scout.test.ts` Mie Ayam unroll; J-ID-01 + G8; standing `single_dish_flatten` |
 | Food Autocomplete & Composite Logging | ✅ PASS (11 tests) | Autocomplete query isolation, multi-item staging, bracket portion sync, photo deduplication, admin meal overwrite, composite calculation |
+| **G10 photo-edit clarifies ONE dish** | ✅ PASS (new) | Golden `tests/Golden_meal/10. Photo edit clarifies one dish/` + `tests/golden_meals.test.ts` + `server_meal_edit.test.ts` (replace in place, peanuts scaled, dishes preserved) + `prototype/tests/photo-edit-replace-dish.spec.ts` (2-photo create → 1-photo clarification, same job, photo appended) |
 | F-12 USDA | shipped / do-not-reopen | F-12.1–12.4 |
 | F-10.7 expand | ⚠️ helper exists, **not on analyze hot path** | `shouldExpandMealAgent` is unit-tested and exported from `src/mealBuild/`; no import from `server_food_analyze_run*.ts`. Complex meals do not spawn workers yet. Do not copy prototype DELEGATE. |
-| Layer B goldens | PASS collect | restored G1–G9; identity/lock fixtures, not 32-key ledgers |
+| Layer B goldens | PASS collect | restored G1–G9 + new G10; identity/lock fixtures, not 32-key ledgers |
 | Meal_04 live 10/11 | under-extract / continuity fail | `golden/meal/Meal_04_log/benchmark_result.md` |
 | Verdict serialize | claimed fixed | `9ff1da2` |
 | kcal one writer | standing | `finalizeDishLedger` |
@@ -203,6 +207,8 @@ node scripts/journey-guard.mjs
 | Mode D narrator / empty-success | claimed fixed after 6 commits | do not reintroduce narrator on compare |
 
 Ratchet: `COMPARE_MODE_D`. Do not merge compare and log packs.
+
+**Ratchet `PHOTO_EDIT_SINGLE_DISH`:** a follow-up clarification photo must replace exactly ONE dish (in place — net dish count stable), scale only the named blank, keep the other rows, and be APPENDED to the meal image list (initial photos retained). Locked by G10 golden + `server_meal_edit.test.ts` + `prototype/tests/photo-edit-replace-dish.spec.ts`. Debug side: `DEBUG_TURN_TIMELINE` — the export shows every turn's prompt, its own photos, and its own answer.
 
 ---
 
@@ -254,7 +260,7 @@ No >3-iteration receptionist class found in recent history. Keep the area board;
 **Named gates**
 
 ```
-npx vitest run src/jobs/__tests__/JobStore.test.ts src/jobs/__tests__/JobSession.contract.test.ts src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts src/utils/creditManager.test.ts src/utils/dumpContract.test.ts src/utils/syncUtils.regression.test.ts src/utils/goldenScoreboard.test.ts src/utils/foodImageSources.test.ts server_auth.test.ts
+npx vitest run src/jobs/__tests__/JobStore.test.ts src/jobs/__tests__/JobSession.contract.test.ts src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts src/utils/creditManager.test.ts src/utils/dumpContract.test.ts src/utils/debugPayload.test.ts src/utils/debugRunTree.test.ts src/utils/syncUtils.regression.test.ts src/utils/goldenScoreboard.test.ts src/utils/foodImageSources.test.ts server_auth.test.ts
 node scripts/journey-guard.mjs
 ```
 
@@ -265,6 +271,7 @@ node scripts/journey-guard.mjs
 | Job session / STALE_TURN | shipped + ratchet | `JobSession.contract.test.ts` |
 | Credits | PASS | PR #4 |
 | Debug / dump contract | PASS | |
+| **Debug multi-turn photo-edit completeness** | ✅ PASS (new) | `debugRunTree.test.ts` `buildTurnTimeline` (per-turn prompt + own photos + own answer; per-dispatch `received.photoUrls`) + `debugPayload.test.ts` Turn Timeline render + continuation marker preserved; route unions `photoUrls` and picks the richest dispatch list (`server_routes_jobs.ts`) |
 | `storageUtils.test.ts` | **missing** (deleted `bca0f80`) | S-5/S-9 note |
 | Cross-device | no test | PR #2 product-only |
 | Guard / standing | must grow, never shrink | including `same_meal_package_prepared` |
@@ -285,6 +292,7 @@ Ratchets: `CROSS_DEVICE_SYNC`, `STALE_TURN`, `GOLDEN_SCORER_DRIFT`, `meal_image_
 | `signup-onboard-wl.live.spec.ts` | Loc / auth | UNTRACKED |
 | `meal01-golden.live.spec.ts` | Meal_01 | UNTRACKED |
 | `multiturn-meal-edit.live.spec.ts` | Meal | UNTRACKED |
+| `photo-edit-replace-dish.spec.ts` | G10 Meal photo-edit | shell stub PASS; live (`LIVE_G10_PHOTO_EDIT=1`) PASS 2026-09-20 (2-photo create → 1-photo clarification, same job, debug Turn Timeline `photos:2`/`photos:1`) |
 | `meal12-chat-saved-meal.live.spec.ts` | Meal_04 case 12 | LIVE T0/T1 PASS 2026-09-17; T2 RED (no UI edit path — must-succeed on fix) |
 | `portion-clarify.live.spec.ts` / `portion-funnel.spec.ts` | Portion | UNTRACKED (inner vitest is the S-10 gate) |
 | `armC-meal02.spec.ts` | Meal_02 | UNTRACKED |

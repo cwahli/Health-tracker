@@ -1,0 +1,92 @@
+{
+  "id": "G10",
+  "title": "Create with 2 photos, then edit with a clarification photo that replaces one dish",
+  "mode": "new_log",
+  "passes": [
+    {
+      "id": "identify",
+      "prompt": "",
+      "photos": [
+        "turn1_pot_chicken_babycorn_enoki.jpg",
+        "turn1_pot_peanuts_enoki.jpg"
+      ]
+    },
+    {
+      "id": "edit_clarify_photo",
+      "prompt": "this is chicken and I ate less of the peanuts",
+      "photos": ["turn2_chicken_pack_clarification.jpg"],
+      "kind": "edit_with_photo",
+      "targetHint": "chicken"
+    }
+  ],
+  "expectedItems": [
+    {
+      "key": "chicken_rebus",
+      "names": ["Ayam Rebus", "boiled chicken", "chicken breast", "chicken"],
+      "source": "components"
+    },
+    {
+      "key": "baby_corn",
+      "names": ["Baby Corn", "jagung muda", "J Acar Polos"],
+      "source": "components"
+    },
+    {
+      "key": "enoki_mushroom",
+      "names": ["Enoki Mushroom", "jamur enoki"],
+      "source": "components"
+    },
+    {
+      "key": "peanuts",
+      "names": ["Peanuts", "kacang tanah", "Kcg Tanah Kulit"],
+      "source": "components"
+    }
+  ],
+  "editPass": {
+    "fromPass": "identify",
+    "toPass": "edit_clarify_photo",
+    "replaceDish": {
+      "fromAnyName": ["Daun Selada Krt", "Lettuce", "daun selada"],
+      "toName": "Ayam Rebus",
+      "toAnyName": ["Ayam Rebus", "boiled chicken", "chicken breast", "chicken"]
+    },
+    "scaleDish": {
+      "anyName": ["Peanuts", "Kcg Tanah Kulit", "kacang tanah"],
+      "direction": "decrease"
+    },
+    "preserveDishes": {
+      "anyName": ["Baby Corn", "J Acar Polos", "Enoki Mushroom", "jamur enoki"],
+      "unchanged": true
+    },
+    "photoList": {
+      "initialPhotos": [
+        "turn1_pot_chicken_babycorn_enoki.jpg",
+        "turn1_pot_peanuts_enoki.jpg"
+      ],
+      "addedPhoto": "turn2_chicken_pack_clarification.jpg",
+      "expectedPhotoCount": 3,
+      "rule": "added photo is appended to the initial list; initial photos are retained"
+    },
+    "dishCount": {
+      "before": 4,
+      "after": 4,
+      "rule": "replace_identity swaps one dish in place; net dish count is unchanged"
+    }
+  },
+  "resolveLocks": [
+    { "query": "chicken breast", "expectId": "chicken_breast" },
+    { "query": "enoki mushroom", "expectId": "cooked_mushrooms" }
+  ],
+  "catalogGaps": [],
+  "neverMatch": [
+    { "query": "peanuts", "forbiddenNames": ["Peanut butter", "peanut oil"] },
+    { "query": "chicken", "forbiddenNames": ["chicken nuggets", "chicken spread"] },
+    { "query": "enoki mushroom", "forbiddenNames": ["mushroom soup"] }
+  ],
+  "invariants": [
+    "The clarification photo replaces ONLY the ambiguous dish; it does not rebuild all dishes",
+    "The added photo is appended to the meal image list (initial 2 retained) -> 3 total",
+    "Peanut portion is scaled down, not deleted",
+    "Baby corn and enoki rows stay byte-for-byte unchanged across the edit",
+    "Dish count is unchanged by an in-place replace_identity (no duplicate chicken row)"
+  ]
+}

@@ -56,7 +56,7 @@ describe('Golden meals — fixture set', () => {
 
   it('registers exactly the official goldens', () => {
     expect(manifest.goldens.map((g: { id: string }) => g.id)).toEqual([
-      'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9',
+      'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10',
     ]);
   });
 
@@ -163,6 +163,50 @@ describe('Golden meals — G1 picnic query hygiene + edit', () => {
   it('"I ate this croissant" is an item edit, not a half/pack refine', () => {
     const intent = detectWeightRefineIntent('I ate this croissant');
     expect(intent.isRefine).toBe(false);
+  });
+});
+
+describe('Golden meals — G10 create + photo-edit clarifies ONE dish', () => {
+  const spec = loadSpec('10. Photo edit clarifies one dish') as any;
+
+  it('pass 1 attaches 2 photos and pass 2 attaches 1 clarification photo', () => {
+    const identify = spec.passes.find((p: any) => p.id === 'identify');
+    const edit = spec.passes.find((p: any) => p.id === 'edit_clarify_photo');
+    expect(identify.photos).toHaveLength(2);
+    expect(edit.photos).toHaveLength(1);
+    expect(edit.kind).toBe('edit_with_photo');
+    expect(edit.prompt).toMatch(/chicken/i);
+    expect(edit.prompt).toMatch(/less of the peanuts/i);
+  });
+
+  it('the edit replaces exactly one dish and preserves the others', () => {
+    const edit = spec.editPass;
+    const initial = spec.passes.find((p: any) => p.id === edit.fromPass).photos;
+    const added = spec.passes.find((p: any) => p.id === edit.toPass).photos;
+    const expectedPhotoCount = initial.length + added.length;
+    expect(expectedPhotoCount).toBe(edit.photoList.expectedPhotoCount);
+    expect(edit.dishCount.before).toBe(edit.dishCount.after);
+    expect(edit.preserveDishes.unchanged).toBe(true);
+  });
+
+  it('appends the clarification photo to the initial list (does not substitute)', async () => {
+    const { uniqueMealImageUrls } = await import('../src/utils/foodImageSources');
+    const initialNames = spec.passes.find((p: any) => p.id === 'identify').photos;
+    const addedName = spec.passes.find((p: any) => p.id === 'edit_clarify_photo').photos[0];
+    const r2 = (n: string) => `https://pub-example.r2.dev/photos/${n}`;
+    const merged = uniqueMealImageUrls([...initialNames.map(r2), r2(addedName)]);
+    expect(merged).toHaveLength(spec.editPass.photoList.expectedPhotoCount);
+    expect(merged.slice(0, initialNames.length)).toEqual(initialNames.map((n: string) => `/photos/${n}`));
+    expect(merged[merged.length - 1]).toBe(`/photos/${addedName}`);
+  });
+
+  it('every listed photo exists on disk', () => {
+    const dir = path.join(ROOT, '10. Photo edit clarifies one dish');
+    for (const pass of spec.passes) {
+      for (const photo of pass.photos || []) {
+        expect(fs.existsSync(path.join(dir, photo)), `missing ${photo}`).toBe(true);
+      }
+    }
   });
 });
 

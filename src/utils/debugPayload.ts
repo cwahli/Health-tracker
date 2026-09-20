@@ -297,6 +297,32 @@ export function buildDebugMarkdownReport(input: DebugReportInput): string {
   }
   lines.push('');
 
+  // 1b. Turn Timeline — what the user did and what the agent answered, per turn.
+  // This is what makes a multi-turn create+edit run reproducible: turn 1 may
+  // attach 2 photos, turn 2 may attach 1 clarification photo that replaces a
+  // single dish. The export must show each turn's prompt, photos, and answer.
+  if (Array.isArray(tree.turns) && tree.turns.length > 0) {
+    lines.push(`## 🧭 Turn Timeline (User ↔ Agent)`);
+    lines.push('');
+    for (const t of tree.turns) {
+      const agents = t.dispatches.map(d => d.id).join(', ') || 'no dispatch recorded';
+      const imgNote = t.imageCount > 0 ? ` · photos: ${t.imageCount}` : ' · photos: 0';
+      lines.push(`### Turn ${t.turn} — ${agents}${imgNote}`);
+      if (t.prompt) lines.push(`- **User:** ${t.prompt}`);
+      if (t.images.length > 0) {
+        t.images.forEach((img, i) => lines.push(`- **Photo ${i + 1}:** ${img}`));
+      } else if (t.imageCount > 0) {
+        lines.push(`- **Photos:** ${t.imageCount} (URLs not captured)`);
+      }
+      if (t.verdict?.label || t.verdict?.level) {
+        lines.push(`- **Verdict:** ${t.verdict.label || '—'} [${t.verdict.level || '—'}]`);
+      }
+      if (t.answer) lines.push(`- **Answer:** ${t.answer}`);
+      else if (t.clinicalAdvice) lines.push(`- **Answer:** ${t.clinicalAdvice}`);
+      lines.push('');
+    }
+  }
+
   // 1. Contract Table first (after identity) — Invariant §1.2 & §9
   lines.push(`## ⚖️ Contract Evaluation`);
   lines.push('');
@@ -394,6 +420,10 @@ export function buildDebugMarkdownReport(input: DebugReportInput): string {
       lines.push(`### Dispatch ${d.id}`);
       if (d.user) lines.push(`- **User:** ${d.user}`);
       if (d.received) lines.push(`- **Received:** ${typeof d.received === 'object' ? JSON.stringify(d.received) : d.received}`);
+      if (d.imageCount != null) lines.push(`- **Photos:** ${d.imageCount}`);
+      if (Array.isArray(d.images) && d.images.length > 0) {
+        d.images.forEach((img: string, i: number) => lines.push(`- **Photo ${i + 1}:** ${img}`));
+      }
       // Debug exports exist for complete auditability — a 4000-char cap here
       // silently cut off most real instruction/output payloads mid-JSON.
       // Raised to a much larger safety ceiling (rather than removed outright)
@@ -1388,6 +1418,11 @@ export function buildDebugMarkdownReport(input: DebugReportInput): string {
     // codebase do any of those inside the brackets, so this is a reliable, general
     // split that doesn't need a hardcoded, ever-growing allowlist of known tags.
     const isRealLogTagBoundary = (line: string): boolean => {
+      // Multi-turn turn separator: a `--- USER CONTINUATION (TURN N) ---` line (or
+      // retry variant) must survive the instruction/reply collapse, otherwise an
+      // edit turn's raw log section is swallowed and the export can no longer show
+      // where turn 1 ended and turn 2 (the follow-up edit) began.
+      if (/^\s*---\s*(?:USER|RETRY|RETRY\s*\/\s*CONTINUATION)\s*CONTINUATION\s*\(TURN\s*\d+\)\s*---\s*$/.test(line)) return true;
       const m = /^\[([A-Za-z][^\]]{0,49})\]/.exec(line);
       if (!m) return false;
       const content = m[1];

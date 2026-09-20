@@ -41,6 +41,27 @@ export function computeSaltFromSodium(sodiumMg?: number | null): number {
   return Math.round(rawSalt * 100) / 100;
 }
 
+/**
+ * Re-derive the two fields TypeScript owns from their macro sources:
+ *   unsaturatedFat = totalFat - (saturatedFat + transFat)   [>= 0]
+ *   salt           = sodium(mg) * 2.54 / 1000
+ *
+ * These are derived, never agent/label facts. Any pass that rewrites
+ * totalFat / saturatedFat / transFat / sodium in place must call this as its
+ * last write, or a derived value can outlive the macro it came from - which is
+ * how a ledger printed `unsaturatedFat: 29.2` beside `totalFat: 3.4`
+ * (job_1789920526160_7rwiexoqd, class DERIVED_STALE).
+ *
+ * Mutates and returns the same bag so call sites can chain.
+ */
+export function reapplyDerivedNutrients<T extends Record<string, any> | null | undefined>(nutrients: T): T {
+  if (!nutrients || typeof nutrients !== 'object') return nutrients;
+  const bag = nutrients as Record<string, any>;
+  bag.unsaturatedFat = computeUnsaturatedFat(bag.totalFat, bag.saturatedFat, bag.transFat);
+  bag.salt = computeSaltFromSodium(bag.sodium);
+  return nutrients;
+}
+
 export function computeSolubleFibre(
   totalFibre?: number | null,
   foodNameOrCategory?: string | null

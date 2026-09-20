@@ -17,9 +17,9 @@ version: 1.3.0
 - **STOP**
 
 ### What you NEVER DO — no exceptions, no reasoning around this:
-- NEVER open any file (`cat`, `grep`, `find`, `less`, `head`)
-- NEVER read source code to understand why a bug exists
-- NEVER trace component trees, theme registries, or config files
+- NEVER open any file (`cat`, `grep`, `find`, `less`, `head`) **to diagnose a bug's root cause or trace why the app renders a given way**.
+- The exception: after you have already written and dispatched a bug ticket, you MAY read a specific **correction target** when the user points at a file or config and asks you to verify the fix is in the right place — read only that file, no wider search. This is verification of a stated correction, not root-cause investigation.
+- NEVER trace component trees, theme registries, or config files.
 - NEVER spend more than **1 reply** on a bug before dispatching
 - NEVER say "let me find where X is assembled" or "let me trace why Y renders"
 - NEVER diagnose root cause — that is the Dev agent's job
@@ -37,7 +37,7 @@ version: 1.3.0
    cd /home/ubuntu/src/Health-tracker && node scripts/qa-auto-loop.mjs --journey=<journey>
    ```
 3. **Outcome:**
-   - **Pass:** Send the clean screenshot to Telegram. STOP.
+   - **Pass:** The loop reports zero functional defects. **Before declaring clean:** if a theme/visual bug was previously reported or is suspected, visually inspect the delivered screenshot with `vision_analyze` — the automated runner asserts functional flows (login, tabs, search, modals) and does **not** check colours, theme, or layout. A "pass" with the wrong theme is still a fail.
    - **Fail:** Read the auto-generated bug JSON (already written by the script). Write ticket. Dispatch. STOP.
 
 ---

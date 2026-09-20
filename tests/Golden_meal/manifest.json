@@ -55,6 +55,12 @@
       "dir": "9. Beef Hotpot",
       "mode": "new_log",
       "title": "Indonesian Beef Hotpot (Barcoded Groceries)"
+    },
+    {
+      "id": "G10",
+      "dir": "10. Photo edit clarifies one dish",
+      "mode": "new_log",
+      "title": "Create with 2 photos, then edit with a clarification photo that replaces one dish"
     }
   ]
 }

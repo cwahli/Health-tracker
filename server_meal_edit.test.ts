@@ -4,6 +4,7 @@ import {
   coalesceLegacyCommands,
   mealItemsHaveAtwaterCalories,
   extractSauceName,
+  scaleItemNutrients,
 } from './server_meal_edit';
 import { compositionTileItems } from './src/utils/foodCompositionTiles';
 
@@ -46,6 +47,62 @@ function steakPlate() {
     },
   ];
 }
+
+describe('scaleItemNutrients — derived nutrients follow the scaled macros (debugmeal1 class)', () => {
+  it('re-derives unsaturatedFat + salt so a stale derived value can never ride a portion edit', () => {
+    // Live repro turn 2: "I ate half of the peanuts amount" halves the 210g
+    // pack to 105g. A linear scale preserves unsat = total-sat-trans only when
+    // the source row was consistent, and salt was never re-derived at all.
+    const item = {
+      scoutIndex: 0,
+      name: 'Kcg Tanah Kulit',
+      weightGrams: 210,
+      nutrients: {
+        calories: 600,
+        protein: 54.8,
+        carbohydrates: 34.6,
+        totalFat: 102,
+        saturatedFat: 13.4,
+        transFat: 0,
+        unsaturatedFat: 88.6,
+        sodium: 38,
+        salt: 2.29, // stale: derived from an earlier sodium, not 38mg
+      },
+    };
+
+    const scaled = scaleItemNutrients(item, 0.5, 105);
+
+    expect(scaled.nutrients.totalFat).toBe(51);
+    expect(scaled.nutrients.saturatedFat).toBe(6.7);
+    expect(scaled.nutrients.sodium).toBe(19);
+    expect(scaled.nutrients.unsaturatedFat).toBe(44.3); // 51 - 6.7 - 0
+    expect(scaled.nutrients.salt).toBe(0.05); // 19 * 2.54 / 1000, not the halved stale 2.29
+    expect(Number(scaled.nutrients.unsaturatedFat)).toBeLessThanOrEqual(Number(scaled.nutrients.totalFat));
+  });
+
+  it('treats unsaturatedFat / salt as TS-owned: a carried lock cannot keep a stale derived value', () => {
+    const item = {
+      scoutIndex: 0,
+      name: 'Co-op Formed Ham',
+      weightGrams: 100,
+      lockedNutrientKeys: ['unsaturatedFat', 'salt'],
+      nutrients: {
+        calories: 145,
+        protein: 25.2,
+        carbohydrates: 2,
+        totalFat: 4.3,
+        saturatedFat: 1.5,
+        unsaturatedFat: 0,
+        sodium: 720,
+        salt: 1.83,
+      },
+    };
+
+    const scaled = scaleItemNutrients(item, 0.5, 50);
+    expect(scaled.nutrients.unsaturatedFat).toBe(1.4); // 2.2 - 0.8, re-derived
+    expect(scaled.nutrients.salt).toBe(0.91); // 360 * 2.54 / 1000
+  });
+});
 
 describe('applyMealEdits', () => {
   it('Q&A: empty commands leave the meal unchanged', async () => {
@@ -3636,4 +3693,136 @@ describe('golden', () => {
     expect(result.items[0].weightGrams).toBe(40);
   });
 
+});
+
+describe('G10 golden — photo edit clarifies ONE dish, adds photo, scales only that blanket', () => {
+  // Turn 1: 2 photos → pot with baby corn, enoki, boiled peanuts, and an
+  // ambiguous green pack (sticker "DAUN SELADA KRT") the scout provisionally
+  // read as lettuce. Deliberately no top-level macros so finalize derives them.
+  function turn1Pot() {
+    return [
+      {
+        scoutIndex: 0,
+        name: 'J Acar Polos',
+        originalName: 'J Acar Polos',
+        canonicalDbName: 'Baby Corn',
+        weightGrams: 115,
+        sourceImageIndex: 0,
+        boundingBox2D: [468, 513, 908, 1000],
+        dbSource: 'estimated',
+        componentsDetailList: [
+          { name: 'Baby Corn', weightGrams: 115, nutrients: { protein: 2.9, carbohydrates: 7.4, totalFat: 0.4, saturatedFat: 0.1, sodium: 3, totalFibre: 2 } },
+        ],
+      },
+      {
+        scoutIndex: 1,
+        name: 'Enoki Mushroom',
+        originalName: 'Enoki Mushroom',
+        canonicalDbName: 'Enoki Mushroom',
+        weightGrams: 150,
+        sourceImageIndex: 0,
+        boundingBox2D: [758, 290, 998, 668],
+        dbSource: 'estimated',
+        componentsDetailList: [
+          { name: 'Enoki Mushroom', weightGrams: 150, nutrients: { protein: 3.9, carbohydrates: 11.6, totalFat: 0.5, saturatedFat: 0.1, sodium: 3, totalFibre: 2.7 } },
+        ],
+      },
+      {
+        scoutIndex: 2,
+        name: 'Kcg Tanah Kulit',
+        originalName: 'Kcg Tanah Kulit',
+        canonicalDbName: 'Peanuts',
+        weightGrams: 210,
+        sourceImageIndex: 1,
+        boundingBox2D: [13, 376, 423, 1000],
+        dbSource: 'estimated',
+        componentsDetailList: [
+          { name: 'Peanuts', weightGrams: 210, nutrients: { protein: 54.8, carbohydrates: 34.6, totalFat: 102, saturatedFat: 13.4, sodium: 38, totalFibre: 17.6 } },
+        ],
+      },
+      {
+        scoutIndex: 3,
+        name: 'Daun Selada Krt',
+        originalName: 'Daun Selada Krt',
+        canonicalDbName: 'Lettuce',
+        weightGrams: 165,
+        sourceImageIndex: 1,
+        boundingBox2D: [0, 0, 975, 520],
+        dbSource: 'estimated',
+      },
+    ];
+  }
+
+  it('replace_identity swaps the ambiguous dish for chicken in place (no duplicate, count unchanged)', async () => {
+    const items = turn1Pot();
+    const before = items.length;
+    const result = await applyMealEdits({
+      items,
+      userMessage: 'this is chicken and I ate less of the peanuts',
+      commands: [
+        {
+          action: 'replace_identity',
+          itemName: 'Daun Selada Krt',
+          newItemName: 'Ayam Rebus',
+          newWeightGrams: 165,
+          estimate: { foodName: 'Ayam Rebus', protein: 35, carbohydrates: 0, totalFat: 1.5, saturatedFat: 0.5, sodium: 110, cookingMethod: 'boiled', foodType: 'protein' },
+        },
+      ],
+    });
+
+    // Exactly one dish replaced: count is unchanged and no duplicate chicken.
+    expect(result.items).toHaveLength(before);
+    const chickens = result.items.filter((it) => /ayam|chicken/i.test(String(it.name || it.originalName || '')));
+    expect(chickens).toHaveLength(1);
+    expect(result.items.some((it) => /selada|lettuce/i.test(String(it.name || it.originalName || '')))).toBe(false);
+    // Untouched dishes stay present with their weights.
+    const corn = result.items.find((it) => /acar|baby corn/i.test(String(it.name || '')));
+    const enoki = result.items.find((it) => /enoki/i.test(String(it.name || '')));
+    expect(corn?.weightGrams).toBe(115);
+    expect(enoki?.weightGrams).toBe(150);
+    // The replaced dish keeps the original photo slot (photo is not lost).
+    expect(chickens[0].sourceImageIndex).toBe(1);
+  });
+
+  it('scales ONLY the peanuts row down and keeps other dish weights fixed', async () => {
+    const items = turn1Pot();
+    const result = await applyMealEdits({
+      items,
+      userMessage: 'this is chicken and I ate less of the peanuts',
+      commands: [
+        { action: 'set_weight', itemName: 'Kcg Tanah Kulit', newWeightGrams: 105 },
+      ],
+    });
+    const peanuts = result.items.find((it) => /kcg|peanut/i.test(String(it.name || '')));
+    expect(peanuts?.weightGrams).toBe(105);
+    const corn = result.items.find((it) => /acar|baby corn/i.test(String(it.name || '')));
+    const enoki = result.items.find((it) => /enoki/i.test(String(it.name || '')));
+    expect(corn?.weightGrams).toBe(115);
+    expect(enoki?.weightGrams).toBe(150);
+  });
+
+  it('the clarification photo is appended to the meal image list (initial 2 retained)', async () => {
+    const { uniqueMealImageUrls, resolveMealImageCandidates } = await import('./src/utils/foodImageSources');
+    const turn1 = [
+      'https://pub-example.r2.dev/photos/turn1_pot_chicken_babycorn_enoki.jpg',
+      'https://pub-example.r2.dev/photos/turn1_pot_peanuts_enoki.jpg',
+    ];
+    const addedPhoto = 'https://pub-example.r2.dev/photos/turn2_chicken_pack_clarification.jpg';
+
+    // The meal's image list after turn 2 = initial photos + the appended
+    // clarification photo (same union the UI performs across job.result image
+    // fields). The edit must never substitute the initial set.
+    const merged = uniqueMealImageUrls([...turn1, addedPhoto]);
+    expect(merged).toHaveLength(3);
+    expect(merged[0]).toBe('/photos/turn1_pot_chicken_babycorn_enoki.jpg');
+    expect(merged[1]).toBe('/photos/turn1_pot_peanuts_enoki.jpg');
+    expect(merged[2]).toBe('/photos/turn2_chicken_pack_clarification.jpg');
+
+    // Re-merging the same list is idempotent (no duplicate on repeated turns).
+    expect(uniqueMealImageUrls([...merged, addedPhoto])).toEqual(merged);
+
+    // resolveMealImageCandidates keeps every distinct photo in order.
+    const candidates = resolveMealImageCandidates({ imageUrls: [...turn1, addedPhoto] });
+    expect(candidates).toEqual(merged);
+  });
 });

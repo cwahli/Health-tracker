@@ -16,6 +16,7 @@ import {
   computeUnsaturatedFat,
   computeSaltFromSodium,
   computeSolubleFibre,
+  reapplyDerivedNutrients,
   deriveCarbohydratesFromEnergy,
   decomposeSaucedEntree,
 } from './server_derivation';
@@ -663,6 +664,11 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
         nutrients.sodium = Math.round(sumNa);
         if (sumTrans > 0) nutrients.transFat = Math.round(sumTrans * 10) / 10;
         if (sumFibre > 0) nutrients.totalFibre = Math.round(sumFibre * 10) / 10;
+        // The child-sum above rewrites totalFat/sat/trans/sodium AFTER step 5
+        // derived unsaturatedFat/salt (e.g. from the estimated fallback when the
+        // scout dish carries no top-level nutrients). Re-derive so the ledger
+        // can never print unsat > totalFat or salt from a stale sodium.
+        reapplyDerivedNutrients(nutrients);
         
         // Update missing locks
         ['calories', 'protein', 'totalFat', 'saturatedFat', 'carbohydrates', 'sodium'].forEach(k => {

@@ -166,13 +166,25 @@ export async function executeScoutPhase(ctx: AnalyzeRunContext): Promise<void> {
         const scoutModel =
           (typeof ctx.engine === 'object' ? (ctx.engine as any)?.name || (ctx.engine as any)?.model : ctx.engine) ||
           'gemini-3.5-flash-lite';
+        // The photos submitted on THIS turn. A follow-up photo edit must record
+        // its own clarification photo on its dispatch, not inherit turn 1's.
+        const turnImageUrls: string[] = (Array.isArray(ctx.req.body?.imageUrls) ? ctx.req.body.imageUrls : [])
+          .filter((u: any) => typeof u === 'string' && u);
+        const turnImages: string[] = turnImageUrls.length > 0
+          ? turnImageUrls
+          : (Array.isArray(ctx.req.body?.images) && ctx.req.body.images.length > 0 && hasImage
+            ? ctx.imagePayloads.map((_: any, i: number) => `image_${i}`)
+            : []);
         ctx.accumulatedDispatches.push({
           id: `t${scoutTurn}/scout`,
           parent: null,
           turn: scoutTurn,
           agent: 'scout',
           user: ctx.message && ctx.message.trim() ? ctx.message.trim() : (hasImage ? 'Analyze this meal photo.' : 'Text meal entry'),
-          received: { mode: ctx.userSelectedMode || 'new_log' },
+          received: {
+            mode: ctx.userSelectedMode || 'new_log',
+            ...(turnImages.length > 0 ? { photoCount: turnImages.length, photoUrls: turnImageUrls, imageCount: turnImages.length } : {}),
+          },
           systemInstruction: resolvedScoutSystemInstruction,
           userPrompt: scoutPromptText,
           instruction: [

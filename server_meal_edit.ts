@@ -7,7 +7,7 @@
  */
 
 import { finalizeDishLedger, parseOcrLabel } from './server_dish_finalize.js';
-import { applyNutrientModifiers, computeCaloriesFromMacros, computeSolubleFibre } from './server_derivation.js';
+import { applyNutrientModifiers, computeCaloriesFromMacros, computeSolubleFibre, reapplyDerivedNutrients } from './server_derivation.js';
 import { findItemIndexInList, formatMealReceiptTable, synthesizeEditCommandsFromBreakdown, itemsMatchByName } from './server_pure_helpers.js';
 import { NUTRIENT_KEYS } from './src/utils/nutrients.js';
 import { sumItemNutrients } from './server_meal_from_finalize.js';
@@ -160,6 +160,11 @@ export function scaleItemNutrients(item: any, ratio: number, newWeight?: number)
   if (!locked.includes('calories')) {
     base.calories = computeCaloriesFromMacros(base.protein, base.carbohydrates, base.totalFat);
   }
+  // Same class as the finalize child-sum: a linear scale preserves
+  // unsat = total-sat-trans only when the source row was consistent, so one
+  // stale row could ride a portion edit into the ledger total. Derived keys are
+  // TS-owned (never lockable), exactly like finalize step 5 - re-derive always.
+  reapplyDerivedNutrients(base);
   if (!locked.includes('solubleFibre') && (base.solubleFibre == null || base.solubleFibre === 0) && base.totalFibre) {
     base.solubleFibre = computeSolubleFibre(base.totalFibre, item.name || item.originalName);
   }
@@ -758,6 +763,9 @@ export async function applyMealEdits(opts: {
       if (!lockedNutrientKeys.includes('calories') && mergedNutrients.protein != null) {
         mergedNutrients.calories = computeCaloriesFromMacros(mergedNutrients.protein, mergedNutrients.carbohydrates, mergedNutrients.totalFat);
       }
+      // Printed-label values may have replaced totalFat/sat/Na inside the bag
+      // while a derived unsat/salt from the carried row stayed behind.
+      reapplyDerivedNutrients(mergedNutrients);
 
       // Dish name: combine brand from labelItem with prepared name
       let mergedName = nonLabelItem.name || labelItem.name || 'Dish';
@@ -864,6 +872,9 @@ export async function applyMealEdits(opts: {
             lockedNutrientKeys = parsed.lockedKeys;
           }
         }
+        // labelItem/OCR values above may have rewritten totalFat/sat/Na while a
+        // derived unsat/salt from the carried bag stayed behind.
+        reapplyDerivedNutrients(mergedNutrients);
         const oIdx = items.indexOf(otherItem);
         items[oIdx] = {
           ...otherItem,

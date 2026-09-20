@@ -57,10 +57,34 @@ export interface DispatchTrace {
   called?: boolean;
   /** Human note, e.g. why model/latency are absent. */
   note?: string;
+  /** Photos attached to *this* turn (URLs). A follow-up edit that adds a
+   * clarification photo must show that photo on its own turn, not only on t1. */
+  images?: string[];
+  /** Count of photos attached to this turn (kept even when URLs are unavailable). */
+  imageCount?: number;
   model?: string | null;
   latency_ms?: number | null;
   tokens?: number;
   error?: string | null;
+}
+
+/**
+ * A single user→agent turn in the journey (create, edit, clarify). The debug
+ * export must let a reader reproduce *exactly* what the user did and saw:
+ * prompt text, photos attached, and the agent answer for that turn — including
+ * the follow-up edit that adds a clarification photo.
+ */
+export interface TurnTrace {
+  turn: number;
+  prompt?: string;
+  imageCount: number;
+  images: string[];
+  /** Dispatches whose `turn` matches this turn (agent answers). */
+  dispatches: DispatchTrace[];
+  answer?: string;
+  /** User-facing verdict/advice for the turn, when the pack emits one. */
+  verdict?: any;
+  clinicalAdvice?: string;
 }
 
 export interface HandoffTrace {
@@ -94,6 +118,9 @@ export interface CanonicalRunTree {
   network: string[];
   handoffs: HandoffTrace[];
   dispatches: DispatchTrace[];
+  /** Per-turn journey timeline (create → edit → clarify) with prompt, photos,
+   * and answer, so a multi-turn photo-edit run is fully reproducible. */
+  turns: TurnTrace[];
   contract: ContractEvaluation[];
   portionAdjustment?: PortionAdjustmentTrace | null;
   /** Linked jobs of a forwarded journey (resolved by the export caller). */
@@ -252,6 +279,41 @@ export function hasCallEvidence(logs: string, stage: 'scout' | 'resolver' | 'cur
   return new RegExp(`${tag}|\\[UnifiedLLM:(?:food_)?resolver\\]|\\[UnifiedLLM-Usage:(?:food_)?resolver\\]|\\[UnifiedLLM-Timing:(?:food_)?resolver\\]|\\[UnifiedLLM:curator\\]|\\[UnifiedLLM-Usage:curator\\]|\\[UnifiedLLM-Timing:curator\\]|food_resolver|Food Resolver agent|curator|brandCurator|\\[curator_answer\\]`).test(logs);
 }
 
+/**
+ * Extract the agent answer text emitted inside one turn's log section.
+ *
+ * The per-dispatch `output`/`rawEmission` is only stored for the final turn in
+ * the stored-result path, so a reconstructed multi-turn export used to show an
+ * edit turn with no answer. These lines are always present per turn (they are
+ * what the pipeline emits on `sendLog`): `[scout_answer] …` and `[diet_answer] …`.
+ * Returns the diet/verdict answer when present, else the scout summary.
+ */
+export function extractTurnAnswerFromLogs(section: string): string | undefined {
+  if (!section) return undefined;
+  const dietMatch = section.match(/\[diet_answer\]\s*([^\n]+)/i);
+  if (dietMatch) return dietMatch[1].trim();
+  const scoutMatch = section.match(/\[scout_answer\]\s*([^\n]+)/i);
+  if (scoutMatch) return scoutMatch[1].trim();
+  const textMatch = section.match(/\[(?:message|verdict|advice|narrative)_answer\]\s*([^\n]+)/i);
+  if (textMatch) return textMatch[1].trim();
+  return undefined;
+}
+
+/**
+ * Merge the per-turn agent answer into a dispatch output without clobbering a
+ * structured emission (rawScout dishes / verdict). When the structured output
+ * exists but carries no human-readable message, attach the per-turn
+ * `[diet_answer]`/`[scout_answer]` text so the Turn Timeline can render it.
+ */
+export function mergeTurnAnswer(output: any, answer: string | undefined): any {
+  if (!answer) return output;
+  if (output == null) return { message: answer };
+  if (typeof output === 'object' && !(output as any).message && !(output as any).clinicalAdvice) {
+    return { ...output, message: answer };
+  }
+  return output;
+}
+
 /** Prefix a log line with [jobId] unless blank or already tagged (contract §9: joinable lines) */
 export function tagJobId(line: string, jobId: string): string {
   if (line == null) return line;
@@ -382,6 +444,21 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
       }
       return copy;
     });
+
+    // Attach this turn's photos to every dispatch on that turn so a follow-up
+    // edit that added a clarification photo shows the photo on t2, not only t1.
+    const imagesByTurnEnriched = resolveTurnImages(input);
+    for (const d of enriched) {
+      const t = Number(d.turn) || 1;
+      const imgs = imagesByTurnEnriched[t - 1] || [];
+      if (imgs.length > 0 && !d.images) d.images = imgs;
+      if (d.imageCount == null) {
+        d.imageCount = imgs.length
+          || Number((d.received as any)?.photoCount ?? 0)
+          || (t === 1 && input.photoUrls ? input.photoUrls.length : 0)
+          || (input.photoUrl ? 1 : 0);
+      }
+    }
 
     const hasCurator = Boolean(
       /food_resolver|Food Resolver|curator/i.test(logs) ||
@@ -586,7 +663,11 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
   const hasScout = Boolean(
     input.scoutItems?.length ||
     input.rawScout ||
-    /\bVision Scout\b|\[UnifiedLLM-Prompt:scout\]|gemini-|Stream stalled/i.test(logs)
+    // `[scout_answer]` / `[diet_answer]` are durable per-turn evidence that the
+    // food meal agent ran — they survive log dedup even when the big
+    // `[UnifiedLLM-Prompt:scout]` blocks were collapsed out, so a reconstructed
+    // multi-turn export still produces a dispatch per turn.
+    /\bVision Scout\b|\[UnifiedLLM-Prompt:scout\]|\[scout_answer\]|\[diet_answer\]|gemini-|Stream stalled/i.test(logs)
   );
 
   if (hasScout) {
@@ -650,6 +731,9 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
 
         const stallMatches = Array.from(section.matchAll(/Stream stalled:\s*Vision Scout\s*(?:\(([^)]+)\))?[^\n]*/gi));
         const fallbackMatch = section.match(/(?:falling back to|Switch to)\s*(gemini-[^\s]+)/i);
+        // Per-turn answer reconstructed from this turn's own log section, so an
+        // edit turn is not left with an empty Output in the export.
+        const turnAnswer = extractTurnAnswerFromLogs(section);
 
         if (stallMatches.length > 0) {
           const m1 = stallMatches[0][1] || turnModelMatch?.[1] || turnModelMatch?.[2] || 'gemini-3.5-flash-lite';
@@ -713,8 +797,14 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
             systemInstruction: turnSysInst || undefined,
             userPrompt: turnUserPrompt || undefined,
             instruction: fullInstruction || undefined,
-            output: turnNum === turnSections.length ? (input.rawScout || input.scoutItems) : undefined,
-            rawEmission: turnNum === turnSections.length ? (input.rawScout || undefined) : undefined,
+            output: mergeTurnAnswer(
+              turnNum === turnSections.length ? (input.rawScout || input.scoutItems) : undefined,
+              turnAnswer,
+            ),
+            rawEmission: mergeTurnAnswer(
+              turnNum === turnSections.length ? (input.rawScout || undefined) : undefined,
+              turnAnswer,
+            ),
             model: turnModelMatch ? (turnModelMatch[1] || turnModelMatch[2]) : 'gemini-3.5-flash-lite',
             latency_ms: turnScoutTimings[0]?.ms ?? (turnLatencyMatch ? Math.round(Number(turnLatencyMatch[1])) : 1500),
             tokens: turnScoutUsages[0]?.total || undefined,
@@ -748,6 +838,7 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
           else if (input.message && turnNum === promptMatches.length) turnUserText = input.message;
         }
 
+        const turnAnswer = extractTurnAnswerFromLogs(turnLogSection);
         dispatches.push({
           id: `t${turnNum}/scout`,
           parent: turnNum > 1 ? `t${turnNum - 1}/scout` : null,
@@ -763,8 +854,14 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
           systemInstruction: turnSysInst || undefined,
           userPrompt: turnUserPrompt || undefined,
           instruction: fullInstruction || undefined,
-          output: turnNum === promptMatches.length ? (input.rawScout || input.scoutItems) : undefined,
-          rawEmission: turnNum === promptMatches.length ? (input.rawScout || undefined) : undefined,
+          output: mergeTurnAnswer(
+            turnNum === promptMatches.length ? (input.rawScout || input.scoutItems) : undefined,
+            turnAnswer,
+          ),
+          rawEmission: mergeTurnAnswer(
+            turnNum === promptMatches.length ? (input.rawScout || undefined) : undefined,
+            turnAnswer,
+          ),
           model: modelMatch ? (modelMatch[1] || modelMatch[2]) : 'gemini-3.5-flash-lite',
           latency_ms: scoutTimings[i]?.ms ?? scoutTimings[scoutTimings.length - 1]?.ms ?? (latencyMatch ? Math.round(Number(latencyMatch[1])) : 1500),
           tokens: scoutUsages[i]?.total ?? scoutUsages[scoutUsages.length - 1]?.total ?? undefined,
@@ -953,6 +1050,21 @@ export function extractDispatches(input: DebugReportInput): DispatchTrace[] {
     }
   }
 
+  // Reconstruction path: credit each turn with its own photos so a follow-up
+  // edit that attached a clarification photo is reproducible from the export.
+  const imagesByTurn = resolveTurnImages(input);
+  for (const d of dispatches) {
+    const t = Number(d.turn) || 1;
+    const imgs = imagesByTurn[t - 1] || [];
+    if (imgs.length > 0 && !d.images) d.images = imgs;
+    if (d.imageCount == null) {
+      d.imageCount = imgs.length
+        || Number((d.received as any)?.photoCount ?? 0)
+        || (t === 1 && input.photoUrls ? input.photoUrls.length : 0)
+        || (input.photoUrl ? 1 : 0);
+    }
+  }
+
   return dispatches;
 }
 
@@ -1008,6 +1120,138 @@ export function extractPortionAdjustment(input: DebugReportInput): PortionAdjust
 }
 
 /**
+ * Distribute the job's full photo list across its turns.
+ *
+ * A create+edit run has one photo set for turn 1 and a (usually smaller) photo
+ * set for the edit turn. The export stores every URL in `input.photoUrls`, but
+ * historically only turn 1 was credited with photos, so the follow-up edit read
+ * as text-only and the journey was not reproducible. Breadcrumbs carry each
+ * submit's `imageCount` (e.g. `submit_initiated {imageCount:2}` then
+ * `{imageCount:1}`); walk them in order and slice the flat photo list.
+ *
+ * Returns an array indexed by turn-1 (so `[0]` is turn 1's photos).
+ */
+export function resolveTurnImages(input: DebugReportInput): string[][] {
+  const rawList = (Array.isArray(input.photoUrls) && input.photoUrls.length > 0)
+    ? input.photoUrls.filter(Boolean).map(String)
+    : (input.photoUrl && /^https?:\/\//i.test(String(input.photoUrl)) ? [String(input.photoUrl)] : []);
+
+  // NOTE: this slice is the fallback used only when a dispatch did not record
+  // its own `received.photoUrls`. The stored `photoUrls` order is not guaranteed
+  // to put turn-1 photos first, so `buildTurnTimeline` prefers the per-dispatch
+  // URL list and only falls back to this count-based slice.
+  const allPhotos = rawList;
+
+  const submits = (Array.isArray(input.userActionBreadcrumbs) ? input.userActionBreadcrumbs : [])
+    .filter((b: any) => b && b.action === 'submit_initiated')
+    .map((b: any) => Number(b?.details?.imageCount ?? b?.details?.image_count ?? 0) || 0);
+
+  const perTurn: string[][] = [];
+  if (submits.length === 0 || submits.every((c) => c === 0)) {
+    if (allPhotos.length > 0) perTurn.push([...allPhotos]);
+    return perTurn;
+  }
+
+  let cursor = 0;
+  for (const count of submits) {
+    const take = Math.max(0, Math.min(count, allPhotos.length - cursor));
+    perTurn.push(allPhotos.slice(cursor, cursor + take));
+    cursor += take;
+  }
+  // Any photos beyond the declared turn counts belong to the first turn.
+  if (cursor < allPhotos.length) {
+    if (perTurn.length === 0) perTurn.push(allPhotos.slice(cursor));
+    else perTurn[0] = [...perTurn[0], ...allPhotos.slice(cursor)];
+  }
+  return perTurn;
+}
+
+/**
+ * Build the per-turn journey timeline from breadcrumbs + dispatches.
+ *
+ * The debug export's job is to let a reader reproduce what the user did and
+ * what the agent answered for EVERY turn (create, edit, clarify) — not just the
+ * last one. This merges:
+ *   - ordered `submit_initiated` breadcrumbs (prompt + imageCount) → user side
+ *   - dispatches grouped by `turn` → agent side, with output/verdict/advice
+ */
+export function buildTurnTimeline(
+  input: DebugReportInput,
+  dispatches: DispatchTrace[],
+): TurnTrace[] {
+  const photosByTurn = resolveTurnImages(input);
+
+  const submitCrumbs = (Array.isArray(input.userActionBreadcrumbs) ? input.userActionBreadcrumbs : [])
+    .filter((b: any) => b && b.action === 'submit_initiated')
+    .map((b: any) => ({
+      prompt: b?.details?.prompt || b?.details?.text || b?.details?.userMessage || undefined,
+      imageCount: Number(b?.details?.imageCount ?? b?.details?.image_count ?? 0) || 0,
+    }));
+
+  const pfl = input.pendingFoodLog || (input as any)?.result?.pendingFoodLog || (input as any)?.result || {};
+  const globalVerdict = pfl?.verdict || (input.receiptTable as any)?.verdict || undefined;
+  const globalAdvice = pfl?.clinicalAdvice || pfl?.message || (input as any)?.result?.clinicalAdvice || (input as any)?.result?.message || undefined;
+
+  // Turn numbers that ran an agent (fall back to a single turn when none exist).
+  const turnNumbers = new Set<number>();
+  for (const d of dispatches) {
+    const n = Number(d.turn);
+    if (Number.isFinite(n) && n > 0) turnNumbers.add(n);
+  }
+  const orderedTurns = [...turnNumbers].sort((a, b) => a - b);
+  const maxTurn = Math.max(
+    orderedTurns.length > 0 ? orderedTurns[orderedTurns.length - 1] : 1,
+    submitCrumbs.length,
+    1,
+  );
+
+  const turns: TurnTrace[] = [];
+  for (let turn = 1; turn <= maxTurn; turn++) {
+    const turnDispatches = dispatches.filter(d => (Number(d.turn) || 1) === turn);
+    const submit = submitCrumbs[turn - 1];
+    const images = photosByTurn[turn - 1] || [];
+
+    // Prefer the dispatch's own user text / images (the server records the real
+    // per-turn payload); fall back to the breadcrumb. `received.photoUrls` is the
+    // per-turn URL list recorded at dispatch time, so it is the most exact source.
+    const dispatchUser = turnDispatches.find(d => d.user)?.user;
+    const dispatchReceivedUrls = turnDispatches
+      .flatMap(d => (Array.isArray((d.received as any)?.photoUrls) ? (d.received as any).photoUrls : []))
+      .filter((u: any) => typeof u === 'string' && u);
+    const dispatchImages = turnDispatches.flatMap(d => (Array.isArray(d.images) ? d.images : []));
+    const imageCount = Math.max(
+      Number(turnDispatches.find(d => d.imageCount != null)?.imageCount ?? 0) || 0,
+      Number((turnDispatches.find(d => (d.received as any)?.imageCount != null)?.received as any)?.imageCount ?? 0) || 0,
+      dispatchReceivedUrls.length,
+      images.length,
+      submit?.imageCount || 0,
+    );
+    const turnImages = dispatchReceivedUrls.length > 0
+      ? dispatchReceivedUrls
+      : (dispatchImages.length > 0 ? dispatchImages : images);
+
+    const answerDispatch = turnDispatches.find(d => d.rawEmission || d.output);
+    const emission: any = answerDispatch?.rawEmission || answerDispatch?.output;
+    const verdict = emission?.verdict || (turn === maxTurn ? globalVerdict : undefined);
+    const clinicalAdvice = emission?.clinicalAdvice
+      || (turnDispatches.find(d => typeof d.user === 'string' && d.agent === 'diet') as any)?.user
+      || (turn === maxTurn ? globalAdvice : undefined);
+
+    turns.push({
+      turn,
+      prompt: submit?.prompt || dispatchUser || (turn === 1 ? (input.userPrompt || input.prompt || input.message) : undefined),
+      imageCount,
+      images: Array.from(new Set(turnImages)),
+      dispatches: turnDispatches,
+      answer: typeof emission?.message === 'string' ? emission.message : undefined,
+      verdict: verdict || undefined,
+      clinicalAdvice: typeof clinicalAdvice === 'string' ? clinicalAdvice : undefined,
+    });
+  }
+  return turns;
+}
+
+/**
  * Builds the canonical JSON run tree from raw debug report input.
  * Evaluates contract laws across process, ui, and content layers.
  */
@@ -1022,6 +1266,7 @@ export function buildCanonicalRunTree(input: DebugReportInput): CanonicalRunTree
     .map(l => tagJobId(typeof l === 'string' ? l : JSON.stringify(l), jobId));
   const handoffs = extractHandoffs(input, jobId);
   const dispatches = extractDispatches(input);
+  const turns = buildTurnTimeline(input, dispatches);
   const portionAdjustment = extractPortionAdjustment(input);
 
   const tree: CanonicalRunTree = {
@@ -1038,6 +1283,7 @@ export function buildCanonicalRunTree(input: DebugReportInput): CanonicalRunTree
     network: networkErrors,
     handoffs,
     dispatches,
+    turns,
     contract: [],
     portionAdjustment,
     linkedJobs: Array.isArray(input.linkedJobs) ? input.linkedJobs : [],

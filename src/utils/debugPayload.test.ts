@@ -826,6 +826,67 @@ describe('debugPayload', () => {
     expect(input.previousAttempts).toEqual([{ turn: 1, status: 'failed', error: 'Timeout' }]);
     expect(input.priorLogs).toBe('[UnifiedLLM] Prior run log line');
   });
+
+  it('renders a Turn Timeline with each turn prompt, its own photos, and answer (debugmeal1 class)', () => {
+    const logs = [
+      '[scout_answer] Scout identified 4 item(s): Baby Corn (~115g), Peanuts (~210g)',
+      '[diet_answer] Your selection delivers strong plant protein.',
+      '',
+      '--- USER CONTINUATION (TURN 2) ---',
+      '',
+      '[scout_answer] Scout identified 2 item(s): Peanuts (~105g), Ayam Rebus (~165g)',
+      '[diet_answer] The clean chicken and vegetables deliver strong protein.',
+    ].join('\n');
+
+    const md = buildDebugMarkdownReport({
+      jobId: 'job_turn_timeline_md',
+      status: 'succeeded',
+      mode: 'edit',
+      backendLogs: logs,
+      photoUrls: ['https://cdn.example.com/t1_a.jpg', 'https://cdn.example.com/t1_b.jpg', 'https://cdn.example.com/t2_edit.jpg'],
+      userActionBreadcrumbs: [
+        { action: 'submit_initiated', details: { prompt: 'Analyze this meal photo.', imageCount: 2 } },
+        { action: 'submit_initiated', details: { prompt: 'the daun selada krt is chicken as shown on picture', imageCount: 1 } },
+      ],
+    });
+
+    expect(md).toContain('## 🧭 Turn Timeline (User ↔ Agent)');
+    expect(md).toContain('### Turn 1 — t1/scout · photos: 2');
+    expect(md).toContain('- **User:** Analyze this meal photo.');
+    expect(md).toContain('### Turn 2 — t2/scout · photos: 1');
+    expect(md).toContain('- **User:** the daun selada krt is chicken as shown on picture');
+    expect(md).toContain('https://cdn.example.com/t2_edit.jpg');
+    expect(md).toContain('The clean chicken and vegetables deliver strong protein.');
+    // The initial photo list is still visible in the header too.
+    expect(md).toContain('https://cdn.example.com/t1_a.jpg');
+  });
+
+  it('keeps the multi-turn continuation marker in Backend Execution Logs (not collapsed away)', () => {
+    const logs = [
+      '=== GLOBAL LIVE STREAM CONNECTED ===',
+      '[UnifiedLLM-Prompt:scout] System Instruction:',
+      'You are the Vision Scout.',
+      '[scout_answer] Scout identified 4 item(s)',
+      '',
+      '--- USER CONTINUATION (TURN 2) ---',
+      '',
+      '[UnifiedLLM-Prompt:scout] System Instruction:',
+      'You are the Vision Scout.',
+      '[diet_answer] The clean chicken and vegetables deliver strong protein.',
+    ].join('\n');
+
+    const md = buildDebugMarkdownReport({
+      jobId: 'job_continuation_marker',
+      status: 'succeeded',
+      backendLogs: logs,
+      scoutItems: [{ originalName: 'Rice' }],
+      rawScout: { dishes: [{ dishName: 'Rice' }] },
+    });
+
+    const logsSection = md.slice(md.indexOf('## 🖥️ Backend Execution Logs'));
+    expect(logsSection).toContain('--- USER CONTINUATION (TURN 2) ---');
+    expect(logsSection).toContain('The clean chicken and vegetables deliver strong protein.');
+  });
 });
 
 

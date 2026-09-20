@@ -524,13 +524,23 @@ jobsRouter.all('/api/jobs/debug', async (req, res) => {
       || (memJobForMerge as any)?.clean_result?.dialogInventory
       || debugPayload.dialogInventory
       || debugPayload.result?.dialogInventory;
-    const effectiveDispatches = dispatches
-      || (memJobForMerge as any)?.dispatches
-      || (memJobForMerge as any)?.clean_result?.dispatches
-      || (job as any)?.dispatches
-      || (job as any)?.clean_result?.dispatches
-      || debugPayload.dispatches
-      || debugPayload.result?.dispatches;
+    // Dispatch completeness: a multi-turn job accumulates one dispatch per turn
+    // (t1/scout, t2/scout, t2/diet). The in-memory job's own `dispatches` field
+    // can be the *preserved* (turn-1-only) list, so picking it first silently
+    // dropped the edit turn in the export. Prefer the longest list across every
+    // source (client body, in-memory, stored result, cold payload).
+    const dispatchCandidates = [
+      dispatches,
+      (memJobForMerge as any)?.clean_result?.dispatches,
+      (memJobForMerge as any)?.dispatches,
+      (job as any)?.clean_result?.dispatches,
+      (job as any)?.dispatches,
+      debugPayload.dispatches,
+      debugPayload.result?.dispatches,
+    ].filter((d): d is any[] => Array.isArray(d) && d.length > 0);
+    const effectiveDispatches = dispatchCandidates.length > 0
+      ? dispatchCandidates.reduce((best, cur) => (cur.length > best.length ? cur : best), dispatchCandidates[0])
+      : undefined;
 
     // Debug-export fix: the client builds the dialog inventory at download time
     // and POSTs it here, but it was only merged into this response — a later
@@ -587,6 +597,40 @@ jobsRouter.all('/api/jobs/debug', async (req, res) => {
       error: safePayload.error,
       debugUrl: safePayload.debugUrl,
       photoUrl: safePayload.photoUrl,
+      // Debug-completeness fix: the stored job result carries `imageUrls` /
+      // `photoUrls` (all photos uploaded for this job, including a follow-up
+      // clarification photo on an edit turn). This export previously forwarded
+      // only `photoUrl` (images[0]), so a create+edit run showed one photo and
+      // turn 2 read as text-only. Forward the full list, falling back to the
+      // message/pendingFoodLog images.
+      photoUrls: (() => {
+        const candidates = [
+          safePayload.result?.pendingFoodLog?.imageUrls,
+          safePayload.result?.photoUrls,
+          safePayload.result?.imageUrls,
+          safePayload.result?.clean_result?.photoUrls,
+          safePayload.result?.clean_result?.imageUrls,
+          (safePayload as any)?.clean_result?.photoUrls,
+          (safePayload as any)?.clean_result?.imageUrls,
+          (safePayload as any)?.photoUrls,
+          (safePayload as any)?.imageUrls,
+          safePayload.photoUrl ? [safePayload.photoUrl] : undefined,
+        ];
+        // Union in priority order; the first source that already holds every
+        // photo wins, otherwise append the rest so no attached photo is lost.
+        const seen = new Set<string>();
+        const merged: string[] = [];
+        for (const c of candidates) {
+          if (!Array.isArray(c)) continue;
+          for (const u of c) {
+            const s = typeof u === 'string' ? u : '';
+            if (!s || seen.has(s)) continue;
+            seen.add(s);
+            merged.push(s);
+          }
+        }
+        return merged.length > 0 ? merged : undefined;
+      })(),
       lastUserAction: effectiveLastUserAction,
       sessionEvents: uniqueSessionEvents,
       userActionBreadcrumbs: mergedBreadcrumbs,
