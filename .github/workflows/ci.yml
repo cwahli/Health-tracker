@@ -1,0 +1,44 @@
+name: ci
+
+# Evidence gate for PRs: typecheck + the repo's own fast named gates.
+# Keeps agent output mergeable without running the whole ~97-file suite
+# (per AGENTS.md: never `npm test`). Make this a required check on `main`
+# via branch protection so a red run blocks merge.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: tsc + named gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci --prefer-offline
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run lint
+
+      - name: Prepush named gates (receptionist + bio + food)
+        run: npm run test:prepush
+
+      - name: Sync regression
+        run: npm run test:sync

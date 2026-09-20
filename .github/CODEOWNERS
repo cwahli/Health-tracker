@@ -1,0 +1,49 @@
+# .github/CODEOWNERS — static ownership for hub files (Tier 1)
+#
+# Rules are LAST-MATCH-WINS: put broad rules first, specific overrides last.
+# Place this file at .github/CODEOWNERS (GitHub checks .github/, then root,
+# then docs/ — first found wins; keep only one).
+#
+# CODEOWNERS alone only *requests* reviewers. It BLOCKS a merge only when the
+# branch protection / ruleset option "Require review from Code Owners" is on
+# (see docs/agent/GITHUB_WORKFLOW.md). Owners must have write access or GitHub
+# silently skips them.
+
+# Default: the repo owner owns everything not listed below.
+*                           @cwahli
+
+# --- Process + shared memory (single-writer hubs) ---------------------------
+/AGENTS.md                  @cwahli
+/GEMINI.md                  @cwahli
+/AI_HANDOVER.md             @cwahli
+/plan/ROADMAP.md            @cwahli
+/plan/DATA_PLANE.md         @cwahli
+/specs/                     @cwahli
+/docs/agent/                @cwahli
+/.github/                   @cwahli
+
+# --- Server entrypoints + job lifecycle (hub files) -------------------------
+/server.ts                  @cwahli
+/serverJobs.ts              @cwahli
+/server_routes_jobs.ts      @cwahli
+/server_routes_sync.ts      @cwahli
+/server_routes_admin.ts     @cwahli
+/server_routes_r2.ts        @cwahli
+/server_d1.ts               @cwahli
+/server_d1_schema.ts        @cwahli
+/server_db_d1.ts            @cwahli
+/server_auth.ts             @cwahli
+/serverBrandMenu.ts         @cwahli
+/supabaseAdmin.ts           @cwahli
+
+# --- Food pipeline hubs -----------------------------------------------------
+/server_vision_scout.ts     @cwahli
+/server_meal_edit.ts        @cwahli
+/server_dish_finalize.ts    @cwahli
+/server_food_catalog.ts     @cwahli
+/server_food_catalog_schema.ts @cwahli
+
+# --- Scorecard / golden instruction (frozen truth) --------------------------
+/golden/scorecard/instruction/  @cwahli
+/tests/Golden_meal/             @cwahli
+/golden/meal/                   @cwahli
