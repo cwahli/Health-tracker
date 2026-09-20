@@ -4,7 +4,7 @@ import { translations } from '../utils/translations';
 import { Activity, Mail, AlertCircle, RefreshCw, KeyRound, CheckCircle } from 'lucide-react';
 import { supabase, isSupabaseConfigured, getAuthRedirectTo, cleanupAuthUrlParams } from '../utils/supabaseClient';
 import { auth } from '../firebase';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 
 interface AuthScreenProps {
   onLogin: (profile: UserProfile) => void;
@@ -129,6 +129,32 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
       if (sbUnsub) sbUnsub();
     };
   }, [nickname]);
+
+  // Complete the Firebase popup-blocked redirect flow. `signInWithRedirect`
+  // navigates to Google and back; this reads the result on return. Without it
+  // the redirected user would land back on the gate with no session.
+  useEffect(() => {
+    let cancelled = false;
+    getRedirectResult(auth)
+      .then((result) => {
+        if (cancelled || !result?.user) return;
+        cleanupAuthUrlParams();
+        handleSuccessfulLogin({
+          uid: result.user.uid,
+          email: result.user.email || '',
+          displayName: result.user.displayName || '',
+          photoURL: result.user.photoURL || '',
+          emailVerified: true,
+        } as any);
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        console.warn('[Auth] Firebase getRedirectResult error:', err);
+        setErrorMsg(err?.message || 'Google sign-in failed. Please try again.');
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSuccessfulLogin = (user: any) => {
     const isDemo = user.email?.toLowerCase().trim() === 'demo@healthcockpit.com';
@@ -607,43 +633,72 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
     setStatus('pending_verification');
   };
 
+  /** Build the app profile from a REAL Firebase user. */
+  const profileFromFirebaseUser = (u: any): UserProfile => ({
+    nickname: u.displayName || u.email?.split('@')[0] || 'Google User',
+    photoUrl: u.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120',
+    email: u.email,
+    age: 28,
+    ethnicity: 'Caucasian',
+    weight: 74,
+    height: 178,
+    gender: 'Male',
+    language,
+    userType: 'Standard',
+  });
+
   const handleThirdPartyLogin = async (provider: 'Google' | 'X' | 'Facebook') => {
     setErrorMsg('');
     setStatus('sending');
 
     if (provider === 'Google') {
+      const providerObj = new GoogleAuthProvider();
+      providerObj.setCustomParameters({ prompt: 'select_account' });
       try {
-        const providerObj = new GoogleAuthProvider();
-        providerObj.setCustomParameters({ prompt: 'select_account' });
         const result = await signInWithPopup(auth, providerObj);
         if (result?.user) {
-          const u = result.user;
-          const userProfile: UserProfile = {
-            nickname: u.displayName || u.email?.split('@')[0] || 'Google User',
-            photoUrl: u.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120',
-            email: u.email || 'google.user@healthcockpit.com',
-            age: 28,
-            ethnicity: 'Caucasian',
-            weight: 74,
-            height: 178,
-            gender: 'Male',
-            language,
-            userType: 'Standard'
-          };
-          onLogin(userProfile);
+          onLogin(profileFromFirebaseUser(result.user));
           setStatus('idle');
           return;
         }
+        // A popup that resolves without a user is not a successful login.
+        setErrorMsg('Google sign-in did not return an account. Please try again.');
+        setStatus('idle');
+        return;
       } catch (fbErr: any) {
-        // If popup was blocked or closed by user, or popup not supported
+        const code = String(fbErr?.code || '');
         console.warn('Firebase Google popup auth error:', fbErr);
-        if (fbErr?.code === 'auth/popup-closed-by-user') {
+
+        // User closed the popup on purpose — no error, no login.
+        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
           setStatus('idle');
           return;
         }
+
+        // Popup blocked (common on mobile / strict browsers): use the real
+        // redirect flow instead of fabricating a user.
+        if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+          try {
+            await signInWithRedirect(auth, providerObj);
+            return; // page navigates away to Google
+          } catch (redirectErr: any) {
+            console.warn('Firebase Google redirect auth error:', redirectErr);
+            setErrorMsg(redirectErr?.message || 'Google sign-in failed. Please try again.');
+            setStatus('idle');
+            return;
+          }
+        }
+
+        // Every other failure is a REAL error (unauthorized-domain,
+        // operation-not-allowed, internal-error, network…). Surface it — never
+        // silently sign the user in as a fabricated account.
+        setErrorMsg(fbErr?.message || `Google sign-in failed${code ? ` (${code})` : ''}.`);
+        setStatus('idle');
+        return;
       }
     }
 
+    // Non-Google providers: Supabase OAuth when configured.
     if (isSupabaseConfigured && supabase) {
       try {
         const providerMap: Record<string, string> = { Google: 'google', X: 'twitter', Facebook: 'facebook' };
@@ -665,21 +720,8 @@ export default function AuthScreen({ onLogin }: AuthScreenProps) {
       }
     }
 
-    // Fallback simulated user for offline environments
-    const currentHost = window.location.hostname || '127.0.0.1';
-    const simulatedUser: UserProfile = {
-      nickname: `${provider} User (${currentHost})`,
-      photoUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120',
-      email: `${provider.toLowerCase()}.user@healthcockpit.com`,
-      age: 28,
-      ethnicity: 'Caucasian',
-      weight: 74,
-      height: 178,
-      gender: 'Male',
-      language,
-      userType: 'Demo'
-    };
-    onLogin(simulatedUser);
+    // No provider available for X/Facebook — surface it. Never fabricate a user.
+    setErrorMsg(`${provider} sign-in is unavailable right now. Please use Google or email.`);
     setStatus('idle');
   };
 

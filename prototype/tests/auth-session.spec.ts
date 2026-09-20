@@ -79,4 +79,27 @@ test.describe('Q-11 auth & session', () => {
 
     expect(pageErrors, `page errors: ${pageErrors.join(' | ')}`).toHaveLength(0);
   });
+
+  test('Google sign-in never fabricates a login when the provider fails', async ({ page }) => {
+    // Regression: the Google handler used to swallow every popup error and
+    // silently sign the user in as `google.user@healthcockpit.com`. Blocking the
+    // Firebase auth handler forces the failure path; the gate must stay put and
+    // no fabricated `@healthcockpit.com` identity may appear.
+    await page.route('**/__/auth/**', (route) => route.abort('failed'));
+    await page.route('**/identitytoolkit.googleapis.com/**', (route) => route.abort('failed'));
+    await page.route('**/securetoken.googleapis.com/**', (route) => route.abort('failed'));
+
+    await settle(page);
+    test.skip(!(await page.locator('#google-login-btn').isVisible().catch(() => false)), 'sign-in gate not reachable');
+
+    await page.locator('#google-login-btn').click();
+    await page.waitForTimeout(4000);
+
+    // Still on the gate — not signed in as a fake account.
+    await expect(page.locator(AUTH_CARD)).toBeVisible();
+    await expect(page.locator(NAV_HOME)).toHaveCount(0);
+    const body = await page.locator('body').innerText().catch(() => '');
+    expect(body).not.toContain('google.user@healthcockpit.com');
+    expect(body).not.toMatch(/Google User \(/i);
+  });
 });
