@@ -31,11 +31,13 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ---
 
-## Current work — finish Q-11 (2026-09-18)
+## Current work — D-2 Supabase code drain (locked packet, `auto_go: true`)
+
+**Active executable ID: D-2** — [`specs/active/D-2.md`](../specs/active/D-2.md). It is **locked and pre-approved**; do **not** wait for a human "go" and do **not** call it "needs a packet." Work one file per commit and **`git push` immediately** — the VPS auto-deploy runs `git reset --hard origin/main`, so any uncommitted drain is lost. The packet carries a **progress ledger**; resume from the first ⬜ row (or ⛔ if schema-blocked). `server_routes_sync.ts` is DONE (`395fa61`); `server_food_catalog.ts` + `server_fdc_resolve.ts` are ⛔ blocked on missing D1 catalog tables (`food_aliases`, `food_observations`, `food_catalog_sync_events`) and need a schema packet — do not repaint them.
 
 B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are **shipped**. Do not restart them.
 
-**Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (392 KB / 7,039 lines, 39 over its 7,000 ceiling), which needs its own packet. Extract-only, one node per commit.
+**Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (392 KB / 7,039 lines), which needs its own packet.
 
 **Do this, in order. Packets are locked = go (`auto_go: true`).**
 
@@ -44,9 +46,9 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
 4. **Q-11.12 DONE** — nodes landed `cdbf2cd` (settings overlay → `DbInteractionsOverlay.tsx`) and `c92ec49` + `2fb8d88` (theme customizer → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, move-only, then its orphaned imports). `Header.tsx` 3,545 → **690 lines / 28,791 B**: the packet's ≤ 1,200-line and < 200 KB targets are both met, and every moved slice was proven byte-identical against the pre-move file. Packet retired to `specs/done/`. **The Q-11 ladder is complete** — no Q-11 packet is active.
 5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (392 KB / 7,039 lines, 39 over its 7,000 ceiling).
-6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. Next: Track V Phase 6 (V-19...V-26 Autonomous QA Bot fleet & Orchestrator self-healing loop). Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md).
+6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. Next: Track V Phase 6 (V-19...V-26 Autonomous QA Bot fleet & Orchestrator self-healing loop). Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). **Auto-deploy wipes uncommitted work — always push.**
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
-8. **Track D PARKED** — one SQL = **D1** (Firebase Auth + R2). Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Muse audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** = unpaid recovery when 402 lifts (~**2026-09-24**), not a paid dump. Drain **code** is D-2 (keep the project). R2 leak-stop is D-9; R2 deletes are **D-10 after D-1**. **SQLite on the VPS is D-5: extra testing and benchmark only, after V-16.** No cutover without D-6 human go.
+8. **Track D — D-2 is the ACTIVE execute ID (see top).** One SQL = **D1** (Firebase Auth + R2). Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Muse audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** = unpaid recovery when 402 lifts (~**2026-09-24**), not a paid dump. R2 leak-stop is **D-9 DONE**; R2 deletes are **D-10 after D-1**. **SQLite on the VPS is D-5: benchmark only, after V-16.** No cutover without D-6 human go.
 
 **Still `blocked_human`:** **L-5** (name a locale first — do not invent `fr`/`zh` copy), **Track D D-1** (unpaid Supabase probe ~24 Sep — [DATA_PLANE.md](./DATA_PLANE.md)), **D-3 / D-5…D-6 / D-10**. **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest, Cloud Run go-live, deleting Render before soak PASS, **VPS SQLite as production**, dual-write D1+SQLite, **paying to unpause Supabase**, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
@@ -430,7 +432,7 @@ Canonical plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 is superseded** (D1 is a
 |---|---|---|---|
 | **D-0** | Record SoT: Firebase Auth + D1 + R2; index Muse audit | **This plan** | Agents follow DATA_PLANE.md, not “stay on Supabase” |
 | **D-1** | Unpaid recovery when 402 lifts (~**2026-09-24**): dump + diff vs D1; insert missing only | `blocked_human` until REST ≠ 402 | Dated recovery log in DATA_PLANE.md (0 gaps is OK). **No extra bill.** |
-| **D-2** | Drain dead Supabase **code**; keep the remote project until D-1 | Needs locked packet | D1 is the only production SQL path; project still exists |
+| **D-2** | Drain dead Supabase **code**; keep the remote project until D-1 | **ACTIVE — `specs/active/D-2.md` locked, `auto_go: true`.** `server_routes_sync.ts` DONE (`395fa61`); ledger inside the packet; catalog/fdc ⛔ need a D1 schema packet | D1 is the only production SQL path; project still exists |
 | **D-3** | Workers Paid ~$5 before ~100 users | `blocked_human` | Free D1 daily cap cannot hard-stop the app |
 | **D-4** | Named D1 timing script; record wall vs SQL ms | Mac **2026-09-20** done; VPS pending | Dated Mac + VPS-dev + VPS-prod rows in DATA_PLANE.md |
 | **D-5** | **SQLite vs D1 benchmark on the VPS** (read-only copy, not a writer) | `blocked_human` until **V-16** | Table: D1 p50/p90 vs SQLite p50/p90 from that region |
