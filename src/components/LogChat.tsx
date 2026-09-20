@@ -21,7 +21,7 @@ import { compressMultipleImages, compressImage } from '../utils/imageCompressor'
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { computeRemainingAllowance, calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag, buildCompositeHealthImpact } from '../utils/compositeFoodCalculation';
 import { stampChildLineage, applyReviewMealId } from '../utils/savedMealLineage';
-import { isMealFollowUpEdit, mostRecentActiveMeal } from '../utils/foodFollowUpEdit';
+import { isMealFollowUpEdit, mostRecentActiveMeal, ensureMealBreakdown } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
@@ -2574,13 +2574,41 @@ ${logsText}`);
             prunedMealForJob = lastFoodLogForJob;
           }
         }
-        getImagesAsBase64(finalImages).then((stagedImagesForSubmit) => {
+        getImagesAsBase64(finalImages).then(async (stagedImagesForSubmit) => {
           recordBreadcrumb('submit_meal_job', 'chat_compose_dock', {
             jobId: currentJobId,
             promptLength: textToSend?.length,
             imageCount: stagedImagesForSubmit.length,
             submissionMode
           });
+          // Fresh-thread edits attach a D1-pulled meal that carries light
+          // columns only (no itemsBreakdown) — hydrate the one chosen meal to
+          // full detail so the server edit inherits priors instead of
+          // silently returning the meal unchanged. Falls back to the light
+          // row on any failure (current behavior, no regression).
+          if (submissionMode === 'edit' && prunedMealForJob && !Array.isArray(prunedMealForJob.itemsBreakdown)) {
+            const detailUid = auth.currentUser?.uid || 'anonymous';
+            const fetchMealDetail = async (id: string) => {
+              const ctrl = new AbortController();
+              const timer = setTimeout(() => ctrl.abort(), 8000);
+              try {
+                const res = await fetch('/api/sync/food-log-detail', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ logId: id, uid: detailUid }),
+                  signal: ctrl.signal,
+                });
+                if (!res.ok) return null;
+                const payload = await res.json().catch(() => null);
+                return payload?.detail ?? payload?.food ?? null;
+              } catch {
+                return null;
+              } finally {
+                clearTimeout(timer);
+              }
+            };
+            prunedMealForJob = await ensureMealBreakdown(prunedMealForJob, fetchMealDetail);
+          }
           const submitPayload = {
             jobId: currentJobId,
             idempotencyKey: `idemp_${auth.currentUser?.uid || 'anon'}_${currentJobId}_${currentReqId}`,

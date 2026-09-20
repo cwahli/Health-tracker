@@ -4,6 +4,7 @@ import {
   mealTimestamp,
   hasEditIntent,
   mostRecentActiveMeal,
+  ensureMealBreakdown,
   FOLLOW_UP_EDIT_MAX_AGE_MS,
 } from './foodFollowUpEdit';
 
@@ -173,5 +174,31 @@ describe('hasEditIntent', () => {
   it('requires a word boundary, not a substring', () => {
     expect(hasEditIntent('address the salad')).toBe(false);
     expect(hasEditIntent('droppings')).toBe(false);
+  });
+});
+
+describe('ensureMealBreakdown', () => {
+  const full = { id: 'm1', name: 'T1', itemsBreakdown: [{ name: 'Big Mac', weightGrams: 215 }] };
+  const light = { id: 'm1', name: 'T1', nutrients: { calories: 681 } };
+
+  it('passes through meals that already carry dishes', async () => {
+    await expect(ensureMealBreakdown(full)).resolves.toBe(full);
+    await expect(ensureMealBreakdown({ ...light, items: [{ name: 'X' }] })).resolves.toMatchObject({ id: 'm1' });
+  });
+
+  it('hydrates a light D1-pulled row via injected fetch (object and JSON-string forms)', async () => {
+    const dishes = [{ name: 'Big Mac', weightGrams: 215 }];
+    await expect(ensureMealBreakdown(light, async () => ({ itemsBreakdown: dishes })))
+      .resolves.toMatchObject({ id: 'm1', itemsBreakdown: dishes });
+    await expect(ensureMealBreakdown(light, async () => ({ items_breakdown: JSON.stringify(dishes) })))
+      .resolves.toMatchObject({ id: 'm1', itemsBreakdown: dishes });
+  });
+
+  it('keeps the light row when fetch fails, returns null, or has no id', async () => {
+    await expect(ensureMealBreakdown(light, async () => { throw new Error('down'); })).resolves.toBe(light);
+    await expect(ensureMealBreakdown(light, async () => null)).resolves.toBe(light);
+    await expect(ensureMealBreakdown(light)).resolves.toBe(light);
+    await expect(ensureMealBreakdown({ name: 'noid' }, async () => ({ itemsBreakdown: [1] })))
+      .resolves.toMatchObject({ name: 'noid' });
   });
 });

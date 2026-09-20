@@ -135,3 +135,32 @@ export function mostRecentActiveMeal<T extends FollowUpMealLike>(
   // If nothing had a parseable timestamp, fall back to insertion-last (legacy).
   return best ?? active[active.length - 1];
 }
+
+/**
+ * Hydrates a D1-pulled (listOnly, breakdown-less) meal into an editable meal.
+ *
+ * Fresh-thread edits attach `mostRecentActiveMeal(activeFoodLogs)`, but paged
+ * pulls carry light columns only — no `itemsBreakdown` — so the server edit
+ * inherits zero priors and silently returns the meal unchanged (live T2 gap:
+ * the client sent mode=edit with an empty meal). Fetch the full detail once
+ * for the chosen meal; on any failure return the light row (no regression).
+ */
+export async function ensureMealBreakdown(
+  meal: any,
+  fetchDetail?: (id: string) => Promise<any>,
+): Promise<any> {
+  if (!meal || typeof meal !== 'object') return meal;
+  if (Array.isArray(meal.itemsBreakdown) && meal.itemsBreakdown.length > 0) return meal;
+  if (Array.isArray(meal.items) && meal.items.length > 0) return meal;
+  const id = meal.id;
+  if (!id || !fetchDetail) return meal;
+  try {
+    const detail = await fetchDetail(id);
+    const raw = detail?.itemsBreakdown ?? detail?.items_breakdown ?? detail?.food?.itemsBreakdown;
+    const list = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (Array.isArray(list) && list.length > 0) return { ...meal, itemsBreakdown: list };
+  } catch {
+    // Keep the light row — server falls back to no-op rather than failing.
+  }
+  return meal;
+}
