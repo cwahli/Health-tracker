@@ -18,6 +18,9 @@ const specs = [
   // were moved verbatim with no standing coverage; a move that fails to mount
   // used to pass every gate.
   'prototype/tests/header-chrome.spec.ts',
+  // Saved-meal lineage: child tag, click-to-master, propagation, re-review,
+  // dead-photo letter tile (THUMB_FALLBACK class).
+  'prototype/tests/saved-meal-lineage.spec.ts',
 ];
 
 console.log('── shell-smoke (Playwright stubs, no Gemini) ──');

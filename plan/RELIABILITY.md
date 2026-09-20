@@ -85,15 +85,16 @@ These are the principles behind this program — not new invention.
 
 ## 4. Optimized target architecture (near-term)
 
+**Execute:** [DATA_PLANE.md](./DATA_PLANE.md) **Track D** (ROADMAP). Live SQL is **D1**, not Supabase. **R-5 is superseded.** VPS SQLite is a **benchmark (D-5)** after Track V cutover, not a second writer.
+
 ```text
-Firebase Auth          → identity only (50k MAU class limits; no app-data writes)
+Firebase Auth          → identity only (Google Sign-In; firebase_uid on rows; no app-data writes)
 D1 (HTTP today)        → thin rows: food_logs, biomarker_logs, profiles, agent_jobs (status only)
-                         (Supabase remains fallback when D1 env is missing — AI Studio)
+                         LIVE source of truth. Supabase project is HTTP 402; browser client is off.
 Cloudflare R2          → photos, debug JSON, mealBuild blobs, backend logs
 Express (server.ts)    → AI + sync proxies + job workers (loopback 127.0.0.1, in-memory maps)
   AI Studio / local    → tsx server.ts, port 3000, Vite HMR
   Production (R-13)    → same Express in a Node process (OVH VPS-2 + Caddy; not Workers)
-                         + Workers/Pages static assets for the Vite SPA
 Local IDB              → chat transcripts, offline cache, in-flight jobs
 ```
 
@@ -101,14 +102,15 @@ Local IDB              → chat transcripts, offline cache, in-flight jobs
 
 | Entity | Writer |
 |--------|--------|
-| Food / biomarker logs | Supabase only |
-| Profile + tombstone maps + dashboard blobs | Supabase only (debounced) |
-| Jobs (thin status) | Supabase via server |
+| Food / biomarker logs | **D1** |
+| Profile + tombstone maps + dashboard blobs | **D1** |
+| Jobs (thin status) | **D1** via server (in-memory maps are the hot path) |
 | Blobs | R2 only |
 | Chat | **IDB primary** (cloud optional rare export — off by default) |
 | Telemetry | Local only (no free-tier DB) |
+| Identity | Firebase Auth only |
 
-**D1 as primary SQL** stays parked (**R-5**, after R-1). **R-13** is “put the existing Express app on the public internet on Cloudflare” — not a D1 rewrite, not Pages Functions importing `server.ts`. Native `env.DB` / `env.BUCKET` is **R-13.4**, after go-live.
+**Do not** dual-write D1 + disk SQLite, or keep D1 as a live spare of SQLite. **R-13** is the Node origin on VPS-2 — not a D1 rewrite, not Pages Functions importing `server.ts`. Native `env.DB` / `env.BUCKET` is **R-13.4**, after go-live, and is unrelated to Track D’s SQLite gate.
 
 ---
 
@@ -170,7 +172,7 @@ Absorbed from archived `Reliability_perf.md`. **Do not start these to “finish 
 | R-13 | Cloudflare go-live + AI Studio parity | Human wants a public URL | See §12. Packet **locked**. R-13.0 preflight PASS. R-13.1 any agent. |
 | R-3 | Playwright leftover-English crawl plus Kosong empty Front Desk | After Track **S-1** string list is green; not a 10-case meal loop | Not a substitute for class goldens |
 | R-4 | Extract `server.ts` routes (food / jobs / biomarkers) | Touching the monolith anyway | Do not big-bang for free-tier |
-| R-5 | Investigate D1 as primary SQL | **After** R-1, free tier still fails | Default: stay on thin Supabase + R2 |
+| R-5 | Investigate D1 as primary SQL | **SUPERSEDED (Track D).** D1 is already live. SQLite-on-VPS = [DATA_PLANE.md](./DATA_PLANE.md) D-5 after V-16 | Do not reopen “stay on Supabase” |
 | R-6 | Job crash recovery soak | Interrupted jobs still orphan | Partial today — fix the bug, no new plan |
 | R-7 | knip / memoize `getBiomarkerStatus` | Never a reliability gate | **Abandoned** as a milestone |
 | R-8 | Measure client TTI + request count (Home / Health / first chat) | Page feels slow (**now true**) | No unmeasured “60%” claims |
@@ -630,7 +632,7 @@ Do **not** import LangSmith. Do **not** add a fourth live-testing tier.
 **Class:** `LIVE_DEPLOY`. Class X when touching auth, jobs, or sync.  
 **Do not** add a sixth `plan/` file. This section is the architecture.
 
-Trigger: the human wants a public URL. Not R-2 (static latency). Not R-5 (D1 as primary). Not “Current work” for AI Studio.
+Trigger: the human wants a public URL. Not R-2 (static latency). Not Track D / old R-5 (D1 is already primary). Not “Current work” for AI Studio.
 
 ### 12.1 Dual-mode (non-negotiable)
 

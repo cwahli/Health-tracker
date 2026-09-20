@@ -1,6 +1,7 @@
 # Storage audit: D1 vs Supabase vs R2
 
-**Date:** 2026-09-20 (UTC). **Auditor:** opencode agent (read-only queries only).
+**Date:** 2026-09-20 (UTC). **Auditor:** Muse Spark via OpenCode (read-only queries only). Commits `10a7061`, `6e5e5b4`. Companion list: [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json) — **do not execute**.
+**Indexed on:** [DATA_PLANE.md](./DATA_PLANE.md) Track D (**D-1** unpaid recovery, **D-9** stop regrowth, **D-10** deletes after D-1) and [ROADMAP.md](./ROADMAP.md).
 **Purpose:** Pre-cutover baseline for the VPS move. Is anything exclusively in
 Supabase? Is R2 healthy? What can be deleted, and what must never be?
 
@@ -23,9 +24,11 @@ Supabase? Is R2 healthy? What can be deleted, and what must never be?
   works). The Supabase migration file
   (`supabase/migrations/20260919_food_logs_source_meal_id.sql`) is committed
   but **cannot be applied while paused**.
-- Open risk: any rows written **only** to Supabase (pre-D1 era?) are locked
-  behind the pause. Unpause → compare → backfill → then delete code paths.
-  Do NOT delete the Supabase project before that comparison.
+- Open risk (Track D **D-1**, unpaid): any rows written **only** to Supabase
+  (pre-D1 era?) stay locked behind the 402 until the quota likely resets
+  **~2026-09-24**. Probe REST then; dump + diff vs D1; insert missing only.
+  **Do not pay to unpause.** If still 402, park and retry later. Drain leftover
+  *code* in D-2; **keep the remote project** until D-1.
 
 ## 2. R2 inventory (`health-tracker-photos`, 2026-09-20)
 
@@ -111,14 +114,12 @@ only (b), still gated on the Supabase comparison.
 2. Stop the base + `_0` double-write (589 twins and counting).
 3. Delete-cascade (or tombstone sweeper) for meal photos — see §3 orphans.
 
-## 5. Recommendations for the VPS agent
-1. Unpause Supabase → rerun §1 → backfill D1 gaps (if any) → then cut code.
-2. Add a delete-cascade (or tombstone sweeper) for meal photos; orphans grow daily.
-3. Put a retention policy on `debug/` + `logs/` + `jobs/` + `bugs/` (60% of
-   objects, ~500 MB of pure diagnostics).
+## 5. Recommendations (mapped to Track D — do not execute from this file)
+1. **D-1:** When REST is no longer 402 (~24 Sep, unpaid) → rerun §1 → backfill D1 gaps (if any). Keep the project until then.
+2. **D-9:** Stop photo regrowth (content-hash reuse on PUT; no base+`_0` twin). No deletes.
+3. **D-10 (after D-1):** delete-cascade / tombstone sweeper; retention on `debug/` + `logs/` + `jobs/` + `bugs/`; then the candidate JSON.
 4. Re-run procedure: `wrangler d1 execute health-tracker --remote` for counts;
    S3 `ListObjectsV2` via the R2 credentials in `.env`
    (`CLOUDFLARE_R2_*`) for inventory; parse D1 `image_urls`, normalize to
    `photos/<key>`, diff the sets. Never print credentials or meal contents.
-5. Keep `source_meal_id` migration file until Supabase is either migrated or
-   decommissioned — then delete it with the Supabase code paths.
+5. Keep `source_meal_id` migration file until D-1 then delete it with the D-2 code paths.

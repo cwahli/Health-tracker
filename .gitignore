@@ -21,6 +21,7 @@ test-results/
 
 # Local scratch (live captures, renders, replay scripts) — never commit
 tmp/
+qa-evidence/
 
 # Aider local
 .aider*

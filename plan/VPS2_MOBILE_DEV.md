@@ -19,7 +19,7 @@ Phone ──instruct──► VPS-2 (one CLI: grok | agy | opencode)
                       └─ Phase 2: Caddy → node dist/server.cjs (always on)
                                       │
                                       ├─ Gemini (meal vision)
-                                      ├─ Cloudflare R2 / D1 (photos, job rows)
+                                      ├─ Cloudflare R2 (photos) + D1 (SQL; Track D)
                                       └─ Firebase (login)
 ```
 
@@ -128,7 +128,7 @@ Internet → (optional Cloudflare orange-cloud DNS)
         → 127.0.0.1:3000  node dist/server.cjs   (systemd Restart=always)
 ```
 
-Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127.0.0.1:3000`, Gemini, R2, D1, Firebase, Supabase — copy from Render, never into git.
+Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127.0.0.1:3000`, Gemini, R2, D1, Firebase — copy from Render, never into git. Supabase env is leftover (Track D); not a second source of truth. Do not install SQLite as production in Track V — that is [DATA_PLANE.md](./DATA_PLANE.md) **D-5** after V-16.
 
 | ID | What | Done when | Do not |
 |---|---|---|---|
@@ -168,8 +168,8 @@ Firebase host: (exact Authorized Domain)
 ## Invariants
 
 1. GitHub is source of truth. The VM is a working tree + (later) the Node origin.
-2. Cloudflare stays **R2 + D1 + optional DNS**. It does not run meal analyze (`sharp`, in-memory jobs, loopback SSE).
-3. Gemini stays the vision model. Firebase stays login.
+2. Cloudflare stays **R2 + D1 + optional DNS** until Track D D-6 says otherwise. It does not run meal analyze (`sharp`, in-memory jobs, loopback SSE).
+3. Gemini stays the vision model. Firebase stays login. SQL stays D1 for the whole of Track V.
 4. One coding CLI at a time. Hermes may wrap it; Hermes is not a second writer in the same tree.
 5. No Docker for the site. Dockerfile remains for history / a future host; systemd runs `node dist/server.cjs`.
 6. `npm run dev` on a laptop/AI Studio stays Vite on 3000. Production is `dist/`.

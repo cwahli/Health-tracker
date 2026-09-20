@@ -46,8 +46,9 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (392 KB / 7,039 lines, 39 over its 7,000 ceiling).
 6. **R-13.1 PARKED / retargeted** — host is **OVH VPS-2**, not Cloud Run and not Cloudflare Containers. Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md) **Track V**. Site stays on Render until Phase 4 (V-13…V-16). Extra Cloudflare/Containers URL stays parked. Do not start Track V or R-13.1 in the same working tree as F-13.
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
+8. **Track D PARKED** — one SQL = **D1** (Firebase Auth + R2). Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Muse audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** = unpaid recovery when 402 lifts (~**2026-09-24**), not a paid dump. Drain **code** is D-2 (keep the project). R2 leak-stop is D-9; R2 deletes are **D-10 after D-1**. **SQLite on the VPS is D-5: extra testing and benchmark only, after V-16.** No cutover without D-6 human go.
 
-**Still `blocked_human`:** **L-5** (name a locale first — do not invent `fr`/`zh` copy) and **Track V / R-13.1** (order VPS-2 first — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest, Cloud Run go-live, deleting Render. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
+**Still `blocked_human`:** **L-5** (name a locale first — do not invent `fr`/`zh` copy), **Track V / R-13.1** (order VPS-2 first — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)), **Track D D-1** (unpaid Supabase probe ~24 Sep — [DATA_PLANE.md](./DATA_PLANE.md)), **D-3 / D-5…D-6 / D-10**. **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest, Cloud Run go-live, deleting Render, **VPS SQLite as production**, dual-write D1+SQLite, **paying to unpause Supabase**, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -89,12 +90,13 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
 | Make the site live / leave Render | **Track V** then **R-13.1** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). OVH VPS-2. R-13.0 preflight PASS. R-13.1 is `blocked_human` until V-0. Not Cloud Run. Not Pages Functions importing `server.ts`. Not Cloudflare Containers. |
+| One database / drop Supabase / SQLite on the VPS / R2 photo junk | **Track D** — [DATA_PLANE.md](./DATA_PLANE.md). Live SQL is **D1**. Muse audit [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** unpaid recovery ~24 Sep. SQLite is a **D-5 benchmark after V-16**, then D-6 human go. Not R-5. |
 | Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: putting curator back on Analyze, reopening FDC, Track R D1 (**R-5** / **R-13.4**), god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render. **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is `blocked_human` until VPS-2 exists. **L-5** stays human until a locale is named.  
-F-10 lives here + [FOOD.md](./FOOD.md) Process. Track V lives here + [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md).
+Do **not** start: putting curator back on Analyze, reopening FDC, **R-13.4** Worker rewrite, god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, **paying to unpause Supabase**, **R2 photo deletes before D-1**. **R-5** is superseded by Track D (D1 is already primary). **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is `blocked_human` until VPS-2 exists. **Track D D-1** waits for unpaid 402 lift (~24 Sep). **Track D D-5** is `blocked_human` until V-16. **L-5** stays human until a locale is named.  
+F-10 lives here + [FOOD.md](./FOOD.md) Process. Track V lives here + [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Track D lives here + [DATA_PLANE.md](./DATA_PLANE.md).
 
 ---
 
@@ -358,7 +360,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | **R-2** | Cloudflare Pages for `dist/` only (no API) | Static latency actually hurts. **Go-live is R-13.** |
 | **R-3** | Playwright leftover-English plus demo-empty smoke | After **S-1** string list is green; not instead of class goldens |
 | **R-4** | Finish `server.ts` router split | Already touching the monolith (`server_routes_{jobs,biomarkers,food}.ts` exist; `server.ts` still huge) |
-| **R-5** | D1 as primary SQL | **After** R-1 still fails free tier |
+| **R-5** | D1 as primary SQL | **SUPERSEDED by Track D.** D1 is already the live SQL (Supabase 402). Do not “investigate D1” again. SQLite-on-VPS is **D-5**, not this row. |
 | **R-6** | Job recovery soak | Interrupted jobs still orphan (unit test exists; not a soak) |
 | **R-8** | **Shipped** | Numbers recorded in `AI_HANDOVER.md` (DOMContentLoaded 1,485ms → 343ms, FCP 1,644ms → 384ms, Load 2,223ms → 1,131ms). Baseline established. | Page feels slow |
 | **R-9** | **Shipped** | Defer `startGoldenIngestWatcher` + `hydrateUserJobs` via `requestIdleCallback` (3500–4000ms timeout) + in-flight request deduplication. Zero startup duplicate fetches. | After R-8 baseline |
@@ -375,7 +377,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | **R-13.1** | **Retargeted.** Always-on Node on OVH VPS-2 (`node dist/server.cjs` + Caddy). Do **Track V** first (dev box + mobile + Grok/Agy/OpenCode), then Phase 4 cutover. Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). `blocked_human` until V-0 (VPS purchased). | `npm run dev` still Vite on 3000; public host always-on (no Render splash); job submit → D1 + R2; Google login on exact host; Render deleted only at V-17 | Import `server.ts` into Pages Functions; Cloud Run min-instances=0 as prod; Cloudflare Containers extra URL; skip `listen` on `CF_PAGES`; delete Render before V-16 PASS |
 | **R-13.2** | Loopback SSE `: ping`; keep 180s abort; align stale-fail copy | Silent 180s behind orange-cloud does not 524; `server_sse_json.test.ts` green | Raise Worker CPU to “make 3 min work” on V8 |
 | **R-13.3** | `server_auth.ts` localhost-only skip; popup/redirect fallback; preview policy | Spoofed `uid` rejected in prod; Google + email verify + Drive backup on prod host | `NODE_ENV !== 'production'` as a localhost synonym |
-| **R-13.4** | Native `env.DB` / `env.BUCKET`; in-process analyze; durable jobs | Worker can analyze without `127.0.0.1` and without `sharp` | Start this to unstick 13.1; D1-as-primary (that is **R-5**) |
+| **R-13.4** | Native `env.DB` / `env.BUCKET`; in-process analyze; durable jobs | Worker can analyze without `127.0.0.1` and without `sharp` | Start this to unstick 13.1; D1-as-primary (that is **Track D**, already live) |
 | **R-13.5** | Workers Logs; 1102/1027/524 alerts; static excluded from compute | Static `/assets/*` not billed as Functions | Pages Functions as the log host |
 
 ### Track V — mobile → VPS-2 → live site (`blocked_human` until V-0)
@@ -403,6 +405,26 @@ Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Do not execute from 
 | **V-16** | DNS cutover; Render still up | Cellular load, no Render splash, meal works |
 | **V-17** | Delete Render; scrub `onrender.com` | Old origin dead |
 | **V-18** | Confirm Containers/Cloud Run stay off | Runbook matches prod |
+
+### Track D — one database (D1 now; SQLite only after a VPS benchmark)
+
+Canonical plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 is superseded** (D1 is already primary; live Supabase is HTTP 402). Do not mix with F-13 or Track V Phase 4. Do **not** treat SQLite as the next execute ID.
+
+| ID | Phase | Status | Done when |
+|---|---|---|---|
+| **D-0** | Record SoT: Firebase Auth + D1 + R2; index Muse audit | **This plan** | Agents follow DATA_PLANE.md, not “stay on Supabase” |
+| **D-1** | Unpaid recovery when 402 lifts (~**2026-09-24**): dump + diff vs D1; insert missing only | `blocked_human` until REST ≠ 402 | Dated recovery log in DATA_PLANE.md (0 gaps is OK). **No extra bill.** |
+| **D-2** | Drain dead Supabase **code**; keep the remote project until D-1 | Needs locked packet | D1 is the only production SQL path; project still exists |
+| **D-3** | Workers Paid ~$5 before ~100 users | `blocked_human` | Free D1 daily cap cannot hard-stop the app |
+| **D-4** | Named D1 timing script; record wall vs SQL ms | Mac **2026-09-20** done; VPS pending | Dated Mac + VPS-dev + VPS-prod rows in DATA_PLANE.md |
+| **D-5** | **SQLite vs D1 benchmark on the VPS** (read-only copy, not a writer) | `blocked_human` until **V-16** | Table: D1 p50/p90 vs SQLite p50/p90 from that region |
+| **D-6** | Human: keep D1 **or** cut over | `blocked_human` until D-5 | Decision box filled in DATA_PLANE.md |
+| **D-7** | SQLite WAL + Litestream → R2; freeze D1 | **Not scheduled** (only if D-6 = cut over) | One SQL writer on disk; restore drill PASS |
+| **D-8** | Keep D1; delete any SQLite adapter | **Not scheduled** (only if D-6 = keep D1) | No `better-sqlite3` in prod |
+| **D-9** | Stop R2 photo **regrowth** (hash reuse; no `_0` twin). Muse audit. No deletes. | Needs locked packet | New uploads do not mint duplicate keys |
+| **D-10** | After D-1: apply [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json), sweeper, debug/logs retention | `blocked_human` until **D-1** | Audit re-run; no keys still referenced |
+
+**D-5 / D-6 decision rule:** user-visible sync extra wait **≤ ~100 ms p50** from the VPS → keep D1. **Consistently 500 ms–1 s** on sync/open-app → SQLite is in play. Meal analyze (~8 s Gemini) is not the yardstick. Do not dual-write. Do not keep D1 as a live spare.
 
 R-7 knip / `getBiomarkerStatus` memo as a reliability gate is **abandoned**.  
 R-8–R-11 are **client speed**, not a free-tier redo. Do not re-migrate images or re-kill Firestore writes.  
@@ -471,6 +493,7 @@ Q-4 AgentResultTable thin    ← shipped
 Q-10 dependency audit        ← shipped
 Q-11 App shell decoupling     ← DONE — 11.7/11.10/11.11/11.12 landed (App 350, Header 690)
 R-13.1 / Track V             ← PARKED blocked_human; host = OVH VPS-2 ([VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)); Cloudflare extra URL still parked; Render still live
+Track D (one SQL)            ← PARKED; live = D1 ([DATA_PLANE.md](./DATA_PLANE.md)); R-5 superseded; SQLite = D-5 benchmark after V-16, not a cutover
 Cloud Run Option A           ← SUPERSEDED (plan/GCP_FREE_TIER_MIGRATION.md)
 ```
 
@@ -512,7 +535,7 @@ packet. Q-9/Q-8.2 are green.
 
 | | **Any agent** (Studio / Antigravity / OpenCode / Cline) | **Grok** (quota-scarce) |
 |---|---|---|
-| Prefer | Current work: **Q-11 and Q-13 are complete** — the remaining >200 KB file is `LogChat.tsx`, which needs its own packet once the other agent's edits land. Otherwise next pick is `F-13` (food follow-up). **R-13.1 / Track V** stays `blocked_human` until a VPS-2 exists ([VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)). | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
+| Prefer | Current work: **Q-11 and Q-13 are complete** — the remaining >200 KB file is `LogChat.tsx`, which needs its own packet once the other agent's edits land. Otherwise next pick is `F-13` (food follow-up). **R-13.1 / Track V** stays `blocked_human` until a VPS-2 exists ([VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)). **Track D** stays on D1; D-1 waits for unpaid 402 lift ~24 Sep; do not start D-5 SQLite until V-16; do not run `R2_DELETE_CANDIDATES.json` ([DATA_PLANE.md](./DATA_PLANE.md)). | Catalog / process lock only when a **new** primitive or new god-file split is needed. |
 | Do not | `npm test`; critic LLM; USDA; invent a primitive; live Gemini as inner loop; wait for Grok | Sit in a live wait loop; rewrite binge; re-lock packets other agents are executing |
 
 ---
