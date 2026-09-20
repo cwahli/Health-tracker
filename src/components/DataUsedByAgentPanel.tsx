@@ -21,7 +21,7 @@ export interface DataUsedByAgentPanelProps {
   dataReviewBatchKeys?: string[] | null;
   biomarkers?: { [key: string]: number | string };
   biomarkerHistory?: any[];
-  dataReviewBatchIdx?: number | null;
+  dataReviewBatchIdx?: number | string | null;
   localBatchSize: number;
   setLocalBatchSize: (v: number) => void;
   budget: string;

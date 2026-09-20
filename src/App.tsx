@@ -1,7 +1,6 @@
 import AppShell from './components/AppShell';
-import type { UserProfile, FoodLog } from './types';
-import { useRef, useCallback } from 'react';
-import { JobStore } from './jobs/JobStore';
+import type { UserProfile } from './types';
+import { useRef } from 'react';
 import { useAuthSession } from './hooks/useAuthSession';
 import { useAppProfile } from './hooks/useAppProfile';
 import { useAppSync } from './hooks/useAppSync';
@@ -147,7 +146,7 @@ export default function App() {
     profileRef, foodLogsRef, biomarkersRef, biomarkerHistoryRef,
   });
   // Q-11.10 Node 1: food-log handlers live in hooks/useFoodLogActions.ts (move-only).
-  const { handleRestoreSnapshot, handleResolveConflict, handleLogFood, handleUpdateFoodLog, handleDeleteFoodLog } = useFoodLogActions({
+  const { handleRestoreSnapshot, handleResolveConflict, handleLogFood, handleUpdateFoodLog, handleDeleteFoodLog, handleReviewMeal } = useFoodLogActions({
     profile,
     foodLogs,
     biomarkers,
@@ -168,30 +167,8 @@ export default function App() {
     setConflictData,
     setSyncState,
     setShowSnapshotPanel,
+    setActiveJobId,
   });
-  // Re-review a saved meal: open a fresh food-chat draft seeded with the
-  // meal's photos. The draft carries reviewMealId so the resulting save
-  // updates the same log instead of duplicating it (see LogChat seed).
-  const handleReviewMeal = useCallback((log: FoodLog) => {
-    const photos = [log.imageUrl, ...(Array.isArray(log.imageUrls) ? log.imageUrls : [])]
-      .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
-      .slice(0, 4);
-    const reviewJobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    JobStore.createJob({
-      id: reviewJobId,
-      kind: 'food_log',
-      lockedModeFamily: 'A',
-      status: 'draft',
-      inputSnapshot: {
-        text: `Review this saved meal: ${log.name}`,
-        imageRefs: [],
-        reviewMealId: log.id,
-        reviewMealName: log.name,
-        reviewMealPhotos: photos,
-      },
-    });
-    setActiveJobId(reviewJobId);
-  }, [setActiveJobId]);
   // Q-11.10 Node 2: biomarker handlers live in hooks/useBiomarkerActions.ts (move-only).
   const {
     handleLogMedical, handleDeleteMultipleBiomarkers, handleDeleteBiomarker,
@@ -236,9 +213,6 @@ export default function App() {
     setIsGenerating,
   });
   // saveAndSync moved to hooks/useAppSync.ts
-
-
-
 
   // Render Screens based on active tab
   return (

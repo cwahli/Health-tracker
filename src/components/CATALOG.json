@@ -28,7 +28,7 @@
     "src/components/BiomarkerDictionaryModal.tsx": 3726,
     "src/components/chat-cards/FoodCard.tsx": 4200,
     "src/components/HomeTab.tsx": 3200,
-    "src/components/LogChat.tsx": 7000,
+    "src/components/LogChat.tsx": 6500,
     "server_vision_scout.ts": 1800,
     "server_routes_food_analyze.ts": 700,
     "server_food_analyze_run.ts": 3800,

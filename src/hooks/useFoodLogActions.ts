@@ -52,6 +52,7 @@ export interface UseFoodLogActionsParams {
   setConflictData: (c: ConflictData | null) => void;
   setSyncState: (s: 'synced' | 'syncing' | 'local' | 'conflict') => void;
   setShowSnapshotPanel: (b: boolean) => void;
+  setActiveJobId?: (id: string | null) => void;
 }
 
 export function useFoodLogActions(params: UseFoodLogActionsParams) {
@@ -76,6 +77,7 @@ export function useFoodLogActions(params: UseFoodLogActionsParams) {
     setConflictData,
     setSyncState,
     setShowSnapshotPanel,
+    setActiveJobId,
   } = params;
 
   const handleRestoreSnapshot = async (snapshot: any) => {
@@ -342,11 +344,36 @@ export function useFoodLogActions(params: UseFoodLogActionsParams) {
     await saveAndSync(updatedProfile, updatedFoods, biomarkers, biomarkerHistory, actions, dailyBenefits, report, { type: 'deleteFood', targetId: id });
   };
 
+  // Re-review a saved meal: open a fresh food-chat draft seeded with the
+  // meal's photos. The draft carries reviewMealId so the resulting save
+  // updates the same log instead of duplicating it (see LogChat seed).
+  const handleReviewMeal = (log: FoodLog) => {
+    const photos = [log.imageUrl, ...(Array.isArray(log.imageUrls) ? log.imageUrls : [])]
+      .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+      .slice(0, 4);
+    const reviewJobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    JobStore.createJob({
+      id: reviewJobId,
+      kind: 'food_log',
+      lockedModeFamily: 'A',
+      status: 'draft',
+      inputSnapshot: {
+        text: `Review this saved meal: ${log.name}`,
+        imageRefs: [],
+        reviewMealId: log.id,
+        reviewMealName: log.name,
+        reviewMealPhotos: photos,
+      },
+    });
+    setActiveJobId?.(reviewJobId);
+  };
+
   return {
     handleRestoreSnapshot,
     handleResolveConflict,
     handleLogFood,
     handleUpdateFoodLog,
     handleDeleteFoodLog,
+    handleReviewMeal,
   };
 }
