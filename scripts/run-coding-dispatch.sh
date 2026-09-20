@@ -17,6 +17,10 @@ PREFERRED_MODEL="muse-spark-1.3"
 
 for arg in "$@"; do
   case $arg in
+    --help|-h)
+      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--model='...']"
+      exit 0
+      ;;
     --task=*)
       TASK="${arg#*=}"
       shift
@@ -49,6 +53,19 @@ fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
+
+# Cross-platform timeout runner
+run_with_timeout() {
+  local duration="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$duration" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$duration" "$@"
+  else
+    "$@"
+  fi
+}
 
 HERMES_DIR="${HOME}/.hermes"
 AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
@@ -89,7 +106,7 @@ echo "[Dispatcher] ---> Tier 1: Invoking OpenCode CLI (Model: $PREFERRED_MODEL).
 TIER1_SUCCESS=0
 
 if [ -x "$OPENCODE_BIN" ]; then
-  timeout 8m "$OPENCODE_BIN" -p "Task for $BUG_ID ($CATEGORY): $TASK. Think deeply (High Thinking) before modifying files. Strictly verify your changes with npx tsc --noEmit and named vitest before finishing." || TIER1_SUCCESS=1
+  run_with_timeout 8m "$OPENCODE_BIN" -p "Task for $BUG_ID ($CATEGORY): $TASK. Think deeply (High Thinking) before modifying files. Strictly verify your changes with npx tsc --noEmit and named vitest before finishing." || TIER1_SUCCESS=1
 else
   echo "[Dispatcher] OpenCode binary not found at $OPENCODE_BIN, skipping to Tier 3..."
   TIER1_SUCCESS=1
@@ -98,7 +115,7 @@ fi
 # --- Tier 2: OpenCode Diagnostic & Unstick Nudge (if Tier 1 had errors) ---
 if [ $TIER1_SUCCESS -ne 0 ] && [ -x "$OPENCODE_BIN" ]; then
   echo "[Dispatcher] ---> Tier 2: Probing OpenCode agent to diagnose and unstick..."
-  timeout 5m "$OPENCODE_BIN" -p "The previous attempt for $BUG_ID failed or timed out. Inspect git diff and test failures. Analyze the error and complete the fix now." || true
+  run_with_timeout 5m "$OPENCODE_BIN" -p "The previous attempt for $BUG_ID failed or timed out. Inspect git diff and test failures. Analyze the error and complete the fix now." || true
 fi
 
 # Check if OpenCode applied a clean, type-safe fix
@@ -122,7 +139,7 @@ git checkout .
 git clean -fd
 
 if [ -x "$GROK_BIN" ]; then
-  timeout 10m "$GROK_BIN" -p "Task for $BUG_ID ($CATEGORY): $TASK. Note: A lighter model was unable to resolve this. Analyze the architecture deeply, fix the issue, and ensure npx tsc --noEmit exits 0." || true
+  run_with_timeout 10m "$GROK_BIN" -p "Task for $BUG_ID ($CATEGORY): $TASK. Note: A lighter model was unable to resolve this. Analyze the architecture deeply, fix the issue, and ensure npx tsc --noEmit exits 0." || true
 
   if npx tsc --noEmit > /dev/null 2>&1; then
     DIFF_COUNT=$(git status --porcelain | wc -l | tr -d ' ')
