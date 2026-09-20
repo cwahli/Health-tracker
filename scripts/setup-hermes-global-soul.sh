@@ -11,6 +11,8 @@ set -e
 
 HERMES_DIR="${HOME}/.hermes"
 PROFILES_DIR="${HERMES_DIR}/profiles"
+DEFAULT_FREE_MODEL="${HERMES_DEFAULT_MODEL:-upstage/solar-pro4:free}"
+DEFAULT_PROVIDER="${HERMES_DEFAULT_PROVIDER:-nous}"
 
 echo "=========================================================="
 echo " [Hermes Global Soul Setup]"
@@ -88,8 +90,11 @@ for qp in "${QA_PROFILES[@]}"; do
   qp_dir="${PROFILES_DIR}/${qp}"
   mkdir -p "${qp_dir}"
 
-  # Profile config
+  # Profile config — locked to working free model so gateway restarts never revert to glm-5.2
   cat > "${qp_dir}/config.yaml" << QA_EOF
+model:
+  default: ${DEFAULT_FREE_MODEL}
+  provider: ${DEFAULT_PROVIDER}
 agent:
   max_turns: 8
   preload_skills:
@@ -126,29 +131,16 @@ done
 ORCH_DIR="${PROFILES_DIR}/orchestrator"
 mkdir -p "${ORCH_DIR}"
 
-# Only write if config.yaml doesn't already exist (to avoid overwriting tokens)
 ORCH_CONFIG="${ORCH_DIR}/config.yaml"
-if [ -f "${ORCH_CONFIG}" ]; then
-  # Merge preload_skills if not already present
-  if ! grep -q "preload_skills" "${ORCH_CONFIG}"; then
-    cat >> "${ORCH_CONFIG}" << 'ORCH_APPEND'
-
-agent:
-  preload_skills:
-    - orchestrator-dispatcher
-ORCH_APPEND
-    echo "  ✓ ~/.hermes/profiles/orchestrator/config.yaml — preload_skills appended"
-  else
-    echo "  ~ ~/.hermes/profiles/orchestrator/config.yaml already has preload_skills, skipping"
-  fi
-else
-  cat > "${ORCH_CONFIG}" << 'ORCH_EOF'
+cat > "${ORCH_CONFIG}" << ORCH_EOF
+model:
+  default: ${DEFAULT_FREE_MODEL}
+  provider: ${DEFAULT_PROVIDER}
 agent:
   preload_skills:
     - orchestrator-dispatcher
 ORCH_EOF
-  echo "  ✓ ~/.hermes/profiles/orchestrator/config.yaml written"
-fi
+echo "  ✓ ~/.hermes/profiles/orchestrator/config.yaml written"
 
 cat > "${ORCH_DIR}/SOUL.md" << 'ORCH_SOUL_EOF'
 # Orchestrator Dispatcher (orchestrator)
@@ -167,23 +159,70 @@ ORCH_SOUL_EOF
 echo "  ✓ ~/.hermes/profiles/orchestrator/SOUL.md written"
 
 # ---------------------------------------------------------------
-# 4. GLOBAL ENVIRONMENT — Live Test URL (V-25)
+# 4. GLOBAL DEFAULT MODEL (Ensures global config never reverts to paid glm-5.2)
 # ---------------------------------------------------------------
-HERMES_ENV="${HERMES_DIR}/.env"
-if [ -f "$HERMES_ENV" ]; then
-  if ! grep -q "PLAYWRIGHT_TEST_BASE_URL" "$HERMES_ENV"; then
-    echo "PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org" >> "$HERMES_ENV"
-    echo "  ✓ Global PLAYWRIGHT_TEST_BASE_URL appended to ~/.hermes/.env"
-  else
-    echo "  ~ Global PLAYWRIGHT_TEST_BASE_URL already present in ~/.hermes/.env"
-  fi
-else
-  echo "PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org" > "$HERMES_ENV"
-  echo "  ✓ ~/.hermes/.env created with PLAYWRIGHT_TEST_BASE_URL"
+PYTHON_BIN="${HERMES_DIR}/hermes-agent/venv/bin/python"
+if [ ! -x "$PYTHON_BIN" ]; then
+  PYTHON_BIN="python3"
+fi
+
+if [ -f "${HERMES_DIR}/config.yaml" ]; then
+  $PYTHON_BIN -c "
+import yaml
+path = '${HERMES_DIR}/config.yaml'
+try:
+    with open(path, 'r') as f:
+        cfg = yaml.safe_load(f) or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    if 'model' not in cfg or not isinstance(cfg['model'], dict):
+        cfg['model'] = {}
+    cfg['model']['default'] = '${DEFAULT_FREE_MODEL}'
+    cfg['model']['provider'] = '${DEFAULT_PROVIDER}'
+    with open(path, 'w') as f:
+        yaml.dump(cfg, f, default_flow_style=False)
+    print('  ✓ Global ~/.hermes/config.yaml model set to ${DEFAULT_FREE_MODEL}')
+except Exception as e:
+    print('  ~ Warning: could not update ~/.hermes/config.yaml:', e)
+" 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------
-# 5. SUMMARY
+# 5. ENVIRONMENT VARIABLES (Model overrides & Live Test URL)
+# ---------------------------------------------------------------
+set_or_replace_env() {
+  local env_file="\$1"
+  local key="\$2"
+  local val="\$3"
+  if [ -f "\$env_file" ]; then
+    if grep -q "^\${key}=" "\$env_file"; then
+      sed -i "s|^\${key}=.*|\${key}=\${val}|" "\$env_file" 2>/dev/null || sed -i '' "s|^\${key}=.*|\${key}=\${val}|" "\$env_file"
+    else
+      echo "\${key}=\${val}" >> "\$env_file"
+    fi
+  else
+    echo "\${key}=\${val}" > "\$env_file"
+  fi
+}
+
+set_or_replace_env "${HERMES_DIR}/.env" "HERMES_INFERENCE_MODEL" "${DEFAULT_FREE_MODEL}"
+set_or_replace_env "${HERMES_DIR}/.env" "HERMES_PROVIDER" "${DEFAULT_PROVIDER}"
+set_or_replace_env "${HERMES_DIR}/.env" "PLAYWRIGHT_TEST_BASE_URL" "https://health-tracking.duckdns.org"
+echo "  ✓ Global ~/.hermes/.env configured with model=${DEFAULT_FREE_MODEL} and duckdns origin"
+
+# Also enforce in all profile .envs so per-profile environments never inherit stale model
+if [ -d "${PROFILES_DIR}" ]; then
+  for prof in "${PROFILES_DIR}"/*; do
+    if [ -d "\$prof" ]; then
+      set_or_replace_env "\$prof/.env" "HERMES_INFERENCE_MODEL" "${DEFAULT_FREE_MODEL}"
+      set_or_replace_env "\$prof/.env" "HERMES_PROVIDER" "${DEFAULT_PROVIDER}"
+    fi
+  done
+  echo "  ✓ All profile .env files configured with model=${DEFAULT_FREE_MODEL}"
+fi
+
+# ---------------------------------------------------------------
+# 6. SUMMARY
 # ---------------------------------------------------------------
 echo ""
 echo "=========================================================="
@@ -195,5 +234,5 @@ echo ""
 echo " To verify:"
 echo "   cat ~/.hermes/SOUL.md"
 echo "   cat ~/.hermes/profiles/qa_meal/config.yaml"
-echo "   cat ~/.hermes/.env | grep PLAYWRIGHT_TEST_BASE_URL"
+echo "   cat ~/.hermes/.env | grep -E '(HERMES_INFERENCE_MODEL|PLAYWRIGHT_TEST_BASE_URL)'"
 echo "=========================================================="
