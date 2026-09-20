@@ -191,17 +191,17 @@ fi
 # 5. ENVIRONMENT VARIABLES (Model overrides & Live Test URL)
 # ---------------------------------------------------------------
 set_or_replace_env() {
-  local env_file="\$1"
-  local key="\$2"
-  local val="\$3"
-  if [ -f "\$env_file" ]; then
-    if grep -q "^\${key}=" "\$env_file"; then
-      sed -i "s|^\${key}=.*|\${key}=\${val}|" "\$env_file" 2>/dev/null || sed -i '' "s|^\${key}=.*|\${key}=\${val}|" "\$env_file"
+  local env_file="$1"
+  local key="$2"
+  local val="$3"
+  if [ -f "$env_file" ]; then
+    if grep -q "^${key}=" "$env_file"; then
+      sed -i "s|^${key}=.*|${key}=${val}|" "$env_file" 2>/dev/null || sed -i '' "s|^${key}=.*|${key}=${val}|" "$env_file"
     else
-      echo "\${key}=\${val}" >> "\$env_file"
+      echo "${key}=${val}" >> "$env_file"
     fi
   else
-    echo "\${key}=\${val}" > "\$env_file"
+    echo "${key}=${val}" > "$env_file"
   fi
 }
 
@@ -210,15 +210,22 @@ set_or_replace_env "${HERMES_DIR}/.env" "HERMES_PROVIDER" "${DEFAULT_PROVIDER}"
 set_or_replace_env "${HERMES_DIR}/.env" "PLAYWRIGHT_TEST_BASE_URL" "https://health-tracking.duckdns.org"
 echo "  ✓ Global ~/.hermes/.env configured with model=${DEFAULT_FREE_MODEL} and duckdns origin"
 
-# Also enforce in all profile .envs so per-profile environments never inherit stale model
+# Propagate credentials and user ID to all profile .envs
+GLOBAL_ALLOWED=$(grep -E '^(TELEGRAM_ALLOWED_USERS|TELEGRAM_USER_ID)=' "${HERMES_DIR}/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- || true)
+
 if [ -d "${PROFILES_DIR}" ]; then
   for prof in "${PROFILES_DIR}"/*; do
-    if [ -d "\$prof" ]; then
-      set_or_replace_env "\$prof/.env" "HERMES_INFERENCE_MODEL" "${DEFAULT_FREE_MODEL}"
-      set_or_replace_env "\$prof/.env" "HERMES_PROVIDER" "${DEFAULT_PROVIDER}"
+    if [ -d "$prof" ]; then
+      set_or_replace_env "$prof/.env" "HERMES_INFERENCE_MODEL" "${DEFAULT_FREE_MODEL}"
+      set_or_replace_env "$prof/.env" "HERMES_PROVIDER" "${DEFAULT_PROVIDER}"
+      if [ -n "$GLOBAL_ALLOWED" ]; then
+        if ! grep -q "TELEGRAM_ALLOWED_USERS=" "$prof/.env" 2>/dev/null; then
+          echo "TELEGRAM_ALLOWED_USERS=${GLOBAL_ALLOWED}" >> "$prof/.env"
+        fi
+      fi
     fi
   done
-  echo "  ✓ All profile .env files configured with model=${DEFAULT_FREE_MODEL}"
+  echo "  ✓ All profile .env files configured with model=${DEFAULT_FREE_MODEL} and allowed users"
 fi
 
 # ---------------------------------------------------------------
