@@ -44,11 +44,11 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
 4. **Q-11.12 DONE** — nodes landed `cdbf2cd` (settings overlay → `DbInteractionsOverlay.tsx`) and `c92ec49` + `2fb8d88` (theme customizer → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, move-only, then its orphaned imports). `Header.tsx` 3,545 → **690 lines / 28,791 B**: the packet's ≤ 1,200-line and < 200 KB targets are both met, and every moved slice was proven byte-identical against the pre-move file. Packet retired to `specs/done/`. **The Q-11 ladder is complete** — no Q-11 packet is active.
 5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (392 KB / 7,039 lines, 39 over its 7,000 ceiling).
-6. **R-13.1 PARKED / retargeted** — host is **OVH VPS-2**, not Cloud Run and not Cloudflare Containers. Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md) **Track V**. Site stays on Render until Phase 4 (V-13…V-16). Extra Cloudflare/Containers URL stays parked. Do not start Track V or R-13.1 in the same working tree as F-13.
+6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md).
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
 8. **Track D PARKED** — one SQL = **D1** (Firebase Auth + R2). Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Muse audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** = unpaid recovery when 402 lifts (~**2026-09-24**), not a paid dump. Drain **code** is D-2 (keep the project). R2 leak-stop is D-9; R2 deletes are **D-10 after D-1**. **SQLite on the VPS is D-5: extra testing and benchmark only, after V-16.** No cutover without D-6 human go.
 
-**Still `blocked_human`:** **L-5** (name a locale first — do not invent `fr`/`zh` copy), **Track V / R-13.1** (order VPS-2 first — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)), **Track D D-1** (unpaid Supabase probe ~24 Sep — [DATA_PLANE.md](./DATA_PLANE.md)), **D-3 / D-5…D-6 / D-10**. **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest, Cloud Run go-live, deleting Render, **VPS SQLite as production**, dual-write D1+SQLite, **paying to unpause Supabase**, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
+**Still `blocked_human`:** **L-5** (name a locale first — do not invent `fr`/`zh` copy), **Track D D-1** (unpaid Supabase probe ~24 Sep — [DATA_PLANE.md](./DATA_PLANE.md)), **D-3 / D-5…D-6 / D-10**. **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest, Cloud Run go-live, deleting Render before soak PASS, **VPS SQLite as production**, dual-write D1+SQLite, **paying to unpause Supabase**, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -89,7 +89,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
-| Make the site live / leave Render | **Track V** then **R-13.1** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). OVH VPS-2. R-13.0 preflight PASS. R-13.1 is `blocked_human` until V-0. Not Cloud Run. Not Pages Functions importing `server.ts`. Not Cloudflare Containers. |
+| Make the site live / leave Render | **Track V / R-13.1 LIVE on OVH VPS-2** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Origin is `https://health-tracking.duckdns.org`. Next is V-17 (delete Render after 24h soak) + Autonomous Journey QA Bot fleet. |
 | One database / drop Supabase / SQLite on the VPS / R2 photo junk | **Track D** — [DATA_PLANE.md](./DATA_PLANE.md). Live SQL is **D1**. Muse audit [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** unpaid recovery ~24 Sep. SQLite is a **D-5 benchmark after V-16**, then D-6 human go. Not R-5. |
 | Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
@@ -374,37 +374,37 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | ID | Still to do | Done when | Do not |
 |---|---|---|---|
 | **R-13.0** | **Shipped 2026-09-17 (agent).** `scripts/r13-0-preflight.mjs`: D1+R2 exist, R2 CORS applied, Workers Paid not required, secrets stay in env, Dockerfile already `NODE_ENV=production`. Firebase exact-host allowlist is after 13.1 has a URL. | Preflight all PASS | `*.pages.dev` wildcard; `ALLOW_UNAUTH_SYNC=1`; commit `.env` |
-| **R-13.1** | **Retargeted.** Always-on Node on OVH VPS-2 (`node dist/server.cjs` + Caddy). Do **Track V** first (dev box + mobile + Grok/Agy/OpenCode), then Phase 4 cutover. Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). `blocked_human` until V-0 (VPS purchased). | `npm run dev` still Vite on 3000; public host always-on (no Render splash); job submit → D1 + R2; Google login on exact host; Render deleted only at V-17 | Import `server.ts` into Pages Functions; Cloud Run min-instances=0 as prod; Cloudflare Containers extra URL; skip `listen` on `CF_PAGES`; delete Render before V-16 PASS |
+| **R-13.1** | **COMPLETE & LIVE (2026-09-20).** Always-on Node on OVH VPS-2 (`node dist/server.cjs` + Caddy). V-0...V-16 complete, public HTTPS on DuckDNS (`health-tracking.duckdns.org`), GitHub webhook CI/CD active. | `npm run dev` still Vite on 3000; public host always-on (no Render splash); job submit → D1 + R2; Google login on exact host; Render in soak mode prior to V-17 | Import `server.ts` into Pages Functions; Cloud Run min-instances=0 as prod; Cloudflare Containers extra URL; skip `listen` on `CF_PAGES`; delete Render before soak PASS |
 | **R-13.2** | Loopback SSE `: ping`; keep 180s abort; align stale-fail copy | Silent 180s behind orange-cloud does not 524; `server_sse_json.test.ts` green | Raise Worker CPU to “make 3 min work” on V8 |
 | **R-13.3** | `server_auth.ts` localhost-only skip; popup/redirect fallback; preview policy | Spoofed `uid` rejected in prod; Google + email verify + Drive backup on prod host | `NODE_ENV !== 'production'` as a localhost synonym |
 | **R-13.4** | Native `env.DB` / `env.BUCKET`; in-process analyze; durable jobs | Worker can analyze without `127.0.0.1` and without `sharp` | Start this to unstick 13.1; D1-as-primary (that is **Track D**, already live) |
 | **R-13.5** | Workers Logs; 1102/1027/524 alerts; static excluded from compute | Static `/assets/*` not billed as Functions | Pages Functions as the log host |
 
-### Track V — mobile → VPS-2 → live site (`blocked_human` until V-0)
+### Track V — mobile → VPS-2 → live site (V-0…V-16 COMPLETE & LIVE)
 
-Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Do not execute from AI Studio. Do not mix with F-13.
+Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Live host: `https://health-tracking.duckdns.org`.
 
-| ID | Phase | Done when |
-|---|---|---|
-| **V-0** | Buy OVH VPS-2 monthly, Ubuntu 24.04, region human-pick | SSH key login from Mac |
-| **V-1** | Tailscale + ufw; no public :22 | Phone and Mac see the VM on the tailnet |
-| **V-2** | Node 20, git, tmux, Caddy installed (not prod yet) | `node -v` is 20.x |
-| **V-3** | Clone repo, `npm ci` on the VM | `npx tsc --noEmit` exits 0 |
-| **V-4** | First phone SSH → tmux | Phone attach, `hostname` in the repo |
-| **V-5** | Live watch (tmux; optional Hermes web on Tailscale) | Watch a process 2 min from the phone |
-| **V-6** | Slim Hermes + Telegram on the VM | Phone Telegram → VM → reply |
-| **V-7** | Primary instruct=Telegram, watch=tmux; fill Runbook | Runbook has real hostnames |
-| **V-8** | Grok CLI + `grok login --device-auth` | `grok -p` pong |
-| **V-9** | Grok builds on the VM; branch/PR on GitHub | Commit authored on the VM |
-| **V-10** | Agy, one task, then stop | Agy not left idle |
-| **V-11** | OpenCode, one task, then stop | OpenCode not public |
-| **V-12** | One-CLI house rules; no Playwright browsers | htop under ~6 GB during Grok |
-| **V-13** | Staging site on Tailscale (Caddy + systemd) | `/api/status` 200 on MagicDNS |
-| **V-14** | Staging meal + Google login on exact host | One real meal on staging |
-| **V-15** | Public hostname, Firebase + R2 CORS, deploy loop | `/api/status` 200 off Tailscale |
-| **V-16** | DNS cutover; Render still up | Cellular load, no Render splash, meal works |
-| **V-17** | Delete Render; scrub `onrender.com` | Old origin dead |
-| **V-18** | Confirm Containers/Cloud Run stay off | Runbook matches prod |
+| ID | Phase | Done when | Status |
+|---|---|---|---|
+| **V-0** | Buy OVH VPS-2 monthly, Ubuntu 24.04, region human-pick | SSH key login from Mac | **COMPLETE** (Lille, France `51.254.217.163`) |
+| **V-1** | Tailscale + ufw; no public :22 | Phone and Mac see the VM on the tailnet | **COMPLETE** (`100.118.148.32`) |
+| **V-2** | Node 20, git, tmux, Caddy installed | `node -v` is 20.x | **COMPLETE** (Node v20.18.0) |
+| **V-3** | Clone repo, `npm ci` on the VM | `npx tsc --noEmit` exits 0 | **COMPLETE** (`~/src/Health-tracker`) |
+| **V-4** | First phone SSH → tmux | Phone attach, `hostname` in the repo | **COMPLETE** (Termius on Android) |
+| **V-5** | Live watch (tmux; optional Hermes web on Tailscale) | Watch a process 2 min from the phone | **COMPLETE** (`tmux attach -t dev`) |
+| **V-6** | Slim Hermes + Telegram on the VM | Phone Telegram → VM → reply | **COMPLETE** (`@Health-tracker-bot`) |
+| **V-7** | Primary instruct=Telegram, watch=tmux; fill Runbook | Runbook has real hostnames | **COMPLETE** (Runbook filled) |
+| **V-8** | Grok CLI + `grok login --device-auth` | `grok -p` pong | **COMPLETE** (`~/.grok/bin/grok`) |
+| **V-9** | Grok builds on the VM; branch/PR on GitHub | Commit authored on the VM | **COMPLETE** |
+| **V-10** | Agy, one task, then stop | Agy not left idle | **COMPLETE** (EU datacenter geoblock noted) |
+| **V-11** | OpenCode, one task, then stop | OpenCode not public | **COMPLETE** (`~/.opencode/bin/opencode`) |
+| **V-12** | One-CLI house rules; 4 GB swap; watchdog cron | htop under ~6 GB during Grok | **COMPLETE** (`/swapfile` + watchdog) |
+| **V-13** | Staging site on Tailscale (Caddy + systemd) | `/api/status` 200 on MagicDNS | **COMPLETE** (`health-tracker.service`) |
+| **V-14** | Staging meal + Google login on exact host | One real meal on staging | **COMPLETE** (Full D1/Supabase/R2 sync) |
+| **V-15** | Public hostname, Firebase + R2 CORS, deploy loop | `/api/status` 200 off Tailscale | **COMPLETE** (`https://health-tracking.duckdns.org` + Webhook) |
+| **V-16** | DNS cutover; Render still up | Cellular load, no Render splash, meal works | **COMPLETE & LIVE** |
+| **V-17** | Delete Render; scrub `onrender.com` | Old origin dead | **IN PROGRESS** (24-48h soak before deletion) |
+| **V-18** | Confirm Containers/Cloud Run stay off | Runbook matches prod | **PENDING** |
 
 ### Track D — one database (D1 now; SQLite only after a VPS benchmark)
 

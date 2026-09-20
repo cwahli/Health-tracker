@@ -1,9 +1,9 @@
 # VPS-2 mobile → VM → live site
 
-**Status:** PLAN (not execute). Every ID is `blocked_human` until that ID’s human gate is done.  
+**Status:** LIVE & CUTOVER (V-0 through V-16 COMPLETE). Production website is live on OVH VPS-2 (`https://health-tracking.duckdns.org`) with automated GitHub webhook CI/CD and mobile agent toolchain.  
 **Replaces:** [plan/GCP_FREE_TIER_MIGRATION.md](./GCP_FREE_TIER_MIGRATION.md) (Cloud Run `min-instances=0`).  
-**Execute index:** [ROADMAP.md](./ROADMAP.md) **Track V**. Site cutover is **R-13.1**, retargeted here.  
-**Do not:** order a VPS from an agent, expose port 22, install Docker/Coolify, copy Mac `node_modules`, run Playwright browsers on the box, run two coding CLIs at once, or delete Render before V-16 PASS.
+**Execute index:** [ROADMAP.md](./ROADMAP.md) **Track V / R-13.1**.  
+**Current Phase:** Phase 4 (V-16 Soak Test) → Phase 5 (V-17 Render Deletion) + Autonomous Journey QA Bot fleet.  
 
 ---
 
@@ -148,19 +148,23 @@ Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127
 
 ---
 
-## Runbook (fill during V-7 / V-15)
+## Runbook (Production Live)
 
 ```text
-VPS:           (ovh name / IPv4)
-Region:        (EU | SG | other)
-Tailscale:     (magicdns)
-tmux watch:    ssh <tailscale>  then  tmux attach -t grok
-Telegram:      (bot username)  allowlist id: (your id)
-Repo on VM:    ~/src/Health-tracker
-Prod URL:      (after V-15)
-systemd:       health-tracker.service
-Deploy:        (git pull && npm ci && npm run build && sudo systemctl restart health-tracker)
-Firebase host: (exact Authorized Domain)
+VPS:           OVH VPS-2 (vps-0a61fae6) / 51.254.217.163
+Region:        EU (Gravelines / Lille, France)
+Tailscale:     100.118.148.32 (vps-0a61fae6)
+SSH:           Tailscale SSH (port 22 blocked publicly by ufw)
+tmux watch:    Termius → Tailscale SSH → tmux attach -t dev (or grok)
+Telegram:      @Health-tracker-bot (Hermes Telegram Gateway with Profile Multiplexer)
+Repo on VM:    /home/ubuntu/src/Health-tracker
+Prod URL:      https://health-tracking.duckdns.org (Caddy :443 -> 127.0.0.1:3000)
+systemd:       health-tracker.service (node dist/server.cjs)
+Deploy:        GitHub Webhook -> Caddy (/webhook/*) -> 127.0.0.1:9000 -> /home/ubuntu/deploy.sh
+Firebase host: health-tracking.duckdns.org (Authorized Domain in Firebase Console)
+Database:      Cloudflare D1 + Supabase + Cloudflare R2 (photos)
+Watchdog:      /home/ubuntu/scripts/watchdog.sh (every 10 hours via cron)
+QA Runner:     node scripts/qa-runner.mjs --journey={meal|biomarker|onboarding}
 ```
 
 ---

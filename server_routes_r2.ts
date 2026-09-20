@@ -41,19 +41,21 @@ export async function uploadBase64ToR2(id: string, base64Data: string, index: nu
   const client = getS3Client();
   const safeId = String(id || 'unknown').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
   const suffix = index > 0 ? `_${index}` : '';
-  const objectKey = `photos/${safeId}${suffix}.jpg`;
-  const publicUrl = `${CLOUDFLARE_R2_PUBLIC_URL}/${objectKey}`;
-  const proxyUrl = `/photos/${safeId}${suffix}.jpg`;
+  const fallbackProxyUrl = `/photos/${safeId}${suffix}.jpg`;
 
-  if (!client) {
-    console.warn('[R2 uploadBase64ToR2] S3 Client not configured, returning proxyUrl');
-    return proxyUrl;
+  if (!base64Data || typeof base64Data !== 'string') {
+    return fallbackProxyUrl;
   }
 
-  try {
-    let body;
-    let contentType = 'image/jpeg';
+  // If already a valid URL or photo path, return without re-uploading
+  if (base64Data.startsWith('http://') || base64Data.startsWith('https://') || base64Data.startsWith('/photos/')) {
+    return base64Data;
+  }
 
+  let body: Buffer;
+  let contentType = 'image/jpeg';
+
+  try {
     if (base64Data.startsWith('data:')) {
       const match = base64Data.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
       if (match) {
@@ -65,18 +67,47 @@ export async function uploadBase64ToR2(id: string, base64Data: string, index: nu
     } else {
       body = Buffer.from(base64Data, 'base64');
     }
+  } catch (err) {
+    console.error('[R2 uploadBase64ToR2] Failed decoding image buffer:', err);
+    return fallbackProxyUrl;
+  }
+
+  // SHA-256 Content-Addressable Storage (CAS) to guarantee zero duplicate image storage (Track D / D-9)
+  const hash = crypto.createHash('sha256').update(body).digest('hex');
+  const casKey = `photos/sha256_${hash}.jpg`;
+  const casPublicUrl = `${CLOUDFLARE_R2_PUBLIC_URL}/${casKey}`;
+  const casProxyUrl = `/photos/sha256_${hash}.jpg`;
+
+  if (!client) {
+    console.warn('[R2 uploadBase64ToR2] S3 Client not configured, returning casProxyUrl');
+    return casProxyUrl;
+  }
+
+  try {
+    // Check if identical photo already exists in R2 bucket
+    try {
+      const headCmd = new HeadObjectCommand({
+        Bucket: CLOUDFLARE_R2_BUCKET_NAME,
+        Key: casKey,
+      });
+      await client.send(headCmd);
+      // Already present in R2: reuse existing CAS object without re-uploading
+      return casPublicUrl;
+    } catch (headErr: any) {
+      // Object not found yet in R2, proceed with write
+    }
 
     const command = new PutObjectCommand({
       Bucket: CLOUDFLARE_R2_BUCKET_NAME,
-      Key: objectKey,
+      Key: casKey,
       Body: body,
       ContentType: contentType,
     });
     await client.send(command);
-    return publicUrl;
+    return casPublicUrl;
   } catch (err) {
     console.error('[R2 uploadBase64ToR2] Failed uploading to R2:', err);
-    return proxyUrl;
+    return casProxyUrl;
   }
 }
 

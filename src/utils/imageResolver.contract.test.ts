@@ -49,6 +49,17 @@ describe('imageResolver Contract & Deduplication', () => {
     expect(resolveFoodImage('ref:/photos/sha256_abcd1234ef.jpg', dummyLogs)).toBe('/photos/sha256_abcd1234ef.jpg');
   });
 
+  it('resolves multiple CAS paths and deduplicates identical image hashes', () => {
+    const images = [
+      '/photos/sha256_e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.jpg',
+      '/photos/sha256_e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.jpg',
+      'ref:/photos/sha256_e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.jpg',
+    ];
+    const resolved = resolveFoodImages(images, dummyLogs);
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]).toBe('/photos/sha256_e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.jpg');
+  });
+
   it('resolves an array of images and removes duplicates', () => {
     const images = [
       '/photos/direct.jpg',

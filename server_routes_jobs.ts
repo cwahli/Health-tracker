@@ -30,7 +30,7 @@ jobsRouter.post('/api/jobs/upsert', async (req, res) => {
         console.error('Failed to upsert job to D1 via server:', d1Res.error);
         return res.status(500).json({ error: d1Res.error });
       }
-    } else {
+    } else if (supabaseAdmin) {
       const { error } = await supabaseAdmin.from('agent_jobs').upsert(payload, { onConflict: 'id' });
       console.log(`[DIAG4] /api/jobs/upsert supabaseAdmin.upsert finished for job ${payload.id} in ${Date.now() - diag4Start}ms`);
       if (error) {

@@ -153,11 +153,11 @@ Failover: a second Node origin + Litestream/D1 backup. **D1 does not serve the S
 ## D-1 recovery log (empty until the 402 lifts)
 
 ```text
-Date probed:
-REST status:
-Gap food_logs / biomarker_logs / profiles / agent_jobs / food_items:
-Dump R2 key:
-Follow-up: retry DATE | gaps backfilled | no gaps
+Date probed: 2026-09-20 10:50 UTC
+REST status: HTTP 402 Payment Required (exceed_egress_quota)
+Gap food_logs / biomarker_logs / profiles / agent_jobs / food_items: [unreachable]
+Dump R2 key: none
+Follow-up: retry ~2026-09-24 when quota reset window opens
 ```
 
 ## Decision (empty until D-6)

@@ -372,7 +372,7 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
       profiles = d1Res.profiles;
       totalFoodsCount = d1Res.totalFoodsCount;
       totalBiomarkersCount = d1Res.totalBiomarkersCount;
-    } else {
+    } else if (supabaseAdmin) {
       // Lightweight columns for list view (always included)
       const lightColumns = 'id, firebase_uid, date, name, composition, weight_grams, quantity, consumed_amount, benefits, risks, health_impact, recommendation, calories, saturated_fat, sodium, added_sugar, nutrients, updated_at, verdict, description, message, debug_url, image_urls, source_meal_id';
       // Heavy JSON blob columns only included when listOnly is false
@@ -512,7 +512,7 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
           if (!r.success) console.warn('[D1 Pull] Obsolete duplicate biomarker cleanup error:', r.error);
           else console.log(`[D1 Pull] Cleaned up ${obsoleteDuplicateBioIds.length} obsolete duplicate biomarker rows from DB`);
         }).catch((e: any) => console.warn('[D1 Pull] Obsolete duplicate biomarker cleanup exception:', e));
-      } else {
+      } else if (supabaseAdmin) {
         Promise.resolve(
           supabaseAdmin
             .from('biomarker_logs')
@@ -610,7 +610,7 @@ syncRouter.post("/api/sync/food-log-detail", async (req, res) => {
       if (!data) {
         return res.status(404).json({ error: 'Log not found or access denied' });
       }
-    } else {
+    } else if (supabaseAdmin) {
       const { data: sbData, error } = await supabaseAdmin
         .from('food_logs')
         .select('id, composition, items_breakdown, scout_items, chat_transcript')
@@ -623,6 +623,8 @@ syncRouter.post("/api/sync/food-log-detail", async (req, res) => {
         return res.status(404).json({ error: 'Log not found or access denied' });
       }
       data = sbData;
+    } else {
+      return res.status(404).json({ error: 'Log not found (database not configured)' });
     }
 
     res.json({ success: true, detail: data });
@@ -895,7 +897,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
           } else {
             foodCount += foodsToUpsert.length;
           }
-        } else {
+        } else if (supabaseAdmin) {
           const { error } = await supabaseAdmin.from('food_logs').upsert(foodsToUpsert);
           if (error) {
             console.error('[Supabase Push] Food upsert error:', error.message);
@@ -921,7 +923,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
           console.error('[D1 Push] Food delete error:', d1DelRes.error);
           pushErrors.push({ table: 'food_logs', op: 'delete', message: d1DelRes.error || 'D1 food delete failed' });
         }
-      } else {
+      } else if (supabaseAdmin) {
         const { error } = await supabaseAdmin.from('food_logs').delete().in('id', foodsToDeleteIds);
         if (error) {
           console.error('[Supabase Push] Food delete error:', error.message);
@@ -950,7 +952,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
           } else {
             bioCount += biosToUpsert.length;
           }
-        } else {
+        } else if (supabaseAdmin) {
           const { error } = await supabaseAdmin.from('biomarker_logs').upsert(biosToUpsert);
           if (error) {
             console.error('[Supabase Push] Biomarker upsert error:', error.message);
@@ -967,7 +969,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
           console.error('[D1 Push] Biomarker delete error:', d1BioDelRes.error);
           pushErrors.push({ table: 'biomarker_logs', op: 'delete', message: d1BioDelRes.error || 'D1 bio delete failed' });
         }
-      } else {
+      } else if (supabaseAdmin) {
         const { error } = await supabaseAdmin.from('biomarker_logs').delete().in('id', biosToDeleteIds);
         if (error) {
           console.error('[Supabase Push] Biomarker delete error:', error.message);
@@ -982,7 +984,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
         if (isD1Configured()) {
           const profRow = await d1GetProfile(canonicalUid);
           existingData = profRow?.data || {};
-        } else {
+        } else if (supabaseAdmin) {
           const { data: existingRows } = await supabaseAdmin.from('profiles').select('*').eq('firebase_uid', canonicalUid);
           existingData = existingRows && existingRows[0] ? (existingRows[0].data || {}) : {};
         }
@@ -1186,7 +1188,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
           } else {
             console.log(`[D1 Push] Successfully upserted profile data for ${canonicalUid}`);
           }
-        } else {
+        } else if (supabaseAdmin) {
           const { error: profErr } = await supabaseAdmin.from('profiles').upsert({
             id: canonicalUid,
             firebase_uid: canonicalUid,
