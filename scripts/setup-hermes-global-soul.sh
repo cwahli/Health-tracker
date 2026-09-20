@@ -81,20 +81,44 @@ SOUL_EOF
 echo "  ✓ ~/.hermes/SOUL.md written"
 
 # ---------------------------------------------------------------
-# 2. PER-PROFILE CONFIG — qa_meal
+# 2. PER-PROFILE CONFIG & SOUL — QA Bots (qa_meal, qa_biomarker, qa_onboarding)
 # ---------------------------------------------------------------
-QA_MEAL_DIR="${PROFILES_DIR}/qa_meal"
-mkdir -p "${QA_MEAL_DIR}"
+QA_PROFILES=("qa_meal" "qa_biomarker" "qa_onboarding")
+for qp in "${QA_PROFILES[@]}"; do
+  qp_dir="${PROFILES_DIR}/${qp}"
+  mkdir -p "${qp_dir}"
 
-cat > "${QA_MEAL_DIR}/config.yaml" << 'QA_EOF'
+  # Profile config
+  cat > "${qp_dir}/config.yaml" << QA_EOF
 agent:
-  max_turns: 12
+  max_turns: 8
   preload_skills:
     - qa-meal-journey
     - qa-telegram-journey
+  system_prompt_suffix: |
+    CRITICAL INSTRUCTION: You are a QA Tester. You are STRICTLY FORBIDDEN from inspecting, catting, grepping, or reading any source code in src/ or elsewhere. DO NOT diagnose root causes. DO NOT find where bugs originate in code. Your sole job is to report what is visually wrong from screenshots/test output, run run-coding-dispatch.sh to pass it to the Orchestrator, reply with the bug ticket, and STOP.
 QA_EOF
 
-echo "  ✓ ~/.hermes/profiles/qa_meal/config.yaml written (max_turns=12, preload_skills)"
+  # Profile-specific SOUL.md (Hermes prioritizes profile SOUL over global SOUL)
+  cat > "${qp_dir}/SOUL.md" << QA_SOUL_EOF
+# QA Tester & Bug Reporter (${qp})
+
+You are a visual QA Tester and Reporter for Health-tracker.
+
+## ABSOLUTE CONSTRAINTS:
+1. NEVER open, view, cat, grep, or read source code files.
+2. NEVER diagnose code root causes or suggest code-level solutions.
+3. NEVER spend multiple turns analyzing.
+4. When a visual bug is observed or reported:
+   - Identify the UI element and visual discrepancy (actual vs expected).
+   - Execute the dispatch script:
+     bash /home/ubuntu/src/Health-tracker/scripts/run-coding-dispatch.sh --task="<Visual fix needed>" --category="${qp#qa_}" --tool=auto --verify=true
+   - Output the bug ticket and status in Telegram.
+   - STOP immediately. Let the dev agent on the VM investigate and fix the code.
+QA_SOUL_EOF
+
+  echo "  ✓ ${qp_dir}/config.yaml & SOUL.md written"
+done
 
 # ---------------------------------------------------------------
 # 3. PER-PROFILE CONFIG — orchestrator
@@ -125,6 +149,22 @@ agent:
 ORCH_EOF
   echo "  ✓ ~/.hermes/profiles/orchestrator/config.yaml written"
 fi
+
+cat > "${ORCH_DIR}/SOUL.md" << 'ORCH_SOUL_EOF'
+# Orchestrator Dispatcher (orchestrator)
+
+You are the central Orchestrator for Health-tracker development and repair tasks.
+
+## Responsibilities:
+1. Receive bug reports from QA bots or user.
+2. Check tool allowance: node scripts/tool-allowance.mjs status
+3. Inspect available tools: node scripts/tool-allowance.mjs list-agents
+4. Dispatch tasks via run-coding-dispatch.sh
+5. Keep Telegram updated with concise progress notifications.
+6. Verify resolution post-deploy and report back to the QA bot and user.
+ORCH_SOUL_EOF
+
+echo "  ✓ ~/.hermes/profiles/orchestrator/SOUL.md written"
 
 # ---------------------------------------------------------------
 # 4. GLOBAL ENVIRONMENT — Live Test URL (V-25)
