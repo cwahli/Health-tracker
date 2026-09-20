@@ -1,0 +1,11 @@
+{
+  "id": "G-B4",
+  "class": "IDENTITY_FALSE_FRIEND",
+  "mappedKeys": {
+    "urine_albumin": "urine_albumin",
+    "mean_corpuscular_hemoglobin": "mean_corpuscular_hemoglobin",
+    "mch": "mean_corpuscular_hemoglobin",
+    "albumin": "serum_albumin",
+    "urine albumin g/L": "urine_albumin"
+  }
+}

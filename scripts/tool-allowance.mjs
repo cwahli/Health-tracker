@@ -325,6 +325,30 @@ if (command === 'pick-tool') {
     const cooldown = tool.cooldown_until ? ` (Cooldown until ${tool.cooldown_until})` : '';
     console.log(`- ${tool.name} (${key}): Installed=${installed}, Status=${tool.status}, Allowance=${tool.allowance_level}${cooldown}, Successes=${tool.success_count}, Fails=${tool.failure_count}`);
   }
+} else if (command === 'list-agents') {
+  const state = loadState();
+  refreshCooldowns(state);
+
+  const AGENT_META = {
+    opencode: { tier: 'free', models: ['muse-spark-1.3', 'deepseek-flash-4.1'], thinking: false },
+    cline:    { tier: 'free', models: ['DeepSeek auto-approve'],                 thinking: true  },
+    grok:     { tier: 'free', models: ['grok-build (free quota)'],               thinking: false },
+    agy:      { tier: 'free', models: ['gemini-flash'],                          thinking: false }
+  };
+
+  console.log('Agent Pool Status:\n');
+  for (const [key, tool] of Object.entries(state.tools)) {
+    const installed = isBinaryInstalled(key);
+    const meta = AGENT_META[key] || { tier: 'unknown', models: [], thinking: false };
+    const inCooldown = tool.cooldown_until && new Date(tool.cooldown_until).getTime() > Date.now();
+    const available = installed && !inCooldown && tool.status !== 'depleted';
+    const icon = !installed ? '[MISSING]' : inCooldown ? '[COOLDOWN]' : '[OK]';
+    const cooldownStr = inCooldown ? ` cooldown until ${new Date(tool.cooldown_until).toLocaleTimeString()}` : '';
+    const thinkingStr = meta.thinking ? ' | thinking: high/low' : '';
+    console.log(`${icon} ${tool.name} | tier: ${meta.tier} | ${available ? 'available' : 'unavailable'}${cooldownStr}`);
+    console.log(`       models: ${meta.models.join(', ')}${thinkingStr}`);
+    console.log(`       successes: ${tool.success_count} | failures: ${tool.failure_count}`);
+  }
 } else {
-  console.log('Usage: node scripts/tool-allowance.mjs <status|pick-tool|report-result> [options]');
+  console.log('Usage: node scripts/tool-allowance.mjs <status|list-agents|pick-tool|report-result> [options]');
 }
