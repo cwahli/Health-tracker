@@ -1,12 +1,9 @@
 {
-  "projectId": "kempt-charmer-0r5vm",
-  "appId": "1:615352013376:web:0f68d4191275cf892c85a5",
-  "apiKey": "AIzaSyAetxFDr-tXSi4RcMZamjmJrXVwKmwOF4E",
-  "authDomain": "kempt-charmer-0r5vm.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-biomarkerandnutr-08909b73-fa3b-476a-a58f-0cce7d43db2c",
-  "storageBucket": "kempt-charmer-0r5vm.firebasestorage.app",
-  "messagingSenderId": "615352013376",
-  "measurementId": "",
-  "oAuthClientId": "615352013376-mm2cuakcdfosd02t9mqnfbnnbo4uju5t.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "projectId": "health-tracker-b04dd",
+  "appId": "1:888247735493:web:5ba2982135e773fe624cac",
+  "apiKey": "AIzaSyDZg5M8omX-VLax-s-Ti3KdiThMO9AkdNM",
+  "authDomain": "health-tracker-b04dd.firebaseapp.com",
+  "storageBucket": "health-tracker-b04dd.firebasestorage.app",
+  "messagingSenderId": "888247735493",
+"measurementId": "G-FG8DCMK32V"
 }
