@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { finalizeDishLedger, parseOcrLabel } from "./server_dish_finalize";
+import { matchBrandMenu } from "./server_brand_match";
 
 describe("server_dish_finalize", () => {
   it("scales scout baseline nutrients proportionally by R (consumedWeight / nutrientBasisWeight)", async () => {
@@ -586,6 +587,71 @@ describe("server_dish_finalize", () => {
     expect(ledger.nutrients.vitaminC).toBeCloseTo(125.4, 1);
     expect(ledger.nutrients.vitaminC).not.toBe(1000);
     expect(ledger.lockedNutrientKeys).toContain("vitaminC");
+  });
+
+  it("F-13.2 live T2 replay: per-100g brand lock at 40 g lands on one basis (not 400 kcal @ 40 g)", async () => {
+    // Hard evidence: live review-mode T2 `job_1789655364725_qoestq254`
+    // (text `[Mr Oat Rolled Oats] [40g] add oats, drop the coconut`) recorded
+    // the lock row as 400 kcal @ 40 g with inconsistently scaled macros.
+    // The real catalog row is per-100g {400, 11.7, 70, 11.7}; 40 g must be
+    // {160, 4.7, 28, 4.7}. Tag-shaped item: no nutrientBasisWeight, no
+    // scout nutrients — exactly what injectExplicitFoodTags submits.
+    const brandMatch = await matchBrandMenu(null, "Mr Oat Rolled Oats");
+    expect(brandMatch.matched).toBe(true);
+    expect(brandMatch.valuesAtBasis?.calories).toBe(400);
+
+    const ledger = await finalizeDishLedger({
+      item: {
+        scoutIndex: 1000,
+        originalName: "Mr Oat Rolled Oats",
+        keyword: "Mr Oat Rolled Oats",
+        estimatedWeightGrams: 40,
+        source: "catalog_tag",
+        dbId: "brand_menu_local_mr_oat_mr_oat_rolled_oats",
+        dbSource: "internal_catalog",
+      },
+      nutrientBasisWeight: 40,
+      consumedWeight: 40,
+    });
+
+    expect(ledger.dbSource).toBe("brand_official");
+    expect(ledger.nutrients.calories).toBe(160);
+    expect(ledger.nutrients.protein).toBeCloseTo(4.7, 1);
+    expect(ledger.nutrients.carbohydrates).toBeCloseTo(28, 0);
+    expect(ledger.nutrients.totalFat).toBeCloseTo(4.7, 1);
+    // One basis: locked kcal agrees with Atwater on the locked macros.
+    expect(ledger.atwaterFlag?.flagged).toBe(false);
+  });
+
+  it("F-13.2 guard: per-serving Big Mac lock still records 508 kcal @ 215 g", async () => {
+    // The D1 Big Mac row carries per-serving values {508, 26, 43, 25} at
+    // servingGrams 215. A naive always-weight-over-100 rescale would print
+    // 1092 kcal; the serving basis must win. Shape mirrors the live lock
+    // from `job_1789667612860_k5ot7l3bb` (per_dish-stamped, servingGrams 215).
+    const ledger = await finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        originalName: "Big Mac",
+        keyword: "Big Mac",
+        chainName: "mcdonalds",
+        estimatedWeightGrams: 215,
+      },
+      nutrientBasisWeight: 215,
+      consumedWeight: 215,
+      storedBrandLock: {
+        id: "bmi_1789651515861_3hjkx",
+        basisType: "per_dish",
+        servingGrams: 215,
+        keys: ["calories", "protein", "totalFat", "carbohydrates", "sodium"],
+        valuesAtBasis: { calories: 508, protein: 26, totalFat: 25, carbohydrates: 43, sodium: 920 },
+      },
+    });
+
+    expect(ledger.dbSource).toBe("brand_official");
+    expect(ledger.nutrients.calories).toBe(508);
+    expect(ledger.nutrients.protein).toBeCloseTo(26, 0);
+    expect(ledger.nutrients.carbohydrates).toBeCloseTo(43, 0);
+    expect(ledger.nutrients.totalFat).toBeCloseTo(25, 0);
   });
 
   it("adds more fat/Na for fast_food_chain deep_fried than home_cooked and re-derives Atwater (F-10.6)", async () => {

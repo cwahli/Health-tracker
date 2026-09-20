@@ -284,6 +284,18 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
   }
 
   // 2. Check Brand database truth (if not locked by OCR)
+  // F-13.2: lock values live at the row's servingGrams (per-100g rows carry
+  // servingGrams 100; per-serving rows carry the dish weight, e.g. Big Mac
+  // 215). Scale by consumed/servingGrams whenever servingGrams is known, so a
+  // mislabeled basis can never print per-100g values raw at 40 g again
+  // (live T2 `job_1789655364725_qoestq254`: 400 kcal @ 40 g). Falls back to
+  // the basis label only when servingGrams is absent.
+  const lockScaleFor = (lock: FinalizeInput['storedBrandLock']): number => {
+    const serving = Number(lock?.servingGrams);
+    if (Number.isFinite(serving) && serving > 0) return consumedWeight / serving;
+    if (lock?.basisType === 'per_100g') return consumedWeight / 100;
+    return R;
+  };
   if (dbSource !== 'label') {
     if (brandLock) {
       // Re-rating an already-stored brand lock (Portion edit or D8)
@@ -299,12 +311,9 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
         const fromItem = String(item.foodName || item.canonicalDbName || item.originalName || '').trim();
         if (fromItem) brandDisplayName = fromItem;
       }
+      const lockScale = lockScaleFor(brandLock);
       for (const [k, v] of Object.entries(brandLock.valuesAtBasis)) {
-        if (brandLock.basisType === 'per_100g') {
-          nutrients[k] = Math.round(v * (consumedWeight / 100) * 10) / 10;
-        } else {
-          nutrients[k] = Math.round(v * R * 10) / 10;
-        }
+        nutrients[k] = Math.round(v * lockScale * 10) / 10;
         if (!lockedNutrientKeys.includes(k)) lockedNutrientKeys.push(k);
       }
       if (nutrients.calories) nutrients.calories = Math.round(nutrients.calories);
@@ -333,12 +342,7 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
           valuesAtBasis: brandMatch.valuesAtBasis || {},
         };
         for (const [k, v] of Object.entries(brandLock.valuesAtBasis)) {
-          if (brandLock.basisType === 'per_100g') {
-            nutrients[k] = Math.round(v * (consumedWeight / 100) * 10) / 10;
-          } else {
-            // per_dish at basis portion
-            nutrients[k] = Math.round(v * R * 10) / 10;
-          }
+          nutrients[k] = Math.round(v * lockScaleFor(brandLock) * 10) / 10;
           if (!lockedNutrientKeys.includes(k)) lockedNutrientKeys.push(k);
         }
         if (nutrients.calories) nutrients.calories = Math.round(nutrients.calories);
