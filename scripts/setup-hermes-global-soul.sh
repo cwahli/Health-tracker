@@ -229,17 +229,19 @@ if [ -d "${PROFILES_DIR}" ]; then
 fi
 
 # ---------------------------------------------------------------
-# 6. SUMMARY
+# 6. SUMMARY & GATEWAY RESTART FOR ALL PROFILES
 # ---------------------------------------------------------------
 echo ""
 echo "=========================================================="
-echo " Setup complete. Next: sync skills and restart gateway."
+echo " Setup complete. Next: sync skills and restart all gateways."
 echo ""
 echo "   bash scripts/sync-hermes-skills.sh"
-echo "   hermes gateway restart"
+echo "   hermes gateway restart --all"
+echo "   hermes gateway list"
 echo ""
-echo " To verify:"
+echo " To verify profiles & active model:"
 echo "   cat ~/.hermes/SOUL.md"
+echo "   cat ~/.hermes/profiles/orchestrator/config.yaml"
 echo "   cat ~/.hermes/profiles/qa_meal/config.yaml"
 echo "   cat ~/.hermes/.env | grep -E '(HERMES_INFERENCE_MODEL|PLAYWRIGHT_TEST_BASE_URL)'"
 echo "=========================================================="

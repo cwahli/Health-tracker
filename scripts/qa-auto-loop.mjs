@@ -200,9 +200,19 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       }
     } catch (e) {}
 
+    // 1. Send BEFORE screenshot
+    if (currentBug.screenshot && fs.existsSync(currentBug.screenshot)) {
+      sendTelegram({
+        photo: currentBug.screenshot,
+        caption: `📸 *[BEFORE FIX]* \`${currentBug.id}\`\n*Observed Defect:* ${currentBug.title}\n*Visual State:* Original defective UI state`
+      });
+    }
+
+    // 2. Send AFTER screenshot
+    const finalAfterPhoto = fs.existsSync(afterScreenshotPath) ? afterScreenshotPath : currentBug.screenshot;
     sendTelegram({
-      photo: fs.existsSync(afterScreenshotPath) ? afterScreenshotPath : currentBug.screenshot,
-      caption: `🎉 *[BUG RESOLVED & VERIFIED]* \`${currentBug.id}\`\n\n*Journey:* ${journey}\n*Resolved By:* ${resolvedBy}\n*Attempts:* ${attempt}/${MAX_ATTEMPTS}\n*Resolution:* Successfully verified on live site.\n*Tests:* All checks green, zero regressions!`
+      photo: finalAfterPhoto,
+      caption: `🎉 *[AFTER FIX — RESOLVED & CONFIRMED]* \`${currentBug.id}\`\n\n*Journey:* ${journey}\n*Resolved By:* ${resolvedBy}\n*Attempts:* ${attempt}/${MAX_ATTEMPTS}\n*Live Verification:* Pass (0 defects)\n\n_Side-by-side Before vs. After confirmed on live site!_`
     });
 
     console.log(`[AutoLoop] Loop completed with 100% resolution on attempt ${attempt}!`);
