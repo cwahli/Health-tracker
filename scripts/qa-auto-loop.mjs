@@ -31,6 +31,7 @@ function getArg(name, defaultValue = '') {
 }
 
 const journey = getArg('journey', 'meal');
+const profile = getArg('profile', process.env.HERMES_PROFILE || `qa_${journey}`);
 const chatId = getArg('chat-id', process.env.TELEGRAM_CHAT_ID || '');
 const threadId = getArg('thread-id', process.env.TELEGRAM_THREAD_ID || '');
 
@@ -43,6 +44,7 @@ function sendTelegram({ text, photo, caption }) {
   if (text) cmdArgs.push(`--text="${text.replace(/"/g, '\\"')}"`);
   if (photo) cmdArgs.push(`--photo="${photo}"`);
   if (caption) cmdArgs.push(`--caption="${caption.replace(/"/g, '\\"')}"`);
+  if (profile) cmdArgs.push(`--profile="${profile}"`);
   if (chatId) cmdArgs.push(`--chat-id="${chatId}"`);
   if (threadId) cmdArgs.push(`--thread-id="${threadId}"`);
 
@@ -128,6 +130,7 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     `--category=${journey}`,
     `--tool=${toolChoice}`,
     `--thinking=${thinkingLevel}`,
+    `--profile=orchestrator`,
     `--verify=false`
   ];
 

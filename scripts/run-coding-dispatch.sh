@@ -25,13 +25,14 @@ REQUESTED_TOOL="auto"
 PREFERRED_MODEL="muse-spark-1.3"
 THINKING="high"
 SCREENSHOT=""
+DISPATCH_PROFILE="${HERMES_PROFILE:-orchestrator}"
 
 PREFER_VERIFY="auto"
 
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none] [--verify=true|false|auto]"
+      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none] [--verify=true|false|auto] [--profile=orchestrator]"
       exit 0
       ;;
     --task=*)    TASK="${arg#*=}" ;;
@@ -42,6 +43,7 @@ for arg in "$@"; do
     --thinking=*) THINKING="${arg#*=}" ;;
     --screenshot=*) SCREENSHOT="${arg#*=}" ;;
     --verify=*)  PREFER_VERIFY="${arg#*=}" ;;
+    --profile=*) DISPATCH_PROFILE="${arg#*=}" ;;
     *)
       if [ -z "$TASK" ]; then TASK="$arg"; fi
       ;;
@@ -78,7 +80,7 @@ if [ -f "$DISPATCH_LOCK" ]; then
   LOCKED_BUG=$(echo "$LOCKED_INFO" | cut -d: -f2)
   if [ -n "$LOCKED_PID" ] && kill -0 "$LOCKED_PID" 2>/dev/null; then
     echo "[Dispatcher] Concurrency lock: PID $LOCKED_PID is active on $LOCKED_BUG."
-    bash "$TELEGRAM_SCRIPT" --text="⚠️ *[Orchestrator]* Concurrency Lock: Task \`$LOCKED_BUG\` is currently executing (PID \`$LOCKED_PID\`). Please wait for it to complete." 2>/dev/null || true
+    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* Concurrency Lock: Task \`$LOCKED_BUG\` is currently executing (PID \`$LOCKED_PID\`). Please wait for it to complete." 2>/dev/null || true
     exit 0
   else
     rm -f "$DISPATCH_LOCK" 2>/dev/null || true
@@ -101,9 +103,9 @@ tg_msg() {
   local text="$1"
   local photo="${2:-}"
   if [ -n "$photo" ] && [ -f "$photo" ]; then
-    bash "$TELEGRAM_SCRIPT" --photo="$photo" --caption="$text" 2>/dev/null || true
+    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --photo="$photo" --caption="$text" 2>/dev/null || true
   else
-    bash "$TELEGRAM_SCRIPT" --text="$text" 2>/dev/null || true
+    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="$text" 2>/dev/null || true
   fi
 }
 
