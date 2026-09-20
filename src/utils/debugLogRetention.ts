@@ -1,4 +1,5 @@
 import { deleteDebugPayloadFromR2 } from './r2Storage';
+import { d1Query, isD1Configured, safeJsonParse } from '../../server_d1.js';
 
 export interface DebugRetentionCheckItem {
   id?: string;
@@ -19,23 +20,83 @@ export interface DebugRetentionResult {
 }
 
 /**
- * Extracts a normalized list of references from bug tracker tables (issue_tags, issue_backlog, golden_cases)
+ * Extracts a normalized list of references from bug tracker tables (issue_tags, issue_backlog)
  * to ensure that any debug log referenced in the bug tracker is protected from automated deletion.
+ *
+ * D-2: D1-only. Production path reads D1 (`issue_tags`, `issue_backlog` minimal
+ * columns; `golden_cases` has no D1 table and is skipped). The optional `db`
+ * arg is legacy DI for tests (Supabase-style `.from()` stub); when provided it
+ * is used as-is. No Supabase import, no 402.
  */
-export async function getBugTrackerProtectedRefs(supabaseAdminInstance?: any): Promise<Set<string>> {
+export async function getBugTrackerProtectedRefs(db?: any): Promise<Set<string>> {
   const protectedRefs = new Set<string>();
 
-  let admin = supabaseAdminInstance;
-  if (!admin && typeof window === 'undefined') {
-    try {
-      const mod = await import('../../supabaseAdmin');
-      admin = mod.supabaseAdmin;
-    } catch {
-      // client or unconfigured
-    }
-  }
+  // Legacy DI (tests): Supabase-style stub with .from()
+  const admin = db && typeof db.from === 'function' ? db : null;
 
   if (!admin) {
+    // D1 production path
+    if (!isD1Configured()) return protectedRefs;
+    try {
+      const tagRes = await d1Query<any>(`SELECT id, work_item, comments FROM issue_tags LIMIT 500`);
+      if (tagRes.success && Array.isArray(tagRes.results)) {
+        for (const tag of tagRes.results) {
+          if (tag.id) protectedRefs.add(String(tag.id).trim().toLowerCase());
+          const wi = typeof tag.work_item === 'string' ? safeJsonParse(tag.work_item, null) : tag.work_item;
+          if (wi && typeof wi === 'object') {
+            if (Array.isArray(wi.hold_refs)) {
+              for (const ref of wi.hold_refs) {
+                if (ref) {
+                  const s = String(ref).trim().toLowerCase();
+                  protectedRefs.add(s);
+                  extractJobIdsFromUrl(s).forEach((jid) => protectedRefs.add(jid));
+                }
+              }
+            }
+            if (wi.job_id) protectedRefs.add(String(wi.job_id).trim().toLowerCase());
+            if (wi.current_evidence) {
+              const ev = wi.current_evidence;
+              if (ev.job_id) protectedRefs.add(String(ev.job_id).trim().toLowerCase());
+              if (ev.debug_url) {
+                const u = String(ev.debug_url).trim().toLowerCase();
+                protectedRefs.add(u);
+                extractJobIdsFromUrl(u).forEach((jid) => protectedRefs.add(jid));
+              }
+              if (ev.r2_prefix) protectedRefs.add(String(ev.r2_prefix).trim().toLowerCase());
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[DebugLogRetention] Error querying D1 issue_tags for protected refs:', err);
+    }
+    try {
+      const blRes = await d1Query<any>(`SELECT id, payload FROM issue_backlog LIMIT 500`);
+      if (blRes.success && Array.isArray(blRes.results)) {
+        for (const item of blRes.results) {
+          if (item.id) protectedRefs.add(String(item.id).trim().toLowerCase());
+          const p = typeof item.payload === 'string' ? safeJsonParse(item.payload, null) : item.payload;
+          if (p && typeof p === 'object') {
+            if (p.activeJobId) protectedRefs.add(String(p.activeJobId).trim().toLowerCase());
+            if (p.tagId) protectedRefs.add(String(p.tagId).trim().toLowerCase());
+            if (p.r2_prefix) protectedRefs.add(String(p.r2_prefix).trim().toLowerCase());
+            if (p.debug_url) {
+              const u = String(p.debug_url).trim().toLowerCase();
+              protectedRefs.add(u);
+              extractJobIdsFromUrl(u).forEach((jid) => protectedRefs.add(jid));
+            }
+            if (p.backendLogsUrl) {
+              const u = String(p.backendLogsUrl).trim().toLowerCase();
+              protectedRefs.add(u);
+              extractJobIdsFromUrl(u).forEach((jid) => protectedRefs.add(jid));
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[DebugLogRetention] Error querying D1 issue_backlog for protected refs:', err);
+    }
+    // golden_cases has no D1 table — skipped (no 402, no stub).
     return protectedRefs;
   }
 
@@ -279,12 +340,15 @@ export function calculateMealDebugRetentionStatus(
 
 /**
  * Prunes debug logs for a specific user.
- * Deletes debug payload from R2 and removes debug_url from Supabase food_logs
+ * Deletes debug payload from R2 and clears debug_url from D1 food_logs
  * for meals older than the last 10 that are NOT filed in the bug tracker.
+ *
+ * D-2: D1-only in production. `options.db` is legacy DI for tests
+ * (a `.from()` stub); when provided the legacy path runs unchanged.
  */
 export async function pruneUserDebugLogs(
   userId: string,
-  options?: { maxRetention?: number; supabaseAdmin?: any }
+  options?: { maxRetention?: number; db?: any }
 ): Promise<{
   success: boolean;
   totalMeals: number;
@@ -294,25 +358,10 @@ export async function pruneUserDebugLogs(
   prunedFoodIds: string[];
 }> {
   const maxRetention = options?.maxRetention ?? 10;
-  let admin = options?.supabaseAdmin;
-  if (!admin && typeof window === 'undefined') {
-    try {
-      const { supabaseAdmin } = await import('../../supabaseAdmin.js');
-      admin = supabaseAdmin;
-    } catch {
-      // unconfigured
-    }
-  }
+  const admin = options?.db;
 
   if (!admin) {
-    return {
-      success: false,
-      totalMeals: 0,
-      keptCount: 0,
-      prunedCount: 0,
-      bugProtectedCount: 0,
-      prunedFoodIds: [],
-    };
+    return pruneUserDebugLogsD1(userId, maxRetention);
   }
 
   try {
@@ -410,5 +459,89 @@ export async function pruneUserDebugLogs(
       bugProtectedCount: 0,
       prunedFoodIds: [],
     };
+  }
+}
+
+/**
+ * D1 production path for pruneUserDebugLogs (no Supabase, no 402).
+ */
+async function pruneUserDebugLogsD1(
+  userId: string,
+  maxRetention: number
+): Promise<{
+  success: boolean;
+  totalMeals: number;
+  keptCount: number;
+  prunedCount: number;
+  bugProtectedCount: number;
+  prunedFoodIds: string[];
+}> {
+  const fail = {
+    success: false,
+    totalMeals: 0,
+    keptCount: 0,
+    prunedCount: 0,
+    bugProtectedCount: 0,
+    prunedFoodIds: [] as string[],
+  };
+  if (!isD1Configured()) return fail;
+  try {
+    const possibleUids = [
+      userId,
+      userId.replace(/[^a-zA-Z0-9]/g, '_'),
+      userId.toLowerCase(),
+      `admin_${userId.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_')}`
+    ];
+    const placeholders = possibleUids.map(() => '?').join(', ');
+    const foodRes = await d1Query<any>(
+      `SELECT id, firebase_uid, date, name, debug_url, updated_at FROM food_logs WHERE firebase_uid IN (${placeholders}) LIMIT 2000`,
+      possibleUids
+    );
+    if (!foodRes.success || !foodRes.results) {
+      console.warn('[DebugLogRetention] Failed to fetch D1 food_logs for prune:', foodRes.error);
+      return fail;
+    }
+    const sortedFoods = sortFoodLogsDescending(foodRes.results);
+    const protectedRefs = await getBugTrackerProtectedRefs();
+
+    let keptCount = 0;
+    let prunedCount = 0;
+    let bugProtectedCount = 0;
+    const prunedFoodIds: string[] = [];
+
+    for (let i = 0; i < sortedFoods.length; i++) {
+      const food = sortedFoods[i];
+      if (i < maxRetention) {
+        keptCount++;
+        continue;
+      }
+      if (isJobOrFoodProtectedByBugTracker(food, protectedRefs)) {
+        bugProtectedCount++;
+        keptCount++;
+        continue;
+      }
+      if (food.debug_url) {
+        try {
+          await deleteDebugPayloadFromR2(food.debug_url, food.firebase_uid);
+        } catch (delErr) {
+          console.warn(`[DebugLogRetention] Failed deleting R2 payload for food ${food.id}:`, delErr);
+        }
+        await d1Query(`UPDATE food_logs SET debug_url = NULL WHERE id = ?`, [food.id]);
+        const extractedJid = String(food.debug_url).match(/debug\/(?:[^\/]+\/)?([a-zA-Z0-9_\-]+)\.json/i)?.[1];
+        if (extractedJid) {
+          await d1Query(`UPDATE agent_jobs SET debug_url = NULL WHERE id = ?`, [extractedJid]);
+        }
+        prunedCount++;
+        prunedFoodIds.push(food.id);
+      }
+    }
+
+    console.log(
+      `[DebugLogRetention] User ${userId}: ${sortedFoods.length} total meals, kept ${keptCount} (including ${bugProtectedCount} bug tracker holds), pruned ${prunedCount} old debug logs.`
+    );
+    return { success: true, totalMeals: sortedFoods.length, keptCount, prunedCount, bugProtectedCount, prunedFoodIds };
+  } catch (err: any) {
+    console.error('[DebugLogRetention] pruneUserDebugLogsD1 error:', err?.message || err);
+    return fail;
   }
 }

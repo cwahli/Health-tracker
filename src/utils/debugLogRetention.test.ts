@@ -157,7 +157,7 @@ describe('Debug Log Retention Policy (10-meal limit + Bug Tracker protection)', 
 
     const result = await pruneUserDebugLogs('user_123', {
       maxRetention: 10,
-      supabaseAdmin: mockSupabase
+      db: mockSupabase
     });
 
     expect(result.success).toBe(true);
