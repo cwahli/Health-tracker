@@ -22,22 +22,6 @@ async function resolveRefPhotos(rows: any[], possibleUids: string[]): Promise<Ma
   try {
     const { isD1Configured, d1GetFoodLogImageUrls } = await import('./server_db_d1.js');
     if (isD1Configured()) return d1GetFoodLogImageUrls(ids, possibleUids);
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    if (supabaseAdmin) {
-      const { data } = await supabaseAdmin.from('food_logs').select('id,image_urls').in('id', ids).in('firebase_uid', possibleUids);
-      for (const r of data || []) {
-        let raw: unknown = (r as any)?.image_urls;
-        if (typeof raw === 'string') {
-          try {
-            raw = JSON.parse(raw);
-          } catch {
-            /* keep raw string */
-          }
-        }
-        const list = (Array.isArray(raw) ? raw : [raw]).filter((u: unknown) => typeof u === 'string' && (u as string).trim());
-        if ((r as any)?.id && list.length > 0) out.set(String((r as any).id), list as string[]);
-      }
-    }
   } catch {
     /* best-effort */
   }
@@ -76,21 +60,6 @@ foodRouter.get('/api/food/search', async (req, res) => {
           const rawPast = await d1SearchUserFoodLogs({ possibleUids, query, limit: 5 });
           const refPhotos = await resolveRefPhotos(rawPast, possibleUids);
           userFoodMatches = substituteRefPhotos(rawPast, refPhotos).map(mapPreviousMealRow);
-        } else {
-          const { supabaseAdmin } = await import('./supabaseAdmin.js');
-          if (supabaseAdmin) {
-            const { data: supaPast } = await supabaseAdmin
-              .from('food_logs')
-              .select('id, name, calories, nutrients, items_breakdown, image_urls, date, weight_grams, consumed_amount, source_meal_id')
-              .in('firebase_uid', possibleUids)
-              .ilike('name', `%${query}%`)
-              .order('updated_at', { ascending: false })
-              .limit(5);
-            if (Array.isArray(supaPast)) {
-              const refPhotos = await resolveRefPhotos(supaPast, possibleUids);
-              userFoodMatches = substituteRefPhotos(supaPast, refPhotos).map(mapPreviousMealRow);
-            }
-          }
         }
       }
     }
