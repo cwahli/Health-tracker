@@ -395,19 +395,20 @@ r2Router.post(['/api/r2/upload-photo', '/api/upload'], async (req, res) => {
 
 r2Router.post('/api/r2/migrate-firestore-images', async (req, res) => {
   try {
-    console.log('[Firestore API Migrate] Fetching food logs from Supabase to match existing images...');
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    const { data: foodLogs, error: supabaseErr } = await supabaseAdmin
-      .from('food_logs')
-      .select('id, image_urls, firebase_uid');
-
-    if (supabaseErr) {
-      console.error('[Firestore API Migrate] Error: Failed to fetch food logs from Supabase:', supabaseErr.message);
-      return res.status(500).json({ error: 'Failed to fetch food logs from Supabase', details: supabaseErr.message });
+    console.log('[Firestore API Migrate] Fetching food logs from D1 to match existing images...');
+    const { d1Query, safeJsonParse } = await import('./server_d1.js');
+    const d1Res = await d1Query<any>(`SELECT id, image_urls, firebase_uid FROM food_logs LIMIT 5000`);
+    if (!d1Res.success) {
+      console.error('[Firestore API Migrate] Error: Failed to fetch food logs from D1:', d1Res.error);
+      return res.status(500).json({ error: 'Failed to fetch food logs from D1', details: d1Res.error });
     }
+    const foodLogs = (d1Res.results || []).map((row: any) => ({
+      ...row,
+      image_urls: safeJsonParse(row.image_urls, []),
+    }));
 
     if (!foodLogs || foodLogs.length === 0) {
-      return res.json({ success: true, message: 'No food logs found in Supabase.', stats: { inspected: 0, skipped: 0, matched: 0, migrated: 0, updated: 0 } });
+      return res.json({ success: true, message: 'No food logs found in D1.', stats: { inspected: 0, skipped: 0, matched: 0, migrated: 0, updated: 0 } });
     }
 
     const { initializeApp: initializeClientApp } = await import('firebase/app');
@@ -479,13 +480,10 @@ r2Router.post('/api/r2/migrate-firestore-images', async (req, res) => {
 
       if (hasNewR2Urls && newUrls.length > 0) {
         const mergedUrls = Array.from(new Set([...(log.image_urls || []), ...newUrls]));
-        const { error: updateSbErr } = await supabaseAdmin
-          .from('food_logs')
-          .update({ image_urls: mergedUrls })
-          .eq('id', docId);
+        const updateRes = await d1Query(`UPDATE food_logs SET image_urls = ? WHERE id = ?`, [JSON.stringify(mergedUrls), docId]);
 
-        if (updateSbErr) {
-          console.error(`[Firestore API Migrate] Failed to update Supabase food_logs for doc ${docId}:`, updateSbErr.message);
+        if (!updateRes.success) {
+          console.error(`[Firestore API Migrate] Failed to update D1 food_logs for doc ${docId}:`, updateRes.error);
         } else {
           migratedCount++;
         }
@@ -539,21 +537,24 @@ r2Router.post('/api/r2/upload-logs', async (req, res) => {
 
 r2Router.post('/api/r2/migrate-backend-logs', async (req, res) => {
   try {
-    console.log('[MigrateLogs] Starting migration of backend logs from Supabase & Firestore to R2...');
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
+    console.log('[MigrateLogs] Starting migration of backend logs from D1 & Firestore to R2...');
+    const { d1Query, safeJsonParse } = await import('./server_d1.js');
+    const { d1UpdateJob } = await import('./server_db_d1.js');
 
-    let supabaseInspected = 0;
-    let supabaseMigrated = 0;
+    let d1Inspected = 0;
+    let d1Migrated = 0;
     let totalBytesSaved = 0;
 
-    const { data: jobs, error: sbErr } = await supabaseAdmin
-      .from('agent_jobs')
-      .select('id, clean_result, status_message');
+    const d1Jobs = await d1Query<any>(`SELECT id, clean_result, status_message FROM agent_jobs LIMIT 2000`);
+    const jobs = (d1Jobs.results || []).map((j: any) => ({
+      ...j,
+      clean_result: typeof j.clean_result === 'string' ? safeJsonParse(j.clean_result, null) : j.clean_result,
+    }));
 
-    if (sbErr) {
-      console.error('[MigrateLogs] Supabase query failed:', sbErr.message);
+    if (!d1Jobs.success) {
+      console.error('[MigrateLogs] D1 query failed:', d1Jobs.error);
     } else if (jobs && jobs.length > 0) {
-      supabaseInspected = jobs.length;
+      d1Inspected = jobs.length;
       for (const job of jobs) {
         let cleanRes = job.clean_result;
         if (!cleanRes || typeof cleanRes !== 'object') continue;
@@ -583,16 +584,13 @@ r2Router.post('/api/r2/migrate-backend-logs', async (req, res) => {
           };
         }
 
-        const { error: updateErr } = await supabaseAdmin
-          .from('agent_jobs')
-          .update({ clean_result: updatedCleanRes })
-          .eq('id', job.id);
+        const updateRes = await d1UpdateJob(job.id, { clean_result: updatedCleanRes });
 
-        if (!updateErr) {
-          supabaseMigrated++;
+        if (updateRes.success) {
+          d1Migrated++;
           totalBytesSaved += logLength;
         } else {
-          console.error(`[MigrateLogs] Failed updating job ${job.id} in Supabase:`, updateErr.message);
+          console.error(`[MigrateLogs] Failed updating job ${job.id} in D1:`, updateRes.error);
         }
       }
     }
@@ -639,8 +637,8 @@ r2Router.post('/api/r2/migrate-backend-logs', async (req, res) => {
       success: true,
       message: 'Backend logs migration completed',
       stats: {
-        supabaseInspected,
-        supabaseMigrated,
+        d1Inspected,
+        d1Migrated,
         firestoreInspected,
         firestoreMigrated,
         totalBytesSavedKB: Math.round(totalBytesSaved / 1024)
