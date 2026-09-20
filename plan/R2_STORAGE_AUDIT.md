@@ -66,8 +66,52 @@ hygiene/backup size is the actual concern).
 keys. Delete only after §1 is resolved, and then only keys unreferenced in
 **both** stores plus a 30-day grace re-check.
 
-## 4. Recommendations for the VPS agent
+## 4. Duplicate photos (content-hash dedup)
 
+Method: listed all 2,590 `photos/` objects with ETags (all plain MD5, no
+multipart) and grouped byte-identical content. No bytes were downloaded —
+equality is by matching MD5, then joined against the D1 reference set from §3.
+
+- **Duplicate groups: 325, covering 2,063 objects (~80% of `photos/`).**
+- **Wasted (all-but-one per group): ~440 MB** — 415.6 MB in all-orphan
+  groups, 23.9 MB in mixed/referenced groups.
+- Mix: 289 groups all-orphan, 25 mixed (referenced + orphan twins),
+  11 all-referenced. Group sizes range 2–69 (histogram peak at 2–3, long
+  tail to 69).
+- 589 objects inside duplicate groups end in `_0.jpg` — the uploader writes
+  a base key **and** a `_0` twin of identical bytes on many uploads.
+
+Notable specimens (keys abbreviated, see re-run procedure to reproduce):
+
+- **69 identical copies** of one 359 KB capture under
+  `photos/job_1788161968468_m02tuufgq{,_0}.jpg`,
+  `photos/job_1788163890334_h982qishx{,_0}.jpg`, … — every analysis job
+  re-uploads the same bytes under a fresh key, twice. None referenced.
+  This is systematic uploader behavior, not user action.
+- **Mixed:** `photos/food_1783028362424.jpg` ≡
+  `photos/food_1783069285969.jpg` (67 KB), only the latter referenced —
+  merge by deleting the former after §1 clears.
+- **All-referenced:** twelve 307-byte files shared across twelve logs —
+  smells like 1px placeholder/test pixels persisted as real meal photos.
+  Worth a look (list with `size < 1024` grouped by ETag).
+
+### Merge list procedure (do NOT execute before §1 resolves)
+
+For each group keep ONE canonical key — prefer a currently-referenced key,
+else the oldest — then: (a) `UPDATE food_logs image_urls` JSON rewriting
+dropped keys to the canonical one (mixed/ref groups only); (b) delete the
+rest; (c) re-run this audit to confirm zero groups. All-orphan groups need
+only (b), still gated on the Supabase comparison.
+
+### Stop the regrowth (root fix, code)
+
+1. Content-hash check on the R2 PUT path (`server_routes_r2.ts`): hash bytes,
+   reuse the existing key on ETag match instead of minting
+   `job_<ts>_<rand>.jpg` per analysis.
+2. Stop the base + `_0` double-write (589 twins and counting).
+3. Delete-cascade (or tombstone sweeper) for meal photos — see §3 orphans.
+
+## 5. Recommendations for the VPS agent
 1. Unpause Supabase → rerun §1 → backfill D1 gaps (if any) → then cut code.
 2. Add a delete-cascade (or tombstone sweeper) for meal photos; orphans grow daily.
 3. Put a retention policy on `debug/` + `logs/` + `jobs/` + `bugs/` (60% of
