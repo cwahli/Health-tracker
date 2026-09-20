@@ -66,9 +66,17 @@ const initialRun = spawnSync('node', ['scripts/qa-runner.mjs', `--journey=${jour
 
 if (initialRun.status === 0) {
   console.log('[AutoLoop] Initial run clean! 0 defects found.');
+  
+  // Find clean screenshot
+  const cleanFiles = fs.readdirSync(qaEvidenceDir).filter(f => f.startsWith(`clean_${journey}_`) && f.endsWith('.png'));
+  cleanFiles.sort((a, b) => fs.statSync(path.join(qaEvidenceDir, b)).mtimeMs - fs.statSync(path.join(qaEvidenceDir, a)).mtimeMs);
+  const cleanScreenshot = cleanFiles.length > 0 ? path.join(qaEvidenceDir, cleanFiles[0]) : null;
+
   sendTelegram({
-    text: `✅ *[QA Clean]* Journey \`${journey}\` passed with 0 defects! All tabs, cards, and calculations are operational.`
+    photo: cleanScreenshot,
+    caption: `✅ *[QA Clean & Verified]* Journey: \`${journey}\`\n\n• Defects: 0\n• Navigation & Lazy Chunks: Verified ✓\n• Interactive Components: Operational ✓\n• Full-page verification screenshot attached.`
   });
+  console.log(`[AutoLoop] Clean verification sent with photo: ${cleanScreenshot}`);
   process.exit(0);
 }
 

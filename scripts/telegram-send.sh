@@ -16,17 +16,29 @@ CAPTION=""
 THREAD_ID=""
 CHAT_ID=""
 
-# Source token from ~/.hermes/.env if not in environment
+# Source token and chat ID from active profile or ~/.hermes/.env if not in environment
 if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-  if [ -f "$HOME/.hermes/.env" ]; then
-    TELEGRAM_BOT_TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/.env" | cut -d '=' -f2- | tr -d '"' | tr -d "'")
-  fi
+  for env_file in "$HOME/.hermes/profiles/"*"/".env "$HOME/.hermes/.env"; do
+    if [ -f "$env_file" ]; then
+      TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$env_file" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+      if [ -n "$TOKEN" ]; then
+        TELEGRAM_BOT_TOKEN="$TOKEN"
+        break
+      fi
+    fi
+  done
 fi
 
 if [ -z "$TELEGRAM_CHAT_ID" ]; then
-  if [ -f "$HOME/.hermes/.env" ]; then
-    TELEGRAM_CHAT_ID=$(grep -E '^(TELEGRAM_CHAT_ID|TELEGRAM_USER_ID|TELEGRAM_ALLOWED_USERS)=' "$HOME/.hermes/.env" | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" | cut -d ',' -f1)
-  fi
+  for env_file in "$HOME/.hermes/profiles/"*"/".env "$HOME/.hermes/.env"; do
+    if [ -f "$env_file" ]; then
+      CID=$(grep -E '^(TELEGRAM_CHAT_ID|TELEGRAM_USER_ID|TELEGRAM_ALLOWED_USERS)=' "$env_file" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" | cut -d ',' -f1 || true)
+      if [ -n "$CID" ]; then
+        TELEGRAM_CHAT_ID="$CID"
+        break
+      fi
+    fi
+  done
 fi
 
 for arg in "$@"; do

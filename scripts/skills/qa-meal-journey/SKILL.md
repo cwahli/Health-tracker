@@ -1,27 +1,38 @@
 ---
 name: qa-meal-journey
-description: Dedicated QA agent skill for the Health-tracker Meal Journey. Tests meal logging, search, macro/micro breakdown, captures screenshots, and coordinates with Orchestrator for auto-healing.
-version: 1.0.0
+description: QA Journey testing agent for Health-tracker. Tests meal, biomarker, or onboarding user journeys against live production, delivers full-page verification screenshots, and triggers autonomous bug healing.
+version: 1.1.0
 ---
 
 ## When to Use
-- When the user asks in Telegram to test, audit, or check the Meal Journey.
-- Phrases: `/test_meal`, "test meal journey", "check meal logging", "audit meals", "run meal QA".
+- When the user asks in Telegram to test, audit, or check ANY user journey.
+- Phrases: "test meal journey", "test biomarker journey", "test onboarding journey", "test <any> journey", "/test <journey>".
 
 ## Procedure
-1. Execute the autonomous Meal QA loop:
+1. **Identify the Journey:**
+   - Check the user's message for the target journey:
+     - `meal` (default if unspecified, or if user mentions meal, food, nutrition, logging)
+     - `biomarker` (if user mentions biomarker, lab, blood, vitals, medical)
+     - `onboarding` (if user mentions onboarding, welcome, front desk, profile)
+   - Assign `JOURNEY=<target>`
+
+2. **Execute the Autonomous QA Loop:**
    ```bash
-   node /home/ubuntu/src/Health-tracker/scripts/qa-auto-loop.mjs --journey=meal
+   cd /home/ubuntu/src/Health-tracker && node scripts/qa-auto-loop.mjs --journey=$JOURNEY
    ```
-2. What happens automatically:
-   - Headless Chromium navigates to the live website and logs in securely via the Demo Account (`demo@healthcockpit.com`).
-   - The bot audits the Food History tab, search input, nutrition cards, and error boundaries.
-   - **If Clean (0 defects):**
-     - Sends a green confirmation directly into the Telegram chat/topic.
-   - **If a Defect is Detected:**
-     - Snaps a full-page **Before** screenshot and sends the defect ticket with repro steps to Telegram.
-     - Hands off the bug ticket to the **Orchestrator**.
-     - The Orchestrator inspects tool allowances and picks the optimal available coding agent (`OpenCode` -> `Cline CLI` -> `Grok Build`).
-     - Once committed and auto-deployed via GitHub webhook (~40s), re-tests the live application.
-     - Snaps a fresh **After** screenshot and posts the Before vs. After victory report to Telegram!
-3. Reply to the user in Telegram confirming the loop execution status.
+
+3. **What Happens Automatically:**
+   - Headless Chromium navigates to `https://health-tracking.duckdns.org` and logs in via `#demo-login-btn` (`demo@healthcockpit.com`).
+   - The test audits all journey tabs, lazy-loaded chunks, interactive elements, and error boundaries.
+   - **On 0 Defects (Clean):**
+     - Captures a full-page screenshot of the clean live application.
+     - Automatically delivers the screenshot and clean verification report to this Telegram chat.
+   - **On Defect Detected:**
+     - Snaps a Before screenshot and delivers the diagnostic bug ticket to Telegram.
+     - Hands off the bug ticket to the Orchestrator.
+     - Orchestrator evaluates allowances and dispatches OpenCode, Cline CLI, or Grok Build.
+     - Awaits GitHub webhook auto-deploy (~40s).
+     - Re-tests live site, captures fresh After screenshot, and sends Before vs. After victory report.
+
+4. **Reply to the User:**
+   - Summarize the test outcome for the requested journey and confirm the screenshot delivery.

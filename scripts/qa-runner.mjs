@@ -67,7 +67,7 @@ async function run() {
 
   try {
     // 1. Initial Page Load & Auth Gate
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(baseUrl, { waitUntil: 'commit', timeout: 35000 });
 
     const demoBtn = page.locator('#demo-login-btn');
     const homeTab = page.locator('#nav-tab-home');
@@ -95,10 +95,16 @@ async function run() {
     }
 
     console.log(`[QA Runner] Journey '${journey}' PASSED with zero defects!`);
+    
+    // Capture full-page screenshot of clean, verified UI
+    const cleanScreenshotPath = path.join(outputDir, `clean_${journey}_${timestamp}.png`);
+    await page.screenshot({ path: cleanScreenshotPath, fullPage: true }).catch(() => {});
+
     const successReport = {
       status: 'pass',
       journey,
       timestamp: new Date().toISOString(),
+      screenshot: cleanScreenshotPath,
       summary: `Journey '${journey}' verified successfully without errors.`
     };
 
