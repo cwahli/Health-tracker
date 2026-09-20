@@ -198,20 +198,50 @@ export async function fetchDebugPayloadFromR2Direct(jobId: string, userId?: stri
   const client = getS3Client();
   if (!client) return null;
   const safeId = String(jobId || 'unknown').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 120);
-  try {
-    const { coldDebugR2Key } = await import('./src/utils/debugPayload.js');
-    const key = coldDebugR2Key(safeId, userId || 'anonymous');
-    const { GetObjectCommand } = await import('@aws-sdk/client-s3');
-    const cmd = new GetObjectCommand({
-      Bucket: CLOUDFLARE_R2_BUCKET_NAME,
-      Key: key,
-    });
-    const res = await client.send(cmd);
-    if (res.Body) {
-      const str = await (res.Body as any).transformToString();
-      return JSON.parse(str);
+  const { coldDebugR2Key } = await import('./src/utils/debugPayload.js');
+  const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+  // The cold debug object is stored under the submitting user's id. When the
+  // caller omits userId (or passes a different one) the exact key misses and the
+  // export silently falls back to the thin DB row — which is how the multi-turn
+  // debugmeal1 export lost its photos, edit turn, and dispatches. Try the exact
+  // key first, then the anonymous key.
+  const candidates: string[] = [];
+  if (userId) candidates.push(coldDebugR2Key(safeId, userId));
+  candidates.push(coldDebugR2Key(safeId, 'anonymous'));
+
+  for (const key of candidates) {
+    try {
+      const res = await client.send(new GetObjectCommand({ Bucket: CLOUDFLARE_R2_BUCKET_NAME, Key: key }));
+      if (res.Body) {
+        const str = await (res.Body as any).transformToString();
+        return JSON.parse(str);
+      }
+    } catch {
+      // NotFound / AccessDenied on a guessed key is expected — try the next.
     }
-  } catch (err: any) {}
+  }
+
+  // Legacy fallback: cold debug is namespaced by user id, which a reader that
+  // only holds the jobId cannot know. List `debug/` and pick the object whose
+  // basename is `<safeId>.json`.
+  try {
+    const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+    const listed = await client.send(new ListObjectsV2Command({
+      Bucket: CLOUDFLARE_R2_BUCKET_NAME,
+      Prefix: 'debug/',
+      MaxKeys: 1000,
+    }));
+    const match = (listed.Contents || []).find((o: any) => String(o.Key || '').endsWith(`/${safeId}.json`));
+    if (match?.Key) {
+      const res = await client.send(new GetObjectCommand({ Bucket: CLOUDFLARE_R2_BUCKET_NAME, Key: match.Key }));
+      if (res.Body) {
+        const str = await (res.Body as any).transformToString();
+        return JSON.parse(str);
+      }
+    }
+  } catch {
+    // Bucket may forbid list; the exact-key attempts above remain the primary path.
+  }
   return null;
 }
 

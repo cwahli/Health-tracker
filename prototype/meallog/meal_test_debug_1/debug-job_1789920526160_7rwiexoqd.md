@@ -1,12 +1,29 @@
 # Health Tracker — End-to-End Diagnostic Report
 
-- **Exported:** 2026-09-20T16:16:39.921Z
+- **Exported:** 2026-09-20T21:41:08.110Z
 - **Job ID:** `job_1789920526160_7rwiexoqd`
 - **Status:** succeeded
 - **Pack:** food
 - **Mode:** review
-- **Photo:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a29592e18ef1d68caf83e5a7c71538de3e08cfd328371b2996378453427ec240.jpg
+- **Photo 1:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_db018820cd88899b3c3a76764b7b229fbe21c9a6601726d85b5608550ce7d254.jpg
+- **Photo 2:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a812f40220d109fd32ccd2824499ecc286735b08967a5b7327713c45f66b813a.jpg
+- **Photo 3:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a29592e18ef1d68caf83e5a7c71538de3e08cfd328371b2996378453427ec240.jpg
 - **Final ledger:** 359 kcal · 535 g · 4 dishes
+
+## 🧭 Turn Timeline (User ↔ Agent)
+
+### Turn 1 — t1/scout · photos: 2
+- **User:** Analyze this meal photo.
+- **Photo 1:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_db018820cd88899b3c3a76764b7b229fbe21c9a6601726d85b5608550ce7d254.jpg
+- **Photo 2:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a812f40220d109fd32ccd2824499ecc286735b08967a5b7327713c45f66b813a.jpg
+- **Verdict:** Nutrient-Dense Whole Foods Selection [good]
+- **Answer:** Your selection of enoki mushrooms, baby corn, and peanuts delivers strong plant protein, dietary fiber, and healthy fats that support your cholesterol goals. Peanuts add heart-healthy unsaturated fats, but watch portion sizes to manage calorie intake alongside your lipid levels. Keep prioritizing these wholesome ingredients!
+
+### Turn 2 — t2/scout, t2/diet · photos: 1
+- **User:** I ate half of the peanuts amount and the daun selada krt is chicken as shown on picture
+- **Photo 1:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a29592e18ef1d68caf83e5a7c71538de3e08cfd328371b2996378453427ec240.jpg
+- **Verdict:** High Protein with Moderate Peanuts [neutral]
+- **Answer:** The clean chicken and vegetables deliver strong protein and fiber, supporting your metabolic goals. However, the peanuts contribute saturated fat and calories that compound against your high cholesterol and HbA1c targets. Balance this meal with a 15-minute brisk walk to help manage post-meal lipids and blood sugar.
 
 ## ⚖️ Contract Evaluation
 
@@ -23,14 +40,14 @@
 | Composer controls count = 1 | ui | none | ✅ PASS | All composer controls count = 1 |
 | DIAG5 off on food | process | none | ✅ PASS | DIAG5 auto-send remained off for food chat |
 | Matrix calc matches ledger | content | none | ✅ PASS | Matrix connected and matches ledger |
-| Each dispatch has model + latency_ms | process | none | ✅ PASS | All 1 dispatch(es) contain model and latency_ms |
+| Each dispatch has model + latency_ms | process | none | ✅ PASS | All 3 dispatch(es) contain model and latency_ms |
 | Handoff from/to + same jobId if transfer | process | none | ⚪ n/a | No agent handoffs in this run |
 | Agent output: nutrients complete | content | none | ✅ PASS | All 32 keys finite (3 legal zeros) |
-| Agent output: verdict + advice | content | none | ✅ PASS | Every meal turn covered — t1: "Nutrient-Dense Whole Foods Selection" [good], 45 words, 0 figure(s) |
-| Dishes: fields populated | content | none | ✅ PASS | 4/4 dish(es) fully populated (J Acar Polos, Enoki Mushroom, Kcg Tanah Kulit, Daun Selada Krt) |
-| Multi-turn split shown | content | none | ⚪ n/a | Single-turn run, no split state |
-| Mode instruction chunk | content | none | ✅ PASS | Meal scout chunk(s) shown for mode(s)=review |
-| Edit patch: components & nutrients preserved | content | none | ⚪ n/a | Single-turn create, no edit turns |
+| Agent output: verdict + advice | content | none | ✅ PASS | Every meal turn covered — t1: "Nutrient-Dense Whole Foods Selection" [good], 45 words, 0 figure(s); t2: "High Protein with Moderate Peanuts" [neutral], 47 words, 0 figure(s) |
+| Dishes: fields populated | content | none | ✅ PASS | 6/6 dish(es) fully populated (J Acar Polos, Enoki Mushroom, Kcg Tanah Kulit, Daun Selada Krt, Kcg Tanah Kulit) |
+| Multi-turn split shown | content | none | ✅ PASS | Second turn dispatched |
+| Mode instruction chunk | content | none | ✅ PASS | Edit patch chunk(s) shown for mode(s)=review,edit |
+| Edit patch: components & nutrients preserved | content | none | ✅ PASS | 4 dish(es) with 4 component(s) preserved with full nutrients |
 | Handoff chain complete | process | none | ⚪ n/a | No handoffs in this run |
 | Handoff received | content | none | ⚪ n/a | Direct food log, no forwarded handoff |
 | Lab panel complete | content | none | ⚪ n/a | Medical-only law (pack=food) |
@@ -63,11 +80,14 @@ The patient's profile exhibits active nutritional targets and metabolic constrai
 | **Added Sugar** | 42.9g | 30.0 g | **Reference target** | Heavily penalizes added sugars, simple syrups, and sweetened confections to protect metabolic control. |
 | **Trans Fat** | 0.6g | 0.0 g | **Reference target** | Zero tolerance: trace trans fats from industrial shortening trigger an immediate clinical alert. |
 
-## 📡 Agent Dispatches (1)
+## 📡 Agent Dispatches (3)
 
 ### Dispatch t1/scout
 - **User:** Analyze this meal photo.
 - **Received:** {"mode":"review"}
+- **Photos:** 2
+- **Photo 1:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_db018820cd88899b3c3a76764b7b229fbe21c9a6601726d85b5608550ce7d254.jpg
+- **Photo 2:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a812f40220d109fd32ccd2824499ecc286735b08967a5b7327713c45f66b813a.jpg
 - **System Instruction:**
 ```
 === USER OUTPUT LANGUAGE ===
@@ -363,6 +383,390 @@ Analyze the provided 2 meal images. Inspect all visible prepared dishes, cooking
 ```
 - **Signals:** model=gemini-3.5-flash-lite, latency_ms=11928
 
+### Dispatch t2/scout
+- **User:** I ate half of the peanuts amount and the daun selada krt is chicken as shown on picture
+- **Received:** {"mode":"review"}
+- **Photos:** 1
+- **Photo 1:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a29592e18ef1d68caf83e5a7c71538de3e08cfd328371b2996378453427ec240.jpg
+- **System Instruction:**
+```
+=== USER OUTPUT LANGUAGE ===
+The patient's UI language is English (code: en).
+Write every user-visible string you generate (verdicts, summaries, chat replies, dietitian lines, card titles, explanations, medicalInsight) in English.
+Keep JSON keys, nutrient codes, biomarker keys, enum values, and schema field names in English. User-visible nutrient labels must be in the UI language; never show raw keys like Saturated_fat to the patient.
+Keep numbers, units (g, kcal, mg/dL), and scientific abbreviations as-is.
+Food identity fields (keyword, originalName, dish names, brand names) stay as observed on labels or common culinary names used for database matching. Do not translate food names into English.
+
+- HIERARCHY: Extract each distinct food item/ingredient (e.g. Tofu, Beef, sides, meal prep items, drinks, packages) directly as its own separate 'dish' with its own boundingBox2D & nutrients. Never group distinct food items into a single composite dish with sub-items. Do not duplicate identical dishes across multi-angles or cooking prep.
+- QUANTITY & MULTIPACKS: Output 'weightGrams' (consumed serving) and 'packGrams' (container total). For unopened grocery multi-packs (e.g. '5 x 65ml', 'pack of 6') without explicit user notes stating all N units were consumed, set 'weightGrams' to a single unit/serving size (e.g. 65g) and 'packGrams' to the container total (e.g. 325g). Never estimate the whole container as consumed: weightGrams is ALWAYS one serving here — the portion question resolves the true amount.
+- GROCERY/SCALE STICKERS: Treat supermarket stickers as atomic: pair printed text with printed weight (e.g. 'Berat 0.252' -> 252g). Output text in 'packageLabelText'. Never transpose weights between packages.
+- LOCAL NAMES: Preserve the verbatim printed name from stickers, packaging, or menus in local language as foodName (e.g. 'Ikan Cendro', 'Cumi Bangka'). Do not genericise when specific local name is readable. ALWAYS provide the generic English translation of the ingredient in 'genericEnglishName' (e.g. 'needlefish', 'squid').
+- INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.
+- DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.
+- BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.
+- COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.
+- CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person ("You got..."). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.
+
+=== REQUIRED OUTPUT JSON SCHEMA ===
+Output exactly ONE JSON object matching this schema:
+{
+  "_internalReasoning": "string (<15 words)",
+  "contentType": "visual | menu_or_poster | label | text",
+  "diningEnvironment": "home_cooked | casual_restaurant | fast_food_chain | fine_dining | airline | unknown",
+  "verdict": {
+    "label": "Supports Gut Health with Added Sugar",
+    "level": "neutral"
+  },
+  "clinicalAdvice": "The fried snacks pack 9g of saturated fat, nearly half your day's limit in one item — that load works against your cholesterol goal and stiffens post-meal blood flow. The beef soup's 30g of clean protein is the win here, and its broth keeps you hydrated. A 10-minute walk will help clear the fat load.",
+  "perImage": [{ "imageIndex": 0, "itemsFound": ["Vegetable and Beef Hotpot"] }],
+  "dishes": [
+    {
+      "dishName": "Vegetable and Beef Hotpot",
+      "genericEnglishName": "beef and vegetable stew",
+      "chainName": null,
+      "estimatedWeightGrams": 650,
+      "packGrams": 650,
+      "cookingMethod": "raw | baked | grilled | boiled | steamed | deep_fried | pan_fried | stir_fried",
+      "boundingBox2D": [300, 200, 850, 900],
+      "sourceImageIndex": 1,
+      "isStandaloneCondimentPacket": false,
+      "foods": [
+        {
+          "foodName": "Beef Blade",
+          "genericEnglishName": "beef",
+          "packageLabelText": "BEEF BLADE - Berat 0.110",
+          "weightGrams": 110,
+          "packGrams": 110,
+          "sourceImageIndex": 0,
+          "rawNutritionLabel": null,
+          "nutrients": { "protein": 24.0, "saturatedFat": 2.5, "addedSugar": 0, "totalFibre": 0, "sodium": 65, "carbohydrates": 0 }
+        }
+      ],
+      "dishNutrients": { "saturatedFat": 5.8, "totalFat": 18.2, "totalSugar": 5.0, "potassium": 1450, "omega3": 0.15, "calcium": 190, "iron": 5.5, "magnesium": 120, "vitaminD": 0 }
+    }
+  ]
+}
+
+- PATIENT CONTEXT (special case — shapes verdict/advice only, never identity or weights): at-risk: AUDIT Binge Drinking Score (high); Cholesterol/HDL Ratio (high); Non-HDL Cholesterol (high); Total Cholesterol (high); HbA1c (high). Budgets: see NUTRITIONAL TARGET STATUS below. Pair praise for positive nutrient targets with plain alerts on any dish or nutrient working against those numbers.
+=== NUTRITIONAL TARGET STATUS ===
+6 days avg: Sat fat (18g), Calorie (1513.7kcal), Sodium (1680mg), Protein (67.1g), Carbohydrates (202.3g), Total Fibre (20.5g), Potassium (2052.9mg), Soluble Fibre (5.6g), Added Sugar (42.9g), Trans Fat (0.6g)
+```
+- **User Prompt:**
+```
+The user is modifying/refining an existing logged meal.
+MEAL DATE: 2026-09-20
+User modification instruction: "I ate half of the peanuts amount and the daun selada krt is chicken as shown on picture".
+Prior Meal Dishes: Dish 1 [Photo #0]: J Acar Polos (115g) [Ingredients: Baby Corn]; Dish 2 [Photo #0]: Enoki Mushroom (150g) [Ingredients: Enoki Mushroom]; Dish 3 [Photo #0]: Kcg Tanah Kulit (210g) [Ingredients: Peanuts]; Dish 4 [Photo #0]: Daun Selada Krt (165g) [Ingredients: Lettuce].
+
+CRITICAL INSTRUCTIONS FOR MODIFICATION:
+1. TARGETED UPDATE (DISH OR SUBITEM): Output only modified or new items. Support action "replace" | "add" | "delete" at dish or foods[] subitem level.
+- For new or edited dishes: populate full nutrients amount (protein, carbs, fat, sodium, sugar, fibre) the same way you populate a new item.
+- For dishes: set dish action "replace" | "add" | "delete" with replacesDish and/or targetDishIndex. If user notes items are the same meal/duplicate (e.g. package vs prepared dish), combine them into 1 dish: ALWAYS preserve rawNutritionLabel and user portion from package, never discard label truth or sum dry+prepared weights. Always include sourceImageIndex.
+- For subitems/components inside a dish: in foods[], set action "replace" | "add" | "delete", replacesFood, full nutrients, and sourceImageIndex.
+2. FULL NUTRIENT VALUES: Always provide complete, accurate nutrients for any new or edited dish or food component.
+3. SEPARATE DISHES: Keep distinct plated items, sides, and beverages as separate distinct dishes in dishes[]. Never merge drinks into food dishes.
+4. CLINICAL ADVICE & NARRATIVE: Provide an updated direct 35-70 word clinicalAdvice in 2nd person ("You got...") on the FULL updated meal (all dishes at their locked weights — never just the edited item). Lead with the most significant finding: flag plainly any nutrient far over budget and compounding against the 7-day average, state the health impact, then one actionable next step/movement.
+```
+- **Raw Emission (Verbatim Output):**
+```json
+{
+  "dishes": [
+    {
+      "dishName": "Kcg Tanah Kulit",
+      "genericEnglishName": "peanuts",
+      "estimatedWeightGrams": 105,
+      "cookingMethod": "boiled",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "foods": [
+        {
+          "foodName": "Kcg Tanah Kulit",
+          "genericEnglishName": "peanuts",
+          "weightGrams": 105,
+          "sourceImageIndex": 0,
+          "nutrients": {
+            "protein": 13,
+            "saturatedFat": 1,
+            "addedSugar": 0,
+            "totalFibre": 4,
+            "sodium": 5,
+            "carbohydrates": 8
+          },
+          "boundingBox2D": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "dishNutrients": {
+        "saturatedFat": 1,
+        "totalFat": 25,
+        "totalSugar": 2,
+        "vitaminD": 0,
+        "protein": 13,
+        "sodium": 5,
+        "totalFibre": 4
+      },
+      "action": "replace",
+      "replacesDish": "Kcg Tanah Kulit"
+    },
+    {
+      "dishName": "Ayam Rebus",
+      "genericEnglishName": "boiled chicken",
+      "estimatedWeightGrams": 165,
+      "cookingMethod": "boiled",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [
+        250,
+        50,
+        800,
+        750
+      ],
+      "foods": [
+        {
+          "foodName": "Ayam",
+          "genericEnglishName": "boiled chicken",
+          "weightGrams": 165,
+          "sourceImageIndex": 0,
+          "nutrients": {
+            "protein": 35,
+            "saturatedFat": 1.5,
+            "addedSugar": 0,
+            "totalFibre": 0,
+            "sodium": 110,
+            "carbohydrates": 0
+          },
+          "boundingBox2D": [
+            250,
+            50,
+            800,
+            750
+          ]
+        }
+      ],
+      "dishNutrients": {
+        "saturatedFat": 1.5,
+        "totalFat": 6,
+        "totalSugar": 0,
+        "vitaminD": 0,
+        "protein": 35,
+        "sodium": 110,
+        "totalFibre": 0
+      },
+      "action": "replace",
+      "replacesDish": "Daun Selada Krt"
+    }
+  ],
+  "contentType": "visual",
+  "diningEnvironment": "home_cooked",
+  "verdict": {
+    "label": "High Protein with Moderate Peanuts",
+    "level": "neutral"
+  },
+  "clinicalAdvice": "The clean chicken and vegetables deliver strong protein and fiber, supporting your metabolic goals. However, the peanuts contribute saturated fat and calories that compound against your high cholesterol and HbA1c targets. Balance this meal with a 15-minute brisk walk to help manage post-meal lipids and blood sugar.",
+  "perImage": [
+    {
+      "imageIndex": 0,
+      "itemsFound": [
+        "Baby Corn",
+        "Enoki Mushroom",
+        "Chicken",
+        "Peanuts"
+      ]
+    }
+  ],
+  "_internalReasoning": "Updated peanut portion to half and replaced lettuce with chicken."
+}
+```
+- **Signals:** model=gemini-3.5-flash-lite, latency_ms=8690
+
+### Dispatch t2/diet
+- **User:** I ate half of the peanuts amount and the daun selada krt is chicken as shown on picture
+- **Received:** {"mode":"edit","editCommandCount":2,"skipped":false}
+- **Photos:** 1
+- **Photo 1:** https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/photos/sha256_a29592e18ef1d68caf83e5a7c71538de3e08cfd328371b2996378453427ec240.jpg
+- **System Instruction:**
+```
+Edit-turn expert/projector stage. TARGETED DISH UPDATE ONLY: rescale the locked label truth for the edited slots; never re-emit or recompute unchanged dishes. Clinical narrative must reflect the post-edit ledger. When skipped, reason is explicit in output.skipReason.
+```
+- **User Prompt:**
+```
+{
+  "userMessage": "I ate half of the peanuts amount and the daun selada krt is chicken as shown on picture",
+  "editCommands": [
+    {
+      "action": "replace_identity",
+      "itemName": "Kcg Tanah Kulit",
+      "newItemName": "Kcg Tanah Kulit",
+      "replacementItemName": "Kcg Tanah Kulit",
+      "newWeightGrams": 105,
+      "targetDbId": null,
+      "scoutIndex": 0,
+      "sourceImageIndex": 0,
+      "estimate": {
+        "protein": 13,
+        "totalFat": 25,
+        "saturatedFat": 1,
+        "sodium": 5,
+        "totalFibre": 4,
+        "totalSugar": 2,
+        "vitaminD": 0,
+        "cookingMethod": "boiled",
+        "sourceImageIndex": 0,
+        "foods": [
+          {
+            "foodName": "Kcg Tanah Kulit",
+            "genericEnglishName": "peanuts",
+            "weightGrams": 105,
+            "sourceImageIndex": 0,
+            "nutrients": {
+              "protein": 13,
+              "saturatedFat": 1,
+              "addedSugar": 0,
+              "totalFibre": 4,
+              "sodium": 5,
+              "carbohydrates": 8
+            },
+            "boundingBox2D": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "action": "replace_identity",
+      "itemName": "Daun Selada Krt",
+      "newItemName": "Ayam Rebus",
+      "replacementItemName": "Ayam Rebus",
+      "newWeightGrams": 165,
+      "targetDbId": null,
+      "scoutIndex": 1,
+      "sourceImageIndex": 0,
+      "estimate": {
+        "protein": 35,
+        "totalFat": 6,
+        "saturatedFat": 1.5,
+        "sodium": 110,
+        "totalFibre": 0,
+        "totalSugar": 0,
+        "vitaminD": 0,
+        "cookingMethod": "boiled",
+        "sourceImageIndex": 0,
+        "foods": [
+          {
+            "foodName": "Ayam",
+            "genericEnglishName": "boiled chicken",
+            "weightGrams": 165,
+            "sourceImageIndex": 0,
+            "nutrients": {
+              "protein": 35,
+              "saturatedFat": 1.5,
+              "addedSugar": 0,
+              "totalFibre": 0,
+              "sodium": 110,
+              "carbohydrates": 0
+            },
+            "boundingBox2D": [
+              250,
+              50,
+              800,
+              750
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "ledgerSummary": [
+    {
+      "name": "J Acar Polos",
+      "weightGrams": 115,
+      "calories": 45,
+      "scoutIndex": 0
+    },
+    {
+      "name": "Enoki Mushroom",
+      "weightGrams": 150,
+      "calories": 67,
+      "scoutIndex": 1
+    },
+    {
+      "name": "Kcg Tanah Kulit",
+      "weightGrams": 105,
+      "calories": 93,
+      "scoutIndex": 2
+    },
+    {
+      "name": "Ayam Rebus",
+      "weightGrams": 165,
+      "calories": 154,
+      "scoutIndex": 3
+    }
+  ],
+  "nutrients": {
+    "calories": 359,
+    "protein": 54.8,
+    "totalFat": 3.4,
+    "saturatedFat": 2.7,
+    "transFat": 0,
+    "unsaturatedFat": 29.2,
+    "omega3": 0,
+    "carbohydrates": 27,
+    "sugar": 7,
+    "addedSugar": 0,
+    "totalFibre": 8.7,
+    "solubleFibre": 3.3,
+    "sodium": 121,
+    "potassium": 993,
+    "magnesium": 85.5,
+    "calcium": 163.5,
+    "iron": 4.6,
+    "zinc": 2.8,
+    "selenium": 26,
+    "iodine": 34.5,
+    "phosphorus": 321,
+    "vitaminD": 0.4,
+    "vitaminB12": 0.9,
+    "folate": 116.4,
+    "vitaminC": 35.1,
+    "vitaminE": 2.5,
+    "vitaminK": 40.2,
+    "vitaminA": 155.4,
+    "vitaminB6": 0.5,
+    "thiamine": 0.3,
+    "riboflavin": 0.3,
+    "niacin": 4.6,
+    "salt": 0.31
+  }
+}
+```
+- **Raw Emission (Verbatim Output):**
+```json
+{
+  "skipped": false,
+  "message": "The clean chicken and vegetables deliver strong protein and fiber, supporting your metabolic goals. However, the peanuts contribute saturated fat and calories that compound against your high cholesterol and HbA1c targets. Balance this meal with a 15-minute brisk walk to help manage post-meal lipids and blood sugar.",
+  "clinicalAdvice": "The clean chicken and vegetables deliver strong protein and fiber, supporting your metabolic goals. However, the peanuts contribute saturated fat and calories that compound against your high cholesterol and HbA1c targets. Balance this meal with a 15-minute brisk walk to help manage post-meal lipids and blood sugar.",
+  "verdict": {
+    "label": "Boosts lean muscle tissue",
+    "level": "neutral"
+  },
+  "editCommandCount": 2
+}
+```
+- **Signals:** model=projector, latency_ms=0, tokens=0
+- **Parent:** t2/scout
+
 ## 🔗 Data Pipelines & Infrastructure Connectivity Matrix
 
 | Pipeline Stage | Connectivity & Status | Details / Metrics |
@@ -374,7 +778,7 @@ Analyze the provided 2 meal images. Inspect all visible prepared dishes, cooking
 | **5. Mathematical Calculation Engine** | ✅ Connected (Verified) | 33 nutrient profile computed |
 | **6. Trial-Balance & Quality Gate** | ✅ Passed & Savable | GATE: EVALUATED |
 | **7. Health Coach / Clinical Engine** | ⚪ Standby / N/A | No clinical analysis requested |
-| **8. State Storage & Job Sync** | ✅ Connected (18 lifecycle event(s)) | Job ID: `job_1789920526160_7rwiexoqd` |
+| **8. State Storage & Job Sync** | ✅ Connected (9 lifecycle event(s)) | Job ID: `job_1789920526160_7rwiexoqd` |
 
 ## ⚖️ Gate & Trial-Balance Evaluation
 
@@ -382,18 +786,10 @@ Analyze the provided 2 meal images. Inspect all visible prepared dishes, cooking
 - **Savable:** `true`
 - **Calculated Ledger Totals:** 535g | 359 kcal | 54.8g protein | 27g carbs | 3.4g fat
 
-## 🔄 Retry Sessions & Execution Attempts (1)
-
-| Attempt / Turn | Status | Completed At | Error / Details |
-|---|---|---|---|
-| **Attempt 1** | `succeeded` | 2026-09-20T16:09:18.500Z | Your selection of enoki mushrooms, baby corn, and peanuts delivers strong plant protein, dietary fiber, and healthy fats that support your cholesterol goals. Peanuts add heart-healthy unsaturated fats, but watch portion sizes to manage calorie intake alongside your lipid levels. Keep prioritizing these wholesome ingredients! |
-
 ## 👤 Last User Action
 
-- **Action:** click
-- **Prompt/Text:** "download-debug-logs-header-btn"
-- **Timestamp:** 2026-09-20T16:16:39.566Z
-- **Details:** {"id":"download-debug-logs-header-btn","label":"download-debug-logs-header-btn"}
+- **Action:** submit_meal_job
+- **Timestamp:** 2026-09-20T16:12:25.442Z
 
 ## 🐾 User Action Breadcrumbs
 
@@ -445,10 +841,6 @@ Analyze the provided 2 meal images. Inspect all visible prepared dishes, cooking
 | 16:12:25 | click | button | {"id":"food-chat-send-btn","label":"food-chat-send-btn"} |
 | 16:12:25 | submit_initiated | chat_composer | {"prompt":"I ate half of the peanuts amount and the daun selada krt is chicken as shown on picture","imageCount":1} |
 | 16:12:25 | submit_meal_job | chat_compose_dock | {"jobId":"job_1789920526160_7rwiexoqd","promptLength":87,"imageCount":1,"submissionMode":"review"} |
-| 16:16:22 | network_error | /api/jobs/upsert | {"status":500,"duration":1329,"method":"POST"} |
-| 16:16:22 | click | button | {"id":"nav-tab-food","label":"Food History"} |
-| 16:16:24 | click | button | {"label":"View Analysis"} |
-| 16:16:39 | click | button | {"id":"download-debug-logs-header-btn","label":"download-debug-logs-header-btn"} |
 
 ## ⚙️ Job Session Event Trail
 
@@ -462,20 +854,11 @@ Analyze the provided 2 meal images. Inspect all visible prepared dishes, cooking
 2026-09-20T16:09:19.437Z JobQueueRunner AnalyzeFinished succeeded
 2026-09-20T16:09:19.504Z JobQueueRunner ServerStatus succeeded
 2026-09-20T16:12:25.373Z LogChat.submit SubmitStarted queued
-2026-09-20T16:12:30.564Z serverJobs.start job_started running
-2026-09-20T16:12:30.627Z serverJobs.progress progress_15% running
-2026-09-20T16:12:39.505Z serverJobs.publish result_ready succeeded
-2026-09-20T16:12:40.082Z serverJobs.complete job_completed succeeded
-2026-09-20T16:16:20.658Z JobQueueRunner ServerStatus running
-2026-09-20T16:16:20.904Z JobQueueRunner AnalyzeFinished succeeded
-2026-09-20T16:16:20.912Z JobStore.apply updateJob succeeded
-2026-09-20T16:16:20.922Z JobQueueRunner ServerStatus succeeded
-2026-09-20T16:16:22.461Z realtime RealtimeRow succeeded
 ```
 
 ## 🌐 Console & Network Diagnostics
 
-### Network Request Warnings & Errors (17)
+### Network Request Warnings & Errors (16)
 ```
 [2026-09-20T16:08:20.672Z] [NET POST 500] /api/jobs/upsert (584ms) - HTTP Error
 [2026-09-20T16:08:20.673Z] [NET POST 500] /api/jobs/upsert (582ms) - HTTP Error
@@ -493,11 +876,11 @@ Analyze the provided 2 meal images. Inspect all visible prepared dishes, cooking
 [2026-09-20T16:09:33.066Z] [NET DROP POST] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel (60ms) - Failed to fetch
 [2026-09-20T16:09:43.059Z] [NET DROP POST] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel (52ms) - Failed to fetch
 [2026-09-20T16:09:57.065Z] [NET DROP POST] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel (55ms) - Failed to fetch
-[2026-09-20T16:16:22.247Z] [NET POST 500] /api/jobs/upsert (1329ms) - HTTP Error
 ```
 
-### Client Console Logs (51)
+### Client Console Logs (47)
 ```
+[LOG 2026-09-20T16:08:19.203Z] [SupabaseJobSync] Supabase direct client/realtime disabled, relying on background polling
 [LOG 2026-09-20T16:08:20.087Z] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789889581799_5wz1ox1iv
 [LOG 2026-09-20T16:08:20.091Z] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789903725124_lzwkh4klb
 [LOG 2026-09-20T16:08:20.092Z] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789904499116_fiv9crv4k
@@ -544,10 +927,6 @@ Analyze the provided 2 meal images. Inspect all visible prepared dishes, cooking
 [LOG 2026-09-20T16:09:06.048Z] [job_1789920526160_7rwiexoqd] [JobQueueRunner] Job job_1789920526160_7rwiexoqd is server-owned. Polling /api/jobs/status...
 [LOG 2026-09-20T16:09:19.433Z] [job_1789920526160_7rwiexoqd] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789920526160_7rwiexoqd
 [LOG 2026-09-20T16:09:19.732Z] [job_1789920526160_7rwiexoqd] [DIAG4] upsertJobToSupabase: Step 1/2 failed, attempting Firestore mirror for job job_1789920526160_7rwiexoqd
-[LOG 2026-09-20T16:16:20.666Z] [JobQueueRunner] Job job_1789920526160_7rwiexoqd is server-owned. Polling /api/jobs/status...
-[LOG 2026-09-20T16:16:20.916Z] [DIAG4] upsertJobToSupabase: calling /api/jobs/upsert for job job_1789920526160_7rwiexoqd
-[LOG 2026-09-20T16:16:20.920Z] [JobQueueRunner] Auto-saving edited food log meal_1789920558168 from job job_1789920526160_7rwiexoqd
-[LOG 2026-09-20T16:16:22.248Z] [DIAG4] upsertJobToSupabase: /api/jobs/upsert for job job_1789920526160_7rwiexoqd responded 500 in 1332ms
 ```
 
 ## 🔍 Vision Scout Results (4 item(s) detected)

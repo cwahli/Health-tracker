@@ -3825,4 +3825,81 @@ describe('G10 golden — photo edit clarifies ONE dish, adds photo, scales only 
     const candidates = resolveMealImageCandidates({ imageUrls: [...turn1, addedPhoto] });
     expect(candidates).toEqual(merged);
   });
+
+  it('photo-only edit (no text) diff-synthesizes replace of the ambiguous dish + scale of the peanut row only', async () => {
+    // The exact user journey from the requirement: turn 1 attaches 2 photos →
+    // 4 dishes (one provisional lettuce row from a sticker). Turn 2 attaches a
+    // clarification photo with NO prompt text; the scout re-emits only the
+    // corrected chicken and the half-eaten peanuts. The server must diff the
+    // re-emission against the prior ledger and issue replace_identity for the
+    // single ambiguous dish plus a scale of the peanut row — never a rebuild.
+    const items = turn1Pot();
+    const scoutReEmission = [
+      {
+        scoutIndex: 3,
+        name: 'Ayam Rebus',
+        originalName: 'Ayam Rebus',
+        canonicalDbName: 'Chicken',
+        weightGrams: 165,
+        sourceImageIndex: 0,
+        foods: [{ foodName: 'Ayam', weightGrams: 165, nutrients: { protein: 35, carbohydrates: 0, totalFat: 1.5, saturatedFat: 0.5, sodium: 110 } }],
+      },
+      {
+        scoutIndex: 2,
+        name: 'Kcg Tanah Kulit',
+        originalName: 'Kcg Tanah Kulit',
+        canonicalDbName: 'Peanuts',
+        weightGrams: 105,
+        sourceImageIndex: 1,
+        foods: [{ foodName: 'Peanuts', weightGrams: 105 }],
+      },
+    ];
+
+    // No commands and no message: the path a photo-only edit takes. The
+    // scout↔ledger diff must synthesize the two structural commands.
+    const result = await applyMealEdits({
+      items,
+      commands: [],
+      userMessage: '',
+      scoutItems: scoutReEmission,
+    });
+
+    // ONE dish replaced in place; count is unchanged, no duplicate chicken.
+    expect(result.items).toHaveLength(items.length);
+    expect(result.items.filter((it) => /ayam|chicken/i.test(String(it.name || it.originalName || '')))).toHaveLength(1);
+    expect(result.items.some((it) => /selada|lettuce/i.test(String(it.name || it.originalName || '')))).toBe(false);
+
+    // Peanuts scaled down (not deleted); other dishes untouched.
+    const peanuts = result.items.find((it) => /kcg|peanut/i.test(String(it.name || '')));
+    expect(peanuts?.weightGrams).toBe(105);
+    const corn = result.items.find((it) => /acar|baby corn/i.test(String(it.name || '')));
+    const enoki = result.items.find((it) => /enoki/i.test(String(it.name || '')));
+    expect(corn?.weightGrams).toBe(115);
+    expect(enoki?.weightGrams).toBe(150);
+  });
+
+  it('the committed debugmeal1 sample export is reproducible: 2 turns, 3 photos, 3 dispatches', async () => {
+    // Anti-regression for the debug fix itself: the checked-in sample report
+    // (prototype/meallog/meal_test_debug_1/debug-job_1789920526160_7rwiexoqd.md)
+    // must carry the full journey, not the turn-1-only view that shipped before.
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const samplePath = path.join(
+      process.cwd(),
+      'prototype/meallog/meal_test_debug_1/debug-job_1789920526160_7rwiexoqd.md',
+    );
+    const md = fs.readFileSync(samplePath, 'utf8');
+    expect(md).toContain('## 🧭 Turn Timeline (User ↔ Agent)');
+    expect(md).toContain('### Turn 1 — t1/scout · photos: 2');
+    expect(md).toContain('### Turn 2 — t2/scout, t2/diet · photos: 1');
+    expect(md).toContain('## 📡 Agent Dispatches (3)');
+    // The edit turn's own prompt + its own clarification photo are visible.
+    expect(md).toContain('I ate half of the peanuts amount and the daun selada krt is chicken as shown on picture');
+    expect(md).toContain('sha256_a29592e18ef1d68caf83e5a7c71538de3e08cfd328371b2996378453427ec240.jpg');
+    // The initial two photos are retained too.
+    expect(md).toContain('sha256_db018820cd88899b3c3a76764b7b229fbe21c9a6601726d85b5608550ce7d254.jpg');
+    expect(md).toContain('sha256_a812f40220d109fd32ccd2824499ecc286735b08967a5b7327713c45f66b813a.jpg');
+    // The initial create result (turn 1) is not lost to the edit.
+    expect(md).toContain('Nutrient-Dense Whole Foods Selection');
+  });
 });

@@ -861,6 +861,44 @@ describe('debugPayload', () => {
     expect(md).toContain('https://cdn.example.com/t1_a.jpg');
   });
 
+  it('renders a photo-only clarification turn (no prompt text) with its 1 photo (debugmeal1 class)', () => {
+    // Exact user-side shape: turn 1 = 2 photos + a text prompt; turn 2 = the
+    // clarification PHOTO only (no message). The export must still show two
+    // turns, credit turn 2 with 1 photo, and keep the journey readable.
+    const logs = [
+      '[scout_answer] Scout identified 4 item(s): Baby Corn (~115g), Peanuts (~210g)',
+      '[diet_answer] Your selection delivers strong plant protein.',
+      '',
+      '--- USER CONTINUATION (TURN 2) ---',
+      '',
+      '[scout_answer] Scout identified 2 item(s): Peanuts (~105g), Ayam Rebus (~165g)',
+      '[diet_answer] The clean chicken and vegetables deliver strong protein.',
+    ].join('\n');
+
+    const md = buildDebugMarkdownReport({
+      jobId: 'job_photo_only_edit',
+      status: 'succeeded',
+      mode: 'edit',
+      backendLogs: logs,
+      photoUrls: ['https://cdn.example.com/t1_a.jpg', 'https://cdn.example.com/t1_b.jpg', 'https://cdn.example.com/t2_edit.jpg'],
+      userActionBreadcrumbs: [
+        { action: 'submit_initiated', details: { prompt: 'Analyze this meal photo.', imageCount: 2 } },
+        { action: 'submit_initiated', details: { imageCount: 1 } },
+      ],
+    });
+
+    expect(md).toContain('## 🧭 Turn Timeline (User ↔ Agent)');
+    expect(md).toContain('### Turn 1 — t1/scout · photos: 2');
+    expect(md).toContain('### Turn 2 — t2/scout · photos: 1');
+    // Turn 2 is photo-only: the timeline still carries its own clarification photo
+    // and its own answer, so the edit is reproducible without a text prompt.
+    expect(md).toContain('https://cdn.example.com/t2_edit.jpg');
+    expect(md).toContain('The clean chicken and vegetables deliver strong protein.');
+    // The initial two photos are retained, not replaced.
+    expect(md).toContain('https://cdn.example.com/t1_a.jpg');
+    expect(md).toContain('https://cdn.example.com/t1_b.jpg');
+  });
+
   it('keeps the multi-turn continuation marker in Backend Execution Logs (not collapsed away)', () => {
     const logs = [
       '=== GLOBAL LIVE STREAM CONNECTED ===',
