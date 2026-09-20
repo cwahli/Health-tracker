@@ -35,9 +35,9 @@ describe('D-9 R2 Photo CAS Deduplication (uploadBase64ToR2)', () => {
   });
 
   it('maps different bytes to different CAS keys', async () => {
-    const otherBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const otherBase64 = pixelBase64.replace('AAAAfFcSJ', 'AAAAGFcSJ');
     const url = await uploadBase64ToR2('job_test_123', pixelBase64, 0);
-    const otherUrl = await uploadBase64ToR2('job_test_123', otherBase64 + 'A', 0);
+    const otherUrl = await uploadBase64ToR2('job_test_123', otherBase64, 0);
     expect(otherUrl).not.toEqual(url);
     expect(otherUrl).toContain('photos/sha256_');
   });
@@ -61,7 +61,7 @@ describe('D-9 R2 Photo CAS head-check reuse (mocked S3)', () => {
       throw new Error(`unexpected S3 command: ${cmd?.constructor?.name}`);
     });
     vi.doMock('@aws-sdk/client-s3', () => ({
-      S3Client: vi.fn(() => ({ send })),
+      S3Client: vi.fn(function (this: any) { return { send }; }),
       PutObjectCommand: class PutObjectCommand { input: any; constructor(input: any) { this.input = input; } },
       HeadObjectCommand: class HeadObjectCommand { input: any; constructor(input: any) { this.input = input; } },
       GetObjectCommand: class GetObjectCommand { input: any; constructor(input: any) { this.input = input; } },
