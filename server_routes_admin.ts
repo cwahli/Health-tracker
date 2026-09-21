@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
-import { supabaseAdmin } from './supabaseAdmin.js';
-import { isD1Configured } from './server_d1.js';
+// D-2: D1-only. Supabase import removed (no 402).
+import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
 import {
   d1GetFoodCatalogItems,
   d1UpdateFoodServing,
@@ -194,25 +194,8 @@ adminRouter.get('/api/admin/food-catalog', async (req, res) => {
       }
     }
 
-    // 2. Try Supabase if available
-    if (supabaseAdmin) {
-      try {
-        const tableName = itemType === 'dish' ? 'dish_cache' : 'food_items';
-        let query = supabaseAdmin.from(tableName).select('*');
-        if (statusFilter !== 'all') {
-          query = query.eq('status', statusFilter);
-        }
-        if (searchQuery) {
-          query = query.ilike('display_name', `%${searchQuery}%`);
-        }
-        const { data, error } = await query.order('updated_at', { ascending: false }).limit(100);
-        if (!error && data && data.length > 0) {
-          return res.json({ items: data });
-        }
-      } catch (sbErr) {
-        console.warn('[api/admin/food-catalog] Supabase fetch error:', sbErr);
-      }
-    }
+    // D-2: D1 is the only remote read (Supabase fallback removed, no 402).
+    // Canonical local foods remain the offline fallback below.
 
     // 3. Fallback: If requesting base food items and no results yet, return from CANONICAL_BASE_FOODS
     if (itemType !== 'dish') {
@@ -287,22 +270,6 @@ adminRouter.post('/api/admin/food-catalog/promote', async (req, res) => {
       await d1UpdateItemStatus(itemType === 'dish' ? 'dish' : 'food', key, 'active');
     }
 
-    if (supabaseAdmin) {
-      try {
-        const table = itemType === 'dish' ? 'dish_cache' : 'food_items';
-        const keyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
-        const { data: existing } = await supabaseAdmin.from(table).select('version').eq(keyCol, key).maybeSingle();
-        const currentVer = existing?.version || 1;
-        await supabaseAdmin.from(table).update({
-          status: 'active',
-          version: currentVer + 1,
-          updated_at: new Date().toISOString()
-        }).eq(keyCol, key);
-      } catch (sbErr) {
-        console.warn('[food-catalog/promote] Supabase update failed:', sbErr);
-      }
-    }
-
     return res.json({ success: true, message: `Promoted ${itemType || 'item'} ${key} to active` });
   } catch (err: any) {
     res.status(500).json({ error: err.message || String(err) });
@@ -316,19 +283,6 @@ adminRouter.post('/api/admin/food-catalog/quarantine', async (req, res) => {
 
     if (isD1Configured()) {
       await d1UpdateItemStatus(itemType === 'dish' ? 'dish' : 'food', key, 'quarantine');
-    }
-
-    if (supabaseAdmin) {
-      try {
-        const targetTable = itemType === 'dish' ? 'dish_cache' : 'food_items';
-        const targetKeyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
-        await supabaseAdmin.from(targetTable).update({
-          status: 'quarantine',
-          updated_at: new Date().toISOString()
-        }).eq(targetKeyCol, key);
-      } catch (sbErr) {
-        console.warn('[food-catalog/quarantine] Supabase update failed:', sbErr);
-      }
     }
 
     return res.json({ success: true, message: `Quarantined ${key}` });
@@ -346,20 +300,6 @@ adminRouter.post('/api/admin/food-catalog/update-serving', async (req, res) => {
 
     if (isD1Configured()) {
       await d1UpdateFoodServing(itemType === 'dish' ? 'dish' : 'food', key, basisType || 'per_serving', numServing);
-    }
-
-    if (supabaseAdmin) {
-      try {
-        const targetTable = itemType === 'dish' ? 'dish_cache' : 'food_items';
-        const targetKeyCol = itemType === 'dish' ? 'dish_key' : 'food_key';
-        await supabaseAdmin.from(targetTable).update({
-          basis_type: basisType || null,
-          serving_grams: numServing || null,
-          updated_at: new Date().toISOString()
-        }).eq(targetKeyCol, key);
-      } catch (sbErr) {
-        console.warn('[food-catalog/update-serving] Supabase update failed:', sbErr);
-      }
     }
 
     return res.json({ success: true, message: `Updated serving size of ${key}` });
@@ -401,7 +341,7 @@ adminRouter.post('/api/admin/food-catalog/quarantine-check', async (req, res) =>
 adminRouter.post('/api/admin/db-clean', async (req, res) => {
   try {
     const countryCode = req.body?.countryCode || 'GB';
-    const cleanRes = await selfCleanBrandDatabase(supabaseAdmin, countryCode, console.log);
+    const cleanRes = await selfCleanBrandDatabase(null, countryCode, console.log);
     return res.json({
       success: true,
       chainStats: {
@@ -422,7 +362,7 @@ adminRouter.post('/api/admin/db-clean', async (req, res) => {
 adminRouter.post('/api/admin/brand-menu/cleanup', async (req, res) => {
   try {
     const countryCode = req.body?.countryCode || 'GB';
-    const cleanRes = await selfCleanBrandDatabase(supabaseAdmin, countryCode, console.log);
+    const cleanRes = await selfCleanBrandDatabase(null, countryCode, console.log);
     return res.json({
       success: true,
       countryCode,
@@ -508,13 +448,13 @@ function extractR2KeyFromUrl(url: string): string | null {
 async function getReferencedPhotoKeys(): Promise<Set<string>> {
   const referenced = new Set<string>();
 
-  // Food logs across every user - image_urls is a JSON array column.
+  // Food logs across every user - image_urls is a JSON array column (D1 text).
   try {
-    const { data: rows } = await supabaseAdmin.from('food_logs').select('image_urls').limit(5000);
-    for (const row of (rows || [])) {
+    const foodRes = await d1Query<{ image_urls: string | null }>(`SELECT image_urls FROM food_logs LIMIT 5000`);
+    for (const row of (foodRes.results || [])) {
       let urls: any = row.image_urls;
       if (typeof urls === 'string') {
-        try { urls = JSON.parse(urls); } catch { urls = []; }
+        urls = safeJsonParse(urls, []);
       }
       if (Array.isArray(urls)) {
         for (const u of urls) {
@@ -524,7 +464,7 @@ async function getReferencedPhotoKeys(): Promise<Set<string>> {
       }
     }
   } catch (err) {
-    console.warn('[r2-photo-audit] Supabase food_logs lookup failed:', err);
+    console.warn('[r2-photo-audit] D1 food_logs lookup failed:', err);
   }
 
   // Every job record, any status - a job's photo_url is the durable link a
