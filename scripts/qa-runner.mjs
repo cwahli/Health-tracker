@@ -67,20 +67,39 @@ async function run() {
 
   try {
     // 1. Initial Page Load & Auth Gate
-    await page.goto(baseUrl, { waitUntil: 'commit', timeout: 35000 });
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
     const demoBtn = page.locator('#demo-login-btn');
     const homeTab = page.locator('#nav-tab-home');
 
-    await Promise.race([
-      homeTab.waitFor({ state: 'attached', timeout: 20000 }).catch(() => {}),
-      demoBtn.waitFor({ state: 'visible', timeout: 20000 }).catch(() => {})
-    ]);
+    // Wait for the app to hydrate or show login screen
+    let authResolved = false;
+    for (let attempt = 0; attempt < 25; attempt++) {
+      if (await homeTab.isVisible().catch(() => false)) {
+        authResolved = true;
+        break;
+      }
+      if (await demoBtn.isVisible().catch(() => false)) {
+        console.log('[QA Runner] Logging in via Demo Account...');
+        await demoBtn.click();
+        await homeTab.waitFor({ state: 'attached', timeout: 25000 }).catch(() => {});
+        authResolved = true;
+        break;
+      }
+      await page.waitForTimeout(1000);
+    }
 
-    if (await demoBtn.isVisible().catch(() => false)) {
-      console.log('[QA Runner] Logging in via Demo Account...');
-      await demoBtn.click();
-      await homeTab.waitFor({ state: 'attached', timeout: 25000 });
+    if (!authResolved) {
+      console.log('[QA Runner] Waiting additional 10s for initial hydration...');
+      await Promise.race([
+        homeTab.waitFor({ state: 'attached', timeout: 10000 }).catch(() => {}),
+        demoBtn.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
+      ]);
+      if (await demoBtn.isVisible().catch(() => false)) {
+        console.log('[QA Runner] Logging in via Demo Account after delay...');
+        await demoBtn.click();
+        await homeTab.waitFor({ state: 'attached', timeout: 25000 }).catch(() => {});
+      }
     }
 
     // 2. Journey Specific Execution

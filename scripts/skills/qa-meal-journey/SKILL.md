@@ -75,7 +75,7 @@ bash "$REPO_DIR/scripts/run-coding-dispatch.sh" \
   --bug-id="$BUG_ID" \
   --category="meal" \
   --screenshot="$LATEST_IMG" \
-  --profile=orchestrator >/dev/null 2>&1 &
+  --profile=orchestrator </dev/null >/dev/null 2>&1 & disown
 ```
 
 ### Step 3 — Reply with Bug Ticket and STOP Immediately

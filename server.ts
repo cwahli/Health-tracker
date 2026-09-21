@@ -3682,6 +3682,10 @@ async function startServer() {
         }
       }
     }));
+    // Explicit 404 for missing hashed assets to prevent SPA fallback serving index.html as JS/CSS
+    app.use('/assets', (req, res) => {
+      res.status(404).type('text/plain').send('Asset not found');
+    });
     app.get("*", (req, res) => {
       res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(distPath, "index.html"));
