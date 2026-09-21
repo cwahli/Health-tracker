@@ -1,5 +1,5 @@
 import { calculateGenericTokenCoverage, evaluateGenericModifierInversionPenalty, evaluateUniversalCategoryDisparity } from './server_matching_engine.js';
-import { supabaseAdmin } from './supabaseAdmin.js';
+import { d1Query, isD1Configured } from './server_d1.js';
 import { checkCategoryAndStateCompatibility } from './server_pure_helpers.js';
 
 export function scoreCandidate(query: string, candidate: any): number {
@@ -62,13 +62,12 @@ export async function writeAliasIfHitUnique(resolveClass: string, query: string,
       if (!aliasKey) return;
       try {
         console.log(`[ResolveClass] HIT_UNIQUE for "${query}" (key: ${aliasKey}). Auto-aliasing to ${fdcId}.`);
-        await supabaseAdmin.from('food_aliases').upsert({
-          alias_key: aliasKey,
-          food_id: String(fdcId),
-          weight: 1.0,
-          source: 'hit_unique_auto_alias',
-          hit_count: 1
-        }, { onConflict: 'alias_key' });
+        if (!isD1Configured()) return;
+        await d1Query(
+          `INSERT INTO food_aliases (alias_key, food_id, weight, source, hit_count) VALUES (?, ?, 1.0, 'hit_unique_auto_alias', 1)
+           ON CONFLICT(alias_key) DO UPDATE SET food_id = excluded.food_id, source = excluded.source`,
+          [aliasKey, String(fdcId)]
+        );
       } catch (err) {
         console.warn(`[ResolveClass] Failed to write auto-alias for ${query}:`, err);
       }

@@ -1,4 +1,4 @@
-import { supabaseAdmin, isSupabaseConfigured } from './supabaseAdmin';
+import { d1Query, isD1Configured, safeJsonParse } from './server_d1.js';
 import { CANONICAL_BASE_FOODS, lookupCanonicalBaseFood } from './server_food_db';
 import { NUTRIENT_KEYS } from './src/utils/nutrients';
 import { ensureFoodCatalogSchema, resetFoodCatalogSchemaEnsure } from "./server_food_catalog_schema.js";
@@ -147,26 +147,34 @@ export async function resolveInternalFood(query: string): Promise<InternalFoodMa
     };
   }
 
-  // 2. Query Supabase for active/candidate food item or alias
-  if (!isSupabaseConfigured) {
+  // 2. Query D1 for active/candidate food item or alias
+  if (!isD1Configured()) {
     return null;
   }
 
-  try {
-    const { data: itemData, error: itemError } = await supabaseAdmin
-      .from('food_items')
-      .select('food_id, food_key, display_name, nutrients_per_100g, status, confidence, fdc_id, form_tags, state')
-      .eq('food_key', key)
-      .maybeSingle();
+  const parseNuts = (v: any): any => (typeof v === 'string' ? safeJsonParse(v, {}) : (v || {}));
+  const parseTags = (v: any): any[] => {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') return safeJsonParse(v, []);
+    return [];
+  };
 
-    if (itemData && !itemError) {
+  try {
+    const itemRes = await d1Query<any>(
+      'SELECT food_id, food_key, display_name, nutrients_per_100g, status, confidence, fdc_id, form_tags, state FROM food_items WHERE food_key = ? LIMIT 1',
+      [key]
+    );
+    const itemData = itemRes.results?.[0];
+    if (itemData) {
+      itemData.nutrients_per_100g = parseNuts(itemData.nutrients_per_100g);
+      itemData.form_tags = parseTags(itemData.form_tags);
       if (itemData.status === 'active') {
         return {
           food_id: itemData.food_id,
           food_key: itemData.food_key,
           display_name: itemData.display_name,
           nutrients_per_100g: itemData.nutrients_per_100g,
-          source: 'supabase_active',
+          source: 'd1_active',
           confidence: itemData.confidence || 0.9,
           fdc_id: itemData.fdc_id,
           form_tags: itemData.form_tags,
@@ -180,7 +188,7 @@ export async function resolveInternalFood(query: string): Promise<InternalFoodMa
             food_key: itemData.food_key,
             display_name: itemData.display_name,
             nutrients_per_100g: itemData.nutrients_per_100g,
-            source: 'supabase_candidate',
+            source: 'd1_candidate',
             confidence: itemData.confidence || 0.5,
             fdc_id: itemData.fdc_id,
             form_tags: itemData.form_tags,
@@ -190,37 +198,34 @@ export async function resolveInternalFood(query: string): Promise<InternalFoodMa
       }
     }
     // Check alias
-    const { data: aliasData, error: aliasError } = await supabaseAdmin
-      .from('food_aliases')
-      .select('*, food_items!inner(*)')
-      .eq('alias_key', key)
-      .maybeSingle();
+    const aliasRes = await d1Query<any>('SELECT * FROM food_aliases WHERE alias_key = ? LIMIT 1', [key]);
+    const aliasData = aliasRes.results?.[0];
 
-    if (aliasData && aliasData.food_items) {
-      const fi = aliasData.food_items;
-      if (fi.status === 'active' || (fi.status === 'candidate' && (fi.confidence || 0.5) >= 0.65 && checkAtwaterValidity(fi.nutrients_per_100g).valid)) {
-        console.log(`[AliasHit] Found alias mapping for ${key} -> ${fi.food_id}`);
-        // F-4 alias hit-rate telemetry: count reads (approximate under concurrency).
-        // Fire-and-forget; resolution never waits on or depends on this write.
-        try {
-          const hitUpdate: any = supabaseAdmin.from('food_aliases').update({ hit_count: (aliasData.hit_count || 0) + 1 }).eq('alias_key', key);
-          if (hitUpdate && typeof hitUpdate.catch === 'function') {
-            hitUpdate.catch((err: any) => console.warn('[AliasHit] hit_count increment failed:', err?.message || err));
-          }
-        } catch (err) {
-          console.warn('[AliasHit] hit_count increment failed:', (err as any)?.message || err);
+    if (aliasData?.food_id) {
+      const fiRes = await d1Query<any>('SELECT * FROM food_items WHERE food_id = ? LIMIT 1', [aliasData.food_id]);
+      const fi = fiRes.results?.[0];
+      if (fi) {
+        fi.nutrients_per_100g = parseNuts(fi.nutrients_per_100g);
+        fi.form_tags = parseTags(fi.form_tags);
+        if (fi.status === 'active' || (fi.status === 'candidate' && (fi.confidence || 0.5) >= 0.65 && checkAtwaterValidity(fi.nutrients_per_100g).valid)) {
+          console.log(`[AliasHit] Found alias mapping for ${key} -> ${fi.food_id}`);
+          // F-4 alias hit-rate telemetry: count reads (approximate under concurrency).
+          // Fire-and-forget; resolution never waits on or depends on this write.
+          d1Query(`UPDATE food_aliases SET hit_count = ? WHERE alias_key = ?`, [(aliasData.hit_count || 0) + 1, key]).catch(
+            (err: any) => console.warn('[AliasHit] hit_count increment failed:', err?.message || err)
+          );
+          return {
+            food_id: fi.food_id,
+            food_key: fi.food_key,
+            display_name: fi.display_name,
+            nutrients_per_100g: fi.nutrients_per_100g,
+            source: fi.status === 'active' ? 'alias_active' : 'd1_candidate',
+            confidence: (fi.confidence || 0.9) * (aliasData.weight || 1.0),
+            fdc_id: fi.fdc_id,
+            form_tags: fi.form_tags,
+            state: fi.state,
+          };
         }
-        return {
-          food_id: fi.food_id,
-          food_key: fi.food_key,
-          display_name: fi.display_name,
-          nutrients_per_100g: fi.nutrients_per_100g,
-          source: fi.status === 'active' ? 'alias_active' : 'supabase_candidate',
-          confidence: (fi.confidence || 0.9) * (aliasData.weight || 1.0),
-          fdc_id: fi.fdc_id,
-          form_tags: fi.form_tags,
-          state: fi.state,
-        };
       }
     }
   } catch (err) {
@@ -235,23 +240,24 @@ export async function resolveInternalFood(query: string): Promise<InternalFoodMa
  * Direct lookup of a compiled dish by canonical key.
  */
 export async function lookupDishInCatalog(key: string): Promise<any | null> {
-  if (!isSupabaseConfigured) {
+  if (!isD1Configured()) {
     return null;
   }
 
   try {
-    const { data: dish, error } = await supabaseAdmin
-      .from('dish_cache')
-      .select('dish_key, display_name, core_nutrients, basis_type, components, confidence')
-      .eq('dish_key', key)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (dish && !error) {
-      return dish;
+    const r = await d1Query<any>(
+      'SELECT dish_key, display_name, core_nutrients, basis_type, serving_grams, confidence FROM dish_cache WHERE dish_key = ? AND status = ? LIMIT 1',
+      [key, 'active']
+    );
+    const dish = r.results?.[0];
+    if (dish) {
+      return {
+        ...dish,
+        core_nutrients: typeof dish.core_nutrients === 'string' ? safeJsonParse(dish.core_nutrients, {}) : (dish.core_nutrients || {}),
+      };
     }
   } catch (err) {
-    console.warn(`[FoodCatalog] Supabase dish lookup error for key ${key}:`, err);
+    console.warn(`[FoodCatalog] D1 dish lookup error for key ${key}:`, err);
   }
 
   return null;
@@ -261,19 +267,15 @@ export async function resolveDishCache(query: string): Promise<InternalDishMatch
   if (!query) return null;
   const key = normalizeDishKey(query);
   if (!key) return null;
-  if (!isSupabaseConfigured) {
+  if (!isD1Configured()) {
     return null;
   }
 
   try {
-    const { data: dish, error } = await supabaseAdmin
-      .from('dish_cache')
-      .select('*')
-      .eq('dish_key', key)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (dish && !error) {
+    const r = await d1Query<any>('SELECT * FROM dish_cache WHERE dish_key = ? AND status = ? LIMIT 1', [key, 'active']);
+    const dish = r.results?.[0];
+    if (dish) {
+      dish.core_nutrients = typeof dish.core_nutrients === 'string' ? safeJsonParse(dish.core_nutrients, {}) : (dish.core_nutrients || {});
       return {
         dish_key: dish.dish_key,
         display_name: dish.display_name,
@@ -281,26 +283,19 @@ export async function resolveDishCache(query: string): Promise<InternalDishMatch
         basis_type: dish.basis_type || 'per_serving',
         serving_grams: dish.serving_grams || 100,
         confidence: dish.confidence || 0.9,
-        source: 'supabase_active',
+        source: 'd1_active',
       };
     }
 
     // Check dish_aliases
-    const { data: alias, error: aliasError } = await supabaseAdmin
-      .from('dish_aliases')
-      .select('dish_key')
-      .eq('alias_key', key)
-      .maybeSingle();
+    const aRes = await d1Query<any>('SELECT dish_key FROM dish_aliases WHERE alias_key = ? LIMIT 1', [key]);
+    const alias = aRes.results?.[0];
 
-    if (alias && !aliasError) {
-      const { data: targetDish } = await supabaseAdmin
-        .from('dish_cache')
-        .select('*')
-        .eq('dish_key', alias.dish_key)
-        .eq('status', 'active')
-        .maybeSingle();
-
+    if (alias?.dish_key) {
+      const tRes = await d1Query<any>('SELECT * FROM dish_cache WHERE dish_key = ? AND status = ? LIMIT 1', [alias.dish_key, 'active']);
+      const targetDish = tRes.results?.[0];
       if (targetDish) {
+        targetDish.core_nutrients = typeof targetDish.core_nutrients === 'string' ? safeJsonParse(targetDish.core_nutrients, {}) : (targetDish.core_nutrients || {});
         return {
           dish_key: targetDish.dish_key,
           display_name: targetDish.display_name,
@@ -326,7 +321,7 @@ export async function upsertFoodAlias(alias: {
   weight?: number;
   source?: string;
 }): Promise<{ success: boolean; error?: string }> {
-  if (!isSupabaseConfigured) {
+  if (!isD1Configured()) {
     return { success: true };
   }
   try {
@@ -336,7 +331,7 @@ export async function upsertFoodAlias(alias: {
     }
     const normAlias = normalizeFoodKey(alias.alias_key);
     if (!normAlias) return { success: false, error: 'Alias key required' };
-    
+
     const targetFoodId = alias.food_id || alias.food_key || normAlias;
     if (normAlias === targetFoodId) {
       // Issue #8: Generated redundant aliases for exact query strings. Add a local check to skip exact self-references.
@@ -344,28 +339,19 @@ export async function upsertFoodAlias(alias: {
       return { success: true };
     }
 
-    const { error } = await supabaseAdmin
-      .from('food_aliases')
-      .upsert({
-        alias_key: normAlias,
-        food_id: targetFoodId,
-        weight: alias.weight ?? 1.0,
-        source: alias.source || 'food_resolver',
-        created_at: new Date().toISOString()
-      }, { onConflict: 'alias_key' });
-
-    if (error) {
-      if (/fetch failed|TypeError|AbortError|network/i.test(error.message || '')) {
-        console.debug(`[upsertFoodAlias] Supabase notice: ${error.message}`);
-      } else {
-        console.warn(`[upsertFoodAlias] Supabase notice: ${error.message}`);
-      }
+    const upRes = await d1Query(
+      `INSERT INTO food_aliases (alias_key, food_id, weight, source) VALUES (?, ?, ?, ?)
+       ON CONFLICT(alias_key) DO UPDATE SET food_id = excluded.food_id, weight = excluded.weight, source = excluded.source`,
+      [normAlias, targetFoodId, alias.weight ?? 1.0, alias.source || 'food_resolver']
+    );
+    if (!upRes.success) {
+      console.warn(`[upsertFoodAlias] D1 notice: ${upRes.error}`);
       return { success: true };
     }
     return { success: true };
   } catch (err: any) {
     if (/schema cache|does not exist|Could not find the table/i.test(err.message || String(err))) { console.error("[CatalogSchema] Write failed because schema is missing. Run SQL: supabase/migrations/20260805_food_catalog_schema.sql or set DATABASE_URL and POST /api/admin/food-catalog/ensure-schema"); resetFoodCatalogSchemaEnsure(); }
-    else if (/fetch failed|TypeError|AbortError|network/i.test(err.message || String(err))) { console.debug('[upsertFoodAlias] Supabase network notice:', err.message || String(err)); }
+    else if (/fetch failed|TypeError|AbortError|network/i.test(err.message || String(err))) { console.debug('[upsertFoodAlias] D1 network notice:', err.message || String(err)); }
     return { success: true, error: err.message || String(err) };
   }
 }
@@ -421,18 +407,22 @@ export async function upsertFoodItemCandidate(item: {
     // Guard 2: Reject candidate items with zero calories and zero macros - REMOVED
     // We allow zero-macro candidate items (like water, black coffee, diet drinks)
     
-    // Check if existing candidate to count captures and check Atwater
-    const { data: existingById } = await supabaseAdmin
-      .from('food_items')
-      .select('*')
-      .eq('food_id', item.food_id)
-      .maybeSingle();
-
-    const { data: existingByKey } = await supabaseAdmin
-      .from('food_items')
-      .select('*')
-      .eq('food_key', normKey)
-      .maybeSingle();
+    // Check if existing candidate to count captures and check Atwater (D1-only)
+    if (!isD1Configured()) {
+      return { success: true };
+    }
+    const byIdRes = await d1Query<any>('SELECT * FROM food_items WHERE food_id = ? LIMIT 1', [item.food_id]);
+    const byKeyRes = await d1Query<any>('SELECT * FROM food_items WHERE food_key = ? LIMIT 1', [normKey]);
+    const parseRow = (r: any): any => {
+      if (!r) return r;
+      return {
+        ...r,
+        nutrients_per_100g: typeof r.nutrients_per_100g === 'string' ? safeJsonParse(r.nutrients_per_100g, {}) : (r.nutrients_per_100g || {}),
+        form_tags: Array.isArray(r.form_tags) ? r.form_tags : (typeof r.form_tags === 'string' ? safeJsonParse(r.form_tags, []) : []),
+      };
+    };
+    const existingById = parseRow(byIdRes.results?.[0]);
+    const existingByKey = parseRow(byKeyRes.results?.[0]);
 
     let finalKey = normKey;
     let existing = existingById || existingByKey;
@@ -471,24 +461,37 @@ export async function upsertFoodItemCandidate(item: {
       }
     }
 
-    const { error } = await supabaseAdmin
-      .from('food_items')
-      .upsert({
-        food_id: item.food_id,
-        food_key: finalKey,
-        display_name: item.display_name,
-        nutrients_per_100g: item.nutrients_per_100g,
-        fdc_id: item.fdc_id || null,
-        form_tags: item.form_tags || [],
-        state: item.state || null,
-        status: newStatus,
-        capture_count: captureCount,
-        confidence: item.confidence ?? 0.5,
-        provenance: item.provenance || 'resolver_candidate',
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'food_id' });
+    const upRes = await d1Query(
+      `INSERT INTO food_items (food_id, food_key, display_name, nutrients_per_100g, fdc_id, form_tags, state, status, capture_count, confidence, provenance, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(food_id) DO UPDATE SET
+         food_key = excluded.food_key,
+         display_name = excluded.display_name,
+         nutrients_per_100g = excluded.nutrients_per_100g,
+         fdc_id = excluded.fdc_id,
+         form_tags = excluded.form_tags,
+         state = excluded.state,
+         status = excluded.status,
+         capture_count = excluded.capture_count,
+         confidence = excluded.confidence,
+         provenance = excluded.provenance,
+         updated_at = excluded.updated_at`,
+      [
+        item.food_id,
+        finalKey,
+        item.display_name,
+        JSON.stringify(item.nutrients_per_100g),
+        item.fdc_id || null,
+        JSON.stringify(item.form_tags || []),
+        item.state || null,
+        newStatus,
+        captureCount,
+        item.confidence ?? 0.5,
+        item.provenance || 'resolver_candidate',
+      ]
+    );
 
-    if (error) return { success: false, error: error.message };
+    if (!upRes.success) return { success: false, error: upRes.error };
     return { success: true };
   } catch (err: any) {
     if (/schema cache|does not exist|Could not find the table/i.test(err.message || String(err))) { console.error("[CatalogSchema] Write failed because schema is missing. Run SQL: supabase/migrations/20260805_food_catalog_schema.sql or set DATABASE_URL and POST /api/admin/food-catalog/ensure-schema"); resetFoodCatalogSchemaEnsure(); } return { success: false, error: err.message || String(err) };
@@ -798,16 +801,8 @@ const EMPTY_CATALOG_SYNC = {
 };
 
 export async function getCatalogSyncStatus(): Promise<any> {
-  try {
-    const { isD1Configured } = await import('./server_d1.js');
-    if (isD1Configured()) {
-      const { d1GetCatalogMetrics } = await import('./server_db_d1.js');
-      const metrics = await d1GetCatalogMetrics();
-      return metrics;
-    }
-  } catch {}
-
-  if (!isSupabaseConfigured || !supabaseAdmin) {
+  // D-2: D1-only metrics computed inline (real gap/failure/event counts).
+  if (!isD1Configured()) {
     return { ...EMPTY_CATALOG_SYNC, offline: true };
   }
   try {
@@ -815,20 +810,25 @@ export async function getCatalogSyncStatus(): Promise<any> {
     if (!ens.ok && /schema cache|does not exist|Could not find the table/i.test(ens.error || '')) {
       // fall through
     }
-    const { count: foodTotal } = await supabaseAdmin.from('food_items').select('*', { count: 'exact', head: true });
-    const { count: foodActive } = await supabaseAdmin.from('food_items').select('*', { count: 'exact', head: true }).eq('status', 'active');
-    const { count: foodCandidate } = await supabaseAdmin.from('food_items').select('*', { count: 'exact', head: true }).eq('status', 'candidate');
-    
-    const { count: dishTotal } = await supabaseAdmin.from('dish_cache').select('*', { count: 'exact', head: true });
-    const { count: dishActive } = await supabaseAdmin.from('dish_cache').select('*', { count: 'exact', head: true }).eq('status', 'active');
-    
-    const { count: deferredGaps } = await supabaseAdmin.from('food_observations').select('*', { count: 'exact', head: true }).eq('event_type', 'deferred_gap');
-    const { count: resolverCalls } = await supabaseAdmin.from('food_observations').select('*', { count: 'exact', head: true }).in('event_type', ['resolver_invoked', 'deferred_gap', 'food_resolver']);
+    const count = async (sql: string, params: any[] = []): Promise<number> => {
+      const r = await d1Query<any>(sql, params);
+      return Number(r.results?.[0]?.n || 0);
+    };
+    const foodTotal = await count('SELECT COUNT(*) AS n FROM food_items');
+    const foodActive = await count("SELECT COUNT(*) AS n FROM food_items WHERE status = 'active'");
+    const foodCandidate = await count("SELECT COUNT(*) AS n FROM food_items WHERE status = 'candidate'");
 
-    const { data: syncEvts } = await supabaseAdmin.from('food_catalog_sync_events').select('event_type');
-    const realFailures = (syncEvts || []).filter((e: any) => /fail|_failure/i.test(e.event_type || '')).length;
+    const dishTotal = await count('SELECT COUNT(*) AS n FROM dish_cache');
+    const dishActive = await count("SELECT COUNT(*) AS n FROM dish_cache WHERE status = 'active'");
 
-    const { data: latestEvents } = await supabaseAdmin.from('food_catalog_sync_events').select('*').order('created_at', { ascending: false }).limit(10);
+    const deferredGaps = await count("SELECT COUNT(*) AS n FROM food_observations WHERE event_type = 'deferred_gap'");
+    const resolverCalls = await count("SELECT COUNT(*) AS n FROM food_observations WHERE event_type IN ('resolver_invoked', 'deferred_gap', 'food_resolver')");
+
+    const syncEvts = await d1Query<any>('SELECT event_type FROM food_catalog_sync_events');
+    const realFailures = ((syncEvts.results || []) as any[]).filter((e: any) => /fail|_failure/i.test(e.event_type || '')).length;
+
+    const latestRes = await d1Query<any>('SELECT * FROM food_catalog_sync_events ORDER BY created_at DESC LIMIT 10');
+    const latestEvents = latestRes.results || [];
 
     return {
       success: true,
@@ -887,12 +887,22 @@ export async function mergeFoodCatalogItems(
       return { success: false, error: 'Refused merge: Incompatible physical form tags (bar vs loose/cup)' };
     }
 
-    if (!isSupabaseConfigured) {
+    if (!isD1Configured()) {
       return { success: true, message: 'Offline mode: merge skipped' };
     }
 
-    const { data: sourceItem } = await supabaseAdmin.from('food_items').select('*').eq('food_key', normSource).maybeSingle();
-    const { data: targetItem } = await supabaseAdmin.from('food_items').select('*').eq('food_key', normTarget).maybeSingle();
+    const srcRes = await d1Query<any>('SELECT * FROM food_items WHERE food_key = ? LIMIT 1', [normSource]);
+    const tgtRes = await d1Query<any>('SELECT * FROM food_items WHERE food_key = ? LIMIT 1', [normTarget]);
+    const parseItem = (r: any): any => {
+      if (!r) return r;
+      return {
+        ...r,
+        nutrients_per_100g: typeof r.nutrients_per_100g === 'string' ? safeJsonParse(r.nutrients_per_100g, {}) : (r.nutrients_per_100g || {}),
+        form_tags: Array.isArray(r.form_tags) ? r.form_tags : (typeof r.form_tags === 'string' ? safeJsonParse(r.form_tags, []) : []),
+      };
+    };
+    const sourceItem = parseItem(srcRes.results?.[0]);
+    const targetItem = parseItem(tgtRes.results?.[0]);
 
     if (sourceItem && targetItem) {
       const sourceTags = [...(sourceItem.form_tags || []), ...passedSourceTags];
@@ -934,18 +944,16 @@ export async function mergeFoodCatalogItems(
       }
     }
 
-    await supabaseAdmin.from('food_aliases').upsert({
-      alias_key: normSource,
-      food_id: targetItem?.food_id || normTarget,
-      weight: 1.0,
-      source: 'admin_merge'
-    }, { onConflict: 'alias_key' });
+    await d1Query(
+      `INSERT INTO food_aliases (alias_key, food_id, weight, source) VALUES (?, ?, 1.0, 'admin_merge')
+       ON CONFLICT(alias_key) DO UPDATE SET food_id = excluded.food_id, source = excluded.source`,
+      [normSource, targetItem?.food_id || normTarget]
+    );
 
-    await supabaseAdmin.from('food_items').update({
-      status: 'merged',
-      parent_id: targetItem?.food_id || normTarget,
-      updated_at: new Date().toISOString()
-    }).eq('food_key', normSource);
+    await d1Query(`UPDATE food_items SET status = 'merged', canonical_target_id = ?, updated_at = datetime('now') WHERE food_key = ?`, [
+      targetItem?.food_id || normTarget,
+      normSource,
+    ]);
 
     await recordSyncEvent({
       event_type: 'item_merged',
@@ -960,20 +968,20 @@ export async function mergeFoodCatalogItems(
 
 export async function quarantineAtwaterFailures(): Promise<{ success: boolean; quarantinedCount: number }> {
   try {
-    const { data: items } = await supabaseAdmin.from('food_items').select('*').eq('status', 'candidate');
+    if (!isD1Configured()) return { success: true, quarantinedCount: 0 };
+    const candRes = await d1Query<any>(`SELECT food_key, nutrients_per_100g FROM food_items WHERE status = 'candidate' LIMIT 500`);
+    const items = (candRes.results || []) as any[];
     let count = 0;
     if (items && items.length > 0) {
       for (const item of items) {
-        const { valid } = checkAtwaterValidity(item.nutrients_per_100g);
+        const nuts = typeof item.nutrients_per_100g === 'string' ? safeJsonParse(item.nutrients_per_100g, {}) : (item.nutrients_per_100g || {});
+        const { valid } = checkAtwaterValidity(nuts);
         if (!valid) {
-          await supabaseAdmin.from('food_items').update({
-            status: 'quarantine',
-            updated_at: new Date().toISOString()
-          }).eq('food_key', item.food_key);
+          await d1Query(`UPDATE food_items SET status = 'quarantine', updated_at = datetime('now') WHERE food_key = ?`, [item.food_key]);
           count++;
           await recordSyncEvent({
             event_type: 'atwater_quarantine',
-            payload: { food_key: item.food_key, nutrients: item.nutrients_per_100g }
+            payload: { food_key: item.food_key, nutrients: nuts }
           });
         }
       }
@@ -998,22 +1006,34 @@ export async function upsertDishCacheCandidate(dish: {
     if (!ens.ok && /schema cache|does not exist|Could not find the table/i.test(ens.error || '')) {
       // fall through
     }
+    if (!isD1Configured()) {
+      return { success: true };
+    }
     const key = normalizeDishKey(dish.dish_key);
-    const { error } = await supabaseAdmin
-      .from('dish_cache')
-      .upsert({
-        dish_key: key,
-        display_name: dish.display_name,
-        core_nutrients: dish.core_nutrients,
-        basis_type: dish.basis_type || 'per_serving',
-        serving_grams: dish.serving_grams || 100,
-        confidence: dish.confidence ?? 0.5,
-        provenance: dish.provenance || 'resolver_dish_core',
-        status: 'active',
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'dish_key' });
+    const upRes = await d1Query(
+      `INSERT INTO dish_cache (dish_key, display_name, core_nutrients, basis_type, serving_grams, confidence, provenance, status, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))
+       ON CONFLICT(dish_key) DO UPDATE SET
+         display_name = excluded.display_name,
+         core_nutrients = excluded.core_nutrients,
+         basis_type = excluded.basis_type,
+         serving_grams = excluded.serving_grams,
+         confidence = excluded.confidence,
+         provenance = excluded.provenance,
+         status = excluded.status,
+         updated_at = excluded.updated_at`,
+      [
+        key,
+        dish.display_name,
+        JSON.stringify(dish.core_nutrients),
+        dish.basis_type || 'per_serving',
+        dish.serving_grams || 100,
+        dish.confidence ?? 0.5,
+        dish.provenance || 'resolver_dish_core',
+      ]
+    );
 
-    if (error) return { success: false, error: error.message };
+    if (!upRes.success) return { success: false, error: upRes.error };
     return { success: true };
   } catch (err: any) {
     if (/schema cache|does not exist|Could not find the table/i.test(err.message || String(err))) { console.error("[CatalogSchema] Write failed because schema is missing. Run SQL: supabase/migrations/20260805_food_catalog_schema.sql or set DATABASE_URL and POST /api/admin/food-catalog/ensure-schema"); resetFoodCatalogSchemaEnsure(); } return { success: false, error: err.message || String(err) };
@@ -1027,16 +1047,20 @@ export async function recordFoodObservation(obs: {
   payload?: any;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabaseAdmin
-      .from('food_observations')
-      .insert({
-        idempotency_key: obs.idempotency_key || null,
-        event_type: obs.event_type,
-        snapshots: obs.snapshots || null,
-        payload: obs.payload || null,
-      });
+    if (!isD1Configured()) return { success: true };
+    const id = `obs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const ins = await d1Query(
+      `INSERT INTO food_observations (id, idempotency_key, event_type, snapshots, payload) VALUES (?, ?, ?, ?, ?)`,
+      [
+        id,
+        obs.idempotency_key || null,
+        obs.event_type,
+        obs.snapshots != null ? JSON.stringify(obs.snapshots) : null,
+        obs.payload != null ? JSON.stringify(obs.payload) : null,
+      ]
+    );
 
-    if (error) return { success: false, error: error.message };
+    if (!ins.success) return { success: false, error: ins.error };
     return { success: true };
   } catch (err: any) {
     if (/schema cache|does not exist|Could not find the table/i.test(err.message || String(err))) { console.error("[CatalogSchema] Write failed because schema is missing. Run SQL: supabase/migrations/20260805_food_catalog_schema.sql or set DATABASE_URL and POST /api/admin/food-catalog/ensure-schema"); resetFoodCatalogSchemaEnsure(); } return { success: false, error: err.message || String(err) };
@@ -1048,14 +1072,15 @@ export async function recordSyncEvent(evt: {
   payload?: any;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabaseAdmin
-      .from('food_catalog_sync_events')
-      .insert({
-        event_type: evt.event_type,
-        payload: evt.payload || null,
-      });
+    if (!isD1Configured()) return { success: true };
+    const id = `sev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const ins = await d1Query(`INSERT INTO food_catalog_sync_events (id, event_type, payload) VALUES (?, ?, ?)`, [
+      id,
+      evt.event_type,
+      evt.payload != null ? JSON.stringify(evt.payload) : null,
+    ]);
 
-    if (error) return { success: false, error: error.message };
+    if (!ins.success) return { success: false, error: ins.error };
     return { success: true };
   } catch (err: any) {
     if (/schema cache|does not exist|Could not find the table/i.test(err.message || String(err))) { console.error("[CatalogSchema] Write failed because schema is missing. Run SQL: supabase/migrations/20260805_food_catalog_schema.sql or set DATABASE_URL and POST /api/admin/food-catalog/ensure-schema"); resetFoodCatalogSchemaEnsure(); } return { success: false, error: err.message || String(err) };
@@ -1064,36 +1089,34 @@ export async function recordSyncEvent(evt: {
 
 
 export async function searchFoodCatalog(query: string, limitCount = 5): Promise<any[]> {
-  if (!isSupabaseConfigured) {
+  if (!isD1Configured()) {
     return [];
   }
   await ensureFoodCatalogSchema();
   try {
     const q = query.toLowerCase().trim();
     if (q.length < 2) return [];
-    
+    const like = `%${q}%`;
+
     // First try food_items
-    const { data: foodData, error: foodError } = await supabaseAdmin
-      .from('food_items')
-      .select('*')
-      .ilike('display_name', `%${q}%`)
-      .limit(limitCount);
-      
+    const foodRes = await d1Query<any>(`SELECT * FROM food_items WHERE display_name LIKE ? LIMIT ?`, [like, limitCount]);
+
     // Then try dish_cache
-    const { data: dishData, error: dishError } = await supabaseAdmin
-      .from('dish_cache')
-      .select('*')
-      .ilike('display_name', `%${q}%`)
-      .limit(limitCount);
-      
+    const dishRes = await d1Query<any>(`SELECT * FROM dish_cache WHERE display_name LIKE ? LIMIT ?`, [like, limitCount]);
+
+    const norm = (r: any): any => ({
+      ...r,
+      nutrients_per_100g: typeof r.nutrients_per_100g === 'string' ? safeJsonParse(r.nutrients_per_100g, {}) : (r.nutrients_per_100g || {}),
+      core_nutrients: typeof r.core_nutrients === 'string' ? safeJsonParse(r.core_nutrients, {}) : (r.core_nutrients || {}),
+    });
     const results = [];
-    if (!foodError && foodData) {
-      results.push(...foodData.map(f => ({ ...f, type: 'food' })));
+    if (foodRes.success && foodRes.results) {
+      results.push(...foodRes.results.map((f: any) => ({ ...norm(f), type: 'food' })));
     }
-    if (!dishError && dishData) {
-      results.push(...dishData.map(d => ({ ...d, type: 'dish' })));
+    if (dishRes.success && dishRes.results) {
+      results.push(...dishRes.results.map((d: any) => ({ ...norm(d), type: 'dish' })));
     }
-    
+
     return results.sort((a, b) => (b.confidence || 0) - (a.confidence || 0)).slice(0, limitCount);
   } catch (err) {
     console.error('[searchFoodCatalog] Exception:', err);

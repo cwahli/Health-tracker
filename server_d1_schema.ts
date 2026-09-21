@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS food_items (
   food_key TEXT NOT NULL UNIQUE,
   display_name TEXT NOT NULL,
   brand_name TEXT,
+  basis_type TEXT DEFAULT 'per_100g',
   nutrients_per_100g TEXT DEFAULT '{}',
   standard_serving_g REAL,
   confidence REAL DEFAULT 1.0,
@@ -188,6 +189,10 @@ CREATE TABLE IF NOT EXISTS food_items (
   fdc_id TEXT,
   version INTEGER DEFAULT 1,
   capture_count INTEGER DEFAULT 1,
+  canonical_target_id TEXT,
+  form_tags TEXT DEFAULT '[]',
+  state TEXT,
+  provenance TEXT DEFAULT 'resolver_candidate',
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -202,8 +207,16 @@ CREATE TABLE IF NOT EXISTS dish_cache (
   confidence REAL DEFAULT 1.0,
   status TEXT DEFAULT 'active',
   version INTEGER DEFAULT 1,
+  provenance TEXT DEFAULT 'resolver_dish_core',
+  components TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS dish_aliases (
+  alias_key TEXT PRIMARY KEY,
+  dish_key TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS food_cache (
@@ -215,6 +228,32 @@ CREATE TABLE IF NOT EXISTS food_cache (
   fetched_at TEXT DEFAULT (datetime('now')),
   expires_at TEXT,
   meta TEXT DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS food_aliases (
+  alias_key TEXT PRIMARY KEY,
+  food_id TEXT NOT NULL,
+  weight REAL DEFAULT 1.0,
+  source TEXT DEFAULT 'food_resolver',
+  hit_count INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS food_observations (
+  id TEXT PRIMARY KEY,
+  idempotency_key TEXT,
+  event_type TEXT NOT NULL,
+  snapshots TEXT,
+  payload TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_food_observations_event ON food_observations(event_type);
+
+CREATE TABLE IF NOT EXISTS food_catalog_sync_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  payload TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
 );
 `;
 
@@ -342,6 +381,26 @@ export async function ensureD1Schema(): Promise<{ success: boolean; error?: stri
     try {
       await d1Query('ALTER TABLE food_logs ADD COLUMN source_meal_id TEXT DEFAULT \'\'');
     } catch (_) {}
+    // D-2 catalog merge pointer (curator soft-merge loser → winner).
+    try {
+      await d1Query('ALTER TABLE food_items ADD COLUMN canonical_target_id TEXT');
+    } catch (_) {}
+    // D-2 catalog basis normalization target.
+    try {
+      await d1Query('ALTER TABLE food_items ADD COLUMN basis_type TEXT DEFAULT \'per_100g\'');
+    } catch (_) {}
+    // D-2 catalog candidate metadata (Supabase code drain): additive only.
+    for (const sql of [
+      'ALTER TABLE food_items ADD COLUMN form_tags TEXT DEFAULT \'[]\'',
+      'ALTER TABLE food_items ADD COLUMN state TEXT',
+      'ALTER TABLE food_items ADD COLUMN provenance TEXT DEFAULT \'resolver_candidate\'',
+      'ALTER TABLE dish_cache ADD COLUMN provenance TEXT DEFAULT \'resolver_dish_core\'',
+      'ALTER TABLE dish_cache ADD COLUMN components TEXT',
+    ]) {
+      try {
+        await d1Query(sql);
+      } catch (_) {}
+    }
     // D-2 issue-tracker columns (Supabase code drain): additive only.
     const issueAlters = [
       'ALTER TABLE issue_tags ADD COLUMN title_key TEXT',

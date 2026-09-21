@@ -4,38 +4,55 @@ import { applyServerAverageNutrients } from './server_pure_helpers';
 import { NUTRIENT_KEYS } from './src/utils/nutrients';
 
 const aliasHitUpdates: any[] = [];
-vi.mock('./supabaseAdmin', () => {
+// D-2: catalog reads D1. Mock the D1 client: alias row (hit_count 4) +
+// active food row for the F-4 probe key; empty elsewhere.
+vi.mock('./server_d1.js', () => {
   const aliasRow = {
-    hit_count: 4,
+    alias_key: 'zxq_jkl_mno',
+    food_id: 'f_alias_oats',
     weight: 1.0,
-    food_items: {
-      food_id: 'f_alias_oats', food_key: 'alias_oats_probe', display_name: 'Alias Oats',
-      nutrients_per_100g: { calories: 350, protein: 10, carbohydrates: 60, totalFat: 8 },
-      status: 'active', confidence: 0.9, fdc_id: 'alias_oats_fdc', form_tags: [], state: null,
-    },
+    hit_count: 4,
   };
-  const chain = (data: any) => {
-    const b: any = {};
-    b.select = () => b;
-    b.eq = () => b;
-    b.maybeSingle = async () => ({ data, error: null });
-    return b;
+  const foodRow = {
+    food_id: 'f_alias_oats',
+    food_key: 'alias_oats_probe',
+    display_name: 'Alias Oats',
+    nutrients_per_100g: { calories: 350, protein: 10, carbohydrates: 60, totalFat: 8 },
+    status: 'active',
+    confidence: 0.9,
+    fdc_id: 'alias_oats_fdc',
+    form_tags: [],
+    state: null,
   };
   return {
-    isSupabaseConfigured: true,
-    supabaseAdmin: {
-      from: (table: string) => {
-        if (table !== 'food_aliases') return chain(null);
-        const b: any = {};
-        b.select = () => b;
-        b.eq = () => b;
-        b.maybeSingle = async () => ({ data: aliasRow, error: null });
-        b.update = (vals: any) => {
-          aliasHitUpdates.push(vals);
-          return { eq: () => ({ catch: () => {} }) };
-        };
-        return b;
-      },
+    isD1Configured: () => true,
+    safeJsonParse: (v: any, fb: any) => {
+      if (v === null || v === undefined) return fb;
+      if (typeof v === 'object') return v;
+      try {
+        return JSON.parse(v);
+      } catch {
+        return fb;
+      }
+    },
+    d1Query: async (sql: string, params: any[] = []) => {
+      if (/FROM food_aliases WHERE alias_key/.test(sql)) {
+        return { success: true, results: params[0] === 'zxq_jkl_mno' ? [aliasRow] : [] };
+      }
+      if (/FROM food_items WHERE food_id/.test(sql)) {
+        return { success: true, results: [foodRow] };
+      }
+      if (/FROM food_items WHERE food_key/.test(sql)) {
+        return { success: true, results: [] };
+      }
+      if (/UPDATE food_aliases SET hit_count/.test(sql)) {
+        aliasHitUpdates.push({ hit_count: (params[0] as number) });
+        return { success: true, results: [] };
+      }
+      if (/INSERT INTO food_aliases/.test(sql)) {
+        return { success: true, results: [] };
+      }
+      return { success: true, results: [] };
     },
   };
 });

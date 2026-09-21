@@ -1,5 +1,5 @@
 import { FoodCuratorActionSchema, foodResolverCuratorInstruction } from './agents/foodResolverInstructions.js';
-import { supabaseAdmin } from './supabaseAdmin.js';
+import { d1Query, isD1Configured } from './server_d1.js';
 import { extractBalancedJson, checkCategoryAndStateCompatibility } from './server_pure_helpers.js';
 import { lookupCanonicalBaseFood, CANONICAL_BASE_FOODS } from './server_food_db.js';
 
@@ -376,17 +376,21 @@ export async function executeFoodResolverCurator(
   }
 
   if (globalAliasesToUpsert.size > 0) {
-    for (const [cleanAlias, targetId] of globalAliasesToUpsert.entries()) {
-       addDebugLog(`[AliasWrite] Creating alias "${cleanAlias}" -> ${targetId}`);
-       try {
-         await supabaseAdmin.from('food_aliases').upsert({
-           alias_key: cleanAlias,
-           target_food_id: targetId,
-           hit_count: 1
-         }, { onConflict: 'alias_key' });
-       } catch (e) {
-         console.error('[AliasWrite] Error persisting alias:', e);
-       }
+    if (!isD1Configured()) {
+      addDebugLog('[AliasWrite] D1 not configured; skipping alias writes (no 402).');
+    } else {
+      for (const [cleanAlias, targetId] of globalAliasesToUpsert.entries()) {
+        addDebugLog(`[AliasWrite] Creating alias "${cleanAlias}" -> ${targetId}`);
+        try {
+          await d1Query(
+            `INSERT INTO food_aliases (alias_key, food_id, weight, source, hit_count) VALUES (?, ?, 1.0, 'curator', 1)
+             ON CONFLICT(alias_key) DO UPDATE SET food_id = excluded.food_id`,
+            [cleanAlias, String(targetId)]
+          );
+        } catch (e) {
+          console.error('[AliasWrite] Error persisting alias:', e);
+        }
+      }
     }
   }
   
@@ -398,18 +402,18 @@ export async function executeFoodResolverCurator(
       for (const loser of merge.loserFdcIds) {
         try {
           // Soft-merge: Update status and set canonical_target_id pointer
-          await supabaseAdmin.from('food_items')
-            .update({ status: 'merged_loser', canonical_target_id: String(merge.winnerFdcId) })
-            .eq('food_id', String(loser));
-            
+          if (!isD1Configured()) continue;
+          await d1Query(`UPDATE food_items SET status = 'merged_loser', canonical_target_id = ? WHERE food_id = ?`, [
+            String(merge.winnerFdcId),
+            String(loser),
+          ]);
+
           // Add single-hop redirection alias
-          await supabaseAdmin.from('food_aliases').upsert({
-            alias_key: `legacy_merge_${loser}`,
-            food_id: String(merge.winnerFdcId),
-            weight: 1.0,
-            source: 'curator_legacy_merge',
-            hit_count: 1
-          }, { onConflict: 'alias_key' });
+          await d1Query(
+            `INSERT INTO food_aliases (alias_key, food_id, weight, source, hit_count) VALUES (?, ?, 1.0, 'curator_legacy_merge', 1)
+             ON CONFLICT(alias_key) DO UPDATE SET food_id = excluded.food_id`,
+            [`legacy_merge_${loser}`, String(merge.winnerFdcId)]
+          );
         } catch (e) {
           console.error('[MergeDuplicates] Error soft-merging loser:', e);
         }
@@ -422,9 +426,8 @@ export async function executeFoodResolverCurator(
     if (!norm.fdcId || !norm.toBasis) continue;
     addDebugLog(`[CuratorAction] normalize_basis for ${norm.fdcId} from ${norm.fromBasis} to ${norm.toBasis} (factor: ${norm.conversionFactor}). Reason: ${norm.reason}`);
     try {
-      await supabaseAdmin.from('food_items')
-        .update({ basis_type: norm.toBasis })
-        .eq('food_id', String(norm.fdcId));
+      if (!isD1Configured()) continue;
+      await d1Query(`UPDATE food_items SET basis_type = ? WHERE food_id = ?`, [norm.toBasis, String(norm.fdcId)]);
     } catch (e) {
       console.error('[NormalizeBasis] Error updating basis:', e);
     }
@@ -438,9 +441,8 @@ export async function executeFoodResolverCurator(
      }
      addDebugLog(`[CatalogQuarantine] Quarantined ${q.fdcId}. Reason: ${q.reason}`);
      try {
-       await supabaseAdmin.from('food_items')
-         .update({ status: 'quarantined' })
-         .eq('food_id', q.fdcId);
+       if (!isD1Configured()) continue;
+       await d1Query(`UPDATE food_items SET status = 'quarantined' WHERE food_id = ?`, [q.fdcId]);
      } catch (e) {
        console.error(e);
      }
