@@ -38,7 +38,7 @@ export interface InternalFoodMatch {
   food_key: string;
   display_name: string;
   nutrients_per_100g: Record<string, number>;
-  source: 'canonical_local' | 'supabase_active' | 'alias_active' | 'supabase_candidate';
+  source: 'canonical_local' | 'supabase_active' | 'alias_active' | 'supabase_candidate' | 'd1_active' | 'd1_candidate';
   confidence: number;
   fdc_id?: string;
   form_tags?: string[];
@@ -52,7 +52,7 @@ export interface InternalDishMatch {
   basis_type: string;
   serving_grams: number;
   confidence: number;
-  source: 'supabase_active' | 'dish_alias';
+  source: 'supabase_active' | 'dish_alias' | 'd1_active';
 }
 
 export const STANDARD_BASE_FOODS: Record<string, { fdcId?: string; nutrients: Record<string, number> }> = {

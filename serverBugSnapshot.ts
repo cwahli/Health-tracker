@@ -1171,7 +1171,6 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (!listed.success) {
         return res.json({ ok: true, skipped: true, reason: listed.error || 'd1 unavailable', linked: 0, created: 0 });
       }
-      const { d1Query } = await import('./server_d1.js');
       const tagRes = await d1Query<any>(`SELECT id, title, work_item, created_at, status FROM issue_tags LIMIT 200`);
       const tags = ((tagRes.results || []) as any[]).map(normIssueTag);
       const plan = planInboxMigration(cases, tags || []);

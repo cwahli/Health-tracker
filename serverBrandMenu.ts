@@ -1388,6 +1388,7 @@ export function registerBrandMenuRoutes(app: Express) {
       return res.status(400).json({ error: 'chain_key and items array required' });
     }
     const rows = items.map((it: any) => ({
+      id: '',
       country_code: country_code || 'GB',
       chain_key: chain_key.trim().toLowerCase(),
       dish_name: it.dish_name,
