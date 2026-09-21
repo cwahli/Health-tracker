@@ -102,4 +102,18 @@ test.describe('Q-11 auth & session', () => {
     expect(body).not.toContain('google.user@healthcockpit.com');
     expect(body).not.toMatch(/Google User \(/i);
   });
+
+  test('a session survives a reload when the user did not sign out', async ({ page }) => {
+    // Regression: reopening the app used to bounce a user who never signed out
+    // back to the gate because only Firebase/Supabase sessions were restored and
+    // the durable local marker (`last_active_email`) was ignored.
+    await settle(page);
+    test.skip(!(await signedIn(page)), 'could not reach a signed-in shell');
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await expect(page.locator(NAV_HOME)).toBeAttached({ timeout: 30000 });
+    await expect(page.locator(IDENTITY)).toBeVisible({ timeout: 30000 });
+    await expect(page.locator(AUTH_CARD)).toBeHidden();
+  });
 });
