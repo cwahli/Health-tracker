@@ -1,0 +1,45 @@
+name: auto-pr
+
+# Opens (or updates) the pull request for an `agent/**` branch using the
+# repository's own GITHUB_TOKEN, so a local agent never needs `gh` or a PAT.
+#
+# Why the checks are NOT triggered from here: a PR created with GITHUB_TOKEN
+# does not fire `pull_request` workflows (GitHub's recursion guard). The agent's
+# own SSH push is a normal event, so `ci` and `claim-guard` run from their
+# `push` triggers on the same head SHA instead.
+#
+# The open PR is the lock; `claim-guard` names any overlapping open PR.
+
+on:
+  push:
+    branches: ['agent/**']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-pr:
+    name: open-pr
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create PR if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_REF_NAME}"
+          if [ "$BRANCH" = "main" ]; then echo "skip main"; exit 0; fi
+
+          existing="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
+          if [ "$existing" != "0" ]; then
+            echo "PR already open for $BRANCH (#$existing) — nothing to do."
+            exit 0
+          fi
+
+          title="$(git log -1 --pretty=%s)"
+          gh pr create --base main --head "$BRANCH" --title "$title" --body "$(git log -1 --pretty=%B)"

@@ -8,8 +8,11 @@ name: ci
 on:
   pull_request:
     branches: [main]
+  # `agent/**` is intentional: PRs opened by auto-pr.yml with GITHUB_TOKEN do not
+  # fire `pull_request` workflows, so the agent's own push is what runs the gate
+  # on the PR head SHA. See docs/agent/GITHUB_WORKFLOW.md.
   push:
-    branches: [main]
+    branches: [main, 'agent/**']
 
 concurrency:
   group: ci-${{ github.ref }}
