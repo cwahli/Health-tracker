@@ -23,25 +23,37 @@
 }
 
 :root {
+  --app-bg: #0f172a;
+  --app-bg-card: #1e293b;
+  --app-border: #334155;
+  --app-text: #f8fafc;
+  --app-text-secondary: #94a3b8;
+  --app-neutral: #cbd5e1;
+  --theme-text-dark-primary: rgba(255, 255, 255, 0.9);
+  --theme-text-dark-secondary: rgba(255, 255, 255, 0.7);
+}
+
+.dark, :root.dark, html.dark {
+  --app-bg: #0f172a;
+  --app-bg-card: #1e293b;
+  --app-border: #334155;
+  --app-text: #f8fafc;
+  --app-text-secondary: #94a3b8;
+  --app-neutral: #cbd5e1;
+}
+
+.light, :root.light, html.light {
   --app-bg: #f8fafc;
   --app-bg-card: #ffffff;
   --app-border: #e2e8f0;
   --app-text: #1e293b;
   --app-text-secondary: #64748b;
   --app-neutral: #334155;
-  --theme-text-dark-primary: rgba(255, 255, 255, 0.9);
-  --theme-text-dark-secondary: rgba(255, 255, 255, 0.7);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --app-bg: #020617;
-    --app-bg-card: #0f172a;
-    --app-border: #1e293b;
-    --app-text: #f1f5f9;
-    --app-text-secondary: #94a3b8;
-    --app-neutral: #cbd5e1;
-  }
+body {
+  background-color: var(--app-bg);
+  color: var(--app-text);
 }
 
 .form-input-styled {

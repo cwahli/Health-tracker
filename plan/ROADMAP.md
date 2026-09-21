@@ -410,7 +410,7 @@ Canonical plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Live host: `https://
 
 ### Track V Phase 6 — Autonomous Journey QA Fleet & Orchestrator Self-Healing Loop
 
-Target architecture: QA bot fleet (`@Meal-journey-QA`, `qa_bio`, `qa_onboarding`) tests live site, detects visual/functional defects, passes tickets to Orchestrator (`@Health-tracker-bot`), which evaluates tool allowances (OpenCode -> Cline -> Grok -> Agy) and dispatches autonomous fixers, auto-deploys via webhook, and signals QA to re-verify with clean screenshots.
+Target architecture: QA bot fleet (`@Meal-journey-QA`, `qa_bio`, `qa_onboarding`) tests live site, detects visual/functional defects, passes tickets to Orchestrator (`@Orchestrator`), which evaluates tool allowances (OpenCode -> Cline -> Grok -> Agy) and dispatches autonomous fixers, auto-deploys via webhook, and signals QA to re-verify with clean screenshots.
 
 | ID | Phase / Gap | Done when | Status |
 |---|---|---|---|

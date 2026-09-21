@@ -71,16 +71,25 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
   # 2. Check global ~/.hermes/.env
   if [ -z "$TELEGRAM_BOT_TOKEN" ] && [ -f "$HOME/.hermes/.env" ]; then
     if [ -n "$TARGET_PROFILE" ]; then
-      echo "[Telegram Send] ⚠️ WARNING: Profile '${TARGET_PROFILE}' has NO TELEGRAM_BOT_TOKEN in ~/.hermes/profiles/${TARGET_PROFILE}/.env! Falling back to global ~/.hermes/.env (@Health-tracker-bot)." >&2
-    fi
-    TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
-    if [ -n "$TOKEN" ]; then
-      TELEGRAM_BOT_TOKEN="$TOKEN"
+      if [ "$TARGET_PROFILE" = "orchestrator" ]; then
+        echo "[Telegram Send] 🚨 ERROR: Dedicated TELEGRAM_BOT_TOKEN is missing in ~/.hermes/profiles/orchestrator/.env! Will not masquerade as @Health-tracker-bot. Please configure TELEGRAM_BOT_TOKEN for Orchestrator." >&2
+      else
+        echo "[Telegram Send] ⚠️ WARNING: Profile '${TARGET_PROFILE}' has NO TELEGRAM_BOT_TOKEN in ~/.hermes/profiles/${TARGET_PROFILE}/.env! Falling back to global ~/.hermes/.env (@Health-tracker-bot)." >&2
+        TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+        if [ -n "$TOKEN" ]; then
+          TELEGRAM_BOT_TOKEN="$TOKEN"
+        fi
+      fi
+    else
+      TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+      if [ -n "$TOKEN" ]; then
+        TELEGRAM_BOT_TOKEN="$TOKEN"
+      fi
     fi
   fi
 
   # 3. Fallback: search profile directories
-  if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+  if [ -z "$TELEGRAM_BOT_TOKEN" ] && [ "$TARGET_PROFILE" != "orchestrator" ]; then
     for env_file in "$HOME/.hermes/profiles/"*"/".env; do
       if [ -f "$env_file" ]; then
         TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$env_file" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
@@ -141,7 +150,7 @@ fi
 
 API_URL="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
 
-# 1. Send Photo if specified
+# 1. Send Photo if specified and file exists
 if [ -n "$PHOTO" ] && [ -f "$PHOTO" ]; then
   CURL_ARGS=(
     -s -X POST "${API_URL}/sendPhoto"
@@ -183,6 +192,25 @@ if [ -n "$PHOTO" ] && [ -f "$PHOTO" ]; then
       echo "[Telegram Send] ERROR: Telegram API error sending photo: $RAW_RESP" >&2
     fi
   fi
+
+# Fallback if photo path specified but file is missing: send as text alert
+elif [ -n "$PHOTO" ] && [ ! -f "$PHOTO" ]; then
+  echo "[Telegram Send] ⚠️ Photo file not found at '$PHOTO'. Falling back to text delivery." >&2
+  FALLBACK_TEXT="⚠️ *[QA Photo Missing on Disk]*
+File: \`$PHOTO\`
+
+${CAPTION:-$TEXT}"
+
+  CURL_ARGS=(
+    -s -X POST "${API_URL}/sendMessage"
+    -d "chat_id=${CHAT_ID}"
+    -d "text=${FALLBACK_TEXT}"
+    -d "parse_mode=Markdown"
+  )
+  if [ -n "$THREAD_ID" ]; then
+    CURL_ARGS+=(-d "message_thread_id=${THREAD_ID}")
+  fi
+  curl "${CURL_ARGS[@]}" 2>&1 || true
 
 # 2. Send Text message
 elif [ -n "$TEXT" ]; then
