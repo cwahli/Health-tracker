@@ -79,7 +79,7 @@
       "label": "No unbounded Supabase/D1 pull; no SELECT *; job poll only when hasActiveJob; no direct client Supabase",
       "asked": "repeated",
       "files_must_contain": {
-        "src/jobs/SupabaseJobSync.ts": [
+        "src/jobs/BackendJobSync.ts": [
           "hasActiveJob",
           "isDirectClientSupabaseDisabled = true"
         ],
