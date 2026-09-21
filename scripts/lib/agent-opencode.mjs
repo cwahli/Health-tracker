@@ -53,6 +53,41 @@ export function mapOpencodeEvent(raw) {
   }
 }
 
+export function listModels({ opencodeBin, spawnImpl = spawn, timeoutMs = 30000 } = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const child = spawnImpl(resolveOpencodeBin(opencodeBin), ['models'], {
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    const timer = timeoutMs > 0 ? setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      done([]);
+    }, timeoutMs) : null;
+    child.stdout?.on('data', (chunk) => {
+      out += chunk.toString();
+    });
+    child.on('error', () => {
+      if (timer) clearTimeout(timer);
+      done([]);
+    });
+    child.on('close', () => {
+      if (timer) clearTimeout(timer);
+      done(out.split('\n').map((line) => line.trim()).filter(Boolean));
+    });
+  });
+}
+
 export function buildOpencodeArgs({ prompt, model, variant, thinking = true, extraArgs = [] }) {
   const args = ['run', '--format', 'json'];
   if (thinking) args.push('--thinking');
@@ -72,6 +107,7 @@ export function runOpencode({
   timeoutMs = 900000,
   opencodeBin,
   onEvent,
+  onSpawn,
   extraArgs = [],
   spawnImpl = spawn,
 }) {
@@ -82,6 +118,14 @@ export function runOpencode({
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+
+    if (typeof onSpawn === 'function') {
+      try {
+        onSpawn(child);
+      } catch {
+        // ignore
+      }
+    }
 
     const textParts = [];
     let stderr = '';

@@ -6,8 +6,9 @@ import path from 'node:path';
 import { compressReasoning, cleanReasoning } from '../scripts/lib/reasoning-compress.mjs';
 import { Throttle } from '../scripts/lib/tg-throttle.mjs';
 import { mapOpencodeEvent, buildOpencodeArgs } from '../scripts/lib/agent-opencode.mjs';
-import { clamp, MAX_MESSAGE_CHARS } from '../scripts/lib/tg-api.mjs';
+import { clamp, chunkText, MAX_MESSAGE_CHARS } from '../scripts/lib/tg-api.mjs';
 import { loadRegistry, getBot, resolveToken } from '../scripts/lib/registry.mjs';
+import { parseCommand, helpText, statusText, formatModelList } from '../scripts/lib/commands.mjs';
 
 describe('reasoning-compress', () => {
   it('strips code fences and markdown noise', () => {
@@ -34,6 +35,13 @@ describe('reasoning-compress', () => {
     const out = compressReasoning('x'.repeat(500), { maxChars: 50 });
     expect(out.length).toBeLessThanOrEqual(50);
     expect(out.endsWith('...')).toBe(true);
+  });
+
+  it('keeps the text inside inline code instead of deleting it', () => {
+    const cleaned = cleanReasoning('The command is `/models` (plural), not `/model`.');
+    expect(cleaned).toContain('/models');
+    expect(cleaned).toContain('/model');
+    expect(cleaned).not.toContain('`');
   });
 
   it('returns empty for empty input', () => {
@@ -165,5 +173,68 @@ describe('registry', () => {
     const bot = { id: 'opencode', telegram: { tokenEnv: 'MISSING_TOKEN_ENV' } };
     expect(() => resolveToken(bot, {})).toThrow(/MISSING_TOKEN_ENV/);
     expect(resolveToken(bot, { MISSING_TOKEN_ENV: 'abc' })).toBe('abc');
+  });
+});
+
+describe('commands', () => {
+  it('parses slash commands and strips the bot suffix', () => {
+    expect(parseCommand('/models')).toEqual({ name: 'models', args: '', raw: '/models' });
+    expect(parseCommand('/model opencode-go/deepseek-v4.1-flash')).toEqual({
+      name: 'model',
+      args: 'opencode-go/deepseek-v4.1-flash',
+      raw: '/model opencode-go/deepseek-v4.1-flash',
+    });
+    expect(parseCommand('/help@Opencode_135_bot').name).toBe('help');
+    // Any leading slash must classify as a command, never as a prompt to the LLM.
+    expect(parseCommand('/foobar').name).toBe('foobar');
+    expect(parseCommand('hello')).toBeNull();
+    expect(parseCommand('')).toBeNull();
+  });
+
+  it('lists the real command surface in help', () => {
+    const config = {
+      name: 'OpenCode Bot',
+      agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
+    };
+    const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
+    for (const cmd of ['/new', '/status', '/model', '/models', '/abort', '/help']) {
+      expect(text).toContain(cmd);
+    }
+    expect(text).toContain('opencode-go/muse-spark-1.3');
+  });
+
+  it('shows the effective model in status', () => {
+    const config = {
+      agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high', workspace: '/tmp' },
+    };
+    expect(statusText(config, { sessionId: 'ses_1', model: 'opencode-go/muse-spark-1.3' })).toContain(
+      'opencode-go/muse-spark-1.3',
+    );
+    expect(statusText(config, {})).toContain('session: (none)');
+  });
+
+  it('formats and caps the model list', () => {
+    expect(formatModelList([])).toBe('No models found.');
+    const many = Array.from({ length: 5 }, (_, i) => `p/m${i}`);
+    const text = formatModelList(many, { max: 3 });
+    expect(text.split('\n')).toHaveLength(4);
+    expect(text).toContain('... and 2 more');
+  });
+});
+
+describe('tg-api chunkText', () => {
+  it('keeps short text as a single chunk', () => {
+    expect(chunkText('hi')).toEqual(['hi']);
+  });
+
+  it('splits long text under the limit, preferring newlines', () => {
+    const line = 'x'.repeat(100);
+    const text = Array.from({ length: 60 }, () => line).join('\n');
+    const chunks = chunkText(text);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(MAX_MESSAGE_CHARS);
+    }
+    expect(chunks.join('\n')).toBe(text);
   });
 });
