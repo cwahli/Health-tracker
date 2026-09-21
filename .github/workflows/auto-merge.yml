@@ -10,8 +10,8 @@ name: auto-merge
 # so a non-required external check (e.g. an unused Cloudflare Workers build)
 # cannot block the merge.
 #
-# If branch protection requires a human review, the merge is rejected and this
-# job annotates a warning — the PR stays open for a human.
+# If branch protection requires a human review, the merge is rejected and the
+# raw API result is posted as a PR comment — the PR stays open for a human.
 
 on:
   push:
@@ -50,17 +50,10 @@ jobs:
           checks="$(gh pr checks "$me" --required --watch --fail-fast 2>&1 || true)"
 
           # Merge via the API so the raw JSON result (merged true/false + message)
-          # is captured, and post it on the PR for visibility.
-          result="$(gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/$me/merge" \
-            -f merge_method=squash 2>&1 || true)"
-          gh pr comment "$me" --body "auto-merge result for \`$GITHUB_SHA\`:
-\`\`\`
-$result
-\`\`\`
-required checks:
-\`\`\`
-$checks
-\`\`\`" || true
+          # is captured and can be posted on the PR.
+          result="$(gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/$me/merge" -f merge_method=squash 2>&1 || true)"
+          printf -v body 'auto-merge result for `%s`:\n```\n%s\n```\nrequired checks:\n```\n%s\n```\n' "$GITHUB_SHA" "$result" "$checks"
+          gh pr comment "$me" --body "$body" || true
           echo "$result"
 
           if printf '%s' "$result" | grep -q '"merged": *true'; then
