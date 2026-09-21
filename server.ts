@@ -3629,7 +3629,11 @@ async function startServer() {
     if (!r.ok) console.error('[CatalogSchema] ensure on boot failed:', r.method, r.error);
   }).catch(() => {});
 
-  ensureD1Schema().catch(() => {});
+  ensureD1Schema().then((r) => {
+    if (!r.success) console.error('[D1] schema ensure failed on boot — D1 reads/writes will fail:', r.error);
+  }).catch((err) => {
+    console.error('[D1] schema ensure threw on boot — D1 reads/writes will fail:', err);
+  });
 
   // Warm up database brand cache and trigger initial database self-cleaning maintenance if configured
   import('./supabaseAdmin.js').then(({ isSupabaseConfigured, supabaseAdmin }) => {
