@@ -6,7 +6,7 @@ import path from 'node:path';
 import { compressReasoning, cleanReasoning } from '../scripts/lib/reasoning-compress.mjs';
 import { Throttle } from '../scripts/lib/tg-throttle.mjs';
 import { mapOpencodeEvent, buildOpencodeArgs } from '../scripts/lib/agent-opencode.mjs';
-import { clamp, chunkText, MAX_MESSAGE_CHARS } from '../scripts/lib/tg-api.mjs';
+import { clamp, chunkText, MAX_MESSAGE_CHARS, TelegramApi } from '../scripts/lib/tg-api.mjs';
 import { loadRegistry, getBot, resolveToken } from '../scripts/lib/registry.mjs';
 import {
   parseCommand,
@@ -304,6 +304,20 @@ describe('pickers', () => {
     expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:1' });
     expect(decodeCallback('m:5')).toEqual({ kind: 'm', value: '5' });
     expect(decodeCallback('noop')).toEqual({ kind: 'noop', value: undefined });
+  });
+});
+
+describe('tg-api sendChatAction', () => {
+  it('posts the typing action for the chat', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImpl = async (url: string, init: { body: string }) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    };
+    const api = new TelegramApi('token', { fetchImpl });
+    await api.sendChatAction(123, 'typing');
+    expect(calls[0].url).toContain('/bottoken/sendChatAction');
+    expect(calls[0].body).toEqual({ chat_id: 123, action: 'typing' });
   });
 });
 

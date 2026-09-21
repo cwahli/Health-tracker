@@ -93,6 +93,10 @@ export class TelegramApi {
     return this.call('sendMessage', { chat_id: chatId, text: clamp(text), ...extra });
   }
 
+  sendChatAction(chatId, action = 'typing') {
+    return this.call('sendChatAction', { chat_id: chatId, action });
+  }
+
   editMessageText(chatId, messageId, text, extra = {}) {
     return this.call('editMessageText', {
       chat_id: chatId,

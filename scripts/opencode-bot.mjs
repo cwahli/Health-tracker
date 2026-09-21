@@ -184,6 +184,8 @@ class ProgressRenderer {
     this.thinking = '';
     this.tool = '';
     this.status = 'starting';
+    this.typingTimer = null;
+    this.typingIntervalMs = 4000;
   }
 
   _render() {
@@ -196,12 +198,28 @@ class ProgressRenderer {
 
   async start() {
     if (this.dryRun) {
-      console.log(`[progress] ${this._render().replace(/\n/g, ' | ')}`);
+      console.log('[progress] typing...');
       this.messageId = 1;
       return;
     }
-    const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
-    this.messageId = result?.message_id ?? null;
+    this._startTyping();
+  }
+
+  _startTyping() {
+    if (this.dryRun || typeof this.api?.sendChatAction !== 'function') return;
+    const tick = () => {
+      Promise.resolve(this.api.sendChatAction(this.chatId, 'typing')).catch(() => {});
+    };
+    tick();
+    this.typingTimer = setInterval(tick, this.typingIntervalMs);
+    if (typeof this.typingTimer.unref === 'function') this.typingTimer.unref();
+  }
+
+  stopTyping() {
+    if (this.typingTimer) {
+      clearInterval(this.typingTimer);
+      this.typingTimer = null;
+    }
   }
 
   onEvent(event) {
@@ -227,8 +245,17 @@ class ProgressRenderer {
       console.log(`[progress] ${this._render().replace(/\n/g, ' | ')}`);
       return;
     }
-    if (this.messageId == null || this.edits >= this.maxEdits) return;
-    this.edits += 1;
+    if (this.messageId == null) {
+      if (!this.thinking && !this.tool) return;
+      this.throttle
+        .submit(async () => {
+          const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
+          if (result?.message_id != null) this.messageId = result.message_id;
+        })
+        .catch(() => {});
+      return;
+    }
+    if (this.edits >= this.maxEdits) return;
     this.throttle
       .submit(() => this._guarded(() => this.api.editMessageText(this.chatId, this.messageId, this._render())))
       .catch(() => {});
@@ -279,15 +306,16 @@ class ProgressRenderer {
   }
 
   async finish(result) {
+    this.stopTyping();
     if (result.lastError && !result.finalText) {
       this.status = 'failed';
-      this._schedule();
+      if (this.messageId != null) this._schedule();
       const tail = result.stderr ? `\n${result.stderr.trim().slice(0, 400)}` : '';
       await this.deliver(`Error: ${result.lastError}${tail}`);
       return;
     }
     this.status = 'done';
-    this._schedule();
+    if (this.messageId != null) this._schedule();
     if (!result.finalText) {
       const code = result.code === 0 ? '' : ` (exit ${result.code})`;
       await this.deliver(`Done${code}, but the model returned no text output.`);
@@ -579,6 +607,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   } catch (err) {
     await api.sendMessage(chatId, `Error: ${err.message}`).catch(() => {});
   } finally {
+    renderer.stopTyping();
     running.delete(chatId);
     busy.delete(chatId);
   }
