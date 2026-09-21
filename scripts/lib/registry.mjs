@@ -32,6 +32,36 @@ export function getBot(registry, id) {
   return bot;
 }
 
+export function normalizeConfig(bot, { defaultWorkspace = process.cwd() } = {}) {
+  return {
+    id: bot.id,
+    name: bot.name || bot.id,
+    telegram: {
+      tokenEnv: bot.telegram?.tokenEnv,
+      allowedUserIds: (bot.telegram?.allowedUserIds || []).map(Number),
+    },
+    agent: {
+      kind: bot.agent?.kind || 'opencode',
+      model: bot.agent?.model,
+      variant: bot.agent?.variant,
+      defaultAgent: bot.agent?.defaultAgent || 'build',
+      workspace: bot.agent?.workspace || defaultWorkspace,
+      timeoutMs: bot.agent?.timeoutMs ?? 900000,
+      thinking: bot.agent?.thinking !== false,
+      opencodeBin: bot.agent?.opencodeBin,
+      allowExternalDirectory: bot.agent?.allowExternalDirectory === true,
+      sharedSkills: Array.isArray(bot.agent?.sharedSkills) ? bot.agent.sharedSkills : [],
+    },
+    progress: {
+      mode: bot.progress?.mode || 'concise',
+      editIntervalMs: bot.progress?.editIntervalMs ?? 2500,
+      maxEdits: bot.progress?.maxEdits ?? 40,
+      maxChars: bot.progress?.maxChars ?? 220,
+    },
+    session: { mode: bot.session?.mode || 'per-chat' },
+  };
+}
+
 export function resolveToken(bot, env = process.env) {
   const name = bot.telegram.tokenEnv;
   const token = env[name];
