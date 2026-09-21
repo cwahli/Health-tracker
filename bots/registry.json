@@ -1,0 +1,30 @@
+{
+  "bots": [
+    {
+      "id": "opencode",
+      "name": "OpenCode Bot",
+      "enabled": true,
+      "telegram": {
+        "tokenEnv": "OPENCODE_BOT_TOKEN",
+        "allowedUserIds": [6218257274]
+      },
+      "agent": {
+        "kind": "opencode",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "variant": "high",
+        "workspace": "/home/ubuntu/src/Health-tracker",
+        "timeoutMs": 900000,
+        "thinking": true
+      },
+      "progress": {
+        "mode": "concise",
+        "editIntervalMs": 2500,
+        "maxEdits": 40,
+        "maxChars": 220
+      },
+      "session": {
+        "mode": "per-chat"
+      }
+    }
+  ]
+}

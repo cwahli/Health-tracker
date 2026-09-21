@@ -1,0 +1,21 @@
+[Unit]
+Description=OpenCode Telegram Bot (%i)
+Documentation=file:///home/ubuntu/src/Health-tracker/bots/registry.json
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/src/Health-tracker
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/ubuntu/.config/opencode-bot/%i.env
+ExecStart=/usr/bin/node /home/ubuntu/src/Health-tracker/scripts/opencode-bot.mjs --id=%i
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
