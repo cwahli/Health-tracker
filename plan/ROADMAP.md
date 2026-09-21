@@ -46,7 +46,7 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
 4. **Q-11.12 DONE** — nodes landed `cdbf2cd` (settings overlay → `DbInteractionsOverlay.tsx`) and `c92ec49` + `2fb8d88` (theme customizer → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, move-only, then its orphaned imports). `Header.tsx` 3,545 → **690 lines / 28,791 B**: the packet's ≤ 1,200-line and < 200 KB targets are both met, and every moved slice was proven byte-identical against the pre-move file. Packet retired to `specs/done/`. **The Q-11 ladder is complete** — no Q-11 packet is active.
 5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (340 KB / 6,474 lines, under the 6,500 ceiling).
-6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. Next: Track V Phase 6 (V-19...V-26 Autonomous QA Bot fleet & Orchestrator self-healing loop). Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). **Auto-deploy wipes uncommitted work — always push.**
+6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE, Phase 6 V-19...V-26 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. **Next mobile ID: V-27 OPEN** (Mosh + tmux `health`, public key-only SSH). Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md) Phase 7. Do not redo V-19…V-26. **Auto-deploy wipes uncommitted work — always push.**
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
 8. **Track D — D-2 is the ACTIVE execute ID (see top).** One SQL = **D1** (Firebase Auth + R2). Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Muse audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** = unpaid recovery when 402 lifts (~**2026-09-24**), not a paid dump. R2 leak-stop is **D-9 DONE**; R2 deletes are **D-10 after D-1**. **SQLite on the VPS is D-5: benchmark only, after V-16.** No cutover without D-6 human go.
 
@@ -91,7 +91,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
-| Make the site live / leave Render | **Track V / R-13.1 LIVE on OVH VPS-2** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Origin is `https://health-tracking.duckdns.org`. Next is V-17 (delete Render after 24h soak) + Track V Phase 6 (V-19...V-26 Autonomous QA Bot fleet & Orchestrator self-healing loop). |
+| Make the site live / leave Render | **Track V / R-13.1 LIVE on OVH VPS-2** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Origin is `https://health-tracking.duckdns.org`. V-17 (delete Render) waits on the soak. Phase 6 (V-19…V-26) is COMPLETE. **Next mobile ID is V-27 OPEN.** |
 | One database / drop Supabase / SQLite on the VPS / R2 photo junk | **Track D** — [DATA_PLANE.md](./DATA_PLANE.md). Live SQL is **D1**. Muse audit [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** unpaid recovery ~24 Sep. SQLite is a **D-5 benchmark after V-16**, then D-6 human go. Not R-5. |
 | Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
@@ -422,6 +422,14 @@ Target architecture: QA bot fleet (`@Meal-journey-QA`, `qa_bio`, `qa_onboarding`
 | **V-24** | **Dispatch Concurrency Lock (Gap 6 - Reliability)**: Write lockfile `~/.hermes/dispatch_lock` with active `BUG_ID`. | Multiple concurrent QA runs or rapid user reports do not trigger conflicting simultaneous git working-tree mutations. | **COMPLETE** |
 | **V-25** | **Global DuckDNS Test Origin (Gap 7 - Config)**: Seed `PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org` in `~/.hermes/.env` globally. | All scripts and bot profiles run headless tests against live production without localhost fallback. | **COMPLETE** |
 | **V-26** | **Orchestrator Post-Deploy Re-Verify (Gap 8 - Orchestrator UX)**: When direct `/fix` or dispatch is triggered from Orchestrator bot, dispatch automatically invokes `qa-runner.mjs` after 45s deploy sleep and reports result. | Orchestrator verifies its own commits end-to-end rather than requiring manual QA invocation. | **COMPLETE** |
+
+### Track V Phase 7 — Phone terminal survives a network change (OPEN)
+
+Canonical steps, measured facts, and the do-not list: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md) Phase 7. This is the next mobile ID. It does not change the website, Hermes tokens, or `src/`.
+
+| ID | Phase | Done when | Status |
+|---|---|---|---|
+| **V-27** | Key-only SSH, then public :22 + Mosh UDP, fail2ban, tmux session `health` recreated on boot. Termius uses Mosh to `health-tracking.duckdns.org`, startup `tmux new -A -s health`. Tailscale stays; Tailscale SSH turns off only after an off-tailnet key login works. | Password SSH rejected. Phone switches Wi-Fi ↔ cellular and is back in the same `health` pane within a few seconds, process still running. No Tailscale cache clear. | **OPEN** |
 
 
 ### Track D — one database (D1 now; SQLite only after a VPS benchmark)

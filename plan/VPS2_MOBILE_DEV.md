@@ -1,9 +1,9 @@
 # VPS-2 mobile → VM → live site
 
-**Status:** LIVE & CUTOVER (V-0 through V-16 COMPLETE). Production website is live on OVH VPS-2 (`https://health-tracking.duckdns.org`) with automated GitHub webhook CI/CD and mobile agent toolchain.  
+**Status:** LIVE & CUTOVER (V-0 through V-16 COMPLETE). Phase 6 (V-19…V-26) COMPLETE. **Open work: V-27** (phone terminal survives a Wi-Fi change).  
 **Replaces:** [plan/GCP_FREE_TIER_MIGRATION.md](./GCP_FREE_TIER_MIGRATION.md) (Cloud Run `min-instances=0`).  
-**Execute index:** [ROADMAP.md](./ROADMAP.md) **Track V / R-13.1**.  
-**Current Phase:** Phase 4 (V-16 Soak Test) → Phase 5 (V-17 Render Deletion) + Autonomous Journey QA Bot fleet.  
+**Execute index:** [ROADMAP.md](./ROADMAP.md) **Track V / R-13.1**. Next mobile ID is **V-27** below. Do not redo V-0…V-26.  
+**Current Phase:** Phase 7 (V-27 OPEN). Phase 5 (V-17 Render deletion) stays on its own soak clock and is not this task.  
 
 ---
 
@@ -53,7 +53,7 @@ Use **two** paths, not six. Everything else is backup.
 | Path | Role | When |
 |---|---|---|
 | **A. Telegram → Hermes** | **Instruct.** Type a task on the phone; Hermes on the VM runs `grok` / `agy` / `opencode` and streams tool progress back into the chat. This is the “grok bot” loop: you see work happen in the message thread. Mac already has Hermes with a `telegram` toolset — **reinstall a slim gateway on the VM**, do not rsync `~/.hermes` (it is huge). | Daily |
-| **B. Termius / Blink / Termux → Tailscale SSH → tmux** | **Watch and steer.** Attach to the live TUI (`grok dashboard`, Agy, OpenCode). Same session the agent is in. Closest to sitting at the machine. | When you need the real TUI, a stuck job, or to type into the CLI |
+| **B. Termius → Mosh → tmux `health`** | **Watch and steer.** Attach to the live TUI (`grok`, Agy, OpenCode) in tmux session `health`. The session lives on the VM, so a phone drop does not kill the turn. Mosh talks to the public hostname and reconnects after Wi-Fi ↔ cellular. **V-27 is this path. It is not built yet.** Until V-27 is done, Termius still comes in over Tailscale SSH and dies on a network change. | When you need the real TUI, a stuck job, or to type into the CLI |
 | C. Hermes **web UI** on Tailscale only | Browser view of Hermes (sessions, progress) without a desktop. Bind `127.0.0.1` + Tailscale MagicDNS. Never public. | Optional after A works |
 | D. Termux (Android) | SSH/mosh client, or a local shell that ssh’s. Not a second agent runtime. | If the phone is Android |
 | E. Screenshare / remote desktop (RustDesk, VNC, XFCE) | Full graphical desktop. **Out of scope on 8 GB.** Skip unless A–C fail. | Do not start |
@@ -62,14 +62,14 @@ Use **two** paths, not six. Everything else is backup.
 **Watching the VM in real time**
 
 - Chat stream (A) = what Hermes/Telegram already does: tool lines and the final answer. Good enough for “build this, tell me when green.”
-- Live TUI (B) = `tmux attach -t grok`. You see the Grok dashboard / spinner / diff as it happens. This is the real “look at the VM.”
+- Live TUI (B) = `tmux new -A -s health` over Mosh, after V-27. You see the same pane you left, including a turn that was still running. `grok --resume` only reloads the transcript after the process has already died. It does not finish a killed turn.
 - Do not install a Linux desktop to screenshare it.
 
 **Messaging rules**
 
 - One in-flight coding CLI. Telegram may *queue* a second message; it must not start a second `grok` while the first still holds the repo.
-- SSH is Tailscale-only. `ufw` default deny; no password root; no public :22.
-- Secrets stay in `/home/.../.env` on the VM and in Telegram bot token files with `0600`. Never git.
+- V-1 locked public :22 shut and Tailscale as the only SSH door. **V-27 supersedes that for the phone terminal**, and only after password SSH is off. Tailscale stays installed for other machines. Do not add a second WireGuard VPN on the phone.
+- Secrets stay in `/home/.../.env` on the VM and in Telegram bot token files with `0600`. Never git. Never print a bot token or an SSH private key.
 
 ---
 
@@ -159,6 +159,59 @@ Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127
 | **V-25** | **Global DuckDNS Test Origin (Gap 7)**: Seed `PLAYWRIGHT_TEST_BASE_URL=https://health-tracking.duckdns.org` in `~/.hermes/.env`. | Headless tests across all profiles default to live site. | **COMPLETE** |
 | **V-26** | **Orchestrator Post-Deploy Re-Verify (Gap 8)**: Orchestrator `/fix` triggers automated `qa-runner.mjs` after deploy sleep. | Orchestrator self-verifies resolution end-to-end. | **COMPLETE** |
 
+### Phase 7 — Phone terminal survives a network change (OPEN)
+
+**ID: V-27. Do this next. Do not redo Phase 6.**
+
+The VM staying up is not enough. Termius on the Pixel owns the SSH session. Android destroys the Tailscale VPN interface when Wi-Fi drops or the phone changes network, which kills every TCP session on it. The Tailscale app on the phone then fails its coordination-server key refresh and shows a WireGuard authentication error. Recovery today is force-stop, clear cache, and airplane mode, often 5–10 minutes. Clearing the Tailscale cache deletes the node login and is what makes the outage long. This is a known Android Tailscale failure (control-key fetch cancelled until the radio state is refreshed). It is not a bad password and not a dead VM.
+
+Measured on 2026-09-21, re-check before changing anything:
+
+| Fact | Value |
+|---|---|
+| Phone | Pixel 9 Pro XL, tailnet `pixel-9-pro-xl`, `100.83.130.60`, account `chiwah.liu@` |
+| VM Tailscale | `vps-0a61fae6`, `100.118.148.32`, Tailscale 1.102.4, `RunSSH true` |
+| Public address | `51.254.217.163`, name `health-tracking.duckdns.org` |
+| Firewall | `ufw` default deny. Allowed: anything on `tailscale0`, `80/tcp`, `443/tcp`. **Public :22 is closed.** sshd still listens on `0.0.0.0:22`. |
+| sshd | `PasswordAuthentication yes`, `PubkeyAuthentication yes`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password` |
+| Mosh | **Not installed.** |
+| tmux | 3.6 at `/usr/bin/tmux`. Runbook session name is `dev`. V-27 uses a new session `health` and does not destroy `dev`. |
+| fail2ban | Installed-or-not: **inactive**. |
+| WireGuard app | No `wg-quick@wg0`. Do not add one. Android runs one VPN; a second tunnel replaces Tailscale and still kills SSH on a network change. |
+
+Tailscale SSH is why the reconnect shows an authentication error rather than a timeout. A connection to the `100.x` address is authenticated by the tailnet node, not by the SSH key stored in Termius. While the phone is stuck refreshing its control key, Termius reports auth failure.
+
+**Agent steps, in order.** Stop if a step would lock out the current Tailscale session. Prove the next login before closing the old one.
+
+1. Confirm `/home/ubuntu/.ssh/authorized_keys` has a key the phone already uses. On a **second** Tailscale SSH session, `ssh -o PreferredAuthentications=publickey -o PasswordAuthentication=no localhost` must succeed. Only then set `PasswordAuthentication no` and `KbdInteractiveAuthentication no` in `/etc/ssh/sshd_config` (or a file under `sshd_config.d/`). `PermitRootLogin` stays `prohibit-password`. Reload sshd. Do not disconnect the session you are working in until the second session has logged in with the key.
+2. `sudo apt-get install -y mosh fail2ban`. Enable the sshd jail. `ignoreip` must include `127.0.0.1/8` and the tailnet `100.64.0.0/10` so a Tailscale reconnect cannot ban the phone. Start fail2ban.
+3. Open the public door: `ufw allow 22/tcp` and `ufw allow 60000:61000/udp` (mosh). Leave the existing tailscale0 / 80 / 443 rules. Do this only after step 1 has reloaded sshd with passwords off. `sshd -T` must still show `passwordauthentication no`.
+4. Create tmux session `health` with working directory `/home/ubuntu/src/Health-tracker`: `tmux new-session -d -s health -c /home/ubuntu/src/Health-tracker`. Add a **user** systemd unit so that session is recreated on boot if it is missing (`Type=forking`, `ExecStart=/usr/bin/tmux new-session -d -s health -c /home/ubuntu/src/Health-tracker`, do not kill an existing session). `loginctl enable-linger ubuntu` only if linger is not already on for Hermes. Do **not** put `tmux attach` in `.bashrc` — that breaks `scp`, `rsync`, and deploy SSH.
+5. After a key login to `ubuntu@health-tracking.duckdns.org` works from off the tailnet (the phone, or any host that is not using Tailscale), run `tailscale set --ssh=false`. Until that off-tailnet login works, leave Tailscale SSH on. Do not uninstall Tailscale.
+6. Update the Runbook in this file to the commands that are actually true. Fill the Termius block below into the Runbook. Do not mark V-27 COMPLETE until the human phone check passes.
+
+**Human, once, on the phone.** The agent cannot do this.
+
+- Termius host: `health-tracking.duckdns.org` (not `100.118.148.32`). Protocol **Mosh**. User `ubuntu`. Key auth. Startup command: `tmux new -A -s health`.
+- Forget the old Tailscale SSH host for daily use, or leave it unused.
+- Do not force-stop Tailscale or clear its cache. Tailscale may stay installed. If it wedges, airplane mode for about ten seconds, or toggle the Tailscale switch. Cache clear forces a full login.
+
+**Done when**
+
+- `sshd -T` reports `passwordauthentication no`. A password login is rejected.
+- `ufw status` shows `22/tcp` and `60000:61000/udp` allowed from Anywhere, and 80/443/tailscale0 unchanged.
+- `mosh-server` exists. `tmux has-session -t health` succeeds, cwd is the repo, and session `dev` is untouched if it was present.
+- fail2ban is active with an sshd jail.
+- From the phone, on Mosh: switch Wi-Fi ↔ cellular (or toggle airplane mode briefly). Termius is back in the **same** `health` pane within a few seconds, and a process that was running inside that pane is still running. No Tailscale cache clear.
+
+**Do not**
+
+- Do not open public :22 while `PasswordAuthentication` is still `yes`.
+- Do not install WireGuard (`wg-quick`) beside Tailscale, and do not tell the user to import a Tailscale config into the WireGuard app.
+- Do not edit `~/.hermes/**/.env`, bot tokens, or `~/.config/opencode-bot/opencode.env`. Do not restart `hermes-gateway` (that posts “Hermes is shutting down” into Telegram). Hermes tasks already run as a service and do not use this Termius session.
+- Do not restart `health-tracker.service` or change Caddy. This ID is the phone door, not the website.
+- Do not `git reset --hard` a dirty tree. Do not commit secrets. Do not change `src/` for V-27.
+- Do not treat `grok --resume` as the fix. The live process has to stay inside tmux.
 
 ---
 
@@ -168,8 +221,10 @@ Env on the VM: `NODE_ENV=production`, `PORT=3000`, `INTERNAL_BASE_URL=http://127
 VPS:           OVH VPS-2 (vps-0a61fae6) / 51.254.217.163
 Region:        EU (Gravelines / Lille, France)
 Tailscale:     100.118.148.32 (vps-0a61fae6)
-SSH:           Tailscale SSH (port 22 blocked publicly by ufw)
-tmux watch:    Termius → Tailscale SSH → tmux attach -t dev (or grok)
+SSH today:     Tailscale SSH only (ufw denies public :22). PasswordAuthentication is still yes — V-27 turns it off before opening :22.
+tmux today:    Termius → Tailscale SSH → tmux attach -t dev
+tmux target:   Termius → Mosh ubuntu@health-tracking.duckdns.org → tmux new -A -s health
+               (V-27 OPEN. Do not pretend this door exists until the phone check passes.)
 Telegram:      @Health-tracker-bot (Hermes Telegram Gateway with Profile Multiplexer)
 Repo on VM:    /home/ubuntu/src/Health-tracker
 Prod URL:      https://health-tracking.duckdns.org (Caddy :443 -> 127.0.0.1:3000)
