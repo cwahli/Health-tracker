@@ -7,7 +7,7 @@ import { compressReasoning, cleanReasoning } from '../scripts/lib/reasoning-comp
 import { Throttle } from '../scripts/lib/tg-throttle.mjs';
 import { mapOpencodeEvent, buildOpencodeArgs, buildOpencodeEnv } from '../scripts/lib/agent-opencode.mjs';
 import { clamp, chunkText, MAX_MESSAGE_CHARS, TelegramApi } from '../scripts/lib/tg-api.mjs';
-import { loadRegistry, getBot, resolveToken } from '../scripts/lib/registry.mjs';
+import { loadRegistry, getBot, resolveToken, normalizeConfig } from '../scripts/lib/registry.mjs';
 import {
   parseCommand,
   parseAgentList,
@@ -88,6 +88,32 @@ describe('tg-throttle', () => {
     throttle.pause(30);
     await throttle.submit(async () => 'x');
     expect(clock.sleeps).toEqual([30000]);
+  });
+});
+
+describe('normalizeConfig', () => {
+  it('preserves external-dir and shared-skill settings', () => {
+    const cfg = normalizeConfig(
+      {
+        id: 'opencode',
+        telegram: { tokenEnv: 'T', allowedUserIds: ['1'] },
+        agent: { kind: 'opencode', workspace: '/ws', allowExternalDirectory: true, sharedSkills: ['.agents/skills'] },
+      },
+      { defaultWorkspace: '/default' },
+    );
+    expect(cfg.agent.allowExternalDirectory).toBe(true);
+    expect(cfg.agent.sharedSkills).toEqual(['.agents/skills']);
+    expect(cfg.telegram.allowedUserIds).toEqual([1]);
+  });
+
+  it('defaults external dir off, skills empty, and workspace to the default', () => {
+    const cfg = normalizeConfig(
+      { id: 'x', telegram: { tokenEnv: 'T' }, agent: { kind: 'opencode' } },
+      { defaultWorkspace: '/d' },
+    );
+    expect(cfg.agent.allowExternalDirectory).toBe(false);
+    expect(cfg.agent.sharedSkills).toEqual([]);
+    expect(cfg.agent.workspace).toBe('/d');
   });
 });
 

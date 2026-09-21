@@ -14,7 +14,7 @@ import {
   listModelsVerbose,
   buildOpencodeEnv,
 } from './lib/agent-opencode.mjs';
-import { loadRegistry, getBot, resolveToken, resolveRegistryPath } from './lib/registry.mjs';
+import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
   parseAgentList,
@@ -61,34 +61,6 @@ Usage:
 Bots are defined in bots/registry.json. Add a new bot by appending an entry,
 exporting its token env var, and starting opencode-bot@<id>. No code changes.
 `);
-}
-
-function normalizeConfig(bot) {
-  return {
-    id: bot.id,
-    name: bot.name || bot.id,
-    telegram: {
-      tokenEnv: bot.telegram?.tokenEnv,
-      allowedUserIds: (bot.telegram?.allowedUserIds || []).map(Number),
-    },
-    agent: {
-      kind: bot.agent?.kind || 'opencode',
-      model: bot.agent?.model,
-      variant: bot.agent?.variant,
-      defaultAgent: bot.agent?.defaultAgent || 'build',
-      workspace: bot.agent?.workspace || REPO_ROOT,
-      timeoutMs: bot.agent?.timeoutMs ?? 900000,
-      thinking: bot.agent?.thinking !== false,
-      opencodeBin: bot.agent?.opencodeBin,
-    },
-    progress: {
-      mode: bot.progress?.mode || 'concise',
-      editIntervalMs: bot.progress?.editIntervalMs ?? 2500,
-      maxEdits: bot.progress?.maxEdits ?? 40,
-      maxChars: bot.progress?.maxChars ?? 220,
-    },
-    session: { mode: bot.session?.mode || 'per-chat' },
-  };
 }
 
 function printConfig(config, registryPath) {
@@ -756,7 +728,7 @@ async function main() {
   const registryPath = resolveRegistryPath(args.registry, REPO_ROOT);
   const registry = loadRegistry(registryPath);
   const bot = getBot(registry, args.id);
-  const config = normalizeConfig(bot);
+  const config = normalizeConfig(bot, { defaultWorkspace: REPO_ROOT });
 
   if (args.checkConfig) {
     printConfig(config, registryPath);
