@@ -19,6 +19,8 @@ import {
   helpText,
   statusText,
   formatModelList,
+  formatUsage,
+  formatTokens,
 } from '../scripts/lib/commands.mjs';
 
 describe('reasoning-compress', () => {
@@ -282,6 +284,17 @@ describe('pickers', () => {
     expect(models[1].variants).toEqual(['low', 'medium', 'high']);
   });
 
+  it('captures the context limit from --verbose output', () => {
+    const raw = [
+      'opencode/big-pickle',
+      '{',
+      '  "id": "big-pickle",',
+      '  "limit": { "context": 200000 }',
+      '}',
+    ].join('\n');
+    expect(parseModelsVerbose(raw)).toEqual([{ id: 'opencode/big-pickle', variants: [], context: 200000 }]);
+  });
+
   it('paginates the model keyboard with compact callback data', () => {
     const models = Array.from({ length: 20 }, (_, i) => `p/m${i}`);
     const page0 = modelKeyboard(models, { page: 0, pageSize: 8 });
@@ -304,6 +317,23 @@ describe('pickers', () => {
     expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:1' });
     expect(decodeCallback('m:5')).toEqual({ kind: 'm', value: '5' });
     expect(decodeCallback('noop')).toEqual({ kind: 'noop', value: undefined });
+  });
+});
+
+describe('usage formatting', () => {
+  it('formats context percent, tokens and cost', () => {
+    const text = formatUsage({ tokens: { total: 7805 }, cost: 0.00117165, contextLimit: 200000, agent: 'build' });
+    expect(text).toBe('build · ctx 3.9% (7.8k/200k) · cost $0.00117');
+  });
+
+  it('omits context percent when the limit is unknown', () => {
+    expect(formatUsage({ tokens: { total: 1200 }, cost: 0 })).toBe('ctx 1.2k tokens');
+  });
+
+  it('formats token magnitudes', () => {
+    expect(formatTokens(200000)).toBe('200k');
+    expect(formatTokens(1000000)).toBe('1M');
+    expect(formatTokens(999)).toBe('999');
   });
 });
 

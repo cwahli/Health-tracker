@@ -47,13 +47,15 @@ export function parseModelsVerbose(text) {
       j += 1;
     }
     let variants = [];
+    let context = 0;
     try {
       const obj = JSON.parse(buf.join('\n'));
       if (obj && obj.variants && typeof obj.variants === 'object') variants = Object.keys(obj.variants);
+      if (obj && obj.limit && Number(obj.limit.context) > 0) context = Number(obj.limit.context);
     } catch {
       // ignore malformed block
     }
-    models.push({ id: line, variants });
+    models.push(context ? { id: line, variants, context } : { id: line, variants });
     i = j + 1;
   }
   return models;
@@ -105,22 +107,50 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/model [name]     pick a model (or set it directly)',
     '/models           list available models',
     '/agent [name]     pick an agent',
+    '/build            switch to the build agent',
+    '/plan             switch to the plan agent',
     '/thinking [level] pick the thinking level (variant)',
     '/new              start a fresh session',
-    '/status           show session, model, agent, workspace',
+    '/status           show session, model, agent, workspace, usage',
     '/abort            cancel the running request',
     '/help             this message',
   ].join('\n');
 }
 
-export function statusText(config, { sessionId, model, agent, variant } = {}) {
-  return [
+export function formatTokens(n) {
+  const value = Number(n) || 0;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}k`;
+  return String(value);
+}
+
+export function formatUsage({ tokens, cost, contextLimit, agent } = {}) {
+  const parts = [];
+  if (agent) parts.push(agent);
+  const total = Number(tokens?.total) || 0;
+  const limit = Number(contextLimit) || 0;
+  if (limit > 0 && total > 0) {
+    const pct = (total / limit) * 100;
+    const pctText = pct < 10 ? pct.toFixed(1) : pct.toFixed(0);
+    parts.push(`ctx ${pctText}% (${formatTokens(total)}/${formatTokens(limit)})`);
+  } else if (total > 0) {
+    parts.push(`ctx ${formatTokens(total)} tokens`);
+  }
+  const spend = Number(cost) || 0;
+  if (spend > 0) parts.push(`cost $${spend.toFixed(spend < 0.01 ? 5 : 4)}`);
+  return parts.join(' · ');
+}
+
+export function statusText(config, { sessionId, model, agent, variant, usage } = {}) {
+  const lines = [
     `model: ${model || config.agent.model}`,
     `agent: ${agent || config.agent.defaultAgent || 'build'}`,
     `thinking: ${variant || config.agent.variant || '(default)'}`,
     `workspace: ${config.agent.workspace}`,
     `session: ${sessionId || '(none)'}`,
-  ].join('\n');
+  ];
+  if (usage) lines.push(`last run: ${usage}`);
+  return lines.join('\n');
 }
 
 export function formatModelList(models, { max = 0 } = {}) {
