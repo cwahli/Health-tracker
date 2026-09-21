@@ -1,5 +1,26 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 const API_BASE = 'https://api.telegram.org';
 export const MAX_MESSAGE_CHARS = 4096;
+
+const PHOTO_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const AUDIO_EXT = new Set(['.mp3', '.m4a', '.ogg', '.wav']);
+
+export function mediaMethod(filePath) {
+  const ext = path.extname(String(filePath)).toLowerCase();
+  if (PHOTO_EXT.has(ext)) return 'sendPhoto';
+  if (ext === '.mp4') return 'sendVideo';
+  if (AUDIO_EXT.has(ext)) return 'sendAudio';
+  return 'sendDocument';
+}
+
+export function mediaField(method) {
+  if (method === 'sendPhoto') return 'photo';
+  if (method === 'sendVideo') return 'video';
+  if (method === 'sendAudio') return 'audio';
+  return 'document';
+}
 
 export class TelegramError extends Error {
   constructor(method, status, description, parameters) {
@@ -95,6 +116,33 @@ export class TelegramApi {
 
   sendChatAction(chatId, action = 'typing') {
     return this.call('sendChatAction', { chat_id: chatId, action });
+  }
+
+  async sendMediaFile(chatId, filePath, extra = {}) {
+    const method = mediaMethod(filePath);
+    const buf = await fs.promises.readFile(filePath);
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append(mediaField(method), new Blob([buf]), path.basename(filePath));
+    for (const [key, value] of Object.entries(extra)) {
+      if (value != null) form.append(key, String(value));
+    }
+    const res = await this.fetch(`${this.baseUrl}/bot${this.token}/${method}`, { method: 'POST', body: form });
+    let body = {};
+    try {
+      body = await res.json();
+    } catch {
+      body = {};
+    }
+    if (!body.ok) {
+      throw new TelegramError(
+        method,
+        body.error_code || res.status,
+        body.description || `HTTP ${res.status}`,
+        body.parameters,
+      );
+    }
+    return body.result;
   }
 
   editMessageText(chatId, messageId, text, extra = {}) {

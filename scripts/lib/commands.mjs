@@ -124,6 +124,23 @@ export function formatTokens(n) {
   return String(value);
 }
 
+export function extractMedia(text) {
+  const lines = String(text ?? '').split('\n');
+  const media = [];
+  const kept = [];
+  for (const line of lines) {
+    const match = line.match(/^\s*MEDIA:(.+?)\s*$/);
+    if (match) {
+      const file = match[1].trim();
+      if (file) media.push(file);
+      continue;
+    }
+    kept.push(line);
+  }
+  const cleaned = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { text: cleaned, media };
+}
+
 export function formatUsage({ tokens, cost, contextLimit, agent } = {}) {
   const parts = [];
   if (agent) parts.push(agent);

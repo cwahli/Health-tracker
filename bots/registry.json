@@ -17,7 +17,12 @@
         "timeoutMs": 900000,
         "thinking": true,
         "allowExternalDirectory": true,
-        "sharedSkills": [".agents/skills"]
+        "sharedSkills": [
+          ".agents/skills",
+          "/home/ubuntu/opencode-bot/scripts/skills",
+          "~/.hermes/shared_skills/social-media/telegram-media-delivery",
+          "~/.hermes/shared_skills/autonomous-ai-agents/opencode"
+        ]
       },
       "progress": {
         "mode": "concise",
