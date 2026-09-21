@@ -11,7 +11,15 @@ import {
   buildOpencodeEnv,
   expandSkillPath,
 } from '../scripts/lib/agent-opencode.mjs';
-import { clamp, chunkText, MAX_MESSAGE_CHARS, TelegramApi, mediaMethod, mediaField } from '../scripts/lib/tg-api.mjs';
+import {
+  clamp,
+  chunkText,
+  MAX_MESSAGE_CHARS,
+  TelegramApi,
+  mediaMethod,
+  mediaField,
+  isSendableMedia,
+} from '../scripts/lib/tg-api.mjs';
 import { loadRegistry, getBot, resolveToken, normalizeConfig } from '../scripts/lib/registry.mjs';
 import {
   parseCommand,
@@ -412,6 +420,13 @@ describe('media delivery', () => {
     expect(mediaMethod('/a/b.zip')).toBe('sendDocument');
     expect(mediaField('sendPhoto')).toBe('photo');
     expect(mediaField('sendDocument')).toBe('document');
+  });
+
+  it('only sends absolute paths that exist', () => {
+    expect(isSendableMedia('/tmp/x.png', { exists: () => true })).toBe(true);
+    expect(isSendableMedia('/tmp/x.png', { exists: () => false })).toBe(false);
+    expect(isSendableMedia('rel/x.png', { exists: () => true })).toBe(false);
+    expect(isSendableMedia('', { exists: () => true })).toBe(false);
   });
 
   it('uploads a file via the matching telegram method', async () => {

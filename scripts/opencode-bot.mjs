@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { TelegramApi, TelegramError, chunkText } from './lib/tg-api.mjs';
+import { TelegramApi, TelegramError, chunkText, isSendableMedia } from './lib/tg-api.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
 import {
@@ -324,18 +324,22 @@ class ProgressRenderer {
   }
 
   async deliverMedia(paths) {
-    for (const file of paths) {
+    for (const raw of paths) {
+      if (!isSendableMedia(raw)) {
+        console.warn(`[media] skipped (missing or not absolute): ${raw}`);
+        continue;
+      }
       if (this.dryRun) {
-        console.log(`[media] ${file}`);
+        console.log(`[media] ${raw}`);
         continue;
       }
       try {
-        await this.api.sendMediaFile(this.chatId, file);
+        await this.api.sendMediaFile(this.chatId, raw);
       } catch (err) {
         if (err instanceof TelegramError && err.isRateLimit) {
           this.throttle?.pause(err.retryAfter);
         }
-        await this.deliver(`Could not send ${file}: ${err.message}`).catch(() => {});
+        await this.deliver(`Could not send ${raw}: ${err.message}`).catch(() => {});
       }
     }
   }

@@ -22,6 +22,12 @@ export function mediaField(method) {
   return 'document';
 }
 
+export function isSendableMedia(file, { exists = fs.existsSync } = {}) {
+  const value = String(file ?? '').trim();
+  if (!value || !path.isAbsolute(value)) return false;
+  return exists(value);
+}
+
 export class TelegramError extends Error {
   constructor(method, status, description, parameters) {
     super(`${method} failed (${status}): ${description}`);
