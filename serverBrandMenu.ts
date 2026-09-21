@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { inferBasisFromServingText, toPer100g, parseNutrientNumber } from './server_nutrient_basis';
 import { runBrandCuratorStage } from './src/server/food/brandCurator.js';
-import { isD1Configured } from './server_d1.js';
+import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
 import {
   d1GetChainMenuSources,
   d1UpsertChainMenuSource,
@@ -195,24 +195,7 @@ export async function autoLinkBrandItemPhoto(args: {
         );
       }
     }
-
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    if (supabaseAdmin) {
-      const { data: existingSb } = await supabaseAdmin
-        .from('brand_menu_items')
-        .select('id, image_url')
-        .eq('country_code', countryCode)
-        .eq('chain_key', chainKey)
-        .eq('dish_name_key', dishNameKey)
-        .maybeSingle();
-
-      if (existingSb && (!existingSb.image_url || existingSb.image_url.trim() === '')) {
-        await supabaseAdmin
-          .from('brand_menu_items')
-          .update({ image_url: photoUrl, updated_at: new Date().toISOString() })
-          .eq('id', existingSb.id);
-      }
-    }
+    // D-2: Supabase fallback removed. D1 is the only photo-link path (no 402).
     return true;
   } catch (err) {
     console.warn('[autoLinkBrandItemPhoto] Warning:', err);
@@ -362,7 +345,7 @@ function isProtectedOfficial(p: unknown): boolean {
 }
 
 export interface ChainCleanArgs {
-  supabaseAdmin?: any;
+  legacyDb?: any;
   chainKey: string;
   countryCode?: string;
   usedRowIds?: Array<string | number>;
@@ -393,34 +376,30 @@ export async function cleanBrandChain(args: ChainCleanArgs): Promise<BrandCleanC
     const last = chainCleanLastRun.get(scope) || 0;
     if (now - last < CHAIN_CLEAN_THROTTLE_MS) return { ...EMPTY_COUNTS };
   }
-  let admin = args.supabaseAdmin;
-  if (!admin) {
-    try {
-      const mod: any = await import('./supabaseAdmin.js');
-      admin = mod?.supabaseAdmin;
-    } catch {
-      return { ...EMPTY_COUNTS };
-    }
+  // D-2: D1-only. `args.legacyDb` is ignored (legacy callers may still
+  // pass it; the admin endpoints stop passing it in the follow-up commit).
+  if (!isD1Configured()) {
+    log(`[BrandClean] ${scope}: D1 not configured; skipping database clean (no 402).`);
+    return { ...EMPTY_COUNTS };
   }
-  if (!admin) return { ...EMPTY_COUNTS };
 
-  // Status-column probe is implicit: this select fails when the F-11.1
-  // migration has not run yet. Skip writes AND do not mark throttle.
+  // D1 brand_menu_items has no capture_count/confidence/provenance columns;
+  // those rank inputs default (provenance '' = presumed official import).
+  // nutrients arrives as JSON text — parse per row.
   let items: any[];
   try {
-    const { data, error } = await admin
-      .from('brand_menu_items')
-      .select(
-        'id, country_code, chain_key, dish_name, dish_name_key, nutrients, capture_count, confidence, provenance, notes, updated_at, status'
-      )
-      .eq('country_code', country)
-      .eq('chain_key', chainKey);
-    if (error) throw error;
-    items = Array.isArray(data) ? data : [];
-  } catch (e: any) {
-    log(
-      `[BrandClean] ${scope}: cannot scan (${e?.message || e}). Run supabase/migrations/20260913_brand_menu_items_status.sql, then retry.`
+    const scanRes = await d1Query<any>(
+      `SELECT id, country_code, chain_key, dish_name, dish_name_key, nutrients, notes, updated_at, status
+       FROM brand_menu_items WHERE country_code = ? AND chain_key = ? LIMIT 2000`,
+      [country, chainKey]
     );
+    if (!scanRes.success) throw new Error(scanRes.error || 'D1 scan failed');
+    items = (scanRes.results || []).map((r: any) => ({
+      ...r,
+      nutrients: typeof r.nutrients === 'string' ? safeJsonParse(r.nutrients, {}) : (r.nutrients || {}),
+    }));
+  } catch (e: any) {
+    log(`[BrandClean] ${scope}: cannot scan (${e?.message || e}).`);
     return { ...EMPTY_COUNTS };
   }
   chainCleanLastRun.set(scope, now);
@@ -438,11 +417,16 @@ export async function cleanBrandChain(args: ChainCleanArgs): Promise<BrandCleanC
   const quarantine = async (ids: string[], what: string): Promise<number> => {
     if (ids.length === 0) return 0;
     try {
-      const { error } = await admin
-        .from('brand_menu_items')
-        .update({ status: 'quarantined', updated_at: new Date().toISOString() })
-        .in('id', ids);
-      if (error) throw error;
+      // D1 binds chunking: keep IN lists small.
+      for (let i = 0; i < ids.length; i += 50) {
+        const chunk = ids.slice(i, i + 50);
+        const placeholders = chunk.map(() => '?').join(', ');
+        const qRes = await d1Query(
+          `UPDATE brand_menu_items SET status = 'quarantined', updated_at = datetime('now') WHERE id IN (${placeholders})`,
+          chunk
+        );
+        if (!qRes.success) throw new Error(qRes.error || 'D1 quarantine failed');
+      }
       log(`[BrandClean] ${scope}: quarantined ${ids.length} ${what} row(s).`);
       return ids.length;
     } catch (e: any) {
@@ -457,11 +441,11 @@ export async function cleanBrandChain(args: ChainCleanArgs): Promise<BrandCleanC
     const cleanKey = normalizeDishKey(cleanTitle);
     if (item.dish_name !== cleanTitle || item.dish_name_key !== cleanKey) {
       try {
-        const { error } = await admin
-          .from('brand_menu_items')
-          .update({ dish_name: cleanTitle, dish_name_key: cleanKey })
-          .eq('id', item.id);
-        if (error) throw error;
+        const sRes = await d1Query(
+          `UPDATE brand_menu_items SET dish_name = ?, dish_name_key = ? WHERE id = ?`,
+          [cleanTitle, cleanKey, item.id]
+        );
+        if (!sRes.success) throw new Error(sRes.error || 'D1 sanitize failed');
         item.dish_name = cleanTitle;
         item.dish_name_key = cleanKey;
       } catch (e: any) {
@@ -581,7 +565,7 @@ export async function cleanBrandChain(args: ChainCleanArgs): Promise<BrandCleanC
         },
         survivingRows,
         callLLMFn: args.callLLMFn,
-        adminClient: admin,
+        adminClient: null,
         onLog: log,
       });
       if (curatorRes.executed) {
@@ -626,12 +610,14 @@ export function enqueueBrandClean(args: {
 }
 
 export async function selfCleanBrandDatabase(
-  supabaseAdmin: any,
+  _legacyDb: any,
   countryCode: string = 'GB',
   addDebugLog?: (msg: string) => void
 ): Promise<BrandCleanCounts> {
   // F-11.1: soft per-chain clean (was: whole-country hard delete).
   // Admin "Clean now" bypasses the per-chain throttle.
+  // D-2: D1-only. First arg is legacy (ignored) so existing callers keep
+  // working until the admin-router follow-up stops passing it.
   const log = addDebugLog || console.log;
   const country = String(countryCode || 'GB').toUpperCase();
   const agg: BrandCleanCounts = {
@@ -640,25 +626,24 @@ export async function selfCleanBrandDatabase(
     updatedChainsCount: 0,
     details: [],
   };
-  if (!supabaseAdmin) {
-    log(`[BrandClean] ${country}: supabaseAdmin is null; skipping database clean.`);
+  if (!isD1Configured()) {
+    log(`[BrandClean] ${country}: D1 not configured; skipping database clean (no 402).`);
     return agg;
   }
   let chains: string[] = [];
   try {
-    const { data, error } = await supabaseAdmin
-      .from('brand_menu_items')
-      .select('chain_key')
-      .eq('country_code', country);
-    if (error) throw error;
-    chains = [...new Set((Array.isArray(data) ? data : []).map((r: any) => r.chain_key).filter(Boolean))];
+    const chainRes = await d1Query<any>(
+      `SELECT DISTINCT chain_key FROM brand_menu_items WHERE country_code = ? LIMIT 500`,
+      [country]
+    );
+    if (!chainRes.success) throw new Error(chainRes.error || 'D1 chain list failed');
+    chains = [...new Set((chainRes.results || []).map((r: any) => r.chain_key).filter(Boolean))];
   } catch (e: any) {
     log(`[BrandClean] ${country}: cannot list chains (${e?.message || e}).`);
     return agg;
   }
   for (const chainKey of chains) {
     const r = await cleanBrandChain({
-      supabaseAdmin,
       chainKey,
       countryCode: country,
       onLog: log,
@@ -674,11 +659,18 @@ export async function selfCleanBrandDatabase(
 }
 
 export async function autoRegisterChainMenuItem(
-  supabaseAdmin: any,
+  _legacyDb: any,
   item: any,
   countryCode: string,
   addDebugLog: (msg: string) => void
 ): Promise<void> {
+  // D-2: D1-only. First arg is legacy (ignored). D1 brand_menu_items has no
+  // capture_count/confidence/provenance/nutrients_per_100g columns — those
+  // rank inputs fall back to defaults; printed nutrients + notes persist.
+  if (!isD1Configured()) {
+    addDebugLog('[AutoChainRegister] D1 not configured; skipping (no 402).');
+    return;
+  }
   try {
     const rawChainName = String(item?.chainName || '').trim();
     const rawDishName = String(item?.originalName || item?.name || item?.dishName || '').trim();
@@ -753,29 +745,25 @@ export async function autoRegisterChainMenuItem(
 
       // Upsert chain_menu_sources placeholder, marked ready since we have real captured data
       try {
-        const sourceUrl = `crowdsourced://ocr/${chain_key}`;
-        const nowIso = new Date().toISOString();
-        await supabaseAdmin.from('chain_menu_sources').upsert({
+        await d1UpsertChainMenuSource({
           chain_key,
           country_code: countryCode,
-          url: sourceUrl,
+          display_name: rawChainName,
+          url: `crowdsourced://ocr/${chain_key}`,
+          source_kind: 'crowdsourced',
           status: 'ready',
           enabled: true,
-          last_success_at: nowIso,
-          updated_at: nowIso,
-        }, { onConflict: 'country_code,chain_key,url' });
+          last_success_at: new Date().toISOString(),
+        });
       } catch (e: any) {
         // Soft-fail OK
       }
 
-      const { data: chainRows, error: lookupErr } = await supabaseAdmin
-        .from('brand_menu_items')
-        .select('id, dish_name, dish_name_key, basis_type, serving_grams, nutrients')
-        .eq('country_code', countryCode)
-        .eq('chain_key', chain_key);
-
-      if (lookupErr) {
-        addDebugLog(`[AutoChainRegister] lookup error, skipping: ${lookupErr.message}`);
+      let chainRows: any[] = [];
+      try {
+        chainRows = await d1GetBrandMenuItems(chain_key, countryCode);
+      } catch (lookupErr: any) {
+        addDebugLog(`[AutoChainRegister] lookup error, skipping: ${lookupErr?.message || lookupErr}`);
         return;
       }
 
@@ -821,7 +809,8 @@ export async function autoRegisterChainMenuItem(
         const extraIds = existingRows.slice(1).map((r: any) => r.id).filter(Boolean);
         if (extraIds.length > 0) {
           addDebugLog(`[AutoChainRegister] Deleting ${extraIds.length} duplicate record(s) for "${dishName}" (${chain_key}).`);
-          await supabaseAdmin.from('brand_menu_items').delete().in('id', extraIds);
+          const placeholders = extraIds.map(() => '?').join(', ');
+          await d1Query(`DELETE FROM brand_menu_items WHERE id IN (${placeholders})`, extraIds);
         }
       }
 
@@ -831,29 +820,28 @@ export async function autoRegisterChainMenuItem(
       const isPartialLocked = lockedKeysList && lockedKeysList.length > 0 && Object.keys(nutrients).length < 4;
 
       if (!existing) {
-        const row = {
+        const provTag = isPartialLocked ? 'ocr_partial' : 'ocr_auto';
+        const newId = `ocr_${String(countryCode).toLowerCase()}_${chain_key}_${dish_name_key}`.slice(0, 120);
+        const insertRes = await d1UpsertBrandMenuItem({
+          id: newId,
           country_code: countryCode,
           chain_key,
+          chain_name: rawChainName,
           dish_name: dishName,
           dish_name_key,
-          serving_grams,
           basis_type,
+          serving_grams,
           nutrients,
-          nutrients_per_100g,
-          ingredients,
-          provenance: isPartialLocked ? 'ocr_partial' : 'ocr_auto',
-          confidence: isPartialLocked ? 0.45 : 0.55,
-          capture_count: 1,
+          ingredients: ingredients || '',
           source_url: `crowdsourced://ocr/${chain_key}`,
-          notes: isPartialLocked
+          notes: `${isPartialLocked
             ? `Auto-captured from photo OCR (Official printed keys: ${lockedKeysList.join(', ')})`
-            : 'Auto-captured from photo OCR',
+            : 'Auto-captured from photo OCR'} [${provTag}]`,
           enabled: true,
-          updated_at: new Date().toISOString(),
-        };
-        const { error: insertErr } = await supabaseAdmin.from('brand_menu_items').insert(row);
-        if (insertErr) {
-          addDebugLog(`[AutoChainRegister] insert failed for "${dishName}": ${insertErr.message}`);
+          status: 'active',
+        });
+        if (!insertRes.success) {
+          addDebugLog(`[AutoChainRegister] insert failed for "${dishName}": ${insertRes.error}`);
         } else {
           invalidateBrandCache();
           addDebugLog(`[AutoChainRegister] Registered new dish "${dishName}" for chain "${chain_key}" with ${Object.keys(nutrients).length} official fields.`);
@@ -874,38 +862,34 @@ export async function autoRegisterChainMenuItem(
         });
 
         const updatedCaptureCount = (existing.capture_count || 1) + 1;
-        const updatedConfidence = Math.min(0.95, (existing.confidence || 0.5) + 0.05);
 
-        const updates: Record<string, any> = {
-          dish_name: dishName,
-          dish_name_key,
-          nutrients: mergedNutrients,
-          nutrients_per_100g: mergedNutrients100g,
-          capture_count: updatedCaptureCount,
-          confidence: updatedConfidence,
-          updated_at: new Date().toISOString(),
-        };
-
+        const mergedNutrientsJson = JSON.stringify(mergedNutrients);
+        const updateSets: string[] = [
+          'dish_name = ?', 'dish_name_key = ?', 'nutrients = ?', `updated_at = datetime('now')`
+        ];
+        const updateParams: any[] = [dishName, dish_name_key, mergedNutrientsJson];
         if ((existing.serving_grams === null || existing.serving_grams === undefined) && serving_grams) {
-          updates.serving_grams = serving_grams;
+          updateSets.push('serving_grams = ?');
+          updateParams.push(serving_grams);
         }
         if (!existing.ingredients && ingredients) {
-          updates.ingredients = ingredients;
+          updateSets.push('ingredients = ?');
+          updateParams.push(ingredients);
         }
+        updateParams.push(existing.id);
+        const updateRes = await d1Query(
+          `UPDATE brand_menu_items SET ${updateSets.join(', ')} WHERE id = ?`,
+          updateParams
+        );
 
-        const { error: updateErr } = await supabaseAdmin
-          .from('brand_menu_items')
-          .update(updates)
-          .eq('id', existing.id);
-
-        if (updateErr) {
-          addDebugLog(`[AutoChainRegister] update failed for "${dishName}": ${updateErr.message}`);
+        if (!updateRes.success) {
+          addDebugLog(`[AutoChainRegister] update failed for "${dishName}": ${updateRes.error}`);
         } else {
           addDebugLog(`[AutoChainRegister] Updated existing dish "${dishName}" (capture #${updatedCaptureCount}).`);
         }
       }
 
-      cleanBrandChain({ supabaseAdmin, chainKey: chain_key, countryCode, onLog: addDebugLog }).catch(() => {});
+      cleanBrandChain({ chainKey: chain_key, countryCode, onLog: addDebugLog }).catch(() => {});
     } finally {
       inFlightRegisterLocks.delete(lockKey);
     }
@@ -923,13 +907,14 @@ export function cleanDescriptionText(raw: string): string {
   return str.trim();
 }
 
-async function maybeMarkChainReady(supabaseAdmin: any, chainKey: string, countryCode: string) {
+async function maybeMarkChainReady(_legacyDb: any, chainKey: string, countryCode: string) {
+  // D-2: D1-only status flip (raw UPDATE so display_name/url/priority are
+  // never clobbered with upsert defaults). First arg is legacy (ignored).
   try {
-    await supabaseAdmin
-      .from('chain_menu_sources')
-      .update({ status: 'ready', updated_at: new Date().toISOString() })
-      .eq('chain_key', chainKey)
-      .eq('country_code', countryCode);
+    await d1Query(
+      `UPDATE chain_menu_sources SET status = 'ready', updated_at = datetime('now') WHERE chain_key = ? AND country_code = ?`,
+      [chainKey, countryCode]
+    );
   } catch (e) {
     console.warn('maybeMarkChainReady failed:', e);
   }
@@ -1239,29 +1224,7 @@ export function registerBrandMenuRoutes(app: Express) {
         }
       }
 
-      // 2. Save to Supabase if available
-      try {
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        if (supabaseAdmin) {
-          if (id) {
-            const { data, error } = await supabaseAdmin
-              .from('chain_menu_sources')
-              .upsert(row, { onConflict: 'id' })
-              .select('*')
-              .single();
-            if (!error && data) savedSource = data;
-          } else {
-            const { data, error } = await supabaseAdmin
-              .from('chain_menu_sources')
-              .upsert(row, { onConflict: 'country_code,chain_key,url' })
-              .select('*')
-              .single();
-            if (!error && data) savedSource = data;
-          }
-        }
-      } catch (sbErr) {
-        console.warn('[chain-menu-sources/save] Supabase save warning:', sbErr);
-      }
+      // D-2: D1 is the only remote store (Supabase fallback removed, no 402).
 
       return res.json({ success: true, source: savedSource });
     } catch (err: any) {
@@ -1281,30 +1244,17 @@ export function registerBrandMenuRoutes(app: Express) {
         return res.status(400).json({ error: 'id or chain_key is required' });
       }
 
-      // 1. Delete from D1 if configured
+      // 1. Delete from D1 if configured (id and chain_key are separate
+      // selectors — the helper cascades brand_menu_items on chain_key).
       if (isD1Configured()) {
         try {
-          await d1DeleteChainMenuSource(id || chain_key);
+          await d1DeleteChainMenuSource(id || undefined, chain_key || undefined);
         } catch (d1Err) {
           console.warn('[chain-menu-sources/delete] D1 delete warning:', d1Err);
         }
       }
 
-      // 2. Delete from Supabase if available
-      try {
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        if (supabaseAdmin) {
-          if (id) {
-            await supabaseAdmin.from('chain_menu_sources').delete().eq('id', id);
-          }
-          if (chain_key) {
-            await supabaseAdmin.from('chain_menu_sources').delete().eq('chain_key', chain_key);
-            await supabaseAdmin.from('brand_menu_items').delete().eq('chain_key', chain_key);
-          }
-        }
-      } catch (sbErr) {
-        console.warn('[chain-menu-sources/delete] Supabase delete warning:', sbErr);
-      }
+      // D-2: D1 is the only remote store (Supabase fallback removed, no 402).
 
       // 3. Clean up local fallback storage if present
       if (chain_key) {
@@ -1358,23 +1308,7 @@ export function registerBrandMenuRoutes(app: Express) {
         }
       }
 
-      // 2. Try Supabase if available and D1 didn't find items
-      if (taggedItems.length === 0) {
-        try {
-          const { supabaseAdmin } = await import('./supabaseAdmin.js');
-          if (supabaseAdmin) {
-            let query = supabaseAdmin.from('brand_menu_items').select('*');
-            if (chain_key) query = query.eq('chain_key', chain_key);
-            if (country_code) query = query.eq('country_code', country_code);
-            const { data, error } = await query.order('dish_name', { ascending: true });
-            if (!error && data && data.length > 0) {
-              taggedItems = data.map((it: any) => ({ ...it, _source: 'supabase' }));
-            }
-          }
-        } catch (sbErr) {
-          console.warn('[brand-menu-items] Supabase fetch warning:', sbErr);
-        }
-      }
+      // D-2: D1 is the only remote store (Supabase fallback removed, no 402).
 
       // 3. Fall back to local items if DBs have no data
       if (taggedItems.length === 0) {
@@ -1423,23 +1357,7 @@ export function registerBrandMenuRoutes(app: Express) {
       }
     }
 
-    // 2. Search Supabase if available
-    try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      if (supabaseAdmin) {
-        const { data, error } = await supabaseAdmin
-          .from('brand_menu_items')
-          .select('*')
-          .eq('country_code', country_code)
-          .ilike('dish_name', `%${q}%`)
-          .limit(50);
-        if (!error && data) {
-          results.push(...data.map((it: any) => ({ ...it, _source: 'supabase' })));
-        }
-      }
-    } catch (e) {
-      console.warn('[brand-menu-items/search] supabase query failed:', e);
-    }
+    // D-2: D1 is the only remote store (Supabase search removed, no 402).
 
     // 3. Search local items
     try {
@@ -1482,10 +1400,18 @@ export function registerBrandMenuRoutes(app: Express) {
       updated_at: new Date().toISOString()
     }));
 
+    // D-2: D1 is the only remote store (Supabase upsert removed, no 402).
+    // Stable ids keep D1 upserts idempotent per chain+dish (matches the old
+    // onConflict country/chain/dish_key).
+    let d1Ok = false;
     if (isD1Configured()) {
       for (const row of rows) {
         try {
-          await d1UpsertBrandMenuItem(row);
+          if (!row.id) {
+            row.id = `imp_${row.country_code}_${row.chain_key}_${row.dish_name_key}`.toLowerCase().slice(0, 120);
+          }
+          const upRes = await d1UpsertBrandMenuItem(row);
+          if (upRes.success) d1Ok = true;
         } catch (e) {
           console.warn('[brand-menu-items/import] D1 upsert warning:', e);
         }
@@ -1507,22 +1433,11 @@ export function registerBrandMenuRoutes(app: Express) {
       return res.json({ success: true, upserted: rows.length, items: rows, fallback: true });
     };
 
-    try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      if (supabaseAdmin) {
-        const { data, error } = await supabaseAdmin
-          .from('brand_menu_items')
-          .upsert(rows, { onConflict: 'country_code,chain_key,dish_name_key' })
-          .select('*');
-        if (!error) {
-          invalidateBrandCache();
-          return res.json({ success: true, upserted: (data || []).length, items: data });
-        }
-      }
-      return runLocalFallback();
-    } catch (err: any) {
-      return runLocalFallback();
+    if (d1Ok) {
+      invalidateBrandCache();
+      return res.json({ success: true, upserted: rows.length, items: rows.map((r: any) => ({ ...r, _source: 'd1' })) });
     }
+    return runLocalFallback();
   });
 
   /** Parse + save a pasted nutrition panel (YOLK-style) as one brand menu item */
@@ -1558,7 +1473,15 @@ export function registerBrandMenuRoutes(app: Express) {
 
       if (isD1Configured()) {
         try {
-          await d1UpsertBrandMenuItem(row);
+          await d1UpsertBrandMenuItem({
+            id: `paste_${country_code}_${chain_key}_${dish_name_key}`.toLowerCase().slice(0, 120),
+            ...row,
+          });
+          try {
+            await maybeMarkChainReady(null, chain_key, country_code);
+          } catch (_) {}
+          invalidateBrandCache();
+          return res.json({ success: true, item: { ...row, _source: 'd1' }, parsed });
         } catch (e) {
           console.warn('[brand-menu-items/paste] D1 upsert warning:', e);
         }
@@ -1575,31 +1498,10 @@ export function registerBrandMenuRoutes(app: Express) {
         else all.push(row);
         saveLocalItems(all);
         try {
-          const { supabaseAdmin } = await import('./supabaseAdmin.js');
-          if (supabaseAdmin) await maybeMarkChainReady(supabaseAdmin, chain_key, country_code);
+          await maybeMarkChainReady(null, chain_key, country_code);
         } catch (_) {}
         return res.json({ success: true, item: { ...row, _source: 'local_fallback' }, parsed, fallback: true });
       };
-
-      try {
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        if (supabaseAdmin) {
-          const { data, error } = await supabaseAdmin
-            .from('brand_menu_items')
-            .upsert(row, { onConflict: 'country_code,chain_key,dish_name_key' })
-            .select('*')
-            .single();
-          if (!error && data) {
-            try {
-              await maybeMarkChainReady(supabaseAdmin, chain_key, country_code);
-            } catch (_) {}
-            invalidateBrandCache();
-            return res.json({ success: true, item: { ...data, _source: 'supabase' }, parsed });
-          }
-        }
-      } catch (sbErr) {
-        console.warn('[brand-menu-items/paste] Supabase upsert warning:', sbErr);
-      }
 
       return await runLocalFallback();
     } catch (err: any) {
@@ -1647,31 +1549,23 @@ export function registerBrandMenuRoutes(app: Express) {
           updated_at: new Date().toISOString(),
         };
 
+        // D-2: D1 is the remote store (stable id = idempotent upsert).
+        let savedToD1 = false;
         if (isD1Configured()) {
           try {
-            await d1UpsertBrandMenuItem(row);
+            const upRes = await d1UpsertBrandMenuItem({
+              id: `paste_${country_code}_${chain_key}_${dish_name_key}`.toLowerCase().slice(0, 120),
+              ...row,
+            });
+            savedToD1 = upRes.success;
           } catch (e) {
             console.warn('[brand-menu-items/bulk-paste] D1 upsert warning:', e);
           }
         }
 
-        let savedViaSupabase = false;
-        try {
-          const { supabaseAdmin } = await import('./supabaseAdmin.js');
-          if (supabaseAdmin) {
-            const { error } = await supabaseAdmin
-              .from('brand_menu_items')
-              .upsert(row, { onConflict: 'country_code,chain_key,dish_name_key' })
-              .select('*')
-              .single();
-            if (!error) {
-              results.push({ dish_name: dish.dish_name, status: 'saved', source: 'supabase', warnings: dish.warnings });
-              savedViaSupabase = true;
-            }
-          }
-        } catch (_) {}
-
-        if (!savedViaSupabase) {
+        if (savedToD1) {
+          results.push({ dish_name: dish.dish_name, status: 'saved', source: 'd1', warnings: dish.warnings });
+        } else {
           const all = loadLocalItems();
           const idx = all.findIndex((it: any) =>
             it.country_code === row.country_code &&
@@ -1681,23 +1575,22 @@ export function registerBrandMenuRoutes(app: Express) {
           if (idx >= 0) all[idx] = row;
           else all.push(row);
           saveLocalItems(all);
-          results.push({ dish_name: dish.dish_name, status: 'saved', source: isD1Configured() ? 'd1' : 'local_fallback', warnings: dish.warnings });
+          results.push({ dish_name: dish.dish_name, status: 'saved', source: 'local_fallback', warnings: dish.warnings });
         }
       }
 
       try {
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        if (supabaseAdmin) await maybeMarkChainReady(supabaseAdmin, chain_key, country_code);
+        await maybeMarkChainReady(null, chain_key, country_code);
       } catch (_) {}
 
-      const savedToSupabase = results.filter((r) => r.source === 'supabase').length;
-      const savedLocalOnly = results.filter((r) => r.source !== 'supabase' && r.status === 'saved').length;
+      const savedToD1Count = results.filter((r) => r.source === 'd1').length;
+      const savedLocalOnly = results.filter((r) => r.source !== 'd1' && r.status === 'saved').length;
       const errors = results.filter((r) => r.status === 'error').length;
 
       res.json({
         success: true,
         results,
-        summary: { total: dishes.length, savedToSupabase, savedLocalOnly, errors },
+        summary: { total: dishes.length, savedToD1: savedToD1Count, savedLocalOnly, errors },
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'bulk paste failed' });
@@ -1721,9 +1614,14 @@ export function registerBrandMenuRoutes(app: Express) {
       return res.status(400).json({ error: 'chain_key and dish_name_key are required' });
     }
 
+    // D-2: D1 is the remote store. Resolve the existing row id first so the
+    // upsert updates in place instead of minting a duplicate row.
     if (isD1Configured()) {
       try {
-        await d1UpsertBrandMenuItem({
+        const existing = await d1GetBrandMenuItems(chain_key, country_code);
+        const hit = (existing || []).find((r: any) => r.dish_name_key === dish_name_key || r.dish_name === dish_name);
+        const upRes = await d1UpsertBrandMenuItem({
+          ...(hit?.id ? { id: hit.id } : {}),
           country_code,
           chain_key,
           dish_name,
@@ -1735,6 +1633,10 @@ export function registerBrandMenuRoutes(app: Express) {
           ...(ingredients !== undefined ? { ingredients } : {}),
           ...(image_url !== undefined ? { image_url } : {}),
         });
+        if (upRes.success) {
+          invalidateBrandCache();
+          return res.json({ success: true, item: { country_code, chain_key, dish_name, dish_name_key, serving_grams, basis_type, nutrients, notes, image_url, _source: 'd1' } });
+        }
       } catch (d1Err) {
         console.warn('[brand-menu-items/edit] D1 update warning:', d1Err);
       }
@@ -1767,38 +1669,8 @@ export function registerBrandMenuRoutes(app: Express) {
       return res.json({ success: true, item: { country_code, chain_key, dish_name, dish_name_key, serving_grams, basis_type, nutrients, notes, image_url } });
     };
 
-    try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      if (supabaseAdmin) {
-        const updatePayload: Record<string, any> = {
-          dish_name,
-          serving_grams,
-          basis_type,
-          nutrients,
-          notes,
-          ...(ingredients !== undefined ? { ingredients } : {}),
-          updated_at: new Date().toISOString()
-        };
-        if (image_url !== undefined) {
-          updatePayload.image_url = image_url;
-        }
-        const { data, error } = await supabaseAdmin
-          .from('brand_menu_items')
-          .update(updatePayload)
-          .eq('country_code', country_code)
-          .eq('chain_key', chain_key)
-          .eq('dish_name_key', dish_name_key)
-          .select('*')
-          .single();
-
-        if (!error && data) {
-          return res.json({ success: true, item: data });
-        }
-      }
-      return runLocalFallback();
-    } catch (err: any) {
-      return runLocalFallback();
-    }
+    // D1 unavailable or upsert failed — local fallback.
+    return runLocalFallback();
   });
 
   /** Delete a brand menu item */
@@ -1813,8 +1685,9 @@ export function registerBrandMenuRoutes(app: Express) {
 
     if (isD1Configured()) {
       try {
-        const { d1Query } = await import('./server_d1.js');
         await d1Query('DELETE FROM brand_menu_items WHERE country_code = ? AND chain_key = ? AND (dish_name_key = ? OR dish_name = ?)', [country_code, chain_key, dish_name_key, dish_name_key]);
+        invalidateBrandCache();
+        return res.json({ success: true });
       } catch (d1Err) {
         console.warn('[brand-menu-items/delete] D1 delete warning:', d1Err);
       }
@@ -1831,85 +1704,48 @@ export function registerBrandMenuRoutes(app: Express) {
       return res.json({ success: true, fallback: true });
     };
 
-    try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      if (supabaseAdmin) {
-        const { error } = await supabaseAdmin
-          .from('brand_menu_items')
-          .delete()
-          .eq('country_code', country_code)
-          .eq('chain_key', chain_key)
-          .eq('dish_name_key', dish_name_key);
-
-        if (!error) {
-          return res.json({ success: true });
-        }
-      }
-      return runLocalFallback();
-    } catch (err: any) {
-      return runLocalFallback();
-    }
+    // D-2: D1 is the only remote store (Supabase delete removed, no 402).
+    return runLocalFallback();
   });
 
-  /** Get recent meals with photos for admin photo-linking picker */
+  /** Get recent meals with photos for admin photo-linking picker (D-2: D1-only) */
   app.get('/api/admin/meals-with-photos', async (_req: Request, res: Response) => {
     try {
       let meals: any[] = [];
-      try {
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        if (supabaseAdmin) {
-          const { data, error } = await supabaseAdmin
-            .from('food_logs')
-            .select('id, name, date, image_url, image_urls, calories, protein, carbohydrates, total_fat, saturated_fat, sodium, portion_grams')
-            .not('image_url', 'is', null)
-            .order('created_at', { ascending: false })
-            .limit(50);
-          if (!error && Array.isArray(data) && data.length > 0) {
-            meals = data.map((d: any) => ({
-              id: d.id,
-              name: d.name,
-              date: d.date,
-              imageUrl: d.image_url,
-              imageUrls: d.image_urls || (d.image_url ? [d.image_url] : []),
-              calories: d.calories,
-              protein: d.protein,
-              carbohydrates: d.carbohydrates,
-              totalFat: d.total_fat,
-              saturatedFat: d.saturated_fat,
-              sodium: d.sodium,
-              portionGrams: d.portion_grams
-            }));
-          }
-        }
-      } catch (_) {}
-
-      if (meals.length === 0 && isD1Configured()) {
+      // D1 food_logs has image_urls (JSON text) + updated_at; macros other
+      // than calories/saturated_fat/sodium live inside the nutrients JSON.
+      if (isD1Configured()) {
         try {
-          const { d1Query } = await import('./server_d1.js');
           const d1Res = await d1Query<any>(
-            `SELECT id, name, date, image_url, image_urls, calories, protein, carbohydrates, total_fat, saturated_fat, sodium, portion_grams 
-             FROM food_logs 
-             WHERE (image_url IS NOT NULL AND image_url != '') 
-                OR (image_urls IS NOT NULL AND image_urls != '') 
-             ORDER BY created_at DESC 
+            `SELECT id, name, date, image_urls, calories, nutrients, weight_grams, updated_at
+             FROM food_logs
+             WHERE image_urls IS NOT NULL AND image_urls != '' AND image_urls != '[]'
+             ORDER BY updated_at DESC
              LIMIT 50`
           );
           const d1Meals = d1Res?.results || [];
           if (Array.isArray(d1Meals)) {
-            meals = d1Meals.map(d => ({
-              id: d.id,
-              name: d.name,
-              date: d.date,
-              imageUrl: d.image_url,
-              imageUrls: d.image_urls ? (typeof d.image_urls === 'string' ? JSON.parse(d.image_urls) : d.image_urls) : (d.image_url ? [d.image_url] : []),
-              calories: d.calories,
-              protein: d.protein,
-              carbohydrates: d.carbohydrates,
-              totalFat: d.total_fat,
-              saturatedFat: d.saturated_fat,
-              sodium: d.sodium,
-              portionGrams: d.portion_grams
-            }));
+            meals = d1Meals.map((d: any) => {
+              let urls: any[] = [];
+              try {
+                urls = typeof d.image_urls === 'string' ? safeJsonParse(d.image_urls, []) : (d.image_urls || []);
+              } catch (_) { urls = []; }
+              const nut = typeof d.nutrients === 'string' ? safeJsonParse(d.nutrients, {}) : (d.nutrients || {});
+              return {
+                id: d.id,
+                name: d.name,
+                date: d.date,
+                imageUrl: urls[0] || null,
+                imageUrls: urls,
+                calories: d.calories,
+                protein: nut.protein ?? null,
+                carbohydrates: nut.carbohydrates ?? nut.carbs ?? null,
+                totalFat: nut.totalFat ?? nut.fat ?? null,
+                saturatedFat: nut.saturatedFat ?? null,
+                sodium: nut.sodium ?? null,
+                portionGrams: d.weight_grams ?? null
+              };
+            }).filter((m: any) => m.imageUrls.length > 0);
           }
         } catch (_) {}
       }
@@ -1934,17 +1770,8 @@ export function registerBrandMenuRoutes(app: Express) {
       let mealData: any = null;
 
       if (mealLogId) {
-        try {
-          const { supabaseAdmin } = await import('./supabaseAdmin.js');
-          if (supabaseAdmin) {
-            const { data } = await supabaseAdmin.from('food_logs').select('*').eq('id', mealLogId).maybeSingle();
-            if (data) mealData = data;
-          }
-        } catch (_) {}
-
-        if (!mealData && isD1Configured()) {
+        if (isD1Configured()) {
           try {
-            const { d1Query } = await import('./server_d1.js');
             const rowsRes = await d1Query<any>('SELECT * FROM food_logs WHERE id = ? LIMIT 1', [mealLogId]);
             const rows = rowsRes?.results || [];
             if (rows.length > 0) mealData = rows[0];
@@ -2031,18 +1858,8 @@ export function registerBrandMenuRoutes(app: Express) {
         }
       }
 
-      try {
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        if (supabaseAdmin) {
-          let q = supabaseAdmin.from('brand_menu_items').update(updateData);
-          if (brandItemId) {
-            q = q.eq('id', brandItemId);
-          } else if (chain_key && dish_name_key) {
-            q = q.eq('country_code', country_code).eq('chain_key', chain_key).eq('dish_name_key', dish_name_key);
-          }
-          await q;
-        }
-      } catch (_) {}
+      // D-2: D1 is the only remote store (Supabase write removed, no 402).
+      // d1Query is top-level imported.
 
       const all = loadLocalItems();
       const idx = all.findIndex((it: any) => 
@@ -2060,10 +1877,11 @@ export function registerBrandMenuRoutes(app: Express) {
     }
   });
 
-  /** Push any local-fallback brand menu items into Supabase, removing them locally once synced */
+  /** Push any local-fallback brand menu items into D1, removing them locally once synced */
   app.post('/api/brand-menu-items/sync-to-supabase', async (req: Request, res: Response) => {
+    // D-2: route name kept (admin UI calls it); the remote is D1 now.
+    // Supabase upsert removed (no 402). Response shape unchanged.
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
       const country_code = String(req.body?.country_code || 'GB');
       const chain_key = req.body?.chain_key ? String(req.body.chain_key).trim().toLowerCase() : null;
 
@@ -2076,6 +1894,10 @@ export function registerBrandMenuRoutes(app: Express) {
         return res.json({ success: true, synced: 0, failed: 0, remainingLocalOnly: 0 });
       }
 
+      if (!isD1Configured()) {
+        return res.json({ success: true, synced: 0, failed: toSync.length, remainingLocalOnly: toSync.length, sampleErrors: ['D1 not configured'] });
+      }
+
       let synced = 0;
       let failed = 0;
       const stillLocal: any[] = [];
@@ -2084,21 +1906,17 @@ export function registerBrandMenuRoutes(app: Express) {
       const ALLOWED_BRAND_MENU_ITEM_COLUMNS = new Set([
         'country_code',
         'chain_key',
+        'chain_name',
         'dish_name',
         'dish_name_key',
         'serving_grams',
         'basis_type',
         'nutrients',
-        'nutrients_per_100g',
         'ingredients',
-        'provenance',
-        'confidence',
-        'capture_count',
         'source_url',
         'image_url',
         'notes',
-        'enabled',
-        'updated_at'
+        'enabled'
       ]);
 
       for (const item of toSync) {
@@ -2116,13 +1934,10 @@ export function registerBrandMenuRoutes(app: Express) {
           if (!payload.dish_name_key && payload.dish_name) {
             payload.dish_name_key = normalizeDishKey(payload.dish_name);
           }
+          const stableId = `sync_${payload.country_code}_${payload.chain_key}_${payload.dish_name_key}`.toLowerCase().slice(0, 120);
 
-          const { error } = await supabaseAdmin
-            .from('brand_menu_items')
-            .upsert(payload, { onConflict: 'country_code,chain_key,dish_name_key' })
-            .select('*')
-            .single();
-          if (error) throw error;
+          const upRes = await d1UpsertBrandMenuItem({ id: stableId, ...payload });
+          if (!upRes.success) throw new Error(upRes.error || 'D1 upsert failed');
           synced++;
         } catch (e: any) {
           failed++;
@@ -2156,484 +1971,7 @@ export function registerBrandMenuRoutes(app: Express) {
       res.status(500).json({ error: err?.message || 'parse failed' });
     }
   });
-
-  /** Admin route: Trigger self-cleaning and database deduplication */
-  app.post('/api/admin/db-clean', async (req: Request, res: Response) => {
-    try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const chainStats = await consolidateBrandMenuItemsAndChains(supabaseAdmin);
-      const catalogStats = await cleanUnbrandedFoodCatalog(supabaseAdmin);
-      res.json({
-        success: true,
-        chainStats,
-        catalogStats,
-        message: 'Self-cleaning database maintenance completed successfully.'
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Self-cleaning failed' });
-    }
-  });
 }
-
-export async function consolidateBrandMenuItemsAndChains(
-  supabaseAdmin: any,
-  addDebugLog?: (msg: string) => void
-): Promise<{ mergedItemsCount: number; deletedDuplicatesCount: number; updatedChainsCount: number; duplicatesFound: { chain_key: string; dish_name: string; kept: number; removed: number }[] }> {
-  let mergedItemsCount = 0;
-  let deletedDuplicatesCount = 0;
-  let updatedChainsCount = 0;
-  const duplicatesFound: { chain_key: string; dish_name: string; kept: number; removed: number }[] = [];
-
-  try {
-    if (!supabaseAdmin) return { mergedItemsCount, deletedDuplicatesCount, updatedChainsCount, duplicatesFound };
-
-    // 1. Fetch all brand menu items
-    const { data: allItems, error: itemsErr } = await supabaseAdmin
-      .from('brand_menu_items')
-      .select('*');
-
-    if (!itemsErr && Array.isArray(allItems) && allItems.length > 0) {
-      const groups = new Map<string, any[]>();
-      for (const item of allItems) {
-        // Filter out zero-nutrient items
-        const nuts = item.nutrients || {};
-        const isZero = Object.values(nuts).every(v => Number(v) === 0 || v === null || v === undefined);
-        const cal = Number(nuts.calories || 0);
-        if (isZero || cal <= 0) {
-          await supabaseAdmin.from('brand_menu_items').delete().eq('id', item.id);
-          deletedDuplicatesCount++;
-          if (addDebugLog) addDebugLog(`Deleted empty nutrient item: ${item.chain_key} - ${item.dish_name}`);
-          continue;
-        }
-        const cCode = (item.country_code || 'GB').toUpperCase();
-        const normChain = normalizeChainKey(item.chain_key || item.chain_name || '');
-        const normDish = normalizeDishKey(item.dish_name || item.dish_name_key || '');
-        if (!normChain || !normDish) continue;
-
-        const missingBasis = !item.basis_type || String(item.basis_type).trim() === '';
-        if (missingBasis) {
-          await supabaseAdmin
-            .from('brand_menu_items')
-            .update({
-              basis_type: 'per_dish',
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', item.id);
-          item.basis_type = 'per_dish';
-          updatedChainsCount++;
-        }
-
-        const groupKey = `${cCode}::${normChain}::${normDish}`;
-        if (!groups.has(groupKey)) {
-          groups.set(groupKey, []);
-        }
-        groups.get(groupKey)!.push(item);
-      }
-
-      for (const [groupKey, items] of groups.entries()) {
-        const [cCode, normChain, normDish] = groupKey.split('::');
-
-        if (items.length === 1) {
-          const single = items[0];
-          // Do NOT convert per_100g grocery labels to per_dish (that corrupted Co-op beef/yogurt).
-          // Only normalize chain/dish keys when needed.
-          if (single.chain_key !== normChain || single.dish_name_key !== normDish) {
-            const { error: upErr } = await supabaseAdmin
-              .from('brand_menu_items')
-              .update({
-                chain_key: normChain,
-                dish_name_key: normDish,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', single.id);
-            if (!upErr) updatedChainsCount++;
-          }
-        } else if (items.length > 1) {
-          items.sort((a, b) => {
-            const aNutCount = Object.values(a.nutrients || {}).filter((v: any) => Number(v) > 0).length;
-            const bNutCount = Object.values(b.nutrients || {}).filter((v: any) => Number(v) > 0).length;
-            if (bNutCount !== aNutCount) return bNutCount - aNutCount;
-            const aCapt = Number(a.capture_count || 1);
-            const bCapt = Number(b.capture_count || 1);
-            if (bCapt !== aCapt) return bCapt - aCapt;
-            return new Date(b.created_at || b.updated_at || 0).getTime() - new Date(a.created_at || a.updated_at || 0).getTime();
-          });
-
-          const primary = items[0];
-          const duplicates = items.slice(1);
-
-          duplicatesFound.push({
-            chain_key: normChain,
-            dish_name: items[0].dish_name || normDish,
-            kept: 1,
-            removed: items.length - 1
-          });
-
-          const mergedNutrients = { ...(primary.nutrients || {}) };
-          let totalCaptures = Number(primary.capture_count || 1);
-          let mergedIngredients = primary.ingredients || null;
-
-          for (const dup of duplicates) {
-            totalCaptures += Number(dup.capture_count || 1);
-            if (!mergedIngredients && dup.ingredients) {
-              mergedIngredients = dup.ingredients;
-            }
-            if (dup.nutrients && typeof dup.nutrients === 'object') {
-              for (const [k, v] of Object.entries(dup.nutrients)) {
-                if ((mergedNutrients[k] === undefined || mergedNutrients[k] === null) && v !== null && v !== undefined) {
-                  mergedNutrients[k] = Number(v);
-                }
-              }
-            }
-          }
-
-          const { error: updatePrimaryErr } = await supabaseAdmin
-            .from('brand_menu_items')
-            .update({
-              chain_key: normChain,
-              dish_name_key: normDish,
-              nutrients: mergedNutrients,
-              ingredients: mergedIngredients,
-              capture_count: totalCaptures,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', primary.id);
-
-          if (!updatePrimaryErr) {
-            mergedItemsCount++;
-            const dupIds = duplicates.map(d => d.id).filter(Boolean);
-            if (dupIds.length > 0) {
-              const { error: delErr } = await supabaseAdmin
-                .from('brand_menu_items')
-                .delete()
-                .in('id', dupIds);
-              if (!delErr) {
-                deletedDuplicatesCount += dupIds.length;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 1B. Semantic dedup within each chain: catch the same product listed under different
-    // names (e.g. a user-typed generic name vs. the official branded product name) by
-    // comparing nutrient profiles. The exact-key merge above only catches formatting
-    // variations of the SAME name; this catches DIFFERENT names for the SAME product.
-    try {
-      const { data: postMergeItems, error: postMergeErr } = await supabaseAdmin
-        .from('brand_menu_items')
-        .select('*');
-
-      if (!postMergeErr && Array.isArray(postMergeItems) && postMergeItems.length > 1) {
-        const chainGroups = new Map<string, any[]>();
-        for (const item of postMergeItems) {
-          const cCode = (item.country_code || 'GB').toUpperCase();
-          const normChain = normalizeChainKey(item.chain_key || item.chain_name || '');
-          if (!normChain) continue;
-          const key = `${cCode}::${normChain}`;
-          if (!chainGroups.has(key)) chainGroups.set(key, []);
-          chainGroups.get(key)!.push(item);
-        }
-
-        // Heuristic: score how "official" a dish name looks vs. a user-typed generic label.
-        // Signals for official: multi-word Title Case, retailer qualifiers ("Taste the
-        // Difference", "Finest", "Extra Special"), longer descriptive names.
-        // Signals for generic/user-typed: '+' separators, all-lowercase, very short.
-        const officialNameScore = (name: string): number => {
-          const n = String(name || '');
-          let score = 0;
-          if (/\+/.test(n)) score -= 3;
-          if (n === n.toLowerCase()) score -= 2;
-          const capWords = (n.match(/\b[A-Z][a-z]/g) || []).length;
-          score += capWords;
-          if (/taste the difference|finest|extra special|reserve|signature select/i.test(n)) score += 4;
-          score += Math.min(n.length / 12, 3);
-          return score;
-        };
-
-        // Nutrients must be within tolerance across the core macros to be considered the
-        // same product; name similarity alone is never sufficient grounds to merge.
-        const NUTRIENT_KEYS = ['calories', 'protein', 'carbohydrates', 'totalFat', 'totalFibre'];
-        const withinTolerance = (a: any, b: any): boolean => {
-          let comparable = 0;
-          for (const k of NUTRIENT_KEYS) {
-            const av = Number(a?.[k]);
-            const bv = Number(b?.[k]);
-            if (!Number.isFinite(av) || !Number.isFinite(bv)) continue;
-            comparable++;
-            const base = Math.max(Math.abs(av), Math.abs(bv), 1);
-            if (Math.abs(av - bv) / base > 0.05) return false;
-          }
-          return comparable >= 3;
-        };
-
-        for (const [, items] of chainGroups.entries()) {
-          if (items.length < 2) continue;
-          const used = new Set<string>();
-          for (let i = 0; i < items.length; i++) {
-            const a = items[i];
-            if (!a?.id || used.has(a.id)) continue;
-            const semanticDupes: any[] = [];
-            for (let j = i + 1; j < items.length; j++) {
-              const b = items[j];
-              if (!b?.id || used.has(b.id)) continue;
-              // Items with identical dish_name_key were already merged in Step 1; only
-              // look at genuinely different names here.
-              if ((a.dish_name_key || '') === (b.dish_name_key || '')) continue;
-              if (withinTolerance(a.nutrients || {}, b.nutrients || {})) {
-                semanticDupes.push(b);
-              }
-            }
-            if (semanticDupes.length === 0) continue;
-
-            const candidates = [a, ...semanticDupes];
-            candidates.sort((x, y) => officialNameScore(y.dish_name) - officialNameScore(x.dish_name));
-            const primary = candidates[0];
-            const dupes = candidates.slice(1);
-
-            const mergedNutrients = { ...(primary.nutrients || {}) };
-            let totalCaptures = Number(primary.capture_count || 1);
-            let mergedIngredients = primary.ingredients || null;
-            for (const dup of dupes) {
-              totalCaptures += Number(dup.capture_count || 1);
-              if (!mergedIngredients && dup.ingredients) mergedIngredients = dup.ingredients;
-              if (dup.nutrients && typeof dup.nutrients === 'object') {
-                for (const [k, v] of Object.entries(dup.nutrients)) {
-                  if ((mergedNutrients[k] === undefined || mergedNutrients[k] === null) && v !== null && v !== undefined) {
-                    mergedNutrients[k] = Number(v);
-                  }
-                }
-              }
-            }
-
-            const { error: updatePrimaryErr } = await supabaseAdmin
-              .from('brand_menu_items')
-              .update({
-                nutrients: mergedNutrients,
-                ingredients: mergedIngredients,
-                capture_count: totalCaptures,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', primary.id);
-
-            if (!updatePrimaryErr) {
-              mergedItemsCount++;
-              const dupIds = dupes.map(d => d.id).filter(Boolean);
-              if (dupIds.length > 0) {
-                const { error: delErr } = await supabaseAdmin
-                  .from('brand_menu_items')
-                  .delete()
-                  .in('id', dupIds);
-                if (!delErr) {
-                  deletedDuplicatesCount += dupIds.length;
-                  if (addDebugLog) {
-                    addDebugLog(`[SelfCleaning:Semantic] Merged "${dupes.map(d => d.dish_name).join('", "')}" into "${primary.dish_name}" (nutrient match, ${dupIds.length} duplicate row(s) removed).`);
-                  }
-                }
-              }
-              used.add(a.id);
-              dupes.forEach(d => used.add(d.id));
-            }
-          }
-        }
-      }
-    } catch (err: any) {
-      console.warn('[consolidateBrandMenuItemsAndChains:semantic] Error:', err);
-    }
-
-    // 2. Consolidate chain_menu_sources
-    const { data: sources, error: sourcesErr } = await supabaseAdmin
-      .from('chain_menu_sources')
-      .select('*');
-
-    if (!sourcesErr && Array.isArray(sources) && sources.length > 0) {
-      const sourceGroups = new Map<string, any[]>();
-      for (const s of sources) {
-        const cCode = (s.country_code || 'GB').toUpperCase();
-        const normChain = normalizeChainKey(s.chain_key || s.display_name || '');
-        if (!normChain) continue;
-
-        const groupKey = `${cCode}::${normChain}`;
-        if (!sourceGroups.has(groupKey)) sourceGroups.set(groupKey, []);
-        sourceGroups.get(groupKey)!.push(s);
-      }
-
-      for (const [groupKey, sList] of sourceGroups.entries()) {
-        const [cCode, normChain] = groupKey.split('::');
-        if (sList.length === 1) {
-          const single = sList[0];
-          if (single.chain_key !== normChain) {
-            await supabaseAdmin
-              .from('chain_menu_sources')
-              .update({ chain_key: normChain, display_name: single.display_name || normChain, updated_at: new Date().toISOString() })
-              .eq('id', single.id);
-          }
-        } else if (sList.length > 1) {
-          // Sort to pick best primary source: prefers ready status, non-empty url, or most recently updated
-          sList.sort((a, b) => {
-            const aReady = a.status === 'ready' ? 1 : 0;
-            const bReady = b.status === 'ready' ? 1 : 0;
-            if (bReady !== aReady) return bReady - aReady;
-            const aHasUrl = a.url ? 1 : 0;
-            const bHasUrl = b.url ? 1 : 0;
-            if (bHasUrl !== aHasUrl) return bHasUrl - aHasUrl;
-            return new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime();
-          });
-
-          const primary = sList[0];
-          const duplicates = sList.slice(1);
-
-          await supabaseAdmin
-            .from('chain_menu_sources')
-            .update({ chain_key: normChain, updated_at: new Date().toISOString() })
-            .eq('id', primary.id);
-
-          const dupIds = duplicates.map(d => d.id).filter(Boolean);
-          if (dupIds.length > 0) {
-            const { error: delErr } = await supabaseAdmin.from('chain_menu_sources').delete().in('id', dupIds);
-            if (!delErr) {
-              deletedDuplicatesCount += dupIds.length;
-            }
-          }
-        }
-      }
-    }
-
-    if (addDebugLog && (mergedItemsCount > 0 || deletedDuplicatesCount > 0 || updatedChainsCount > 0)) {
-      addDebugLog(`[SelfCleaning] Consolidated brand menu items: ${updatedChainsCount} chain keys updated, ${mergedItemsCount} items merged, ${deletedDuplicatesCount} duplicate rows removed.`);
-    }
-  } catch (err: any) {
-    console.warn('[consolidateBrandMenuItemsAndChains] Error:', err);
-  }
-
-  return { mergedItemsCount, deletedDuplicatesCount, updatedChainsCount, duplicatesFound };
-}
-
-export async function cleanUnbrandedFoodCatalog(
-  supabaseAdmin: any,
-  addDebugLog?: (msg: string) => void
-): Promise<{ purgedBrandedCount: number; purgedZeroMacroCount: number }> {
-  let purgedBrandedCount = 0;
-  let purgedZeroMacroCount = 0;
-
-  try {
-    if (!supabaseAdmin) return { purgedBrandedCount, purgedZeroMacroCount };
-
-    const { data: foodItems, error } = await supabaseAdmin
-      .from('food_items')
-      .select('*');
-
-    if (error || !Array.isArray(foodItems) || foodItems.length === 0) {
-      return { purgedBrandedCount, purgedZeroMacroCount };
-    }
-
-    const toDeleteIds: string[] = [];
-    const toDeleteKeys: string[] = [];
-
-    for (const fi of foodItems) {
-      const name = fi.display_name || '';
-      const key = fi.food_key || '';
-      const nutrients = fi.nutrients_per_100g || {};
-      const cals = Number(nutrients.calories || 0);
-      const p = Number(nutrients.protein || 0);
-      const c = Number(nutrients.carbohydrates || 0);
-      const f = Number(nutrients.totalFat || 0);
-
-      const isBranded = isKnownDatabaseBrandSync(name) || isKnownDatabaseBrandSync(key) || isGroceryBrandSync(name);
-      const isZeroMacroCandidate = fi.status === 'candidate' && cals === 0 && p === 0 && c === 0 && f === 0;
-
-      if (isBranded) {
-        toDeleteIds.push(fi.food_id);
-        toDeleteKeys.push(fi.food_key);
-        purgedBrandedCount++;
-      } else if (isZeroMacroCandidate) {
-        toDeleteIds.push(fi.food_id);
-        toDeleteKeys.push(fi.food_key);
-        purgedZeroMacroCount++;
-      } else {
-        if (!fi.basis_type || String(fi.basis_type).trim() === '') {
-          await supabaseAdmin
-            .from('food_items')
-            .update({
-              basis_type: 'per_100g',
-              updated_at: new Date().toISOString()
-            })
-            .eq('food_id', fi.food_id);
-          fi.basis_type = 'per_100g';
-        }
-      }
-    }
-
-    if (toDeleteIds.length > 0) {
-      await supabaseAdmin.from('food_items').delete().in('food_id', toDeleteIds);
-      if (toDeleteKeys.length > 0) {
-        await supabaseAdmin.from('food_aliases').delete().in('alias_key', toDeleteKeys);
-      }
-    }
-
-    // Also clean up dish_cache basis_type defaults
-    try {
-      const { data: dishes, error: dishError } = await supabaseAdmin
-        .from('dish_cache')
-        .select('*');
-      if (!dishError && Array.isArray(dishes)) {
-        for (const d of dishes) {
-          if (!d.basis_type || String(d.basis_type).trim() === '') {
-            await supabaseAdmin
-              .from('dish_cache')
-              .update({
-                basis_type: 'per_100g',
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', d.id);
-          }
-        }
-      }
-    } catch (dishErr) {
-      console.warn('[cleanUnbrandedFoodCatalog] dish_cache fix error:', dishErr);
-    }
-
-    // Deduplicate food items
-    const { data: deduplicatedItems, error: dedupErr } = await supabaseAdmin.from('food_items').select('*');
-    if (!dedupErr && Array.isArray(deduplicatedItems)) {
-      const groups = new Map<string, any[]>();
-      for (const item of deduplicatedItems) {
-        const key = item.food_key || '';
-        if (!key) continue;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(item);
-      }
-
-      for (const [key, items] of groups.entries()) {
-        if (items.length > 1) {
-          items.sort((a, b) => {
-             const aConf = a.confidence || 0;
-             const bConf = b.confidence || 0;
-             if (aConf !== bConf) return bConf - aConf;
-             return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
-          });
-          const primary = items[0];
-          const duplicates = items.slice(1);
-          const dupIds = duplicates.map(d => d.food_id).filter(Boolean);
-          if (dupIds.length > 0) {
-            await supabaseAdmin.from('food_items').delete().in('food_id', dupIds);
-            if (addDebugLog) addDebugLog(`[SelfCleaning] Deleted ${dupIds.length} duplicates for catalog item: ${key}`);
-          }
-        }
-      }
-    }
-
-    if (addDebugLog && (purgedBrandedCount > 0 || purgedZeroMacroCount > 0)) {
-      addDebugLog(`[SelfCleaning] Food Catalog Clean-up: Purged ${purgedBrandedCount} branded items and ${purgedZeroMacroCount} 0-macro candidates from unbranded food catalog.`);
-    }
-  } catch (err: any) {
-    console.warn('[cleanUnbrandedFoodCatalog] Error:', err);
-  }
-
-  return { purgedBrandedCount, purgedZeroMacroCount };
-}
-
 let cachedBrandSet: Set<string> | null = null;
 let cachedGroceryBrandSet: Set<string> | null = null;
 let lastBrandCacheTime = 0;
@@ -2678,62 +2016,9 @@ export async function fetchAllDatabaseBrands(): Promise<{ allBrands: Set<string>
     }
   }
 
-  // 2. Fetch from Supabase if available
-  try {
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    if (supabaseAdmin) {
-      // Fetch from brand_menu_items
-      const { data: bmi } = await supabaseAdmin
-        .from('brand_menu_items')
-        .select('chain_name, chain_key, category');
-      if (bmi && Array.isArray(bmi)) {
-        bmi.forEach((r: any) => {
-          const name = (r.chain_name || '').toLowerCase().trim();
-          const key = (r.chain_key || '').replace(/_/g, ' ').toLowerCase().trim();
-          if (name) allBrands.add(name);
-          if (key) allBrands.add(key);
-          if (r.category && /grocery|supermarket|retail|store/i.test(r.category)) {
-            if (name) groceryBrands.add(name);
-            if (key) groceryBrands.add(key);
-          }
-        });
-      }
-
-      // Fetch from chain_menu_sources
-      const { data: cms } = await supabaseAdmin
-        .from('chain_menu_sources')
-        .select('chain_name, chain_key, category');
-      if (cms && Array.isArray(cms)) {
-        cms.forEach((r: any) => {
-          const name = (r.chain_name || '').toLowerCase().trim();
-          const key = (r.chain_key || '').replace(/_/g, ' ').toLowerCase().trim();
-          if (name) allBrands.add(name);
-          if (key) allBrands.add(key);
-          if (r.category && /grocery|supermarket|retail|store/i.test(r.category)) {
-            if (name) groceryBrands.add(name);
-            if (key) groceryBrands.add(key);
-          }
-        });
-      }
-
-      // Fetch from food_items (where brand_name is present)
-      const { data: fi } = await supabaseAdmin
-        .from('food_items')
-        .select('brand_name')
-        .not('brand_name', 'is', null)
-        .limit(1000);
-      if (fi && Array.isArray(fi)) {
-        fi.forEach((r: any) => {
-          if (r.brand_name) {
-            const b = String(r.brand_name).toLowerCase().trim();
-            if (b) allBrands.add(b);
-          }
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('[fetchAllDatabaseBrands] Supabase fetch warning:', err);
-  }
+  // D-2: D1 + seeds + local only (Supabase brand fetch removed, no 402).
+  // food_items brand_name sweep dropped with it (D1 food_items has no
+  // brand column reads here; chain tables already cover the set).
 
   // 3. Fetch local fallback items
   try {
@@ -2820,18 +2105,9 @@ export async function fetchAllBrandMenuItems(): Promise<any[]> {
     return cachedAllBrandItems;
   }
 
+  // D-2: D1-first, then local (Supabase fetch removed — client is 402-dead).
   let items: any[] = [];
-  try {
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    const { data, error } = await supabaseAdmin.from('brand_menu_items').select('*');
-    if (data && !error && Array.isArray(data)) {
-      items = data;
-    }
-  } catch (err) {
-    console.warn('[fetchAllBrandMenuItems] Supabase fetch warning:', err);
-  }
-
-  if (items.length === 0 && isD1Configured()) {
+  if (isD1Configured()) {
     try {
       const { d1GetBrandMenuItems } = await import('./server_db_d1.js');
       const d1Items = await d1GetBrandMenuItems();

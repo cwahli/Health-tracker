@@ -396,10 +396,10 @@ export async function upsertFoodItemCandidate(item: {
       try {
         const { autoRegisterChainMenuItem, normalizeChainKey } = await import('./serverBrandMenu.js');
         const chainKey = normalizeChainKey(displayName) || normalizeChainKey(normKey) || 'sainsbury';
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        if (supabaseAdmin) {
+        const { isD1Configured } = await import('./server_d1.js');
+        if (isD1Configured()) {
           await autoRegisterChainMenuItem(
-            supabaseAdmin,
+            null,
             {
               chainName: chainKey,
               dishName: displayName,

@@ -38,7 +38,7 @@ import { ensureFoodCatalogSchema, resetFoodCatalogSchemaEnsure } from "./server_
 import { ensureD1Schema } from "./server_d1_schema.js";
 import { reconcileIngredientsToComponents } from './server_vision_scout.js';
 import { resolveInternalFood, resolveDishCache, upsertFoodItemCandidate, upsertFoodAlias, upsertDishCacheCandidate, recordFoodObservation, recordSyncEvent, normalizeFoodKey, normalizeDishKey, getCatalogSyncStatus, mergeFoodCatalogItems, quarantineAtwaterFailures, checkAtwaterValidity, getFallbackCategoryProfile } from './server_food_catalog.js';
-import { sanitizeDishTitle, isGroceryBrandSync, selfCleanBrandDatabase, isUnofficialOrCompositeDish } from './serverBrandMenu.js';
+import { sanitizeDishTitle, isGroceryBrandSync, isUnofficialOrCompositeDish } from './serverBrandMenu.js';
 import {
   computeItemBudget,
   reconcileNutrients,
@@ -343,7 +343,7 @@ import { cleanNutrientNumber } from "./server_nutrient_aggregation";
 import { registerIssueBacklogRoutes } from './serverIssueBacklog.js';
 import { registerBugSnapshotRoutes } from './serverBugSnapshot.js';
 import { registerGoldenRoutes } from './serverGoldenRoutes.js';
-import { registerBrandMenuRoutes, isKnownDatabaseBrand, isKnownDatabaseBrandSync, fetchAllDatabaseBrands, searchBrandMenuItems, brandHitFitsQuery, normalizeChainKey, consolidateBrandMenuItemsAndChains, cleanUnbrandedFoodCatalog } from './serverBrandMenu.js';
+import { registerBrandMenuRoutes, isKnownDatabaseBrand, isKnownDatabaseBrandSync, fetchAllDatabaseBrands, searchBrandMenuItems, brandHitFitsQuery, normalizeChainKey } from './serverBrandMenu.js';
 import { supabaseAdmin } from './supabaseAdmin.js';
 import { isGenericZeroNutrientDiluent, getZeroNutrientVector, calculateGenericTokenCoverage, evaluateGenericModifierInversionPenalty, classifyUniversalPhysicalFormV3 } from "./server_matching_engine";
 import { 

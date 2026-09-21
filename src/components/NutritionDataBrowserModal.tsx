@@ -658,8 +658,8 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
       }
       setSyncBanner(
         json.synced > 0 || json.failed > 0
-          ? `Synced ${json.synced} item(s) to Supabase${json.failed > 0 ? `, ${json.failed} still failed${json.sampleErrors?.length ? `: ${json.sampleErrors[0]}` : ''}` : ''}.`
-          : 'Nothing to sync — all items already in Supabase.'
+          ? `Synced ${json.synced} item(s) to D1${json.failed > 0 ? `, ${json.failed} still failed${json.sampleErrors?.length ? `: ${json.sampleErrors[0]}` : ''}` : ''}.`
+          : 'Nothing to sync — all items already in D1.'
       );
       await load();
       for (const key of Object.keys(expandedChains)) {
@@ -1897,7 +1897,7 @@ export default function NutritionDataBrowserModal({ isOpen, onClose, language }:
                           {bulkResults[key] && (
                             <div className={`text-[10px] rounded-lg bg-black/30 p-2.5 space-y-1 ${textSecondary}`}>
                               <span className="font-bold text-emerald-300">
-                                  {interpolate(t.browserBulkSaved, { saved: bulkResults[key].summary.savedToSupabase + bulkResults[key].summary.savedLocalOnly, total: bulkResults[key].summary.total })}
+                                  {interpolate(t.browserBulkSaved, { saved: (bulkResults[key].summary.savedToD1 ?? bulkResults[key].summary.savedToSupabase ?? 0) + bulkResults[key].summary.savedLocalOnly, total: bulkResults[key].summary.total })}
                               </span>
                               {bulkResults[key].summary.savedLocalOnly > 0 && (
                                 <div className="text-amber-300 flex items-center gap-1">
