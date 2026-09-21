@@ -1,0 +1,51 @@
+name: auto-merge
+
+# Merges an `agent/**` PR once its required checks are green, using the
+# repository's GITHUB_TOKEN — the agent does not need a PAT to land its work.
+#
+# Triggered on the agent's own push (the same event that opens the PR via
+# auto-pr.yml and runs ci/claim-guard), then enables GitHub native auto-merge:
+# GitHub performs the squash the moment the required checks pass. The merge
+# releases the "open PR is the lock" claim and deletes the branch.
+#
+# Requires the repo setting Settings -> General -> Pull requests ->
+# "Allow auto-merge" (owner-only, once). If it is off, this job annotates the
+# warning instead of failing the branch.
+
+on:
+  push:
+    branches: ['agent/**']
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable:
+    name: enable-auto-merge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge for the agent PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          BRANCH="${GITHUB_REF_NAME}"
+
+          # auto-pr.yml runs on the same push; wait briefly for its PR.
+          me=""
+          for _ in $(seq 1 20); do
+            me="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)"
+            if [ -n "$me" ] && [ "$me" != "null" ]; then break; fi
+            sleep 3
+          done
+          if [ -z "$me" ] || [ "$me" = "null" ]; then
+            echo "auto-merge: no open PR for $BRANCH; nothing to do."
+            exit 0
+          fi
+
+          if out="$(gh pr merge "$me" --squash --auto --delete-branch 2>&1)"; then
+            echo "auto-merge enabled for PR #$me: $out"
+          else
+            echo "::warning title=auto-merge::could not enable auto-merge for #$me: $out"
+          fi
