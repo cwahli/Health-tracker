@@ -51,6 +51,7 @@ export function normalizeConfig(bot, { defaultWorkspace = process.cwd() } = {}) 
       opencodeBin: bot.agent?.opencodeBin,
       allowExternalDirectory: bot.agent?.allowExternalDirectory === true,
       sharedSkills: Array.isArray(bot.agent?.sharedSkills) ? bot.agent.sharedSkills : [],
+      playwrightOutputDir: bot.agent?.playwrightOutputDir || '',
     },
     progress: {
       mode: bot.progress?.mode || 'concise',

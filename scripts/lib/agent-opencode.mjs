@@ -13,13 +13,30 @@ export function expandSkillPath(p, workspace) {
   return path.isAbsolute(value) ? value : path.resolve(workspace || '.', value);
 }
 
-export function buildOpencodeEnv({ workspace, allowExternalDirectory, sharedSkills } = {}) {
+export function buildOpencodeEnv({ workspace, allowExternalDirectory, sharedSkills, playwrightOutputDir } = {}) {
   const content = { $schema: 'https://opencode.ai/config.json' };
   if (allowExternalDirectory) content.permission = { external_directory: 'allow' };
   const paths = (Array.isArray(sharedSkills) ? sharedSkills : [])
     .map((p) => expandSkillPath(p, workspace))
     .filter(Boolean);
   if (paths.length) content.skills = { paths };
+  if (playwrightOutputDir) {
+    content.mcp = {
+      playwright: {
+        type: 'local',
+        command: [
+          'npx',
+          '-y',
+          '@playwright/mcp@latest',
+          '--headless',
+          '--isolated',
+          '--output-dir',
+          playwrightOutputDir,
+        ],
+        enabled: true,
+      },
+    };
+  }
   if (Object.keys(content).length <= 1) return {};
   return { OPENCODE_CONFIG_CONTENT: JSON.stringify(content) };
 }

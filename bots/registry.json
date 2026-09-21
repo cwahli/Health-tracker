@@ -17,6 +17,7 @@
         "timeoutMs": 900000,
         "thinking": true,
         "allowExternalDirectory": true,
+        "playwrightOutputDir": "/tmp/opencode-bot-shots",
         "sharedSkills": [
           ".agents/skills",
           "/home/ubuntu/opencode-bot/scripts/skills",
