@@ -18,8 +18,8 @@ const DECISION_HINTS = [
 
 export function cleanReasoning(text) {
   return String(text ?? '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`[^`]*`/g, ' ')
+    .replace(/```[\s\S]*?```/g, ' [code] ')
+    .replace(/`([^`]*)`/g, '$1')
     .replace(/[#*_>]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

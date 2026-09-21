@@ -26,6 +26,21 @@ export function clamp(text, limit = MAX_MESSAGE_CHARS) {
   return `${s.slice(0, limit - 3)}...`;
 }
 
+export function chunkText(text, limit = MAX_MESSAGE_CHARS) {
+  const s = String(text ?? '');
+  if (s.length <= limit) return [s];
+  const chunks = [];
+  let rest = s;
+  while (rest.length > limit) {
+    let cut = rest.lastIndexOf('\n', limit);
+    if (cut < limit * 0.5) cut = limit;
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut).replace(/^\n/, '');
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
+
 export class TelegramApi {
   constructor(token, { baseUrl = API_BASE, fetchImpl = globalThis.fetch } = {}) {
     if (!token) throw new Error('TelegramApi: token is required');

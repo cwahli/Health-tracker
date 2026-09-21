@@ -4,11 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { TelegramApi, TelegramError } from './lib/tg-api.mjs';
+import { TelegramApi, TelegramError, chunkText } from './lib/tg-api.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
-import { runOpencode } from './lib/agent-opencode.mjs';
+import { runOpencode, listModels } from './lib/agent-opencode.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath } from './lib/registry.mjs';
+import { parseCommand, helpText, statusText, formatModelList } from './lib/commands.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +26,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--id=')) args.id = arg.slice('--id='.length);
     else if (arg.startsWith('--registry=')) args.registry = arg.slice('--registry='.length);
     else if (arg.startsWith('--prompt=')) args.prompt = arg.slice('--prompt='.length);
+    else if (arg.startsWith('--simulate=')) args.simulate = arg.slice('--simulate='.length);
   }
   return args;
 }
@@ -57,6 +59,7 @@ function normalizeConfig(bot) {
       workspace: bot.agent?.workspace || REPO_ROOT,
       timeoutMs: bot.agent?.timeoutMs ?? 900000,
       thinking: bot.agent?.thinking !== false,
+      opencodeBin: bot.agent?.opencodeBin,
     },
     progress: {
       mode: bot.progress?.mode || 'concise',
@@ -91,13 +94,18 @@ function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2));
 }
 
-function loadSessions(id) {
-  return new Map(Object.entries(readJson(path.join(stateDir(id), 'sessions.json'), {})));
+function loadMap(id, file) {
+  return new Map(Object.entries(readJson(path.join(stateDir(id), file), {})));
 }
 
-function saveSessions(id, sessions) {
-  writeJson(path.join(stateDir(id), 'sessions.json'), Object.fromEntries(sessions));
+function saveMap(id, file, map) {
+  writeJson(path.join(stateDir(id), file), Object.fromEntries(map));
 }
+
+const loadSessions = (id) => loadMap(id, 'sessions.json');
+const saveSessions = (id, sessions) => saveMap(id, 'sessions.json', sessions);
+const loadPrefs = (id) => loadMap(id, 'prefs.json');
+const savePrefs = (id, prefs) => saveMap(id, 'prefs.json', prefs);
 
 function loadOffset(id) {
   return Number(readJson(path.join(stateDir(id), 'offset.json'), { offset: 0 }).offset) || 0;
@@ -105,6 +113,10 @@ function loadOffset(id) {
 
 function saveOffset(id, offset) {
   writeJson(path.join(stateDir(id), 'offset.json'), { offset });
+}
+
+function effectiveModel(config, prefs, chatId) {
+  return prefs.get(chatId)?.model || config.agent.model;
 }
 
 class ProgressRenderer {
@@ -187,14 +199,21 @@ class ProgressRenderer {
   }
 
   async deliver(text) {
-    const body = String(text ?? '').trim() || '(no output)';
+    const body = String(text ?? '').trim();
+    if (!body) return;
     if (this.dryRun) {
       console.log(`[final] ${body}`);
       return;
     }
+    for (const part of chunkText(body)) {
+      await this._send(part);
+    }
+  }
+
+  async _send(part) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        await this.api.sendMessage(this.chatId, body);
+        await this.api.sendMessage(this.chatId, part);
         return;
       } catch (err) {
         if (err instanceof TelegramError && err.isRateLimit) {
@@ -212,37 +231,119 @@ class ProgressRenderer {
     if (result.lastError && !result.finalText) {
       this.status = 'failed';
       this._schedule();
-      await this.deliver(`Error: ${result.lastError}`);
+      const tail = result.stderr ? `\n${result.stderr.trim().slice(0, 400)}` : '';
+      await this.deliver(`Error: ${result.lastError}${tail}`);
       return;
     }
     this.status = 'done';
     this._schedule();
+    if (!result.finalText) {
+      const code = result.code === 0 ? '' : ` (exit ${result.code})`;
+      await this.deliver(`Done${code}, but the model returned no text output.`);
+      return;
+    }
     await this.deliver(result.finalText);
   }
 }
 
-function helpText(config) {
-  return [
-    `${config.name}`,
-    `model: ${config.agent.model} (${config.agent.variant})`,
-    '',
-    'Send any message to run opencode.',
-    '/new    start a fresh session',
-    '/status show current session + model',
-    '/help   this message',
-  ].join('\n');
+async function sendChunked(api, chatId, text) {
+  for (const part of chunkText(text)) {
+    await api.sendMessage(chatId, part);
+  }
 }
 
-function statusText(config, sessionId) {
-  return [
-    `model: ${config.agent.model}`,
-    `variant: ${config.agent.variant}`,
-    `workspace: ${config.agent.workspace}`,
-    `session: ${sessionId || '(none)'}`,
-  ].join('\n');
+async function handleCommand({ api, config, sessions, prefs, running, chatId, cmd }) {
+  const model = effectiveModel(config, prefs, chatId);
+
+  switch (cmd.name) {
+    case 'start':
+    case 'help':
+      await api.sendMessage(chatId, helpText(config, { model }));
+      return;
+
+    case 'status':
+      await api.sendMessage(chatId, statusText(config, { sessionId: sessions.get(chatId), model }));
+      return;
+
+    case 'new':
+      sessions.delete(chatId);
+      saveSessions(config.id, sessions);
+      await api.sendMessage(chatId, 'Started a fresh session.');
+      return;
+
+    case 'model': {
+      if (!cmd.args) {
+        await api.sendMessage(
+          chatId,
+          [
+            `Current model: ${model}`,
+            `Default model: ${config.agent.model}`,
+            '',
+            'Usage:',
+            '/model <provider/model>  switch model for this chat',
+            '/model reset             back to the default',
+            '/models                  list available models',
+          ].join('\n'),
+        );
+        return;
+      }
+      if (cmd.args === 'reset') {
+        const current = prefs.get(chatId) || {};
+        delete current.model;
+        if (Object.keys(current).length) prefs.set(chatId, current);
+        else prefs.delete(chatId);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, `Model reset to ${config.agent.model}.`);
+        return;
+      }
+      const target = cmd.args;
+      const models = await listModels({ opencodeBin: config.agent.opencodeBin });
+      if (models.length && !models.includes(target)) {
+        await api.sendMessage(chatId, `Unknown model: ${target}\nUse /models to see options.`);
+        return;
+      }
+      prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: target });
+      savePrefs(config.id, prefs);
+      const note = models.length ? '' : '\n(note: could not verify against the model list)';
+      await api.sendMessage(chatId, `Model set to ${target} for this chat.${note}`);
+      return;
+    }
+
+    case 'models': {
+      const models = await listModels({ opencodeBin: config.agent.opencodeBin });
+      await sendChunked(api, chatId, formatModelList(models));
+      return;
+    }
+
+    case 'abort': {
+      const active = running.get(chatId);
+      if (!active) {
+        await api.sendMessage(chatId, 'Nothing is running.');
+        return;
+      }
+      active.aborted = true;
+      try {
+        active.child.kill('SIGTERM');
+        setTimeout(() => {
+          try {
+            active.child.kill('SIGKILL');
+          } catch {
+            // already gone
+          }
+        }, 3000);
+      } catch {
+        // already gone
+      }
+      await api.sendMessage(chatId, 'Aborting the running request...');
+      return;
+    }
+
+    default:
+      await api.sendMessage(chatId, `Unknown command: /${cmd.name}\n\n${helpText(config, { model })}`);
+  }
 }
 
-async function handleMessage({ api, config, throttle, sessions, busy, message }) {
+async function handleMessage({ api, config, throttle, sessions, prefs, running, busy, message }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
   if (!config.telegram.allowedUserIds.includes(userId)) {
@@ -252,22 +353,14 @@ async function handleMessage({ api, config, throttle, sessions, busy, message })
   const text = (message.text || '').trim();
   if (!text) return;
 
-  if (text === '/start' || text === '/help') {
-    await api.sendMessage(chatId, helpText(config));
+  const cmd = parseCommand(text);
+  if (cmd) {
+    await handleCommand({ api, config, sessions, prefs, running, chatId, cmd });
     return;
   }
-  if (text === '/status') {
-    await api.sendMessage(chatId, statusText(config, sessions.get(chatId)));
-    return;
-  }
-  if (text === '/new') {
-    sessions.delete(chatId);
-    saveSessions(config.id, sessions);
-    await api.sendMessage(chatId, 'Started a new session.');
-    return;
-  }
+
   if (busy.has(chatId)) {
-    await api.sendMessage(chatId, 'Still working on the previous request. Send /new to reset.');
+    await api.sendMessage(chatId, 'Still working on the previous request. Send /abort to cancel or /new to reset.');
     return;
   }
 
@@ -281,12 +374,14 @@ async function handleMessage({ api, config, throttle, sessions, busy, message })
 
     const result = await runOpencode({
       prompt: text,
-      model: config.agent.model,
+      model: effectiveModel(config, prefs, chatId),
       variant: config.agent.variant,
       workspace: config.agent.workspace,
       thinking: config.agent.thinking,
       timeoutMs: config.agent.timeoutMs,
+      opencodeBin: config.agent.opencodeBin,
       onEvent: (event) => renderer.onEvent(event),
+      onSpawn: (child) => running.set(chatId, { child, aborted: false }),
       extraArgs,
     });
 
@@ -294,10 +389,17 @@ async function handleMessage({ api, config, throttle, sessions, busy, message })
       sessions.set(chatId, result.sessionID);
       saveSessions(config.id, sessions);
     }
-    await renderer.finish(result);
+
+    if (running.get(chatId)?.aborted) {
+      renderer.status = 'aborted';
+      await renderer.deliver('Aborted.');
+    } else {
+      await renderer.finish(result);
+    }
   } catch (err) {
     await api.sendMessage(chatId, `Error: ${err.message}`).catch(() => {});
   } finally {
+    running.delete(chatId);
     busy.delete(chatId);
   }
 }
@@ -305,17 +407,19 @@ async function handleMessage({ api, config, throttle, sessions, busy, message })
 async function runLoop({ api, config }) {
   const throttle = new Throttle({ minIntervalMs: config.progress.editIntervalMs });
   const sessions = loadSessions(config.id);
+  const prefs = loadPrefs(config.id);
+  const running = new Map();
   const busy = new Set();
   let offset = loadOffset(config.id);
-  let running = true;
+  let running_ = true;
 
   const stop = () => {
-    running = false;
+    running_ = false;
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
-  while (running) {
+  while (running_) {
     let updates;
     try {
       updates = await api.getUpdates({ offset, timeout: 30 });
@@ -329,11 +433,36 @@ async function runLoop({ api, config }) {
       offset = update.update_id + 1;
       saveOffset(config.id, offset);
       if (!update.message) continue;
-      handleMessage({ api, config, throttle, sessions, busy, message: update.message }).catch((err) => {
-        console.error(`[${config.id}] handler error: ${err.message}`);
-      });
+      handleMessage({ api, config, throttle, sessions, prefs, running, busy, message: update.message }).catch(
+        (err) => {
+          console.error(`[${config.id}] handler error: ${err.message}`);
+        },
+      );
     }
   }
+}
+
+async function simulate(config, args) {
+  const cmd = parseCommand(args.simulate);
+  if (!cmd) {
+    console.log(`[simulate] not a command; would run opencode with: ${args.simulate}`);
+    return;
+  }
+  const api = {
+    sendMessage: async (chatId, text) => {
+      console.log(`[reply]\n${text}`);
+      return { message_id: 1 };
+    },
+  };
+  await handleCommand({
+    api,
+    config,
+    sessions: new Map(),
+    prefs: new Map(),
+    running: new Map(),
+    chatId: 'sim',
+    cmd,
+  });
 }
 
 async function dryRun(config, args) {
@@ -347,6 +476,7 @@ async function dryRun(config, args) {
     workspace: config.agent.workspace,
     thinking: config.agent.thinking,
     timeoutMs: config.agent.timeoutMs,
+    opencodeBin: config.agent.opencodeBin,
     onEvent: (event) => renderer.onEvent(event),
   });
   await renderer.finish(result);
@@ -373,6 +503,11 @@ async function main() {
     } catch (err) {
       console.log(`token: MISSING -> ${err.message}`);
     }
+    return;
+  }
+
+  if (args.simulate) {
+    await simulate(config, args);
     return;
   }
 
