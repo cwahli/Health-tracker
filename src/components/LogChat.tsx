@@ -2514,15 +2514,19 @@ ${logsText}`);
             })
           );
         };
-        const fetchSubmitWithRetry = async (url: string, payload: any, maxRetries = 4, delayMs = 600) => {
+        const fetchSubmitWithRetry = async (url: string, payload: any, maxRetries = 4, delayMs = 600, timeoutMs = 45000) => {
           let lastErr: any = null;
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), timeoutMs);
             try {
               const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: safeJSONStringify(payload)
+                body: safeJSONStringify(payload),
+                signal: ctrl.signal
               });
+              clearTimeout(timer);
               if (res.ok) return res;
               // Retry on 429 (Rate limit) or 5xx server errors
               if ((res.status >= 500 || res.status === 429) && attempt < maxRetries) {
@@ -2535,8 +2539,11 @@ ${logsText}`);
                 continue;
               }
               return res;
-            } catch (err) {
-              lastErr = err;
+            } catch (err: any) {
+              clearTimeout(timer);
+              const timedOut = err?.name === 'AbortError';
+              lastErr = timedOut ? new Error(`Submit timed out after ${timeoutMs}ms (attempt ${attempt}/${maxRetries})`) : err;
+              console.warn(`[fetchSubmitWithRetry] Attempt ${attempt}/${maxRetries} ${timedOut ? 'timed out' : 'failed'}:`, lastErr?.message || lastErr);
               if (attempt < maxRetries) {
                 const waitMs = delayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 250);
                 await new Promise(r => setTimeout(r, waitMs));

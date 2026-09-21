@@ -257,7 +257,11 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
               
               let submitOk = false;
               let lastSubmitErr: any = null;
+              const submitTimeoutMs = 60000;
               for (let sAttempt = 1; sAttempt <= 3; sAttempt++) {
+                const sCtrl = new AbortController();
+                const sTimer = setTimeout(() => sCtrl.abort(), submitTimeoutMs);
+                const sStart = Date.now();
                 try {
                   const w = typeof window !== 'undefined' ? (window as any) : {};
                   const submitSessionEvents = getSessionLog(job.id).length > 0
@@ -269,6 +273,7 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                   const res = await fetch('/api/jobs/submit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    signal: sCtrl.signal,
                     body: JSON.stringify({
                       jobId: job.id,
                       userId: auth.currentUser?.uid || 'anonymous',
@@ -291,6 +296,8 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                     })
                   });
                   if (res.ok) {
+                    clearTimeout(sTimer);
+                    console.log(`[JobQueueRunner] Submit ok for job ${job.id} (attempt ${sAttempt}/3, ${Date.now() - sStart}ms).`);
                     // M-FIX2: A 200 here does not guarantee THIS job was actually queued.
                     // The server's per-user in-flight lock can silently redirect a new
                     // submission onto an older, unrelated, still-running job and return
@@ -309,13 +316,21 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                     break;
                   }
                   if (res.status >= 500 && sAttempt < 3) {
+                    clearTimeout(sTimer);
+                    console.warn(`[JobQueueRunner] Submit HTTP ${res.status} for job ${job.id} (attempt ${sAttempt}/3) — retrying.`);
                     await new Promise(r => setTimeout(r, 500 * sAttempt));
                     continue;
                   }
                   const errTxt = await res.text().catch(() => '');
+                  clearTimeout(sTimer);
                   throw new Error(`HTTP ${res.status}${errTxt ? ': ' + errTxt.slice(0, 200) : ''}`);
-                } catch (sErr) {
-                  lastSubmitErr = sErr;
+                } catch (sErr: any) {
+                  clearTimeout(sTimer);
+                  const timedOut = sErr?.name === 'AbortError';
+                  lastSubmitErr = timedOut
+                    ? new Error(`Submit timed out after ${submitTimeoutMs}ms (attempt ${sAttempt}/3)`)
+                    : sErr;
+                  console.warn(`[JobQueueRunner] Submit ${timedOut ? 'timed out' : 'failed'} for job ${job.id} (attempt ${sAttempt}/3):`, lastSubmitErr?.message || lastSubmitErr);
                   if (sAttempt < 3) {
                     await new Promise(r => setTimeout(r, 500 * sAttempt));
                   }
