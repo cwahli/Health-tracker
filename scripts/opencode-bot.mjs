@@ -12,6 +12,7 @@ import {
   listModels,
   listAgents,
   listModelsVerbose,
+  buildOpencodeEnv,
 } from './lib/agent-opencode.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath } from './lib/registry.mjs';
 import {
@@ -147,16 +148,22 @@ function makeCaches() {
   return { models: null, verbose: null, agents: null };
 }
 
+function opencodeEnv(config) {
+  return buildOpencodeEnv(config.agent);
+}
+
 async function getModels(config, caches) {
   if (!caches.models) {
-    caches.models = await listModels({ opencodeBin: config.agent.opencodeBin });
+    caches.models = await listModels({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) });
   }
   return caches.models;
 }
 
 async function getVariants(config, caches, modelId) {
   if (!caches.verbose) {
-    caches.verbose = parseModelsVerbose(await listModelsVerbose({ opencodeBin: config.agent.opencodeBin }));
+    caches.verbose = parseModelsVerbose(
+      await listModelsVerbose({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
+    );
   }
   const entry = caches.verbose.find((m) => m.id === modelId);
   return entry?.variants || [];
@@ -164,7 +171,9 @@ async function getVariants(config, caches, modelId) {
 
 async function getContextLimit(config, caches, modelId) {
   if (!caches.verbose) {
-    caches.verbose = parseModelsVerbose(await listModelsVerbose({ opencodeBin: config.agent.opencodeBin }));
+    caches.verbose = parseModelsVerbose(
+      await listModelsVerbose({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
+    );
   }
   const entry = caches.verbose.find((m) => m.id === modelId);
   return entry?.context || 0;
@@ -172,9 +181,9 @@ async function getContextLimit(config, caches, modelId) {
 
 async function getAgents(config, caches) {
   if (!caches.agents) {
-    caches.agents = parseAgentList(await listAgents({ opencodeBin: config.agent.opencodeBin })).filter(
-      (a) => a.type === 'primary',
-    );
+    caches.agents = parseAgentList(
+      await listAgents({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
+    ).filter((a) => a.type === 'primary');
   }
   return caches.agents;
 }
@@ -611,6 +620,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       onEvent: (event) => renderer.onEvent(event),
       onSpawn: (child) => running.set(chatId, { child, aborted: false }),
       extraArgs,
+      env: opencodeEnv(config),
     });
 
     if (result.sessionID) {
@@ -730,6 +740,7 @@ async function dryRun(config, args) {
     timeoutMs: config.agent.timeoutMs,
     opencodeBin: config.agent.opencodeBin,
     onEvent: (event) => renderer.onEvent(event),
+    env: opencodeEnv(config),
   });
   await renderer.finish(result);
   console.log(`\n[dry-run] session=${result.sessionID} code=${result.code} error=${result.lastError || 'none'}`);

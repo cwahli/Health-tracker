@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { compressReasoning, cleanReasoning } from '../scripts/lib/reasoning-compress.mjs';
 import { Throttle } from '../scripts/lib/tg-throttle.mjs';
-import { mapOpencodeEvent, buildOpencodeArgs } from '../scripts/lib/agent-opencode.mjs';
+import { mapOpencodeEvent, buildOpencodeArgs, buildOpencodeEnv } from '../scripts/lib/agent-opencode.mjs';
 import { clamp, chunkText, MAX_MESSAGE_CHARS, TelegramApi } from '../scripts/lib/tg-api.mjs';
 import { loadRegistry, getBot, resolveToken } from '../scripts/lib/registry.mjs';
 import {
@@ -88,6 +88,20 @@ describe('tg-throttle', () => {
     throttle.pause(30);
     await throttle.submit(async () => 'x');
     expect(clock.sleeps).toEqual([30000]);
+  });
+});
+
+describe('buildOpencodeEnv', () => {
+  it('allows external directories and resolves shared skill paths', () => {
+    const env = buildOpencodeEnv({ workspace: '/ws', allowExternalDirectory: true, sharedSkills: ['.agents/skills'] });
+    expect(env.OPENCODE_CONFIG_CONTENT).toBeDefined();
+    const cfg = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    expect(cfg.permission).toEqual({ external_directory: 'allow' });
+    expect(cfg.skills).toEqual({ paths: ['/ws/.agents/skills'] });
+  });
+
+  it('returns an empty env when nothing is configured', () => {
+    expect(buildOpencodeEnv({})).toEqual({});
   });
 });
 

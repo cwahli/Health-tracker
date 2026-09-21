@@ -5,6 +5,17 @@ import os from 'node:os';
 
 const HOME = os.homedir();
 
+export function buildOpencodeEnv({ workspace, allowExternalDirectory, sharedSkills } = {}) {
+  const content = { $schema: 'https://opencode.ai/config.json' };
+  if (allowExternalDirectory) content.permission = { external_directory: 'allow' };
+  const paths = (Array.isArray(sharedSkills) ? sharedSkills : [])
+    .map((p) => (path.isAbsolute(p) ? p : path.resolve(workspace || '.', p)))
+    .filter(Boolean);
+  if (paths.length) content.skills = { paths };
+  if (Object.keys(content).length <= 1) return {};
+  return { OPENCODE_CONFIG_CONTENT: JSON.stringify(content) };
+}
+
 export function resolveOpencodeBin(explicit) {
   if (explicit) return explicit;
   const candidates = [
@@ -53,7 +64,7 @@ export function mapOpencodeEvent(raw) {
   }
 }
 
-export function execOpencode(args, { opencodeBin, spawnImpl = spawn, timeoutMs = 30000 } = {}) {
+export function execOpencode(args, { opencodeBin, spawnImpl = spawn, timeoutMs = 30000, env } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const done = (value) => {
@@ -64,7 +75,7 @@ export function execOpencode(args, { opencodeBin, spawnImpl = spawn, timeoutMs =
     let child;
     try {
       child = spawnImpl(resolveOpencodeBin(opencodeBin), args, {
-        env: process.env,
+        env: { ...process.env, ...(env || {}) },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch {
@@ -134,13 +145,14 @@ export function runOpencode({
   onEvent,
   onSpawn,
   extraArgs = [],
+  env,
   spawnImpl = spawn,
 }) {
   return new Promise((resolve) => {
     const args = buildOpencodeArgs({ prompt, model, variant, thinking, extraArgs });
     const child = spawnImpl(resolveOpencodeBin(opencodeBin), args, {
       cwd: workspace,
-      env: process.env,
+      env: { ...process.env, ...(env || {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

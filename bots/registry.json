@@ -15,7 +15,9 @@
         "defaultAgent": "build",
         "workspace": "/home/ubuntu/src/Health-tracker",
         "timeoutMs": 900000,
-        "thinking": true
+        "thinking": true,
+        "allowExternalDirectory": true,
+        "sharedSkills": [".agents/skills"]
       },
       "progress": {
         "mode": "concise",
