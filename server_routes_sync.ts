@@ -832,7 +832,7 @@ syncRouter.post("/api/sync/supabase-push", async (req, res) => {
             foodCount += foodsToUpsert.length;
             // Asynchronously enforce 10-meal debug log retention policy
             try {
-              const { pruneUserDebugLogs } = await import('./src/utils/debugLogRetention.js');
+              const { pruneUserDebugLogs } = await import('./src/server/debugLogRetention.js');
               void pruneUserDebugLogs(canonicalUid, { maxRetention: 10 }).catch((e: any) =>
                 console.warn('[SyncPush] Debug log prune:', e?.message || e)
               );

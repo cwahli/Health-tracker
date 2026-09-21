@@ -1,0 +1,66 @@
+name: auto-pr
+
+# Opens (or updates) the pull request for an `agent/**` branch using the
+# repository's own GITHUB_TOKEN, so a local agent never needs `gh` or a PAT.
+#
+# Why the checks are NOT triggered from here: a PR created with GITHUB_TOKEN
+# does not fire `pull_request` workflows (GitHub's recursion guard). The agent's
+# own SSH push is a normal event, so `ci` and `claim-guard` run from their
+# `push` triggers on the same head SHA instead.
+#
+# The open PR is the lock; `claim-guard` names any overlapping open PR.
+
+on:
+  push:
+    branches: ['agent/**']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-pr:
+    name: open-pr
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create or update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          BRANCH="${GITHUB_REF_NAME}"
+          if [ "$BRANCH" = "main" ]; then echo "skip main"; exit 0; fi
+
+          # Title from the branch's first commit (stable), body lists all commits.
+          git fetch --quiet origin main || true
+          base="$(git merge-base origin/main HEAD 2>/dev/null || true)"
+          if [ -n "$base" ]; then
+            title="$(git log --format=%s "$base"..HEAD | tail -n1)"
+            body="$(git log --format='- %s' "$base"..HEAD)"
+          else
+            title="$(git log -1 --pretty=%s)"
+            body="$(git log -1 --pretty=%B)"
+          fi
+          [ -n "$title" ] || title="$BRANCH"
+
+          count="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length' 2>&1)" || {
+            echo "::error title=auto-pr list failed::$count"; exit 1; }
+
+          if [ "$count" != "0" ]; then
+            me="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
+            if ! out="$(gh pr edit "$me" --title "$title" --body "$body" 2>&1)"; then
+              echo "::error title=auto-pr edit failed::$out"; exit 1
+            fi
+            echo "updated PR #$me: $title"
+            exit 0
+          fi
+
+          if ! out="$(gh pr create --base main --head "$BRANCH" --title "$title" --body "$body" 2>&1)"; then
+            echo "::error title=auto-pr create failed::$out"
+            exit 1
+          fi
+          echo "$out"

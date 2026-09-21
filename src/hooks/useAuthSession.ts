@@ -62,11 +62,54 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
 
   useEffect(() => {
     let unsubs: (() => void)[] = [];
+    let localRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Durable local session. `last_active_email` is written on every successful
+    // login (Firebase, D1 email/password, demo) and removed only by
+    // `handleSignOut`, so its presence means "the user did not explicitly sign
+    // out". Used as the fallback when Firebase reports no persisted session, so
+    // closing and reopening the app does not bounce them back to the gate.
+    const restoreLocalSession = async (): Promise<boolean> => {
+      const lastEmail = (localStorage.getItem('last_active_email') || '').toLowerCase().trim();
+      if (!lastEmail) return false;
+      const uid = 'usr_' + lastEmail.replace(/[^a-z0-9]/gi, '_');
+      await onUserRef.current(uid, lastEmail);
+      return true;
+    };
+
+    const scheduleLocalRestore = () => {
+      if (localRestoreTimer) return;
+      localRestoreTimer = setTimeout(async () => {
+        localRestoreTimer = null;
+        if (auth.currentUser) return;
+        clearTimeout(fallbackTimeout);
+        try {
+          const restored = await restoreLocalSession();
+          if (!restored) {
+            setIsAuthChecking(false);
+            onAuthResolvedRef.current();
+          }
+        } catch (err) {
+          console.error('[Auth] Local session restore failed:', err);
+          setIsAuthChecking(false);
+          onAuthResolvedRef.current();
+        }
+      }, 500);
+    };
 
     const fallbackTimeout = setTimeout(() => {
       console.warn("Auth check timed out.");
-      setIsAuthChecking(false);
-      onAuthResolvedRef.current();
+      if (!localRestoreTimer && !auth.currentUser) {
+        restoreLocalSession()
+          .catch(() => {})
+          .finally(() => {
+            setIsAuthChecking(false);
+            onAuthResolvedRef.current();
+          });
+      } else {
+        setIsAuthChecking(false);
+        onAuthResolvedRef.current();
+      }
     }, 6000);
 
     const resolveSbNick = (u: any) => {
@@ -154,21 +197,37 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
       const unsubscribeFb = onAuthStateChanged(auth, async (user) => {
         if (user) {
           clearTimeout(fallbackTimeout);
-          await onUserRef.current(
-            user.uid,
-            user.email || '',
-            user.displayName || '',
-            user.photoURL || ''
-          );
+          if (localRestoreTimer) {
+            clearTimeout(localRestoreTimer);
+            localRestoreTimer = null;
+          }
+          try {
+            await onUserRef.current(
+              user.uid,
+              user.email || '',
+              user.displayName || '',
+              user.photoURL || ''
+            );
+          } catch (err) {
+            console.error('[Auth] Firebase session restore failed, using local session:', err);
+            await restoreLocalSession();
+          }
+        } else if (!isSupabaseConfigured || !supabase) {
+          // No persisted Firebase session. Fall back to the local session so a
+          // restart keeps the user signed in unless they explicitly signed out.
+          scheduleLocalRestore();
         }
       });
       unsubs.push(unsubscribeFb);
 
       if (!isSupabaseConfigured || !supabase) {
-        // No Supabase source of truth exists in this build, so this is the only
-        // signal we get. Firebase-only mode still applies here.
-        clearTimeout(fallbackTimeout);
-        setIsAuthChecking(false);
+        // No Supabase source of truth exists in this build. When a local session
+        // marker is present, keep the checking gate up until the listener above
+        // resolves it, instead of flashing the sign-in screen.
+        if (!localStorage.getItem('last_active_email')) {
+          clearTimeout(fallbackTimeout);
+          setIsAuthChecking(false);
+        }
       }
       // When Supabase IS configured, do NOT force isAuthChecking to false here.
       // The initial getSession() call above can race with Supabase's own
@@ -190,6 +249,7 @@ export function useAuthSession(options: UseAuthSessionOptions): UseAuthSessionRe
 
     return () => {
       clearTimeout(fallbackTimeout);
+      if (localRestoreTimer) clearTimeout(localRestoreTimer);
       unsubs.forEach(u => u());
     };
   }, []);

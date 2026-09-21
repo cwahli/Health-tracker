@@ -435,6 +435,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       res.json(overviewCache.data);
       return;
     }
+    let issues: any[] = [];
     try {
       const r = await d1Query(
         'SELECT id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, resolution_note, ever_tagged FROM issue_backlog ORDER BY created_at DESC LIMIT 200'

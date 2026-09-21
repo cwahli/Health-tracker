@@ -1,0 +1,88 @@
+name: auto-merge
+
+# Merges an `agent/**` PR with the repository's GITHUB_TOKEN once its required
+# checks are green — the agent lands its own work with no PAT and no human
+# click. The merge releases the "open PR is the lock" claim and deletes the
+# branch.
+#
+# Triggered on the agent's own push (the same event that opens the PR via
+# auto-pr.yml and runs ci/claim-guard). It uses the REST API directly so the
+# result is always posted back on the PR. If branch protection requires a human
+# review, the merge is rejected and the reason is posted as a PR comment.
+
+on:
+  push:
+    branches: ['agent/**']
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    name: merge-agent-pr
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = context.ref.replace('refs/heads/', '');
+
+            // auto-pr.yml runs on the same push; wait briefly for its PR.
+            let pr = null;
+            for (let i = 0; i < 20 && !pr; i++) {
+              const res = await github.rest.pulls.list({
+                owner, repo, head: `${owner}:${branch}`, state: 'open', per_page: 100,
+              });
+              if (res.data.length > 0) pr = res.data[0];
+              else await new Promise((r) => setTimeout(r, 3000));
+            }
+            if (!pr) {
+              core.notice(`auto-merge: no open PR for ${branch}; nothing to do.`);
+              return;
+            }
+
+            const head = pr.head.sha;
+
+            // Wait for this SHA's check runs to finish (ci/claim-guard run
+            // concurrently with this job). Non-required checks like the
+            // Cloudflare Workers build are allowed to fail; they do not block
+            // the API merge.
+            await new Promise((r) => setTimeout(r, 45000));
+            for (let i = 0; i < 90; i++) {
+              const cr = await github.rest.checks.listForRef({ owner, repo, ref: head, per_page: 100 });
+              // Ignore this job's own check run (it cannot complete while we wait).
+              const pending = cr.data.check_runs.filter(
+                (c) => c.status !== 'completed' && c.name !== 'merge-agent-pr',
+              );
+              if (pending.length === 0) break;
+              await new Promise((r) => setTimeout(r, 5000));
+            }
+
+            let mergeResult;
+            try {
+              const res = await github.rest.pulls.merge({
+                owner, repo, pull_number: pr.number, merge_method: 'squash',
+              });
+              mergeResult = `merged=${res.data.merged} message=${res.data.message || ''}`;
+              if (res.data.merged) {
+                try {
+                  await github.rest.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
+                  mergeResult += ' | branch deleted';
+                } catch (e) {
+                  mergeResult += ` | branch delete failed: ${e.message}`;
+                }
+              }
+            } catch (e) {
+              mergeResult = `merge failed: ${e.message} | ${JSON.stringify(e.response?.data || {})}`;
+            }
+
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: pr.number,
+              body: `auto-merge on \`${head}\`:\n\`\`\`\n${mergeResult}\n\`\`\``,
+            });
+            if (!/merged=true/.test(mergeResult)) {
+              core.warning(`auto-merge did not merge PR #${pr.number}: ${mergeResult}`);
+            }

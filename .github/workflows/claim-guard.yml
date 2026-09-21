@@ -16,6 +16,11 @@ name: claim-guard
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # On `agent/**` push: auto-pr.yml opens the PR with GITHUB_TOKEN, which does
+  # NOT fire `pull_request` (GitHub's recursion guard). So the lock is asserted
+  # from the agent's own push and the PR is resolved by branch below.
+  push:
+    branches: ['agent/**']
 
 permissions:
   contents: read
@@ -32,7 +37,24 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const me = context.payload.pull_request.number;
+
+            let me = context.payload.pull_request?.number;
+
+            if (!me) {
+              const branch = context.ref.replace('refs/heads/', '');
+              // auto-pr.yml runs on the same push; wait briefly for its PR.
+              for (let attempt = 0; attempt < 20 && !me; attempt++) {
+                const res = await github.rest.pulls.list({
+                  owner, repo, head: `${owner}:${branch}`, state: 'open', per_page: 100,
+                });
+                if (res.data.length > 0) { me = res.data[0].number; break; }
+                await new Promise((r) => setTimeout(r, 3000));
+              }
+              if (!me) {
+                core.info(`claim-guard: no open PR yet for ${branch}; nothing to guard.`);
+                return;
+              }
+            }
 
             // Files changed by this PR.
             const mine = await github.paginate(

@@ -2,9 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   sortFoodLogsDescending,
   isJobOrFoodProtectedByBugTracker,
-  calculateMealDebugRetentionStatus,
-  pruneUserDebugLogs
+  calculateMealDebugRetentionStatus
 } from './debugLogRetention';
+import { pruneUserDebugLogs } from '../server/debugLogRetention';
 
 describe('Debug Log Retention Policy (10-meal limit + Bug Tracker protection)', () => {
   it('sorts food logs in reverse chronological order (newest date first)', () => {

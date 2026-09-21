@@ -1234,7 +1234,7 @@ export async function submitServerJob(payload: ServerJobPayload): Promise<void> 
 
         if (userId && userId !== 'anonymous') {
           try {
-            const { pruneUserDebugLogs } = await import('./src/utils/debugLogRetention.js');
+            const { pruneUserDebugLogs } = await import('./src/server/debugLogRetention.js');
             void pruneUserDebugLogs(userId, { maxRetention: 10 }).catch((e: any) =>
               console.warn('[ServerJobs] debug prune:', e?.message || e)
             );

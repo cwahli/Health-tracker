@@ -33,6 +33,36 @@ agent worktree (agent/<area>)  ──push──►  PR to main
 GitHub has **no native temporary per-path lock** — this is the standard
 workaround (open-PR-as-lock + CI guard + CODEOWNERS).
 
+### 1b. PAT-free automation (no `gh`, no token on the agent box)
+
+A local agent only has SSH (git), not the GitHub API. Two pieces remove the
+need for `gh`/a PAT:
+
+- **`.github/workflows/auto-pr.yml`** — on `push` to `agent/**`, opens (or finds)
+  the PR with the runner's own `GITHUB_TOKEN`.
+- **`ci` + `claim-guard` also trigger on `push` to `agent/**`.** A PR created
+  with `GITHUB_TOKEN` does **not** fire `pull_request` workflows (GitHub's
+  recursion guard), so the agent's own SSH push is what runs the gates on the
+  PR head SHA. `claim-guard` resolves the PR by branch (briefly polling for the
+  one `auto-pr` is creating).
+
+So the flow is: **push `agent/<area>` → PR opens → `ci` + `claim-guard` run on
+the head SHA → the open PR is the lock → merge/close releases it.** No PAT.
+
+For the short *edit* window (before the first commit), use the branch lock:
+
+```bash
+scripts/lock.sh acquire <area>   # atomic; fails if another agent holds it
+# ... edit ...
+git commit && git push origin HEAD
+scripts/lock.sh release <area>   # after the commit; the open PR is now the lock
+scripts/lock.sh list             # git ls-remote 'refs/heads/lock/*'
+```
+
+`lock/<area>` branches are pure git (GitHub only accepts `refs/heads`/`refs/tags`,
+so `refs/locks/*` is not an option). Acquire is a compare-and-swap via
+`git push --force-with-lease=refs/heads/lock/<area>:`.
+
 ---
 
 ## 2. Files in this change
@@ -82,8 +112,11 @@ These are **UI/API only** — a committed file cannot turn them on. Repository
 ## 4. Agent rules (always-on, mirror of AGENTS.md §0)
 
 1. Work in a worktree (`~/dev/new-worktree.sh <area>`), branch `agent/<area>`.
-2. **Never push directly to `main`.** Open a PR.
+2. **Never push directly to `main`.** Push the branch; `auto-pr.yml` opens the
+   PR with `GITHUB_TOKEN` — no `gh`/PAT needed.
 3. **One area per PR.** If it needs a hub file another agent is using, sequence.
+   For the edit window before the first push, `scripts/lock.sh acquire <area>`
+   and `release` after the commit (see §1b).
 4. Before pushing, **rebase on `origin/main`** and re-run the gates locally:
    `npm run lint && npm run test:prepush && npm run test:sync`.
 5. When `claim-guard` is red, do not "fix" it by widening scope — read the
