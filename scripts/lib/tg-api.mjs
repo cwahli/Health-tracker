@@ -85,6 +85,10 @@ export class TelegramApi {
     return this.call('deleteWebhook', { drop_pending_updates: dropPendingUpdates });
   }
 
+  answerCallbackQuery(callbackQueryId, extra = {}) {
+    return this.call('answerCallbackQuery', { callback_query_id: callbackQueryId, ...extra });
+  }
+
   sendMessage(chatId, text, extra = {}) {
     return this.call('sendMessage', { chat_id: chatId, text: clamp(text), ...extra });
   }

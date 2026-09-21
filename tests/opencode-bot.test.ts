@@ -8,7 +8,18 @@ import { Throttle } from '../scripts/lib/tg-throttle.mjs';
 import { mapOpencodeEvent, buildOpencodeArgs } from '../scripts/lib/agent-opencode.mjs';
 import { clamp, chunkText, MAX_MESSAGE_CHARS } from '../scripts/lib/tg-api.mjs';
 import { loadRegistry, getBot, resolveToken } from '../scripts/lib/registry.mjs';
-import { parseCommand, helpText, statusText, formatModelList } from '../scripts/lib/commands.mjs';
+import {
+  parseCommand,
+  parseAgentList,
+  parseModelsVerbose,
+  modelKeyboard,
+  agentKeyboard,
+  variantKeyboard,
+  decodeCallback,
+  helpText,
+  statusText,
+  formatModelList,
+} from '../scripts/lib/commands.mjs';
 
 describe('reasoning-compress', () => {
   it('strips code fences and markdown noise', () => {
@@ -219,6 +230,72 @@ describe('commands', () => {
     const text = formatModelList(many, { max: 3 });
     expect(text.split('\n')).toHaveLength(4);
     expect(text).toContain('... and 2 more');
+  });
+});
+
+describe('pickers', () => {
+  it('parses primary agents and ignores the permission dump', () => {
+    const raw = [
+      'build (primary)',
+      '  [',
+      '  {',
+      '    "permission": "*",',
+      '    "action": "allow"',
+      '  }',
+      'plan (primary)',
+      'explore (subagent)',
+    ].join('\n');
+    expect(parseAgentList(raw)).toEqual([
+      { name: 'build', type: 'primary' },
+      { name: 'plan', type: 'primary' },
+      { name: 'explore', type: 'subagent' },
+    ]);
+  });
+
+  it('parses model variants from --verbose output', () => {
+    const raw = [
+      'opencode/big-pickle',
+      '{',
+      '  "id": "big-pickle",',
+      '  "variants": {',
+      '    "low": { "reasoningEffort": "low" },',
+      '    "high": { "reasoningEffort": "high" }',
+      '  }',
+      '}',
+      'opencode-go/deepseek-v4.1-flash',
+      '{',
+      '  "id": "deepseek-v4.1-flash",',
+      '  "variants": { "low": {}, "medium": {}, "high": {} }',
+      '}',
+    ].join('\n');
+    const models = parseModelsVerbose(raw);
+    expect(models).toHaveLength(2);
+    expect(models[0]).toEqual({ id: 'opencode/big-pickle', variants: ['low', 'high'] });
+    expect(models[1].variants).toEqual(['low', 'medium', 'high']);
+  });
+
+  it('paginates the model keyboard with compact callback data', () => {
+    const models = Array.from({ length: 20 }, (_, i) => `p/m${i}`);
+    const page0 = modelKeyboard(models, { page: 0, pageSize: 8 });
+    expect(page0.inline_keyboard).toHaveLength(9);
+    expect(page0.inline_keyboard[0][0].callback_data).toBe('m:0');
+    expect(page0.inline_keyboard[8].some((b: { callback_data: string }) => b.callback_data === 'mp:1')).toBe(true);
+    const page2 = modelKeyboard(models, { page: 2, pageSize: 8 });
+    expect(page2.inline_keyboard[0][0].callback_data).toBe('m:16');
+    for (const row of page0.inline_keyboard) {
+      for (const button of row) {
+        expect(button.callback_data.length).toBeLessThanOrEqual(64);
+      }
+    }
+  });
+
+  it('builds agent and variant keyboards and decodes callbacks', () => {
+    const agents = agentKeyboard([{ name: 'build', type: 'primary' }]);
+    expect(agents.inline_keyboard[0][0]).toEqual({ text: 'build (primary)', callback_data: 'a:0' });
+    const variants = variantKeyboard(['low', 'high']);
+    expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:1' });
+    expect(decodeCallback('m:5')).toEqual({ kind: 'm', value: '5' });
+    expect(decodeCallback('noop')).toEqual({ kind: 'noop', value: undefined });
   });
 });
 
