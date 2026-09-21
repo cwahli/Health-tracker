@@ -996,6 +996,8 @@ export function invalidateStaleIdentityMetadata(item: any, newName: string): any
   if (!item || typeof item !== 'object') return item;
   const next = { ...item };
   const name = String(newName || displayName(item) || '').trim();
+  const prevName = displayName(item);
+  const identityChanged = prevName && name && prevName.toLowerCase() !== name.toLowerCase();
   next.name = name;
   next.canonicalDbName = name;
   next.originalName = name;
@@ -1005,6 +1007,23 @@ export function invalidateStaleIdentityMetadata(item: any, newName: string): any
   if (next.genericEnglishName) delete next.genericEnglishName;
   if (next.englishName) delete next.englishName;
   if (next.translatedName) delete next.translatedName;
+  // S2 fix (job_a3jwhqvwk B2): on identity change, stale grocery/pack
+  // grounding must not survive (e.g. Boiled Chicken keeping Pack:165g,
+  // bbox [0,0,960,520], method raw, OCR DAUN SELADA KRT).
+  if (identityChanged) {
+    if (next.packageLabelText) delete next.packageLabelText;
+    if (next.rawNutritionLabel) delete next.rawNutritionLabel;
+    if (next.packGrams != null) delete next.packGrams;
+    // Placeholder full-frame box from the deleted dish is never valid grounding.
+    if (Array.isArray(next.boundingBox2D) && next.boundingBox2D[0] === 0 && next.boundingBox2D[1] === 0) {
+      delete next.boundingBox2D;
+    }
+    // Cooking method belongs to the NEW identity (boiled chicken, not raw lettuce).
+    // Keep only if explicitly supplied for the new identity via estimate/media.
+    if (next.cookingMethod === 'raw' && /chicken|ayam|boiled|rebus/i.test(name)) {
+      delete next.cookingMethod;
+    }
+  }
   // Ingredient / visual sibling lists must not retain the prior identity
   next.ingredientsList = [name];
   next.visualIngredients = [name];

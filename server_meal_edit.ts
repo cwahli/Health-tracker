@@ -903,9 +903,17 @@ export async function applyMealEdits(opts: {
         opts.userMessage,
       );
       const grams = Number(raw.newWeightGrams) > 0 ? Number(raw.newWeightGrams) : Number(prev.weightGrams) || 100;
+      // S2 fix (job_a3jwhqvwk): identity replace must not inherit stale
+      // bbox / photo index / pack / sticker from the deleted dish.
+      // Prefer the NEW scout media (raw) when present; fall back to prev only
+      // when the scout did not supply fresh grounding.
+      const rawBox = Array.isArray(raw.boundingBox2D) && raw.boundingBox2D.length === 4 ? raw.boundingBox2D : null;
+      const rawBoxIsPlaceholder = rawBox
+        ? (rawBox[0] === 0 && rawBox[1] === 0 && rawBox[2] === 960 && rawBox[3] === 520)
+        : true;
       const media = {
-        boundingBox2D: prev.boundingBox2D || raw.boundingBox2D || null,
-        sourceImageIndex: typeof prev.sourceImageIndex === 'number' ? prev.sourceImageIndex : (raw.sourceImageIndex ?? null),
+        boundingBox2D: (!rawBoxIsPlaceholder && rawBox) ? rawBox : (prev.boundingBox2D && !(prev.boundingBox2D[0] === 0 && prev.boundingBox2D[1] === 0) ? prev.boundingBox2D : rawBox),
+        sourceImageIndex: typeof raw.sourceImageIndex === 'number' ? raw.sourceImageIndex : (typeof prev.sourceImageIndex === 'number' ? prev.sourceImageIndex : null),
       };
       let next = await finalizeFromEstimate(newName, grams, raw.estimate, media, prev.scoutIndex ?? nextScoutIndex(items));
       next = invalidateStaleIdentityMetadata(next, newName);

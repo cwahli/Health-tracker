@@ -237,6 +237,18 @@ export function parseOcrLabel(rawLabel: any, targetWeight: number, defaultR: num
   return { ocrNutrients, lockedKeys };
 }
 
+/**
+ * S3 (job_a3jwhqvwk B3): edible-yield guard for in-shell packs.
+ * Gross scale weight includes shell; kernels are ~60-70%.
+ */
+export function edibleYieldFactor(name: string): number {
+  const s = String(name || '').toLowerCase();
+  const isPeanut = /kacang|tanah|peanut|groundnut/.test(s);
+  const isInShell = /kulit|in.?shell|cangkang|with.?shell|shell/.test(s);
+  if (isPeanut && isInShell) return 0.65;
+  return 1;
+}
+
 export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedger> {
   const item = input.item || {};
   const scoutIndex = Number(item.scoutIndex ?? 0);
@@ -244,8 +256,15 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
   const keyword = item.keyword ? String(item.keyword) : undefined;
   const chainName = item.chainName ? String(item.chainName) : null;
 
-  const consumedWeight = Math.max(1, Math.round(Number(input.consumedWeight ?? item.estimatedWeightGrams ?? 100)));
-  const nutrientBasisWeight = Math.max(1, Math.round(Number(input.nutrientBasisWeight ?? item.nutrientBasisWeight ?? item.estimatedWeightGrams ?? consumedWeight)));
+  // S3 fix (job_a3jwhqvwk B3): in-shell gross weight is not edible.
+  // Kcg Tanah Kulit 210g gross -> ~65% kernels. Scale nutrient basis so
+  // 210g gross never becomes 1274kcal/102g fat of kernels.
+  const edibleYield = edibleYieldFactor(
+    `${originalName} ${keyword || ''} ${item.genericEnglishName || ''} ${item.packageLabelText || ''}`
+  );
+  const rawConsumed = Math.max(1, Math.round(Number(input.consumedWeight ?? item.estimatedWeightGrams ?? 100)));
+  const consumedWeight = edibleYield < 1 ? Math.max(1, Math.round(rawConsumed * edibleYield)) : rawConsumed;
+  const nutrientBasisWeight = Math.max(1, Math.round(Number(input.nutrientBasisWeight ?? item.nutrientBasisWeight ?? item.estimatedWeightGrams ?? rawConsumed)));
   const R = consumedWeight / nutrientBasisWeight;
 
   const ingredients: string[] = Array.isArray(item.ingredients) ? item.ingredients : [];

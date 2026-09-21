@@ -413,12 +413,26 @@ export async function executeFinalizePhase(
     const isHighSatFat = (result.nutrients?.saturatedFat || 0) >= 8;
     const isHighSodium = (result.nutrients?.sodium || 0) >= 1000;
     const isHighCalories = (result.nutrients?.calories || 0) >= 900;
+    // S6/S7 fix (job_a3jwhqvwk B6/B7): a scout [good] must not survive a
+    // high ledger. Escalate to warning when the post-edit totals breach
+    // thresholds (e.g. 19.4g sat-fat / 115g fat / 2023kcal), and lock the
+    // diet projector to the SAME scout label (sanitized once) so
+    // t/scout and t/diet never fork (High-Protein vs Boosts lean).
+    const scoutLabel = rawParsed.verdict?.label || priorVerdict?.label || null;
+    const scoutLevel = rawParsed.verdict?.level || priorVerdict?.level || 'neutral';
     const shouldWarn = isHighSatFat || isHighSodium || isHighCalories;
     const priorLevel = priorVerdict?.level || 'neutral';
-    const effectiveLevel = (priorLevel === 'warning' || priorLevel === 'alert') && shouldWarn ? priorLevel : rawParsed.verdict?.level || priorLevel;
+    let effectiveLevel = (priorLevel === 'warning' || priorLevel === 'alert') && shouldWarn ? priorLevel : scoutLevel || priorLevel;
+    if (shouldWarn && effectiveLevel === 'good') effectiveLevel = 'warning';
     const effectiveRawLabel =
-      rawParsed.verdict?.label || priorVerdict?.label || (effectiveLevel === 'warning' ? 'Elevated saturated fat impact' : 'Mindful balance');
+      scoutLabel || (effectiveLevel === 'warning' ? 'Elevated saturated fat impact' : 'Mindful balance');
     const sanitizedVerdictLabel = sanitizeVerdictLabel(effectiveRawLabel, effectiveLevel, result.nutrients, ctx.userProfile?.language);
+    // Verdict lock: rewrite the scout emission in place so the exported
+    // t/scout and t/diet rows carry the identical sanitized label+level.
+    if (rawParsed && rawParsed.verdict && typeof rawParsed.verdict === 'object') {
+      rawParsed.verdict.label = sanitizedVerdictLabel;
+      rawParsed.verdict.level = effectiveLevel;
+    }
     activeMeal.verdict = {
       label: sanitizedVerdictLabel,
       level: effectiveLevel,

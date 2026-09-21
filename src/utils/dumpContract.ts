@@ -882,10 +882,18 @@ function evaluateFoodAgentOutput(tree: CanonicalRunTree, isFoodPack: boolean): C
   }
 
   // 17. Dishes: at least one fully populated dish in any agent emission.
+  // S5 fix (job_a3jwhqvwk B5): the old text flatMapped ALL emissions, so a
+  // 2-turn run reported 6/6 while listing 5 names incl. the deleted dish.
+  // Count the FINAL ledger (pendingFoodLog) when present; fall back to emissions.
+  const finalDishes: any[] = Array.isArray((tree as any).pendingFoodLog?.dishes)
+    ? (tree as any).pendingFoodLog.dishes
+    : (Array.isArray((tree as any).pendingFoodLog?.itemsBreakdown) ? (tree as any).pendingFoodLog.itemsBreakdown : []);
   const dishEmissions = (tree.dispatches || [])
     .map((d) => d?.rawEmission || d?.output)
     .filter((o) => o && typeof o === 'object');
-  const allDishes = dishEmissions.flatMap((o) => (Array.isArray(o?.dishes) ? o.dishes : []));
+  const allDishes = finalDishes.length > 0
+    ? finalDishes
+    : dishEmissions.flatMap((o) => (Array.isArray(o?.dishes) ? o.dishes : []));
   if (allDishes.length === 0) {
     na('Dishes: fields populated', 'No dishes in any agent emission');
   } else {

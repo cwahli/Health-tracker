@@ -115,6 +115,8 @@ export const scoutSystemInstruction = `- HIERARCHY: Extract each distinct food i
 - INGESTION: Extract ALL visible food items/packages from ALL provided images into dishes[]. After dishes[], emit 'perImage': one entry per provided image in 0-based order with the dishName values seen in that image ('itemsFound'; empty array only when that image truly shows no food, or when no images are attached) — every provided image must appear exactly once; never skip an image. Before emitting, verify the anchor both ways for images 0..N-1: each 'perImage' entry must match at least one dish carrying that same 'sourceImageIndex', and any entry with no matching dish must be confirmed food-free — a food image with no matching dish means you stopped early, so go back and extract it. 'contentType' is post-extraction metadata and must not restrict extraction.
 - DIRECT OCR & LABEL TRUTH: Transcribe printed labels into 'rawNutritionLabel' (preserve exact 0s and % AKG/% DV). Before emitting rawNutritionLabel & nutrients, perform an accuracy check on printed tables: verify negative prefixes in English & all languages (e.g. 'un-'/'non-'/'tidak': saturated fat is strictly the pure saturated row, never unsaturated/tidak jenuh or total fat; soluble fiber is never insoluble). When packaging/label accompanies prepared food across photos, anchor dish nutrients to printed label truth.
 - BRANDS & CONDIMENTS: Set 'chainName' for brands. Set 'isStandaloneCondimentPacket' for packets <=30g.
+- GROCERY VS MEAL (anti-double-count): grocery packs with scale stickers are shopping reference, not eaten portions, when the SAME ingredient also appears prepared in a pot/bowl in another image (e.g. baby corn pack + baby corn in hotpot). Do not sum both: emit the prepared dish as the consumed item and keep packs as reference with packGrams only. In-shell packs (e.g. KCG TANAH KULIT): weight is gross with shell; edible kernels are ~65%.
+- LABEL MISMATCH: if a sticker name contradicts the visual/brand (e.g. DAUN SELADA lettuce sticker on poultry-branded pack, or cucumbers in frame), do not emit the sticker name as fact — flag low confidence and prefer the visual/brand identity.
 - COOKING FATS: Include cooking oils/fats in 'dishNutrients.totalFat' based on 'cookingMethod'.
 - CLINICAL VERDICT & NARRATIVE: Provide a 3-6 word 'verdict' ('level': good|warning|alert|neutral) and a direct 35-70 word clinical 'clinicalAdvice' in 2nd person ("You got..."). Balance two sides: celebrate positive nutrient achievements (protein, soluble fiber, healthy fats) while plainly flagging any nutrient over budget (sodium, saturated fat) with its magnitude and actionable movement.
 
@@ -1703,6 +1705,43 @@ export function parseAndHealVisionScout(
       addDebugLog(`[Vision Scout] Sanity failed with no items (${sanity.reason}); returning empty scout.`);
     }
   }
+  // S4/S9 fix (job_a3jwhqvwk B4/B9): prune perImage orphans so every
+  // itemsFound name has a matching dish with the same sourceImageIndex,
+  // and drop placeholder full-frame boxes ([0,0,960,520]) which signal
+  // label-guess grounding (e.g. Daun Selada lettuce).
+  try {
+    const dishNames = new Set(
+      visionScoutItems.map((d: any) => String(d.dishName || d.originalName || d.keyword || d.name || '').toLowerCase())
+    );
+    const prune = (perImage: any) => {
+      if (!Array.isArray(perImage)) return perImage;
+      return perImage.map((p: any) => {
+        if (!p || !Array.isArray(p.itemsFound)) return p;
+        const kept = p.itemsFound.filter((n: any) => {
+          const nl = String(n || '').toLowerCase();
+          if (dishNames.has(nl)) return true;
+          // allow component-level names (e.g. Baby Corn inside hotpot)
+          return visionScoutItems.some((d: any) => {
+            const comps = [...(Array.isArray(d.foods) ? d.foods : []), ...(Array.isArray(d.components) ? d.components : [])];
+            return comps.some((c: any) => String(c.foodName || c.name || '').toLowerCase() === nl);
+          });
+        });
+        const dropped = (p.itemsFound as any[]).filter((n: any) => !kept.includes(n));
+        if (dropped.length > 0) addDebugLog(`[Vision Scout] perImage prune orphans: ${dropped.join(', ')}`);
+        return { ...p, itemsFound: kept };
+      });
+    };
+    if (parsedScout && Array.isArray(parsedScout.perImage)) parsedScout.perImage = prune(parsedScout.perImage);
+    if (originalScoutJson && Array.isArray((originalScoutJson as any).perImage)) {
+      (originalScoutJson as any).perImage = prune((originalScoutJson as any).perImage);
+    }
+    for (const d of visionScoutItems) {
+      if (Array.isArray(d.boundingBox2D) && d.boundingBox2D[0] === 0 && d.boundingBox2D[1] === 0 && d.boundingBox2D[2] === 960 && d.boundingBox2D[3] === 520) {
+        addDebugLog(`[Vision Scout] drop placeholder bbox on "${d.dishName || d.originalName}"`);
+        d.boundingBox2D = null;
+      }
+    }
+  } catch { /* never fail heal on prune */ }
   return {
     items: visionScoutItems,
     scoutConfidenceRating,
