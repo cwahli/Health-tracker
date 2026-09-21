@@ -25,6 +25,7 @@ import {
   helpText,
   statusText,
   formatModelList,
+  formatUsage,
 } from './lib/commands.mjs';
 
 const HOME = os.homedir();
@@ -159,6 +160,14 @@ async function getVariants(config, caches, modelId) {
   }
   const entry = caches.verbose.find((m) => m.id === modelId);
   return entry?.variants || [];
+}
+
+async function getContextLimit(config, caches, modelId) {
+  if (!caches.verbose) {
+    caches.verbose = parseModelsVerbose(await listModelsVerbose({ opencodeBin: config.agent.opencodeBin }));
+  }
+  const entry = caches.verbose.find((m) => m.id === modelId);
+  return entry?.context || 0;
 }
 
 async function getAgents(config, caches) {
@@ -305,8 +314,9 @@ class ProgressRenderer {
     }
   }
 
-  async finish(result) {
+  async finish(result, { footer = '' } = {}) {
     this.stopTyping();
+    const withFooter = (body) => (footer ? `${body}\n\n${footer}` : body);
     if (result.lastError && !result.finalText) {
       this.status = 'failed';
       if (this.messageId != null) this._schedule();
@@ -318,10 +328,10 @@ class ProgressRenderer {
     if (this.messageId != null) this._schedule();
     if (!result.finalText) {
       const code = result.code === 0 ? '' : ` (exit ${result.code})`;
-      await this.deliver(`Done${code}, but the model returned no text output.`);
+      await this.deliver(withFooter(`Done${code}, but the model returned no text output.`));
       return;
     }
-    await this.deliver(result.finalText);
+    await this.deliver(withFooter(result.finalText));
   }
 }
 
@@ -333,7 +343,7 @@ async function sendChunked(api, chatId, text) {
 
 const CLEAR_KEYBOARD = { inline_keyboard: [] };
 
-async function handleCommand({ api, config, sessions, prefs, caches, running, chatId, cmd }) {
+async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, chatId, cmd }) {
   const eff = effective(config, prefs, chatId);
 
   switch (cmd.name) {
@@ -343,7 +353,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, ch
       return;
 
     case 'status':
-      await api.sendMessage(chatId, statusText(config, { sessionId: sessions.get(chatId), ...eff }));
+      await api.sendMessage(
+        chatId,
+        statusText(config, { sessionId: sessions.get(chatId), ...eff, usage: lastUsage?.get(chatId) }),
+      );
+      return;
+
+    case 'build':
+    case 'plan':
+      prefs.set(chatId, { ...(prefs.get(chatId) || {}), agent: cmd.name });
+      savePrefs(config.id, prefs);
+      await api.sendMessage(chatId, `Agent set to ${cmd.name} for this chat.`);
       return;
 
     case 'new':
@@ -549,7 +569,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
   }
 }
 
-async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, busy, message }) {
+async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, busy, message }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
   if (!config.telegram.allowedUserIds.includes(userId)) {
@@ -561,7 +581,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
 
   const cmd = parseCommand(text);
   if (cmd) {
-    await handleCommand({ api, config, sessions, prefs, caches, running, chatId, cmd });
+    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, chatId, cmd });
     return;
   }
 
@@ -597,12 +617,24 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       sessions.set(chatId, result.sessionID);
       saveSessions(config.id, sessions);
     }
-
     if (running.get(chatId)?.aborted) {
       renderer.status = 'aborted';
       await renderer.deliver('Aborted.');
     } else {
-      await renderer.finish(result);
+      let contextLimit = 0;
+      try {
+        contextLimit = await getContextLimit(config, caches, eff.model);
+      } catch {
+        // usage is best-effort; never fail the answer over it
+      }
+      const usageText = formatUsage({
+        tokens: result.usage?.tokens,
+        cost: result.usage?.cost,
+        contextLimit,
+        agent: eff.agent,
+      });
+      if (usageText) lastUsage.set(chatId, usageText);
+      await renderer.finish(result, { footer: usageText });
     }
   } catch (err) {
     await api.sendMessage(chatId, `Error: ${err.message}`).catch(() => {});
@@ -620,6 +652,7 @@ async function runLoop({ api, config }) {
   const caches = makeCaches();
   const running = new Map();
   const busy = new Set();
+  const lastUsage = new Map();
   let offset = loadOffset(config.id);
   let running_ = true;
 
@@ -647,7 +680,7 @@ async function runLoop({ api, config }) {
           console.error(`[${config.id}] callback handler error: ${err.message}`);
         });
       } else if (update.message) {
-        handleMessage({ api, config, throttle, sessions, prefs, caches, running, busy, message: update.message }).catch(
+        handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, busy, message: update.message }).catch(
           (err) => {
             console.error(`[${config.id}] handler error: ${err.message}`);
           },
@@ -678,6 +711,7 @@ async function simulate(config, args) {
     prefs: new Map(),
     caches,
     running: new Map(),
+    lastUsage: new Map(),
     chatId: 'sim',
     cmd,
   });

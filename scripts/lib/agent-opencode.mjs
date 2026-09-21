@@ -158,6 +158,8 @@ export function runOpencode({
     let lastError = null;
     let buffer = '';
     let settled = false;
+    let cost = 0;
+    let tokens = null;
 
     const timer =
       timeoutMs > 0
@@ -181,6 +183,7 @@ export function runOpencode({
         finalText: textParts.join('\n\n').trim(),
         lastError,
         stderr,
+        usage: { cost, tokens },
       });
     };
 
@@ -198,6 +201,10 @@ export function runOpencode({
       if (!event) return;
       if (event.kind === 'text' && event.text) textParts.push(event.text);
       if (event.kind === 'error') lastError = event.message;
+      if (event.kind === 'step_finish') {
+        cost += Number(event.cost) || 0;
+        if (event.tokens) tokens = event.tokens;
+      }
       if (onEvent) {
         try {
           onEvent(event);
