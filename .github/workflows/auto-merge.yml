@@ -53,7 +53,10 @@ jobs:
             await new Promise((r) => setTimeout(r, 45000));
             for (let i = 0; i < 90; i++) {
               const cr = await github.rest.checks.listForRef({ owner, repo, ref: head, per_page: 100 });
-              const pending = cr.data.check_runs.filter((c) => c.status !== 'completed');
+              // Ignore this job's own check run (it cannot complete while we wait).
+              const pending = cr.data.check_runs.filter(
+                (c) => c.status !== 'completed' && c.name !== 'merge-agent-pr',
+              );
               if (pending.length === 0) break;
               await new Promise((r) => setTimeout(r, 5000));
             }
