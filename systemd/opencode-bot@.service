@@ -13,7 +13,7 @@ Environment=HOME=/home/ubuntu
 Environment=PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-/home/ubuntu/.config/opencode-bot/%i.env
 ExecStart=/usr/bin/node /home/ubuntu/opencode-bot/scripts/opencode-bot.mjs --id=%i
-Restart=on-failure
+Restart=always
 RestartSec=5
 NoNewPrivileges=true
 

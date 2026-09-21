@@ -234,6 +234,26 @@ Firebase host: health-tracking.duckdns.org (Authorized Domain in Firebase Consol
 Database:      Cloudflare D1 + Supabase + Cloudflare R2 (photos)
 Watchdog:      /home/ubuntu/scripts/watchdog.sh (every 10 hours via cron)
 QA Runner:     node scripts/qa-runner.mjs --journey={meal|biomarker|onboarding}
+Mobile shell:  Moshi (Auto: Mosh→ET→SSH) + tmux attach -t dev; key ~/.ssh/moshi_vps (pub in authorized_keys)
+```
+
+### Direct-Moshi cutover (retire Tailscale from shell path) — 2026-09-21, agreed
+
+Goal: Moshi → `51.254.217.163` directly; Tailscale entry kept as fallback until direct proves out.
+Findings (live, 2026-09-21): `authorized_keys` has 2 keys (old + moshi_vps); `sshd -T`
+reports `passwordauthentication yes` — `50-cloud-init.conf` sets yes and OpenSSH honors the
+first value, so the `no` in `60-cloudimg-settings.conf` never took effect; fail2ban not installed.
+Safe order (do NOT `ufw allow` before step 1):
+
+1. `echo 'PasswordAuthentication no' | sudo tee /etc/ssh/sshd_config.d/00-local.conf`
+   (`00-` sorts before cloud-init's `50-`; do NOT edit `50-cloud-init.conf`, cloud-init owns it.)
+2. `sudo sshd -T | grep -i passwordauth` → must print `no`; `sudo systemctl reload sshd`
+   (existing sessions survive reload).
+3. Prove the Tailscale Moshi entry still connects with key auth.
+4. `sudo apt install fail2ban`; set `ignoreip = 127.0.0.1/8 100.64.0.0/10`
+   (Tailscale range — testing can't ban the phone); `sudo systemctl enable --now fail2ban`.
+5. `sudo ufw allow 22/tcp && sudo ufw allow 60000:61000/udp`.
+6. Add second Moshi entry for `51.254.217.163`, test; delete Tailscale entry only after a week direct-only.
 ```
 
 ---

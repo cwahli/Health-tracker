@@ -1,0 +1,17 @@
+[Unit]
+Description=Persistent tmux session (%i) — survives SSH drops, recreated on boot
+Documentation=file:///home/ubuntu/src/Health-tracker/plan/VPS2_MOBILE_DEV.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/bin/tmux new-session -d -s %i -c /home/ubuntu/src/Health-tracker
+ExecStop=/usr/bin/tmux kill-session -t %i
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
