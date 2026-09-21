@@ -559,7 +559,7 @@ jobsRouter.post(['/api/jobs/prune-debug-logs', '/api/debug-logs/prune'], async (
   try {
     const { userId, maxRetention } = req.body || {};
     const effectiveRetention = typeof maxRetention === 'number' && maxRetention > 0 ? maxRetention : 10;
-    const { pruneUserDebugLogs } = await import('./src/utils/debugLogRetention.js');
+    const { pruneUserDebugLogs } = await import('./src/server/debugLogRetention.js');
 
     if (userId) {
       const result = await pruneUserDebugLogs(String(userId), { maxRetention: effectiveRetention });
@@ -604,7 +604,7 @@ jobsRouter.get('/api/debug-logs/protected-refs', async (_req, res) => {
     // have no D1 table yet. getBugTrackerProtectedRefs() returns an empty set
     // without a Supabase client, which is the correct degradation until the D1
     // schema packet lands (no 402 is emitted).
-    const { getBugTrackerProtectedRefs } = await import('./src/utils/debugLogRetention.js');
+    const { getBugTrackerProtectedRefs } = await import('./src/server/debugLogRetention.js');
     const refs = await getBugTrackerProtectedRefs(null);
     return res.json({ refs: Array.from(refs) });
   } catch (err: any) {
