@@ -123,10 +123,10 @@ export function statusText(config, { sessionId, model, agent, variant } = {}) {
   ].join('\n');
 }
 
-export function formatModelList(models, { max = 60 } = {}) {
+export function formatModelList(models, { max = 0 } = {}) {
   const list = Array.isArray(models) ? models.map((m) => String(m).trim()).filter(Boolean) : [];
   if (!list.length) return 'No models found.';
-  const shown = list.slice(0, max).map((m) => `- ${m}`);
-  if (list.length > max) shown.push(`... and ${list.length - max} more`);
+  const shown = (max > 0 ? list.slice(0, max) : list).map((m) => `- ${m}`);
+  if (max > 0 && list.length > max) shown.push(`... and ${list.length - max} more`);
   return shown.join('\n');
 }

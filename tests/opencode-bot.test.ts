@@ -231,6 +231,14 @@ describe('commands', () => {
     expect(text.split('\n')).toHaveLength(4);
     expect(text).toContain('... and 2 more');
   });
+
+  it('shows every model when no cap is set', () => {
+    const many = Array.from({ length: 100 }, (_, i) => `p/m${i}`);
+    const text = formatModelList(many);
+    expect(text.split('\n')).toHaveLength(100);
+    expect(text).toContain('p/m99');
+    expect(text).not.toContain('more');
+  });
 });
 
 describe('pickers', () => {
