@@ -16,6 +16,10 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.
 
 export const isSupabaseConfigured: boolean = !!(supabaseUrl && supabaseServiceRoleKey);
 
+if (supabaseUrl && !process.env.SUPABASE_SERVICE_ROLE_KEY && (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY)) {
+  console.warn('[Supabase] SERVICE_ROLE_KEY missing — admin client built with anon key; privileged ops (e.g. listUsers) will fail.');
+}
+
 export const supabaseAdmin: SupabaseClient | null = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: {

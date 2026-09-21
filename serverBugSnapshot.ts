@@ -599,6 +599,9 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (!tagId && tagTitle) {
         const title_key = normalizeTagKey(tagTitle) || tagTitle.toLowerCase().slice(0, 160);
         const existRes = await d1Query<any>(`SELECT id, title FROM issue_tags WHERE title_key = ? LIMIT 1`, [title_key]);
+        if (!existRes.success) {
+          return res.status(500).json({ error: existRes.error || 'failed to look up bug tag' });
+        }
         const existingTag = existRes.results?.[0];
         if (existingTag?.id) {
           tagId = existingTag.id;

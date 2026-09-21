@@ -3627,7 +3627,9 @@ async function startServer() {
   console.log("[boot] startServer()");
   ensureFoodCatalogSchema().then((r) => {
     if (!r.ok) console.error('[CatalogSchema] ensure on boot failed:', r.method, r.error);
-  }).catch(() => {});
+  }).catch((err) => {
+    console.error('[CatalogSchema] ensure on boot threw:', err);
+  });
 
   ensureD1Schema().then((r) => {
     if (!r.success) console.error('[D1] schema ensure failed on boot — D1 reads/writes will fail:', r.error);

@@ -701,11 +701,11 @@ SSE heartbeats are for **proxied origins and UX**, not for magically extending W
 
 ### 12.5 OAuth / domain (R-13.0, before first prod login)
 
-Firebase project `kempt-charmer-0r5vm`. OAuth client `615352013376-mm2cuakcdfosd02t9mqnfbnnbo4uju5t`. `authDomain` = `kempt-charmer-0r5vm.firebaseapp.com`. Client: `signInWithPopup` (`AuthScreen.tsx`, `googleBackup.ts`). Redirect helper already uses `window.location.origin`.
+Firebase project `kempt-charmer-0r5vm`. OAuth client ID lives in Google Console / env only (do not paste here). `authDomain` = `kempt-charmer-0r5vm.firebaseapp.com`. Client: `signInWithPopup` (`AuthScreen.tsx`, `googleBackup.ts`). Redirect helper already uses `window.location.origin`.
 
 **Firebase Console → Authentication → Settings → Authorized domains** (exact hosts):
 
-- Production host (`health-tracker.pages.dev` or custom)
+- Production host (`https://health-tracking.duckdns.org`)
 - `localhost` (AI Studio)
 - Optional stable `preview.<custom>` — **not** `*.pages.dev`
 
@@ -732,15 +732,15 @@ Firebase project `kempt-charmer-0r5vm`. OAuth client `615352013376-mm2cuakcdfosd
 
 ### 12.7 Phases (one ID at a time)
 
-**R-13.0 Preconditions (no app code, agent CLI).** `node --env-file=.env scripts/r13-0-preflight.mjs`. Workers Paid is **not** required (API is Node). D1 + R2 already exist. R2 CORS for `http://localhost:3000` + live Render origin. Secrets stay on the **runtime** process (copy from env at deploy; never Vite build, never git). `NODE_ENV=production` is already in the Dockerfile. Firebase + OAuth allowlists (§12.5) after 13.1 prints the exact prod host.
+**R-13.0 Preconditions (no app code, agent CLI).** `node --env-file=.env scripts/r13-0-preflight.mjs`. Workers Paid is **not** required (API is Node). D1 + R2 already exist. R2 CORS for `http://localhost:3000` + `https://health-tracking.duckdns.org`. Secrets stay on the **runtime** process (copy from env at deploy; never Vite build, never git). `NODE_ENV=production` is already in the Dockerfile. Firebase + OAuth allowlists (§12.5) after 13.1 prints the exact prod host.
 
-**R-13.1 Ship: static SPA + existing Express in a Node process.** Host (locked 2026-09-19): **OVH VPS-2** (`node dist/server.cjs` behind Caddy). **Not** Cloudflare Containers and **not** Cloud Run. Mobile/dev box first, then site cutover: [plan/VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md) Track V. `blocked_human` until V-0. Cloudflare extra URL stays parked.
+**R-13.1 Ship: static SPA + existing Express in a Node process.** Host (locked 2026-09-19): **OVH VPS-2** (`node dist/server.cjs` behind Caddy). **Not** Cloudflare Containers and **not** Cloud Run. V-0…V-16 COMPLETE, live since 2026-09-20. Worker `health-tracker-2` is a no-build edge proxy to the VPS.
 
 - Split scripts: `build:web` = `vite build` only; `build:server` = current esbuild; `build` = both. Pages/Workers asset build uses **`build:web` only**.
 - `PORT` from env, **default 3000**. Replace hardcoded `http://localhost:3000` loopbacks with `http://127.0.0.1:${PORT}`. Keep `app.listen` gated by `NODE_ENV !== 'test' && !VITEST` only — **not** `CF_PAGES`.
 - `INTERNAL_BASE_URL=http://127.0.0.1:${PORT}` in the container.
 - Dockerfile: `node dist/server.cjs`, health `GET /api/status`.
-- Front door: Workers (preferred) or Pages serve `dist/` SPA. Route `/api/*`, `/photos/*`, `/admin/*` to the Container. SPA not-found → `index.html`. Static `/assets/*` must **not** invoke compute.
+- Front door: Worker `health-tracker-2` (no-build edge proxy) → VPS Caddy `:443` → Node `127.0.0.1:3000`. `/api/*`, `/photos/*`, `/admin/*` served by the same Node process. SPA not-found → `index.html`. Static `/assets/*` must **not** invoke compute.
 - If the API hostname is orange-clouded: start bytes (SSE ping) within seconds **or** grey-cloud that hostname. Silent 180s behind orange-cloud is a real 524.
 
 **Done when:** `npm run dev` still Vite on 3000. Public URL serves SPA. `POST /api/jobs/submit` → poll → meal in D1, photo from R2. Google login on the **exact** prod host.

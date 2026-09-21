@@ -349,7 +349,10 @@ syncRouter.get("/api/admin/dedupe-biomarkers", async (req, res) => {
 
 syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
   try {
-    await verifyFirebaseIdToken(req).catch(() => null);
+    const auth = await verifyFirebaseIdToken(req).catch(() => null);
+    if (!auth) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { uid, email, lastSyncTime, listOnly = true, pageSize = 15, offset, cursor } = req.body;
     if (!uid) {
@@ -530,7 +533,10 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
 // Lazy detail endpoint: fetch only the heavy blob columns for a single food log
 syncRouter.post("/api/sync/food-log-detail", async (req, res) => {
   try {
-    await verifyFirebaseIdToken(req).catch(() => null);
+    const auth = await verifyFirebaseIdToken(req).catch(() => null);
+    if (!auth) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { uid, email, logId } = req.body;
     if (!logId) {

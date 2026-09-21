@@ -16,6 +16,7 @@
 | [plan/BIOMARKER_LIFECYCLE.md](../../plan/BIOMARKER_LIFECYCLE.md) | Biomarker architecture |
 | [domains/sync.md](./domains/sync.md) | Firebase / Supabase / R2 multi-device |
 | [domains/debug-contract.md](./domains/debug-contract.md) | Debug download as contract report (reliability pillar). F-8.13 / Q-8. **Durable truth** if ROADMAP/RELIABILITY §11 are shortened. |
+| [../../scripts/opencode-bot.mjs](../../scripts/opencode-bot.mjs) + [../../bots/registry.json](../../bots/registry.json) | Telegram bot fronting opencode on the VPS (opencode-bot) |
 
 ## Document roles
 

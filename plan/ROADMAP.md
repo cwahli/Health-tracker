@@ -37,7 +37,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are **shipped**. Do not restart them.
 
-**Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (392 KB / 7,039 lines), which needs its own packet.
+**Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (340 KB / 6,474 lines, under its 6,500 ceiling after extraction).
 
 **Do this, in order. Packets are locked = go (`auto_go: true`).**
 
@@ -45,7 +45,7 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 2. **Q-11.10 DONE** — `e2ab233`. App `handle*` bodies → `useFoodLogActions` / `useBiomarkerActions` / `useReportActions` (App.tsx 3,114 → 1,098). `specs/done/`.
 3. **Q-11.11 DONE** — App.tsx 1,098 → **350 lines / 14,416 B**, wiring only, via `useAppShellState.ts`; CATALOG ceiling 350, parity re-recorded. `specs/done/`.
 4. **Q-11.12 DONE** — nodes landed `cdbf2cd` (settings overlay → `DbInteractionsOverlay.tsx`) and `c92ec49` + `2fb8d88` (theme customizer → `useThemeCustomizer.ts` + `ThemeCustomizerScreen.tsx`, move-only, then its orphaned imports). `Header.tsx` 3,545 → **690 lines / 28,791 B**: the packet's ≤ 1,200-line and < 200 KB targets are both met, and every moved slice was proven byte-identical against the pre-move file. Packet retired to `specs/done/`. **The Q-11 ladder is complete** — no Q-11 packet is active.
-5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (392 KB / 7,039 lines, 39 over its 7,000 ceiling).
+5. **Q-13 DONE** — `specs/done/q-13-biomarker-dictionary-split.md`. `BiomarkerDictionaryModal.tsx` 6,230 lines / 345 KB → **3,725 lines / 183,970 B**, under the AI Studio 200 KB ceiling. Nodes: `02d84dc` packet → `145d8e2` consolidation panel (49.7 KB) → `450f7c4` data-accuracy panel (41.7 KB) → `ad84598` agent panel (37.6 KB) → `fafc060` `DictionaryItem` + `autoCalibrateBiomarkerCalibrate`/`autoCalibrateBiomarkerDef` + `ensureCustomRanges` (44.6 KB, no props). CATALOG ratcheted 6640 → 3726. The planned batch-paste panel (49.2 KB / 74 props) was dropped as poor value — the file already cleared the ceiling without it. **Do not touch `LogChat.tsx`** — another agent is editing it in this working tree, and it is now the largest remaining file (340 KB / 6,474 lines, under the 6,500 ceiling).
 6. **R-13.1 LIVE on OVH VPS-2 (Track V V-0...V-16 COMPLETE)** — host is **OVH VPS-2** (`https://health-tracking.duckdns.org`), Caddy + systemd `health-tracker.service` (node dist/server.cjs), GitHub Webhook auto-deploy active. Render in 24-48h soak mode prior to V-17 deletion. Next: Track V Phase 6 (V-19...V-26 Autonomous QA Bot fleet & Orchestrator self-healing loop). Plan: [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). **Auto-deploy wipes uncommitted work — always push.**
 7. **F-13** — `specs/active/F-13.md` stays locked for food follow-up; do not mix with Q-13 files.
 8. **Track D — D-2 is the ACTIVE execute ID (see top).** One SQL = **D1** (Firebase Auth + R2). Plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 superseded.** Muse audit: [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** = unpaid recovery when 402 lifts (~**2026-09-24**), not a paid dump. R2 leak-stop is **D-9 DONE**; R2 deletes are **D-10 after D-1**. **SQLite on the VPS is D-5: benchmark only, after V-16.** No cutover without D-6 human go.
@@ -97,7 +97,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
 | New feature or update | [RELIABILITY.md](./RELIABILITY.md) **§10** gate table in the same change, then the F / B / L id. Do not start with a live case matrix. |
 
-Do **not** start: putting curator back on Analyze, reopening FDC, **R-13.4** Worker rewrite, god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, **paying to unpause Supabase**, **R2 photo deletes before D-1**. **R-5** is superseded by Track D (D1 is already primary). **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is `blocked_human` until VPS-2 exists. **Track D D-1** waits for unpaid 402 lift (~24 Sep). **Track D D-5** is `blocked_human` until V-16. **L-5** stays human until a locale is named.  
+Do **not** start: putting curator back on Analyze, reopening FDC, **R-13.4** Worker rewrite, god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, **paying to unpause Supabase**, **R2 photo deletes before D-1**. **R-5** is superseded by Track D (D1 is already primary). **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is LIVE on VPS-2 since 2026-09-20. **Track D D-1** waits for unpaid 402 lift (~24 Sep). **Track D D-5** is `blocked_human` until V-16. **L-5** stays human until a locale is named.  
 F-10 lives here + [FOOD.md](./FOOD.md) Process. Track V lives here + [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Track D lives here + [DATA_PLANE.md](./DATA_PLANE.md).
 
 ---
@@ -461,10 +461,10 @@ Rules unchanged: work item = class · inner = vitest · outer = one example · h
 
 | Still to do | Done when |
 |---|---|
-| **Q-4** `AgentResultTable` thin | **Current work.** Packet `specs/active/q-4-agent-result-table.md` locked. Extract-only. Any agent. |
+| **Q-4** `AgentResultTable` thin | **Shipped.** Packet retired to `specs/done/q-4-agent-result-table.SUPERSEDED.md` (+ q-4a…q-4d splits). Extract-only. |
 | **Q-8** Process goldens | **Shipped 8.1–8.6.** |
 | **Q-9** Website consolidation | **Shipped 2026-09-16** extract-only (`specs/done/q-9-website-consolidation.md`). Do not rewrite. |
-| **Q-10** Dependency consolidation | **Current work after Q-4.** Packet `specs/active/q-10-dependency-audit.md` locked. Hygiene only. **Not** R-7 knip. |
+| **Q-10** Dependency consolidation | **Shipped.** Packet retired to `specs/done/q-10-dependency-audit.md`. Hygiene only. **Not** R-7 knip. |
 
 **Landed — recently completed:**
 - Make G-B2/5/6/7/9 execute the helper they name
@@ -510,7 +510,7 @@ Q-9 website consolidation    ← shipped (extract-only)
 Q-4 AgentResultTable thin    ← shipped
 Q-10 dependency audit        ← shipped
 Q-11 App shell decoupling     ← DONE — 11.7/11.10/11.11/11.12 landed (App 350, Header 690)
-R-13.1 / Track V             ← PARKED blocked_human; host = OVH VPS-2 ([VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)); Cloudflare extra URL still parked; Render still live
+R-13.1 / Track V             ← LIVE on OVH VPS-2 since 2026-09-20 ([VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md)); Worker health-tracker-2 is a no-build edge proxy; Render soak-pending-delete
 Track D (one SQL)            ← PARKED; live = D1 ([DATA_PLANE.md](./DATA_PLANE.md)); R-5 superseded; SQLite = D-5 benchmark after V-16, not a cutover
 Cloud Run Option A           ← SUPERSEDED (plan/GCP_FREE_TIER_MIGRATION.md)
 ```

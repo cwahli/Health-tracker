@@ -193,7 +193,7 @@ QA Runner:     node scripts/qa-runner.mjs --journey={meal|biomarker|onboarding}
 6. `npm run dev` on a laptop/AI Studio stays Vite on 3000. Production is `dist/`.
 7. Do not co-host unrestricted agents as root with the live process. After V-13, agent user may be the same unix user but must not `kill` Caddy/`health-tracker` as a habit; restart is `systemctl`.
 8. In-memory job maps ⇒ **one** Node process. Do not put a load balancer with two app workers.
-9. Playwright/e2e stays off this box until a later, explicit ID.
+9. Playwright/e2e against the live host is QA-fleet only (Phase 6+ `qa-runner.mjs`); no ad-hoc e2e runs on the VPS.
 10. Track V does not mix with Q-11 / F-13 application packets in the same working tree.
 
 ---

@@ -187,7 +187,11 @@ export async function autoLinkBrandItemPhoto(args: {
         'SELECT id, image_url FROM brand_menu_items WHERE country_code = ? AND chain_key = ? AND (dish_name_key = ? OR dish_name = ?) LIMIT 1',
         [countryCode, chainKey, dishNameKey, args.dishName || dishNameKey]
       );
-      const existing = existingRes?.results || [];
+      if (!existingRes.success) {
+        console.warn('[autoLinkBrandItemPhoto] D1 lookup failed, skipping photo link:', existingRes.error);
+        return false;
+      }
+      const existing = existingRes.results || [];
       if (existing.length > 0 && (!existing[0].image_url || existing[0].image_url.trim() === '')) {
         await d1Query(
           'UPDATE brand_menu_items SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
@@ -889,7 +893,9 @@ export async function autoRegisterChainMenuItem(
         }
       }
 
-      cleanBrandChain({ chainKey: chain_key, countryCode, onLog: addDebugLog }).catch(() => {});
+      cleanBrandChain({ chainKey: chain_key, countryCode, onLog: addDebugLog }).catch((e: any) => {
+        addDebugLog(`[AutoChainRegister] background brand clean failed: ${e?.message || e}`);
+      });
     } finally {
       inFlightRegisterLocks.delete(lockKey);
     }
@@ -1723,8 +1729,11 @@ export function registerBrandMenuRoutes(app: Express) {
              WHERE image_urls IS NOT NULL AND image_urls != '' AND image_urls != '[]'
              ORDER BY updated_at DESC
              LIMIT 50`
-          );
-          const d1Meals = d1Res?.results || [];
+           );
+          if (!d1Res.success) {
+            throw new Error(d1Res.error || 'D1 query failed');
+          }
+          const d1Meals = d1Res.results || [];
           if (Array.isArray(d1Meals)) {
             meals = d1Meals.map((d: any) => {
               let urls: any[] = [];
@@ -1774,9 +1783,15 @@ export function registerBrandMenuRoutes(app: Express) {
         if (isD1Configured()) {
           try {
             const rowsRes = await d1Query<any>('SELECT * FROM food_logs WHERE id = ? LIMIT 1', [mealLogId]);
-            const rows = rowsRes?.results || [];
-            if (rows.length > 0) mealData = rows[0];
-          } catch (_) {}
+            if (!rowsRes.success) {
+              console.warn('[link-meal] D1 meal lookup failed:', rowsRes.error);
+            } else {
+              const rows = rowsRes.results || [];
+              if (rows.length > 0) mealData = rows[0];
+            }
+          } catch (e: any) {
+            console.warn('[link-meal] D1 meal lookup threw:', e?.message || e);
+          }
         }
 
         if (mealData) {
@@ -1999,19 +2014,27 @@ export async function fetchAllDatabaseBrands(): Promise<{ allBrands: Set<string>
     try {
       const { d1Query } = await import('./server_d1.js');
       const resBmi = await d1Query<any>('SELECT chain_name, chain_key FROM brand_menu_items LIMIT 500');
-      (resBmi.results || []).forEach((r: any) => {
-        const name = (r.chain_name || '').toLowerCase().trim();
-        const key = (r.chain_key || '').replace(/_/g, ' ').toLowerCase().trim();
-        if (name) allBrands.add(name);
-        if (key) allBrands.add(key);
-      });
+      if (!resBmi.success) {
+        console.warn('[brand-menu] D1 brand fetch failed, using defaults only:', resBmi.error);
+      } else {
+        (resBmi.results || []).forEach((r: any) => {
+          const name = (r.chain_name || '').toLowerCase().trim();
+          const key = (r.chain_key || '').replace(/_/g, ' ').toLowerCase().trim();
+          if (name) allBrands.add(name);
+          if (key) allBrands.add(key);
+        });
+      }
       const resCms = await d1Query<any>('SELECT display_name, chain_key FROM chain_menu_sources LIMIT 500');
-      (resCms.results || []).forEach((r: any) => {
-        const name = (r.display_name || '').toLowerCase().trim();
-        const key = (r.chain_key || '').replace(/_/g, ' ').toLowerCase().trim();
-        if (name) allBrands.add(name);
-        if (key) allBrands.add(key);
-      });
+      if (!resCms.success) {
+        console.warn('[brand-menu] D1 chain-source fetch failed, using defaults only:', resCms.error);
+      } else {
+        (resCms.results || []).forEach((r: any) => {
+          const name = (r.display_name || '').toLowerCase().trim();
+          const key = (r.chain_key || '').replace(/_/g, ' ').toLowerCase().trim();
+          if (name) allBrands.add(name);
+          if (key) allBrands.add(key);
+        });
+      }
     } catch (d1Err) {
       console.warn('[fetchAllDatabaseBrands] D1 fetch warning:', d1Err);
     }
