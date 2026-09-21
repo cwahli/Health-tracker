@@ -21,6 +21,10 @@ const specs = [
   // Saved-meal lineage: child tag, click-to-master, propagation, re-review,
   // dead-photo letter tile (THUMB_FALLBACK class).
   'prototype/tests/saved-meal-lineage.spec.ts',
+  // Track T (T-1…T-8): staged-meal compose tray — thumbnails, gram inputs,
+  // single confirm, staged-only submit, image gallery, OCR restage hydration.
+  // The spec was the binding per-item gate but ran in no standing job.
+  'prototype/tests/staged-tray.spec.ts',
 ];
 
 console.log('── shell-smoke (Playwright stubs, no Gemini) ──');

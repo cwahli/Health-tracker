@@ -581,7 +581,7 @@ EN/ID UI chrome for login, home, chat, food history, insights, trends/health, pr
 
 **Gates while active:** `npm run scorecard:debug` (`i18n_required_chrome` PASS) + named i18n vitest (`i18n.test.ts`, `dietitianInstructions.i18n.test.ts`) + I18N-A11Y soak into `golden/scorecard/current/a11y/` when chrome changes.
 
-## Track T — Staged-meal compose fixes (2026-09-18, active)
+## Track T — Staged-meal compose fixes (2026-09-18 → 2026-09-21, COMPLETE)
 
 Screenshot-reported defects in the Matches / staged-tray / composite-card flow (`LogChat.tsx` Matches dropdown + tray, `compositeFoodCalculation.ts`, `FoodCard.tsx` + `NutritionLabelTable.tsx`). Work in this order. One class, one item, named tests.
 
@@ -596,6 +596,9 @@ Screenshot-reported defects in the Matches / staged-tray / composite-card flow (
 | **T-5** | `STALE_SUBMIT` | Submit works staged-only: empty input + staged tags sends via instant composite path; staged + plain query text still routes composite (no silent agent-path drop) | `server_food_multi_composition.test.ts` · PW `staged-only submit composes instantly` + PW `staged plus query text still composes` | `POST /loop`; paint expected.json |
 | **T-6** | `MEAL_IMAGE_UNIQUE` | Card shows preview AND full image(s): composite `allImages` render as gallery (multi-image meal shows all), preview stays; agent-path thread carries staged photos on the user message (scout input untouched) | `imageResolver.contract.test.ts` · PW `composite card gallery shows every staged image` + PW `agent-path thread carries staged photos` | Duplicate R2 uploads; drop `preferred_language`-style widening |
 | **T-7** | `FALSE_FRIEND` | OCR badge on restaged meals: `dbSource`/`labelNutrientsPerServing`/`rawNutritionLabel` propagate tag → calc → card, "Nutrition Facts (OCR Label)" shows with **zero** extra agent calls (assert no unexpected `/api` POSTs in PW) | `brandCurator.test.ts` row + `debugPayload.test.ts` · PW `restaged OCR meal shows label badge with no agent call` | New agent/dispatch for OCR; invent a catalog primitive |
+| **T-8** | `THIN_ROW_HYDRATE` | Restaging a past meal from `/api/food/search` hydrates thin API rows (nutrients / images / OCR provenance) from the full saved local log before the composite card renders — no extra network or agent call | `compositeFoodCalculation.test.ts` (`hydratePreviousMealTag` row) · PW `staged tray: T-8 thin restage hydrates nutrients, images and OCR from saved log` | New catalog primitive; live R2/Gemini calls in the loop |
+
+**Status 2026-09-21:** T-1…T-8 landed (`b9a37e1`…`a1b7449`; T-8 `239a6d9`/`a9e9886`). `prototype/tests/staged-tray.spec.ts` is **10/10 green** and wired into `scripts/assert-shell-smoke.mjs`; no Track T item is open.
 
 **Process for Track T:**desk-check each item against `docs/agent/DOMAIN_REGRESSION_MAP.md` matching row; `tsc` + named vitest + the item's PW test per item; `journey-guard` + shell-smoke before COMPLETE. New user-visible copy (if any) goes in `translations.ts` en+id parity.
 

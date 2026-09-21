@@ -299,6 +299,7 @@ Ratchets: `CROSS_DEVICE_SYNC`, `STALE_TURN`, `GOLDEN_SCORER_DRIFT`, `meal_image_
 | `compare-mode-six-cases.spec.ts` / `meal03-compare-benchmark.spec.ts` | Compare 6-set | UNTRACKED |
 | `receptionist-*.spec.ts` | Receptionist | stub |
 | `dialog-inventory.spec.ts` | Q-8.3 | S-7 green 2026-09-12 |
+| `staged-tray.spec.ts` | Meal / Track T (T-1…T-8) | 10/10 green 2026-09-21; wired into `assert-shell-smoke.mjs` |
 | `key-journeys.spec.ts` / `r3-smoke.spec.ts` | shell / leftover-English | untracked here |
 | `example.spec.ts` | — | ignore |
 
