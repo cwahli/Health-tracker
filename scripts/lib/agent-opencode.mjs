@@ -53,7 +53,7 @@ export function mapOpencodeEvent(raw) {
   }
 }
 
-export function listModels({ opencodeBin, spawnImpl = spawn, timeoutMs = 30000 } = {}) {
+export function execOpencode(args, { opencodeBin, spawnImpl = spawn, timeoutMs = 30000 } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const done = (value) => {
@@ -61,31 +61,56 @@ export function listModels({ opencodeBin, spawnImpl = spawn, timeoutMs = 30000 }
       settled = true;
       resolve(value);
     };
-    const child = spawnImpl(resolveOpencodeBin(opencodeBin), ['models'], {
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    let child;
+    try {
+      child = spawnImpl(resolveOpencodeBin(opencodeBin), args, {
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch {
+      done('');
+      return;
+    }
     let out = '';
-    const timer = timeoutMs > 0 ? setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // ignore
-      }
-      done([]);
-    }, timeoutMs) : null;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            try {
+              child.kill('SIGKILL');
+            } catch {
+              // ignore
+            }
+            done(out);
+          }, timeoutMs)
+        : null;
     child.stdout?.on('data', (chunk) => {
       out += chunk.toString();
     });
     child.on('error', () => {
       if (timer) clearTimeout(timer);
-      done([]);
+      done(out);
     });
     child.on('close', () => {
       if (timer) clearTimeout(timer);
-      done(out.split('\n').map((line) => line.trim()).filter(Boolean));
+      done(out);
     });
   });
+}
+
+export async function listModels(opts = {}) {
+  const out = await execOpencode(['models'], opts);
+  return out
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+export function listAgents(opts = {}) {
+  return execOpencode(['agent', 'list'], opts);
+}
+
+export function listModelsVerbose(opts = {}) {
+  return execOpencode(['models', '--verbose'], { timeoutMs: 60000, ...opts });
 }
 
 export function buildOpencodeArgs({ prompt, model, variant, thinking = true, extraArgs = [] }) {
