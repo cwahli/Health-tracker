@@ -78,8 +78,12 @@ CREATE INDEX IF NOT EXISTS idx_profiles_uid ON profiles(firebase_uid);
 CREATE TABLE IF NOT EXISTS issue_tags (
   id TEXT PRIMARY KEY,
   title TEXT,
+  title_key TEXT,
+  category TEXT DEFAULT 'foodcart',
   status TEXT DEFAULT 'open',
   comments TEXT,
+  resolution_note TEXT DEFAULT '',
+  whats_still_open TEXT DEFAULT '',
   work_item TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
@@ -89,6 +93,17 @@ CREATE TABLE IF NOT EXISTS issue_tags (
 CREATE TABLE IF NOT EXISTS issue_backlog (
   id TEXT PRIMARY KEY,
   tag_id TEXT,
+  status TEXT DEFAULT 'open',
+  issue_type TEXT DEFAULT '',
+  severity TEXT DEFAULT '',
+  country_code TEXT DEFAULT '',
+  chain_key TEXT DEFAULT '',
+  dish_query TEXT DEFAULT '',
+  context TEXT DEFAULT '',
+  source_url TEXT DEFAULT '',
+  user_note TEXT DEFAULT '',
+  resolution_note TEXT DEFAULT '',
+  ever_tagged INTEGER DEFAULT 0,
   payload TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -97,6 +112,7 @@ CREATE TABLE IF NOT EXISTS issue_tag_links (
   id TEXT PRIMARY KEY,
   tag_id TEXT,
   backlog_id TEXT,
+  issue_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -325,6 +341,30 @@ export async function ensureD1Schema(): Promise<{ success: boolean; error?: stri
     try {
       await d1Query('ALTER TABLE food_logs ADD COLUMN source_meal_id TEXT DEFAULT \'\'');
     } catch (_) {}
+    // D-2 issue-tracker columns (Supabase code drain): additive only.
+    const issueAlters = [
+      'ALTER TABLE issue_tags ADD COLUMN title_key TEXT',
+      'ALTER TABLE issue_tags ADD COLUMN category TEXT DEFAULT \'foodcart\'',
+      'ALTER TABLE issue_tags ADD COLUMN resolution_note TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_tags ADD COLUMN whats_still_open TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN status TEXT DEFAULT \'open\'',
+      'ALTER TABLE issue_backlog ADD COLUMN issue_type TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN severity TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN country_code TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN chain_key TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN dish_query TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN context TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN source_url TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN user_note TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN resolution_note TEXT DEFAULT \'\'',
+      'ALTER TABLE issue_backlog ADD COLUMN ever_tagged INTEGER DEFAULT 0',
+      'ALTER TABLE issue_tag_links ADD COLUMN issue_id TEXT',
+    ];
+    for (const sql of issueAlters) {
+      try {
+        await d1Query(sql);
+      } catch (_) {}
+    }
     await ensureNutritionD1Seed();
     return { success: true };
   } catch (err: any) {
