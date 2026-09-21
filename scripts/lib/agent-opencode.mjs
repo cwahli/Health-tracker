@@ -5,11 +5,19 @@ import os from 'node:os';
 
 const HOME = os.homedir();
 
+export function expandSkillPath(p, workspace) {
+  const value = String(p ?? '').trim();
+  if (!value) return '';
+  if (value === '~') return os.homedir();
+  if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
+  return path.isAbsolute(value) ? value : path.resolve(workspace || '.', value);
+}
+
 export function buildOpencodeEnv({ workspace, allowExternalDirectory, sharedSkills } = {}) {
   const content = { $schema: 'https://opencode.ai/config.json' };
   if (allowExternalDirectory) content.permission = { external_directory: 'allow' };
   const paths = (Array.isArray(sharedSkills) ? sharedSkills : [])
-    .map((p) => (path.isAbsolute(p) ? p : path.resolve(workspace || '.', p)))
+    .map((p) => expandSkillPath(p, workspace))
     .filter(Boolean);
   if (paths.length) content.skills = { paths };
   if (Object.keys(content).length <= 1) return {};
