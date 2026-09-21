@@ -5,8 +5,13 @@ import path from 'node:path';
 
 import { compressReasoning, cleanReasoning } from '../scripts/lib/reasoning-compress.mjs';
 import { Throttle } from '../scripts/lib/tg-throttle.mjs';
-import { mapOpencodeEvent, buildOpencodeArgs, buildOpencodeEnv } from '../scripts/lib/agent-opencode.mjs';
-import { clamp, chunkText, MAX_MESSAGE_CHARS, TelegramApi } from '../scripts/lib/tg-api.mjs';
+import {
+  mapOpencodeEvent,
+  buildOpencodeArgs,
+  buildOpencodeEnv,
+  expandSkillPath,
+} from '../scripts/lib/agent-opencode.mjs';
+import { clamp, chunkText, MAX_MESSAGE_CHARS, TelegramApi, mediaMethod, mediaField } from '../scripts/lib/tg-api.mjs';
 import { loadRegistry, getBot, resolveToken, normalizeConfig } from '../scripts/lib/registry.mjs';
 import {
   parseCommand,
@@ -21,6 +26,7 @@ import {
   formatModelList,
   formatUsage,
   formatTokens,
+  extractMedia,
 } from '../scripts/lib/commands.mjs';
 
 describe('reasoning-compress', () => {
@@ -128,6 +134,15 @@ describe('buildOpencodeEnv', () => {
 
   it('returns an empty env when nothing is configured', () => {
     expect(buildOpencodeEnv({})).toEqual({});
+  });
+
+  it('expands ~ and keeps absolute skill paths', () => {
+    expect(expandSkillPath('scripts/skills', '/ws')).toBe('/ws/scripts/skills');
+    expect(expandSkillPath('/abs/skills', '/ws')).toBe('/abs/skills');
+    expect(expandSkillPath('~/.hermes/shared_skills', '/ws')).toBe(
+      path.join(os.homedir(), '.hermes/shared_skills'),
+    );
+    expect(expandSkillPath('', '/ws')).toBe('');
   });
 });
 
@@ -374,6 +389,44 @@ describe('usage formatting', () => {
     expect(formatTokens(200000)).toBe('200k');
     expect(formatTokens(1000000)).toBe('1M');
     expect(formatTokens(999)).toBe('999');
+  });
+});
+
+describe('media delivery', () => {
+  it('pulls MEDIA: lines out of the text', () => {
+    const { text, media } = extractMedia('MEDIA:/tmp/a.png\nHere it is.\nMEDIA:/tmp/b.pdf');
+    expect(media).toEqual(['/tmp/a.png', '/tmp/b.pdf']);
+    expect(text).toBe('Here it is.');
+  });
+
+  it('ignores inline MEDIA mentions', () => {
+    const { text, media } = extractMedia('see MEDIA:/tmp/a.png inline');
+    expect(media).toEqual([]);
+    expect(text).toBe('see MEDIA:/tmp/a.png inline');
+  });
+
+  it('maps file extensions to telegram methods', () => {
+    expect(mediaMethod('/a/b.png')).toBe('sendPhoto');
+    expect(mediaMethod('/a/b.mp4')).toBe('sendVideo');
+    expect(mediaMethod('/a/b.ogg')).toBe('sendAudio');
+    expect(mediaMethod('/a/b.zip')).toBe('sendDocument');
+    expect(mediaField('sendPhoto')).toBe('photo');
+    expect(mediaField('sendDocument')).toBe('document');
+  });
+
+  it('uploads a file via the matching telegram method', async () => {
+    const file = path.join(os.tmpdir(), `ocb-media-${Date.now()}.png`);
+    fs.writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const calls: Array<{ url: string; init: { body: unknown } }> = [];
+    const fetchImpl = async (url: string, init: { body: unknown }) => {
+      calls.push({ url, init });
+      return { json: async () => ({ ok: true, result: { message_id: 7 } }) };
+    };
+    const api = new TelegramApi('tok', { fetchImpl });
+    await api.sendMediaFile(123, file);
+    expect(calls[0].url).toContain('/bottok/sendPhoto');
+    expect(calls[0].init.body).toBeInstanceOf(FormData);
+    fs.unlinkSync(file);
   });
 });
 

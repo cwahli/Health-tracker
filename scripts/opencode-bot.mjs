@@ -27,6 +27,7 @@ import {
   statusText,
   formatModelList,
   formatUsage,
+  extractMedia,
 } from './lib/commands.mjs';
 
 const HOME = os.homedir();
@@ -122,6 +123,11 @@ function makeCaches() {
 
 function opencodeEnv(config) {
   return buildOpencodeEnv(config.agent);
+}
+
+function chatEnv(api, chatId) {
+  if (!api?.token) return {};
+  return { TELEGRAM_BOT_TOKEN: api.token, TELEGRAM_CHAT_ID: String(chatId) };
 }
 
 async function getModels(config, caches) {
@@ -312,7 +318,26 @@ class ProgressRenderer {
       await this.deliver(withFooter(`Done${code}, but the model returned no text output.`));
       return;
     }
-    await this.deliver(withFooter(result.finalText));
+    const { text: body, media } = extractMedia(withFooter(result.finalText));
+    await this.deliver(body);
+    await this.deliverMedia(media);
+  }
+
+  async deliverMedia(paths) {
+    for (const file of paths) {
+      if (this.dryRun) {
+        console.log(`[media] ${file}`);
+        continue;
+      }
+      try {
+        await this.api.sendMediaFile(this.chatId, file);
+      } catch (err) {
+        if (err instanceof TelegramError && err.isRateLimit) {
+          this.throttle?.pause(err.retryAfter);
+        }
+        await this.deliver(`Could not send ${file}: ${err.message}`).catch(() => {});
+      }
+    }
   }
 }
 
@@ -592,7 +617,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       onEvent: (event) => renderer.onEvent(event),
       onSpawn: (child) => running.set(chatId, { child, aborted: false }),
       extraArgs,
-      env: opencodeEnv(config),
+      env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
     });
 
     if (result.sessionID) {
