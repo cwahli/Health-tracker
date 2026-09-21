@@ -111,12 +111,19 @@ describe('normalizeConfig', () => {
       {
         id: 'opencode',
         telegram: { tokenEnv: 'T', allowedUserIds: ['1'] },
-        agent: { kind: 'opencode', workspace: '/ws', allowExternalDirectory: true, sharedSkills: ['.agents/skills'] },
+        agent: {
+          kind: 'opencode',
+          workspace: '/ws',
+          allowExternalDirectory: true,
+          sharedSkills: ['.agents/skills'],
+          playwrightOutputDir: '/tmp/shots',
+        },
       },
       { defaultWorkspace: '/default' },
     );
     expect(cfg.agent.allowExternalDirectory).toBe(true);
     expect(cfg.agent.sharedSkills).toEqual(['.agents/skills']);
+    expect(cfg.agent.playwrightOutputDir).toBe('/tmp/shots');
     expect(cfg.telegram.allowedUserIds).toEqual([1]);
   });
 
@@ -151,6 +158,20 @@ describe('buildOpencodeEnv', () => {
       path.join(os.homedir(), '.hermes/shared_skills'),
     );
     expect(expandSkillPath('', '/ws')).toBe('');
+  });
+
+  it('adds the playwright MCP server when an output dir is set', () => {
+    const env = buildOpencodeEnv({ workspace: '/ws', playwrightOutputDir: '/tmp/shots' });
+    const cfg = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    expect(cfg.mcp.playwright.type).toBe('local');
+    expect(cfg.mcp.playwright.enabled).toBe(true);
+    expect(cfg.mcp.playwright.command).toContain('--output-dir');
+    expect(cfg.mcp.playwright.command).toContain('/tmp/shots');
+  });
+
+  it('omits mcp when no output dir is set', () => {
+    const env = buildOpencodeEnv({ workspace: '/ws', allowExternalDirectory: true });
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT).mcp).toBeUndefined();
   });
 });
 

@@ -822,6 +822,9 @@ async function main() {
   const registry = loadRegistry(registryPath);
   const bot = getBot(registry, args.id);
   const config = normalizeConfig(bot, { defaultWorkspace: REPO_ROOT });
+  if (config.agent.playwrightOutputDir) {
+    fs.mkdirSync(config.agent.playwrightOutputDir, { recursive: true });
+  }
 
   if (args.checkConfig) {
     printConfig(config, registryPath);
