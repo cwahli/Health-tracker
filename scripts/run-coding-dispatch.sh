@@ -81,7 +81,7 @@ if [ -f "$DISPATCH_LOCK" ]; then
   if [ -n "$LOCKED_PID" ] && kill -0 "$LOCKED_PID" 2>/dev/null; then
     echo "[Dispatcher] Concurrency lock: PID $LOCKED_PID is active on $LOCKED_BUG."
     bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* Concurrency Lock: Task \`$LOCKED_BUG\` is currently executing (PID \`$LOCKED_PID\`). Please wait for it to complete." 2>/dev/null || true
-    exit 0
+    exit 1
   else
     rm -f "$DISPATCH_LOCK" 2>/dev/null || true
   fi

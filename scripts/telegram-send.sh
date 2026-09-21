@@ -60,7 +60,7 @@ if [ -n "$CLI_TOKEN" ]; then
 fi
 
 if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-  # 1. Check targeted profile .env if specified
+  # 1. This profile's own bot, when it has one (qa_meal does).
   if [ -n "$TARGET_PROFILE" ] && [ -f "$HOME/.hermes/profiles/${TARGET_PROFILE}/.env" ]; then
     TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/profiles/${TARGET_PROFILE}/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
     if [ -n "$TOKEN" ]; then
@@ -68,37 +68,17 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
     fi
   fi
 
-  # 2. Check global ~/.hermes/.env
+  # 2. Otherwise the primary bot already running from ~/.hermes/.env.
+  # orchestrator, qa_biomarker, and qa_onboarding have no bot of their own.
+  # Do not borrow another profile's token, and do not ask the user to paste one.
   if [ -z "$TELEGRAM_BOT_TOKEN" ] && [ -f "$HOME/.hermes/.env" ]; then
     if [ -n "$TARGET_PROFILE" ]; then
-      if [ "$TARGET_PROFILE" = "orchestrator" ]; then
-        echo "[Telegram Send] 🚨 ERROR: Dedicated TELEGRAM_BOT_TOKEN is missing in ~/.hermes/profiles/orchestrator/.env! Will not masquerade as @Health-tracker-bot. Please configure TELEGRAM_BOT_TOKEN for Orchestrator." >&2
-      else
-        echo "[Telegram Send] ⚠️ WARNING: Profile '${TARGET_PROFILE}' has NO TELEGRAM_BOT_TOKEN in ~/.hermes/profiles/${TARGET_PROFILE}/.env! Falling back to global ~/.hermes/.env (@Health-tracker-bot)." >&2
-        TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
-        if [ -n "$TOKEN" ]; then
-          TELEGRAM_BOT_TOKEN="$TOKEN"
-        fi
-      fi
-    else
-      TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
-      if [ -n "$TOKEN" ]; then
-        TELEGRAM_BOT_TOKEN="$TOKEN"
-      fi
+      echo "[Telegram Send] Profile '${TARGET_PROFILE}' has no bot token. Delivering via the primary Health-tracker bot." >&2
     fi
-  fi
-
-  # 3. Fallback: search profile directories
-  if [ -z "$TELEGRAM_BOT_TOKEN" ] && [ "$TARGET_PROFILE" != "orchestrator" ]; then
-    for env_file in "$HOME/.hermes/profiles/"*"/".env; do
-      if [ -f "$env_file" ]; then
-        TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$env_file" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
-        if [ -n "$TOKEN" ]; then
-          TELEGRAM_BOT_TOKEN="$TOKEN"
-          break
-        fi
-      fi
-    done
+    TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$HOME/.hermes/.env" 2>/dev/null | head -n1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+    if [ -n "$TOKEN" ]; then
+      TELEGRAM_BOT_TOKEN="$TOKEN"
+    fi
   fi
 fi
 

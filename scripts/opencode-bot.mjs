@@ -33,6 +33,60 @@ import {
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
+const DISPATCH_LOCK = path.join(HOME, '.hermes', 'dispatch_lock');
+
+function lockHolder() {
+  let info = '';
+  try {
+    info = fs.readFileSync(DISPATCH_LOCK, 'utf8').trim();
+  } catch {
+    return null;
+  }
+  const splitAt = info.indexOf(':');
+  if (splitAt < 1) return null;
+  const pid = Number(info.slice(0, splitAt));
+  const bug = info.slice(splitAt + 1) || 'unknown';
+  if (!Number.isFinite(pid) || pid <= 0) return null;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return null;
+  }
+  return { pid, bug };
+}
+
+function acquireDispatchLock() {
+  fs.mkdirSync(path.dirname(DISPATCH_LOCK), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const holder = lockHolder();
+    if (holder) return holder;
+    try {
+      const fd = fs.openSync(DISPATCH_LOCK, 'wx');
+      fs.writeFileSync(fd, `${process.pid}:opencode-chat\n`);
+      fs.closeSync(fd);
+      return null;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      if (!lockHolder()) {
+        try {
+          fs.unlinkSync(DISPATCH_LOCK);
+        } catch {
+          // another writer removed it
+        }
+      }
+    }
+  }
+  return lockHolder() || { pid: 0, bug: 'unknown' };
+}
+
+function releaseDispatchLock() {
+  try {
+    const info = fs.readFileSync(DISPATCH_LOCK, 'utf8');
+    if (info.startsWith(`${process.pid}:`)) fs.unlinkSync(DISPATCH_LOCK);
+  } catch {
+    // already gone
+  }
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -600,6 +654,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     return;
   }
 
+  const holder = acquireDispatchLock();
+  if (holder) {
+    await api.sendMessage(
+      chatId,
+      `The repo is busy with ${holder.bug} (pid ${holder.pid}). Wait until that finishes. A second coding agent would overwrite the same tree.`,
+    );
+    return;
+  }
+
   busy.add(chatId);
   const renderer = new ProgressRenderer({ api, throttle, chatId, ...config.progress });
   try {
@@ -653,6 +716,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     renderer.stopTyping();
     running.delete(chatId);
     busy.delete(chatId);
+    releaseDispatchLock();
   }
 }
 
