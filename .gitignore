@@ -27,3 +27,10 @@ qa-evidence/
 .aider*
 scripts/_qwen_ping.txt
 .freebuff/
+
+# Antigravity & mobile symlinks
+.antigravity/
+settings.json
+agent
+download
+screenshots
