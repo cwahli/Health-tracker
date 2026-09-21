@@ -14,7 +14,58 @@ import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import { normalizeChainKey } from './serverBrandMenu.js';
 import { assignMissingPublicNs, hydrateWorkItem, lastCommit, publicId } from './src/utils/bugWorkItem';
-import { isD1Configured, d1Query } from './server_d1.js';
+import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
+
+// ---------------------------------------------------------------------------
+// D-2: D1-only data access for the issue tracker. D1 stores JSON columns
+// (work_item, comments, payload) as TEXT — norm helpers parse on read and
+// callers stringify on write. Ids are explicit (`tag_`/`iss_`/`link_`).
+// ---------------------------------------------------------------------------
+
+function newTagId(): string {
+  return `tag_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function newIssueId(): string {
+  return `iss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Parse D1 TEXT JSON columns back to objects/arrays. */
+export function normIssueTag(row: any): any {
+  if (!row) return row;
+  return {
+    ...row,
+    category: row.category || 'foodcart',
+    whats_still_open: row.whats_still_open || '',
+    work_item: typeof row.work_item === 'string' ? safeJsonParse(row.work_item, null) : (row.work_item ?? null),
+    comments: typeof row.comments === 'string' ? safeJsonParse(row.comments, []) : (row.comments ?? []),
+  };
+}
+
+/** Parse D1 TEXT payload column. */
+export function normBacklogRow(row: any): any {
+  if (!row) return row;
+  return {
+    ...row,
+    payload: typeof row.payload === 'string' ? safeJsonParse(row.payload, null) : (row.payload ?? null),
+  };
+}
+
+async function d1GetTag(id: string): Promise<any | null> {
+  const r = await d1Query<any>(`SELECT * FROM issue_tags WHERE id = ? LIMIT 1`, [id]);
+  if (!r.success || !r.results || r.results.length === 0) return null;
+  return normIssueTag(r.results[0]);
+}
+
+/** INSERT OR IGNORE link (mirrors issue_id into backlog_id for legacy readers). */
+async function d1LinkTag(tagId: string, issueId: string): Promise<void> {
+  const linkId = `${tagId}::${issueId}`;
+  await d1Query(
+    `INSERT OR IGNORE INTO issue_tag_links (id, tag_id, backlog_id, issue_id) VALUES (?, ?, ?, ?)`,
+    [linkId, tagId, issueId, issueId]
+  );
+  await d1Query(`UPDATE issue_backlog SET ever_tagged = 1 WHERE id = ?`, [issueId]);
+}
 
 export async function uploadBacklogPayloadToR2(id: string, payload: any, customKey?: string): Promise<string> {
   try {
@@ -239,7 +290,6 @@ export function parseNoteIntoTagTitles(userNote: string | null | undefined): str
 }
 
 async function ensureTagsForIssue(
-  supabaseAdmin: any,
   issueId: string,
   userNote: string | null | undefined,
   issueType?: string | null
@@ -259,172 +309,103 @@ async function ensureTagsForIssue(
     if (!title_key) continue;
 
     let tagId: string | null = null;
-    const { data: existing } = await supabaseAdmin
-      .from('issue_tags')
-      .select('id')
-      .eq('title_key', title_key)
-      .maybeSingle();
+    const existingRes = await d1Query<any>(`SELECT id FROM issue_tags WHERE title_key = ? LIMIT 1`, [title_key]);
+    const existing = existingRes.results?.[0];
 
     if (existing?.id) {
       tagId = existing.id;
       // Re-open if previously soft-closed (we hard-delete normally; keep for safety)
-      await supabaseAdmin
-        .from('issue_tags')
-        .update({ status: 'to_fix', resolved_at: null })
-        .eq('id', tagId)
-        .eq('status', 'fixed');
+      await d1Query(`UPDATE issue_tags SET status = 'to_fix', resolved_at = NULL WHERE id = ? AND status = 'fixed'`, [tagId]);
     } else {
-      const { data: created, error } = await supabaseAdmin
-        .from('issue_tags')
-        .insert({ title, title_key, status: 'to_fix' })
-        .select('id')
-        .single();
-      if (error) {
+      const freshId = newTagId();
+      const ins = await d1Query(`INSERT INTO issue_tags (id, title, title_key, status) VALUES (?, ?, ?, 'to_fix')`, [
+        freshId,
+        title,
+        title_key,
+      ]);
+      if (!ins.success) {
         // race: unique conflict
-        const { data: again } = await supabaseAdmin
-          .from('issue_tags')
-          .select('id')
-          .eq('title_key', title_key)
-          .maybeSingle();
-        tagId = again?.id || null;
+        const againRes = await d1Query<any>(`SELECT id FROM issue_tags WHERE title_key = ? LIMIT 1`, [title_key]);
+        tagId = againRes.results?.[0]?.id || null;
       } else {
-        tagId = created?.id || null;
+        tagId = freshId;
       }
     }
 
     if (tagId) {
       tagIds.push(tagId);
-      const { error: linkErr } = await supabaseAdmin
-        .from('issue_tag_links')
-        .upsert({ tag_id: tagId, issue_id: issueId }, { onConflict: 'tag_id,issue_id' });
-      if (linkErr) console.warn('[issue_tag_links] upsert:', linkErr.message);
+      await d1LinkTag(tagId, issueId);
     }
   }
 
   if (tagIds.length > 0) {
     // Mark report so when all tags are fixed/removed it becomes a deletion candidate
-    const { error: everErr } = await supabaseAdmin
-      .from('issue_backlog')
-      .update({ ever_tagged: true })
-      .eq('id', issueId);
-    if (everErr) console.warn('[issue_backlog] ever_tagged update:', everErr.message);
+    const everRes = await d1Query(`UPDATE issue_backlog SET ever_tagged = 1 WHERE id = ?`, [issueId]);
+    if (!everRes.success) console.warn('[issue_backlog] ever_tagged update:', everRes.error);
   }
   return tagIds;
 }
 
 /** Create or reuse a tag by free-text title (manual admin path). */
-async function upsertTagByTitle(supabaseAdmin: any, titleRaw: string): Promise<{ id: string; title: string; title_key: string } | null> {
+async function upsertTagByTitle(titleRaw: string): Promise<{ id: string; title: string; title_key: string } | null> {
   const title = String(titleRaw || '').trim().slice(0, 200);
   if (title.length < 3) return null;
   const title_key = normalizeTagKey(title) || title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 160);
   if (!title_key) return null;
 
-  const { data: existing } = await supabaseAdmin
-    .from('issue_tags')
-    .select('id, title, title_key')
-    .eq('title_key', title_key)
-    .maybeSingle();
+  const existingRes = await d1Query<any>(`SELECT id, title, title_key FROM issue_tags WHERE title_key = ? LIMIT 1`, [title_key]);
+  const existing = existingRes.results?.[0];
   if (existing?.id) {
-    await supabaseAdmin
-      .from('issue_tags')
-      .update({ status: 'to_fix', resolved_at: null })
-      .eq('id', existing.id)
-      .eq('status', 'fixed');
+    await d1Query(`UPDATE issue_tags SET status = 'to_fix', resolved_at = NULL WHERE id = ? AND status = 'fixed'`, [existing.id]);
     return { id: existing.id, title: existing.title || titleFromKey(title_key, title), title_key };
   }
 
   const display = titleFromKey(title_key, title);
-  const { data: created, error } = await supabaseAdmin
-    .from('issue_tags')
-    .insert({ title: display, title_key, status: 'to_fix' })
-    .select('id, title, title_key')
-    .single();
-  if (error) {
-    const { data: again } = await supabaseAdmin
-      .from('issue_tags')
-      .select('id, title, title_key')
-      .eq('title_key', title_key)
-      .maybeSingle();
+  const freshId = newTagId();
+  const ins = await d1Query(`INSERT INTO issue_tags (id, title, title_key, status) VALUES (?, ?, ?, 'to_fix')`, [
+    freshId,
+    display,
+    title_key,
+  ]);
+  if (!ins.success) {
+    const againRes = await d1Query<any>(`SELECT id, title, title_key FROM issue_tags WHERE title_key = ? LIMIT 1`, [title_key]);
+    const again = againRes.results?.[0];
     return again?.id ? { id: again.id, title: again.title, title_key: again.title_key } : null;
   }
-  return created;
+  return { id: freshId, title: display, title_key };
 }
 
-/** UUID, #18, or 18 — same lookup as GET /api/bugs/:tagId. */
-export async function findIssueTag(supabaseAdmin: any, param: string): Promise<any | null> {
+/** UUID, #18, or 18 — same lookup as GET /api/bugs/:tagId. D-2: D1-only. */
+export async function findIssueTag(param: string): Promise<any | null> {
   const raw = String(param || '').replace(/^#/, '').trim();
-  if (!raw || !supabaseAdmin) return null;
-  const { data: byId } = await supabaseAdmin.from('issue_tags').select('*').eq('id', raw).maybeSingle();
+  if (!raw) return null;
+  const byId = await d1GetTag(raw);
   if (byId) return byId;
   if (/^\d+$/.test(raw)) {
     const n = Number(raw);
-    const { data: byN, error } = await supabaseAdmin
-      .from('issue_tags')
-      .select('*')
-      .filter('work_item->>public_n', 'eq', String(n))
-      .limit(1);
-    if (!error && byN?.[0]) return byN[0];
-    const { data: rows } = await supabaseAdmin.from('issue_tags').select('*').limit(200);
-    return (rows || []).find((t: any) => hydrateWorkItem(t).public_n === n) || null;
+    const allRes = await d1Query<any>(`SELECT * FROM issue_tags LIMIT 200`);
+    const rows = (allRes.results || []).map(normIssueTag);
+    return rows.find((t: any) => hydrateWorkItem(t).public_n === n) || null;
   }
   return null;
 }
 
-async function loadBugTagsWithLinks(supabaseAdmin: any) {
+async function loadBugTagsWithLinks() {
   let tags: any[] = [];
   let links: any[] = [];
   try {
-    if (isD1Configured()) {
-      const tRes = await d1Query(
-        "SELECT id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at, work_item FROM issue_tags WHERE status IN ('to_fix', 'in_progress', 'fixed') ORDER BY created_at DESC LIMIT 200"
-      );
-      const tagRows = tRes.results || [];
-      tags = (tagRows || []).map((t: any) => ({
-        ...t,
-        category: t.category || 'foodcart',
-        whats_still_open: t.whats_still_open || '',
-      }));
-      if (tags.length > 0) {
-        const placeholders = tags.map(() => '?').join(', ');
-        const lRes = await d1Query(`SELECT tag_id, issue_id FROM issue_tag_links WHERE tag_id IN (${placeholders})`, tags.map((t: any) => t.id));
-        links = lRes.results || [];
-      }
-      return { tags, links };
-    }
-
-    if (!supabaseAdmin) return { tags: [], links: [] };
-
-    let { data: tagRows, error: tErr } = await supabaseAdmin
-      .from('issue_tags')
-      .select('id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at, work_item')
-      .in('status', ['to_fix', 'in_progress', 'fixed'])
-      .order('created_at', { ascending: false })
-      .limit(200);
-    if (tErr) {
-      // Fallback if category or whats_still_open not yet migrated
-      const { data: tagRowsFallback } = await supabaseAdmin
-        .from('issue_tags')
-        .select('id, created_at, title, title_key, status, resolution_note, comments, resolved_at')
-        .in('status', ['to_fix', 'in_progress', 'fixed'])
-        .order('created_at', { ascending: false })
-        .limit(200);
-      tagRows = tagRowsFallback || [];
-    }
-    tags = (tagRows || []).map((t: any) => ({
-      ...t,
-      category: t.category || 'foodcart',
-      whats_still_open: t.whats_still_open || '',
-    }));
+    const tRes = await d1Query(
+      "SELECT id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at, work_item FROM issue_tags WHERE status IN ('to_fix', 'in_progress', 'fixed') ORDER BY created_at DESC LIMIT 200"
+    );
+    if (!tRes.success) return { tags, links };
+    const tagRows = tRes.results || [];
+    tags = (tagRows || []).map(normIssueTag);
     if (tags.length > 0) {
-      const { data: linkRows } = await supabaseAdmin
-        .from('issue_tag_links')
-        .select('tag_id, issue_id')
-        .in(
-          'tag_id',
-          tags.map((t: any) => t.id)
-        );
-      links = linkRows || [];
+      const placeholders = tags.map(() => '?').join(', ');
+      const lRes = await d1Query(`SELECT tag_id, issue_id FROM issue_tag_links WHERE tag_id IN (${placeholders})`, tags.map((t: any) => t.id));
+      links = lRes.results || [];
     }
+    return { tags, links };
   } catch {
     tags = [];
     links = [];
@@ -455,41 +436,14 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       return;
     }
     try {
-      let issues: any[] | null = null;
-      let iErr: any = null;
-
-      if (isD1Configured()) {
-        const r = await d1Query(
-          'SELECT id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, resolution_note, ever_tagged FROM issue_backlog ORDER BY created_at DESC LIMIT 200'
-        );
-        issues = r.results || [];
-      } else {
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        const r = await supabaseAdmin
-          .from('issue_backlog')
-          .select(
-            'id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, resolution_note, ever_tagged'
-          )
-          .order('created_at', { ascending: false })
-          .limit(200);
-        issues = r.data;
-        iErr = r.error;
-        // Backward-compatible if ever_tagged column not yet migrated
-        if (iErr && /ever_tagged/i.test(String(iErr.message || ''))) {
-          const r2 = await supabaseAdmin
-            .from('issue_backlog')
-            .select(
-              'id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, resolution_note'
-            )
-            .order('created_at', { ascending: false })
-            .limit(200);
-          issues = r2.data;
-          iErr = r2.error;
-        }
-      }
-      if (iErr) {
-        console.warn('[BugTracker Overview] Fetch warning, falling back to empty:', iErr.message);
+      const r = await d1Query(
+        'SELECT id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, resolution_note, ever_tagged FROM issue_backlog ORDER BY created_at DESC LIMIT 200'
+      );
+      if (!r.success) {
+        console.warn('[BugTracker Overview] Fetch warning, falling back to empty:', r.error);
         issues = [];
+      } else {
+        issues = r.results || [];
       }
 
       if (issues && Array.isArray(issues)) {
@@ -498,8 +452,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         // resulting in 4-second latency. The frontend should only fetch payload on-demand.
       }
 
-      const supabaseAdmin = !isD1Configured() ? (await import('./supabaseAdmin.js')).supabaseAdmin : null;
-      const { tags, links } = await loadBugTagsWithLinks(supabaseAdmin);
+      const { tags, links } = await loadBugTagsWithLinks();
       const issuesById = new Map((issues || []).map((i: any) => [i.id, i]));
 
       const bugTags = tags.map((t: any) => {
@@ -525,13 +478,9 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         const hit = bugTags.find((t: any) => t.id === row.id);
         if (hit) hit.work_item = row.item;
         try {
-          if (isD1Configured()) {
-            await d1Query('UPDATE issue_tags SET work_item = ? WHERE id = ?', [row.item, row.id]);
-          } else if (supabaseAdmin) {
-            await supabaseAdmin.from('issue_tags').update({ work_item: row.item }).eq('id', row.id);
-          }
+          await d1Query('UPDATE issue_tags SET work_item = ? WHERE id = ?', [JSON.stringify(row.item), row.id]);
         } catch {
-          /* column missing — numbers still returned this request */
+          /* numbers still returned this request */
         }
       }
 
@@ -547,7 +496,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       // ever_tagged is the source of truth (set on every successful tag link).
       const linkedIssueIdSet = new Set(links.map((l: any) => l.issue_id));
       const deletionCandidates = (issues || []).filter(
-        (i: any) => (i.ever_tagged === true || i.ever_tagged === 'true') && !linkedIssueIdSet.has(i.id)
+        (i: any) => (i.ever_tagged === true || i.ever_tagged === 'true' || i.ever_tagged === 1) && !linkedIssueIdSet.has(i.id)
       );
 
       // Preview of note → tag titles (for manual UI) without writing
@@ -731,8 +680,6 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         receivedAt: new Date().toISOString(),
       };
 
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-
       const noteText = user_note != null ? String(user_note).trim() || null : null;
 
       const lightweightPayload = {
@@ -743,52 +690,53 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         dishQuery: dish_query || null,
       };
 
-      const row = {
-        status: 'to_fix',
-        issue_type: String(issue_type),
-        severity: ['low', 'medium', 'high'].includes(severity) ? severity : 'medium',
-        country_code: country_code || null,
-        chain_key: chain_key || null,
-        dish_query: dish_query || null,
-        context: context || 'unknown',
-        source_url: source_url || register_source_url || null,
-        user_note: noteText,
-        firebase_uid: firebase_uid || null,
-        payload: lightweightPayload,
-      };
+      const issueId = newIssueId();
+      const insRes = await d1Query(
+        `INSERT INTO issue_backlog (id, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, firebase_uid, payload)
+         VALUES (?, 'to_fix', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          issueId,
+          String(issue_type),
+          ['low', 'medium', 'high'].includes(severity) ? severity : 'medium',
+          country_code || null,
+          chain_key || null,
+          dish_query || null,
+          context || 'unknown',
+          source_url || register_source_url || null,
+          noteText,
+          firebase_uid || null,
+          JSON.stringify(lightweightPayload),
+        ]
+      );
 
-      const { data, error } = await supabaseAdmin
-        .from('issue_backlog')
-        .insert(row)
-        .select('id, status, created_at, user_note')
-        .single();
-
-      if (error) {
-        console.error('[issue_backlog] insert error:', error.message);
+      if (!insRes.success) {
+        console.error('[issue_backlog] insert error:', insRes.error);
         addDebugLog(
-          `[IssueBacklog] FAILED to insert issue_type=${issue_type}: ${error.message}`,
+          `[IssueBacklog] FAILED to insert issue_type=${issue_type}: ${insRes.error}`,
           sessionId !== 'global' ? sessionId : undefined
         );
-        return res.status(500).json({ error: error.message });
+        return res.status(500).json({ error: insRes.error });
       }
 
-      if (data && data.id) {
-        try {
-          const publicUrl = await uploadBacklogPayloadToR2(data.id, safePayload);
-          if (publicUrl) {
-            await supabaseAdmin
-              .from('issue_backlog')
-              .update({
-                payload: {
-                  ...lightweightPayload,
-                  r2_url: publicUrl,
-                },
-              })
-              .eq('id', data.id);
-          }
-        } catch (r2Err: any) {
-          console.error('[IssueBacklog R2] Async upload failed:', r2Err.message);
+      const createdRes = await d1Query<any>(
+        `SELECT id, status, created_at, user_note FROM issue_backlog WHERE id = ? LIMIT 1`,
+        [issueId]
+      );
+      const data = createdRes.results?.[0];
+      if (!data) {
+        return res.status(500).json({ error: 'insert succeeded but row not found' });
+      }
+
+      try {
+        const publicUrl = await uploadBacklogPayloadToR2(data.id, safePayload);
+        if (publicUrl) {
+          await d1Query(`UPDATE issue_backlog SET payload = ? WHERE id = ?`, [
+            JSON.stringify({ ...lightweightPayload, r2_url: publicUrl }),
+            data.id,
+          ]);
         }
+      } catch (r2Err: any) {
+        console.error('[IssueBacklog R2] Async upload failed:', r2Err.message);
       }
 
       // Link or create requested tag / bug
@@ -802,11 +750,8 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
           // Create new bug tag explicitly
           const title_key = normalizeTagKey(newTitle) || newTitle.toLowerCase().slice(0, 160);
           let createdTagId: string | null = null;
-          const { data: existingTag } = await supabaseAdmin
-            .from('issue_tags')
-            .select('id, comments')
-            .eq('title_key', title_key)
-            .maybeSingle();
+          const tagLookup = await d1Query<any>(`SELECT id, comments FROM issue_tags WHERE title_key = ? LIMIT 1`, [title_key]);
+          const existingTag = tagLookup.results?.[0];
 
           if (existingTag?.id) {
             createdTagId = existingTag.id;
@@ -814,64 +759,39 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
             const initialComments = noteText
               ? [{ id: crypto.randomUUID(), body: noteText, created_at: new Date().toISOString() }]
               : [];
-            const { data: createdTag } = await supabaseAdmin
-              .from('issue_tags')
-              .insert({
-                title: newTitle,
-                title_key,
-                category: cat,
-                status: 'to_fix',
-                comments: initialComments,
-              })
-              .select('id')
-              .single();
-            createdTagId = createdTag?.id || null;
+            const freshId = newTagId();
+            await d1Query(
+              `INSERT INTO issue_tags (id, title, title_key, category, status, comments) VALUES (?, ?, ?, ?, 'to_fix', ?)`,
+              [freshId, newTitle, title_key, cat, JSON.stringify(initialComments)]
+            );
+            createdTagId = freshId;
           }
 
           if (createdTagId) {
             tagIds.push(createdTagId);
-            await supabaseAdmin
-              .from('issue_tag_links')
-              .upsert({ tag_id: createdTagId, issue_id: data.id }, { onConflict: 'tag_id,issue_id' });
-            await supabaseAdmin
-              .from('issue_backlog')
-              .update({ ever_tagged: true })
-              .eq('id', data.id);
+            await d1LinkTag(createdTagId, data.id);
           }
         } else if (reqTagId) {
           // Link existing tag ID
           tagIds.push(reqTagId);
-          await supabaseAdmin
-            .from('issue_tag_links')
-            .upsert({ tag_id: reqTagId, issue_id: data.id }, { onConflict: 'tag_id,issue_id' });
-          await supabaseAdmin
-            .from('issue_backlog')
-            .update({ ever_tagged: true })
-            .eq('id', data.id);
+          await d1LinkTag(reqTagId, data.id);
 
           // If noteText is provided, attach it as a comment on the identified bug tag
           if (noteText) {
-            const { data: existingTag } = await supabaseAdmin
-              .from('issue_tags')
-              .select('id, comments')
-              .eq('id', reqTagId)
-              .maybeSingle();
-            if (existingTag) {
-              const prevComments = Array.isArray(existingTag.comments) ? [...existingTag.comments] : [];
+            const tagRow = await d1GetTag(reqTagId);
+            if (tagRow) {
+              const prevComments = Array.isArray(tagRow.comments) ? [...tagRow.comments] : [];
               prevComments.push({
                 id: crypto.randomUUID(),
                 body: noteText,
                 created_at: new Date().toISOString(),
               });
-              await supabaseAdmin
-                .from('issue_tags')
-                .update({ comments: prevComments })
-                .eq('id', reqTagId);
+              await d1Query(`UPDATE issue_tags SET comments = ? WHERE id = ?`, [JSON.stringify(prevComments), reqTagId]);
             }
           }
         } else {
           // Fall back to auto-linking from note/type
-          tagIds = await ensureTagsForIssue(supabaseAdmin, data.id, noteText, issue_type);
+          tagIds = await ensureTagsForIssue(data.id, noteText, issue_type);
         }
       } catch (tagErr: any) {
         console.warn('[issue_tags] ensure failed (run SQL migration?):', tagErr?.message);
@@ -880,7 +800,8 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       const urlToRegister = register_source_url || (issue_type === 'missing_link' ? source_url : null);
       if (urlToRegister && chain_key) {
         try {
-          const sourceRow = {
+          const { d1UpsertChainMenuSource } = await import('./server_db_d1.js');
+          await d1UpsertChainMenuSource({
             country_code: country_code || 'GB',
             chain_key: String(chain_key).toLowerCase(),
             display_name: register_display_name || chain_key,
@@ -889,13 +810,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
             status: 'pending',
             priority: 100,
             enabled: true,
-            meta: { registered_from: 'issue_flag', issue_id: data.id },
-            updated_at: new Date().toISOString(),
-          };
-          const { error: srcErr } = await supabaseAdmin
-            .from('chain_menu_sources')
-            .upsert(sourceRow, { onConflict: 'country_code,chain_key,url' });
-          if (srcErr) console.warn('[chain_menu_sources] upsert warning:', srcErr.message);
+          });
         } catch (regErr: any) {
           console.warn('[chain_menu_sources] register failed:', regErr?.message);
         }
@@ -944,39 +859,6 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
             meta: typeof f.meta === 'string' ? JSON.parse(f.meta) : (f.meta || {})
           }));
         } catch {}
-      } else {
-        const { supabaseAdmin } = await import('./supabaseAdmin.js');
-        if (supabaseAdmin) {
-          try {
-            const { data: sData, error: sErr } = await supabaseAdmin
-              .from('chain_menu_sources')
-              .select('*')
-              .order('chain_key', { ascending: true });
-            if (!sErr && sData) sources = sData;
-          } catch (e) {
-            console.warn('[nutrition-data/overview] Supabase sources failed:', e);
-          }
-
-          try {
-            const { data: iData, error: iErr } = await supabaseAdmin
-              .from('issue_backlog')
-              .select('id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, source_url, user_note, resolution_note')
-              .order('created_at', { ascending: false })
-              .limit(100);
-            if (!iErr && iData) issues = iData;
-          } catch (e) {
-            console.warn('[nutrition-data/overview] Supabase issues failed:', e);
-          }
-
-          try {
-            const { data: foods } = await supabaseAdmin
-              .from('food_cache')
-              .select('id, provider, query_or_id, name, nutrients, fetched_at, expires_at, meta')
-              .order('fetched_at', { ascending: false })
-              .limit(200);
-            cachedFoods = foods || [];
-          } catch {}
-        }
       }
 
       // If no sources found from DB, provide standard chains so overview is never blank
@@ -992,8 +874,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         ];
       }
 
-      const supabaseAdmin = !isD1Configured() ? (await import('./supabaseAdmin.js')).supabaseAdmin : null;
-      const { tags, links } = await loadBugTagsWithLinks(supabaseAdmin);
+      const { tags, links } = await loadBugTagsWithLinks();
 
       const issuesById = new Map((issues || []).map((i: any) => [i.id, i]));
       const issueTags = tags.map((t) => {
@@ -1051,21 +932,6 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
             chainItemCounts[k].synced++;
             chainItemCounts[k].total++;
           });
-        } else {
-          const { supabaseAdmin: sAdmin } = await import('./supabaseAdmin.js');
-          if (sAdmin) {
-            const { data: menuRows } = await sAdmin
-              .from('brand_menu_items')
-              .select('chain_key')
-              .eq('country_code', country);
-            (menuRows || []).forEach((r: any) => {
-              const k = normalizeChainKey(r.chain_key);
-              if (!k) return;
-              if (!chainItemCounts[k]) chainItemCounts[k] = { synced: 0, pending: 0, total: 0 };
-              chainItemCounts[k].synced++;
-              chainItemCounts[k].total++;
-            });
-          }
         }
         const { loadLocalItems } = await import('./serverBrandMenu.js');
         const localItems = loadLocalItems().filter((it: any) => it.country_code === country);
@@ -1107,13 +973,10 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
 
   app.get('/api/issues/:id', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const { data, error } = await supabaseAdmin
-        .from('issue_backlog')
-        .select('*')
-        .eq('id', req.params.id)
-        .single();
-      if (error) return res.status(404).json({ error: error.message });
+      const rowRes = await d1Query<any>(`SELECT * FROM issue_backlog WHERE id = ? LIMIT 1`, [req.params.id]);
+      const row = rowRes.results?.[0];
+      if (!rowRes.success || !row) return res.status(404).json({ error: 'report not found' });
+      const data = normBacklogRow(row);
 
       if (data && data.payload && typeof data.payload === 'object' && ((data.payload as any).is_r2 || (data.payload as any).r2_prefix || (data.payload as any).r2_url)) {
         const prefix = (data.payload as any).r2_prefix ? `${(data.payload as any).r2_prefix}/payload.json` : undefined;
@@ -1125,14 +988,12 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
 
       let tags: any[] = [];
       try {
-        const { data: linkRows } = await supabaseAdmin
-          .from('issue_tag_links')
-          .select('tag_id')
-          .eq('issue_id', req.params.id);
-        const ids = (linkRows || []).map((l: any) => l.tag_id);
+        const linkRes = await d1Query<any>(`SELECT tag_id FROM issue_tag_links WHERE issue_id = ?`, [req.params.id]);
+        const ids = ((linkRes.results || []) as any[]).map((l: any) => l.tag_id);
         if (ids.length) {
-          const { data: tagRows } = await supabaseAdmin.from('issue_tags').select('*').in('id', ids);
-          tags = tagRows || [];
+          const placeholders = ids.map(() => '?').join(', ');
+          const tagRes = await d1Query<any>(`SELECT * FROM issue_tags WHERE id IN (${placeholders})`, ids);
+          tags = ((tagRes.results || []) as any[]).map(normIssueTag);
         }
       } catch {
         tags = [];
@@ -1148,18 +1009,17 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
     try {
       const status = (req.query.status as string) || 'to_fix';
       const limit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200);
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      let q = supabaseAdmin
-        .from('issue_backlog')
-        .select(
-          'id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, firebase_uid, resolution_note'
-        )
-        .order('created_at', { ascending: false })
-        .limit(limit);
-      if (status && status !== 'all') q = q.eq('status', status);
-      const { data, error } = await q;
-      if (error) return res.status(500).json({ error: error.message });
-      res.json({ issues: data || [] });
+      let sql = `SELECT id, created_at, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, firebase_uid, resolution_note FROM issue_backlog`;
+      const params: any[] = [];
+      if (status && status !== 'all') {
+        sql += ` WHERE status = ?`;
+        params.push(status);
+      }
+      sql += ` ORDER BY created_at DESC LIMIT ?`;
+      params.push(limit);
+      const r = await d1Query(sql, params);
+      if (!r.success) return res.status(500).json({ error: r.error });
+      res.json({ issues: r.results || [] });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to list issues' });
     }
@@ -1168,33 +1028,29 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Create a bug tag manually (optional link to a report). */
   app.post('/api/issue-tags', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
       const title = String(req.body?.title || '').trim();
       const issueId = req.body?.issue_id ? String(req.body.issue_id) : null;
       const progress = req.body?.resolution_note != null ? String(req.body.resolution_note).trim() : '';
       if (title.length < 3) return res.status(400).json({ error: 'title required (min 3 chars)' });
 
-      const tag = await upsertTagByTitle(supabaseAdmin, title);
+      const tag = await upsertTagByTitle(title);
       if (!tag) return res.status(400).json({ error: 'could not create tag from title' });
 
       if (progress) {
-        const { data: cur } = await supabaseAdmin.from('issue_tags').select('resolution_note').eq('id', tag.id).single();
+        const cur = await d1GetTag(tag.id);
         const line = `[${new Date().toISOString()}] ${progress}`;
         const next =
           cur?.resolution_note && String(cur.resolution_note).trim()
             ? `${cur.resolution_note}\n\n${line}`
             : line;
-        await supabaseAdmin.from('issue_tags').update({ resolution_note: next }).eq('id', tag.id);
+        await d1Query(`UPDATE issue_tags SET resolution_note = ? WHERE id = ?`, [next, tag.id]);
       }
 
       if (issueId) {
-        await supabaseAdmin
-          .from('issue_tag_links')
-          .upsert({ tag_id: tag.id, issue_id: issueId }, { onConflict: 'tag_id,issue_id' });
-        await supabaseAdmin.from('issue_backlog').update({ ever_tagged: true }).eq('id', issueId);
+        await d1LinkTag(tag.id, issueId);
       }
 
-      const { data: full } = await supabaseAdmin.from('issue_tags').select('*').eq('id', tag.id).single();
+      const full = await d1GetTag(tag.id);
       res.json({ success: true, tag: full || tag });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'create tag failed' });
@@ -1204,20 +1060,14 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Link an existing tag to a report (history for that bug). */
   app.post('/api/issue-tags/:id/link', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
       const issueId = String(req.body?.issue_id || '').trim();
       if (!issueId) return res.status(400).json({ error: 'issue_id required' });
 
-      const tag = await findIssueTag(supabaseAdmin, req.params.id);
+      const tag = await findIssueTag(req.params.id);
       if (!tag) return res.status(404).json({ error: 'tag not found' });
       const tagId = tag.id;
 
-      const { error } = await supabaseAdmin
-        .from('issue_tag_links')
-        .upsert({ tag_id: tagId, issue_id: issueId }, { onConflict: 'tag_id,issue_id' });
-      if (error) return res.status(500).json({ error: error.message });
-
-      await supabaseAdmin.from('issue_backlog').update({ ever_tagged: true }).eq('id', issueId);
+      await d1LinkTag(tagId, issueId);
       res.json({ success: true, tag_id: tagId, issue_id: issueId });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'link failed' });
@@ -1227,14 +1077,9 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Unlink tag from one report (does not delete the tag). */
   app.delete('/api/issue-tags/:id/links/:issueId', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
       const { id: tagId, issueId } = req.params;
-      const { error } = await supabaseAdmin
-        .from('issue_tag_links')
-        .delete()
-        .eq('tag_id', tagId)
-        .eq('issue_id', issueId);
-      if (error) return res.status(500).json({ error: error.message });
+      const del = await d1Query(`DELETE FROM issue_tag_links WHERE tag_id = ? AND (issue_id = ? OR backlog_id = ?)`, [tagId, issueId, issueId]);
+      if (!del.success) return res.status(500).json({ error: del.error });
       res.json({ success: true, tag_id: tagId, issue_id: issueId });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'unlink failed' });
@@ -1244,14 +1089,10 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Extract bug tags from one report's flag note (manual per-report rebuild). */
   app.post('/api/issues/:id/extract-tags', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
       const id = req.params.id;
-      const { data: iss, error } = await supabaseAdmin
-        .from('issue_backlog')
-        .select('id, user_note, issue_type, resolution_note')
-        .eq('id', id)
-        .single();
-      if (error || !iss) return res.status(404).json({ error: error?.message || 'report not found' });
+      const issRes = await d1Query<any>(`SELECT id, user_note, issue_type, resolution_note FROM issue_backlog WHERE id = ? LIMIT 1`, [id]);
+      const iss = issRes.results?.[0];
+      if (!iss) return res.status(404).json({ error: 'report not found' });
 
       // Optional override: body.titles array of free-text titles
       let titles = Array.isArray(req.body?.titles)
@@ -1264,30 +1105,21 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
 
       const tagIds: string[] = [];
       for (const title of titles) {
-        const tag = await upsertTagByTitle(supabaseAdmin, title);
+        const tag = await upsertTagByTitle(title);
         if (!tag) continue;
         tagIds.push(tag.id);
-        await supabaseAdmin
-          .from('issue_tag_links')
-          .upsert({ tag_id: tag.id, issue_id: id }, { onConflict: 'tag_id,issue_id' });
+        await d1LinkTag(tag.id, id);
       }
       if (tagIds.length) {
-        await supabaseAdmin.from('issue_backlog').update({ ever_tagged: true }).eq('id', id);
+        await d1Query(`UPDATE issue_backlog SET ever_tagged = 1 WHERE id = ?`, [id]);
       }
 
       // Optional: move this report's resolution_note onto tags that have none
       if (iss.resolution_note && tagIds.length) {
         for (const tid of tagIds) {
-          const { data: tag } = await supabaseAdmin
-            .from('issue_tags')
-            .select('id, resolution_note')
-            .eq('id', tid)
-            .single();
-          if (tag && !String(tag.resolution_note || '').trim()) {
-            await supabaseAdmin
-              .from('issue_tags')
-              .update({ resolution_note: String(iss.resolution_note) })
-              .eq('id', tid);
+          const tagRow = await d1GetTag(tid);
+          if (tagRow && !String(tagRow.resolution_note || '').trim()) {
+            await d1Query(`UPDATE issue_tags SET resolution_note = ? WHERE id = ?`, [String(iss.resolution_note), tid]);
           }
         }
       }
@@ -1307,20 +1139,16 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Hard-delete all done/fixed issue tags from the database to reclaim space */
   app.post('/api/issue-tags/purge-done', async (_req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const { data: doneTags, error: findErr } = await supabaseAdmin
-        .from('issue_tags')
-        .select('id, title, status, work_item')
-        .or('status.eq.fixed,status.eq.ignored');
-
-      if (findErr) return res.status(500).json({ error: findErr.message });
+      const doneRes = await d1Query<any>(`SELECT id, title, status, work_item FROM issue_tags WHERE status IN ('fixed', 'ignored')`);
+      const doneTags = doneRes.results || [];
       const tagIds = (doneTags || []).map((t: any) => t.id);
 
       if (tagIds.length > 0) {
         // Remove links first to ensure clean cascade
-        await supabaseAdmin.from('issue_tag_links').delete().in('tag_id', tagIds);
-        const { error: delErr } = await supabaseAdmin.from('issue_tags').delete().in('id', tagIds);
-        if (delErr) return res.status(500).json({ error: delErr.message });
+        const placeholders = tagIds.map(() => '?').join(', ');
+        await d1Query(`DELETE FROM issue_tag_links WHERE tag_id IN (${placeholders})`, tagIds);
+        const delRes = await d1Query(`DELETE FROM issue_tags WHERE id IN (${placeholders})`, tagIds);
+        if (!delRes.success) return res.status(500).json({ error: delRes.error });
       }
 
       overviewCache = null;
@@ -1333,14 +1161,13 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Hard-delete a shared fix tag from the database (tick / mark fixed). Links cascade. */
   app.delete(['/api/issue-tags/:id', '/api/bugs/:id'], async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const existing = await findIssueTag(supabaseAdmin, req.params.id);
+      const existing = await findIssueTag(req.params.id);
       if (!existing) return res.status(404).json({ error: 'tag not found' });
       const id = existing.id;
 
-      await supabaseAdmin.from('issue_tag_links').delete().eq('tag_id', id);
-      const { error } = await supabaseAdmin.from('issue_tags').delete().eq('id', id);
-      if (error) return res.status(500).json({ error: error.message });
+      await d1Query(`DELETE FROM issue_tag_links WHERE tag_id = ?`, [id]);
+      const del = await d1Query(`DELETE FROM issue_tags WHERE id = ?`, [id]);
+      if (!del.success) return res.status(500).json({ error: del.error });
       overviewCache = null;
       res.json({ success: true, deleted: true, id, title: existing.title });
     } catch (err: any) {
@@ -1351,8 +1178,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Append fix note or update fields on a tag (not on the log report). */
   app.patch('/api/issue-tags/:id', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const existing = await findIssueTag(supabaseAdmin, req.params.id);
+      const existing = await findIssueTag(req.params.id);
       if (!existing) return res.status(404).json({ error: 'tag not found' });
       const id = existing.id;
       const { resolution_note, append_note, title, whats_still_open, status, identified_problems } = req.body || {};
@@ -1379,16 +1205,21 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       if (status === 'fixed' || status === 'ignored') {
         const wi = hydrateWorkItem(existing);
         wi.queue = 'done';
-        patch.work_item = wi;
+        patch.work_item = JSON.stringify(wi);
         if (!patch.status) patch.status = 'fixed';
         if (!existing.resolved_at) patch.resolved_at = new Date().toISOString();
       }
       if (Object.keys(patch).length === 0) {
         return res.status(400).json({ error: 'Provide resolution_note, whats_still_open, status, title, or identified_problems' });
       }
-      const { data, error } = await supabaseAdmin.from('issue_tags').update(patch).eq('id', id).select('*').single();
-      if (error) return res.status(500).json({ error: error.message });
+      const cols = Object.keys(patch);
+      const upd = await d1Query(`UPDATE issue_tags SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, [
+        ...cols.map((c) => patch[c]),
+        id,
+      ]);
+      if (!upd.success) return res.status(500).json({ error: upd.error });
       overviewCache = null;
+      const data = await d1GetTag(id);
       res.json({ success: true, tag: data });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'update tag failed' });
@@ -1397,8 +1228,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
 
   app.post('/api/issue-tags/:id/comments', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const existing = await findIssueTag(supabaseAdmin, req.params.id);
+      const existing = await findIssueTag(req.params.id);
       if (!existing) return res.status(404).json({ error: 'tag not found' });
       const id = existing.id;
       const body = String(req.body?.body || '').trim();
@@ -1410,13 +1240,9 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         created_at: new Date().toISOString(),
       };
       comments.push(comment);
-      const { data, error } = await supabaseAdmin
-        .from('issue_tags')
-        .update({ comments })
-        .eq('id', id)
-        .select('*')
-        .single();
-      if (error) return res.status(500).json({ error: error.message });
+      const upd = await d1Query(`UPDATE issue_tags SET comments = ? WHERE id = ?`, [JSON.stringify(comments), id]);
+      if (!upd.success) return res.status(500).json({ error: upd.error });
+      const data = await d1GetTag(id);
       res.json({ success: true, tag: data, comment });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'add comment failed' });
@@ -1425,21 +1251,16 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
 
   app.delete('/api/issue-tags/:id/comments/:commentId', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const existing = await findIssueTag(supabaseAdmin, req.params.id);
+      const existing = await findIssueTag(req.params.id);
       if (!existing) return res.status(404).json({ error: 'tag not found' });
       const id = existing.id;
       const commentId = req.params.commentId;
       const prev = Array.isArray(existing.comments) ? existing.comments : [];
       const comments = prev.filter((c: any) => c && c.id !== commentId);
       if (comments.length === prev.length) return res.status(404).json({ error: 'comment not found' });
-      const { data, error } = await supabaseAdmin
-        .from('issue_tags')
-        .update({ comments })
-        .eq('id', id)
-        .select('*')
-        .single();
-      if (error) return res.status(500).json({ error: error.message });
+      const upd = await d1Query(`UPDATE issue_tags SET comments = ? WHERE id = ?`, [JSON.stringify(comments), id]);
+      if (!upd.success) return res.status(500).json({ error: upd.error });
+      const data = await d1GetTag(id);
       res.json({ success: true, tag: data });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'delete comment failed' });
@@ -1449,10 +1270,9 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Hard-delete a flagged log report (payload) from the database. */
   app.delete('/api/issues/:id', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
       const id = req.params.id;
-      const { error } = await supabaseAdmin.from('issue_backlog').delete().eq('id', id);
-      if (error) return res.status(500).json({ error: error.message });
+      const del = await d1Query(`DELETE FROM issue_backlog WHERE id = ?`, [id]);
+      if (!del.success) return res.status(500).json({ error: del.error });
       res.json({ success: true, deleted: true, id });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'delete issue failed' });
@@ -1465,17 +1285,13 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
    */
   app.post('/api/issue-tags/rebuild-from-notes', async (_req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const { data: issues, error } = await supabaseAdmin
-        .from('issue_backlog')
-        .select('id, user_note, issue_type, resolution_note, status')
-        .order('created_at', { ascending: true });
-      if (error) {
-        return res.status(500).json({
-          error: error.message,
-          hint: 'Check Supabase credentials and that issue_backlog exists.',
-        });
+      const issRes = await d1Query<any>(
+        `SELECT id, user_note, issue_type, resolution_note, status FROM issue_backlog ORDER BY created_at ASC LIMIT 2000`
+      );
+      if (!issRes.success) {
+        return res.status(500).json({ error: issRes.error });
       }
+      const issues = issRes.results || [];
 
       let linked = 0;
       let issuesWithTags = 0;
@@ -1485,7 +1301,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
 
       for (const iss of issues || []) {
         try {
-          const ids = await ensureTagsForIssue(supabaseAdmin, iss.id, iss.user_note, iss.issue_type);
+          const ids = await ensureTagsForIssue(iss.id, iss.user_note, iss.issue_type);
           linked += ids.length;
           if (ids.length) issuesWithTags++;
           perIssue.push({
@@ -1509,28 +1325,19 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       for (const [tid, notes] of Object.entries(tagNoteBuckets)) {
         const unique = Array.from(new Set(notes.map((n) => n.trim()).filter(Boolean)));
         if (!unique.length) continue;
-        const { data: tag } = await supabaseAdmin
-          .from('issue_tags')
-          .select('id, resolution_note')
-          .eq('id', tid)
-          .single();
+        const tag = await d1GetTag(tid);
         if (!tag) continue;
         if (tag.resolution_note && String(tag.resolution_note).trim()) continue;
         const best = unique.sort((a, b) => b.length - a.length)[0];
-        await supabaseAdmin.from('issue_tags').update({ resolution_note: best }).eq('id', tid);
+        await d1Query(`UPDATE issue_tags SET resolution_note = ? WHERE id = ?`, [best, tid]);
         notesMoved++;
       }
 
       // Clear per-log resolution notes so progress lives on tags
-      await supabaseAdmin
-        .from('issue_backlog')
-        .update({ resolution_note: null })
-        .not('resolution_note', 'is', null);
+      await d1Query(`UPDATE issue_backlog SET resolution_note = NULL WHERE resolution_note IS NOT NULL`);
 
-      const { count: tagCount } = await supabaseAdmin
-        .from('issue_tags')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'to_fix');
+      const tagCountRes = await d1Query<any>(`SELECT COUNT(*) AS n FROM issue_tags WHERE status = 'to_fix'`);
+      const tagCount = tagCountRes.results?.[0]?.n ?? null;
 
       res.json({
         success: true,
@@ -1545,8 +1352,8 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
     } catch (err: any) {
       console.error('[rebuild-from-notes]', err);
       res.status(500).json({
-        error: err?.message || 'rebuild failed — run issue_tags SQL migration first',
-        hint: 'Supabase SQL: create issue_tags + issue_tag_links (+ ever_tagged on issue_backlog).',
+        error: err?.message || 'rebuild failed',
+        hint: 'D1: ensure issue_tags + issue_tag_links + issue_backlog exist (ensureD1Schema).',
       });
     }
   });

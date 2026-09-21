@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS issue_backlog (
   user_note TEXT DEFAULT '',
   resolution_note TEXT DEFAULT '',
   ever_tagged INTEGER DEFAULT 0,
+  firebase_uid TEXT DEFAULT '',
   payload TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -358,6 +359,7 @@ export async function ensureD1Schema(): Promise<{ success: boolean; error?: stri
       'ALTER TABLE issue_backlog ADD COLUMN user_note TEXT DEFAULT \'\'',
       'ALTER TABLE issue_backlog ADD COLUMN resolution_note TEXT DEFAULT \'\'',
       'ALTER TABLE issue_backlog ADD COLUMN ever_tagged INTEGER DEFAULT 0',
+      'ALTER TABLE issue_backlog ADD COLUMN firebase_uid TEXT DEFAULT \'\'',
       'ALTER TABLE issue_tag_links ADD COLUMN issue_id TEXT',
     ];
     for (const sql of issueAlters) {

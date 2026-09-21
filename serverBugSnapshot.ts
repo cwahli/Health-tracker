@@ -27,7 +27,7 @@ import {
 } from './src/utils/bugSnapshot';
 import { domainPackForAgent, buildOverviewMarkdown } from './src/utils/bugDomainPacks';
 import { stripHeavyImages } from './src/utils/debugPayload';
-import { findIssueTag, normalizeTagKey } from './serverIssueBacklog.js';
+import { findIssueTag, normalizeTagKey, normIssueTag } from './serverIssueBacklog.js';
 import {
   appendEvidenceCommit,
   applySnapRemaining,
@@ -58,15 +58,16 @@ async function loadJobTape(jobId: string): Promise<{ logText: string; foodLog: a
     scout = payload.scoutItems || payload.result?.scoutItems || null;
   }
   if (!foodLog || !scout) {
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    const { data: job } = await supabaseAdmin
-      .from('agent_jobs')
-      .select('clean_result')
-      .eq('id', jobId)
-      .maybeSingle();
-    const cr = job?.clean_result || {};
-    if (!foodLog) foodLog = cr.pendingFoodLog || null;
-    if (!scout) scout = cr.scoutItems || null;
+    // D-2: D1-only fallback (agent_jobs.clean_result is JSON text; d1GetJob parses).
+    try {
+      const { d1GetJob } = await import('./server_db_d1.js');
+      const job = await d1GetJob(jobId);
+      const cr = (job as any)?.clean_result || {};
+      if (!foodLog) foodLog = cr.pendingFoodLog || null;
+      if (!scout) scout = cr.scoutItems || null;
+    } catch {
+      /* R2-only tape */
+    }
   }
   return { logText, foodLog, scout };
 }
@@ -96,10 +97,13 @@ async function persistMissingPublicNs(tags: any[]): Promise<any[]> {
 
 async function persistWorkItem(tagId: string, item: ReturnType<typeof hydrateWorkItem>): Promise<boolean> {
   try {
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    const { error } = await supabaseAdmin.from('issue_tags').update({ work_item: item }).eq('id', tagId);
-    if (error) {
-      console.warn(`${BUG_SNAPSHOT_LOG} work_item persist skipped:`, error.message);
+    const { d1Query } = await import('./server_d1.js');
+    const res = await d1Query(`UPDATE issue_tags SET work_item = ?, updated_at = datetime('now') WHERE id = ?`, [
+      JSON.stringify(item),
+      tagId,
+    ]);
+    if (!res.success) {
+      console.warn(`${BUG_SNAPSHOT_LOG} work_item persist skipped:`, res.error);
       return false;
     }
     return true;
@@ -109,8 +113,8 @@ async function persistWorkItem(tagId: string, item: ReturnType<typeof hydrateWor
   }
 }
 
-async function findTagByParam(supabaseAdmin: any, param: string): Promise<any | null> {
-  return findIssueTag(supabaseAdmin, param);
+async function findTagByParam(param: string): Promise<any | null> {
+  return findIssueTag(param);
 }
 
 export type BugSnapshotDeps = {
@@ -230,39 +234,30 @@ function readIdentifiedProblems(tag: any): string {
 }
 
 async function writeIdentifiedProblems(
-  supabaseAdmin: any,
   tagId: string,
   text: string,
   existing: any
 ): Promise<{ ok: boolean; via: string; tag?: any }> {
+  // D-2: D1 issue_tags has no identified_problems column — persist as a
+  // special comments marker (previously the Supabase fallback path).
   const trimmed = String(text || '').trim().slice(0, 50_000);
-  // Prefer real column
-  const { data, error } = await supabaseAdmin
-    .from('issue_tags')
-    .update({ identified_problems: trimmed })
-    .eq('id', tagId)
-    .select('*')
-    .maybeSingle();
-  if (!error && data) {
-    return { ok: true, via: 'column', tag: data };
+  try {
+    const { d1Query } = await import('./server_d1.js');
+    const comments = Array.isArray(existing?.comments) ? [...existing.comments] : [];
+    const without = comments.filter((c: any) => c?.kind !== 'identified_problems');
+    without.push({
+      id: crypto.randomUUID(),
+      kind: 'identified_problems',
+      body: trimmed,
+      created_at: new Date().toISOString(),
+    });
+    const upd = await d1Query(`UPDATE issue_tags SET comments = ? WHERE id = ?`, [JSON.stringify(without), tagId]);
+    if (!upd.success) return { ok: false, via: 'failed' };
+    const cur = await findIssueTag(tagId);
+    return { ok: true, via: 'comments_fallback', tag: cur || undefined };
+  } catch {
+    return { ok: false, via: 'failed' };
   }
-  // Fallback: special comment entry
-  const comments = Array.isArray(existing?.comments) ? [...existing.comments] : [];
-  const without = comments.filter((c: any) => c?.kind !== 'identified_problems');
-  without.push({
-    id: crypto.randomUUID(),
-    kind: 'identified_problems',
-    body: trimmed,
-    created_at: new Date().toISOString(),
-  });
-  const { data: data2, error: err2 } = await supabaseAdmin
-    .from('issue_tags')
-    .update({ comments: without })
-    .eq('id', tagId)
-    .select('*')
-    .maybeSingle();
-  if (err2) return { ok: false, via: 'failed' };
-  return { ok: true, via: 'comments_fallback', tag: data2 };
 }
 
 /** In-memory durable triage job status (survives until process restart; instance pack stays on R2). */
@@ -316,31 +311,35 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       return { ok: false, error: 'callUnifiedLLM not wired' };
     }
 
-    const { supabaseAdmin } = await import('./supabaseAdmin.js');
-    let { data: tag, error } = await supabaseAdmin.from('issue_tags').select('*').eq('id', tagId).maybeSingle();
-    if (error || !tag) {
-      mark({ status: 'failed', error: error?.message || 'tag not found' });
-      return { ok: false, error: error?.message || 'tag not found' };
+    const { d1Query } = await import('./server_d1.js');
+    const tagRow = await findIssueTag(tagId);
+    if (!tagRow) {
+      mark({ status: 'failed', error: 'tag not found' });
+      return { ok: false, error: 'tag not found' };
     }
+    const tag = tagRow;
 
     const cat = tag.category || 'foodcart';
     const prior = readIdentifiedProblems(tag);
-    const { data: linkRows } = await supabaseAdmin
-      .from('issue_tag_links')
-      .select('issue_id')
-      .eq('tag_id', tagId);
-    const issueIds = (linkRows || []).map((l: any) => l.issue_id);
+    const linkRes = await d1Query<any>(`SELECT issue_id FROM issue_tag_links WHERE tag_id = ?`, [tagId]);
+    const issueIds = ((linkRes.results || []) as any[]).map((l: any) => l.issue_id);
     if (!issueIds.length) {
       mark({ status: 'failed', error: 'No reports linked' });
       return { ok: false, error: 'No reports linked to this bug', preserved: prior };
     }
 
-    const { data: issues } = await supabaseAdmin
-      .from('issue_backlog')
-      .select('id, user_note, payload, created_at')
-      .in('id', issueIds)
-      .order('created_at', { ascending: false })
-      .limit(5);
+    let issues: any[] = [];
+    {
+      const placeholders = issueIds.map(() => '?').join(', ');
+      const issRes = await d1Query<any>(
+        `SELECT id, user_note, payload, created_at FROM issue_backlog WHERE id IN (${placeholders}) ORDER BY created_at DESC LIMIT 5`,
+        issueIds
+      );
+      issues = ((issRes.results || []) as any[]).map((r: any) => ({
+        ...r,
+        payload: typeof r.payload === 'string' ? (() => { try { return JSON.parse(r.payload); } catch { return {}; } })() : (r.payload || {}),
+      }));
+    }
 
     let selected = issues || [];
     if (reportIds.length) {
@@ -504,7 +503,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       return { ok: false, error: 'empty triage result', preserved: prior, ms: Date.now() - started };
     }
 
-    const written = await writeIdentifiedProblems(supabaseAdmin, tagId, textOut, tag);
+    const written = await writeIdentifiedProblems(tagId, textOut, tag);
     if (!written.ok) {
       mark({ status: 'failed', error: 'failed to save identified_problems' });
       return { ok: false, error: 'failed to save identified_problems', ms: Date.now() - started };
@@ -592,37 +591,28 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         });
       }
 
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
+      const { d1Query } = await import('./server_d1.js');
       const cat = String(category || 'foodcart');
       let tagId = tag_id && tag_id !== 'new_bug' ? String(tag_id) : null;
       let tagTitle = new_bug_title ? String(new_bug_title).trim() : null;
 
       if (!tagId && tagTitle) {
         const title_key = normalizeTagKey(tagTitle) || tagTitle.toLowerCase().slice(0, 160);
-        const { data: existingTag } = await supabaseAdmin
-          .from('issue_tags')
-          .select('id, title')
-          .eq('title_key', title_key)
-          .maybeSingle();
+        const existRes = await d1Query<any>(`SELECT id, title FROM issue_tags WHERE title_key = ? LIMIT 1`, [title_key]);
+        const existingTag = existRes.results?.[0];
         if (existingTag?.id) {
           tagId = existingTag.id;
           tagTitle = existingTag.title;
         } else {
-          const { data: created, error: cErr } = await supabaseAdmin
-            .from('issue_tags')
-            .insert({
-              title: tagTitle.slice(0, 200),
-              title_key,
-              category: cat,
-              status: 'to_fix',
-              comments: [],
-            })
-            .select('id, title')
-            .single();
-          if (cErr || !created) {
-            return res.status(500).json({ error: cErr?.message || 'failed to create bug tag' });
+          const freshId = `tag_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          const cIns = await d1Query(
+            `INSERT INTO issue_tags (id, title, title_key, category, status, comments) VALUES (?, ?, ?, ?, 'to_fix', '[]')`,
+            [freshId, tagTitle.slice(0, 200), title_key, cat]
+          );
+          if (!cIns.success) {
+            return res.status(500).json({ error: cIns.error || 'failed to create bug tag' });
           }
-          tagId = created.id;
+          tagId = freshId;
         }
       }
 
@@ -640,62 +630,47 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         domainPackBody && typeof domainPackBody === 'object' ? domainPackBody : safePayload?.domain_pack || null;
       const networkObj = Array.isArray(networkBody) ? networkBody : req.body?.network || null;
 
-      // Insert issue_backlog report
-      const row = {
-        status: 'to_fix',
-        issue_type: 'general_bug',
-        severity: 'medium',
-        country_code: null,
-        chain_key: chain_key || null,
-        dish_query:
-          dish_query ||
-          domainPack?.summaryLine ||
-          `snapshot ${new Date().toISOString().slice(0, 16)}`,
-        context: 'bug_snapshot',
-        source_url: null,
-        user_note: symptom || null,
-        firebase_uid: firebase_uid || null,
-        payload: {
-          bug_snapshot: true,
-          is_r2: true,
-          reportId,
-          tagId,
-          category: cat,
-          env: env || null,
-          structure_default: AGENT_STRUCTURE_DEFAULT,
-          r2_prefix: bugReportR2Prefix(cat, tagId, reportId),
-          shot_count: shotList.length,
-          serverMeta: { receivedAt: new Date().toISOString(), sessionId: sessionId || null },
-        },
-        ever_tagged: true,
+      const issueId = `iss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const snapshotPayload = {
+        bug_snapshot: true,
+        is_r2: true,
+        reportId,
+        tagId,
+        category: cat,
+        env: env || null,
+        structure_default: AGENT_STRUCTURE_DEFAULT,
+        r2_prefix: bugReportR2Prefix(cat, tagId!, reportId),
+        shot_count: shotList.length,
+        serverMeta: { receivedAt: new Date().toISOString(), sessionId: sessionId || null },
       };
-
-      let issue: { id: string; created_at?: string } | null = null;
-      {
-        const ins = await supabaseAdmin
-          .from('issue_backlog')
-          .insert(row)
-          .select('id, created_at')
-          .single();
-        if (ins.error && /ever_tagged/i.test(String(ins.error.message || ''))) {
-          const { ever_tagged: _, ...row2 } = row as any;
-          const r2 = await supabaseAdmin.from('issue_backlog').insert(row2).select('id, created_at').single();
-          if (r2.error || !r2.data) {
-            return res.status(500).json({ error: r2.error?.message || ins.error.message });
-          }
-          issue = r2.data;
-        } else if (ins.error || !ins.data) {
-          return res.status(500).json({ error: ins.error?.message || 'insert report failed' });
-        } else {
-          issue = ins.data;
-        }
+      const insRes = await d1Query(
+        `INSERT INTO issue_backlog (id, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, firebase_uid, resolution_note, ever_tagged, payload)
+         VALUES (?, 'to_fix', 'general_bug', 'medium', NULL, ?, ?, 'bug_snapshot', NULL, ?, ?, NULL, 1, ?)`,
+        [
+          issueId,
+          chain_key || null,
+          dish_query || domainPack?.summaryLine || `snapshot ${new Date().toISOString().slice(0, 16)}`,
+          symptom || null,
+          firebase_uid || null,
+          JSON.stringify(snapshotPayload),
+        ]
+      );
+      if (!insRes.success) {
+        return res.status(500).json({ error: insRes.error || 'insert report failed' });
+      }
+      const createdRes = await d1Query<any>(`SELECT id, created_at FROM issue_backlog WHERE id = ? LIMIT 1`, [issueId]);
+      const issue = createdRes.results?.[0];
+      if (!issue) {
+        return res.status(500).json({ error: 'insert report failed' });
       }
 
-      const issueId = issue!.id;
-
-      await supabaseAdmin
-        .from('issue_tag_links')
-        .upsert({ tag_id: tagId, issue_id: issueId }, { onConflict: 'tag_id,issue_id' });
+      const linkId = `${tagId}::${issue.id}`;
+      await d1Query(`INSERT OR IGNORE INTO issue_tag_links (id, tag_id, backlog_id, issue_id) VALUES (?, ?, ?, ?)`, [
+        linkId,
+        tagId,
+        issue.id,
+        issue.id,
+      ]);
 
       // Upload artifacts to R2
       const shotMeta: BugSnapshotManifest['shots'] = [];
@@ -825,7 +800,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       files.push({ name: 'manifest.json', key: mKey });
 
       // Tag meta snapshot (brief pointers)
-      const { data: tagRow } = await supabaseAdmin.from('issue_tags').select('*').eq('id', tagId).maybeSingle();
+      const tagRow = await findIssueTag(tagId!);
       const meta = {
         tagId,
         title: tagRow?.title || tagTitle,
@@ -834,23 +809,24 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         whats_still_open: tagRow?.whats_still_open || '',
         updated_at: new Date().toISOString(),
         last_report_id: reportId,
-        r2_prefix: bugTagR2Prefix(cat, tagId),
+        r2_prefix: bugTagR2Prefix(cat, tagId!),
       };
-      await putR2Object(deps, bugMetaKey(cat, tagId), JSON.stringify(meta, null, 2), 'application/json');
+      await putR2Object(deps, bugMetaKey(cat, tagId!), JSON.stringify(meta, null, 2), 'application/json');
 
       // Patch issue payload with R2 keys
       try {
-        await supabaseAdmin
-          .from('issue_backlog')
-          .update({
-            payload: {
-              ...(row.payload as any),
-              r2_manifest_key: mKey,
-              r2_shots: shotMeta,
-              r2_files: files,
-            },
-          })
-          .eq('id', issueId);
+        const curPayRes = await d1Query<any>(`SELECT payload FROM issue_backlog WHERE id = ? LIMIT 1`, [issueId]);
+        const curPayRaw = curPayRes.results?.[0]?.payload;
+        const curPay = typeof curPayRaw === 'string' ? (() => { try { return JSON.parse(curPayRaw); } catch { return {}; } })() : (curPayRaw || {});
+        await d1Query(`UPDATE issue_backlog SET payload = ? WHERE id = ?`, [
+          JSON.stringify({
+            ...curPay,
+            r2_manifest_key: mKey,
+            r2_shots: shotMeta,
+            r2_files: files,
+          }),
+          issueId,
+        ]);
       } catch {
         /* ignore */
       }
@@ -859,8 +835,13 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (tagRow) {
         let wi = hydrateWorkItem(tagRow);
         if (!wi.public_n) {
-          const { data: nRows } = await supabaseAdmin.from('issue_tags').select('work_item');
-          const usedNs = (nRows || []).map((t: any) => hydrateWorkItem(t).public_n).filter((n: number) => n > 0);
+          const nRes = await d1Query<any>(`SELECT work_item FROM issue_tags`);
+          const usedNs = ((nRes.results || []) as any[])
+            .map((t: any) => {
+              const parsed = typeof t.work_item === 'string' ? (() => { try { return JSON.parse(t.work_item); } catch { return {}; } })() : (t.work_item || {});
+              return hydrateWorkItem({ work_item: parsed }).public_n;
+            })
+            .filter((n: number) => n > 0);
           wi = assignPublicN(wi, usedNs);
         }
         wi.bug = prefillBug(wi.bug, symptom || tagTitle || tagRow.title || '');
@@ -898,9 +879,9 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
           remaining: wi.remaining,
         });
         wi.hold_refs = [...new Set([...(wi.hold_refs || []), ev.job_id, ev.r2_prefix].filter(Boolean))] as string[];
-        await persistWorkItem(tagId, wi);
+        await persistWorkItem(tagId!, wi);
         if (tagRow.status === 'fixed' || wi.queue === 'ready') {
-          await supabaseAdmin.from('issue_tags').update({ status: 'to_fix' }).eq('id', tagId);
+          await d1Query(`UPDATE issue_tags SET status = 'to_fix' WHERE id = ?`, [tagId]);
         }
         snapNow = buildNow({ ...tagRow, work_item: wi, id: tagId });
       }
@@ -911,23 +892,23 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
           body: `[snapshot] ${symptom.slice(0, 500)}`,
           created_at: new Date().toISOString(),
         });
-        await supabaseAdmin.from('issue_tags').update({ comments: prev }).eq('id', tagId);
+        await d1Query(`UPDATE issue_tags SET comments = ? WHERE id = ?`, [JSON.stringify(prev), tagId]);
       }
 
       // Archive older instances: mark previous linked reports; keep last 3 active
       try {
-        const { data: linkRows } = await supabaseAdmin
-          .from('issue_tag_links')
-          .select('issue_id')
-          .eq('tag_id', tagId);
-        const otherIds = (linkRows || []).map((l: any) => l.issue_id).filter((id: string) => id !== issueId);
+        const linkRes = await d1Query<any>(`SELECT issue_id FROM issue_tag_links WHERE tag_id = ?`, [tagId]);
+        const otherIds = ((linkRes.results || []) as any[]).map((l: any) => l.issue_id).filter((id: string) => id !== issueId);
         if (otherIds.length) {
-          const { data: others } = await supabaseAdmin
-            .from('issue_backlog')
-            .select('id, payload, created_at')
-            .in('id', otherIds)
-            .order('created_at', { ascending: false });
-          const list = others || [];
+          const placeholders = otherIds.map(() => '?').join(', ');
+          const othRes = await d1Query<any>(
+            `SELECT id, payload, created_at FROM issue_backlog WHERE id IN (${placeholders}) ORDER BY created_at DESC`,
+            otherIds
+          );
+          const list = ((othRes.results || []) as any[]).map((o: any) => ({
+            ...o,
+            payload: typeof o.payload === 'string' ? (() => { try { return JSON.parse(o.payload); } catch { return {}; } })() : (o.payload || {}),
+          }));
           // First previous → archive pointer file
           for (let i = 0; i < list.length; i++) {
             const o = list[i];
@@ -938,7 +919,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
               archived: true,
               archived_at: p.archived_at || archivedAt,
             };
-            await supabaseAdmin.from('issue_backlog').update({ payload: nextPayload }).eq('id', o.id);
+            await d1Query(`UPDATE issue_backlog SET payload = ? WHERE id = ?`, [JSON.stringify(nextPayload), o.id]);
             if (i >= 3 && p.reportId) {
               // Cap: prune R2 for very old instances (beyond 3 previous) unless held
               const keys: string[] = [];
@@ -956,18 +937,16 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
                 continue;
               }
               for (const k of keys) await deleteR2Object(deps, k);
-              await supabaseAdmin
-                .from('issue_backlog')
-                .update({
-                  payload: {
-                    ...nextPayload,
-                    obsolete: true,
-                    pruned_at: archivedAt,
-                    r2_shots: [],
-                    r2_files: [],
-                  },
-                })
-                .eq('id', o.id);
+              await d1Query(`UPDATE issue_backlog SET payload = ? WHERE id = ?`, [
+                JSON.stringify({
+                  ...nextPayload,
+                  obsolete: true,
+                  pruned_at: archivedAt,
+                  r2_shots: [],
+                  r2_files: [],
+                }),
+                o.id,
+              ]);
             } else if (p.reportId) {
               const noteKey = `${bugTagR2Prefix(cat, tagId)}/archive/${archivedAt.slice(0, 19).replace(/[:.]/g, '-')}/${p.reportId}/ARCHIVED.txt`;
               await putR2Object(
@@ -1055,55 +1034,22 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** GET /api/bugs/open — brief-only list for coding agents */
   app.get('/api/bugs/open', async (_req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      let tags: any[] | null = null;
-      const r1 = await supabaseAdmin
-        .from('issue_tags')
-        .select(
-          'id, created_at, title, title_key, category, status, resolution_note, whats_still_open, identified_problems, comments, resolved_at, work_item'
-        )
-        .eq('status', 'to_fix')
-        .order('created_at', { ascending: false })
-        .limit(100);
-      tags = r1.data;
-      let error = r1.error;
-
-      if (error && /identified_problems/i.test(String(error.message || ''))) {
-        const r2 = await supabaseAdmin
-          .from('issue_tags')
-          .select(
-            'id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at, work_item'
-          )
-          .eq('status', 'to_fix')
-          .order('created_at', { ascending: false })
-          .limit(100);
-        tags = r2.data;
-        error = r2.error;
-      }
-      if (error && /work_item/i.test(String(error.message || ''))) {
-        const r3 = await supabaseAdmin
-          .from('issue_tags')
-          .select(
-            'id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at'
-          )
-          .eq('status', 'to_fix')
-          .order('created_at', { ascending: false })
-          .limit(100);
-        tags = r3.data;
-        error = r3.error;
-      }
-      if (error) return res.status(500).json({ error: error.message });
-
-      tags = await persistMissingPublicNs(tags || []);
+      const { d1Query } = await import('./server_d1.js');
+      // D-2: D1-only. Schema is expanded (title_key/category/resolution_note/
+      // whats_still_open present) so no column-fallback chain is needed.
+      const r = await d1Query<any>(
+        `SELECT id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at, work_item
+         FROM issue_tags WHERE status = 'to_fix' ORDER BY created_at DESC LIMIT 100`
+      );
+      if (!r.success) return res.status(500).json({ error: r.error });
+      const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
 
       const tagIds = (tags || []).map((t: any) => t.id);
       let links: any[] = [];
       if (tagIds.length) {
-        const { data: linkRows } = await supabaseAdmin
-          .from('issue_tag_links')
-          .select('tag_id, issue_id')
-          .in('tag_id', tagIds);
-        links = linkRows || [];
+        const placeholders = tagIds.map(() => '?').join(', ');
+        const linkRes = await d1Query<any>(`SELECT tag_id, issue_id FROM issue_tag_links WHERE tag_id IN (${placeholders})`, tagIds);
+        links = linkRes.results || [];
       }
 
       const bugs = (tags || [])
@@ -1132,15 +1078,12 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** GET /api/bugs/next — work bug (current). ?mode=next = next card. ?n=11 = that #. */
   app.get('/api/bugs/next', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const r1 = await supabaseAdmin
-        .from('issue_tags')
-        .select('*')
-        .in('status', ['to_fix', 'in_progress'])
-        .order('created_at', { ascending: true })
-        .limit(100);
-      if (r1.error) return res.status(500).json({ error: r1.error.message });
-      const tags = await persistMissingPublicNs(r1.data || []);
+      const { d1Query } = await import('./server_d1.js');
+      const r = await d1Query<any>(
+        `SELECT * FROM issue_tags WHERE status IN ('to_fix', 'in_progress') ORDER BY created_at ASC LIMIT 100`
+      );
+      if (!r.success) return res.status(500).json({ error: r.error });
+      const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
       const tag = pickQueueTag(tags, {
         mode: String(req.query?.mode || ''),
         n: req.query?.n as string | undefined,
@@ -1167,15 +1110,13 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** GET /api/bugs/unmatched — auto-file that could not fingerprint-merge */
   app.get('/api/bugs/unmatched', async (_req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const r1 = await supabaseAdmin
-        .from('issue_tags')
-        .select('*')
-        .in('status', ['to_fix', 'in_progress'])
-        .limit(200);
-      if (r1.error) return res.status(500).json({ error: r1.error.message });
-      const unmatched = (r1.data || [])
-        .map((t: any) => briefFromTag({ ...t, identified_problems: readIdentifiedProblems(t) }))
+      const { d1Query } = await import('./server_d1.js');
+      const r = await d1Query<any>(
+        `SELECT * FROM issue_tags WHERE status IN ('to_fix', 'in_progress') LIMIT 200`
+      );
+      if (!r.success) return res.status(500).json({ error: r.error });
+      const unmatched = ((r.results || []) as any[])
+        .map((t: any) => briefFromTag({ ...normIssueTag(t), identified_problems: readIdentifiedProblems(normIssueTag(t)) }))
         .filter((b: any) => b.unmatched);
       res.json({ unmatched, count: unmatched.length });
     } catch (err: any) {
@@ -1230,11 +1171,9 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (!listed.success) {
         return res.json({ ok: true, skipped: true, reason: listed.error || 'd1 unavailable', linked: 0, created: 0 });
       }
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const { data: tags } = await supabaseAdmin
-        .from('issue_tags')
-        .select('id, title, work_item, created_at, status')
-        .limit(200);
+      const { d1Query } = await import('./server_d1.js');
+      const tagRes = await d1Query<any>(`SELECT id, title, work_item, created_at, status FROM issue_tags LIMIT 200`);
+      const tags = ((tagRes.results || []) as any[]).map(normIssueTag);
       const plan = planInboxMigration(cases, tags || []);
       const summary = { linked: 0, created: 0, skipped: 0, already: 0 };
       for (const row of plan) {
@@ -1295,8 +1234,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** POST /api/bugs/:tagId/reanalyze — catalog restage, then one skipScout if auto remaining. Same card. */
   app.post('/api/bugs/:tagId/reanalyze', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const tag = await findTagByParam(supabaseAdmin, req.params.tagId);
+      const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'not found' });
       let item = hydrateWorkItem(tag);
       const priorBurns = (item.burns || []).length;
@@ -1422,36 +1360,36 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** GET /api/bugs/:tagId — NOW + commits + report manifests */
   app.get('/api/bugs/:tagId', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const tag = await findTagByParam(supabaseAdmin, req.params.tagId);
+      const { d1Query } = await import('./server_d1.js');
+      const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'not found' });
       const tagId = tag.id;
 
-      const { data: linkRows } = await supabaseAdmin
-        .from('issue_tag_links')
-        .select('issue_id')
-        .eq('tag_id', tagId);
-      const issueIds = (linkRows || []).map((l: any) => l.issue_id);
+      const linkRes = await d1Query<any>(`SELECT issue_id FROM issue_tag_links WHERE tag_id = ?`, [tagId]);
+      const issueIds = ((linkRes.results || []) as any[]).map((l: any) => l.issue_id);
       let reports: any[] = [];
       if (issueIds.length) {
-        const { data: issues } = await supabaseAdmin
-          .from('issue_backlog')
-          .select('id, created_at, status, dish_query, user_note, context, payload')
-          .in('id', issueIds)
-          .order('created_at', { ascending: false });
-        reports = (issues || []).map((i: any) => ({
-          id: i.id,
-          created_at: i.created_at,
-          status: i.status,
-          dish_query: i.dish_query,
-          user_note: i.user_note,
-          context: i.context,
-          reportId: i.payload?.reportId || null,
-          r2_prefix: i.payload?.r2_prefix || null,
-          r2_manifest_key: i.payload?.r2_manifest_key || null,
-          shot_count: i.payload?.shot_count ?? i.payload?.r2_shots?.length ?? 0,
-          obsolete: i.payload?.obsolete === true,
-        }));
+        const placeholders = issueIds.map(() => '?').join(', ');
+        const issRes = await d1Query<any>(
+          `SELECT id, created_at, status, dish_query, user_note, context, payload FROM issue_backlog WHERE id IN (${placeholders}) ORDER BY created_at DESC`,
+          issueIds
+        );
+        reports = ((issRes.results || []) as any[]).map((i: any) => {
+          const p = typeof i.payload === 'string' ? (() => { try { return JSON.parse(i.payload); } catch { return {}; } })() : (i.payload || {});
+          return {
+            id: i.id,
+            created_at: i.created_at,
+            status: i.status,
+            dish_query: i.dish_query,
+            user_note: i.user_note,
+            context: i.context,
+            reportId: p?.reportId || null,
+            r2_prefix: p?.r2_prefix || null,
+            r2_manifest_key: p?.r2_manifest_key || null,
+            shot_count: p?.shot_count ?? p?.r2_shots?.length ?? 0,
+            obsolete: p?.obsolete === true,
+          };
+        });
       }
 
       const item = hydrateWorkItem({ ...tag, linked_count: reports.length });
@@ -1476,8 +1414,8 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** POST /api/bugs/:tagId/attempts — required end of every agent loop */
   app.post('/api/bugs/:tagId/attempts', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const tag = await findTagByParam(supabaseAdmin, req.params.tagId);
+      const { d1Query } = await import('./server_d1.js');
+      const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'not found' });
       const body = req.body || {};
       const item = hydrateWorkItem(tag);
@@ -1500,10 +1438,10 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       const taped = await refreshTapeRemaining(next);
       await persistWorkItem(tag.id, taped);
       if (taped.queue === 'blocked') {
-        await supabaseAdmin.from('issue_tags').update({ status: 'to_fix' }).eq('id', tag.id);
+        await d1Query(`UPDATE issue_tags SET status = 'to_fix' WHERE id = ?`, [tag.id]);
       }
       if (taped.queue === 'done') {
-        await supabaseAdmin.from('issue_tags').update({ status: 'fixed', resolved_at: new Date().toISOString() }).eq('id', tag.id);
+        await d1Query(`UPDATE issue_tags SET status = 'fixed', resolved_at = ? WHERE id = ?`, [new Date().toISOString(), tag.id]);
       }
       const start = buildStartPayload({ ...tag, work_item: taped, id: tag.id });
       if (rejected) {
@@ -1523,8 +1461,8 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** PATCH /api/bugs/:tagId — update Bug field, class, remaining, or unblock */
   app.patch('/api/bugs/:tagId', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const tag = await findTagByParam(supabaseAdmin, req.params.tagId);
+      const { d1Query } = await import('./server_d1.js');
+      const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'not found' });
       const item = hydrateWorkItem(tag);
       const nextBug = String(req.body?.bug ?? '').trim();
@@ -1547,9 +1485,9 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (Array.isArray(req.body?.checks)) item.checks = req.body.checks;
       await persistWorkItem(tag.id, item);
       if (item.queue === 'done') {
-        await supabaseAdmin.from('issue_tags').update({ status: 'fixed', resolved_at: new Date().toISOString() }).eq('id', tag.id);
+        await d1Query(`UPDATE issue_tags SET status = 'fixed', resolved_at = ? WHERE id = ?`, [new Date().toISOString(), tag.id]);
       } else {
-        await supabaseAdmin.from('issue_tags').update({ status: 'to_fix' }).eq('id', tag.id);
+        await d1Query(`UPDATE issue_tags SET status = 'to_fix' WHERE id = ?`, [tag.id]);
       }
       res.json(buildStartPayload({ ...tag, work_item: item, id: tag.id }));
     } catch (err: any) {
@@ -1560,8 +1498,9 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** POST /api/bugs/:tagId/attach — Flag / Snap Open #n (auto-match failed) */
   app.post('/api/bugs/:tagId/attach', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const tag = await findTagByParam(supabaseAdmin, req.params.tagId);
+      const { d1Query } = await import('./server_d1.js');
+      const { d1GetJob } = await import('./server_db_d1.js');
+      const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'not found' });
       const body = req.body || {};
       const jobId = String(body.job_id || body.jobId || '').trim() || null;
@@ -1570,13 +1509,10 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         ? (body.photo_urls || body.photoUrls).map(String)
         : [];
       if (jobId && !debugUrl) {
-        const { data: job } = await supabaseAdmin
-          .from('agent_jobs')
-          .select('debug_url, photo_url, clean_result')
-          .eq('id', jobId)
-          .maybeSingle();
-        debugUrl = job?.debug_url || job?.clean_result?.debugUrl || debugUrl;
-        if (!photoUrls.length && job?.photo_url) photoUrls = [job.photo_url];
+        const job = await d1GetJob(jobId);
+        const cr = (job as any)?.clean_result || {};
+        debugUrl = (job as any)?.debug_url || cr?.debugUrl || debugUrl;
+        if (!photoUrls.length && (job as any)?.photo_url) photoUrls = [(job as any).photo_url];
       }
       let item = hydrateWorkItem(tag);
       item = appendEvidenceCommit(item, {
@@ -1595,7 +1531,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (jobId) item.hold_refs = [...new Set([...(item.hold_refs || []), jobId, debugUrl].filter(Boolean))] as string[];
       await persistWorkItem(tag.id, item);
       if (tag.status === 'fixed' || item.queue === 'ready') {
-        await supabaseAdmin.from('issue_tags').update({ status: 'to_fix' }).eq('id', tag.id);
+        await d1Query(`UPDATE issue_tags SET status = 'to_fix' WHERE id = ?`, [tag.id]);
       }
       res.json(buildStartPayload({ ...tag, work_item: item, id: tag.id }));
     } catch (err: any) {
@@ -1609,8 +1545,8 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
    */
   app.get('/api/bugs/:tagId/artifacts', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const tag = await findTagByParam(supabaseAdmin, req.params.tagId);
+      const { d1Query } = await import('./server_d1.js');
+      const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'tag not found' });
       const tagId = tag.id;
       let reportId = String(req.query.reportId || '');
@@ -1618,12 +1554,12 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (!reportId) return res.status(400).json({ error: 'reportId required' });
 
       // Dashboard used to pass issue_backlog.id; R2 folders use snapshot reportId.
-      const { data: issueRow } = await supabaseAdmin
-        .from('issue_backlog')
-        .select('id, payload')
-        .eq('id', reportId)
-        .maybeSingle();
-      if (issueRow?.payload?.reportId) reportId = String(issueRow.payload.reportId);
+      const issueRes = await d1Query<any>(`SELECT id, payload FROM issue_backlog WHERE id = ? LIMIT 1`, [reportId]);
+      const issueRow = issueRes.results?.[0];
+      const issuePayload = typeof issueRow?.payload === 'string'
+        ? (() => { try { return JSON.parse(issueRow.payload); } catch { return {}; } })()
+        : (issueRow?.payload || {});
+      if (issuePayload?.reportId) reportId = String(issuePayload.reportId);
 
       const cat = tag.category || 'foodcart';
       if (name === 'logs.txt') name = 'console.logs.txt';
@@ -1723,21 +1659,17 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   app.post('/api/bugs/:tagId/reports/:issueId/prune', async (req: Request, res: Response) => {
     try {
       const { tagId, issueId } = req.params;
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const { data: issue, error } = await supabaseAdmin
-        .from('issue_backlog')
-        .select('id, payload')
-        .eq('id', issueId)
-        .maybeSingle();
-      if (error || !issue) return res.status(404).json({ error: error?.message || 'report not found' });
+      const { d1Query } = await import('./server_d1.js');
+      const issueRes = await d1Query<any>(`SELECT id, payload FROM issue_backlog WHERE id = ? LIMIT 1`, [issueId]);
+      const issue = issueRes.results?.[0];
+      if (!issue) return res.status(404).json({ error: 'report not found' });
 
-      const { data: tag } = await supabaseAdmin
-        .from('issue_tags')
-        .select('id, category, work_item, status')
-        .eq('id', tagId)
-        .maybeSingle();
+      const tagRes = await d1Query<any>(`SELECT id, category, work_item, status FROM issue_tags WHERE id = ? LIMIT 1`, [tagId]);
+      const tag = tagRes.results?.[0];
       const cat = tag?.category || 'foodcart';
-      const p = issue.payload || {};
+      const p = typeof issue.payload === 'string'
+        ? (() => { try { return JSON.parse(issue.payload); } catch { return {}; } })()
+        : (issue.payload || {});
       const keys: string[] = [];
       if (Array.isArray(p.r2_shots)) {
         for (const s of p.r2_shots) if (s?.key) keys.push(s.key);
@@ -1772,18 +1704,16 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         if (await deleteR2Object(deps, k)) deleted++;
       }
 
-      await supabaseAdmin
-        .from('issue_backlog')
-        .update({
-          payload: {
-            ...p,
-            obsolete: true,
-            pruned_at: new Date().toISOString(),
-            r2_shots: [],
-            r2_files: [],
-          },
-        })
-        .eq('id', issueId);
+      await d1Query(`UPDATE issue_backlog SET payload = ? WHERE id = ?`, [
+        JSON.stringify({
+          ...p,
+          obsolete: true,
+          pruned_at: new Date().toISOString(),
+          r2_shots: [],
+          r2_files: [],
+        }),
+        issueId,
+      ]);
 
       log(`${BUG_SNAPSHOT_LOG} pruned issue=${issueId} deleted=${deleted}`);
       res.json({ success: true, deleted, issueId });
@@ -1795,8 +1725,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** POST /api/bugs/:tagId/make-golden — 1-click Bug to Golden Case Ingest */
   app.post('/api/bugs/:tagId/make-golden', async (req: Request, res: Response) => {
     try {
-      const { supabaseAdmin } = await import('./supabaseAdmin.js');
-      const tag = await findTagByParam(supabaseAdmin, req.params.tagId);
+      const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'tag not found' });
 
       const item = hydrateWorkItem(tag);
@@ -1819,13 +1748,14 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       const jobId = item.current_evidence?.job_id || item.commits.find(c => c.evidence?.job_id)?.evidence?.job_id || null;
       let scoutData: any = null;
       if (jobId) {
-        const { data: jobRow } = await supabaseAdmin
-          .from('agent_jobs')
-          .select('clean_result')
-          .eq('id', jobId)
-          .maybeSingle();
-        if (jobRow?.clean_result) {
-          scoutData = jobRow.clean_result;
+        try {
+          const { d1GetJob } = await import('./server_db_d1.js');
+          const jobRow = await d1GetJob(jobId);
+          if ((jobRow as any)?.clean_result) {
+            scoutData = (jobRow as any).clean_result;
+          }
+        } catch {
+          /* R2/file fallback below */
         }
       }
 
