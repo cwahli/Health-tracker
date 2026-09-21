@@ -27,7 +27,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create PR if missing
+      - name: Create or update PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -35,16 +35,30 @@ jobs:
           BRANCH="${GITHUB_REF_NAME}"
           if [ "$BRANCH" = "main" ]; then echo "skip main"; exit 0; fi
 
-          existing="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length' 2>&1)" || {
-            echo "::error title=auto-pr list failed::$existing"; exit 1; }
+          # Title from the branch's first commit (stable), body lists all commits.
+          git fetch --quiet origin main || true
+          base="$(git merge-base origin/main HEAD 2>/dev/null || true)"
+          if [ -n "$base" ]; then
+            title="$(git log --format=%s "$base"..HEAD | tail -n1)"
+            body="$(git log --format='- %s' "$base"..HEAD)"
+          else
+            title="$(git log -1 --pretty=%s)"
+            body="$(git log -1 --pretty=%B)"
+          fi
+          [ -n "$title" ] || title="$BRANCH"
 
-          if [ "$existing" != "0" ]; then
-            echo "PR already open for $BRANCH (#$existing) — nothing to do."
+          count="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length' 2>&1)" || {
+            echo "::error title=auto-pr list failed::$count"; exit 1; }
+
+          if [ "$count" != "0" ]; then
+            me="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
+            if ! out="$(gh pr edit "$me" --title "$title" --body "$body" 2>&1)"; then
+              echo "::error title=auto-pr edit failed::$out"; exit 1
+            fi
+            echo "updated PR #$me: $title"
             exit 0
           fi
 
-          title="$(git log -1 --pretty=%s)"
-          body="$(git log -1 --pretty=%B)"
           if ! out="$(gh pr create --base main --head "$BRANCH" --title "$title" --body "$body" 2>&1)"; then
             echo "::error title=auto-pr create failed::$out"
             exit 1
