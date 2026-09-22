@@ -1,7 +1,7 @@
 ---
 name: qa-meal-journey
 description: QA Tester and Bug Reporter for Health-tracker. Runs the live journey test, captures a screenshot, sends it to Telegram, writes a bug ticket, and hands off to @Orchestrator. NEVER diagnoses source code. NEVER monitors dev agents.
-version: 1.4.0
+version: 1.5.0
 ---
 
 ## Role (READ FIRST — ABSOLUTE)
@@ -29,11 +29,13 @@ version: 1.4.0
 
 ## Path Resolution (Run First)
 
-Always resolve the repo directory dynamically:
 ```bash
-REPO_DIR="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null)"
-if [ -z "$REPO_DIR" ]; then
-  [ -d "/home/ubuntu/src/Health-tracker" ] && REPO_DIR="/home/ubuntu/src/Health-tracker" || REPO_DIR="/root/Health-tracker"
+if [ -f /home/ubuntu/src/Health-tracker/scripts/run-coding-dispatch.sh ]; then
+  REPO_DIR=/home/ubuntu/src/Health-tracker
+elif [ -f /home/ubuntu/opencode-bot/scripts/run-coding-dispatch.sh ]; then
+  REPO_DIR=/home/ubuntu/opencode-bot
+else
+  REPO_DIR="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null)"
 fi
 ```
 
@@ -71,12 +73,14 @@ bash "$REPO_DIR/scripts/telegram-send.sh" --profile=qa_meal --photo="$LATEST_IMG
 ```bash
 BUG_ID="BUG-$(date +%Y%m%d)-$(head /dev/urandom | tr -dc 0-9 | head -c 4)"
 bash "$REPO_DIR/scripts/run-coding-dispatch.sh" \
-  --task="Fix visual theme discrepancy: root app background must render dark navy #0f172a instead of light gray #f8fafc" \
+  --task="<the user's actual report. Observed: <what is on screen>. Expected: <what they asked for>. Do not replace this with a different bug.>" \
   --bug-id="$BUG_ID" \
   --category="meal" \
   --screenshot="$LATEST_IMG" \
-  --profile=orchestrator </dev/null >/dev/null 2>&1 & disown
+  --profile=orchestrator
 ```
+
+The script detaches itself and returns a background pid. Do not wait for it. The Orchestrator runs the coder and sends the pass or the remaining failure back into this Meal QA chat. The navy theme colours above are only an example of how to look. Never dispatch that example unless the user reported it.
 
 ### Step 3 — Reply with Bug Ticket and STOP Immediately
 ```

@@ -131,7 +131,8 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     `--tool=${toolChoice}`,
     `--thinking=${thinkingLevel}`,
     `--profile=orchestrator`,
-    `--verify=false`
+    `--verify=false`,
+    `--foreground`
   ];
 
   if (currentBug.screenshot && fs.existsSync(currentBug.screenshot)) {

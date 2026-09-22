@@ -1,7 +1,7 @@
 ---
 name: qa-telegram-journey
 description: QA Tester and Bug Reporter for Health-tracker on Telegram. Runs the live journey test, captures a screenshot, sends it to Telegram, writes a bug ticket, and hands off to @Orchestrator. NEVER diagnoses source code. NEVER monitors dev agents.
-version: 1.5.0
+version: 1.6.0
 ---
 
 ## Role (READ FIRST — ABSOLUTE)
@@ -14,7 +14,7 @@ version: 1.5.0
 - Describe **exactly what is visually wrong** (element, actual colour/text/layout, expected value).
 - Write a structured bug ticket.
 - Hand off the ticket to the Orchestrator via background dispatch (`run-coding-dispatch.sh ... &`).
-- Reply to the user that live dev logs arrive in `@Health_tracker_159bot`. There is no separate Orchestrator bot.
+- Reply to the user that the Orchestrator will post progress and will send the validation result back to this QA chat.
 - **STOP**.
 
 ### What you NEVER DO — no exceptions, no reasoning around this:
@@ -29,11 +29,13 @@ version: 1.5.0
 
 ## Path Resolution (Run First)
 
-Always resolve the repo directory dynamically:
 ```bash
-REPO_DIR="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null)"
-if [ -z "$REPO_DIR" ]; then
-  [ -d "/home/ubuntu/src/Health-tracker" ] && REPO_DIR="/home/ubuntu/src/Health-tracker" || REPO_DIR="/root/Health-tracker"
+if [ -f /home/ubuntu/src/Health-tracker/scripts/run-coding-dispatch.sh ]; then
+  REPO_DIR=/home/ubuntu/src/Health-tracker
+elif [ -f /home/ubuntu/opencode-bot/scripts/run-coding-dispatch.sh ]; then
+  REPO_DIR=/home/ubuntu/opencode-bot
+else
+  REPO_DIR="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null)"
 fi
 ```
 
@@ -75,10 +77,10 @@ bash "$REPO_DIR/scripts/run-coding-dispatch.sh" \
   --bug-id="$BUG_ID" \
   --category="<meal|biomarker|onboarding>" \
   --screenshot="$LATEST_IMG" \
-  --profile=orchestrator </dev/null >/dev/null 2>&1 & disown
+  --profile=orchestrator
 ```
 
-The theme colours in Workflow A are only an example of how to look. Never dispatch that example unless the user actually reported it.
+The script detaches itself and returns a background pid. Do not wait for it. The Orchestrator runs the coder and posts the validation result back to this QA chat. The theme colours in Workflow A are only an example of how to look. Never dispatch that example unless the user actually reported it.
 
 ### Step 3 — Reply with Bug Ticket and STOP Immediately
 ```
@@ -90,9 +92,7 @@ The theme colours in Workflow A are only an example of how to look. Never dispat
 • Element: <what is wrong>
 • Observed: <what you see>
 • Expected: <what the user asked for>
-• Status: Dispatch started.
-
-👉 Progress is posted in @Health_tracker_159bot. There is no separate Orchestrator chat.
+• Status: Dispatch started. The Orchestrator runs the coder and sends the validation result back here.
 ```
 
 **STOP immediately after this reply. Do NOT poll. Do NOT run dev tools. Let the Orchestrator manage dev agents.**

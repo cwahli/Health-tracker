@@ -15,6 +15,10 @@
 # Usage:
 #   ./scripts/run-coding-dispatch.sh --task="Fix X" --bug-id="BUG-123" --category="meal" \
 #     [--tool=auto|cline|opencode|grok] [--screenshot="/path/to/bug.png"] [--thinking=high|low|none]
+#
+# The process detaches itself so a short Hermes tool timeout cannot kill the coder.
+# Pass --foreground when the caller must wait (qa-auto-loop). --print-plan prints the
+# OpenCode command and QA profile without starting a job.
 
 set -eo pipefail
 
@@ -28,11 +32,13 @@ SCREENSHOT=""
 DISPATCH_PROFILE="${HERMES_PROFILE:-orchestrator}"
 
 PREFER_VERIFY="auto"
+FOREGROUND=0
+PRINT_PLAN=0
 
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none] [--verify=true|false|auto] [--profile=orchestrator]"
+      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none] [--verify=true|false|auto] [--profile=orchestrator] [--foreground] [--print-plan]"
       exit 0
       ;;
     --task=*)    TASK="${arg#*=}" ;;
@@ -44,6 +50,8 @@ for arg in "$@"; do
     --screenshot=*) SCREENSHOT="${arg#*=}" ;;
     --verify=*)  PREFER_VERIFY="${arg#*=}" ;;
     --profile=*) DISPATCH_PROFILE="${arg#*=}" ;;
+    --foreground) FOREGROUND=1 ;;
+    --print-plan) PRINT_PLAN=1 ;;
     *)
       if [ -z "$TASK" ]; then TASK="$arg"; fi
       ;;
@@ -62,31 +70,96 @@ HERMES_DIR="${HOME}/.hermes"
 AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
 TELEGRAM_SCRIPT="${REPO_DIR}/scripts/telegram-send.sh"
 DISPATCH_LOCK="${HERMES_DIR}/dispatch_lock"
-mkdir -p "$HERMES_DIR"
+mkdir -p "$HERMES_DIR" "${HERMES_DIR}/logs"
+
+opencode_model_id() {
+  local model="$1"
+  case "$model" in
+    */*) printf '%s\n' "$model" ;;
+    *) printf 'opencode/%s\n' "$model" ;;
+  esac
+}
+
+qa_profile_for_category() {
+  case "$CATEGORY" in
+    biomarker) printf 'qa_biomarker\n' ;;
+    onboarding) printf 'qa_onboarding\n' ;;
+    *) printf 'qa_meal\n' ;;
+  esac
+}
+
+if [ "$PRINT_PLAN" = "1" ]; then
+  echo "opencode_model=$(opencode_model_id "$PREFERRED_MODEL")"
+  echo "qa_profile=$(qa_profile_for_category)"
+  echo "opencode_argv=opencode run --auto --dir ${REPO_DIR} -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>"
+  exit 0
+fi
+
+# Leave the Hermes tool call immediately. A 30s tool timeout used to kill the coder
+# mid-typecheck. setsid starts a new session so that kill does not reach the child.
+if [ "$FOREGROUND" != "1" ] && [ "${DISPATCH_FOREGROUND:-}" != "1" ]; then
+  child_log="${HERMES_DIR}/logs/dispatch_${BUG_ID}.log"
+  echo "[Dispatcher] Detaching ${BUG_ID} to ${child_log}"
+  env DISPATCH_FOREGROUND=1 setsid nohup bash "$0" "$@" </dev/null >>"$child_log" 2>&1 &
+  echo "[Dispatcher] Background pid $! — result returns to $(qa_profile_for_category) after the fix."
+  exit 0
+fi
 
 # ---------------------------------------------------------------
 # Heartbeat & Lock Cleanup Trap (V-23, V-24)
+# Defined before the trap. An early exit used to call stop_heartbeat
+# before this function existed, and the trap also deleted another process's lock.
 # ---------------------------------------------------------------
+stop_heartbeat() {
+  if [ -n "${HEARTBEAT_PID:-}" ]; then
+    kill "$HEARTBEAT_PID" 2>/dev/null || true
+    wait "$HEARTBEAT_PID" 2>/dev/null || true
+    HEARTBEAT_PID=""
+  fi
+}
+
+WE_OWN_LOCK=0
 cleanup_dispatch() {
   stop_heartbeat
-  rm -f "$DISPATCH_LOCK" 2>/dev/null || true
+  if [ "$WE_OWN_LOCK" != "1" ]; then
+    return 0
+  fi
+  local info=""
+  info=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
+  case "$info" in
+    "$$:"*) rm -f "$DISPATCH_LOCK" 2>/dev/null || true ;;
+  esac
 }
 trap cleanup_dispatch EXIT INT TERM
 
-# Concurrency check
-if [ -f "$DISPATCH_LOCK" ]; then
+lock_holder_alive() {
+  local info pid
+  info=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
+  pid=$(printf '%s\n' "$info" | cut -d: -f1)
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+# The OpenCode chat bot holds this lock for one chat turn. Wait, then give up
+# without deleting that lock.
+waited=0
+while lock_holder_alive; do
   LOCKED_INFO=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
-  LOCKED_PID=$(echo "$LOCKED_INFO" | cut -d: -f1)
-  LOCKED_BUG=$(echo "$LOCKED_INFO" | cut -d: -f2)
-  if [ -n "$LOCKED_PID" ] && kill -0 "$LOCKED_PID" 2>/dev/null; then
-    echo "[Dispatcher] Concurrency lock: PID $LOCKED_PID is active on $LOCKED_BUG."
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* Concurrency Lock: Task \`$LOCKED_BUG\` is currently executing (PID \`$LOCKED_PID\`). Please wait for it to complete." 2>/dev/null || true
-    exit 1
-  else
-    rm -f "$DISPATCH_LOCK" 2>/dev/null || true
+  LOCKED_PID=$(printf '%s\n' "$LOCKED_INFO" | cut -d: -f1)
+  LOCKED_BUG=$(printf '%s\n' "$LOCKED_INFO" | cut -d: -f2-)
+  if [ "$waited" -eq 0 ]; then
+    echo "[Dispatcher] Concurrency lock: PID $LOCKED_PID is active on $LOCKED_BUG. Waiting."
+    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` is waiting. \`$LOCKED_BUG\` (PID \`$LOCKED_PID\`) still has the repo." 2>/dev/null || true
   fi
-fi
+  if [ "$waited" -ge 180 ]; then
+    echo "[Dispatcher] Lock still held after 180s."
+    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` did not start. \`$LOCKED_BUG\` (PID \`$LOCKED_PID\`) still has the repo." 2>/dev/null || true
+    exit 1
+  fi
+  sleep 10
+  waited=$((waited + 10))
+done
 echo "$$:${BUG_ID}" > "$DISPATCH_LOCK"
+WE_OWN_LOCK=1
 
 # Executable search paths
 OPENCODE_BIN=$(which opencode 2>/dev/null || echo "${HOME}/.opencode/bin/opencode")
@@ -106,6 +179,18 @@ tg_msg() {
     bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --photo="$photo" --caption="$text" 2>/dev/null || true
   else
     bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="$text" 2>/dev/null || true
+  fi
+}
+
+tg_qa() {
+  local text="$1"
+  local photo="${2:-}"
+  local prof
+  prof=$(qa_profile_for_category)
+  if [ -n "$photo" ] && [ -f "$photo" ]; then
+    bash "$TELEGRAM_SCRIPT" --profile="$prof" --photo="$photo" --caption="$text" 2>/dev/null || true
+  else
+    bash "$TELEGRAM_SCRIPT" --profile="$prof" --text="$text" 2>/dev/null || true
   fi
 }
 
@@ -138,13 +223,6 @@ start_heartbeat() {
   HEARTBEAT_PID=$!
 }
 
-stop_heartbeat() {
-  if [ -n "${HEARTBEAT_PID:-}" ]; then
-    kill "$HEARTBEAT_PID" 2>/dev/null || true
-    HEARTBEAT_PID=""
-  fi
-}
-
 # ---------------------------------------------------------------
 # Audit
 # ---------------------------------------------------------------
@@ -158,14 +236,46 @@ record_audit() {
 # ---------------------------------------------------------------
 # tsc + git commit check
 # ---------------------------------------------------------------
+SNAP_FILE=""
+snapshot_workspace() {
+  rm -f "${SNAP_FILE:-}"
+  SNAP_FILE=$(mktemp)
+  git status --porcelain | grep -v 'src/git-version.generated.ts' > "$SNAP_FILE" || true
+}
+
+# Lines that appeared after snapshot_workspace. Pre-existing dirt does not count.
+new_changes() {
+  local now
+  now=$(mktemp)
+  git status --porcelain | grep -v 'src/git-version.generated.ts' > "$now" || true
+  if [ -n "$SNAP_FILE" ] && [ -f "$SNAP_FILE" ]; then
+    comm -13 <(sort "$SNAP_FILE") <(sort "$now") || true
+  else
+    cat "$now" || true
+  fi
+  rm -f "$now"
+}
+
+commit_fix() {
+  local msg="$1"
+  if git config user.email >/dev/null 2>&1; then
+    git commit -m "$msg"
+  else
+    GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-cwahli}" \
+    GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-cwahli@users.noreply.github.com}" \
+    GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-cwahli}" \
+    GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-cwahli@users.noreply.github.com}" \
+    git commit -m "$msg"
+  fi
+}
+
 check_git_and_tsc() {
   local tool_name="$1" model_desc="$2" log_file="${3:-}"
   echo "[Dispatcher] Verifying $tool_name changes with tsc..."
-  
-  local diff_files
-  diff_files=$(git status --porcelain | grep -v 'src/git-version.generated.ts' || true)
-  local diff_count
-  diff_count=$(echo "$diff_files" | grep -c '[^[:space:]]' || true)
+
+  local diff_files diff_count
+  diff_files=$(new_changes)
+  diff_count=$(printf '%s\n' "$diff_files" | grep -c '[^[:space:]]' || true)
 
   if [ "$diff_count" -eq 0 ]; then
     echo "[Dispatcher] No code changes produced by $tool_name."
@@ -181,20 +291,26 @@ ${tail_output:-No output logged}
     return 1
   fi
 
-  local diff_stat
-  diff_stat=$(git diff --stat | grep -v 'git-version' | head -10 || true)
-
   tg_msg "📝 *[Orchestrator]* Code modified by *$tool_name*:
 \`\`\`
-$diff_stat
+$(printf '%s\n' "$diff_files" | head -10)
 \`\`\`
 Running TypeScript build check ('npx tsc --noEmit')..."
 
   local tsc_output
   if tsc_output=$(npx tsc --noEmit 2>&1); then
     echo "[Dispatcher] tsc clean — committing real changes..."
-    git add .
-    git commit -m "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)" || true
+    local line path
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      path="${line:3}"
+      [ -n "$path" ] && git add -- "$path" || true
+    done <<< "$diff_files"
+    if ! commit_fix "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)"; then
+      echo "[Dispatcher] git commit failed."
+      tg_msg "⚠️ *[Orchestrator]* *$tool_name* edited files for \`$BUG_ID\`, but \`git commit\` failed."
+      return 1
+    fi
     if ! git push origin main; then
       echo "[Dispatcher] Error: git push origin main failed."
       tg_msg "⚠️ *[Orchestrator]* Fix coded by *$tool_name*, but \`git push origin main\` failed. Check GitHub credentials on VPS (SSH key or PAT)."
@@ -205,24 +321,34 @@ Running TypeScript build check ('npx tsc --noEmit')..."
     tg_msg "🚀 *[Orchestrator]* Fix committed and pushed to \`main\` (\`$commit_hash\`)."
     node scripts/tool-allowance.mjs report-result --tool="$tool_name" --status="success" --bug-id="$BUG_ID" --category="$CATEGORY" --duration=$(( $(date +%s) - START_TIME )) || true
     record_audit "$tool_name" "$model_desc" "resolved" "deployed_pending_qa"
+    snapshot_workspace
     return 0
   else
     echo "[Dispatcher] tsc failed after $tool_name."
     local tsc_tail
-    tsc_tail=$(echo "$tsc_output" | head -n 6 | tr -d '`' | cut -c1-300)
+    tsc_tail=$(printf '%s\n' "$tsc_output" | head -n 6 | tr -d '`' | cut -c1-300)
     tg_msg "❌ *[Orchestrator]* TypeScript compilation failed after *$tool_name*:
 \`\`\`
-$tsc_tail
+${tsc_tail:-no compiler output}
 \`\`\`
-Reverting uncommitted changes..."
+Reverting this attempt's uncommitted changes..."
     clean_workspace
     return 1
   fi
 }
 
 clean_workspace() {
-  git checkout . >/dev/null 2>&1 || true
-  git clean -fd >/dev/null 2>&1 || true
+  local line path
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    path="${line:3}"
+    [ -z "$path" ] && continue
+    case "$line" in
+      \?\?*) rm -rf -- "$path" ;;
+      *) git checkout -- "$path" >/dev/null 2>&1 || true ;;
+    esac
+  done < <(new_changes)
+  snapshot_workspace
 }
 
 # ---------------------------------------------------------------
@@ -251,6 +377,15 @@ Ensure the root page background renders the dark theme navy (#0f172a) properly f
 # TOOL FUNCTIONS
 # ---------------------------------------------------------------
 
+run_opencode_agent() {
+  local prompt="$1" log_file="$2" duration="$3"
+  local model_id
+  model_id=$(opencode_model_id "$PREFERRED_MODEL")
+  snapshot_workspace
+  echo "[Dispatcher] opencode run --auto --dir ${REPO_DIR} -m ${model_id}"
+  run_with_timeout "$duration" "$OPENCODE_BIN" run --auto --dir "$REPO_DIR" -m "$model_id" "$prompt" 2>&1 | tee "$log_file" || true
+}
+
 try_opencode() {
   local model="$1"
   echo "[Dispatcher] --> OpenCode (Model: $model)"
@@ -277,7 +412,7 @@ $prompt_preview
 \`\`\`"
 
   start_heartbeat "OpenCode"
-  run_with_timeout 8m "$OPENCODE_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
+  run_opencode_agent "$prompt" "$log_file" 8m
   stop_heartbeat
 
   local output; output=$(cat "$log_file" 2>/dev/null || true)
@@ -294,7 +429,7 @@ $prompt_preview
   # One nudge attempt
   tg_msg "🔄 *[Orchestrator]* OpenCode nudged to retry \`$BUG_ID\`..."
   local nudge_log="${log_dir}/dispatch_${BUG_ID}_opencode_nudge.log"
-  run_with_timeout 4m "$OPENCODE_BIN" -p "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." 2>&1 | tee "$nudge_log" || true
+  run_opencode_agent "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." "$nudge_log" 4m
   if check_git_and_tsc "opencode" "$model" "$nudge_log"; then return 0; fi
 
   tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`. Escalating to Cline..."
@@ -328,6 +463,7 @@ try_cline() {
 $prompt_preview
 \`\`\`"
 
+  snapshot_workspace
   start_heartbeat "Cline"
   run_with_timeout 8m "$CLINE_BIN" --auto-approve true --thinking "$thinking" "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
@@ -373,6 +509,7 @@ try_grok() {
 $prompt_preview
 \`\`\`"
 
+  snapshot_workspace
   start_heartbeat "Grok"
   run_with_timeout 10m "$GROK_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
@@ -415,6 +552,7 @@ try_agy() {
 $prompt_preview
 \`\`\`"
 
+  snapshot_workspace
   start_heartbeat "Agy"
   run_with_timeout 8m "$AGY_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
@@ -476,6 +614,22 @@ done
 
 echo "[Dispatcher] Execution sequence: ${TOOL_SEQUENCE[*]}"
 
+qa_failure_summary() {
+  local report
+  report=$(ls -t "${REPO_DIR}/qa-evidence/bug_${CATEGORY}_"*.json 2>/dev/null | head -n1 || true)
+  if [ -z "$report" ] || [ ! -f "$report" ]; then
+    printf 'QA runner failed without a bug report.\n'
+    return 0
+  fi
+  python3 - "$report" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+title = str(data.get("title") or "QA failed").replace("`", "")
+fix = str(data.get("suggested_fix") or "").replace("`", "")
+print(f"{title}. {fix}".strip())
+PY
+}
+
 verify_live_resolution() {
   local tool_resolved="$1"
   local should_verify=false
@@ -489,36 +643,67 @@ verify_live_resolution() {
     esac
   fi
 
-  if [ "$should_verify" = "true" ] && [ -f "${REPO_DIR}/scripts/qa-runner.mjs" ]; then
+  if [ "$should_verify" != "true" ] || [ ! -f "${REPO_DIR}/scripts/qa-runner.mjs" ]; then
     tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` resolved by *$tool_resolved*!
 
-Fix pushed to \`main\`. Awaiting live webhook rebuild (~45s) to run automated QA verification..."
+Fix pushed to main. Awaiting CI/CD deploy (~45s)."
+    return 0
+  fi
+
+  local qa_prof round failure_text clean_img bug_img
+  qa_prof=$(qa_profile_for_category)
+  round=0
+  while [ "$round" -lt 2 ]; do
+    tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` is on \`main\` via *$tool_resolved*.
+
+Waiting ~45s for the live rebuild, then ${qa_prof} validates it."
+    tg_qa "🔎 *[${qa_prof}]* \`$BUG_ID\` was fixed by the Orchestrator. I will re-test the \`${CATEGORY}\` journey when the live site finishes rebuilding."
     sleep 45
 
-    tg_msg "🔄 *[Orchestrator Verification]* Running automated test for \`${CATEGORY}\` journey on live site..."
+    echo "[Dispatcher] QA validation round $((round + 1)) via ${qa_prof}"
     if node "${REPO_DIR}/scripts/qa-runner.mjs" --journey="${CATEGORY}"; then
-      local clean_img
       clean_img=$(ls -t "${REPO_DIR}/qa-evidence/clean_${CATEGORY}_"*.png 2>/dev/null | head -n1 || true)
+      tg_msg "🎉 *[Orchestrator]* \`$BUG_ID\` passed ${qa_prof} validation."
       if [ -n "$clean_img" ] && [ -f "$clean_img" ]; then
-        tg_msg "🎉 *[Orchestrator QA Verified]* Live site updated and verified with 0 defects! Screenshot attached." "$clean_img"
+        tg_qa "✅ *[${qa_prof}]* \`$BUG_ID\` passed the \`${CATEGORY}\` journey. No further fix." "$clean_img"
       else
-        tg_msg "🎉 *[Orchestrator QA Verified]* Live site updated and verified cleanly on \`${CATEGORY}\` journey!"
+        tg_qa "✅ *[${qa_prof}]* \`$BUG_ID\` passed the \`${CATEGORY}\` journey. No further fix."
       fi
-    else
-      local bug_img
-      bug_img=$(ls -t "${REPO_DIR}/qa-evidence/bug_${CATEGORY}_"*.png 2>/dev/null | head -n1 || true)
-      if [ -n "$bug_img" ] && [ -f "$bug_img" ]; then
-        tg_msg "⚠️ *[Orchestrator QA Notice]* Fix deployed, but post-deploy check reported remaining issues." "$bug_img"
-      else
-        tg_msg "⚠️ *[Orchestrator QA Notice]* Fix deployed, but post-deploy verification test exited with errors."
-      fi
+      return 0
     fi
-  else
-    tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` resolved by *$tool_resolved*!
 
-Fix pushed to main. Awaiting CI/CD deploy (~45s).
-QA bot will re-verify and send confirmation screenshot."
-  fi
+    failure_text=$(qa_failure_summary)
+    bug_img=$(ls -t "${REPO_DIR}/qa-evidence/bug_${CATEGORY}_"*.png 2>/dev/null | head -n1 || true)
+    round=$((round + 1))
+    if [ "$round" -ge 2 ]; then
+      tg_msg "⚠️ *[Orchestrator]* \`$BUG_ID\` still fails ${qa_prof} after a second fix.
+
+${failure_text}"
+      if [ -n "$bug_img" ] && [ -f "$bug_img" ]; then
+        tg_qa "⚠️ *[${qa_prof}]* \`$BUG_ID\` still fails the \`${CATEGORY}\` journey after one additional fix. ${failure_text}" "$bug_img"
+      else
+        tg_qa "⚠️ *[${qa_prof}]* \`$BUG_ID\` still fails the \`${CATEGORY}\` journey after one additional fix. ${failure_text}"
+      fi
+      return 0
+    fi
+
+    tg_msg "🔄 *[Orchestrator]* ${qa_prof} rejected \`$BUG_ID\`. Applying one more fix.
+
+${failure_text}"
+    if [ -n "$bug_img" ] && [ -f "$bug_img" ]; then
+      tg_qa "⚠️ *[${qa_prof}]* \`$BUG_ID\` failed validation. The Orchestrator is applying one more fix. ${failure_text}" "$bug_img"
+    else
+      tg_qa "⚠️ *[${qa_prof}]* \`$BUG_ID\` failed validation. The Orchestrator is applying one more fix. ${failure_text}"
+    fi
+    TASK="${TASK}
+
+QA validation failed after deploy. Remaining failure: ${failure_text}. Fix that remaining defect and leave the rest of the app alone."
+    if ! try_opencode "$PREFERRED_MODEL"; then
+      tg_msg "❌ *[Orchestrator]* The additional fix for \`$BUG_ID\` did not land. ${qa_prof} still has the failure above."
+      tg_qa "❌ *[${qa_prof}]* The Orchestrator could not land an additional fix for \`$BUG_ID\`. ${failure_text}"
+      return 0
+    fi
+  done
 }
 
 for tool in "${TOOL_SEQUENCE[@]}"; do
