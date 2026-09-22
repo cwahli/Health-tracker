@@ -103,6 +103,7 @@ The script detaches itself and returns a background pid. Do not wait for it. The
 • Observed: Light gray (#f8fafc)
 • Expected: Dark navy (#0f172a)
 • Status: Dispatched to VM Dev Pool via @Orchestrator.
+⏳ Status: Waiting for @Orchestrator to fix, deploy, and report validation result back...
 
 👉 Live agent reasoning, prompt instructions, git diffs, and deploy logs are streaming in @Orchestrator.
 I will re-test the live site and deliver side-by-side Before vs After screenshots once the fix is deployed!

@@ -225,9 +225,19 @@ start_heartbeat() {
   local log_file="${2:-}"
   local interval_secs="${3:-120}"   # 2 min default
   (
+    # Continuous typing action loop in background to display 3 loading dots in Telegram chat header
+    (
+      while true; do
+        bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
+        sleep 4
+      done
+    ) &
+    local TYPING_PID=$!
+    trap "kill $TYPING_PID 2>/dev/null || true" EXIT INT TERM
+
     while true; do
       sleep "$interval_secs"
-      local current_activity="analyzing codebase"
+      local current_activity="analyzing codebase..."
       if [ -n "$log_file" ] && [ -f "$log_file" ]; then
         local last_line
         last_line=$(grep -vE '^[[:space:]]*$' "$log_file" 2>/dev/null | tr -d '\r`' | tail -n 1 | cut -c1-120 || true)
@@ -460,7 +470,8 @@ try_opencode() {
   local prompt_preview
   prompt_preview=$(echo "$prompt" | head -n 8 | tr -d '`' | cut -c1-350)
 
-  tg_msg "🤖 *[Orchestrator]* Dispatching to *OpenCode* ($model) for \`$BUG_ID\`
+  tg_msg "🤖 *[Orchestrator]* Dispatching to *OpenCode* ($model) for \`$BUG_ID\`...
+⏳ *Status:* Waiting for response from Agent OpenCode...
 
 📋 *Task:* $TASK
 📁 *Log:* \`$log_file\`
@@ -530,7 +541,8 @@ try_cline() {
   local prompt_preview
   prompt_preview=$(echo "$prompt" | head -n 8 | tr -d '`' | cut -c1-350)
 
-  tg_msg "🤖 *[Orchestrator]* Dispatching to *Cline CLI* (thinking=$thinking) for \`$BUG_ID\`
+  tg_msg "🤖 *[Orchestrator]* Dispatching to *Cline CLI* (thinking=$thinking) for \`$BUG_ID\`...
+⏳ *Status:* Waiting for response from Agent Cline...
 
 📋 *Task:* $TASK
 📁 *Log:* \`$log_file\`
@@ -576,7 +588,8 @@ try_grok() {
   local prompt_preview
   prompt_preview=$(echo "$prompt" | head -n 8 | tr -d '`' | cut -c1-350)
 
-  tg_msg "🤖 *[Orchestrator]* Dispatching to *Grok Build* for \`$BUG_ID\`
+  tg_msg "🤖 *[Orchestrator]* Dispatching to *Grok Build* for \`$BUG_ID\`...
+⏳ *Status:* Waiting for response from Agent Grok...
 
 📋 *Task:* $TASK
 📁 *Log:* \`$log_file\`
@@ -625,7 +638,8 @@ try_agy() {
   local prompt_preview
   prompt_preview=$(echo "$prompt" | head -n 8 | tr -d '`' | cut -c1-350)
 
-  tg_msg "🤖 *[Orchestrator]* Dispatching to *Antigravity CLI* for \`$BUG_ID\`
+  tg_msg "🤖 *[Orchestrator]* Dispatching to *Antigravity CLI* for \`$BUG_ID\`...
+⏳ *Status:* Waiting for response from Agent Antigravity...
 
 📋 *Task:* $TASK
 📁 *Log:* \`$log_file\`
@@ -738,11 +752,21 @@ Fix pushed to main. Awaiting CI/CD deploy (~45s)."
   round=0
   while [ "$round" -lt 2 ]; do
     tg_msg "✅ *[Orchestrator]* \`$BUG_ID\` is on \`main\` via *$tool_resolved*.
+⏳ *Status:* Waiting ~45s for production rebuild & deploy... then ${qa_prof} will validate."
+    tg_qa "⏳ *[${qa_prof}]* \`$BUG_ID\` was fixed by the Orchestrator. Waiting for live rebuild to complete before re-testing..."
 
-Waiting ~45s for the live rebuild, then ${qa_prof} validates it."
-    tg_qa "🔎 *[${qa_prof}]* \`$BUG_ID\` was fixed by the Orchestrator. I will re-test the \`${CATEGORY}\` journey when the live site finishes rebuilding."
+    # Pulse Telegram typing indicator during deploy wait so 3 dots are shown
+    (
+      for i in $(seq 1 11); do
+        bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --action="typing" >/dev/null 2>&1 || true
+        sleep 4
+      done
+    ) &
+    local DEPLOY_WAIT_PID=$!
     sleep 45
+    kill "$DEPLOY_WAIT_PID" 2>/dev/null || true
 
+    tg_msg "🔎 *[Orchestrator]* Rebuild complete. Waiting for QA validation result from \`@${qa_prof}\`..."
     echo "[Dispatcher] QA validation round $((round + 1)) via ${qa_prof}"
     if node "${REPO_DIR}/scripts/qa-runner.mjs" --journey="${CATEGORY}"; then
       clean_img=$(ls -t "${REPO_DIR}/qa-evidence/clean_${CATEGORY}_"*.png 2>/dev/null | head -n1 || true)

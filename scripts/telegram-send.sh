@@ -17,9 +17,14 @@ THREAD_ID=""
 CHAT_ID=""
 PROFILE=""
 CLI_TOKEN=""
+ACTION=""
 
 for arg in "$@"; do
   case $arg in
+    --action=*)
+      ACTION="${arg#*=}"
+      shift
+      ;;
     --text=*)
       TEXT="${arg#*=}"
       shift
@@ -129,6 +134,26 @@ if [ -z "$CHAT_ID" ]; then
 fi
 
 API_URL="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+
+# 0. Send Chat Action (typing / ... indicator) if specified
+if [ -n "$ACTION" ]; then
+  CURL_ARGS=(
+    -s -X POST "${API_URL}/sendChatAction"
+    -d "chat_id=${CHAT_ID}"
+    -d "action=${ACTION}"
+  )
+  if [ -n "$THREAD_ID" ]; then
+    CURL_ARGS+=(-d "message_thread_id=${THREAD_ID}")
+  fi
+
+  RAW_RESP=$(curl "${CURL_ARGS[@]}" 2>&1 || true)
+  if echo "$RAW_RESP" | grep -q '"ok":true'; then
+    echo "[Telegram Send] Action '${ACTION}' sent to chat $CHAT_ID"
+  else
+    echo "[Telegram Send] Warning: Failed to send action '${ACTION}': $RAW_RESP" >&2
+  fi
+  exit 0
+fi
 
 # 1. Send Photo if specified and file exists
 if [ -n "$PHOTO" ] && [ -f "$PHOTO" ]; then

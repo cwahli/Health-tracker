@@ -102,7 +102,8 @@ The script detaches itself and returns a background pid. Do not wait for it. The
 • Element: <what is wrong>
 • Observed: <what you see>
 • Expected: <what the user asked for>
-• Status: Dispatch started. The Orchestrator runs the coder and sends the validation result back here.
+• Status: Dispatch started.
+⏳ Status: Waiting for @Orchestrator to fix, deploy, and report validation result back...
 ```
 
 **STOP immediately after this reply. Do NOT poll. Do NOT run dev tools. Let the Orchestrator manage dev agents.**
