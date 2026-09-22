@@ -76,6 +76,7 @@ export function loadRegistry(registryPath) {
     throw new Error(`Registry at ${registryPath} must contain a "bots" array`);
   }
   const seen = new Set();
+  const seenEnv = new Set();
   for (const bot of parsed.bots) {
     if (!bot.id) throw new Error('Every bot entry needs an "id"');
     if (seen.has(bot.id)) throw new Error(`Duplicate bot id: ${bot.id}`);
@@ -83,6 +84,12 @@ export function loadRegistry(registryPath) {
     if (!bot.telegram?.tokenEnv) {
       throw new Error(`Bot "${bot.id}" needs telegram.tokenEnv (each bot has its own token)`);
     }
+    if (seenEnv.has(bot.telegram.tokenEnv)) {
+      throw new Error(
+        `Duplicate tokenEnv "${bot.telegram.tokenEnv}" — one Telegram token = one getUpdates poller`,
+      );
+    }
+    seenEnv.add(bot.telegram.tokenEnv);
   }
 
   parsed = applyMasterDefaults(parsed);

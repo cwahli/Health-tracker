@@ -21,9 +21,7 @@
         "playwrightOutputDir": "/tmp/opencode-bot-shots",
         "sharedSkills": [
           ".agents/skills",
-          "/home/ubuntu/opencode-bot/scripts/skills",
-          "~/.hermes/shared_skills/social-media/telegram-media-delivery",
-          "~/.hermes/shared_skills/autonomous-ai-agents/opencode"
+          "/home/ubuntu/opencode-bot/scripts/skills"
         ]
       },
       "progress": {
@@ -34,6 +32,17 @@
       },
       "session": {
         "mode": "per-chat"
+      }
+    },
+    {
+      "id": "android",
+      "name": "Android OpenCode Bot",
+      "enabled": true,
+      "telegram": {
+        "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
+      },
+      "agent": {
+        "playwrightOutputDir": "/tmp/opencode-bot-shots-android"
       }
     }
   ]

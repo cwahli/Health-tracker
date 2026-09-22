@@ -154,3 +154,24 @@ describe('resolveToken / normalizeConfig', () => {
     expect(cfg.telegram.allowedUserIds).toEqual([1]);
   });
 });
+
+describe("one poller per token", () => {
+  it("registry tokenEnv values are unique", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reg-"));
+    const file = path.join(dir, "registry.json");
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        master: "opencode",
+        bots: [
+          { id: "opencode", telegram: { tokenEnv: "SAME" }, agent: { kind: "opencode" } },
+          { id: "dup", telegram: { tokenEnv: "SAME" } },
+        ],
+      }),
+    );
+    const reg = loadRegistry(file);
+    const envs = reg.bots.map((b) => b.telegram.tokenEnv);
+    expect(new Set(envs).size).toBe(envs.length);
+  });
+});
+\n

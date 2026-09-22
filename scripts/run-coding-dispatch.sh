@@ -256,6 +256,7 @@ qa_profile_for_category() {
   case "$CATEGORY" in
     biomarker) printf 'qa_biomarker\n' ;;
     onboarding) printf 'qa_onboarding\n' ;;
+    meal_audit) printf 'meal_audit\n' ;;
     *) printf 'qa_meal\n' ;;
   esac
 }
