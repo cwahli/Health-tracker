@@ -46,33 +46,41 @@ fi
 
 When the QA bot dispatches a bug (or the user asks you to fix something):
 
-### Step 1 — Check agent availability
+### Step 1 — Decompose Multi-Issue Tickets (Single Verifiable Defect Rule)
+If the report contains multiple discrepancies (e.g. 1. nav 2. telemetry 3. float formatting):
+- **DO NOT** dispatch a monolithic ticket with multiple defects (this causes coder overthinking loops and test invariant conflicts).
+- Discard any invalid requests that break invariants (never delete active sections or rename `#nav-tab-health`).
+- Isolate the primary atomic verifiable defect (e.g., formatting the omega-3 target with `.toFixed(1)`).
+
+### Step 2 — Check agent availability
 ```bash
 node "$REPO_DIR/scripts/tool-allowance.mjs" list-agents
 ```
 Show output to user so they know what's available before you dispatch.
 
-### Step 2 — Dispatch with screenshot if available
+### Step 3 — Dispatch with Dynamic Thinking Level
+For atomic visual, text, or numeric formatting fixes, always pass `--thinking=low` (completes in < 60s). Reserve `--thinking=high` for complex multi-file architectural changes.
 ```bash
 bash "$REPO_DIR/scripts/run-coding-dispatch.sh" \
-  --task="<the bug as reported. Observed: <X>. Expected: <Y>. Change needed: <Z>>" \
+  --task="Component: <Area>. Observed: <Single defect>. Expected: <Desired state>. Verification: <Single check>." \
   --bug-id="<BUG-ID>" \
   --category="<meal|biomarker|onboarding>" \
   --tool=auto \
-  --thinking=high \
-  --screenshot="<path to screenshot if provided, else omit>" \
+  --thinking=low \
+  --screenshot="<path to screenshot if visual defect, omit if text/formatting>" \
   --profile=orchestrator
 ```
 
 Do not pass `--foreground`. The script detaches and returns a background pid within a second. Leave the tool timeout at its default. Do not run `opencode`, Cline, Grok, or Agy yourself.
 
 **The script handles everything from here:**
-- Runs `opencode run` against this repo, then the fallback tools if OpenCode makes no change
-- Sends Telegram updates on the orchestrator profile
+- Runs `opencode run` with `deepseek-v4.1-flash` against this repo, then the fallback tools if OpenCode makes no change
+- Streams action-aware status heartbeats parsing the coder's active log every 2 minutes
+- Emits structured failure diagnostics if a coder halts with 0 code changes (identifying funds, invariant aborts, or timeouts)
 - After a fix reaches `main`, re-runs the journey QA and posts the pass or the failure to the QA bot (`qa_meal` for meal)
 - If that validation fails, applies one more OpenCode fix and sends that result back to the same QA bot
 
-### Step 3 — After the command returns
+### Step 4 — After the command returns
 If stdout contains `Background pid`, reply once and stop:
 ```
 ✅ BUG-XXXX is running.
@@ -103,10 +111,10 @@ Format the output as a Telegram message. Example:
 ```
 🔧 Agent Pool
 
-🟢 OpenCode    | free | muse-spark-1.3, deepseek-flash-4.1
+🟢 OpenCode    | free | deepseek-v4.1-flash (active), muse-spark-1.3 (depleted)
 🟢 Cline CLI   | free | DeepSeek auto-approve | thinking: high/low
-🟡 Grok Build  | free | on cooldown until 15:30
-🟢 Agy         | free | gemini-flash
+🟢 Grok Build  | free | grok-build (free quota)
+🚫 Agy         | free | unavailable (geo-blocked on European VPS)
 ```
 
 ---

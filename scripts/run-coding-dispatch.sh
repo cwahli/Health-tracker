@@ -27,7 +27,7 @@ BUG_ID="BUG-UNKNOWN"
 CATEGORY="general"
 REQUESTED_TOOL="auto"
 PREFERRED_MODEL="muse-spark-1.3"
-THINKING="high"
+THINKING="auto"
 SCREENSHOT=""
 DISPATCH_PROFILE="${HERMES_PROFILE:-orchestrator}"
 
@@ -38,7 +38,7 @@ PRINT_PLAN=0
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none] [--verify=true|false|auto] [--profile=orchestrator] [--foreground] [--print-plan]"
+      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none|auto] [--verify=true|false|auto] [--profile=orchestrator] [--foreground] [--print-plan]"
       exit 0
       ;;
     --task=*)    TASK="${arg#*=}" ;;
@@ -61,6 +61,15 @@ done
 if [ -z "$TASK" ]; then
   echo "Error: No task provided. Usage: $0 --task='description' [--bug-id='...'] [--category='...']"
   exit 1
+fi
+
+# Dynamic Thinking Tuning (V-29): atomic UI/text fixes use low thinking to avoid overthinking loops
+if [ "$THINKING" = "auto" ] || [ -z "$THINKING" ]; then
+  if echo "$TASK" | grep -qiE "format|round|float|toFixed|typo|color|css|style|text|spacing|padding|margin|label"; then
+    THINKING="low"
+  else
+    THINKING="high"
+  fi
 fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
@@ -377,20 +386,49 @@ clean_workspace() {
 # ---------------------------------------------------------------
 build_prompt() {
   local base_prompt="Task for $BUG_ID ($CATEGORY): $TASK"
-  if [ -n "$SCREENSHOT" ] && [ -f "$SCREENSHOT" ]; then
+
+  # Filter screenshot for pure text/numeric formatting tasks to prevent visual over-analysis loops
+  local is_text_or_format=0
+  if echo "$TASK" | grep -qiE "format|round|float|toFixed|typo|number|decimal|unit|omega"; then
+    is_text_or_format=1
+  fi
+
+  if [ -n "$SCREENSHOT" ] && [ -f "$SCREENSHOT" ] && [ "$is_text_or_format" -eq 0 ]; then
     base_prompt="${base_prompt}. The bug screenshot is at: ${SCREENSHOT} — inspect it to understand the visual defect."
   fi
 
+  # Invariant Guard (prevents test breakage and coder abort loops)
+  base_prompt="${base_prompt}
+
+[CRITICAL CODEBASE INVARIANTS]:
+- Never delete or disable active features ('Health status', 'Clinical Actions', 'Daily Benefits').
+- Never rename or delete navigation locators (e.g. '#nav-tab-health', '#nav-tab-food', '#nav-tab-home') which are required by Playwright tests.
+- Scope changes strictly to the single defect described. Do not rewrite unrelated components."
+
+  # Target File Hints
   if echo "$TASK" | grep -qiE "theme|dark|navy|#0f172a|#f8fafc|background|color"; then
-    base_prompt="${base_prompt}.
+    base_prompt="${base_prompt}
 [TARGET FILE HINTS]:
 - Root CSS variables & theme classes: 'src/index.css' (check --app-bg definition and dark class).
 - Dynamic styles injector: 'src/components/AppDynamicStyles.ts' (check root theme palette injection).
 - Shell / container: 'src/components/AppShell.tsx' (check root element background styling).
 Ensure the root page background renders the dark theme navy (#0f172a) properly for demo / dark mode users."
+  elif echo "$TASK" | grep -qiE "omega|omega-3|nutrition|target|card|macro|gram|float|format|decimal"; then
+    base_prompt="${base_prompt}
+[TARGET FILE HINTS]:
+- Weekly nutrition target card: 'src/components/WeeklyNutritionCard.tsx' or 'src/components/NutritionTargetCard.tsx'.
+- Macro summary & formatting: 'src/components/MacroSummary.tsx'.
+- Format numeric targets using .toFixed(1) or Math.round to eliminate floating-point precision artifacts (e.g. 7.700000000000001g -> 7.7g)."
   fi
 
-  base_prompt="${base_prompt}. Think deeply before modifying files. Verify with npx tsc --noEmit before finishing."
+  if [ "$THINKING" = "low" ]; then
+    base_prompt="${base_prompt}
+Make a minimal, single-file atomic change. Verify with npx tsc --noEmit before finishing."
+  else
+    base_prompt="${base_prompt}
+Think carefully before modifying files. Verify with npx tsc --noEmit before finishing."
+  fi
+
   echo "$base_prompt"
 }
 
@@ -531,7 +569,7 @@ try_grok() {
     return 1
   fi
 
-  local prompt; prompt="$(build_prompt) A lighter model was unable to resolve this — analyse the architecture deeply."
+  local prompt; prompt="$(build_prompt)"
   local log_dir="${HERMES_DIR}/logs"
   mkdir -p "$log_dir"
   local log_file="${log_dir}/dispatch_${BUG_ID}_grok.log"
@@ -550,7 +588,7 @@ $prompt_preview
 
   snapshot_workspace
   start_heartbeat "Grok" "$log_file"
-  run_with_timeout 10m "$GROK_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
+  run_with_timeout 6m "$GROK_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
 
   local output; output=$(cat "$log_file" 2>/dev/null || true)

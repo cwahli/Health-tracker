@@ -107,10 +107,47 @@ function loadState() {
   return JSON.parse(JSON.stringify(DEFAULT_STATE));
 }
 
+function syncMemorySummary(state) {
+  const memoryFile = path.join(HERMES_DIR, 'memories', 'MEMORY.md');
+  if (!fs.existsSync(memoryFile)) return;
+  try {
+    let content = fs.readFileSync(memoryFile, 'utf-8');
+    const statusNotes = [];
+    if (state.tools.opencode && state.tools.opencode.status === 'depleted') {
+      statusNotes.push('OpenCode model muse-spark-1.3 is depleted ($0 balance); default is deepseek-v4.1-flash.');
+    }
+    if (state.tools.agy && state.tools.agy.status === 'unavailable') {
+      statusNotes.push('Antigravity CLI is unavailable (European VPS IP geo-blocked by Gemini API).');
+    }
+    if (state.tools.grok && state.tools.grok.cooldown_until && new Date(state.tools.grok.cooldown_until).getTime() > Date.now()) {
+      statusNotes.push(`Grok is in cooldown until ${new Date(state.tools.grok.cooldown_until).toISOString()}.`);
+    }
+
+    const marker = '## Tool Allowance & Health Notes';
+    if (statusNotes.length > 0) {
+      const block = `${marker}\n${statusNotes.join('\n')}\n`;
+      if (content.includes(marker)) {
+        content = content.replace(new RegExp(`${marker}[\\s\\S]*?(?=\\n##|$)`), block);
+      } else {
+        content = content.trim() + `\n\n${block}`;
+      }
+    } else if (content.includes(marker)) {
+      content = content.replace(new RegExp(`${marker}[\\s\\S]*?(?=\\n##|$)`), '');
+    }
+
+    if (content.length <= 2200) {
+      fs.writeFileSync(memoryFile, content, 'utf-8');
+    }
+  } catch (e) {
+    // Non-critical memory sync
+  }
+}
+
 function saveState(state) {
   ensureDir();
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    syncMemorySummary(state);
   } catch (e) {
     console.warn('[ToolAllowance] Could not save state file:', e.message);
   }
@@ -341,10 +378,10 @@ if (command === 'pick-tool') {
   refreshCooldowns(state);
 
   const AGENT_META = {
-    opencode: { tier: 'free', models: ['muse-spark-1.3', 'deepseek-flash-4.1'], thinking: false },
+    opencode: { tier: 'free', models: ['deepseek-v4.1-flash (active)', 'muse-spark-1.3 (depleted)'], thinking: false },
     cline:    { tier: 'free', models: ['DeepSeek auto-approve'],                 thinking: true  },
     grok:     { tier: 'free', models: ['grok-build (free quota)'],               thinking: false },
-    agy:      { tier: 'free', models: ['gemini-flash'],                          thinking: false }
+    agy:      { tier: 'free', models: ['gemini-flash (geo-blocked on VPS)'],     thinking: false }
   };
 
   console.log('Agent Pool Status:\n');
@@ -352,14 +389,47 @@ if (command === 'pick-tool') {
     const installed = isBinaryInstalled(key);
     const meta = AGENT_META[key] || { tier: 'unknown', models: [], thinking: false };
     const inCooldown = tool.cooldown_until && new Date(tool.cooldown_until).getTime() > Date.now();
-    const available = installed && !inCooldown && tool.status !== 'depleted';
-    const icon = !installed ? '[MISSING]' : inCooldown ? '[COOLDOWN]' : '[OK]';
+    const isDepleted = tool.status === 'depleted';
+    const isUnavailable = tool.status === 'unavailable';
+    const available = installed && !inCooldown && !isDepleted && !isUnavailable;
+    const icon = !installed ? '[MISSING]' : isUnavailable ? '[GEOBLOCKED]' : isDepleted ? '[DEPLETED]' : inCooldown ? '[COOLDOWN]' : '[OK]';
     const cooldownStr = inCooldown ? ` cooldown until ${new Date(tool.cooldown_until).toLocaleTimeString()}` : '';
+    const reasonStr = isUnavailable && tool.reason ? ` (${tool.reason})` : isDepleted ? ' (out of funds)' : '';
     const thinkingStr = meta.thinking ? ' | thinking: high/low' : '';
-    console.log(`${icon} ${tool.name} | tier: ${meta.tier} | ${available ? 'available' : 'unavailable'}${cooldownStr}`);
+    console.log(`${icon} ${tool.name} | tier: ${meta.tier} | ${available ? 'available' : 'unavailable'}${cooldownStr}${reasonStr}`);
     console.log(`       models: ${meta.models.join(', ')}${thinkingStr}`);
     console.log(`       successes: ${tool.success_count} | failures: ${tool.failure_count}`);
   }
+} else if (command === 'probe' || command === 'canary') {
+  const targetTool = parseArg('tool');
+  const state = loadState();
+  refreshCooldowns(state);
+
+  const toolsToProbe = targetTool ? [targetTool] : Object.keys(state.tools);
+  console.log('=== Canary Health Probe ===');
+  for (const t of toolsToProbe) {
+    const tool = state.tools[t];
+    if (!tool) {
+      console.log(`[UNKNOWN] Tool '${t}' not in pool`);
+      continue;
+    }
+    const installed = isBinaryInstalled(t);
+    const isDepleted = tool.status === 'depleted';
+    const isUnavailable = tool.status === 'unavailable';
+    const inCooldown = tool.cooldown_until && new Date(tool.cooldown_until).getTime() > Date.now();
+
+    if (!installed) {
+      console.log(`❌ ${tool.name} (${t}): Binary missing from system path.`);
+    } else if (isUnavailable) {
+      console.log(`🚫 ${tool.name} (${t}): Marked unavailable (${tool.reason || 'geo-blocked'}).`);
+    } else if (isDepleted) {
+      console.log(`💸 ${tool.name} (${t}): Depleted balance / insufficient credits.`);
+    } else if (inCooldown) {
+      console.log(`⏳ ${tool.name} (${t}): In cooldown until ${tool.cooldown_until}.`);
+    } else {
+      console.log(`✅ ${tool.name} (${t}): Healthy and ready for dispatch.`);
+    }
+  }
 } else {
-  console.log('Usage: node scripts/tool-allowance.mjs <status|list-agents|pick-tool|report-result> [options]');
+  console.log('Usage: node scripts/tool-allowance.mjs <status|list-agents|pick-tool|report-result|probe> [options]');
 }

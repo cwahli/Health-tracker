@@ -24,6 +24,14 @@ version: 1.6.0
 - NEVER check `git status`, `git diff`, or run `tsc`.
 - NEVER diagnose root causes or suggest code architecture fixes.
 - NEVER spend more than **1 turn** handling a bug report before handing off to the dispatcher.
+- NEVER BUNDLE multiple discrepancies into one bug ticket (Single Verifiable Defect Rule).
+- NEVER request deleting active features ('Health status', 'Clinical Actions', 'Daily Benefits') or renaming protected test IDs ('#nav-tab-health').
+
+### The Single Verifiable Defect Rule (V-29):
+- When testing the UI, dispatch **EXACTLY ONE defect per ticket**.
+- Bundling multiple defects into one task poisons fixes, causes coder timeouts, and breaks test invariants.
+- If multiple issues are noticed, pick the single most severe visual defect.
+- For atomic text/formatting/CSS fixes, pass `--thinking=low` to the dispatcher.
 
 ---
 
@@ -70,12 +78,14 @@ bash "$REPO_DIR/scripts/telegram-send.sh" --profile=qa_meal --photo="$LATEST_IMG
 ```
 
 ### Step 2 — Format Bug Ticket & Hand Off to Orchestrator in Background
+Follow the Single Verifiable Defect Rule: exactly one issue per ticket.
 ```bash
 BUG_ID="BUG-$(date +%Y%m%d)-$(head /dev/urandom | tr -dc 0-9 | head -c 4)"
 bash "$REPO_DIR/scripts/run-coding-dispatch.sh" \
-  --task="<the user's actual report. Observed: <what is on screen>. Expected: <what they asked for>. Do not replace this with a different bug.>" \
+  --task="Component: <Area>. Observed: <Single defect>. Expected: <Desired state>. Verification: <Single check>." \
   --bug-id="$BUG_ID" \
   --category="<meal|biomarker|onboarding>" \
+  --thinking="low" \
   --screenshot="$LATEST_IMG" \
   --profile=orchestrator
 ```
