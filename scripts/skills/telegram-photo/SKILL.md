@@ -11,6 +11,7 @@ each path automatically (photos, video, audio, or documents by extension) and
 strips the `MEDIA:` lines from the text.
 
 See the shared **`telegram-media-delivery`** skill for the authoritative rules.
+For delivery **verification** (text, photo, HTML, Instant View claims) use the **`telegram-testing`** skill and `scripts/telegram-smoke-test.sh`.
 
 ## Minimal pattern
 

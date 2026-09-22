@@ -1,6 +1,6 @@
 # Meal-Audit Bot — Plan v3
 
-> Status: **DONE** — P0–P6 complete in proot (P6: suite report + issues + calibrate + E2E W1/W2 PASS). VPS handoff 2026-09-22: profile provisioned, skills synced, gateway restarted (meal_audit multiplexed), MAI-001 verified, fixtures seeded, calibrate=100. Remaining human: dedicated TELEGRAM_BOT_TOKEN then live phone MEDIA: E2E. Supersedes v1/v2. v2 incorrectly claimed the
+> Status: **LIVE on VPS-2 2026-09-22** — @Meal_audit_bot online (token + `auth.json` + home channel; gateway multiplexed), Workflow 1 phone E2E PASS (`Meal-Instant-Noodles-01`), MAI-001 fixed, fixtures seeded, calibrate=100. Open: canonical bundle output dir, `MEDIA:` fence hardening, holdout→golden promote, suite scanner `holdout/`, Workflow 2 live run, BotFather-vs-managed-bot note (see ROADMAP meal-audit row). Supersedes v1/v2. v2 incorrectly claimed the
 > implementation was "already built, tested, and deployed" — see §8 Historical Claims.
 
 The Meal-Audit Bot (`meal_audit`) is a **standalone, on-demand benchmark agent**.
