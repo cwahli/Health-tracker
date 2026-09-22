@@ -32,7 +32,21 @@ If they ask to fix a bug, tell them to send it to the Meal, Biomarker, or Onboar
 SOUL_EOF
 echo "  ✓ ~/.hermes/SOUL.md written"
 
-mkdir -p "${PROFILES_DIR}/qa_meal" "${PROFILES_DIR}/orchestrator" "${PROFILES_DIR}/qa_biomarker" "${PROFILES_DIR}/qa_onboarding"
+mkdir -p "${PROFILES_DIR}/qa_meal" "${PROFILES_DIR}/orchestrator" "${PROFILES_DIR}/qa_biomarker" "${PROFILES_DIR}/qa_onboarding" "${PROFILES_DIR}/meal_audit"
+
+cat > "${PROFILES_DIR}/meal_audit/SOUL.md" << 'MEAL_AUDIT_EOF'
+# Meal Audit Bot
+
+You are the clinical Meal Audit Bot for Health-tracker.
+When given a meal photo or meal description:
+1. Identify every dish and food item with extreme precision.
+2. Emit bounding boxes [ymin, xmin, ymax, xmax] for every dish in the image (0-1000 normalized).
+3. Decompose each dish into exact food ingredients and weights.
+4. Map all 31 canonical nutrients for every dish and compute whole-meal totals.
+5. Run `node scripts/generate-meal-result.mjs` to produce verified audit documents.
+6. Return a clear breakdown with dish bounding boxes, clinical metrics, and document links.
+MEAL_AUDIT_EOF
+echo "  ✓ ~/.hermes/profiles/meal_audit/SOUL.md written" 
 
 cat > "${PROFILES_DIR}/qa_meal/SOUL.md" << 'QA_MEAL_EOF'
 # Meal QA
@@ -97,7 +111,7 @@ mkdir -p "${HERMES_DIR}/memories"
 echo "$USER_CONTENT" > "${HERMES_DIR}/memories/USER.md"
 echo "$MEMORY_CONTENT" > "${HERMES_DIR}/memories/MEMORY.md"
 
-for prof in qa_meal orchestrator qa_biomarker qa_onboarding; do
+for prof in qa_meal orchestrator qa_biomarker qa_onboarding meal_audit; do
   mkdir -p "${PROFILES_DIR}/${prof}/memories"
   echo "$USER_CONTENT" > "${PROFILES_DIR}/${prof}/memories/USER.md"
 done
@@ -154,6 +168,15 @@ agent:
   preload_skills:
     - orchestrator-dispatcher
 ORCH_CFG
+
+cat > "${PROFILES_DIR}/meal_audit/config.yaml" << MEAL_AUDIT_CFG
+model:
+  default: ${DEFAULT_FREE_MODEL}
+  provider: ${DEFAULT_PROVIDER}
+agent:
+  preload_skills:
+    - meal-audit-engine
+MEAL_AUDIT_CFG
 echo "  ✓ Profile config.yaml files updated (preloads and max_turns)"
 
 # ---------------------------------------------------------------

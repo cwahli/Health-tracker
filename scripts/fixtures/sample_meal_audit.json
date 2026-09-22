@@ -1,0 +1,151 @@
+{
+  "mealId": "MEAL-20260922-8812",
+  "timestamp": "2026-09-22T13:15:00.000Z",
+  "title": "Grilled Salmon Bowl with Avocado, Edamame & Miso Soup",
+  "photos": [
+    "salmon_bowl_plate.jpg",
+    "miso_soup_bowl.jpg"
+  ],
+  "dishes": [
+    {
+      "dishIndex": 1,
+      "dishName": "Grilled Salmon Bowl",
+      "genericEnglishName": "Grilled Salmon with Brown Rice, Avocado & Edamame",
+      "sourceImageIndex": 0,
+      "boundingBox2D": [120, 150, 780, 820],
+      "estimatedWeightGrams": 420,
+      "cookingMethod": "grilled",
+      "foods": [
+        {
+          "name": "Atlantic Salmon Fillet",
+          "estimatedWeightGrams": 160,
+          "cookingMethod": "grilled",
+          "ingredients": ["Atlantic salmon", "olive oil", "sea salt", "black pepper"]
+        },
+        {
+          "name": "Steamed Brown Rice",
+          "estimatedWeightGrams": 150,
+          "cookingMethod": "steamed",
+          "ingredients": ["wholegrain brown rice", "water"]
+        },
+        {
+          "name": "Hass Avocado Slices",
+          "estimatedWeightGrams": 60,
+          "cookingMethod": "raw",
+          "ingredients": ["fresh avocado"]
+        },
+        {
+          "name": "Shelled Edamame Beans",
+          "estimatedWeightGrams": 50,
+          "cookingMethod": "steamed",
+          "ingredients": ["edamame soybeans"]
+        }
+      ],
+      "dishNutrients": {
+        "calories": 640,
+        "protein": 44.0,
+        "carbohydrates": 48.0,
+        "totalFat": 30.0,
+        "saturatedFat": 4.8,
+        "transFat": 0.1,
+        "unsaturatedFat": 24.2,
+        "omega3": 3.4,
+        "sugar": 2.1,
+        "addedSugar": 0.0,
+        "totalFibre": 9.2,
+        "solubleFibre": 2.8,
+        "sodium": 380,
+        "potassium": 980,
+        "magnesium": 115,
+        "calcium": 65,
+        "iron": 2.8,
+        "zinc": 2.4,
+        "selenium": 46.5,
+        "iodine": 38.0,
+        "phosphorus": 480,
+        "vitaminD": 520,
+        "vitaminB12": 4.6,
+        "folate": 110,
+        "vitaminC": 8.5,
+        "vitaminE": 4.2,
+        "vitaminK": 28.0,
+        "vitaminA": 45.0,
+        "vitaminB6": 0.9,
+        "thiamine": 0.35,
+        "riboflavin": 0.28,
+        "niacin": 11.2
+      }
+    },
+    {
+      "dishIndex": 2,
+      "dishName": "Traditional Miso Soup",
+      "genericEnglishName": "Soybean Paste Soup with Tofu and Wakame",
+      "sourceImageIndex": 1,
+      "boundingBox2D": [80, 50, 420, 480],
+      "estimatedWeightGrams": 220,
+      "cookingMethod": "simmered",
+      "foods": [
+        {
+          "name": "Miso Dashi Broth",
+          "estimatedWeightGrams": 190,
+          "cookingMethod": "simmered",
+          "ingredients": ["fermented soybean paste", "dashi seaweed stock", "water"]
+        },
+        {
+          "name": "Silken Tofu Cubes",
+          "estimatedWeightGrams": 25,
+          "cookingMethod": "simmered",
+          "ingredients": ["silken tofu"]
+        },
+        {
+          "name": "Wakame Seaweed & Scallions",
+          "estimatedWeightGrams": 5,
+          "cookingMethod": "simmered",
+          "ingredients": ["dried wakame seaweed", "green onions"]
+        }
+      ],
+      "dishNutrients": {
+        "calories": 65,
+        "protein": 4.5,
+        "carbohydrates": 7.0,
+        "totalFat": 2.2,
+        "saturatedFat": 0.4,
+        "transFat": 0.0,
+        "unsaturatedFat": 1.7,
+        "omega3": 0.15,
+        "sugar": 2.8,
+        "addedSugar": 0.0,
+        "totalFibre": 1.4,
+        "solubleFibre": 0.5,
+        "sodium": 720,
+        "potassium": 210,
+        "magnesium": 28,
+        "calcium": 48,
+        "iron": 1.1,
+        "zinc": 0.6,
+        "selenium": 4.2,
+        "iodine": 120.0,
+        "phosphorus": 65,
+        "vitaminD": 0,
+        "vitaminB12": 0.1,
+        "folate": 24,
+        "vitaminC": 1.5,
+        "vitaminE": 0.3,
+        "vitaminK": 18.5,
+        "vitaminA": 15.0,
+        "vitaminB6": 0.1,
+        "thiamine": 0.05,
+        "riboflavin": 0.08,
+        "niacin": 0.6
+      }
+    }
+  ],
+  "clinicalSummary": {
+    "observations": [
+      "Excellent cardioprotective profile with 3.55g Omega-3 (EPA/DHA) from grilled salmon.",
+      "High iodine content (158 mcg) meeting 105% daily requirement from wakame seaweed and marine sources.",
+      "Whole-meal sodium is 1100mg (~55% daily ceiling) largely from fermented miso paste. Pair with high-potassium sides.",
+      "Zero added sugars with 10.6g dietary fibre supporting glycemic stability."
+    ]
+  }
+}
