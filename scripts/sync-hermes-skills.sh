@@ -40,10 +40,10 @@ if [ -d "${HERMES_DIR}/profiles" ]; then
   done
 fi
 
-# Clean up orchestrator-dispatcher symlink from QA profiles
-for qa_prof in qa_meal qa_biomarker qa_onboarding; do
-  if [ -d "${HERMES_DIR}/profiles/$qa_prof/skills" ]; then
-    rm -f "${HERMES_DIR}/profiles/$qa_prof/skills/orchestrator-dispatcher"
+# Clean up orchestrator-dispatcher symlink from profiles that must not dispatch
+for no_dispatch_prof in qa_meal qa_biomarker qa_onboarding meal_audit; do
+  if [ -d "${HERMES_DIR}/profiles/$no_dispatch_prof/skills" ]; then
+    rm -f "${HERMES_DIR}/profiles/$no_dispatch_prof/skills/orchestrator-dispatcher"
   fi
 done
 
@@ -54,13 +54,13 @@ for skill_path in "${SKILLS_SRC}"/*; do
     SKILL_COUNT=$((SKILL_COUNT + 1))
 
     for target in "${TARGET_DIRS[@]}"; do
-      # Do not link orchestrator-dispatcher into QA profiles
-      if [ "$skill_name" = "orchestrator-dispatcher" ] && [[ "$target" =~ /profiles/qa_ ]]; then
+      # Do not link orchestrator-dispatcher into QA or meal_audit profiles
+      if [ "$skill_name" = "orchestrator-dispatcher" ] && [[ "$target" =~ /profiles/(qa_|meal_audit) ]]; then
         continue
       fi
       ln -sfn "$skill_path" "$target/$skill_name"
     done
-    echo "  ✓ Linked skill: '$skill_name' -> profile locations (filtered for QA profiles)"
+    echo "  ✓ Linked skill: '$skill_name' -> profile locations (filtered for QA/meal_audit)"
   fi
 done
 

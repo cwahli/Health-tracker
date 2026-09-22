@@ -283,6 +283,15 @@ function comparePayloads(expectedAudit, actualAudit) {
   const actPasses = Array.isArray(actualAudit.passes) ? actualAudit.passes : [actualAudit];
 
   // --- Turn structure (exact) — mismatch ⇒ DIVERGED via turn_mismatch ---
+  // turnId labels may differ by suffix (turn_2_photo_clarify vs turn_2_edit);
+  // structural identity is the turn number (MAI-20260922-001).
+  const turnKey = (raw, idx) => {
+    const id = String(raw == null ? '' : raw);
+    const m = id.match(/turn[_-]?(\d+)/i);
+    if (m) return `turn_${Number(m[1])}`;
+    if (id.toLowerCase() === 'single-turn') return 'turn_1';
+    return `turn_${idx + 1}`;
+  };
   if (expPasses.length !== actPasses.length) {
     failures.push({
       taxonomy: 'turn_mismatch',
@@ -300,7 +309,7 @@ function comparePayloads(expectedAudit, actualAudit) {
       const ap = actPasses[i];
       const eId = ep.turnId || ep.id || `turn_${i + 1}`;
       const aId = ap.turnId || ap.id || `turn_${i + 1}`;
-      if (normalizeText(eId) !== normalizeText(aId)) {
+      if (turnKey(eId, i) !== turnKey(aId, i)) {
         failures.push({
           taxonomy: 'turn_mismatch',
           key: 'turnId',

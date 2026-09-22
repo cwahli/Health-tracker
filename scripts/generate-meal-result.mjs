@@ -251,7 +251,7 @@ export function validateAndNormalizePayload(raw, explicitBundleName = null) {
     let cumulativePhotos = [];
     normalizedPasses = raw.passes.map((p, idx) => {
       const turnIndex = typeof p.turnIndex === 'number' ? p.turnIndex : idx + 1;
-      const turnId = p.turnId || (idx === 0 ? 'turn_1_initial' : `turn_${turnIndex}_edit`);
+      const turnId = p.turnId || p.id || (idx === 0 ? 'turn_1_initial' : `turn_${turnIndex}_edit`);
       const userPrompt = String(p.userPrompt || p.prompt || '');
       const addedPhotos = Array.isArray(p.addedPhotos) ? p.addedPhotos : (Array.isArray(p.photos) ? p.photos : []);
       cumulativePhotos = Array.from(new Set([...cumulativePhotos, ...addedPhotos]));
