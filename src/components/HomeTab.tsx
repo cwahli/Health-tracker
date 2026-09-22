@@ -771,8 +771,9 @@ export default function HomeTab({
   const baseProteinTarget = report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.protein, 90) : 90;
 
   const formatValue = (val: number) => {
-    if (val >= 10) return Math.ceil(val);
-    return Math.ceil(val * 10) / 10;
+    const clean = Math.round(val * 1000) / 1000;
+    if (clean >= 10) return Math.ceil(clean);
+    return Math.ceil(clean * 10) / 10;
   };
 
   const activeTargets = {
@@ -1410,7 +1411,7 @@ export default function HomeTab({
               {sortNutrientKeys(topWeeklyNutrientKeys).map((key) => {
                 const reportTargetRaw = lookupTargetRaw(key);
                 const baseDailyTarget = parseTarget(reportTargetRaw, 0);
-                const weeklyTarget = baseDailyTarget * 7;
+                const weeklyTarget = Math.round(baseDailyTarget * 7 * 10) / 10;
                 const actual7dRaw = extractNutrientValue(rolling7DayTotals, key);
                 const actual7d = formatValue(actual7dRaw);
                 const unit = parseUnit(reportTargetRaw, fallbackUnits[canonicalNutrientKey(key)] || fallbackUnits[key] || 'mg');
