@@ -188,3 +188,25 @@ A live bug run is not required to close V-28.
 - Do not add Mem0, Honcho, or OpenViking.
 - Do not execute V-27 in the V-28 turn.
 - Do not let an agent rewrite `SOUL.md` or a skill as part of learning.
+
+## 6. Atomic Bug Dispatch & Coder Efficiency Improvements (V-29)
+
+### 6a. QA Bots: The Single Verifiable Defect Rule
+- **Atomic Dispatch**: When testing a journey, if multiple visual discrepancies are detected, the QA bot must NEVER bundle them into a single monolithic bug ticket. Bundling 6 issues into one task (as occurred in `BUG-20260921-8449`) causes coder stalls, timeouts, and poisons legitimate fixes with invalid requests.
+- **Ticket Format**: Exactly ONE issue per ticket:
+  1. **Component/Area**: Single screen element (e.g. `Weekly Target Card`).
+  2. **Observed**: Exactly one defect (e.g. `Omega-3 shows 7.700000000000001g`).
+  3. **Expected**: Exactly one desired state (e.g. `Omega-3 shows 7.7g`).
+  4. **Verification Criteria**: What single check proves it fixed.
+- **Pre-flight Invariant Protection**: QA bots must never file tickets requesting deletion of active features (`Health status`, `Clinical Actions`, `Daily Benefits`) or renaming protected test IDs (`#nav-tab-health`).
+
+### 6b. Orchestrator: Task Decomposition & Early Circuit Breakers
+- **Prompt Decomposition Engine**: If a bug ticket with multiple enumerated issues arrives, the Orchestrator splits it into atomic sub-tasks (`BUG-XXXX-1`, `BUG-XXXX-2`) and runs them sequentially in priority order.
+- **Early Stagnation Circuit Breaker**: If a coder produces 0 git porcelain changes within 3 minutes, check the log tail. If the coder is stuck overthinking or aborted, cancel early rather than burning 8–18 minutes.
+- **Target File Hints**: Automatically attach known component paths based on the defect category (e.g. nutrition card $\to$ `src/components/`, styling $\to$ `src/index.css`) so coders don't crawl 90+ files.
+
+### 6c. Coders: Scoped Prompts & Dynamic Thinking
+- **OpenCode**: Primary model `opencode/deepseek-v4.1-flash`; fallback to DeepSeek Chat. Pass `--dir "$REPO_DIR"` with scoped component targets.
+- **Cline**: Use `--thinking=low` for atomic UI/text fixes (fast 30s execution); reserve `--thinking=high` only for multi-file architectural refactors. Append invariant guard: *"Never modify elements protected by Playwright tests in prototype/ or AGENTS.md."*
+- **Grok**: Reduce execution timeout to 6 minutes max. Do not attach screenshot images for pure text/formatting tickets to prevent visual over-analysis loops.
+

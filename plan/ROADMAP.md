@@ -91,7 +91,7 @@ Locked converts never change: `1.293` / `1.411` / `3.362` / `79.56` / `13.68`.
 | Biomarkers | **B0** Apply smoke, then B2 leftover hygiene, then real G-B2. Chat UX = fill-template (one agent + TS batch), not 10 personas. |
 | Site is slow | **R-8** measure (Q-1 is already green). Then R-9 defer. Not FoodCard/App splits first |
 | Quota / egress spike | **R-1** measure, then only the matching R-id |
-| Make the site live / leave Render | **Track V / R-13.1 LIVE on OVH VPS-2** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Origin is `https://health-tracking.duckdns.org`. V-17 (delete Render) waits on the soak. Phase 6 (V-19…V-26) is COMPLETE. **Next mobile ID is V-27 OPEN.** **Next bot-instruction ID is V-28 OPEN** ([BOT_ROLES.md](./BOT_ROLES.md)). |
+| Make the site live / leave Render | **Track V / R-13.1 LIVE on OVH VPS-2** — [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Origin is `https://health-tracking.duckdns.org`. V-17 (delete Render) waits on the soak. Phase 6 (V-19…V-26) is COMPLETE. **Next mobile ID is V-27 OPEN.** **Next bot IDs are V-28 OPEN** ([BOT_ROLES.md](./BOT_ROLES.md)) **and V-29 OPEN** (Atomic QA bug dispatch). |
 | One database / drop Supabase / SQLite on the VPS / R2 photo junk | **Track D** — [DATA_PLANE.md](./DATA_PLANE.md). Live SQL is **D1**. Muse audit [R2_STORAGE_AUDIT.md](./R2_STORAGE_AUDIT.md). **D-1** unpaid recovery ~24 Sep. SQLite is a **D-5 benchmark after V-16**, then D-6 human go. Not R-5. |
 | Localisation leftover | **Active** — human unparked Track L 2026-09-15. Restore EN/ID packs (no invent); L-1…L-4 in progress; L-5 waits on named milestone locale. |
 | Website / live-pass bugs | **Track S** below. One class, named vitest. Not the next live case. |
@@ -438,6 +438,8 @@ Canonical steps: [BOT_ROLES.md](./BOT_ROLES.md). Does not change `src/` or the p
 | ID | Phase | Done when | Status |
 |---|---|---|---|
 | **V-28** | Short soul per Hermes profile. One preloaded skill per live bot. QA profiles cannot load `orchestrator-dispatcher`. Memory holds only current facts. Dispatch tries `opencode/deepseek-v4.1-flash` once after Muse reports insufficient funds, and skips Antigravity. | The done-when list in BOT_ROLES.md §4 is true. | **OPEN** |
+| **V-29** | **Atomic QA Bug Dispatch & Orchestrator Queue**: QA bots dispatch one verifiable defect per ticket (never bundle multiple discrepancies). Orchestrator decomposes multi-issue prompts into atomic sub-tasks, attaches target file hints, enforces 3m early stagnation circuit breaker, and tunes coder thinking levels. | [BOT_ROLES.md](./BOT_ROLES.md) §6 is implemented; single-defect tickets run in < 60s without overthinking loops or poisoned bundles. | **OPEN** |
+
 
 
 ### Track D — one database (D1 now; SQLite only after a VPS benchmark)
