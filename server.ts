@@ -1315,6 +1315,7 @@ app.use((req, res, next) => {
 });
 
 app.use(compression());
+app.use(express.static(path.join(process.cwd(), 'public')));
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(biomarkerRouter);
@@ -1328,6 +1329,12 @@ app.use(medicalGeminiRouter);
 app.use(foodAnalyzeRouter);
 app.use(scorecardRouter);
 
+// Nutrient table demo page
+app.get('/nutrient-table', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.send(fs.readFileSync(path.join(process.cwd(), 'public', 'nutrient-table.html'), 'utf-8'));
+});
 
 process.on('uncaughtException', (err) => {
   console.error('[UNCAUGHT EXCEPTION]', err);
