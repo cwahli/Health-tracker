@@ -255,11 +255,13 @@ export default function TrendsTab({
 
     // Handle rolling aggregate depending on selection
     if (rollingPeriod === 'weekly') {
-      // Group by weeks
+      // Group by ISO calendar week (Monday start); bucket key is the Monday date
       const grouped: { [key: string]: number[] } = {};
       activeCompiled.forEach(item => {
-        // Simple approximate week identifier (first 8 chars or custom week bracket)
-        const weekKey = item.date.substring(0, 7) + "-W";
+        const d = new Date(item.date + 'T00:00:00');
+        const mondayOffset = (d.getDay() + 6) % 7;
+        d.setDate(d.getDate() - mondayOffset);
+        const weekKey = d.toISOString().split('T')[0];
         if (!grouped[weekKey]) grouped[weekKey] = [];
         grouped[weekKey].push(item.value);
       });
@@ -282,7 +284,7 @@ export default function TrendsTab({
 
     return activeCompiled;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFoodLogs, activeHistory, selectedMetric, report, profile, duplicateGroups, aliasKeysToHide]);
+  }, [activeFoodLogs, activeHistory, selectedMetric, rollingPeriod, report, profile, duplicateGroups, aliasKeysToHide]);
 
   const chartData = getChartData();
 
@@ -638,7 +640,7 @@ export default function TrendsTab({
             {(['daily', 'weekly', 'monthly'] as const).map(p => (
               <button
                 key={p}
-                onClick={() => setRollingPeriod(p)}
+                onClick={() => { setRollingPeriod(p); setSelectedDate(null); }}
                 className={`py-1.5 rounded-lg text-[10px] font-bold capitalize transition-all ${
                   rollingPeriod === p
                     ? 'bg-indigo-600 text-white shadow-sm'
@@ -788,9 +790,12 @@ export default function TrendsTab({
       {nutrientDefinitions.some(n => n.key === selectedMetric) && (
         <div className="space-y-6 mt-4">
           {(() => {
-            const datesToShow = selectedDate 
-              ? [selectedDate] 
-              : chartData.map(c => c.date).sort((a, b) => b.localeCompare(a));
+            // In weekly/monthly views chartData holds bucket keys, so list the underlying logged days
+            const datesToShow = selectedDate
+              ? [selectedDate]
+              : rollingPeriod === 'daily'
+                ? chartData.map(c => c.date).sort((a, b) => b.localeCompare(a))
+                : Array.from(new Set(activeFoodLogs.map(f => toYYYYMMDD(f.date)))).sort((a, b) => b.localeCompare(a));
             
             return datesToShow.map(dateStr => {
               const dayFoods = activeFoodLogs.filter(f => toYYYYMMDD(f.date) === toYYYYMMDD(dateStr));
