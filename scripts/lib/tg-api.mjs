@@ -78,10 +78,16 @@ export class TelegramApi {
   }
 
   async call(method, payload = {}) {
+    // Long-poll needs slack past Telegram timeout; everything else fails fast.
+    // Without AbortSignal, a dead proot/Termux socket hangs forever and the bot
+    // stops consuming updates while Telegram has already dropped the connection.
+    const pollSec = method === 'getUpdates' ? Number(payload.timeout) || 30 : 0;
+    const abortMs = (pollSec + 10) * 1000;
     const res = await this.fetch(`${this.baseUrl}/bot${this.token}/${method}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(abortMs),
     });
     let body = {};
     try {

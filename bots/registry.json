@@ -42,7 +42,13 @@
         "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/opencode-bot-shots-android"
+        "workspace": "/root/Health-tracker",
+        "opencodeBin": "/root/.opencode/bin/opencode",
+        "playwrightOutputDir": "/tmp/opencode-bot-shots-android",
+        "sharedSkills": [
+          ".agents/skills",
+          "/root/Health-tracker/scripts/skills"
+        ]
       }
     }
   ]
