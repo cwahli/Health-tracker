@@ -48,11 +48,16 @@ echo "  ✓ ~/.hermes/profiles/qa_meal/SOUL.md written"
 cat > "${PROFILES_DIR}/orchestrator/SOUL.md" << 'ORCH_SOUL_EOF'
 # Orchestrator
 
-You are the status log for coding runs.
-Do not edit the repo. Do not start OpenCode, Cline, Grok, or Antigravity yourself.
-Do not message the OpenCode Telegram bot.
-When asked to fix a bug, start scripts/run-coding-dispatch.sh once and stop when it prints "Background pid".
-The script posts progress here and sends validation to the QA bot.
+You are the intelligent coordinator and status manager for Health-tracker coding runs.
+Do not edit the repository directly. Use run-coding-dispatch.sh for all actions.
+- When asked about progress, what an agent is doing, or "what are you waiting for?", run:
+  run-coding-dispatch.sh status
+- When asked to stop, cancel, or halt, run:
+  run-coding-dispatch.sh stop
+- When asked for models or agents, run:
+  run-coding-dispatch.sh list-models
+- When asked to fix or assign a bug, select the best tool/model and dispatch via run-coding-dispatch.sh.
+- Never guess, hallucinate, or deny messages. Always run run-coding-dispatch.sh status to check reality.
 ORCH_SOUL_EOF
 echo "  ✓ ~/.hermes/profiles/orchestrator/SOUL.md written"
 
@@ -97,8 +102,22 @@ for prof in qa_meal orchestrator qa_biomarker qa_onboarding; do
   echo "$USER_CONTENT" > "${PROFILES_DIR}/${prof}/memories/USER.md"
 done
 
-echo "$MEMORY_CONTENT" > "${PROFILES_DIR}/qa_meal/memories/MEMORY.md"
-rm -f "${PROFILES_DIR}/orchestrator/memories/MEMORY.md"
+cat > "${PROFILES_DIR}/qa_meal/memories/MEMORY.md" << 'QA_MEM_EOF'
+Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
+OpenCode model opencode/muse-spark-1.3 returned insufficient funds on 2026-09-22. Antigravity is blocked in this region.
+A QA bug is fixed only by run-coding-dispatch.sh. The OpenCode Telegram bot is a separate interactive door.
+QA_MEM_EOF
+
+cat > "${PROFILES_DIR}/orchestrator/memories/MEMORY.md" << 'ORCH_MEM_EOF'
+Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
+The dispatch harness is installed in PATH at run-coding-dispatch.sh and tool-allowance.mjs.
+Available commands:
+- run-coding-dispatch.sh status — shows active agent PID, elapsed time, current agent activity.
+- run-coding-dispatch.sh stop — cleanly stops running coding agent, releases lock, resets workspace.
+- run-coding-dispatch.sh list-models — available tools, healthy models, quotas.
+- run-coding-dispatch.sh --tool=opencode --model=opencode-go/deepseek-v4.1-flash --thinking=high --task="..." — granular dispatch.
+Available coding tools: OpenCode (active model: opencode-go/deepseek-v4.1-flash; muse-spark-1.3 is depleted), Grok Build CLI, Antigravity CLI. Cline CLI is not installed.
+ORCH_MEM_EOF
 rm -f "${PROFILES_DIR}/qa_biomarker/memories/MEMORY.md"
 rm -f "${PROFILES_DIR}/qa_onboarding/memories/MEMORY.md"
 echo "  ✓ USER.md and MEMORY.md synced across profiles"

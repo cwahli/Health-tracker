@@ -99,6 +99,10 @@ function loadState() {
           parsed.tools[key] = defaultVal;
         }
       }
+      // Migrate depleted or outdated default models
+      if (parsed.tools.opencode && (parsed.tools.opencode.default_model === "muse-spark-1.3" || !parsed.tools.opencode.default_model)) {
+        parsed.tools.opencode.default_model = "deepseek-v4.1-flash";
+      }
       return parsed;
     }
   } catch (e) {

@@ -22,7 +22,8 @@
 
 set -eo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.."; pwd)"
 cd "$REPO_DIR"
 
 HERMES_DIR="${HERMES_DIR:-${HOME}/.hermes}"
