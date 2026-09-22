@@ -18,7 +18,7 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 - `qa_meal` memory exists and is partly stale (git-config requirement, exit 124). Orchestrator, `qa_biomarker`, and `qa_onboarding` memory directories are empty.
 - Global `~/.hermes/SOUL.md` still says the Orchestrator has no bot. Each QA `SOUL.md` contains a shell command with the placeholder task `<Visual fix needed>`. `system_prompt_suffix` in the three QA configs repeats the same order. Those copies beat the skill. Delete the command from the soul and the suffix. The skill is the only procedure.
 - `qa_biomarker` and `qa_onboarding` preload `qa-meal-journey` and `qa-telegram-journey`. They have no Telegram token. Do not wake them.
-- `scripts/sync-hermes-skills.sh` symlinks every repo skill into every profile, including `orchestrator-dispatcher` into the QA profiles. That is how Meal QA became the Orchestrator.
+- `scripts/sync-hermes-skills.sh` symlinks every repo skill into profiles; it **excludes** `orchestrator-dispatcher` from `qa_*` and `meal_audit` (unlink on run). OpenCode master shares the same `scripts/skills/` via registry `sharedSkills` and runs meal-audit itself (model A) — it does not message @Meal_audit_bot.
 - Dispatch script `scripts/run-coding-dispatch.sh` (commit `28486b1`) already detaches, calls `opencode run --auto -m opencode/muse-spark-1.3`, reverts only files that attempt changed, and on a meal/biomarker/onboarding push runs `qa-runner` and posts to that QA profile, with one extra OpenCode attempt if validation fails.
 - 2026-09-22 run of `BUG-20260921-8449`: OpenCode returned `Insufficient account funds` on `muse-spark-1.3`. Cline thought 8 minutes and aborted with no diff. `grok -p` wrote two sentences and hit the 10-minute limit with no diff. Antigravity returned `User location is not supported`. Audit row: escalated_human, 1,249 seconds. The tree stayed clean. Do not re-file 8449 as a meal bug. The Food History tab bar was compared with the Home tab bar. The Home screen already shows Home, Trends, Food, Progress. The real on-screen defect is the Omega-3 text `7.700000000000001g`.
 - Interactive doors, not QA coders: `@Opencode_135_bot` (`scripts/opencode-bot.mjs`, lock line `pid:opencode-chat`) and the human Grok session in tmux `dev`. The script waits up to 180 seconds if that lock is held, then exits 1. It must not delete a lock it does not own.
@@ -35,7 +35,11 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 | qa_biomarker | no bot until it has its own token | Dark | Preload the meal skill |
 | qa_onboarding | no bot until it has its own token | Dark | Preload the meal skill |
 | orchestrator | @Orchestrator_health_tracker_bot | Status log. The script posts here | Run OpenCode itself, or message @Opencode_135_bot |
-| meal_audit | no bot until it has its own token (profile+skill+gateway ready 2026-09-22) | Dark — audit meals, write artifacts/meal_audits/ | Read src/, dispatch coders, touch golden/meal/ |
+| meal_audit | @Meal_audit_bot (LIVE 2026-09-22; Hermes gateway owns the token) | Audit meals, write artifacts/meal_audits/ | Read src/, dispatch coders, touch golden/meal/; **not** in opencode-bot registry |
+
+### OpenCode ↔ meal_audit (model A)
+
+OpenCode master **self-serves** meal-audit via shared skill `meal-audit-engine` (entry commands in that SKILL). Outbound-only as the meal_audit voice: `telegram-send.sh --profile=meal_audit`. Never put `meal_audit` in `bots/registry.json` (would dual-poll the Hermes token). Coders still do not talk except through `run-coding-dispatch.sh`.
 
 ### The worker
 

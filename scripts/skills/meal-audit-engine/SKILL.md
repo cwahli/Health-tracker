@@ -130,6 +130,22 @@ Every bundle records:
 
 ---
 
+## Contact model (opencode master = self-serve)
+
+The OpenCode Telegram bot (`@Opencode_135_bot`, registry master `opencode`) **runs this
+engine itself** when asked to audit a meal. It does **not** message `@Meal_audit_bot`
+or any other bot — Telegram cannot deliver bot→bot, and a second `getUpdates` on the
+meal_audit token would conflict with `hermes-gateway`.
+
+| Goal | Do |
+|---|---|
+| Audit / compare / suite from OpenCode chat | Run the entry commands below in this workspace; reply with `MEDIA:` for reports |
+| Speak **as** `@Meal_audit_bot` (outbound only) | `bash scripts/telegram-send.sh --profile=meal_audit --text=\| --photo= --caption=` |
+| Wake the Hermes meal_audit **agent** | Not via Telegram. Local only: headless `hermes` CLI / file spool (future) |
+
+Do not add `meal_audit` to `bots/registry.json`. Do not reuse that profile token in
+`opencode-bot`. Shared skills already include this file via registry `sharedSkills`.
+
 ## Holdout & Telegram delivery
 
 - Holdout / pending-review outputs go under `artifacts/meal_audits/holdout/`
