@@ -1,6 +1,6 @@
 # Meal-Audit Bot — Plan v3
 
-> Status: **DONE** — P0–P6 complete in proot (P6: suite report + issues + calibrate + E2E W1/W2 PASS). Remaining user/VPS-side: Telegram bot token + VPS gateway restart for live phone delivery. Supersedes v1/v2. v2 incorrectly claimed the
+> Status: **DONE** — P0–P6 complete in proot (P6: suite report + issues + calibrate + E2E W1/W2 PASS). VPS handoff 2026-09-22: profile provisioned, skills synced, gateway restarted (meal_audit multiplexed), MAI-001 verified, fixtures seeded, calibrate=100. Remaining human: dedicated TELEGRAM_BOT_TOKEN then live phone MEDIA: E2E. Supersedes v1/v2. v2 incorrectly claimed the
 > implementation was "already built, tested, and deployed" — see §8 Historical Claims.
 
 The Meal-Audit Bot (`meal_audit`) is a **standalone, on-demand benchmark agent**.
