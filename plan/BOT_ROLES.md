@@ -35,7 +35,7 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 | qa_biomarker | no bot until it has its own token | Dark | Preload the meal skill |
 | qa_onboarding | no bot until it has its own token | Dark | Preload the meal skill |
 | orchestrator | @Orchestrator_health_tracker_bot | Status log. The script posts here | Run OpenCode itself, or message @Opencode_135_bot |
-| meal_audit | no bot until it has its own token | Dark — audit meals, write artifacts/meal_audits/ | Read src/, dispatch coders, touch golden/meal/ |
+| meal_audit | no bot until it has its own token (profile+skill+gateway ready 2026-09-22) | Dark — audit meals, write artifacts/meal_audits/ | Read src/, dispatch coders, touch golden/meal/ |
 
 ### The worker
 
