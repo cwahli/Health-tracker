@@ -19,8 +19,10 @@ function read(rel) {
 }
 
 const sync = read('server_routes_sync.ts');
-const app = read('src/App.tsx');
-const jobSync = read('src/jobs/SupabaseJobSync.ts');
+const app = read('src/App.tsx') + read('src/hooks/useAppSync.ts');
+// D-2: implementation lives in BackendJobSync; SupabaseJobSync is a re-export shim
+const jobSync =
+  read('src/jobs/BackendJobSync.ts') || read('src/jobs/SupabaseJobSync.ts');
 const client = read('src/utils/syncUtils.ts');
 
 console.log('\n=== EGRESS_BOMB (Supabase/D1 conservation) ===\n');
@@ -43,9 +45,9 @@ if (!/forcePull \|\| forceReplaceLocal/.test(app) && !app.includes('forceReplace
   fail('no force-pull exception documented — risk of always-full pull');
 } else pass('full pull reserved for force');
 
-// Law 4: job poll gated
+// Law 4: job poll gated (BackendJobSync fallback poll)
 if (!jobSync.includes('hasActiveJob')) {
-  fail('SupabaseJobSync poll not gated on hasActiveJob');
+  fail('BackendJobSync poll not gated on hasActiveJob');
 } else pass('job poll gated on hasActiveJob');
 
 const pollMs = jobSync.match(/setInterval\(\s*\(\)\s*=>\s*\{[\s\S]*?hasActiveJob[\s\S]*?\},\s*(\d+)/);
@@ -54,7 +56,7 @@ if (pollMs && Number(pollMs[1]) < 5000) {
 } else if (pollMs) pass(`job fallback poll ${pollMs[1]}ms`);
 else pass('job poll interval parsed or gated');
 
-// Law 3: client supabase disabled (lockout path)
+// Law 3: no direct client Supabase — all egress through backend (D1) proxy
 if (!jobSync.includes('isDirectClientSupabaseDisabled = true')) {
   fail('direct client Supabase not default-disabled — egress can bypass the proxy');
 } else pass('direct client Supabase disabled by default');
