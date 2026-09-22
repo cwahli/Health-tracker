@@ -429,7 +429,7 @@ Canonical steps, measured facts, and the do-not list: [VPS2_MOBILE_DEV.md](./VPS
 
 | ID | Phase | Done when | Status |
 |---|---|---|---|
-| **V-27** | Key-only SSH, then public :22 + Mosh UDP, fail2ban, tmux session `health` recreated on boot. Termius uses Mosh to `health-tracking.duckdns.org`, startup `tmux new -A -s health`. Tailscale stays; Tailscale SSH turns off only after an off-tailnet key login works. | Password SSH rejected. Phone switches Wi-Fi ↔ cellular and is back in the same `health` pane within a few seconds, process still running. No Tailscale cache clear. | **OPEN** |
+| **V-27** | Key-only SSH, then public :22 + Mosh UDP, fail2ban, tmux session `health` recreated on boot. Termius uses Mosh to `health-tracking.duckdns.org`, startup `tmux new -A -s health`. Tailscale stays; Tailscale SSH turns off only after an off-tailnet key login works. | Password SSH rejected. Phone switches Wi-Fi ↔ cellular and is back in the same `health` pane within a few seconds, process still running. No Tailscale cache clear. | **READY FOR PHONE CHECK** |
 
 ### Track V Phase 8 — One job per bot, silent dev agents (OPEN)
 

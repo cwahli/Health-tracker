@@ -221,10 +221,12 @@ Tailscale SSH is why the reconnect shows an authentication error rather than a t
 VPS:           OVH VPS-2 (vps-0a61fae6) / 51.254.217.163
 Region:        EU (Gravelines / Lille, France)
 Tailscale:     100.118.148.32 (vps-0a61fae6)
-SSH today:     Tailscale SSH only (ufw denies public :22). PasswordAuthentication is still yes — V-27 turns it off before opening :22.
-tmux today:    Termius → Tailscale SSH → tmux attach -t dev
-tmux target:   Termius → Mosh ubuntu@health-tracking.duckdns.org → tmux new -A -s health
-               (V-27 OPEN. Do not pretend this door exists until the phone check passes.)
+SSH / Mosh:    Public :22 key-only (PasswordAuthentication no, fail2ban active on sshd).
+               Mosh UDP ports 60000:61000 open in ufw.
+tmux session:  tmux session 'health' active (cwd /home/ubuntu/src/Health-tracker).
+               Autostarted via systemd user unit: tmux-health.service (linger enabled).
+tmux command:  Termius / Moshi → Mosh ubuntu@health-tracking.duckdns.org → tmux new -A -s health
+               (Server configuration COMPLETE. Awaiting human phone Wi-Fi ↔ cellular verification.)
 Telegram:      @Health-tracker-bot (Hermes Telegram Gateway with Profile Multiplexer)
 Repo on VM:    /home/ubuntu/src/Health-tracker
 Prod URL:      https://health-tracking.duckdns.org (Caddy :443 -> 127.0.0.1:3000)
@@ -234,7 +236,6 @@ Firebase host: health-tracking.duckdns.org (Authorized Domain in Firebase Consol
 Database:      Cloudflare D1 + Supabase + Cloudflare R2 (photos)
 Watchdog:      /home/ubuntu/scripts/watchdog.sh (every 10 hours via cron)
 QA Runner:     node scripts/qa-runner.mjs --journey={meal|biomarker|onboarding}
-Mobile shell:  Moshi (Auto: Mosh→ET→SSH) + tmux attach -t dev; key ~/.ssh/moshi_vps (pub in authorized_keys)
 ```
 
 ### Direct-Moshi cutover (retire Tailscale from shell path) — 2026-09-21, agreed
