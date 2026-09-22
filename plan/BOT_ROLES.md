@@ -210,3 +210,21 @@ A live bug run is not required to close V-28.
 - **Cline**: Use `--thinking=low` for atomic UI/text fixes (fast 30s execution); reserve `--thinking=high` only for multi-file architectural refactors. Append invariant guard: *"Never modify elements protected by Playwright tests in prototype/ or AGENTS.md."*
 - **Grok**: Reduce execution timeout to 6 minutes max. Do not attach screenshot images for pure text/formatting tickets to prevent visual over-analysis loops.
 
+### 6d. Action-Aware Heartbeats & Structured Failure Diagnostics
+- **Contextual Heartbeat (What the agent is doing)**:
+  - The heartbeat loop in `scripts/run-coding-dispatch.sh` must not emit blind elapsed timers (`Agent 'Grok' still working... (12m elapsed)`).
+  - Every 2 minutes, the heartbeat parses the latest non-empty activity from the coder's log (active file read, test execution, or current thought line) and reports concrete progress to Telegram:
+    `⏳ [Orchestrator] Grok is investigating <target file/action> (4m elapsed)`
+- **Structured Outcome & Failure Summaries**:
+  - When an agent finishes with 0 code changes or errors, the Orchestrator must never dump raw 6-line unformatted log chunks or a bare "0 code changes".
+  - It must parse the log and emit a structured Telegram summary:
+    - **What Was Investigated**: (e.g. `Inspected home dashboard layout & Playwright test locators`).
+    - **Code Modified**: `0 files` (or changed file paths).
+    - **Root Cause Diagnosis**: Concrete reason why it halted:
+      - `Credit Depletion`: "Account funds exhausted ($0 balance on muse-spark-1.3)."
+      - `Test / Invariant Conflict`: "Aborted: changing #nav-tab-health breaks existing Playwright tests in prototype/."
+      - `Stall / Timeout`: "Halted: overthinking loop after 6m without generating code changes."
+      - `Typecheck Failure`: "npx tsc failed on TS2322 in src/..."
+    - **Action Taken**: Next step executed by the Orchestrator (e.g. `Failing over to Cline with scoped atomic prompt`).
+
+

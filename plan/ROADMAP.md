@@ -438,7 +438,7 @@ Canonical steps: [BOT_ROLES.md](./BOT_ROLES.md). Does not change `src/` or the p
 | ID | Phase | Done when | Status |
 |---|---|---|---|
 | **V-28** | Short soul per Hermes profile. One preloaded skill per live bot. QA profiles cannot load `orchestrator-dispatcher`. Memory holds only current facts. Dispatch tries `opencode/deepseek-v4.1-flash` once after Muse reports insufficient funds, and skips Antigravity. | The done-when list in BOT_ROLES.md §4 is true. | **OPEN** |
-| **V-29** | **Atomic QA Bug Dispatch & Orchestrator Queue**: QA bots dispatch one verifiable defect per ticket (never bundle multiple discrepancies). Orchestrator decomposes multi-issue prompts into atomic sub-tasks, attaches target file hints, enforces 3m early stagnation circuit breaker, and tunes coder thinking levels. | [BOT_ROLES.md](./BOT_ROLES.md) §6 is implemented; single-defect tickets run in < 60s without overthinking loops or poisoned bundles. | **OPEN** |
+| **V-29** | **Atomic QA Bug Dispatch & Orchestrator Observability**: QA bots dispatch one verifiable defect per ticket (never bundle multiple discrepancies). Orchestrator decomposes multi-issue prompts into atomic sub-tasks, attaches target file hints, provides action-aware heartbeats (reporting current investigation activity rather than blind timers), emits structured failure diagnostics, enforces 3m early stagnation circuit breaker, and tunes coder thinking levels. | [BOT_ROLES.md](./BOT_ROLES.md) §6 is implemented; single-defect tickets run in < 60s without overthinking loops, blind heartbeats, or poisoned bundles. | **OPEN** |
 
 
 
