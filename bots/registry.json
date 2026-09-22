@@ -1,4 +1,5 @@
 {
+  "master": "opencode",
   "bots": [
     {
       "id": "opencode",
@@ -33,6 +34,17 @@
       },
       "session": {
         "mode": "per-chat"
+      }
+    },
+    {
+      "id": "meal_audit",
+      "name": "Meal Audit Bot",
+      "enabled": true,
+      "telegram": {
+        "tokenEnv": "MEAL_AUDIT_BOT_TOKEN"
+      },
+      "agent": {
+        "playwrightOutputDir": "/tmp/opencode-bot-shots-meal-audit"
       }
     }
   ]

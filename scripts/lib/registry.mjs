@@ -1,6 +1,69 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function mergeOnto(base, override) {
+  if (!isPlainObject(base) || !isPlainObject(override)) {
+    return override === undefined ? base : override;
+  }
+  const out = { ...base };
+  for (const [k, v] of Object.entries(override)) {
+    out[k] = isPlainObject(v) && isPlainObject(base[k]) ? mergeOnto(base[k], v) : v;
+  }
+  return out;
+}
+
+export function applyMasterDefaults(registry) {
+  const bots = registry.bots;
+  const masterId = registry.master || bots[0]?.id;
+  const master = bots.find((b) => b.id === masterId);
+  if (!master) throw new Error(`Master bot "${masterId}" not found`);
+  if (master.extends) throw new Error(`Master bot "${masterId}" must not extend another bot`);
+
+  const resolved = bots.map((bot) => {
+    if (bot.id === masterId) return bot;
+    const parentId = bot.extends || masterId;
+    const parent = bots.find((b) => b.id === parentId);
+    if (!parent) throw new Error(`Bot "${bot.id}" extends unknown bot "${parentId}"`);
+    if (parentId === bot.id) throw new Error(`Bot "${bot.id}" cannot extend itself`);
+
+    const merged = mergeOnto(
+      {
+        name: parent.name,
+        telegram: parent.telegram || {},
+        agent: parent.agent || {},
+        progress: parent.progress || {},
+        session: parent.session || {},
+      },
+      {
+        ...(bot.name !== undefined ? { name: bot.name } : {}),
+        telegram: bot.telegram || {},
+        agent: bot.agent || {},
+        progress: bot.progress || {},
+        session: bot.session || {},
+      },
+    );
+
+    return {
+      ...parent,
+      ...bot,
+      name: merged.name,
+      telegram: merged.telegram,
+      agent: merged.agent,
+      progress: merged.progress,
+      session: merged.session,
+      id: bot.id,
+      enabled: bot.enabled,
+      extends: bot.extends,
+    };
+  });
+
+  return { ...registry, master: masterId, bots: resolved };
+}
+
 export function loadRegistry(registryPath) {
   const raw = fs.readFileSync(registryPath, 'utf8');
   let parsed;
@@ -17,6 +80,14 @@ export function loadRegistry(registryPath) {
     if (!bot.id) throw new Error('Every bot entry needs an "id"');
     if (seen.has(bot.id)) throw new Error(`Duplicate bot id: ${bot.id}`);
     seen.add(bot.id);
+    if (!bot.telegram?.tokenEnv) {
+      throw new Error(`Bot "${bot.id}" needs telegram.tokenEnv (each bot has its own token)`);
+    }
+  }
+
+  parsed = applyMasterDefaults(parsed);
+
+  for (const bot of parsed.bots) {
     if (!bot.telegram?.tokenEnv) throw new Error(`Bot "${bot.id}" needs telegram.tokenEnv`);
     if (!bot.agent?.kind) throw new Error(`Bot "${bot.id}" needs agent.kind`);
   }
