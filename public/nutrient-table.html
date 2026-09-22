@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nutrient Table - Baked Salmon Meal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 16px; color: #333; }
+  .container { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
+  .header { background: #2563eb; color: #fff; padding: 16px; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header p { font-size: 13px; opacity: 0.9; margin-top: 4px; }
+  .macro-row { display: flex; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 15px; }
+  .macro-row:last-child { border-bottom: none; }
+  .macro-label { color: #6b7280; }
+  .macro-value { font-weight: 600; color: #111827; }
+  .macro-value.high { color: #dc2626; }
+  .macro-value.ok { color: #16a34a; }
+  .divider { height: 1px; background: #e5e7eb; margin: 0; }
+  .sub-header { padding: 12px 16px; font-size: 13px; color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+  .nutrient-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .nutrient-table th { text-align: left; padding: 8px 12px; background: #f3f4f6; color: #6b7280; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  .nutrient-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+  .nutrient-table tr:last-child td { border-bottom: none; }
+  .nutrient-table .val { text-align: right; font-weight: 500; }
+  .note { padding: 12px 16px; font-size: 12px; color: #9ca3af; line-height: 1.5; background: #fffbeb; border-top: 1px solid #fde68a; }
+  .unit { color: #9ca3af; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>🐟 Baked Salmon with Quinoa &amp; Steamed Broccoli</h1>
+    <p>Logged: 19 Sep 2026 · Portion: 1 serving</p>
+  </div>
+  <div class="macro-row">
+    <span class="macro-label">Calories</span>
+    <span class="macro-value">540 <span class="unit">kcal</span></span>
+  </div>
+  <div class="macro-row">
+    <span class="macro-label">Protein</span>
+    <span class="macro-value ok">38.0 <span class="unit">g</span></span>
+  </div>
+  <div class="macro-row">
+    <span class="macro-label">Carbohydrates</span>
+    <span class="macro-value">45.0 <span class="unit">g</span></span>
+  </div>
+  <div class="macro-row">
+    <span class="macro-label">Total Fat</span>
+    <span class="macro-value">24.0 <span class="unit">g</span></span>
+  </div>
+  <div class="macro-row">
+    <span class="macro-label">Saturated Fat</span>
+    <span class="macro-value high">6.2 <span class="unit">g</span></span>
+  </div>
+  <div class="divider"></div>
+  <div class="sub-header">Micronutrients</div>
+  <table class="nutrient-table">
+    <thead><tr><th>Nutrient</th><th style="text-align:right">Amount</th><th style="text-align:right">% Daily</th></tr></thead>
+    <tbody>
+      <tr><td>Sodium</td><td class="val">680 <span class="unit">mg</span></td><td class="val">30%</td></tr>
+      <tr><td>Potassium</td><td class="val">520 <span class="unit">mg</span></td><td class="val">15%</td></tr>
+      <tr><td>Magnesium</td><td class="val">140 <span class="unit">mg</span></td><td class="val">33%</td></tr>
+      <tr><td>Calcium</td><td class="val">85 <span class="unit">mg</span></td><td class="val">7%</td></tr>
+      <tr><td>Iron</td><td class="val">2.8 <span class="unit">mg</span></td><td class="val">16%</td></tr>
+      <tr><td>Zinc</td><td class="val">2.1 <span class="unit">mg</span></td><td class="val">19%</td></tr>
+      <tr><td>Vitamin D</td><td class="val">4.2 <span class="unit">mcg</span></td><td class="val">21%</td></tr>
+      <tr><td>Vitamin B12</td><td class="val">2.8 <span class="unit">mcg</span></td><td class="val">117%</td></tr>
+      <tr><td>Soluble Fibre</td><td class="val">1.2 <span class="unit">g</span></td><td class="val">30%</td></tr>
+      <tr><td>Omega-3 (EPA+DHA)</td><td class="val">2.4 <span class="unit">g</span></td><td class="val">—</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    ★ High in protein and omega-3. Low in added sugar. Moderate sodium — consider pairing with a low-sodium side if tracking strictly.
+  </div>
+</div>
+</body>
+</html>
