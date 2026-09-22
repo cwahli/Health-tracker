@@ -59,6 +59,7 @@ import {
 } from '../utils/logChatOffline';
 export { safeJSONStringify };
 import { humanizeJobFailure } from '../utils/jobFailure';
+import { pullAuthHeaders } from '../utils/syncUtils';
 import { ImageStore } from '../jobs/ImageStore';
 import { reserveCredits } from '../jobs/credits';
 import { JobQueueRunner } from '../jobs/JobQueueRunner';
@@ -2601,7 +2602,7 @@ ${logsText}`);
               try {
                 const res = await fetch('/api/sync/food-log-detail', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: await pullAuthHeaders(),
                   body: JSON.stringify({ logId: id, uid: detailUid }),
                   signal: ctrl.signal,
                 });

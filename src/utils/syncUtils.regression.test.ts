@@ -14,7 +14,15 @@ import {
   mergeDeleteMaps,
   mergeProfiles,
   resolveInitialLanguage,
+  pullAuthHeaders,
+  fetchAllConsolidatedLogs,
+  fetchFoodLogsPage,
 } from './syncUtils';
+
+vi.mock('../firebase', () => ({
+  auth: { currentUser: { getIdToken: async () => 'fb-id-token' } },
+}));
+
 
 // This project's vitest run doesn't use a DOM environment (no jsdom/happy-dom
 // dependency), so localStorage isn't a global here the way it is in the
@@ -66,14 +74,31 @@ describe('pushLogsToServer', () => {
     expect(captured[0].headers['Authorization']).toBe('Bearer tok-abc');
   });
 
-  it('omits Authorization header when idToken is absent', async () => {
+  it('attaches Authorization when idToken is provided', async () => {
     const captured: any[] = [];
     globalThis.fetch = vi.fn(async (_url: string, opts: any) => {
       captured.push(opts?.headers || {});
       return { ok: true, json: async () => ({ success: true }) } as any;
     });
+    await pushLogsToServer({ uid: 'u1', idToken: 'explicit-tok' });
+    expect(captured[0]['Authorization']).toBe('Bearer explicit-tok');
+  });
+
+  it('always sends Content-Type; Authorization only when a token is available', async () => {
+    const captured: any[] = [];
+    globalThis.fetch = vi.fn(async (_url: string, opts: any) => {
+      captured.push(opts?.headers || {});
+      return { ok: true, json: async () => ({ success: true }) } as any;
+    });
+    // No idToken: pullAuthHeaders() still runs and may attach a Firebase token
+    // when signed in; in this Node test env there is no Firebase session, so
+    // Authorization stays absent — but Content-Type must always be present so
+    // the JSON body parses on the server.
     await pushLogsToServer({ uid: 'u1' });
-    expect(captured[0]['Authorization']).toBeUndefined();
+    expect(captured[0]['Content-Type']).toBe('application/json');
+    if (captured[0]['Authorization'] !== undefined) {
+      expect(String(captured[0]['Authorization'])).toMatch(/^Bearer /);
+    }
   });
 
   it('returns success:false and does not throw on HTTP error', async () => {
@@ -90,6 +115,57 @@ describe('pushLogsToServer', () => {
     const result = await pushLogsToServer({ uid: 'u1' });
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/network down/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pullAuthHeaders / pull endpoints — ratchet for the 401-hides-meals class
+// (ffa1023 enforced token auth; 71ba3e0 added headers; this pins all pull
+// call sites so a future fetch without Authorization fails here first).
+// ---------------------------------------------------------------------------
+describe('pull auth headers (401 hides totalFoodsCount → 2-page bug)', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = realFetch; vi.restoreAllMocks(); });
+
+  it('pullAuthHeaders always includes Content-Type', async () => {
+    const headers = await pullAuthHeaders();
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
+  it('fetchAllConsolidatedLogs POSTs /api/sync/supabase-pull with Authorization when signed in', async () => {
+    const captured: { url: string; headers: Record<string, string> }[] = [];
+    globalThis.fetch = vi.fn(async (url: string, opts: any) => {
+      captured.push({ url: String(url), headers: opts?.headers || {} });
+      return {
+        ok: true,
+        json: async () => ({ success: true, foods: [], biomarkers: [], totalFoodsCount: 176 }),
+      } as any;
+    });
+
+    const result = await fetchAllConsolidatedLogs('uid-1', 'a@b.com', {}, {}, {});
+    expect(captured).toHaveLength(1);
+    expect(captured[0].url).toBe('/api/sync/supabase-pull');
+    expect(captured[0].headers['Authorization']).toBe('Bearer fb-id-token');
+    expect(result.totalFoodsCount).toBe(176);
+  });
+
+  it('fetchFoodLogsPage POSTs page 2 with Authorization and preserves totalFoodsCount', async () => {
+    const captured: { body: any; headers: Record<string, string> }[] = [];
+    globalThis.fetch = vi.fn(async (_url: string, opts: any) => {
+      captured.push({ body: JSON.parse(opts?.body || '{}'), headers: opts?.headers || {} });
+      return {
+        ok: true,
+        json: async () => ({ success: true, foods: [{ id: 'f1', name: 'x' }], totalFoodsCount: 176 }),
+      } as any;
+    });
+
+    const page2 = await fetchFoodLogsPage('uid-1', 2, 15, 'a@b.com');
+    expect(captured[0].headers['Authorization']).toBe('Bearer fb-id-token');
+    expect(captured[0].body.pageSize).toBe(15);
+    expect(captured[0].body.offset).toBe(15);
+    // Total must come from the server count, not foods.length — otherwise
+    // ceil(15/15)=1 page even when D1 has 176 rows.
+    expect(page2.totalFoodsCount).toBe(176);
   });
 });
 

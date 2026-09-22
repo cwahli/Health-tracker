@@ -8,7 +8,9 @@ import { translations } from './translations';
 // server pull endpoints (/api/sync/*, 401-enforced in production)
 // accept the request. Falls back to the htk session auto-attach
 // (breadcrumbTracker) when Firebase is signed out.
-async function pullAuthHeaders(): Promise<Record<string, string>> {
+// Exported so LogChat and other call sites reuse the same header builder
+// (L5: one path fixed ≠ all paths).
+export async function pullAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
     const { auth } = await import('../firebase');
@@ -302,6 +304,12 @@ export async function fetchAllConsolidatedLogs(
     });
     clearTimeout(timeoutId);
 
+    if (resp.status === 401) {
+      // Class: silent 401 hides totalFoodsCount → UI collapses to ~1–2 pages.
+      // Fail loud so the next regression is visible in the console/net log.
+      console.error('[syncUtils] supabase-pull 401 Unauthorized — missing/expired Firebase ID token (uid=%s)', uid);
+    }
+
     if (resp.ok) {
       const data = await resp.json();
       if (data && data.success) {
@@ -528,9 +536,11 @@ export async function pushLogsToServer(params: {
 }): Promise<{ success: boolean; foodCount?: number; bioCount?: number; error?: string }> {
   if (!params.uid) return { success: false, error: 'uid required' };
   try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    // Always attach a Bearer token: prod enforces 401 without one.
+    // Prefer explicit idToken (call sites that already minted one); otherwise
+    // fall back to pullAuthHeaders() so profile-only pushes (upsertProfileToSupabase)
+    // are not unauthenticated.
+    const headers: Record<string, string> = await pullAuthHeaders();
     if (params.idToken) {
       headers['Authorization'] = `Bearer ${params.idToken}`;
     }
