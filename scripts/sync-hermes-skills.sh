@@ -40,6 +40,13 @@ if [ -d "${HERMES_DIR}/profiles" ]; then
   done
 fi
 
+# Clean up orchestrator-dispatcher symlink from QA profiles
+for qa_prof in qa_meal qa_biomarker qa_onboarding; do
+  if [ -d "${HERMES_DIR}/profiles/$qa_prof/skills" ]; then
+    rm -f "${HERMES_DIR}/profiles/$qa_prof/skills/orchestrator-dispatcher"
+  fi
+done
+
 SKILL_COUNT=0
 for skill_path in "${SKILLS_SRC}"/*; do
   if [ -d "$skill_path" ] && [ -f "$skill_path/SKILL.md" ]; then
@@ -47,10 +54,15 @@ for skill_path in "${SKILLS_SRC}"/*; do
     SKILL_COUNT=$((SKILL_COUNT + 1))
 
     for target in "${TARGET_DIRS[@]}"; do
+      # Do not link orchestrator-dispatcher into QA profiles
+      if [ "$skill_name" = "orchestrator-dispatcher" ] && [[ "$target" =~ /profiles/qa_ ]]; then
+        continue
+      fi
       ln -sfn "$skill_path" "$target/$skill_name"
     done
-    echo "  ✓ Linked skill: '$skill_name' -> across ${#TARGET_DIRS[@]} profile locations"
+    echo "  ✓ Linked skill: '$skill_name' -> profile locations (filtered for QA profiles)"
   fi
 done
+
 
 echo "[SyncSkills] Successfully synced $SKILL_COUNT skills across all Hermes profiles."

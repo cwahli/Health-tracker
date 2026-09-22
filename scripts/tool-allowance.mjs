@@ -36,7 +36,7 @@ const DEFAULT_STATE = {
       failure_count: 0,
       rate_limit_count: 0,
       last_used: null,
-      default_model: 'muse-spark-1.3',
+      default_model: 'deepseek-v4.1-flash',
       priority: 1
     },
     cline: {
@@ -64,8 +64,9 @@ const DEFAULT_STATE = {
     },
     agy: {
       name: 'Antigravity CLI',
-      status: 'available',
-      allowance_level: 'high',
+      status: 'unavailable',
+      allowance_level: 'unavailable',
+      reason: 'User location is not supported on VPS',
       cooldown_until: null,
       success_count: 0,
       failure_count: 0,
@@ -170,14 +171,14 @@ function pickTool(options = {}) {
     const isInstalled = isBinaryInstalled(preferred);
     const inCooldown = prefTool.cooldown_until && new Date(prefTool.cooldown_until).getTime() > Date.now();
 
-    if (isInstalled && !inCooldown && prefTool.status !== 'depleted') {
+    if (isInstalled && !inCooldown && prefTool.status !== 'depleted' && prefTool.status !== 'unavailable') {
       return {
         tool: preferred,
         config: prefTool,
         reason: `Explicitly preferred tool '${preferred}' is healthy and available.`
       };
     } else {
-      console.warn(`[ToolAllowance] Preferred tool '${preferred}' unavailable (installed=${isInstalled}, inCooldown=${inCooldown}). Falling back to pool...`);
+      console.warn(`[ToolAllowance] Preferred tool '${preferred}' unavailable (installed=${isInstalled}, inCooldown=${inCooldown}, status=${prefTool.status}). Falling back to pool...`);
     }
   }
 
@@ -199,7 +200,7 @@ function pickTool(options = {}) {
       continue;
     }
 
-    if (tool.status === 'depleted') {
+    if (tool.status === 'depleted' || tool.status === 'unavailable') {
       continue;
     }
 
@@ -238,6 +239,16 @@ function reportResult(toolName, status, meta = {}) {
     tool.status = 'available';
     tool.allowance_level = 'high';
     tool.cooldown_until = null;
+  } else if (status === 'depleted') {
+    tool.status = 'depleted';
+    tool.allowance_level = 'depleted';
+    tool.cooldown_until = null;
+    console.log(`[ToolAllowance] Tool ${toolName} permanently marked depleted (insufficient funds)`);
+  } else if (status === 'unavailable') {
+    tool.status = 'unavailable';
+    tool.allowance_level = 'unavailable';
+    tool.cooldown_until = null;
+    console.log(`[ToolAllowance] Tool ${toolName} marked unavailable (${meta.reason || 'location blocked'})`);
   } else if (status === 'rate_limited' || status === 'low_allowance') {
     tool.rate_limit_count += 1;
     tool.allowance_level = status;

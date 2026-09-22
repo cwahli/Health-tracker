@@ -213,11 +213,21 @@ run_with_timeout() {
 # ---------------------------------------------------------------
 start_heartbeat() {
   local tool_name="$1"
-  local interval_secs="${2:-120}"   # 2 min default
+  local log_file="${2:-}"
+  local interval_secs="${3:-120}"   # 2 min default
   (
     while true; do
       sleep "$interval_secs"
-      tg_msg "⏳ *[Orchestrator]* Agent '$tool_name' still working on \`$BUG_ID\`... ($(( ($(date +%s) - START_TIME) / 60 ))m elapsed)"
+      local current_activity="analyzing codebase"
+      if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+        local last_line
+        last_line=$(grep -vE '^[[:space:]]*$' "$log_file" 2>/dev/null | tr -d '\r`' | tail -n 1 | cut -c1-120 || true)
+        if [ -n "$last_line" ]; then
+          current_activity="$last_line"
+        fi
+      fi
+      tg_msg "⏳ *[Orchestrator]* Agent '$tool_name' working on \`$BUG_ID\`... ($(( ($(date +%s) - START_TIME) / 60 ))m elapsed)
+• *Status:* \`$current_activity\`"
     done
   ) &
   HEARTBEAT_PID=$!
@@ -280,10 +290,21 @@ check_git_and_tsc() {
   if [ "$diff_count" -eq 0 ]; then
     echo "[Dispatcher] No code changes produced by $tool_name."
     local tail_output=""
+    local reason="Halted with 0 code changes"
     if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+      if grep -qiE "insufficient account funds|insufficient funds|out of credits" "$log_file"; then
+        reason="Account funds exhausted ($0 balance)"
+      elif grep -qiE "user location is not supported|location is not supported" "$log_file"; then
+        reason="Location blocked (Gemini API unavailable in VPS datacenter region)"
+      elif grep -qiE "abort|aborted" "$log_file"; then
+        reason="Agent aborted execution (detected conflict with tests or invariants)"
+      elif grep -qiE "timed out|timeout" "$log_file"; then
+        reason="Execution timed out without making file edits"
+      fi
       tail_output=$(tail -n 6 "$log_file" | tr -d '`' | cut -c1-300)
     fi
-    tg_msg "⚠️ *[Orchestrator]* *$tool_name* made *0 code changes*.
+    tg_msg "⚠️ *[Orchestrator]* *$tool_name* produced *0 code changes*.
+• *Root Cause:* $reason
 *Agent output tail:*
 \`\`\`
 ${tail_output:-No output logged}
@@ -411,11 +432,27 @@ try_opencode() {
 $prompt_preview
 \`\`\`"
 
-  start_heartbeat "OpenCode"
+  start_heartbeat "OpenCode" "$log_file"
   run_opencode_agent "$prompt" "$log_file" 8m
   stop_heartbeat
 
   local output; output=$(cat "$log_file" 2>/dev/null || true)
+
+  if echo "$output" | grep -qiE "insufficient account funds|insufficient funds|out of credits"; then
+    tg_msg "⚠️ *[Orchestrator]* OpenCode hit insufficient funds on \`$model\`. Retrying once with \`opencode/deepseek-v4.1-flash\`..."
+    node scripts/tool-allowance.mjs report-result --tool="opencode" --status="depleted" --bug-id="$BUG_ID" --reason="Insufficient account funds" || true
+    clean_workspace
+    local alt_model="opencode/deepseek-v4.1-flash"
+    local alt_log="${log_dir}/dispatch_${BUG_ID}_opencode_deepseek.log"
+    start_heartbeat "OpenCode (deepseek)" "$alt_log"
+    run_with_timeout 8m "$OPENCODE_BIN" run --auto --dir "$REPO_DIR" -m "$alt_model" "$prompt" 2>&1 | tee "$alt_log" || true
+    stop_heartbeat
+    if check_git_and_tsc "opencode" "$alt_model" "$alt_log"; then return 0; fi
+    tg_msg "❌ *[Orchestrator]* OpenCode (deepseek) could not resolve \`$BUG_ID\`. Escalating to Cline..."
+    clean_workspace
+    node scripts/tool-allowance.mjs report-result --tool="opencode" --status="failed" --bug-id="$BUG_ID" || true
+    return 1
+  fi
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|insufficient credits|429|allowance"; then
     tg_msg "⚠️ *[Orchestrator]* OpenCode hit rate limit for \`$BUG_ID\`. Trying next tool..."
@@ -429,7 +466,9 @@ $prompt_preview
   # One nudge attempt
   tg_msg "🔄 *[Orchestrator]* OpenCode nudged to retry \`$BUG_ID\`..."
   local nudge_log="${log_dir}/dispatch_${BUG_ID}_opencode_nudge.log"
+  start_heartbeat "OpenCode (nudge)" "$nudge_log"
   run_opencode_agent "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." "$nudge_log" 4m
+  stop_heartbeat
   if check_git_and_tsc "opencode" "$model" "$nudge_log"; then return 0; fi
 
   tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`. Escalating to Cline..."
@@ -464,7 +503,7 @@ $prompt_preview
 \`\`\`"
 
   snapshot_workspace
-  start_heartbeat "Cline"
+  start_heartbeat "Cline" "$log_file"
   run_with_timeout 8m "$CLINE_BIN" --auto-approve true --thinking "$thinking" "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
 
@@ -510,7 +549,7 @@ $prompt_preview
 \`\`\`"
 
   snapshot_workspace
-  start_heartbeat "Grok"
+  start_heartbeat "Grok" "$log_file"
   run_with_timeout 10m "$GROK_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
 
@@ -535,6 +574,12 @@ try_agy() {
   echo "[Dispatcher] --> Antigravity CLI"
   if [ ! -x "$AGY_BIN" ]; then return 1; fi
 
+  if node scripts/tool-allowance.mjs status 2>/dev/null | grep -i 'Antigravity' | grep -qi 'unavailable'; then
+    echo "[Dispatcher] Antigravity CLI is marked unavailable on VPS. Skipping."
+    tg_msg "⏭️ *[Orchestrator]* Skipping *Antigravity CLI* (marked unavailable on VPS datacenter IP)."
+    return 1
+  fi
+
   local prompt; prompt="$(build_prompt)"
   local log_dir="${HERMES_DIR}/logs"
   mkdir -p "$log_dir"
@@ -553,7 +598,7 @@ $prompt_preview
 \`\`\`"
 
   snapshot_workspace
-  start_heartbeat "Agy"
+  start_heartbeat "Agy" "$log_file"
   run_with_timeout 8m "$AGY_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
   stop_heartbeat
 
