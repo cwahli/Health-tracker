@@ -135,23 +135,37 @@ node "$REPO_DIR/scripts/meal-audit-fetch.mjs" \
 ```
 
 ### Step 3 — Hand Off to Meal-Audit Bot
-Instruct @Meal_Audit_bot (or invoke meal-audit-engine) to perform the deep multi-turn 31-nutrient audit and bundle the ground truth into `Meal-[meal name]-[number]`:
+Instruct @Meal_Audit_bot (or invoke meal-audit-engine) to perform the deep multi-turn 32-nutrient audit and bundle the ground truth into `Meal-[meal name]-[number]`:
 ```
 🔍 [Meal Inaccuracy Delegated to @Meal_Audit_bot]
 • Reference: <Timestamp / Meal Name / Job ID>
-• Status: Fetching debug events & R2 photos. Reconstructing multi-turn flow and generating ground-truth benchmark (31 nutrients + bounding boxes)...
+• Status: Fetching debug events & R2 photos. Reconstructing multi-turn flow and generating ground-truth benchmark (32 nutrients + bounding boxes)...
 • Benchmark Bundle: artifacts/meal_audits/Meal-<Name>-01
 ```
 
-### Step 4 — Journey Test Against Benchmark
+### Step 4 — Isolated Journey Replay + Compare (P4.5)
 Once the `Meal-[meal name]-[number]` benchmark is generated:
-1. Re-run the meal journey with the photos and instructions from `Instruction.md`.
-2. Compare the live site results against `expected.json` / `meal_result.json`.
+
+**Isolation rule:** the journey runner (system under test) must NEVER read
+`expected.json` / `meal_result.json` during the run. Those files are hidden for
+the whole replay and only `meal-audit-compare.mjs` reads them afterward.
+
+1. Run the isolated replay (hides expectations, runs journey, restores, scores):
+   ```bash
+   node "$REPO_DIR/scripts/meal-audit-replay.mjs" \
+     --bundle="$REPO_DIR/artifacts/meal_audits/Meal-<Name>-01" \
+     --actual="$REPO_DIR/qa-evidence/actual_meal.json"
+   ```
+   Capture the live site meal payload as `actual_meal.json` during the journey
+   (photo upload → multi-turn edits → export). Do not open expectation files
+   yourself while the journey is running — use only `Instruction.md` + photos.
+2. Exit `0` ⇒ PASS. Exit `1`/`2` ⇒ score lives in `comparison.json` (taxonomy
+   codes + harness card). Exit `4` ⇒ isolation violated (bug in tooling).
 3. If live site passes: Report resolution and clean benchmark match to user.
-4. If live site diverges: File an atomic bug ticket to @Orchestrator attaching the benchmark path and exact discrepancy:
+4. If live site diverges: File an atomic bug ticket to @Orchestrator attaching the benchmark path and exact discrepancy (from `comparison.json`, not by re-reading expectations by hand):
 ```bash
 bash "$REPO_DIR/scripts/run-coding-dispatch.sh" \
-  --task="Component: Vision/Dietitian Pipeline. Observed: Live site outputs <Actual> on <Dish>. Expected: Benchmark bundle <Meal-Name-01> specifies <Expected 31-nutrients/weight>. Verification: Journey test against Meal-Name-01 passes within tolerance." \
+  --task="Component: Vision/Dietitian Pipeline. Observed: Live site outputs <Actual> on <Dish>. Expected: Benchmark bundle <Meal-Name-01> specifies <Expected 32-nutrients/weight>. Verification: Journey test against Meal-Name-01 passes within tolerance." \
   --bug-id="$BUG_ID" \
   --category="meal" \
   --thinking="high" \

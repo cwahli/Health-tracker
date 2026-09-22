@@ -1,229 +1,225 @@
-# Comprehensive Architecture & Implementation Plan: Meal-Audit Bot & Multi-Turn Flow Reviewer
+# Meal-Audit Bot — Plan v3
 
-## 1. Executive Summary & Vision
+> Status: **DONE** — P0–P6 complete in proot (P6: suite report + issues + calibrate + E2E W1/W2 PASS). Remaining user/VPS-side: Telegram bot token + VPS gateway restart for live phone delivery. Supersedes v1/v2. v2 incorrectly claimed the
+> implementation was "already built, tested, and deployed" — see §8 Historical Claims.
 
-The **Meal-Audit Bot** (`meal-audit`) is an audit-grade AI nutrition engine designed to produce authoritative, clinically verified ground truth benchmarks for food analysis. It can be invoked directly by human users or autonomously by other agents (such as `@Meal_journey_QA_bot` or `@Orchestrator`).
+The Meal-Audit Bot (`meal_audit`) is a **standalone, on-demand benchmark agent**.
+It reviews meals (raw photos, multi-turn site flows, or any already-saved meal),
+produces an authoritative ground-truth report, and bundles it as
+`Meal-[meal name]-[number]/` for QA comparison.
 
-Every meal audit produces a self-contained benchmark folder named according to the standard convention:
-$$\text{Meal-[meal name]-[number]}$$
-*(e.g. `Meal-Salmon-Bowl-01`, `Meal-Chicken-Hotpot-02`)*
-
-This folder bundles all evidence images, multi-turn user instructions, visual bounding boxes, and the complete **31-nutrient ledger** for every turn. It serves as an immutable ground truth for:
-1. Verifying meal logging accuracy on the live site.
-2. Replaying multi-turn meal editing flows (e.g. photo edit + text clarification).
-3. Feeding reproducible regression test suites in `golden/meal/Meal_04_log/`.
+It is **not** part of `golden/meal/`. Golden meal is a static regression suite;
+this bot is a separate process that audits meals as they come along and tracks
+discovered bugs in its own issue ledger (§6).
 
 ---
 
-## 2. The Two Core Operating Workflows
+## 1. Design principles
+
+1. **User-input led, vision assisted.** Values the user provides in chat are
+   authoritative. Values the meal flow asks the user to confirm are confirmed
+   interactively. Only when the user does not provide/confirm does the bot guess
+   (OCR/label → nutrient DB → vision estimate). Every number carries provenance.
+2. **Honesty over false precision.** Missing debug data aborts loudly; placeholder
+   ground truth is forbidden. Guesses are marked `confidence: estimated`.
+3. **Deterministic bundles.** Golden outputs normalize unstable fields (clock, IDs,
+   paths, float jitter) at write time; diffs are the review surface.
+4. **Separation of concerns.** Writes only under `artifacts/meal_audits/`.
+   Never touches `golden/meal/` unless the user explicitly promotes a bundle.
+5. **Contamination isolation.** The system under test (live-site journey replay)
+   must never read `expected.json` / `meal_result.json` during a run.
+6. **Harness disclosure.** Every bundle records `generatedBy {model, promptVersion,
+   date}`; every comparison records site SHA + model. Scores without a harness card
+   are meaningless.
+7. **Type-dependent tolerance.** See §3. Exact where exactness is possible,
+   percentage bands where estimation is inherent.
+
+## 2. The three workflows
 
 ```mermaid
 flowchart TD
-    subgraph W1["Workflow 1: Standalone Meal Audit"]
-        A1["User or Agent submits Meal Photo(s)"] --> B1["Meal-Audit Agent"]
-        B1 --> C1["Scene Segmentation & Bounding Boxes [ymin, xmin, ymax, xmax]"]
-        C1 --> D1["Dish & Ingredient Decomposition"]
-        D1 --> E1["31-Nutrient Calculation per Dish + Whole-Meal Total"]
-        E1 --> F1["Bundle into Meal-[meal name]-[number] Folder"]
-        F1 --> G1["Ground Truth Benchmark ready for Human / QA"]
+    subgraph W1["W1: Standalone audit"]
+        A1["Photos + optional chat context"] --> B1["Analyze: dishes, bbox, 32 nutrients"]
+        B1 --> C1{"Flow asks user confirmation?"}
+        C1 -- yes --> D1["Pause: ask user (names, weights)"]
+        C1 -- no --> E1["User provided values?"]
+        D1 --> F1["Apply user answers (provenance=user)"]
+        E1 -- yes --> F1
+        E1 -- no --> G1["Keep guesses (provenance=estimated)"]
+        F1 --> H1["generate-meal-result.mjs → Meal-X-NN/"]
+        G1 --> H1
     end
-
-    subgraph W2["Workflow 2: Multi-Turn Meal Flow Review"]
-        A2["Report: 'Meal is inaccurate' + Job ID / Timestamp / Meal Name"] --> B2["Meal-Audit Agent retrieves Debug File & R2 Photos"]
-        B2 --> C2["Turn 1: Initial Upload (Audit Dishes + 31 Nutrients + Boxes)"]
-        C2 --> D2["Turn 2: Edit Turn with Photo (Update Dishes + Recalculate 31 Nutrients)"]
-        D2 --> E2["Turn 3: Edit Turn with Text (Modify Weights/Dishes + Recalculate)"]
-        E2 --> F2["Generate Multi-Turn Passes Ledger & Instruction.md"]
-        F2 --> G2["Bundle into Meal-[meal name]-[number] Benchmark"]
+    subgraph W2["W2: Flow review (multi-turn)"]
+        A2["Ref: --timestamp | --name | --job-id | debug file"] --> B2["meal-audit-fetch: real turns + downloaded photos"]
+        B2 --> C2["Per-turn audit; debug user prompts = authoritative corrections"]
+        C2 --> D2["One full ledger per pass → Meal-X-NN/"]
     end
-
-    G1 --> H["QA Meal Agent compares Live Site vs Benchmark"]
-    G2 --> H
-    H --> I{"Discrepancy Found?"}
-    I -- "Yes" --> J["QA Files Atomic Bug to @Orchestrator with Benchmark Ref"]
-    J --> K["Orchestrator assigns Coder (OpenCode/Grok)"]
-    K --> L["Deploy & QA Re-tests against Benchmark until PASS"]
-    I -- "No" --> M["Verified PASS & Saved to Golden Benchmark Suite"]
+    subgraph W3["W3: Review any existing meal"]
+        A3["Same refs as W2"] --> B3["Reconstruct benchmark"]
+        B3 --> C3["Fetch site-stored values"]
+        C3 --> D3["Side-by-side comparison report (tolerance verdicts)"]
+    end
+    H1 --> QA["QA replays journey vs bundle (isolated) → compare.mjs"]
+    D2 --> QA
+    D3 --> LEDGER{"Discrepancy?"}
+    LEDGER -- no --> OK["PASS"]
+    LEDGER -- yes --> ISS["Issue ledger + V-29 ticket → Orchestrator → coder → re-audit"]
+    ISS --> QA
 ```
 
----
+- **W1 — Standalone audit.** Human/agent submits photos (+ chat context).
+  Where the product's meal flow explicitly asks the user for confirmation, the
+  audit bot **pauses and asks too**, and the user may volunteer weights/values.
+  User answers overwrite guesses and are recorded per-pass.
+- **W2 — Multi-turn flow review.** Locate by timestamp, meal name, job id, or a
+  local debug file. Fetcher reconstructs turns (initial upload → photo edit →
+  text edit) with **photos downloaded to disk**. Debug user prompts are treated
+  as authoritative corrections. Output: one full 32-nutrient ledger + dish set +
+  associated images **per turn** (1 upload + 2 edits ⇒ 3 passes).
+- **W3 — Existing-meal report.** Same inputs as W2, but the deliverable is the
+  **comparison report**: benchmark values vs site-stored values, per key, with
+  tolerance verdicts — directly usable to decide whether a meal is wrong.
 
-### Workflow 1: Standalone Meal Audit
-*Triggered when a human or agent submits raw meal photos to audit.*
+Both W1/W2 feed the QA loop: QA Meal replays the journey against the bundle
+(isolated), `meal-audit-compare.mjs` scores it, failures land in the issue ledger.
 
-1. **Ingestion**: Receives 1 or more meal photos with optional notes.
-2. **Visual Grounding**:
-   - Detects every plate, bowl, container, side, or beverage.
-   - Assigns normalized 2D bounding boxes `[ymin, xmin, ymax, xmax]` ($0..1000$ scale).
-3. **Decomposition**: Splits each dish into ingredients, cooking methods (`grilled`, `steamed`, `fried`, `raw`, `simmered`), and gram estimates.
-4. **31-Nutrient Calculation**: Resolves all 31 nutrients for each dish and whole-meal totals.
-5. **Bundling**: Packages all artifacts into `Meal-[meal name]-[number]/`.
+## 3. Tolerance matrix (comparison contract)
 
----
+| Check | Tolerance | Rule |
+|---|---|---|
+| OCR / label text | **0%** | Exact after whitespace trim |
+| Meal / dish name | **Exact** | Normalize case/punct/spacing; acronyms match only via explicit `aliases[]` — no fuzzy guessing |
+| Core nutrients (repo `CORE_NUTRIENT_KEYS`, 10 keys: calories, protein, carbohydrates, solubleFibre, saturatedFat, transFat, addedSugar, totalFibre, sodium, potassium) | **≤10%** | Per-key % error vs benchmark |
+| Remaining nutrients (the other 22 of 32) | **≤30%** | Per-key; always report actuals |
+| Total weight | **≤10%** | Core-tier |
+| Bounding box (only when photos exist) | **IoU ≥ 0.5** | `[ymin,xmin,ymax,xmax]` in 0..1000 |
+| Atwater energy balance | **≤10%** | Pre-diff invariant, always runs |
+| Turn structure | **Exact** | Wrong turn count / photo attribution ⇒ **DIVERGED** (not a nutrient FAIL) |
 
-### Workflow 2: Meal Flow Review (Reconstructing Multi-Turn Meal Logs)
-*Triggered when a user or QA agent reports a meal inaccuracy on the live site.*
+**Canonical nutrient set = 32 keys** (`src/utils/nutrients.ts NUTRIENT_KEYS`).
+Historical "31" was an off-by-one (`sugar` was added later); `salt` is a
+display-derived 33rd and is not part of the ledger.
 
-1. **Locating the Meal & Debug Payload**:
-   - The agent accesses the saved meal or in-progress meal via:
-     - **Exact Timestamp** (e.g. `Sept 22 08:21` or `2026-09-22T08:21:00Z`)
-     - **Meal Name** (e.g. `Chicken Hotpot`)
-     - **Job ID** (e.g. `job_1787301189340_b7oux316g` or `golden_...`)
-     - Or a local debug file (`debug-job_....md` / `debug.json`).
-   - Retrieves the full debug record via the internal API (`/api/jobs/debug?jobId=...`) or DB query:
-     - Downloads all original uploaded photos from R2 storage.
-     - Parses `sessionEvents` to extract user text prompts and actions for every turn.
-2. **Turn-by-Turn State Reconstruction**:
-   - **Turn 1 (Initial Intake)**:
-     - Input: Initial photo(s) + initial prompt.
-     - Computes: Initial dish segmentation, bounding boxes, and Turn 1 31-nutrient ledger.
-   - **Turn 2 (Photo Clarification / Add-on)**:
-     - Input: New photo added + user clarification (e.g. *"this is chicken and I ate less peanuts"*).
-     - Computes: Replaces or scales dishes, adds new bounding boxes, recalculates Turn 2 31-nutrient ledger.
-   - **Turn 3 (Text-only Portion / Ingredient Edit)**:
-     - Input: User text modification (e.g. *"steak was 250g, no sauce, didn't drink the beer"*).
-     - Computes: Removes deleted items, scales weights, recalculates Turn 3 31-nutrient ledger.
-3. **Multi-Turn Ground Truth Ledger**:
-   - Generates an audit document containing **all 3 sets of full 31-nutrient ledgers and dishes**, showing exact state evolution at each turn.
-4. **Bundling**: Saves into `Meal-[meal name]-[number]/` with all turn photos (`turn1_...`, `turn2_...`).
+Outcomes: `PASS` | `FAIL(code)` | `DIVERGED`. Failure taxonomy codes:
+`name_mismatch, portion_bias, core_nutrient_drift, micro_nutrient_drift,
+bbox_drift, edit_not_applied, turn_mismatch, ocr_error`.
 
----
+Every comparison output carries a harness card:
+`{bundleName, siteSha, scoutModel, toleranceTier, generatedBy, comparedAt}`.
 
-## 3. The Bundle Standard: `Meal-[meal name]-[number]`
+## 4. Provenance & confidence (per nutrient value / dish field)
 
-Every audit folder follows a standardized structure:
+Priority order — first non-empty wins:
 
-```
-Meal-[meal name]-[number]/
-├── meal_result.json        # Canonical typed ledger (with passes[] for multi-turn)
-├── meal_result.md          # Human-readable executive audit report
-├── meal_annotated.svg      # Visual bounding box overlay map
-├── Instruction.md          # Multi-turn user prompts, actions, and expectations
-├── photos/                 # Local copies of all source evidence photos
-│   ├── turn1_plate.jpg
-│   ├── turn1_side.jpg
-│   └── turn2_clarification.jpg
-└── expected.json           # Golden benchmark contract (compatible with Meal_04_log)
-```
+1. `user_confirmed` — user answered the bot's pause-for-confirmation question.
+2. `user_provided` — user volunteered the value in chat.
+3. `ocr_label` — read from an on-image label / package (W1: highest machine tier).
+4. `user_instruction` — from debug conversation (W2 edits; authoritative for edits).
+5. `nutrient_db` — looked up from brand/USDA-style DB by identified food.
+6. `vision_estimate` — model guess.
 
-### `meal_result.json` Multi-Turn Schema
+`meal_result.json` records `provenance` + `confidence: exact|estimated` per dish
+and for meal totals. FINAL status requires no `estimated` values in core
+nutrients; otherwise the bundle is marked `DRAFT` with the gaps listed.
 
-```typescript
-export interface MultiTurnMealAuditResult {
-  schemaVersion: "2.0.0";
-  bundleName: string;          // e.g. "Meal-Chicken-Hotpot-02"
-  mealId: string;
-  createdAt: string;
-  title: string;
-  mode: "single_audit" | "multi_turn_flow";
-  
-  // Array of turns / passes
-  passes: Array<{
-    turnIndex: number;
-    turnId: string;            // e.g. "turn_1_initial", "turn_2_photo_edit", "turn_3_text_scale"
-    userPrompt: string;        // User's instruction in this turn
-    addedPhotos: string[];     // Photos introduced in this turn
-    cumulativePhotos: string[];// All active photos up to this turn
-    totalWeightGrams: number;
-    dishes: DishAudit[];       // Dishes present at this turn (with bounding boxes)
-    mealTotals: Nutrients31;   // Complete 31-nutrient ledger for this turn
-    energyVerification: {
-      declaredCalories: number;
-      atwaterCalories: number;
-      differencePercent: number;
-      isBalanced: boolean;
-    };
-  }>;
+### Pause-for-confirmation protocol (W1)
 
-  // Final consolidated outcome
-  finalSummary: {
-    totalTurns: number;
-    finalWeightGrams: number;
-    finalCalories: number;
-    finalNutrients: Nutrients31;
-    clinicalObservations: string[];
-  };
-}
-```
+Trigger: the underlying meal flow asks the user to confirm a dish/weight, OR the
+estimate's confidence is low for a core nutrient. The bot sends one message
+listing uncertain items and possible weights, waits for the reply (bounded, e.g.
+5 min), records answers as `user_confirmed`, then proceeds. If the user skips,
+proceeds with `vision_estimate` + `DRAFT` flag. The pause and its outcome are
+written into `Instruction.md` and the pass's `userPrompt`.
 
----
-
-## 4. The 4-Agent Collaboration Cycle
+## 5. Bundle standard `Meal-[meal name]-[number]`
 
 ```
-[User / Human Tester]
-         │
-         ▼
-[QA Meal Agent] ──(Obvious UI/CSS/Float bug)──► [@Orchestrator]
-         │                                            │
-         │ (Food Inaccuracy / Wrong Dishes /          ▼
-         │  Multi-Turn Edit Discrepancy)       [Coding Agent]
-         ▼                                     (OpenCode/Grok)
-[Meal Audit Agent]                                    │
-   - Fetches debug payload & R2 photos                │
-   - Audits all turns (dishes, boxes, 31 nutrients)   │
-   - Emits Meal-[name]-[number] benchmark             │
-         │                                            │
-         ▼                                            ▼
-[QA Meal Agent] ◄───(Runs Journey vs Benchmark)───────┘
-   - Verifies fix against Meal-[name]-[number]
-   - Iterates until 100% PASS
+Meal-<slug>-NN/            # NN = 01, 02… collision-safe (auto-increment)
+├── meal_result.json       # canonical ledger; passes[] for multi-turn;
+│                          # provenance, confidence, generatedBy harness card
+├── meal_result.md         # human report: dishes, bbox, 32-nutrient tables,
+│                          # Atwater check, sources, W3 comparison table
+├── Instruction.md         # per-pass replay instructions + pause/confirm record
+├── expected.json          # QA contract: tolerances{}, passes, expectedItems
+├── comparison.json        # (W3/after QA) verdicts per key + taxonomy codes
+├── meal_annotated[_turnN].svg
+└── photos/                # LOCAL files (fetcher downloads; never bare URLs)
 ```
 
-### Step 1 — Triage by QA Meal Agent
-When a user submits a bug or flags an inaccurate meal:
-- **Fast Path (UI/Theme/Formatting Defect)**: If the issue is simple formatting (e.g. `7.700000000000001g` floating-point artifact or CSS color), QA Meal immediately files an atomic ticket to `@Orchestrator`.
-- **Deep Path (Food/Nutritional Inaccuracy)**: If the meal was recognized wrongly, an ingredient was hallucinated, portions are distorted, or multi-turn edits failed to update macros, QA Meal delegates to **`@Meal_Audit_bot`**:
-  `"Audit meal: Timestamp 'Sept 22 08:21', Name 'Salmon Bowl', Job ID 'job_xxx'"`
+Determinism rules for writers: fixed/derived clock, stable key order, 1-decimal
+floats, project-relative paths, no absolute host paths, no secrets/PII.
+Photos are EXIF/GPS-scrubbed before they can ever reach git.
 
-### Step 2 — Audit & Benchmark Generation
-- The **Meal Audit Agent** fetches the session events and photos.
-- Reconstructs every turn and computes the ground truth 31-nutrient ledger.
-- Generates the benchmark folder: `Meal-Salmon-Bowl-01/`.
-- Replies to QA Meal with the benchmark path and summary.
+## 6. Issue ledger (bugs outside golden)
 
-### Step 3 — Verification & Iterative Resolution
-- The **QA Meal Agent** runs the Playwright/HTTP journey test feeding the exact photos and prompts from `Instruction.md`.
-- Compares the live site output against `expected.json` / `meal_result.json`.
-- If the live site diverges:
-  - QA Meal logs an atomic defect ticket pointing to the exact discrepancy (e.g. *"Turn 2: Salmon was scaled to 200g in benchmark, but live site kept 160g"*).
-  - `@Orchestrator` assigns a coder (OpenCode/Grok) to refine the backend prompt / vision critic in `server_vision_scout.ts`.
-  - QA Meal re-tests against the benchmark folder until it passes.
+`artifacts/meal_audits/issue_ledger.jsonl` — one JSON line per finding:
 
----
+```json
+{"id":"MAI-YYYYMMDD-NNN","bundle":"Meal-X-01","turn":2,
+ "taxonomy":"core_nutrient_drift","key":"protein","expected":46.5,"actual":38.1,
+ "deltaPct":18.1,"status":"open|ticketed|fixed|verified|closed",
+ "bugId":"BUG-…","createdAt":"…","resolvedAt":null}
+```
 
-## 5. Technical Implementation Plan
+Lifecycle: `audit → compare → FAIL → ledger(open) → V-29 atomic ticket to
+@Orchestrator → coder fixes → re-audit → PASS → ledger(verified) → closed`.
+Open issues are queryable from the bot on Telegram (`/issues`). Promotion of a
+bundle into `golden/meal/` happens only on explicit user request — never as an
+automatic side effect.
 
-### Phase 1: Multi-Turn & Bundle Support in `scripts/generate-meal-result.mjs`
-- Enhance `scripts/generate-meal-result.mjs` to accept multi-turn payloads (`passes: [...]`).
-- Implement `--bundle-name="Meal-[name]-[number]"` parameter.
-- Automatically copy source photos into `photos/` within the bundle directory.
-- Generate `Instruction.md` documenting user instructions per turn.
+## 7. Model strategy
 
-### Phase 2: Debug Retrieval Tool (`scripts/meal-audit-fetch.mjs`)
-- Build a CLI helper to locate and extract meal debug files:
-  ```bash
-  node scripts/meal-audit-fetch.mjs \
-    [--job-id="job_..."] \
-    [--timestamp="2026-09-22 08:21"] \
-    [--name="salmon"] \
-    [--output-dir="artifacts/fetched_debug/"]
-  ```
-- Queries local D1/SQLite or remote `/api/jobs/debug` endpoint to download photos and session logs.
+- **Start free:** run on the free Hermes model available to the `meal_audit`
+  profile. Record model id in `generatedBy` on every bundle.
+- **Calibrate (P6):** score N audits against user-confirmed values using the
+  tolerance matrix → report accuracy per model. If core-nutrient pass rate is
+  below target, switch the profile's model and re-calibrate.
+- Model swaps are config-only; bundles already emitted keep their harness card.
 
-### Phase 3: Update `meal-audit-engine` Skill & Hermes Profile
-- Update [`scripts/skills/meal-audit-engine/SKILL.md`](file:///root/Health-tracker/scripts/skills/meal-audit-engine/SKILL.md) with:
-  - Workflow 1 (Standalone Image Audit) instructions.
-  - Workflow 2 (Multi-turn Debug Flow Review) instructions.
-  - Bounding box standards (`0..1000`) and 31-nutrient mapping rules.
+## 8. Historical claims (correcting v2)
 
-### Phase 4: Update `qa-meal-journey` Skill
-- Update [`scripts/skills/qa-meal-journey/SKILL.md`](file:///root/Health-tracker/scripts/skills/qa-meal-journey/SKILL.md) to add **Workflow C: Meal Inaccuracy Triage & Delegation**:
-  - Distinguishes UI/visual defects from nutritional/vision defects.
-  - Delegates nutritional defects to `@Meal_Audit_bot`.
-  - Re-tests against the resulting `Meal-[name]-[number]` bundle.
+v2 asserted the plan was "already been built, tested, committed … and deployed."
+Verified 2026-09-22: committed `6a04b42` **yes**; tested **no** (zero test
+coverage); built **partially** (fetcher broken: `--timestamp` ignored, wrong
+event types, no photo download, placeholder dishes on failure); deployed
+**unverified**; Hermes profile **not provisioned**. This v3 replaces those claims
+with the phase table below, each with an exit criterion.
 
-### Phase 5: End-to-End Verification
-- Test Workflow 1 on a standalone photo.
-- Test Workflow 2 using a multi-turn case from `tests/Golden_meal/10. Photo edit clarifies one dish`.
-- Verify TypeScript check (`npx tsc --noEmit`) passes cleanly.
+## 9. Phases
+
+| Phase | Work | Exit criterion |
+|---|---|---|
+| **P0** | Reconcile 31→32 everywhere; rename stray bundle; privacy rule (EXIF/PII scrub before git); document scope separation | `grep -r "31-nutrient"` clean in plan/skill/generator; no PII path in committed files |
+| **P1** | Fix fetcher: `--timestamp` queries for real; turns via `buildTurnTimeline`/`resolveTurnImages`; photos downloaded to disk; fail loud (no synthetic ids, no placeholder dishes) | Timestamp lookup returns a real jobId or exits 2 listing candidates; `photos/` non-empty; missing debug ⇒ exit 1 |
+| **P2** | Payload contract doc; provenance tiers + pause protocol in SKILL; inbound `MEDIA:` photo path; `generatedBy` model field | Contract doc exists; fixture validates; SKILL describes pause flow |
+| **P3** ✅ | Generator gates: bbox required iff photos; all 32 keys; collision-safe numbering; determinism normalization; pre-diff invariant layer | Invalid payload throws; regenerating a golden yields a review-sized diff |
+| **P4** ✅ | `scripts/meal-audit-compare.mjs`: tolerance matrix, MAE/%MAE + IoU, PASS/FAIL/DIVERGED, taxonomy, harness card | Forced-wrong payload ⇒ FAIL with correct code |
+| **P4.5** ✅ | QA replay isolation: journey runner cannot read bundle expectations | Proven by hidden-bundle run |
+| **P5** ✅ | Provision `meal_audit` Hermes profile + skill symlink + token + `plan/BOT_ROLES.md`; retention hold for audits in progress | Bot responds on Telegram with skill loaded — **partially met**: profile+skill+BOT_ROLES done in proot; token missing (user/VPS-side); retention hold = holdout pending-review rule (SKILL.md) |
+| **P5.5** ✅ | Holdout: gitignored `artifacts/meal_audits/holdout/` + bot delivers reports to Telegram (`MEDIA:`) | Holdout report openable on phone via bot — **infra met**: gitignored holdout + `MEDIA:` documented; phone delivery pending token |
+| **P6** ✅ | Suite report (coverage matrix + cross-meal bias); issue ledger + `/issues`; model calibration loop; E2E W1 + W2 | Suite report generated (`meal-audit-suite.mjs report`); model scored numerically (`calibrate` → solar-pro4:free=100); E2E green (W1+W2 self-compare PASS) |
+
+### Entry-point commands (target API)
+
+```bash
+# W1
+node scripts/generate-meal-result.mjs --input=payload.json --bundle-name="Meal-X-01"
+# W2 fetch
+node scripts/meal-audit-fetch.mjs --timestamp="2026-09-22 08:21" \
+  --name="Chicken Hotpot" --job-id="job_…" --output-dir=…
+# W3 / QA scoring
+node scripts/meal-audit-compare.mjs --bundle=artifacts/meal_audits/Meal-X-01 \
+  --actual=qa-evidence/actual.json
+```
+
+## 10. Related files
+
+- `scripts/generate-meal-result.mjs` — bundle generator (P3 gates)
+- `scripts/meal-audit-fetch.mjs` — W2/W3 fetcher (P1 fixes)
+- `scripts/meal-audit-compare.mjs` — comparison engine (P4, new)
+- `scripts/skills/meal-audit-engine/SKILL.md` — agent playbook (P2 update)
+- `scripts/skills/qa-meal-journey/SKILL.md` — QA delegation (Workflow C)
+- `scripts/fixtures/sample_multiturn_meal_audit.json` — 3-pass fixture
+- `src/utils/debugRunTree.ts` — canonical turn reconstruction (reuse, don't reinvent)
+- `src/utils/nutrients.ts` — canonical 32 keys + `CORE_NUTRIENT_KEYS`
+- `plan/BOT_ROLES.md` — profile registry (P5)

@@ -42,7 +42,7 @@ When given a meal photo or meal description:
 1. Identify every dish and food item with extreme precision.
 2. Emit bounding boxes [ymin, xmin, ymax, xmax] for every dish in the image (0-1000 normalized).
 3. Decompose each dish into exact food ingredients and weights.
-4. Map all 31 canonical nutrients for every dish and compute whole-meal totals.
+4. Map all 32 canonical nutrients for every dish and compute whole-meal totals.
 5. Run `node scripts/generate-meal-result.mjs` to produce verified audit documents.
 6. Return a clear breakdown with dish bounding boxes, clinical metrics, and document links.
 MEAL_AUDIT_EOF
@@ -251,7 +251,7 @@ if [ -d "${PROFILES_DIR}" ]; then
   # Validate dedicated profile tokens
   echo ""
   echo " Profile Telegram Bot Token Status:"
-  for prof_name in "orchestrator" "qa_meal"; do
+  for prof_name in "orchestrator" "qa_meal" "meal_audit"; do
     prof_env="${PROFILES_DIR}/${prof_name}/.env"
     if [ -f "$prof_env" ] && grep -q '^TELEGRAM_BOT_TOKEN=' "$prof_env"; then
       echo "  ✓ Profile '${prof_name}' has dedicated TELEGRAM_BOT_TOKEN"

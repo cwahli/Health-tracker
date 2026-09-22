@@ -2,28 +2,29 @@
 /**
  * scripts/meal-audit-fetch.mjs
  *
- * Meal Flow & Debug Retrieval Helper for Meal-Audit Bot.
- * Locates meal logs and debug traces by:
- *  - Job ID (--job-id="job_1787301189340_b7oux316g" or "golden_...")
- *  - Exact or partial timestamp (--timestamp="2026-09-22 08:21" or "08:21")
- *  - Meal name query (--name="hotpot" or "salmon")
+ * Meal Flow & Debug Retrieval Helper for Meal-Audit Bot (Plan v3 / P1).
+ * Locates a real job by Job ID, timestamp, or meal name — never invents IDs —
+ * pulls the server-built CanonicalRunTree (real turns via buildTurnTimeline),
+ * downloads turn photos to disk, and emits flow_skeleton.json for audit.
  *
- * Reconstructs the multi-turn session transcript, downloads/extracts associated photos,
- * and emits `flow_skeleton.json` for the Meal-Audit Bot to review and benchmark.
+ * Exit codes:
+ *   0 success
+ *   1 hard failure (server down, debug missing/expired, photo download failed)
+ *   2 ambiguous or zero candidates (lists candidates on stdout as JSON)
  *
  * Usage:
- *   node scripts/meal-audit-fetch.mjs --job-id="job_123" [--output-dir="artifacts/fetched_meal"]
- *   node scripts/meal-audit-fetch.mjs --timestamp="Sept 22 08:21"
- *   node scripts/meal-audit-fetch.mjs --name="Chicken Hotpot"
+ *   node scripts/meal-audit-fetch.mjs --job-id="job_..."
+ *   node scripts/meal-audit-fetch.mjs --timestamp="2026-09-22 08:21" [--name="hotpot"]
+ *   node scripts/meal-audit-fetch.mjs --name="Chicken Hotpot" [--uid=...]
+ *   node scripts/meal-audit-fetch.mjs --list
+ *   node scripts/meal-audit-fetch.mjs --debug-file=/path/to/debug.json --name="..."
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import http from 'node:http';
-import https from 'node:https';
-import { fileURLToPath } from 'node:url';
 
-const BASE_URL = process.env.API_BASE_URL || 'http://127.0.0.1:3000';
+const BASE_URL = (process.env.API_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+const TS_WINDOW_MS = 3 * 60 * 1000;
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -31,217 +32,438 @@ function parseArgs() {
     jobId: null,
     timestamp: null,
     name: null,
+    uid: null,
     outputDir: null,
+    debugFile: null,
+    list: false,
+    help: false,
   };
-
   for (const arg of args) {
-    if (arg.startsWith('--job-id=')) {
-      options.jobId = arg.slice('--job-id='.length).trim();
-    } else if (arg.startsWith('--timestamp=')) {
-      options.timestamp = arg.slice('--timestamp='.length).trim();
-    } else if (arg.startsWith('--name=')) {
-      options.name = arg.slice('--name='.length).trim();
-    } else if (arg.startsWith('--output-dir=')) {
-      options.outputDir = arg.slice('--output-dir='.length).trim();
-    }
+    if (arg === '--list') options.list = true;
+    else if (arg === '--help' || arg === '-h') options.help = true;
+    else if (arg.startsWith('--job-id=')) options.jobId = arg.slice('--job-id='.length).trim();
+    else if (arg.startsWith('--timestamp=')) options.timestamp = arg.slice('--timestamp='.length).trim();
+    else if (arg.startsWith('--name=')) options.name = arg.slice('--name='.length).trim();
+    else if (arg.startsWith('--uid=')) options.uid = arg.slice('--uid='.length).trim();
+    else if (arg.startsWith('--output-dir=')) options.outputDir = arg.slice('--output-dir='.length).trim();
+    else if (arg.startsWith('--debug-file=')) options.debugFile = arg.slice('--debug-file='.length).trim();
   }
-
   return options;
 }
 
-async function fetchJson(url) {
-  return new Promise((resolve, reject) => {
-    const isHttps = url.startsWith('https:');
-    const client = isHttps ? https : http;
+function usage() {
+  console.log(`
+Meal Audit Fetcher — locate a real meal job and rebuild its multi-turn flow.
 
-    client.get(url, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
-        try {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve(JSON.parse(data));
-          } else {
-            resolve({ error: `HTTP ${res.statusCode}`, raw: data });
-          }
-        } catch (e) {
-          resolve({ error: e.message, raw: data });
-        }
-      });
-    }).on('error', reject);
-  });
+Usage:
+  node scripts/meal-audit-fetch.mjs --job-id="job_1787301189340_xxx" [--output-dir=...]
+  node scripts/meal-audit-fetch.mjs --timestamp="2026-09-22 08:21" [--name="hotpot"]
+  node scripts/meal-audit-fetch.mjs --name="Chicken Hotpot" [--uid=<firebaseUid>]
+  node scripts/meal-audit-fetch.mjs --debug-file=/path/debug.json [--name="..."]
+  node scripts/meal-audit-fetch.mjs --list
+
+Notes:
+  - Never invents job IDs. Zero/ambiguous matches exit 2 with a candidate list.
+  - Photos are downloaded into <output-dir>/photos/ (local paths in the skeleton).
+  - The skeleton carries empty dishes[] — the audit agent fills them after review.
+`);
 }
 
-async function searchMealLogs(query, timestamp = null) {
-  const searchUrl = `${BASE_URL}/api/food/search?q=${encodeURIComponent(query || '')}`;
+async function fetchJson(url, { allow404 = false } = {}) {
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (res.status === 404 && allow404) return { __status: 404 };
+  const text = await res.text();
+  let body;
   try {
-    const res = await fetchJson(searchUrl);
-    if (res && Array.isArray(res.results)) {
-      return res.results;
-    }
-  } catch (err) {
-    console.warn('[Fetch] Local search endpoint failed, checking fallback:', err.message);
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = { raw: text };
   }
-  return [];
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status} for ${url}: ${text.slice(0, 300)}`);
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+  return body;
 }
 
-async function fetchJobDebug(jobId) {
-  const debugUrl = `${BASE_URL}/api/jobs/debug?jobId=${encodeURIComponent(jobId)}`;
-  try {
-    const res = await fetchJson(debugUrl);
-    if (res && !res.error) {
-      return res;
-    }
-  } catch (err) {
-    console.warn(`[Fetch] Failed to fetch debug payload for ${jobId}:`, err.message);
+/** Parse user timestamp into a window. Returns null if unparseable. */
+function parseTimestampWindow(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  let d = null;
+  let hasTime = false;
+
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})[T\s]+(\d{2}:\d{2})(?::(\d{2}))?/);
+  const monDay = s.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:,|\s)+(\d{4})?\s*(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+  const timeOnly = s.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+
+  if (iso) {
+    d = new Date(`${iso[1]}T${iso[2]}:${iso[3] || '00'}`);
+    hasTime = true;
+  } else if (monDay) {
+    const monthMap = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
+    const mKey = monDay[1].toLowerCase().slice(0, 3);
+    const year = monDay[3] ? Number(monDay[3]) : new Date().getFullYear();
+    let hour = Number(monDay[4]);
+    const min = Number(monDay[5]);
+    const ampm = (monDay[6] || '').toLowerCase();
+    if (ampm === 'pm' && hour < 12) hour += 12;
+    if (ampm === 'am' && hour === 12) hour = 0;
+    d = new Date(year, monthMap[mKey] ?? 0, Number(monDay[2]), hour, min, 0, 0);
+    hasTime = true;
+  } else if (timeOnly) {
+    const now = new Date();
+    let hour = Number(timeOnly[1]);
+    const min = Number(timeOnly[2]);
+    const ampm = (timeOnly[3] || '').toLowerCase();
+    if (ampm === 'pm' && hour < 12) hour += 12;
+    if (ampm === 'am' && hour === 12) hour = 0;
+    d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, min, 0, 0);
+    hasTime = true;
+  } else {
+    const parsed = new Date(s);
+    if (!Number.isNaN(parsed.getTime())) d = parsed;
   }
+
+  if (!d || Number.isNaN(d.getTime())) return null;
+  const ms = d.getTime();
+  return { startMs: ms - TS_WINDOW_MS, endMs: ms + TS_WINDOW_MS, dateMs: ms, hasTime };
+}
+
+/** Job IDs embed epoch ms: job_<ms>_<rand>. Extract if present. */
+function jobIdEpochMs(jobId) {
+  const m = String(jobId || '').match(/(?:^|_)(\d{13})(?:_|$)/);
+  return m ? Number(m[1]) : null;
+}
+
+function jobCreatedMs(job) {
+  const fromId = jobIdEpochMs(job.id);
+  const created = job.created_at ? Date.parse(job.created_at) : NaN;
+  const updated = job.updated_at ? Date.parse(job.updated_at) : NaN;
+  if (!Number.isNaN(created)) return created;
+  if (fromId) return fromId;
+  if (!Number.isNaN(updated)) return updated;
   return null;
 }
 
-function parseTurnsFromEvents(events = [], rawResult = null) {
-  const turns = [];
+function summarizeJob(job) {
+  const cr = job.clean_result || {};
+  const names = new Set();
+  const dishes = cr.dishes || cr.scoutItems || (cr.pendingFoodLog && cr.pendingFoodLog.dishes) || [];
+  for (const d of Array.isArray(dishes) ? dishes : []) {
+    if (d && (d.dishName || d.name)) names.add(d.dishName || d.name);
+  }
+  if (typeof cr.message === 'string' && cr.message.length < 120) names.add(cr.message);
+  return {
+    jobId: job.id,
+    status: job.status,
+    kind: job.kind,
+    createdAt: job.created_at || null,
+    updatedAt: job.updated_at || null,
+    createdMs: jobCreatedMs(job),
+    userId: job.user_id || null,
+    photoUrl: job.photo_url || null,
+    debugUrl: job.debug_url || null,
+    names: [...names].slice(0, 5),
+  };
+}
 
-  if (!Array.isArray(events) || events.length === 0) {
-    // Single turn fallback from rawResult
-    return [{
-      turnIndex: 1,
-      turnId: 'turn_1_initial',
-      userPrompt: '',
-      addedPhotos: [],
-      recordedDishes: rawResult?.dishes || rawResult?.items || [],
-      recordedTotals: rawResult?.mealTotals || rawResult?.nutrients || {},
-    }];
+async function listJobs({ full = true } = {}) {
+  const qs = full ? 'full=true' : '';
+  try {
+    const body = await fetchJson(`${BASE_URL}/api/jobs/status?${qs}`);
+    return Array.isArray(body && body.jobs) ? body.jobs : [];
+  } catch (err) {
+    console.error(`[Fetch] Cannot list jobs from ${BASE_URL}: ${err.message}`);
+    console.error(`[Fetch] Is the server running? (API_BASE_URL=${BASE_URL})`);
+    process.exit(1);
+  }
+}
+
+function filterCandidates(jobs, { timestampWindow, name }) {
+  let out = jobs;
+  if (timestampWindow) {
+    out = out.filter((j) => {
+      const ms = jobCreatedMs(j);
+      if (ms == null) return false;
+      if (timestampWindow.hasTime) return ms >= timestampWindow.startMs && ms <= timestampWindow.endMs;
+      const d = new Date(ms);
+      const dd = new Date(timestampWindow.dateMs);
+      return d.getFullYear() === dd.getFullYear() && d.getMonth() === dd.getMonth() && d.getDate() === dd.getDate();
+    });
+  }
+  if (name) {
+    const q = name.toLowerCase();
+    out = out.filter((j) => {
+      const hay = JSON.stringify({
+        id: j.id,
+        clean_result: j.clean_result,
+        status_message: j.status_message,
+        photo_url: j.photo_url,
+      }).toLowerCase();
+      return hay.includes(q);
+    });
+  }
+  return out;
+}
+
+function emitCandidatesAndExit(candidates, reason) {
+  const list = candidates.map(summarizeJob);
+  console.error(`[Fetch] ${reason}`);
+  console.error(`[Fetch] ${list.length} candidate(s). Re-run with --job-id=<id>.`);
+  process.stdout.write(`${JSON.stringify({ reason, candidates: list }, null, 2)}\n`);
+  process.exit(2);
+}
+
+async function resolveJobId(options) {
+  if (options.jobId) return options.jobId;
+
+  const timestampWindow = parseTimestampWindow(options.timestamp);
+  if (options.timestamp && !timestampWindow) {
+    console.error(`[Fetch] Could not parse --timestamp="${options.timestamp}".`);
+    console.error('[Fetch] Accepted: "2026-09-22 08:21", "Sept 22 08:21", "08:21", ISO-8601.');
+    process.exit(2);
+  }
+  if (!timestampWindow && !options.name) {
+    usage();
+    process.exit(1);
   }
 
-  let currentTurn = {
-    turnIndex: 1,
-    turnId: 'turn_1_initial',
-    userPrompt: '',
-    addedPhotos: [],
-    recordedDishes: [],
-    recordedTotals: {},
-  };
+  const jobs = await listJobs({ full: true });
+  const matches = filterCandidates(jobs, { timestampWindow, name: options.name });
 
-  events.forEach((ev) => {
-    if (ev.type === 'user_message' || ev.event === 'user_input' || ev.type === 'edit_request') {
-      if (currentTurn.userPrompt || currentTurn.addedPhotos.length > 0) {
-        turns.push(currentTurn);
-        currentTurn = {
-          turnIndex: turns.length + 1,
-          turnId: `turn_${turns.length + 1}_edit`,
-          userPrompt: ev.text || ev.prompt || '',
-          addedPhotos: ev.photos || ev.imageUrls || [],
-          recordedDishes: [],
-          recordedTotals: {},
-        };
-      } else {
-        currentTurn.userPrompt = ev.text || ev.prompt || '';
-        if (Array.isArray(ev.photos)) currentTurn.addedPhotos.push(...ev.photos);
-      }
-    } else if (ev.type === 'meal_result' || ev.event === 'vision_scout' || ev.type === 'dietitian_complete') {
-      if (ev.result?.dishes) currentTurn.recordedDishes = ev.result.dishes;
-      if (ev.result?.mealTotals) currentTurn.recordedTotals = ev.result.mealTotals;
-    }
-  });
+  if (matches.length === 1) {
+    const s = summarizeJob(matches[0]);
+    console.error(`  ✓ Matched job ${s.jobId} (created=${s.createdAt || s.createdMs})`);
+    return s.jobId;
+  }
+  if (matches.length === 0) {
+    emitCandidatesAndExit([], `No job matched timestamp=${options.timestamp || '-'} name=${options.name || '-'} on ${BASE_URL}.`);
+  }
+  const windowNote = timestampWindow && !timestampWindow.hasTime
+    ? 'date-only match'
+    : `window=+/-${TS_WINDOW_MS / 60000}min`;
+  emitCandidatesAndExit(matches, `Ambiguous match: ${matches.length} jobs for timestamp=${options.timestamp || '-'} name=${options.name || '-'} (${windowNote}).`);
+}
 
-  turns.push(currentTurn);
-  return turns;
+async function fetchRunTree(jobId) {
+  const url = `${BASE_URL}/api/jobs/debug?jobId=${encodeURIComponent(jobId)}`;
+  console.error(`Fetching CanonicalRunTree: ${url}`);
+  let body;
+  try {
+    body = await fetchJson(url, { allow404: true });
+  } catch (err) {
+    console.error(`[Fetch] Debug fetch failed for ${jobId}: ${err.message}`);
+    process.exit(1);
+  }
+  if (body && body.__status === 404) {
+    console.error(`[Fetch] Debug payload not found for ${jobId}.`);
+    console.error('[Fetch] Retention window may have expired.');
+    process.exit(1);
+  }
+  if (!body || body.error) {
+    console.error(`[Fetch] Debug payload error for ${jobId}: ${JSON.stringify(body).slice(0, 400)}`);
+    process.exit(1);
+  }
+  if (!Array.isArray(body.turns)) {
+    console.error(`[Fetch] Response for ${jobId} has no turns[] — not a CanonicalRunTree.`);
+    process.exit(1);
+  }
+  return body;
+}
+
+function loadDebugFile(file) {
+  const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  if (!Array.isArray(raw.turns)) {
+    console.error(`[Fetch] ${file} has no turns[] — not a CanonicalRunTree export.`);
+    process.exit(1);
+  }
+  return raw;
+}
+
+/**
+ * Rewrite R2 public URLs to the site's /photos/ proxy.
+ * The raw *.r2.dev host often has an expired/mismatched cert; the Caddy-served
+ * /photos/<key> endpoint serves the same bytes and trusts our CA chain.
+ */
+function resolvePhotoUrl(url) {
+  if (typeof url === 'string' && /https?:\/\/[^/]*\.r2\.dev\/photos\//i.test(url)) {
+    const idx = url.indexOf('/photos/');
+    return `${BASE_URL}${url.slice(idx)}`;
+  }
+  if (url.startsWith('/')) return `${BASE_URL}${url}`;
+  if (!/^https?:\/\//i.test(url)) return `${BASE_URL}/${url}`;
+  return url;
+}
+
+async function downloadPhoto(url, photosDir) {
+  const abs = resolvePhotoUrl(url);
+
+  let nameFromUrl;
+  try {
+    const u = new URL(abs);
+    const base = path.basename(u.pathname) || 'photo.jpg';
+    nameFromUrl = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+  } catch {
+    nameFromUrl = `photo_${Buffer.from(url).toString('hex').slice(0, 16)}.jpg`;
+  }
+  const dest = path.join(photosDir, nameFromUrl);
+  if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+    return { url, localPath: dest, bytes: fs.statSync(dest).size };
+  }
+
+  const res = await fetch(abs);
+  if (!res.ok) throw new Error(`photo HTTP ${res.status}: ${abs}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length === 0) throw new Error(`photo empty: ${abs}`);
+  fs.writeFileSync(dest, buf);
+  return { url, resolvedUrl: abs, localPath: dest, bytes: buf.length };
 }
 
 async function main() {
   const options = parseArgs();
+  if (options.help) {
+    usage();
+    process.exit(0);
+  }
 
-  if (!options.jobId && !options.timestamp && !options.name) {
-    console.log(`
-Meal Audit Fetcher — Locates meal records and session event traces.
+  if (options.list) {
+    const jobs = await listJobs({ full: true });
+    process.stdout.write(`${JSON.stringify(jobs.map(summarizeJob), null, 2)}\n`);
+    process.exit(0);
+  }
 
-Usage:
-  node scripts/meal-audit-fetch.mjs --job-id="job_..." [--output-dir="artifacts/meal_flow"]
-  node scripts/meal-audit-fetch.mjs --timestamp="2026-09-22 08:21"
-  node scripts/meal-audit-fetch.mjs --name="Chicken Hotpot"
-`);
+  console.error('Locating meal job...');
+  let runTree;
+  let targetJobId;
+
+  if (options.debugFile) {
+    targetJobId = options.jobId || path.basename(options.debugFile, '.json');
+    console.error(`  Using local debug file ${options.debugFile}`);
+    runTree = loadDebugFile(options.debugFile);
+    targetJobId = runTree.jobId || targetJobId;
+  } else {
+    targetJobId = await resolveJobId(options);
+    runTree = await fetchRunTree(targetJobId);
+  }
+
+  const turns = runTree.turns || [];
+  if (turns.length === 0) {
+    console.error(`[Fetch] Job ${targetJobId} reconstructed 0 turns — aborting (no placeholder skeleton).`);
     process.exit(1);
   }
 
-  console.log('🔍 Locating meal record...');
-  let targetJobId = options.jobId;
-  let mealTitle = options.name || 'Audited Meal';
-  let mealTimestamp = options.timestamp || new Date().toISOString();
+  let mealTitle = options.name
+    || (runTree.pendingFoodLog && (runTree.pendingFoodLog.title || runTree.pendingFoodLog.name))
+    || null;
+  if (!mealTitle) {
+    for (const t of turns) {
+      const ds = t.dispatches && t.dispatches[0] && t.dispatches[0].output && t.dispatches[0].output.dishes;
+      if (Array.isArray(ds) && ds[0] && ds[0].dishName) {
+        mealTitle = ds[0].dishName;
+        break;
+      }
+    }
+  }
+  if (!mealTitle) mealTitle = 'Audited Meal';
 
-  // If no direct jobId, search by name or timestamp
-  if (!targetJobId && (options.name || options.timestamp)) {
-    const q = options.name || '';
-    const results = await searchMealLogs(q, options.timestamp);
-    if (results.length > 0) {
-      const match = results[0];
-      targetJobId = match.food_id || match.id || match.source_meal_id;
-      mealTitle = match.dish_name || match.name || mealTitle;
-      console.log(`  ✓ Found matching meal: "${mealTitle}" (ID: ${targetJobId})`);
-    } else {
-      console.log(`  ⚠️ No exact match found via search for query "${q}". Using synthetic identifier.`);
-      targetJobId = `job_${Date.now()}`;
+  const bundleSlug = mealTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'meal';
+  const outDir = options.outputDir || path.join(process.cwd(), 'artifacts', 'meal_audits', `Meal-${bundleSlug}-flow`);
+  const photosDir = path.join(outDir, 'photos');
+  fs.mkdirSync(photosDir, { recursive: true });
+
+  fs.writeFileSync(path.join(outDir, 'run_tree.json'), JSON.stringify(runTree, null, 2), 'utf-8');
+
+  const seenUrls = new Set();
+  const photoUrls = [];
+  for (const t of turns) {
+    const urls = [
+      ...(Array.isArray(t.images) ? t.images : []),
+      ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
+    ];
+    for (const u of urls) {
+      if (typeof u === 'string' && u && !u.startsWith('data:') && !seenUrls.has(u)) {
+        seenUrls.add(u);
+        photoUrls.push(u);
+      }
     }
   }
 
-  // Fetch debug payload
-  console.log(`📥 Fetching session debug trace for: ${targetJobId}...`);
-  const debugPayload = await fetchJobDebug(targetJobId);
+  const downloaded = [];
+  const failed = [];
+  for (const url of photoUrls) {
+    try {
+      downloaded.push(await downloadPhoto(url, photosDir));
+    } catch (err) {
+      failed.push({ url, error: err.message });
+    }
+  }
+  if (failed.length > 0) {
+    console.error(`[Fetch] ${failed.length} photo download(s) failed — aborting (fail-loud):`);
+    for (const f of failed) console.error(`  - ${f.url}: ${f.error}`);
+    process.exit(1);
+  }
+  const localByRemote = new Map(downloaded.map((d) => [d.url, path.relative(outDir, d.localPath)]));
 
-  const sessionEvents = debugPayload?.sessionEvents || debugPayload?.chatTranscript || [];
-  const rawResult = debugPayload?.result || {};
-  const photos = debugPayload?.photos || rawResult?.photos || [];
-
-  const reconstructedTurns = parseTurnsFromEvents(sessionEvents, rawResult);
-
-  // Target output directory
-  const bundleSlug = mealTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'meal';
-  const outDir = options.outputDir || path.join(process.cwd(), 'artifacts', 'meal_audits', `Meal-${bundleSlug}-flow`);
-  fs.mkdirSync(outDir, { recursive: true });
+  const passes = turns.map((t, idx) => {
+    const remote = [
+      ...(Array.isArray(t.images) ? t.images : []),
+      ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
+    ];
+    const addedPhotos = [...new Set(remote.map((u) => localByRemote.get(u)).filter(Boolean))];
+    const turnNo = typeof t.turn === 'number' ? t.turn : idx + 1;
+    return {
+      turnIndex: turnNo,
+      turnId: idx === 0 ? 'turn_1_initial' : `turn_${turnNo}_edit`,
+      userPrompt: t.prompt || '',
+      addedPhotos,
+      imageCount: typeof t.imageCount === 'number' ? t.imageCount : addedPhotos.length,
+      agentAnswer: typeof t.answer === 'string' ? t.answer : undefined,
+      dishes: [],
+      _needsAudit: true,
+    };
+  });
 
   const skeleton = {
-    schemaVersion: '2.0.0',
+    schemaVersion: '2.1.0',
     mealId: targetJobId,
     bundleName: `Meal-${bundleSlug}-01`,
-    timestamp: mealTimestamp,
+    timestamp: runTree.exportedAt || new Date().toISOString(),
     title: mealTitle,
-    mode: reconstructedTurns.length > 1 ? 'multi_turn_flow' : 'single_audit',
+    mode: passes.length > 1 ? 'multi_turn_flow' : 'single_audit',
     retrievedFrom: {
       jobId: targetJobId,
-      debugUrl: debugPayload?.debugUrl || null,
-      sourcePhotos: photos,
+      apiBase: BASE_URL,
+      debugUrl: runTree.debugUrl || null,
+      fetchedAt: new Date().toISOString(),
+      photoCount: downloaded.length,
+      sourcePhotos: downloaded.map((d) => ({
+        remote: d.url,
+        via: d.resolvedUrl !== d.url ? d.resolvedUrl : undefined,
+        local: path.relative(outDir, d.localPath),
+        bytes: d.bytes,
+      })),
     },
-    passes: reconstructedTurns.map((t, idx) => ({
-      turnIndex: t.turnIndex || idx + 1,
-      turnId: t.turnId || `turn_${idx + 1}`,
-      userPrompt: t.userPrompt || '',
-      addedPhotos: t.addedPhotos || [],
-      dishes: t.recordedDishes.length > 0 ? t.recordedDishes : [
-        {
-          dishIndex: 1,
-          dishName: mealTitle,
-          genericEnglishName: mealTitle,
-          boundingBox2D: [100, 100, 900, 900],
-          estimatedWeightGrams: 300,
-          cookingMethod: 'standard',
-          foods: [],
-          dishNutrients: {},
-        }
-      ],
-    })),
+    passes,
+    notes: [
+      'dishes[] intentionally empty — audit agent must fill after reviewing photos (no placeholder ground truth).',
+      'Turn structure comes from the server CanonicalRunTree (buildTurnTimeline); do not re-parse invented event types.',
+    ],
   };
 
   const skeletonPath = path.join(outDir, 'flow_skeleton.json');
   fs.writeFileSync(skeletonPath, JSON.stringify(skeleton, null, 2), 'utf-8');
 
-  console.log(`\n✅ Meal Flow Successfully Retrieved!`);
-  console.log(`📁 Skeleton written to: ${skeletonPath}`);
-  console.log(`📊 Reconstructed ${reconstructedTurns.length} turn(s).`);
-  console.log(`\nNext step for Meal-Audit Agent:`);
-  console.log(`  Review and verify the dishes/nutrients in flow_skeleton.json, then run:`);
-  console.log(`  generate-meal-result.mjs --input="${skeletonPath}" --output-dir="${outDir}"\n`);
+  console.error(`\nMeal flow retrieved for ${targetJobId}`);
+  console.error(`Skeleton: ${skeletonPath}`);
+  console.error(`Turns: ${passes.length} | Photos downloaded: ${downloaded.length}`);
+  console.error('\nNext: audit photos and fill dishes[] per pass, then run:');
+  console.error(`  node scripts/generate-meal-result.mjs --input="${skeletonPath}" --bundle-name="Meal-${bundleSlug}-01"`);
 }
 
-main().catch(err => {
-  console.error('[MealAuditFetch] Fatal error:', err);
+main().catch((err) => {
+  console.error('[MealAuditFetch] Fatal:', err);
   process.exit(1);
 });

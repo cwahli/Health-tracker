@@ -8,7 +8,7 @@
  *  2. Multi-Turn Meal Flow Reviews (initial upload -> photo edits -> text edits)
  *
  * Output Bundle: Meal-[meal name]-[number]/
- *  ├── meal_result.json        (Canonical typed 31-nutrient ledger with multi-turn passes)
+ *  ├── meal_result.json        (Canonical typed 32-nutrient ledger with multi-turn passes)
  *  ├── meal_result.md          (Executive audit report with turn evolution and nutrient tables)
  *  ├── Instruction.md          (Multi-turn replay instructions for QA runners)
  *  ├── expected.json           (Golden benchmark contract compatible with Meal_04_log)
@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ============================================================================
-// 1. CANONICAL 31 NUTRIENT DEFINITIONS & UNITS
+// 1. CANONICAL 32 NUTRIENT DEFINITIONS & UNITS
 // ============================================================================
 
 export const NUTRIENT_METADATA = {
@@ -98,6 +98,7 @@ function parseArgs() {
     bundleName: null,
     stdin: false,
     annotateImage: true,
+    model: process.env.MEAL_AUDIT_MODEL || null,
   };
 
   for (const arg of args) {
@@ -107,6 +108,8 @@ function parseArgs() {
       options.outputDir = arg.slice('--output-dir='.length).trim();
     } else if (arg.startsWith('--bundle-name=')) {
       options.bundleName = arg.slice('--bundle-name='.length).trim();
+    } else if (arg.startsWith('--model=')) {
+      options.model = arg.slice('--model='.length).trim();
     } else if (arg === '--stdin') {
       options.stdin = true;
     } else if (arg === '--no-annotate-image') {
@@ -117,7 +120,7 @@ function parseArgs() {
   return options;
 }
 
-function normalizeDishesArray(dishesRaw) {
+function normalizeDishesArray(dishesRaw, passHasPhotos, turnLabel = '') {
   if (!Array.isArray(dishesRaw)) return [];
 
   return dishesRaw.map((d, idx) => {
@@ -128,9 +131,16 @@ function normalizeDishesArray(dishesRaw) {
     const cookingMethod = d.cookingMethod || 'standard';
     const sourceImageIndex = typeof d.sourceImageIndex === 'number' ? d.sourceImageIndex : 0;
 
-    let box = [0, 0, 1000, 1000];
+    let box = null;
     if (Array.isArray(d.boundingBox2D) && d.boundingBox2D.length === 4) {
-      box = d.boundingBox2D.map(n => Math.max(0, Math.min(1000, Math.round(Number(n) || 0))));
+      if (d.boundingBox2D.some(n => n === null || n === undefined || n === '' || !Number.isFinite(Number(n)))) {
+        throw new Error(`Invalid payload: ${turnLabel} dish "${dishName}" has non-numeric boundingBox2D — expected [ymin,xmin,ymax,xmax].`);
+      }
+      box = d.boundingBox2D.map(n => Math.max(0, Math.min(1000, Math.round(Number(n)))));
+    } else if (passHasPhotos) {
+      throw new Error(
+        `Invalid payload: ${turnLabel} has photos but dish "${dishName}" is missing boundingBox2D — bbox required iff photos exist.`
+      );
     }
 
     const foods = Array.isArray(d.foods) ? d.foods.map(f => {
@@ -147,9 +157,19 @@ function normalizeDishesArray(dishesRaw) {
 
     const rawNuts = d.dishNutrients || d.nutrients || {};
     const dishNutrients = {};
+    const invalidNuts = [];
     for (const key of NUTRIENT_KEYS) {
       const v = rawNuts[key];
-      dishNutrients[key] = (v !== undefined && v !== null && !isNaN(Number(v))) ? round(v, key === 'omega3' || key === 'vitaminB12' ? 2 : 1) : 0;
+      if (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0) {
+        invalidNuts.push(key);
+        continue;
+      }
+      dishNutrients[key] = round(v, key === 'omega3' || key === 'vitaminB12' ? 2 : 1);
+    }
+    if (invalidNuts.length > 0) {
+      throw new Error(
+        `Invalid payload: ${turnLabel} dish "${dishName}" missing or invalid nutrient key(s): ${invalidNuts.join(', ')} — all 32 NUTRIENT_KEYS required (finite, non-negative).`
+      );
     }
 
     return {
@@ -193,6 +213,16 @@ function calculatePassNutrients(dishes) {
     formula: `4 * ${mealTotals.protein}g(P) + 4 * ${mealTotals.carbohydrates}g(C) + 9 * ${mealTotals.totalFat}g(F) = ${atwaterKcal} kcal`
   };
 
+  if (declaredKcal > 0 || atwaterKcal > 0) {
+    const gatePercent = declaredKcal > 0 ? diffPercent : 100;
+    if (gatePercent > 10.0) {
+      throw new Error(
+        `Invalid payload: Atwater energy balance ${declaredKcal > 0 ? diffPercent + '%' : 'undefined (declared 0 kcal)'} exceeds 10% tolerance ` +
+        `(declared ${declaredKcal} kcal vs macronutrient sum ${atwaterKcal} kcal). Formula: ${energyVerification.formula}`
+      );
+    }
+  }
+
   const metrics = {
     potassiumSodiumRatio: mealTotals.sodium > 0 ? round(mealTotals.potassium / mealTotals.sodium, 2) : 0,
     addedSugarKcalPercent: declaredKcal > 0 ? round(((mealTotals.addedSugar * 4) / declaredKcal) * 100, 1) : 0,
@@ -225,8 +255,9 @@ export function validateAndNormalizePayload(raw, explicitBundleName = null) {
       const userPrompt = String(p.userPrompt || p.prompt || '');
       const addedPhotos = Array.isArray(p.addedPhotos) ? p.addedPhotos : (Array.isArray(p.photos) ? p.photos : []);
       cumulativePhotos = Array.from(new Set([...cumulativePhotos, ...addedPhotos]));
+      const passHasPhotos = cumulativePhotos.length > 0 || addedPhotos.length > 0;
 
-      const dishes = normalizeDishesArray(p.dishes || []);
+      const dishes = normalizeDishesArray(p.dishes || [], passHasPhotos, turnId);
       const { totalWeightGrams, mealTotals, energyVerification, metrics } = calculatePassNutrients(dishes);
 
       return {
@@ -246,7 +277,8 @@ export function validateAndNormalizePayload(raw, explicitBundleName = null) {
   } else {
     // Single-turn mode
     const photos = Array.isArray(raw.photos) ? raw.photos : (raw.photo ? [raw.photo] : []);
-    const dishes = normalizeDishesArray(raw.dishes || []);
+    const passHasPhotos = photos.length > 0;
+    const dishes = normalizeDishesArray(raw.dishes || [], passHasPhotos, 'single-turn');
     if (dishes.length === 0) {
       throw new Error('Invalid payload: "dishes" array is required and must contain at least one dish.');
     }
@@ -270,8 +302,46 @@ export function validateAndNormalizePayload(raw, explicitBundleName = null) {
   // Final Pass is the current ground truth state
   const lastPass = normalizedPasses[normalizedPasses.length - 1];
 
+  if (lastPass.dishes.length === 0) {
+    throw new Error(
+      'Invalid payload: final pass has zero dishes — fill dishes[] after audit (no placeholder ground truth).'
+    );
+  }
+  const emptyPasses = normalizedPasses.filter(p => p.dishes.length === 0).map(p => p.turnId);
+  if (emptyPasses.length > 0) {
+    throw new Error(
+      'Invalid payload: pass(es) with zero dishes: ' + emptyPasses.join(', ') + ' — fill dishes[] after audit.'
+    );
+  }
+
+  const coreEstimated = [];
+  for (const p of normalizedPasses) {
+    for (const d of p.dishes) {
+      const prov = (d.provenance && typeof d.provenance === 'object') ? d.provenance : {};
+      const conf = d.confidence || prov.confidence || null;
+      if (conf === 'estimated') {
+        coreEstimated.push(p.turnId + ':' + d.dishName);
+      }
+    }
+  }
+
+  let derivedDate = new Date().toISOString().slice(0, 10);
+  const tsForDate = raw.timestamp || raw.generatedBy && raw.generatedBy.date;
+  if (raw.generatedBy && raw.generatedBy.date) {
+    derivedDate = raw.generatedBy.date;
+  } else if (raw.timestamp && !isNaN(Date.parse(raw.timestamp))) {
+    derivedDate = new Date(raw.timestamp).toISOString().slice(0, 10);
+  } else if (tsForDate) {
+    derivedDate = String(tsForDate).slice(0, 10);
+  }
+  const generatedBy = {
+    model: (raw.generatedBy && raw.generatedBy.model) || null,
+    promptVersion: (raw.generatedBy && raw.generatedBy.promptVersion) || 'meal-audit-engine/2.1.0',
+    date: derivedDate,
+  };
+
   return {
-    schemaVersion: '2.0.0',
+    schemaVersion: '2.1.0',
     bundleName,
     mealId,
     timestamp,
@@ -282,6 +352,9 @@ export function validateAndNormalizePayload(raw, explicitBundleName = null) {
     finalTotals: lastPass.mealTotals,
     passes: normalizedPasses,
     clinicalObservations: lastPass.observations,
+    generatedBy,
+    status: coreEstimated.length > 0 ? 'DRAFT' : 'FINAL',
+    draftGaps: coreEstimated,
   };
 }
 
@@ -340,7 +413,7 @@ export function buildMealResultMarkdown(audit) {
     lines.push('| # | Dish Name | Generic / English Name | Weight | Cooking Method | Bounding Box [ymin, xmin, ymax, xmax] |');
     lines.push('|---|---|---|---|---|---|');
     pass.dishes.forEach(d => {
-      const boxStr = `\`[${d.boundingBox2D.join(', ')}]\``;
+      const boxStr = Array.isArray(d.boundingBox2D) ? `\`[${d.boundingBox2D.join(', ')}]\`` : '—';
       lines.push(`| **${d.dishIndex}** | **${d.dishName}** | ${d.genericEnglishName} | ${d.estimatedWeightGrams} g | ${d.cookingMethod} | ${boxStr} |`);
     });
     lines.push('');
@@ -361,8 +434,8 @@ export function buildMealResultMarkdown(audit) {
     });
     lines.push('');
 
-    // 31-Nutrient Table
-    lines.push(`### ${turnPrefix}31-Nutrient Audit Ledger`);
+    // 32-Nutrient Table
+    lines.push(`### ${turnPrefix}32-Nutrient Audit Ledger`);
     const headerCols = ['Nutrient', 'Unit'];
     pass.dishes.forEach(d => headerCols.push(`D${d.dishIndex}: ${d.dishName.slice(0, 14)}`));
     headerCols.push('Whole-Meal Total', 'Daily Ref %');
@@ -424,7 +497,9 @@ export function buildMealResultMarkdown(audit) {
   }
 
   lines.push('---');
-  lines.push(`*Generated by Health-tracker Meal Audit Engine v2.0.0 — Canonical 31-Nutrient Benchmark.*`);
+  const gb = audit.generatedBy || {};
+  lines.push(`*Generated by Health-tracker Meal Audit Engine v2.1.0 — Canonical 32-Nutrient Benchmark.*`);
+  lines.push(`*Harness: model=${gb.model || 'unknown'} · promptVersion=${gb.promptVersion || 'meal-audit-engine/2.1.0'} · date=${gb.date || 'unknown'} · status=${audit.status || 'FINAL'}*`);
 
   return lines.join('\n');
 }
@@ -497,7 +572,9 @@ export function buildExpectedBenchmarkJson(audit) {
       nutrients: d.dishNutrients,
     })),
     finalMealTotals: lastPass.mealTotals,
-    sourceOfTruth: `golden/meal/${bundleName}`
+    generatedBy: audit.generatedBy || null,
+    status: audit.status || 'FINAL',
+    sourceOfTruth: `artifacts/meal_audits/${bundleName}`
   };
 }
 
@@ -508,7 +585,7 @@ export function buildExpectedBenchmarkJson(audit) {
 export function buildBoundingBoxSvg(dishes, title, turnLabel = '') {
   const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6'];
 
-  const rects = dishes.map((d, i) => {
+  const rects = dishes.filter(d => Array.isArray(d.boundingBox2D) && d.boundingBox2D.length === 4).map((d, i) => {
     const [ymin, xmin, ymax, xmax] = d.boundingBox2D;
     const width = Math.max(10, xmax - xmin);
     const height = Math.max(10, ymax - ymin);
@@ -581,10 +658,39 @@ Usage:
     process.exit(1);
   }
 
+  if (options.model && parsedJson && typeof parsedJson === 'object') {
+    parsedJson.generatedBy = {
+      ...(parsedJson.generatedBy && typeof parsedJson.generatedBy === 'object' ? parsedJson.generatedBy : {}),
+      model: options.model,
+    };
+  }
   const normalizedAudit = validateAndNormalizePayload(parsedJson, options.bundleName);
 
   // Target directory bundle convention: Meal-[name]-[number]
-  const outDir = options.outputDir || path.join(process.cwd(), 'artifacts', 'meal_audits', normalizedAudit.bundleName);
+  // Collision-safe: auto-increment NN only when the name was derived from title
+  // (no explicit --bundle-name / payload.bundleName / --output-dir).
+  const explicitName = Boolean(options.bundleName) || Boolean(parsedJson && parsedJson.bundleName);
+  let outDir;
+  if (options.outputDir) {
+    outDir = options.outputDir;
+  } else if (explicitName) {
+    outDir = path.join(process.cwd(), 'artifacts', 'meal_audits', normalizedAudit.bundleName);
+  } else {
+    const rootDir = path.join(process.cwd(), 'artifacts', 'meal_audits');
+    let name = normalizedAudit.bundleName;
+    const m = name.match(/^(Meal-.+)-(\d+)$/);
+    if (m && fs.existsSync(path.join(rootDir, name))) {
+      let n = parseInt(m[2], 10);
+      let candidate;
+      do {
+        n += 1;
+        candidate = `${m[1]}-${String(n).padStart(2, '0')}`;
+      } while (fs.existsSync(path.join(rootDir, candidate)));
+      name = candidate;
+      normalizedAudit.bundleName = name;
+    }
+    outDir = path.join(rootDir, name);
+  }
   const photosDir = path.join(outDir, 'photos');
   fs.mkdirSync(photosDir, { recursive: true });
 

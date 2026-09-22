@@ -1155,7 +1155,7 @@ P5 checkbox above means “suite exists,” not “all goldens green.”
 | **Meal** | One loggable plate: items + totals + media + content | Today’s lunch |
 | **ComparisonSet** | Mode D only: set of **Meals** (options) | Option A vs B vs C |
 | **Partial item** | Item with incomplete data but usable truth | Label-only 700 kcal burger, components missing |
-| **Calculator** | Pure finalize (budget/reconcile/aggregate) | Fills 31-nutrient slots — not stored as rival state |
+| **Calculator** | Pure finalize (budget/reconcile/aggregate) | Fills 32-nutrient slots — not stored as rival state |
 | **stageLedger** | Append-only audit decisions | Not a second nutrient dump |
 | **Job** | Work order that advances meal stages | Does not own the meal long-term |
 
@@ -1586,7 +1586,7 @@ media → scout → (portion?) → resolver → calculation → dietitian
 | scout | items identity, soft kcal/weight, components sketch | no savable meal; circuit → user text fill |
 | portion | weights / choices; awaiting_user | pause, not fail |
 | resolver | dbId, componentsDetailList, sources | category fallback + ledger degraded |
-| calculation | 31 nutrients, receipt, savable | not savable |
+| calculation | 32 nutrients, receipt, savable | not savable |
 | dietitian | content advice only | **degraded**; meal stays savable |
 
 Each stage run:
@@ -1810,7 +1810,7 @@ Cold URL 404 after lifecycle expiry: UI shows “forensic package expired (kept 
 |-------|--------|--------------|
 | Domain schema & taxonomy | Complete | Component ≠ FoodItem ≠ Meal ≠ ComparisonSet |
 | Context management | Complete | Stage input masks; base64 stripped hot |
-| Math integrity | Complete | 31 nutrients via deterministic calculator |
+| Math integrity | Complete | 32 nutrients via deterministic calculator |
 | Concurrency & sync | Complete | OCC version + CAS + **409 client rebase** |
 | Deletion integrity | Complete | **deletedItemIds** tombstones |
 | Derived narrative integrity | Complete | **staleDietitianNarrative** |

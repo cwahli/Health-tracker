@@ -252,7 +252,7 @@ The download is a **full forensic log**, not a summary. If the process is long, 
 | Last user action | Yes | Plus the actual prompt text (today omitted it on the action line) |
 | Breadcrumbs | Yes | This job’s clicks/submit. Drop CSS-class button labels if we have `id` |
 | Network / console | Yes | This job’s requests + real errors. Session-wide Firestore 2.5s from *other* minutes is appendix, not the Errors section |
-| Saved nutrition table + 31 nutrients | Yes | Once (the saved book) |
+| Saved nutrition table + 32 nutrients | Yes | Once (the saved book) |
 | Dietitian narrative | Yes | Once, must match the table |
 | **Agent instructions** | **Yes, full body** | **Once per dispatch that ran** (scout T1, dietitian T1, dietitian T2). Schema included. |
 | Agent replies | Yes, full JSON | Once per dispatch |
@@ -273,7 +273,7 @@ If finalize **ran twice** (bug or leftover fork), the log shows **two** `[finali
 1. Header
 2. Last user action + breadcrumbs
 3. Gate / errors  (computed; empty pass still listed)
-4. Saved meal (items + 31 nutrients + narrative)
+4. Saved meal (items + 32 nutrients + narrative)
 5. Agent dispatches — full instruction + full reply, once each, in time order
 6. Process execution — T1 then T2, every stage that ran, full item ledgers
 7. Network / console (this job)
