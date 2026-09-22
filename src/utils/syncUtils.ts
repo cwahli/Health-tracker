@@ -3,6 +3,21 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { resolveMealVerdict } from './verdictUtils.js';
 import { translations } from './translations';
 
+
+// Attach the Firebase ID token when signed in so the authenticated
+// server pull endpoints (/api/sync/*, 401-enforced in production)
+// accept the request. Falls back to the htk session auto-attach
+// (breadcrumbTracker) when Firebase is signed out.
+async function pullAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const { auth } = await import('../firebase');
+    const token = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => undefined) : undefined;
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+  } catch { /* offline / signed out: server decides */ }
+  return headers;
+}
+
 export function mergeByRecency<T extends { id?: string; updated_at?: number | string; date?: string; timestamp?: string }>(
   listA: T[] = [],
   listB: T[] = []
@@ -273,7 +288,7 @@ export async function fetchAllConsolidatedLogs(
     const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 30000);
     const resp = await fetch('/api/sync/supabase-pull', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await pullAuthHeaders(),
       body: JSON.stringify({
         uid,
         email,
@@ -365,7 +380,7 @@ export async function fetchFoodLogsPage(
   try {
     const resp = await fetch('/api/sync/supabase-pull', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await pullAuthHeaders(),
       body: JSON.stringify({
         uid,
         email,
@@ -411,7 +426,7 @@ export async function fetchFoodLogDetail(
   try {
     const res = await fetch('/api/sync/food-log-detail', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await pullAuthHeaders(),
       body: JSON.stringify({ logId, uid, email })
     });
     if (res.ok) {
