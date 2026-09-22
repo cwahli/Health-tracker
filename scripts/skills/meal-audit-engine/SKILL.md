@@ -1,7 +1,7 @@
 ---
 name: meal-audit-engine
 description: Clinical-grade meal audit and multi-turn decomposition engine. Ingests meal photos or debug session traces, detects visual bounding boxes for every dish, reconstructs multi-turn meal flows, computes 32-nutrient ledgers for each turn, and bundles benchmarks into Meal-[name]-[number] directories. Supports Workflow 3 comparison reports for any existing meal.
-version: 2.1.0
+version: 2.2.0
 ---
 
 # Meal Audit Engine
@@ -28,7 +28,7 @@ Every audit is packaged as a standardized benchmark bundle:
 
 ### Workflow 1 — Standalone Meal Audit
 *Triggered when a human or agent submits raw meal photos to audit.*
-1. **Visual Grounding**: Identify all dishes, containers, sides, and beverages in the photo. Emit normalized 2D bounding boxes `[ymin, xmin, ymax, xmax]` in the `0..1000` coordinate space.
+1. **Visual Grounding**: Identify all dishes, containers, sides, and beverages in the photo. Emit normalized 2D bounding boxes in the `0..1000` coordinate space using the exact JSON field name **`boundingBox2D`**: `[ymin, xmin, ymax, xmax]` (integers — the generator gate rejects `bbox` or any other name when photos exist).
 2. **Decomposition**: Split each dish into ingredients, cooking methods (`grilled`, `steamed`, `fried`, `simmered`, `raw`), and estimated weights in grams.
 3. **User-input-led values (pause protocol):**
    - Values the user provides in chat are authoritative (`user_provided`).
@@ -37,13 +37,19 @@ Every audit is packaged as a standardized benchmark bundle:
    - No reply → keep `vision_estimate`, mark the bundle `DRAFT`, continue.
    - Record every pause and its outcome in `Instruction.md` and the pass `userPrompt`.
 4. **32-Nutrient Calculation**: Compute all 32 canonical nutrients for each dish and whole-meal totals. Tag each value's provenance (§Provenance) and set `confidence: exact|estimated`.
-5. **Generate Bundle**:
+5. **Generate Bundle** (absolute output path — never rely on cwd):
    ```bash
+   REPO="$(git rev-parse --show-toplevel)"
    node scripts/generate-meal-result.mjs \
      --input="payload.json" \
      --bundle-name="Meal-<Name>-01" \
+     --output-dir="$REPO/artifacts/meal_audits/Meal-<Name>-01" \
      --model="<hermes-or-upgraded-model-id>"
    ```
+   `generate-meal-result.mjs` resolves a missing `--output-dir` against
+   `process.cwd()`. Gateways/agents often run with a different cwd (e.g. a
+   Hermes profile dir), which silently diverts the bundle there. Always pass
+   `--output-dir` with the absolute repo path above.
 
 ### Workflow 2 — Multi-Turn Meal Flow Review
 *Triggered when reviewing an inaccurate meal log from the live site (via timestamp, meal name, or job ID).*
@@ -63,10 +69,13 @@ Every audit is packaged as a standardized benchmark bundle:
    Fill `passes[].dishes` (the fetch skeleton leaves them empty with `_needsAudit: true`).
 3. **Generate Multi-Turn Benchmark**:
    ```bash
+   REPO="$(git rev-parse --show-toplevel)"
    node scripts/generate-meal-result.mjs \
      --input="multi_turn_payload.json" \
-     --bundle-name="Meal-<Name>-02"
+     --bundle-name="Meal-<Name>-02" \
+     --output-dir="$REPO/artifacts/meal_audits/Meal-<Name>-02"
    ```
+   Same absolute-path rule as Workflow 1: never omit `--output-dir`.
    This generates `meal_result.json`, `meal_result.md`, `Instruction.md`, `expected.json`, and bounding box SVG overlays for each turn.
 4. **Hand Back to QA Meal Agent**:
    Point `@Meal_journey_QA_bot` to the generated benchmark folder so it can test the live site journey against it.
@@ -121,7 +130,7 @@ Record `provenance` + `confidence` per dish (and for meal totals) in
 Every bundle records:
 
 ```json
-{ "model": "…", "promptVersion": "meal-audit-engine/2.1.0", "date": "YYYY-MM-DD" }
+{ "model": "…", "promptVersion": "meal-audit-engine/2.2.0", "date": "YYYY-MM-DD" }
 ```
 
 - Start on the free Hermes model; record its id. Upgrade later for accuracy and
@@ -158,3 +167,15 @@ Do not add `meal_audit` to `bots/registry.json`. Do not reuse that profile token
 
   on its own line in your final reply (see `scripts/skills/telegram-photo/SKILL.md`).
   Absolute paths only; never wrap `MEDIA:` in prose or a code fence.
+
+  **Delivery self-check (do this before sending):**
+  - The reply must contain a line starting with exactly `MEDIA:/` — no
+    backticks, no indentation, no surrounding text on that line.
+  - ❌ WRONG: ```` ```MEDIA:/path/to/photo.png``` ```` (gateway may still
+    extract it, but the report counts as a delivery defect).
+  - ✅ RIGHT:
+    ```
+    MEDIA:/path/to/photo.png
+    ```
+  - A fenced `MEDIA:` line = failed delivery. Re-emit the reply with a bare
+    `MEDIA:` line.

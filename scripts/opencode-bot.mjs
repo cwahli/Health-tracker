@@ -849,8 +849,28 @@ async function main() {
 
   const token = resolveToken(bot);
   const api = new TelegramApi(token);
-  const me = await api.getMe();
-  await api.deleteWebhook();
+  // Phone/proot network drops often; never fatal-exit on a down link at
+  // startup — retry the handshake in-process instead of hot-looping proot.
+  let me = null;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      me = await api.getMe();
+      break;
+    } catch (err) {
+      if (attempt % 6 === 1) console.error(`[${config.id}] getMe failed (attempt ${attempt}): ${err.message} - retrying`);
+      await sleep(5000);
+    }
+  }
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      await api.deleteWebhook();
+      break;
+    } catch (err) {
+      console.error(`[${config.id}] deleteWebhook failed (attempt ${attempt}): ${err.message}`);
+      if (attempt === 5) console.error(`[${config.id}] continuing; getUpdates may 409 if a webhook is set`);
+      else await sleep(5000);
+    }
+  }
   console.log(`[${config.id}] connected as @${me.username}`);
   await runLoop({ api, config });
 }

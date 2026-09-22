@@ -1,6 +1,6 @@
 # Meal-Audit Bot — Plan v3
 
-> Status: **LIVE on VPS-2 2026-09-22** — @Meal_audit_bot online (token + `auth.json` + home channel; gateway multiplexed), Workflow 1 phone E2E PASS (`Meal-Instant-Noodles-01`), MAI-001 fixed, fixtures seeded, calibrate=100. Open: canonical bundle output dir, `MEDIA:` fence hardening, holdout→golden promote, suite scanner `holdout/`, Workflow 2 live run, BotFather-vs-managed-bot note (see ROADMAP meal-audit row). Supersedes v1/v2. v2 incorrectly claimed the
+> Status: **LIVE on VPS-2 2026-09-22** — @Meal_audit_bot online (token + `auth.json` + home channel; gateway multiplexed), Workflow 1 phone E2E PASS (`Meal-Instant-Noodles-01`), MAI-001 fixed, fixtures seeded, calibrate=100. Open items cleared 2026-09-22: canonical dir = repo `artifacts/meal_audits/` via absolute `--output-dir` (SKILL 2.2.0), `MEDIA:` fence hardened + self-check, `suite promote` shipped, scanner reads `holdout/`, W2 live run DONE (`Meal-oatmeal-...-01`, DIVERGED, ledger +34), BotFather path documented in §11 below. Supersedes v1/v2. v2 incorrectly claimed the
 > implementation was "already built, tested, and deployed" — see §8 Historical Claims.
 
 The Meal-Audit Bot (`meal_audit`) is a **standalone, on-demand benchmark agent**.
@@ -211,6 +211,23 @@ node scripts/meal-audit-fetch.mjs --timestamp="2026-09-22 08:21" \
 node scripts/meal-audit-compare.mjs --bundle=artifacts/meal_audits/Meal-X-01 \
   --actual=qa-evidence/actual.json
 ```
+
+## 11. Telegram token ops (BotFather manual path — reliable)
+
+Managed-bot pairing via `t.me/NousHostedHermesBot` timed out twice on
+2026-09-22. Do not retry it first; use the manual path:
+
+1. Message `t.me/BotFather`, send `/newbot`, follow the prompts (name +
+   username ending in `bot`). BotFather replies with the token.
+2. Put the token in `~/.hermes/profiles/meal_audit/.env` as
+   `TELEGRAM_BOT_TOKEN` (chmod 600). Set the home channel chat id alongside.
+3. The profile runs multiplexed under `hermes-gateway` — never run a second
+   poller on the same token (no `getUpdates` from `opencode-bot`, no second
+   gateway).
+4. Verify: send a message in the home channel; the gateway log shows the
+   meal_audit agent load the `meal-audit-engine` skill and reply.
+
+Token rotation is the same steps with `/revoke` in BotFather, then step 2.
 
 ## 10. Related files
 

@@ -11,6 +11,7 @@
  *   node scripts/meal-audit-suite.mjs report [--dir=artifacts/meal_audits] [--out=…]
  *   node scripts/meal-audit-suite.mjs issues [--status=open] [--bundle=Meal-X-01] [--limit=50]
  *   node scripts/meal-audit-suite.mjs calibrate [--dir=artifacts/meal_audits] [--min-n=1]
+ *   node scripts/meal-audit-suite.mjs promote --bundle=Meal-X-01 [--golden=golden/meal] [--force]
  *
  * Exit: 0=ok  1=report found failures but suite ran  3=usage/empty
  */
@@ -24,9 +25,11 @@ const TAXONOMIES = [
 ];
 
 function parseArgs(argv) {
-  const opts = { mode: null, dir: 'artifacts/meal_audits', out: null, status: 'open', bundle: null, limit: 50, minN: 1 };
+  const opts = { mode: null, dir: 'artifacts/meal_audits', out: null, status: 'open', bundle: null, limit: 50, minN: 1, golden: 'golden/meal', force: false };
   for (const a of argv) {
-    if (a === 'report' || a === 'issues' || a === 'calibrate') opts.mode = a;
+    if (a === 'report' || a === 'issues' || a === 'calibrate' || a === 'promote') opts.mode = a;
+    else if (a.startsWith('--golden=')) opts.golden = a.slice(9);
+    else if (a === '--force') opts.force = true;
     else if (a.startsWith('--dir=')) opts.dir = a.slice(6);
     else if (a.startsWith('--out=')) opts.out = a.slice(6);
     else if (a.startsWith('--status=')) opts.status = a.slice(9);
@@ -40,10 +43,25 @@ function parseArgs(argv) {
 
 function listBundleDirs(root) {
   if (!fs.existsSync(root)) return [];
-  return fs.readdirSync(root, { withFileTypes: true })
-    .filter(d => d.isDirectory() && d.name !== 'holdout' && d.name.startsWith('Meal-'))
-    .map(d => path.join(root, d.name))
-    .sort();
+  const out = [];
+  for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    if (d.name.startsWith('Meal-')) out.push(path.join(root, d.name));
+    else if (d.name === 'holdout') {
+      // Pending-review bundles live one level down; scan them too so
+      // `report`/`calibrate` see holdout work without moving it.
+      const holdout = path.join(root, 'holdout');
+      if (!fs.existsSync(holdout)) continue;
+      for (const h of fs.readdirSync(holdout, { withFileTypes: true })) {
+        if (h.isDirectory() && h.name.startsWith('Meal-')) out.push(path.join(holdout, h.name));
+      }
+    }
+  }
+  return out.sort();
+}
+
+function isHoldoutDir(dir) {
+  return dir.split(path.sep).includes('holdout');
 }
 
 function readJsonSafe(p) {
@@ -100,7 +118,7 @@ function runReport(opts) {
   for (const dir of bundles) {
     const h = loadHarness(dir);
     const c = loadComparison(dir);
-    if (!c) { noComparison += 1; rows.push({ bundle: path.basename(dir), verdict: 'NO_COMPARISON', model: h ? h.model : 'unknown', failures: null }); continue; }
+    if (!c) { noComparison += 1; rows.push({ bundle: path.basename(dir), holdout: isHoldoutDir(dir), verdict: 'NO_COMPARISON', model: h ? h.model : 'unknown', failures: null }); continue; }
     const v = c.verdict || 'UNKNOWN';
     if (v === 'PASS') pass += 1; else if (v === 'DIVERGED') diverged += 1; else fail += 1;
     const fails = collectFailures(c);
@@ -117,6 +135,7 @@ function runReport(opts) {
     }
     rows.push({
       bundle: path.basename(dir),
+      holdout: isHoldoutDir(dir),
       verdict: v,
       model: (c.harness && c.harness.scoutModel) || (h && h.model) || 'unknown',
       failures: fails.length,
@@ -165,6 +184,37 @@ function runReport(opts) {
 
   // exit 1 if any FAIL/DIVERGED so CI can gate; suite still "generated"
   if (fail + diverged > 0) process.exit(1);
+  process.exit(0);
+}
+
+function runPromote(opts) {
+  // Explicit user-requested promotion only (SKILL.md scope: engine never
+  // writes under golden/ on its own). Copies a PASS bundle into golden/meal.
+  if (!opts.bundle) {
+    console.error('promote needs --bundle=Meal-Name-01');
+    process.exit(3);
+  }
+  const candidates = [path.join(opts.dir, opts.bundle), path.join(opts.dir, 'holdout', opts.bundle)];
+  const src = candidates.find((c) => { try { return fs.statSync(c).isDirectory(); } catch { return false; } });
+  if (!src) {
+    console.error(`Bundle ${opts.bundle} not found under ${opts.dir} (or ${opts.dir}/holdout)`);
+    process.exit(3);
+  }
+  const c = loadComparison(src);
+  const verdict = c ? (c.verdict || 'UNKNOWN') : 'NO_COMPARISON';
+  if (!opts.force && verdict !== 'PASS') {
+    console.error(`Refusing to promote ${opts.bundle}: verdict=${verdict} (need PASS or --force)`);
+    process.exit(1);
+  }
+  const dest = path.join(opts.golden, opts.bundle);
+  if (fs.existsSync(dest) && !opts.force) {
+    console.error(`Refusing: ${dest} exists (use --force to overwrite)`);
+    process.exit(1);
+  }
+  fs.mkdirSync(opts.golden, { recursive: true });
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.cpSync(src, dest, { recursive: true });
+  console.log(`Promoted ${opts.bundle} (verdict=${verdict}) -> ${dest}`);
   process.exit(0);
 }
 
@@ -274,6 +324,7 @@ function main() {
   node scripts/meal-audit-suite.mjs report [--dir=…] [--out=…]
   node scripts/meal-audit-suite.mjs issues [--status=open|all] [--bundle=…] [--limit=N]
   node scripts/meal-audit-suite.mjs calibrate [--dir=…] [--min-n=N]
+  node scripts/meal-audit-suite.mjs promote --bundle=Meal-X-01 [--dir=…] [--golden=golden/meal] [--force]
 
 Exit: 0=ok  1=report had FAIL/DIVERGED  3=usage`);
     process.exit(opts.help ? 0 : 3);
@@ -281,6 +332,7 @@ Exit: 0=ok  1=report had FAIL/DIVERGED  3=usage`);
   if (opts.mode === 'report') runReport(opts);
   if (opts.mode === 'issues') runIssues(opts);
   if (opts.mode === 'calibrate') runCalibrate(opts);
+  if (opts.mode === 'promote') runPromote(opts);
 }
 
 main();

@@ -81,6 +81,31 @@ describe('loadRegistry', () => {
     expect(child.agent.kind).toBe('opencode');
   });
 
+  it('lets child clear inherited scalar fields with null', () => {
+    const reg = applyMasterDefaults({
+      master: 'opencode',
+      bots: [
+        {
+          id: 'opencode',
+          telegram: { tokenEnv: 'T1', allowedUserIds: [1] },
+          agent: { kind: 'opencode', model: 'm1', variant: 'high', playwrightOutputDir: '/tmp/shots' },
+        },
+        {
+          id: 'child',
+          telegram: { tokenEnv: 'T2' },
+          agent: { model: 'm2', variant: null, playwrightOutputDir: null },
+        },
+      ],
+    });
+    const child = getBot(reg, 'child');
+    expect(child.agent.model).toBe('m2');
+    expect(child.agent.variant).toBeNull();
+    expect(child.agent.playwrightOutputDir).toBeNull();
+    const cfg = normalizeConfig(child, { defaultWorkspace: '/ws' });
+    expect(cfg.agent.variant).toBeNull();
+    expect(cfg.agent.playwrightOutputDir).toBe('');
+  });
+
   it('requires tokenEnv on every bot', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reg-'));
     const file = path.join(dir, 'registry.json');
