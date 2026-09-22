@@ -145,6 +145,28 @@ Keep the `28486b1` behavior (detach, own the lock, snapshot revert, QA hand-back
 
 Add: on `Insufficient account funds`, one OpenCode retry with `-m opencode/deepseek-v4.1-flash`, then Cline, then Grok. Skip `agy` when `~/.hermes/tool_allowances.json` says `unavailable`. Set that status in `scripts/tool-allowance.mjs` defaults because Antigravity is location-blocked. A coder with no new files is a failed attempt; the Telegram line must include the real error (funds, abort, or location), not only “0 code changes.”
 
+### 3f. Orchestrator Health Probing, Investigation Mode & Dual-Sync Memory
+
+To prevent 36-minute stall ladders (where broken tools loop or timeout before touching code):
+
+1. **Autonomous Model Health Analysis (Pre-Flight Canary)**:
+   - `scripts/tool-allowance.mjs` tracks granular model status per tool.
+   - When a model returns `Insufficient account funds`, mark that model permanently `depleted` in `~/.hermes/tool_allowances.json` (do not clear it on the 15-minute cooldown timer).
+   - Fast fail-over: switch `opencode` active model to `opencode/deepseek-v4.1-flash` without burning 8 minutes.
+
+2. **Investigation Mode on Stagnation / Abort**:
+   - If a coder makes 0 code changes after 4 minutes or outputs an explicit abort:
+     - Scan the log signature for root cause:
+       - **Credit/Quota Failure**: mark depleted, switch model in registry, and retry once.
+       - **Invariant / Architectural Conflict**: if the coder aborts because a requested change breaks a protected contract in `AGENTS.md` (e.g. renaming `#nav-tab-health` breaks Playwright tests), scrub the forbidden request from the task prompt and retry only the legitimate defects (e.g. float formatting).
+       - **Prompt Bloat / Over-Analysis**: if a model times out reading a 6-part task, split into atomic single-concern micro-tasks and dispatch sequentially.
+       - **Geo-block / Environment Failure**: immediately mark tool `unavailable` and escalate to next healthy tool in pool.
+
+3. **Dual-Sync Storage (JSON + MEMORY.md)**:
+   - **Machine State**: `~/.hermes/tool_allowances.json` remains the deterministic, typed source of truth parsed by `tool-allowance.mjs` and `run-coding-dispatch.sh`.
+   - **Cognitive Context**: When a tool status changes (e.g. model depleted, region blocked), `tool-allowance.mjs` syncs a concise 2-line note into `~/.hermes/memories/MEMORY.md` so the LLM Orchestrator system prompt is aware of environment realities without running shell commands.
+
+
 ## 4. Done when
 
 - `bash -n scripts/run-coding-dispatch.sh` exits 0.
