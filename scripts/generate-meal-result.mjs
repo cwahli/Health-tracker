@@ -15,6 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ============================================================================
 // 1. CANONICAL 31 NUTRIENT DEFINITIONS & UNITS
@@ -452,8 +453,20 @@ Usage:
   console.log(`\n🎉 Meal Audit Complete: ${normalizedAudit.title} (${normalizedAudit.dishes.length} dishes, ${normalizedAudit.totalWeightGrams}g, ${normalizedAudit.mealTotals.calories} kcal)`);
 }
 
-// Direct CLI invocation
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Direct CLI invocation (symlink-safe)
+const isDirectCli = Boolean(
+  process.argv[1] &&
+  (import.meta.url === `file://${process.argv[1]}` ||
+   (() => {
+     try {
+       return fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+     } catch {
+       return false;
+     }
+   })())
+);
+
+if (isDirectCli) {
   main().catch(err => {
     console.error('[MealResultGen] Fatal error:', err);
     process.exit(1);
