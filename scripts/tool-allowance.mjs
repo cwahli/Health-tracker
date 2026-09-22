@@ -430,6 +430,69 @@ if (command === 'pick-tool') {
       console.log(`✅ ${tool.name} (${t}): Healthy and ready for dispatch.`);
     }
   }
+} else if (command === 'list-models' || command === 'models') {
+  const state = loadState();
+  refreshCooldowns(state);
+
+  const MODEL_CATALOG = {
+    opencode: {
+      name: 'OpenCode CLI',
+      models: [
+        { id: 'deepseek-v4.1-flash', status: 'available', tier: 'free', notes: 'Recommended active model. Fast and reliable.' },
+        { id: 'deepseek-chat', status: 'available', tier: 'free', notes: 'General reasoning model.' },
+        { id: 'muse-spark-1.3', status: 'depleted', tier: 'paid', notes: 'Depleted ($0 balance / insufficient account funds).' }
+      ],
+      thinking_modes: ['low', 'high', 'auto'],
+      default_model: 'deepseek-v4.1-flash'
+    },
+    cline: {
+      name: 'Cline CLI',
+      models: [
+        { id: 'deepseek', status: 'available', tier: 'api', notes: 'Direct DeepSeek API integration with auto-approve.' }
+      ],
+      thinking_modes: ['high', 'low', 'none'],
+      default_model: 'deepseek'
+    },
+    grok: {
+      name: 'Grok Build CLI',
+      models: [
+        { id: 'grok-build', status: 'available', tier: 'free-quota', notes: 'xAI Grok Build. 6-minute timeout limit.' }
+      ],
+      thinking_modes: ['none'],
+      default_model: 'grok-build'
+    },
+    agy: {
+      name: 'Antigravity CLI (agy)',
+      models: [
+        { id: 'gemini-flash', status: 'unavailable', tier: 'free', notes: 'Geo-blocked: Gemini API unavailable on VPS datacenter IP.' }
+      ],
+      thinking_modes: ['none'],
+      default_model: 'gemini-flash'
+    }
+  };
+
+  const asJson = args.includes('--json');
+  if (asJson) {
+    console.log(JSON.stringify(MODEL_CATALOG, null, 2));
+    process.exit(0);
+  }
+
+  console.log('=== Granular Agent & Model Catalog ===\n');
+  for (const [toolKey, toolInfo] of Object.entries(MODEL_CATALOG)) {
+    const toolState = state.tools[toolKey] || {};
+    const installed = isBinaryInstalled(toolKey);
+    const inCooldown = toolState.cooldown_until && new Date(toolState.cooldown_until).getTime() > Date.now();
+    const toolStatus = !installed ? 'NOT INSTALLED' : inCooldown ? 'COOLDOWN' : (toolState.status || 'unknown').toUpperCase();
+
+    console.log(`• [${toolKey}] ${toolInfo.name} (${toolStatus})`);
+    console.log(`  Thinking Modes: ${toolInfo.thinking_modes.join(', ')}`);
+    console.log('  Available Models:');
+    for (const m of toolInfo.models) {
+      const mark = m.status === 'available' ? '✅' : m.status === 'depleted' ? '💸' : '🚫';
+      console.log(`    ${mark} ${m.id} [${m.tier}] - ${m.notes}`);
+    }
+    console.log('');
+  }
 } else {
-  console.log('Usage: node scripts/tool-allowance.mjs <status|list-agents|pick-tool|report-result|probe> [options]');
+  console.log('Usage: node scripts/tool-allowance.mjs <status|list-agents|list-models|pick-tool|report-result|probe> [options]');
 }

@@ -22,14 +22,178 @@
 
 set -eo pipefail
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
+cd "$REPO_DIR"
+
+HERMES_DIR="${HERMES_DIR:-${HOME}/.hermes}"
+AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
+TELEGRAM_SCRIPT="${REPO_DIR}/scripts/telegram-send.sh"
+DISPATCH_LOCK="${HERMES_DIR}/dispatch_lock"
+DISPATCH_ACTIVE="${HERMES_DIR}/dispatch_active.json"
+mkdir -p "$HERMES_DIR" "${HERMES_DIR}/logs"
+
+# ---------------------------------------------------------------
+# Subcommands: status, stop, cancel, list-models, list-agents
+# ---------------------------------------------------------------
+SUBCOMMAND="${1:-}"
+
+status_cmd() {
+  echo "=== Health-tracker Coding Dispatch Status ==="
+  local pid="" bug_id="" category="" tool="" model="" thinking="" start_time="" log_file="" task=""
+
+  if [ -f "$DISPATCH_ACTIVE" ]; then
+    pid=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("pid",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    bug_id=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("bug_id",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    category=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("category",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    tool=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("tool",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    model=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("model",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    thinking=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("thinking",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    start_time=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("start_time",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    log_file=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("log_file",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    task=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("task",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+  fi
+
+  if [ -z "$pid" ] && [ -f "$DISPATCH_LOCK" ]; then
+    IFS=: read -r pid bug_id tool model thinking start_time log_file < "$DISPATCH_LOCK" || true
+  fi
+
+  if [ -n "$pid" ]; then
+    if kill -0 "$pid" 2>/dev/null; then
+      local now; now=$(date +%s)
+      local elapsed=$(( now - ${start_time:-$now} ))
+      local mins=$(( elapsed / 60 ))
+      local secs=$(( elapsed % 60 ))
+
+      local current_activity="Investigating codebase..."
+      local last_clean_lines=""
+      if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+        last_clean_lines=$(sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' "$log_file" 2>/dev/null | tr -d '\r' | grep -vE '^[[:space:]]*$' | tail -n 8 || true)
+        local candidate
+        candidate=$(printf '%s\n' "$last_clean_lines" | tail -n 1 | cut -c1-140)
+        if [ -n "$candidate" ]; then
+          current_activity="$candidate"
+        fi
+      fi
+
+      echo "State: ACTIVE_RUNNING"
+      echo "Agent: ${tool:-unknown} (Model: ${model:-default}, Thinking: ${thinking:-auto})"
+      echo "Bug ID: ${bug_id:-N/A} (Category: ${category:-general})"
+      echo "PID: $pid (Elapsed: ${mins}m ${secs}s)"
+      echo "Log: ${log_file:-none}"
+      echo "Task: ${task:-none}"
+      echo "Current Activity: $current_activity"
+      echo ""
+      echo "Recent Log Tail:"
+      printf '%s\n' "$last_clean_lines" | tail -n 5
+      return 0
+    else
+      echo "State: STALE_LOCK"
+      echo "Process PID $pid is not alive. Lock was held for $bug_id ($tool)."
+      echo "Run '$0 stop' to release the lock."
+      return 0
+    fi
+  fi
+
+  echo "State: IDLE"
+  echo "No coding agent is currently running."
+  if [ -f "$AUDIT_LOG" ]; then
+    local last_audit; last_audit=$(tail -n 1 "$AUDIT_LOG" 2>/dev/null || true)
+    if [ -n "$last_audit" ]; then
+      echo "Last Audit Entry: $last_audit"
+    fi
+  fi
+}
+
+stop_cmd() {
+  echo "[Dispatcher] Processing stop request..."
+  local pid="" bug_id="" tool="" log_file=""
+
+  if [ -f "$DISPATCH_ACTIVE" ]; then
+    pid=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("pid",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    bug_id=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("bug_id",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+    tool=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("tool",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
+  fi
+
+  if [ -z "$pid" ] && [ -f "$DISPATCH_LOCK" ]; then
+    IFS=: read -r pid bug_id tool _ < "$DISPATCH_LOCK" || true
+  fi
+
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "[Dispatcher] Terminating agent '$tool' (PID $pid) for $bug_id..."
+    kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    pkill -P "$pid" 2>/dev/null || true
+    sleep 1.5
+
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "[Dispatcher] Process $pid did not exit after SIGTERM, sending SIGKILL..."
+      kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      pkill -9 -P "$pid" 2>/dev/null || true
+    fi
+  fi
+
+  # Terminate common background tools if lingering
+  pkill -f "opencode run" 2>/dev/null || true
+  pkill -f "cline --auto-approve" 2>/dev/null || true
+  pkill -f "grok -p" 2>/dev/null || true
+
+  # Remove lock files
+  local had_lock=0
+  if [ -f "$DISPATCH_LOCK" ] || [ -f "$DISPATCH_ACTIVE" ]; then
+    had_lock=1
+  fi
+  rm -f "$DISPATCH_LOCK" "$DISPATCH_ACTIVE" 2>/dev/null || true
+
+  # Revert source changes if an active coder was running
+  if [ "$had_lock" -eq 1 ] && [ -n "$pid" ]; then
+    cd "$REPO_DIR"
+    git checkout -- src/ 2>/dev/null || true
+  fi
+
+  # Notify Telegram
+  if [ -n "$tool" ] && [ -n "$bug_id" ]; then
+    bash "$TELEGRAM_SCRIPT" --profile="${HERMES_PROFILE:-orchestrator}" \
+      --text="🛑 *[Orchestrator]* Stopped agent '*$tool*' on \`$bug_id\`.
+• Process terminated (PID $pid).
+• Workspace uncommitted source changes reverted to clean \`main\`.
+• No further fallback agent will be started." 2>/dev/null || true
+  fi
+
+  echo "[Dispatcher] Stopped successfully. Lock released."
+}
+
+case "$SUBCOMMAND" in
+  status)
+    status_cmd
+    exit 0
+    ;;
+  stop|cancel)
+    stop_cmd
+    exit 0
+    ;;
+  list-models|models)
+    shift
+    node "${REPO_DIR}/scripts/tool-allowance.mjs" list-models "$@"
+    exit 0
+    ;;
+  list-agents|agents)
+    shift
+    node "${REPO_DIR}/scripts/tool-allowance.mjs" list-agents "$@"
+    exit 0
+    ;;
+esac
+
+# ---------------------------------------------------------------
+# Argument Parsing for Dispatch
+# ---------------------------------------------------------------
 TASK=""
 BUG_ID="BUG-UNKNOWN"
 CATEGORY="general"
 REQUESTED_TOOL="auto"
-PREFERRED_MODEL="muse-spark-1.3"
+PREFERRED_MODEL="deepseek-v4.1-flash"
 THINKING="auto"
 SCREENSHOT=""
 DISPATCH_PROFILE="${HERMES_PROFILE:-orchestrator}"
+CASCADE=0
 
 PREFER_VERIFY="auto"
 FOREGROUND=0
@@ -38,20 +202,27 @@ PRINT_PLAN=0
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|cline|opencode|grok] [--screenshot='/path/to/img.png'] [--thinking=high|low|none|auto] [--verify=true|false|auto] [--profile=orchestrator] [--foreground] [--print-plan]"
+      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--screenshot='/path/to/img.png'] [--verify=true|false|auto] [--profile=orchestrator] [--foreground] [--print-plan]"
+      echo ""
+      echo "Subcommands:"
+      echo "  $0 status                     Check live running agent activity"
+      echo "  $0 stop                       Cleanly stop running agent and release lock"
+      echo "  $0 list-models                List available tools, models, and thinking modes"
+      echo "  $0 list-agents                List agent pool status"
       exit 0
       ;;
-    --task=*)    TASK="${arg#*=}" ;;
-    --bug-id=*)  BUG_ID="${arg#*=}" ;;
-    --category=*) CATEGORY="${arg#*=}" ;;
-    --tool=*)    REQUESTED_TOOL="${arg#*=}" ;;
-    --model=*)   PREFERRED_MODEL="${arg#*=}" ;;
-    --thinking=*) THINKING="${arg#*=}" ;;
+    --task=*)       TASK="${arg#*=}" ;;
+    --bug-id=*)     BUG_ID="${arg#*=}" ;;
+    --category=*)   CATEGORY="${arg#*=}" ;;
+    --tool=*)       REQUESTED_TOOL="${arg#*=}" ;;
+    --model=*)      PREFERRED_MODEL="${arg#*=}" ;;
+    --thinking=*)   THINKING="${arg#*=}" ;;
     --screenshot=*) SCREENSHOT="${arg#*=}" ;;
-    --verify=*)  PREFER_VERIFY="${arg#*=}" ;;
-    --profile=*) DISPATCH_PROFILE="${arg#*=}" ;;
-    --foreground) FOREGROUND=1 ;;
-    --print-plan) PRINT_PLAN=1 ;;
+    --cascade)      CASCADE=1 ;;
+    --verify=*)     PREFER_VERIFY="${arg#*=}" ;;
+    --profile=*)    DISPATCH_PROFILE="${arg#*=}" ;;
+    --foreground)   FOREGROUND=1 ;;
+    --print-plan)   PRINT_PLAN=1 ;;
     *)
       if [ -z "$TASK" ]; then TASK="$arg"; fi
       ;;
@@ -72,15 +243,6 @@ if [ "$THINKING" = "auto" ] || [ -z "$THINKING" ]; then
   fi
 fi
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
-cd "$REPO_DIR"
-
-HERMES_DIR="${HOME}/.hermes"
-AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
-TELEGRAM_SCRIPT="${REPO_DIR}/scripts/telegram-send.sh"
-DISPATCH_LOCK="${HERMES_DIR}/dispatch_lock"
-mkdir -p "$HERMES_DIR" "${HERMES_DIR}/logs"
-
 opencode_model_id() {
   local model="$1"
   case "$model" in
@@ -98,26 +260,30 @@ qa_profile_for_category() {
 }
 
 if [ "$PRINT_PLAN" = "1" ]; then
-  echo "opencode_model=$(opencode_model_id "$PREFERRED_MODEL")"
+  echo "tool=${REQUESTED_TOOL}"
+  echo "model=${PREFERRED_MODEL}"
+  echo "thinking=${THINKING}"
+  echo "cascade=${CASCADE}"
   echo "qa_profile=$(qa_profile_for_category)"
-  echo "opencode_argv=opencode run --auto --dir ${REPO_DIR} -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>"
+  if [ "$REQUESTED_TOOL" = "opencode" ] || [ "$REQUESTED_TOOL" = "auto" ]; then
+    echo "opencode_argv=opencode run --auto --dir ${REPO_DIR} -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>"
+  fi
   exit 0
 fi
 
 # Leave the Hermes tool call immediately. A 30s tool timeout used to kill the coder
 # mid-typecheck. setsid starts a new session so that kill does not reach the child.
 if [ "$FOREGROUND" != "1" ] && [ "${DISPATCH_FOREGROUND:-}" != "1" ]; then
-  child_log="${HERMES_DIR}/logs/dispatch_${BUG_ID}.log"
-  echo "[Dispatcher] Detaching ${BUG_ID} to ${child_log}"
+  child_log="${HERMES_DIR}/logs/dispatch_${BUG_ID}_${REQUESTED_TOOL}.log"
+  echo "[Dispatcher] Detaching ${BUG_ID} (${REQUESTED_TOOL}/${PREFERRED_MODEL}) to ${child_log}"
   env DISPATCH_FOREGROUND=1 setsid nohup bash "$0" "$@" </dev/null >>"$child_log" 2>&1 &
-  echo "[Dispatcher] Background pid $! — result returns to $(qa_profile_for_category) after the fix."
+  CHILD_PID=$!
+  echo "[Dispatcher] Background pid ${CHILD_PID} — agent ${REQUESTED_TOOL} working on ${BUG_ID}."
   exit 0
 fi
 
 # ---------------------------------------------------------------
 # Heartbeat & Lock Cleanup Trap (V-23, V-24)
-# Defined before the trap. An early exit used to call stop_heartbeat
-# before this function existed, and the trap also deleted another process's lock.
 # ---------------------------------------------------------------
 stop_heartbeat() {
   if [ -n "${HEARTBEAT_PID:-}" ]; then
@@ -136,7 +302,9 @@ cleanup_dispatch() {
   local info=""
   info=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
   case "$info" in
-    "$$:"*) rm -f "$DISPATCH_LOCK" 2>/dev/null || true ;;
+    "$$:"*)
+      rm -f "$DISPATCH_LOCK" "$DISPATCH_ACTIVE" 2>/dev/null || true
+      ;;
   esac
 }
 trap cleanup_dispatch EXIT INT TERM
@@ -148,13 +316,11 @@ lock_holder_alive() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
-# The OpenCode chat bot holds this lock for one chat turn. Wait, then give up
-# without deleting that lock.
 waited=0
 while lock_holder_alive; do
   LOCKED_INFO=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
   LOCKED_PID=$(printf '%s\n' "$LOCKED_INFO" | cut -d: -f1)
-  LOCKED_BUG=$(printf '%s\n' "$LOCKED_INFO" | cut -d: -f2-)
+  LOCKED_BUG=$(printf '%s\n' "$LOCKED_INFO" | cut -d: -f2)
   if [ "$waited" -eq 0 ]; then
     echo "[Dispatcher] Concurrency lock: PID $LOCKED_PID is active on $LOCKED_BUG. Waiting."
     bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` is waiting. \`$LOCKED_BUG\` (PID \`$LOCKED_PID\`) still has the repo." 2>/dev/null || true
@@ -167,7 +333,24 @@ while lock_holder_alive; do
   sleep 10
   waited=$((waited + 10))
 done
-echo "$$:${BUG_ID}" > "$DISPATCH_LOCK"
+
+START_TIME=$(date +%s)
+CURRENT_LOG="${HERMES_DIR}/logs/dispatch_${BUG_ID}_${REQUESTED_TOOL}.log"
+
+echo "$$:${BUG_ID}:${REQUESTED_TOOL}:${PREFERRED_MODEL}:${THINKING}:${START_TIME}:${CURRENT_LOG}" > "$DISPATCH_LOCK"
+cat <<JSON > "$DISPATCH_ACTIVE"
+{
+  "pid": $$,
+  "bug_id": "${BUG_ID}",
+  "category": "${CATEGORY}",
+  "tool": "${REQUESTED_TOOL}",
+  "model": "${PREFERRED_MODEL}",
+  "thinking": "${THINKING}",
+  "start_time": ${START_TIME},
+  "log_file": "${CURRENT_LOG}",
+  "task": $(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$TASK")
+}
+JSON
 WE_OWN_LOCK=1
 
 # Executable search paths
@@ -175,8 +358,6 @@ OPENCODE_BIN=$(which opencode 2>/dev/null || echo "${HOME}/.opencode/bin/opencod
 CLINE_BIN=$(which cline 2>/dev/null || echo "${HOME}/.local/bin/cline")
 GROK_BIN=$(which grok 2>/dev/null || echo "${HOME}/.grok/bin/grok")
 AGY_BIN=$(which agy 2>/dev/null || echo "${HOME}/.local/bin/agy")
-
-START_TIME=$(date +%s)
 
 # ---------------------------------------------------------------
 # Telegram helper — always non-blocking, never fails the dispatch
@@ -447,19 +628,20 @@ Think carefully before modifying files. Verify with npx tsc --noEmit before fini
 # ---------------------------------------------------------------
 
 run_opencode_agent() {
-  local prompt="$1" log_file="$2" duration="$3"
+  local prompt="$1" log_file="$2" duration="$3" model="$4"
   local model_id
-  model_id=$(opencode_model_id "$PREFERRED_MODEL")
+  model_id=$(opencode_model_id "$model")
   snapshot_workspace
   echo "[Dispatcher] opencode run --auto --dir ${REPO_DIR} -m ${model_id}"
   run_with_timeout "$duration" "$OPENCODE_BIN" run --auto --dir "$REPO_DIR" -m "$model_id" "$prompt" 2>&1 | tee "$log_file" || true
 }
 
 try_opencode() {
-  local model="$1"
+  local model="${1:-$PREFERRED_MODEL}"
   echo "[Dispatcher] --> OpenCode (Model: $model)"
   if [ ! -x "$OPENCODE_BIN" ]; then
     echo "[Dispatcher] OpenCode not executable at $OPENCODE_BIN, skipping."
+    tg_msg "⚠️ *[Orchestrator]* OpenCode binary not found or not executable."
     return 1
   fi
 
@@ -482,29 +664,35 @@ $prompt_preview
 \`\`\`"
 
   start_heartbeat "OpenCode" "$log_file"
-  run_opencode_agent "$prompt" "$log_file" 8m
+  run_opencode_agent "$prompt" "$log_file" 8m "$model"
   stop_heartbeat
 
   local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "insufficient account funds|insufficient funds|out of credits"; then
-    tg_msg "⚠️ *[Orchestrator]* OpenCode hit insufficient funds on \`$model\`. Retrying once with \`opencode/deepseek-v4.1-flash\`..."
     node scripts/tool-allowance.mjs report-result --tool="opencode" --status="depleted" --bug-id="$BUG_ID" --reason="Insufficient account funds" || true
     clean_workspace
-    local alt_model="opencode/deepseek-v4.1-flash"
-    local alt_log="${log_dir}/dispatch_${BUG_ID}_opencode_deepseek.log"
-    start_heartbeat "OpenCode (deepseek)" "$alt_log"
-    run_with_timeout 8m "$OPENCODE_BIN" run --auto --dir "$REPO_DIR" -m "$alt_model" "$prompt" 2>&1 | tee "$alt_log" || true
-    stop_heartbeat
-    if check_git_and_tsc "opencode" "$alt_model" "$alt_log"; then return 0; fi
-    tg_msg "❌ *[Orchestrator]* OpenCode (deepseek) could not resolve \`$BUG_ID\`. Escalating to Cline..."
+    if [ "$model" != "deepseek-v4.1-flash" ]; then
+      tg_msg "⚠️ *[Orchestrator]* OpenCode hit insufficient funds on \`$model\`. Retrying once with \`opencode/deepseek-v4.1-flash\`..."
+      local alt_model="deepseek-v4.1-flash"
+      local alt_log="${log_dir}/dispatch_${BUG_ID}_opencode_deepseek.log"
+      start_heartbeat "OpenCode (deepseek)" "$alt_log"
+      run_opencode_agent "$prompt" "$alt_log" 8m "$alt_model"
+      stop_heartbeat
+      if check_git_and_tsc "opencode" "$alt_model" "$alt_log"; then return 0; fi
+    fi
+    if [ "$CASCADE" -eq 1 ]; then
+      tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (funds depleted). Escalating to Cline..."
+    else
+      tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (funds depleted)."
+    fi
     clean_workspace
     node scripts/tool-allowance.mjs report-result --tool="opencode" --status="failed" --bug-id="$BUG_ID" || true
     return 1
   fi
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|insufficient credits|429|allowance"; then
-    tg_msg "⚠️ *[Orchestrator]* OpenCode hit rate limit for \`$BUG_ID\`. Trying next tool..."
+    tg_msg "⚠️ *[Orchestrator]* OpenCode hit rate limit for \`$BUG_ID\`."
     node scripts/tool-allowance.mjs report-result --tool="opencode" --status="rate_limited" --bug-id="$BUG_ID" --reason="Rate limit" || true
     clean_workspace
     return 2
@@ -516,11 +704,15 @@ $prompt_preview
   tg_msg "🔄 *[Orchestrator]* OpenCode nudged to retry \`$BUG_ID\`..."
   local nudge_log="${log_dir}/dispatch_${BUG_ID}_opencode_nudge.log"
   start_heartbeat "OpenCode (nudge)" "$nudge_log"
-  run_opencode_agent "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." "$nudge_log" 4m
+  run_opencode_agent "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." "$nudge_log" 4m "$model"
   stop_heartbeat
   if check_git_and_tsc "opencode" "$model" "$nudge_log"; then return 0; fi
 
-  tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`. Escalating to Cline..."
+  if [ "$CASCADE" -eq 1 ]; then
+    tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`. Escalating to Cline..."
+  else
+    tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`."
+  fi
   clean_workspace
   node scripts/tool-allowance.mjs report-result --tool="opencode" --status="failed" --bug-id="$BUG_ID" || true
   return 1
@@ -531,6 +723,7 @@ try_cline() {
   echo "[Dispatcher] --> Cline CLI (Thinking: $thinking)"
   if [ ! -x "$CLINE_BIN" ]; then
     echo "[Dispatcher] Cline not executable at $CLINE_BIN, skipping."
+    tg_msg "⚠️ *[Orchestrator]* Cline CLI is not installed on this system."
     return 1
   fi
 
@@ -560,7 +753,7 @@ $prompt_preview
   local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|insufficient credits|429|exhausted|allowance"; then
-    tg_msg "⚠️ *[Orchestrator]* Cline hit rate limit for \`$BUG_ID\`. Trying next tool..."
+    tg_msg "⚠️ *[Orchestrator]* Cline hit rate limit for \`$BUG_ID\`."
     node scripts/tool-allowance.mjs report-result --tool="cline" --status="rate_limited" --bug-id="$BUG_ID" --reason="Rate limit" || true
     clean_workspace
     return 2
@@ -568,7 +761,11 @@ $prompt_preview
 
   if check_git_and_tsc "cline" "DeepSeek/thinking=$thinking" "$log_file"; then return 0; fi
 
-  tg_msg "❌ *[Orchestrator]* Cline could not resolve \`$BUG_ID\`. Escalating to Grok..."
+  if [ "$CASCADE" -eq 1 ]; then
+    tg_msg "❌ *[Orchestrator]* Cline could not resolve \`$BUG_ID\`. Escalating to Grok..."
+  else
+    tg_msg "❌ *[Orchestrator]* Cline could not resolve \`$BUG_ID\`."
+  fi
   clean_workspace
   node scripts/tool-allowance.mjs report-result --tool="cline" --status="failed" --bug-id="$BUG_ID" || true
   return 1
@@ -578,6 +775,7 @@ try_grok() {
   echo "[Dispatcher] --> Grok Build CLI"
   if [ ! -x "$GROK_BIN" ]; then
     echo "[Dispatcher] Grok not executable at $GROK_BIN, skipping."
+    tg_msg "⚠️ *[Orchestrator]* Grok Build CLI is not installed on this system."
     return 1
   fi
 
@@ -607,7 +805,11 @@ $prompt_preview
   local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|429"; then
-    tg_msg "⚠️ *[Orchestrator]* Grok hit rate limit for \`$BUG_ID\`. Trying Agy..."
+    if [ "$CASCADE" -eq 1 ]; then
+      tg_msg "⚠️ *[Orchestrator]* Grok hit rate limit for \`$BUG_ID\`. Trying Agy..."
+    else
+      tg_msg "⚠️ *[Orchestrator]* Grok hit rate limit for \`$BUG_ID\`."
+    fi
     node scripts/tool-allowance.mjs report-result --tool="grok" --status="rate_limited" --bug-id="$BUG_ID" || true
     clean_workspace
     return 2
@@ -615,7 +817,11 @@ $prompt_preview
 
   if check_git_and_tsc "grok" "grok-build" "$log_file"; then return 0; fi
 
-  tg_msg "❌ *[Orchestrator]* Grok could not resolve \`$BUG_ID\`. Trying Agy..."
+  if [ "$CASCADE" -eq 1 ]; then
+    tg_msg "❌ *[Orchestrator]* Grok could not resolve \`$BUG_ID\`. Trying Agy..."
+  else
+    tg_msg "❌ *[Orchestrator]* Grok could not resolve \`$BUG_ID\`."
+  fi
   clean_workspace
   node scripts/tool-allowance.mjs report-result --tool="grok" --status="failed" --bug-id="$BUG_ID" || true
   return 1
@@ -623,7 +829,11 @@ $prompt_preview
 
 try_agy() {
   echo "[Dispatcher] --> Antigravity CLI"
-  if [ ! -x "$AGY_BIN" ]; then return 1; fi
+  if [ ! -x "$AGY_BIN" ]; then
+    echo "[Dispatcher] Antigravity CLI not executable at $AGY_BIN, skipping."
+    tg_msg "⚠️ *[Orchestrator]* Antigravity CLI not found or executable."
+    return 1
+  fi
 
   if node scripts/tool-allowance.mjs status 2>/dev/null | grep -i 'Antigravity' | grep -qi 'unavailable'; then
     echo "[Dispatcher] Antigravity CLI is marked unavailable on VPS. Skipping."
@@ -695,19 +905,32 @@ Selecting best available tool and dispatching..."
 
 # Build tool sequence
 TOOL_SEQUENCE=()
-if [ "$REQUESTED_TOOL" != "auto" ]; then
-  TOOL_SEQUENCE+=("$REQUESTED_TOOL")
-fi
-
-BEST_TOOL=$(node scripts/tool-allowance.mjs pick-tool --category="$CATEGORY" 2>/dev/null | grep '"tool":' | head -n1 | cut -d '"' -f4)
-if [ "$BEST_TOOL" != "none" ] && [[ ! " ${TOOL_SEQUENCE[*]} " =~ " ${BEST_TOOL} " ]]; then
-  TOOL_SEQUENCE+=("$BEST_TOOL")
-fi
-for fallback in "opencode" "cline" "grok" "agy"; do
-  if [[ ! " ${TOOL_SEQUENCE[*]} " =~ " ${fallback} " ]]; then
-    TOOL_SEQUENCE+=("$fallback")
+if [ "$CASCADE" -eq 1 ]; then
+  if [ "$REQUESTED_TOOL" != "auto" ]; then
+    TOOL_SEQUENCE+=("$REQUESTED_TOOL")
   fi
-done
+  BEST_TOOL=$(node scripts/tool-allowance.mjs pick-tool --category="$CATEGORY" 2>/dev/null | grep '"tool":' | head -n1 | cut -d '"' -f4)
+  if [ "$BEST_TOOL" != "none" ] && [[ ! " ${TOOL_SEQUENCE[*]} " =~ " ${BEST_TOOL} " ]]; then
+    TOOL_SEQUENCE+=("$BEST_TOOL")
+  fi
+  for fallback in "opencode" "cline" "grok" "agy"; do
+    if [[ ! " ${TOOL_SEQUENCE[*]} " =~ " ${fallback} " ]]; then
+      TOOL_SEQUENCE+=("$fallback")
+    fi
+  done
+else
+  # Granular Single-Tool Execution Mode (Default)
+  if [ "$REQUESTED_TOOL" = "auto" ]; then
+    BEST_TOOL=$(node scripts/tool-allowance.mjs pick-tool --category="$CATEGORY" 2>/dev/null | grep '"tool":' | head -n1 | cut -d '"' -f4)
+    if [ "$BEST_TOOL" = "none" ]; then
+      tg_msg "🚨 *[Orchestrator]* No available tools in agent pool for \`$BUG_ID\`."
+      exit 1
+    fi
+    TOOL_SEQUENCE+=("$BEST_TOOL")
+  else
+    TOOL_SEQUENCE+=("$REQUESTED_TOOL")
+  fi
+fi
 
 echo "[Dispatcher] Execution sequence: ${TOOL_SEQUENCE[*]}"
 
@@ -839,12 +1062,17 @@ for tool in "${TOOL_SEQUENCE[@]}"; do
   esac
 done
 
-# All tools exhausted
-record_audit "none" "none" "human" "escalated_human"
-tg_msg "🚨 *[Orchestrator]* All automated agents exhausted for \`$BUG_ID\`.
-
+# Result handling
+if [ "$CASCADE" -eq 1 ]; then
+  record_audit "none" "none" "human" "escalated_human"
+  tg_msg "🚨 *[Orchestrator]* All automated cascade agents exhausted for \`$BUG_ID\`.
 *Agents tried:* ${TOOL_SEQUENCE[*]}
 *Bug:* $TASK
 
 Human intervention required. Please review the bug and assign manually."
-exit 1
+  exit 1
+else
+  tg_msg "⚠️ *[Orchestrator]* Agent *${TOOL_SEQUENCE[0]}* did not resolve \`$BUG_ID\`.
+Orchestrator awaiting next action or alternate model selection."
+  exit 1
+fi

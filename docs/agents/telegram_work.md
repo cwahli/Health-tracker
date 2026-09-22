@@ -122,3 +122,57 @@ The diagram below illustrates the full lifecycle from visual defect detection to
   - Dual-syncs concise tool status notes into `~/.hermes/memories/MEMORY.md`.
 - [`scripts/qa-runner.mjs`](../../scripts/qa-runner.mjs):
   - Headless Playwright runner executing authenticated journey tests against the live production URL. Captures before and after visual evidence (`qa-evidence/*.png`).
+
+---
+
+## 6. Incident Analysis (`BUG-20260921-8449`) & The Granular Orchestrator Architecture
+
+### A. What Went Wrong in the `BUG-20260921-8449` Incident
+During the dispatch run of `BUG-20260921-8449`, a severe breakdown occurred across agent communication, tool management, and user interaction:
+1. **Split-Brain Visibility & Gaslighting:**
+   - `run-coding-dispatch.sh` was executing detached in the background posting as `[Orchestrator]`.
+   - When the user asked the interactive Hermes bot "What is cline working on?", Hermes had zero inter-process visibility into the lockfile or log files.
+   - Hermes ran shell commands in a restricted local sandbox, found no trace of `cline` or project files, and hallucinated that the whole project didn't exist.
+   - When the background script posted a heartbeat ("Agent 'Cline' still working..."), Hermes actively denied having sent the message and argued with the user ("I never said 'agent cline is still working'...").
+2. **Monolithic Script Usurping Orchestrator Control:**
+   - The bash script was an autonomous state machine that dictated a hardcoded cascade: `OpenCode -> Cline -> Grok -> Agy`.
+   - The LLM Orchestrator was reduced to a passive onlooker. It could not pick specific models, inspect state, or intervene when things went wrong.
+3. **Runaway Cascade Fighting User `/stop`:**
+   - When OpenCode failed with insufficient funds and Cline's API stream died, the bash trap proceeded to spawn Grok, then attempted Agy.
+   - When the user requested to stop work, killing a single process merely caused the bash script to escalate to the next tier, fighting the user's intent.
+4. **Nudging Dead Models:**
+   - When OpenCode failed with "Insufficient account funds ($0 balance)", the script blindly nudged the same depleted model (`muse-spark-1.3`), failing twice and wasting minutes before escalating.
+
+---
+
+### B. The Granular Orchestrator-Empowered Architecture
+To permanently eliminate these failure modes, the monolithic bash cascade was redesigned into an **interactive toolset operated by the Orchestrator LLM**:
+
+1. **Tool Mode, Not State-Machine Cascade:**
+   - By default, `./scripts/run-coding-dispatch.sh` runs **strictly one tool** (`--tool=opencode|cline|grok|agy`).
+   - It does NOT automatically cascade to other tools unless explicitly invoked with `--cascade`.
+   - When a tool finishes or fails, control immediately returns to the Orchestrator LLM. The Orchestrator reports the exact root cause to the user and intelligently decides the next action.
+
+2. **Subcommands for Complete Visibility & Control:**
+   - **`status` (`./scripts/run-coding-dispatch.sh status`):**
+     - Reads `${HERMES_DIR}/dispatch_lock` and `${HERMES_DIR}/dispatch_active.json`.
+     - Checks if the process PID is alive.
+     - Strips ANSI escape sequences and extracts the current activity line from the active log.
+     - Returns grounded state: active agent, model, thinking mode, elapsed time, current action, and recent log tail.
+     - Enables the Orchestrator to answer "What is X doing?" with 100% precision.
+   - **`stop` (`./scripts/run-coding-dispatch.sh stop`):**
+     - Immediately sends SIGTERM/SIGKILL to the active process group and child processes (`opencode`, `cline`, `grok`).
+     - Releases concurrency lock files.
+     - Automatically runs `git checkout -- .` and `git clean -fd` to revert partial edits to clean `main`.
+     - Halts all execution without spawning fallback agents.
+   - **`list-models` (`./scripts/run-coding-dispatch.sh list-models`):**
+     - Lists all supported tools, models, current status, quotas, and supported thinking modes:
+       - OpenCode: `deepseek-v4.1-flash` (Active, free, fast), `muse-spark-1.3` (depleted).
+       - Cline CLI: `deepseek` (API integration, thinking: `high|low|none`).
+       - Grok Build: `grok-build` (Free quota, 6m limit).
+       - Antigravity: `gemini-flash` (Geo-blocked on VPS).
+
+3. **Clean Output & Error Diagnostics:**
+   - All log output forwarded to Telegram is sanitized of ANSI escape sequences (no raw ` [0m [91m` terminal debris).
+   - Structured diagnostic summaries explain what was attempted, what files were inspected, and why the run failed (funds depleted, stream disconnected, compiler error).
+
