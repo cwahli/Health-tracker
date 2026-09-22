@@ -176,3 +176,45 @@ To permanently eliminate these failure modes, the monolithic bash cascade was re
    - All log output forwarded to Telegram is sanitized of ANSI escape sequences (no raw ` [0m [91m` terminal debris).
    - Structured diagnostic summaries explain what was attempted, what files were inspected, and why the run failed (funds depleted, stream disconnected, compiler error).
 
+---
+
+### C. The Agent-Harness Division of Responsibility
+
+To maintain modularity and prevent the script from duplicating LLM reasoning:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        ORCHESTRATOR LLM (The Brain)                    │
+│  • Reads bug report & isolates single atomic defect                    │
+│  • Dynamically selects tool & model (OpenCode, Cline, Grok, etc.)      │
+│  • Decides thinking mode (low for text/CSS, high for complex logic)    │
+│  • Communicates directly with user and explains failure root causes    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Commands via CLI
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                run-coding-dispatch.sh (The OS Harness)                 │
+│                                                                        │
+│  1. Process Detachment:                                                │
+│     • Spawns coder in a new session (`setsid`), returns PID in <1s.    │
+│     • Shields coder from 30-60s Telegram tool timeouts.                │
+│                                                                        │
+│  2. Exclusivity & Process Group Termination:                           │
+│     • Enforces concurrency mutex (`~/.hermes/dispatch_lock`).          │
+│     • On `stop`: cleanly kills entire process group (`kill -- -$PID`). │
+│                                                                        │
+│  3. Continuous Telegram Observability:                                 │
+│     • Background subshell pulses Telegram `typing` action every 4s     │
+│       (keeps the 3 animated dots `...` visible throughout the run).    │
+│     • Heartbeat parses coder log every 2m and posts clean status lines.│
+│                                                                        │
+│  4. Safety & Atomic Git Rollback:                                      │
+│     • Takes pre-flight workspace snapshot.                             │
+│     • Verifies with `tsc --noEmit`.                                    │
+│     • If failed / 0 changes: automatically rolls back dirty edits to   │
+│       clean HEAD (`clean_workspace`).                                  │
+│     • If clean: commits, pushes to `main`, triggers deploy & QA check. │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+

@@ -47,15 +47,13 @@ If a bug report lists multiple discrepancies:
 - Discard any invalid requests that break invariants (never delete active sections or rename `#nav-tab-health`).
 - Pick the single atomic verifiable defect (e.g., format numeric target with `.toFixed(1)`).
 
-### Step 2 — Check Available Models & Allowances
-```bash
-bash "$REPO_DIR/scripts/run-coding-dispatch.sh" list-models
-```
-Present the model options if the user is asking, or select the best healthy tool:
-- **OpenCode**: `deepseek-v4.1-flash` (Active, free, fast). Note: `muse-spark-1.3` is depleted ($0 balance).
-- **Cline CLI**: `deepseek` (API integration, supports native `--thinking=high|low|none`).
-- **Grok Build**: `grok-build` (Free quota, 6m execution limit).
-- **Antigravity**: `gemini-flash` (Geo-blocked on European VPS).
+### Step 2 — Model & Tool Selection (Agent Decides)
+The Orchestrator LLM decides the best tool and model based on task complexity and quota:
+- **OpenCode**: Free, reliable active model is `deepseek-v4.1-flash` (or `deepseek-chat`). Note: `muse-spark-1.3` is depleted.
+- **Cline CLI**: `deepseek` with native `--thinking=high|low|none`.
+- **Grok Build**: `grok-build` for fast fixes (6m quota).
+- **Antigravity**: `gemini-flash` (geo-blocked on European VPS).
+You can pass any specific model supported by the tool directly via `--model="..."`. If checking tool pool health, you can run `node "$REPO_DIR/scripts/tool-allowance.mjs" status`.
 
 ### Step 3 — Granular Dispatch
 Launch strictly the selected tool with desired model and thinking level:
