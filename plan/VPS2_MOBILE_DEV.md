@@ -208,7 +208,7 @@ Tailscale SSH is why the reconnect shows an authentication error rather than a t
 
 - Do not open public :22 while `PasswordAuthentication` is still `yes`.
 - Do not install WireGuard (`wg-quick`) beside Tailscale, and do not tell the user to import a Tailscale config into the WireGuard app.
-- Do not edit `~/.hermes/**/.env`, bot tokens, or `~/.config/opencode-bot/opencode.env`. Do not restart `hermes-gateway` (that posts “Hermes is shutting down” into Telegram). Hermes tasks already run as a service and do not use this Termius session.
+- Do not edit `~/.hermes/**/.env`, bot tokens, or `~/.config/bot-host/opencode.env`. Do not restart `hermes-gateway` (that posts “Hermes is shutting down” into Telegram). Hermes tasks already run as a service and do not use this Termius session.
 - Do not restart `health-tracker.service` or change Caddy. This ID is the phone door, not the website.
 - Do not `git reset --hard` a dirty tree. Do not commit secrets. Do not change `src/` for V-27.
 - Do not treat `grok --resume` as the fix. The live process has to stay inside tmux.

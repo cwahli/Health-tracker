@@ -23,7 +23,7 @@ Put the returned screenshot path on its own `MEDIA:` line (see the
 `telegram-media-delivery` skill):
 
 ```
-MEDIA:/tmp/opencode-bot-shots/page-<timestamp>.png
+MEDIA:/tmp/bot-host-shots/page-<timestamp>.png
 Here is example.com.
 ```
 

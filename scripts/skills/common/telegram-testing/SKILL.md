@@ -24,7 +24,7 @@ Goal: never say “sent / works / Instant View works” without a command that p
 ## 1. Text / Markdown send test
 
 ```bash
-bash /home/ubuntu/opencode-bot/scripts/telegram-send.sh \
+bash /home/ubuntu/bot-host/scripts/telegram-send.sh \
   --profile="${PROFILE:-orchestrator}" \
   --text="TG-TEST markdown *bold* \`code\` $(date -u +%H:%M:%SZ)"
 ```
@@ -55,7 +55,7 @@ MEDIA:/absolute/path/to/report.html
 Optional one-line note.
 ```
 
-Or direct API via bot path (opencode-bot `TelegramApi.sendMediaFile`): extension decides method — `.png/.jpg` → photo, else **document**.
+Or direct API via bot path (bot-host `TelegramApi.sendMediaFile`): extension decides method — `.png/.jpg` → photo, else **document**.
 
 Verify file first:
 
@@ -136,7 +136,7 @@ Never: “should work”, “I restarted but didn’t re-curl”, HTTP 200 witho
 ## 8. Smoke test one-shot
 
 ```bash
-bash /home/ubuntu/opencode-bot/scripts/telegram-smoke-test.sh --profile=orchestrator
+bash /home/ubuntu/bot-host/scripts/telegram-smoke-test.sh --profile=orchestrator
 ```
 
 Runs text, action, and optional photo/document checks; prints PASS/FAIL per case.

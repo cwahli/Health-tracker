@@ -22,6 +22,21 @@ import {
 } from '../scripts/lib/tg-api.mjs';
 import { loadRegistry, getBot, resolveToken, normalizeConfig } from '../scripts/lib/registry.mjs';
 import {
+  parseModelRef,
+  toModelRef,
+  formatFreeLabel,
+  listFreeOpenCode,
+  buildFreeModelList,
+  formatFreeModelText,
+  CLINE_FREE_MODELS,
+} from '../scripts/lib/freemodels.mjs';
+import {
+  buildClineArgs,
+  mapClineEvent,
+  resolveClineBin,
+  CLINE_THINKING_LEVELS,
+} from '../scripts/lib/agent-cline.mjs';
+import {
   parseCommand,
   BOT_COMMANDS,
   COMMAND_NAMES,
@@ -41,6 +56,7 @@ import {
   formatUsage,
   formatTokens,
   extractMedia,
+  extractCodeBlocks,
 } from '../scripts/lib/commands.mjs';
 import {
   buildStatusSnapshot,
@@ -247,7 +263,7 @@ describe('tg-api clamp', () => {
 });
 
 describe('registry', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bot-registry-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-host-registry-'));
   const file = path.join(tmp, 'registry.json');
 
   it('loads multiple bots and resolves by id', () => {
@@ -289,6 +305,11 @@ describe('registry', () => {
 describe('commands', () => {
   it('parses slash commands and strips the bot suffix', () => {
     expect(parseCommand('/models')).toEqual({ name: 'models', args: '', raw: '/models' });
+    expect(parseCommand('/model cline:cline-free/kat-coder-pro')).toEqual({
+      name: 'model',
+      args: 'cline:cline-free/kat-coder-pro',
+      raw: '/model cline:cline-free/kat-coder-pro',
+    });
     expect(parseCommand('/model opencode-go/deepseek-v4.1-flash')).toEqual({
       name: 'model',
       args: 'opencode-go/deepseek-v4.1-flash',
@@ -307,7 +328,7 @@ describe('commands', () => {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
     };
     const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
-    for (const cmd of ['/new', '/status', '/model', '/models', '/abort', '/help']) {
+    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/abort', '/help']) {
       expect(text).toContain(cmd);
     }
     expect(text).toContain('opencode-go/muse-spark-1.3');
@@ -396,10 +417,10 @@ describe('pickers', () => {
     const models = Array.from({ length: 20 }, (_, i) => `p/m${i}`);
     const page0 = modelKeyboard(models, { page: 0, pageSize: 8 });
     expect(page0.inline_keyboard).toHaveLength(9);
-    expect(page0.inline_keyboard[0][0].callback_data).toBe('m:0');
+    expect(page0.inline_keyboard[0][0].callback_data).toBe('m:p/m0');
     expect(page0.inline_keyboard[8].some((b: { callback_data: string }) => b.callback_data === 'mp:1')).toBe(true);
     const page2 = modelKeyboard(models, { page: 2, pageSize: 8 });
-    expect(page2.inline_keyboard[0][0].callback_data).toBe('m:16');
+    expect(page2.inline_keyboard[0][0].callback_data).toBe('m:p/m16');
     for (const row of page0.inline_keyboard) {
       for (const button of row) {
         expect(button.callback_data.length).toBeLessThanOrEqual(64);
@@ -422,8 +443,8 @@ describe('pickers', () => {
       'opencode/nemotron-3.5-lightning-free',
     ]);
     const kb = modelKeyboard(sorted, { page: 0, pageSize: 8 });
-    expect(kb.inline_keyboard[0][0].text).toMatch(/^\u2713 /);
-    expect(kb.inline_keyboard[0][0].callback_data).toBe('m:0');
+    expect(kb.inline_keyboard[0][0].text).toBe('opencode/muse-spark-1.3-contributor-free');
+    expect(kb.inline_keyboard[0][0].callback_data).toBe('m:opencode/muse-spark-1.3-contributor-free');
     expect(kb.inline_keyboard[2][0].text).toBe('opencode/deepseek-v4-flash');
   });
 
@@ -459,9 +480,9 @@ describe('pickers', () => {
 
   it('keeps one command source of truth including /free + /compact', async () => {
     expect(assertValidCommands()).toBe(true);
-    // every advertised command has a handler case in opencode-bot.mjs
+    // every advertised command has a handler case in bot-host.mjs
     const src = (await import('node:fs')).readFileSync(
-      new URL('../scripts/opencode-bot.mjs', import.meta.url), 'utf8',
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
     );
     for (const name of COMMAND_NAMES) {
       expect(src).toContain(`case '${name}'`);
@@ -478,11 +499,135 @@ describe('pickers', () => {
 
   it('builds agent and variant keyboards and decodes callbacks', () => {
     const agents = agentKeyboard([{ name: 'build', type: 'primary' }]);
-    expect(agents.inline_keyboard[0][0]).toEqual({ text: 'build (primary)', callback_data: 'a:0' });
+    expect(agents.inline_keyboard[0][0]).toEqual({ text: 'build (primary)', callback_data: 'a:build' });
     const variants = variantKeyboard(['low', 'high']);
-    expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:1' });
+    expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:high' });
     expect(decodeCallback('m:5')).toEqual({ kind: 'm', value: '5' });
     expect(decodeCallback('noop')).toEqual({ kind: 'noop', value: undefined });
+  });
+
+  it('keeps default m/mp callbacks and supports fm/fmp for free models', () => {
+    const models = Array.from({ length: 12 }, (_, i) => `p/m${i}`);
+    const page0 = modelKeyboard(models, { page: 0, pageSize: 8 });
+    expect(page0.inline_keyboard[0][0].callback_data).toBe('m:p/m0');
+    expect(page0.inline_keyboard[8].some((b: { callback_data: string }) => b.callback_data === 'mp:1')).toBe(true);
+    const free = modelKeyboard(['a', 'b'], { kind: 'fm' });
+    expect(free.inline_keyboard[0][0].callback_data).toBe('fm:a');
+    const freePage = modelKeyboard(models, { page: 1, pageSize: 8, kind: 'fm' });
+    expect(freePage.inline_keyboard[0][0].callback_data).toBe('fm:p/m8');
+    expect(freePage.inline_keyboard.at(-1)?.some((b: { callback_data: string }) => b.callback_data === 'fmp:0')).toBe(true);
+  });
+});
+
+describe('freemodels', () => {
+  it('parses cline: and opencode: refs and formats labels', () => {
+    expect(parseModelRef('cline:cline-free/muse-spark-1.3-contributor')).toEqual({
+      surface: 'cline',
+      id: 'cline-free/muse-spark-1.3-contributor',
+      raw: 'cline:cline-free/muse-spark-1.3-contributor',
+    });
+    expect(parseModelRef('opencode:opencode/big-pickle')).toEqual({
+      surface: 'opencode',
+      id: 'opencode/big-pickle',
+      raw: 'opencode:opencode/big-pickle',
+    });
+    expect(parseModelRef('opencode-go/minimax-m2.7')).toEqual({
+      surface: 'opencode',
+      id: 'opencode-go/minimax-m2.7',
+      raw: 'opencode-go/minimax-m2.7',
+    });
+    expect(toModelRef('cline', 'cline-free/kat-coder-pro')).toBe('cline:cline-free/kat-coder-pro');
+    expect(toModelRef('opencode', 'opencode/big-pickle')).toBe('opencode/big-pickle');
+    expect(formatFreeLabel('cline:cline-free/muse-spark-1.3-contributor')).toBe(
+      'cline:muse spark 1.3 contributor (free)',
+    );
+    expect(formatFreeLabel('opencode/big-pickle')).toBe('opencode:big-pickle (free)');
+  });
+
+  it('filters zero-cost authorized opencode models from the cache', () => {
+    const readJson = (file: string) => {
+      if (file.endsWith('models.json')) {
+        return {
+          opencode: {
+            models: {
+              'big-pickle': { cost: { input: 0, output: 0 } },
+              'mimo-v2.6-flash-free': { cost: { input: 0, output: 0 } },
+              'paid-model': { cost: { input: 1, output: 2 } },
+            },
+          },
+          unauthorized: {
+            models: { 'free-but-no-auth': { cost: { input: 0, output: 0 } } },
+          },
+        };
+      }
+      if (file.endsWith('auth.json')) return { opencode: { key: 'x' } };
+      return null;
+    };
+    const refs = listFreeOpenCode({ modelsCachePath: '/x/models.json', authPath: '/x/auth.json', readJson });
+    expect(refs).toEqual(['opencode/big-pickle', 'opencode/mimo-v2.6-flash-free']);
+  });
+
+  it('lists cline free models first and reports notes in the text', () => {
+    const entries = buildFreeModelList({
+      modelsCachePath: '/missing-models.json',
+      authPath: '/missing-auth.json',
+      readJson: () => null,
+    });
+    expect(entries).toHaveLength(CLINE_FREE_MODELS.length);
+    expect(entries[0].surface).toBe('cline');
+    expect(entries[0].ref).toBe('cline:cline-free/deepseek-v4.1-flash');
+    const text = formatFreeModelText(entries, { current: 'opencode/big-pickle' });
+    expect(text).toContain('opencode/big-pickle');
+    expect(text).toContain('daily free cap');
+    expect(text).toContain('4 cline, 0 opencode');
+  });
+});
+
+describe('agent-cline', () => {
+  it('builds cline args with provider, model, json and prompt last', () => {
+    const args = buildClineArgs({
+      prompt: 'Say OK',
+      model: 'cline-free/deepseek-v4.1-flash',
+      variant: 'low',
+      plan: true,
+      timeoutMs: 90000,
+      workspace: '/ws',
+    });
+    expect(args).toEqual([
+      '-P', 'cline',
+      '-m', 'cline-free/deepseek-v4.1-flash',
+      '--json', '--auto-approve', 'true',
+      '--thinking', 'low',
+      '-p',
+      '-t', '90',
+      '-c', '/ws',
+      'Say OK',
+    ]);
+  });
+
+  it('drops invalid variants and omits plan/timeout flags when unset', () => {
+    const args = buildClineArgs({ prompt: 'hi', model: 'cline-free/kat-coder-pro', variant: 'auto' });
+    expect(args).toEqual(['-P', 'cline', '-m', 'cline-free/kat-coder-pro', '--json', '--auto-approve', 'true', 'hi']);
+    expect(CLINE_THINKING_LEVELS).toContain('xhigh');
+    expect(typeof resolveClineBin('/custom/cline')).toBe('string');
+    expect(resolveClineBin('/custom/cline')).toBe('/custom/cline');
+  });
+
+  it('maps run_result, error and tool events', () => {
+    expect(
+      mapClineEvent({
+        type: 'run_result',
+        text: 'OK',
+        usage: { totalCost: 0, inputTokens: 10, outputTokens: 5 },
+        finishReason: 'stop',
+        model: 'deepseek',
+      }),
+    ).toMatchObject({ kind: 'run_result', text: 'OK' });
+    expect(mapClineEvent({ type: 'error', message: 'boom' })).toEqual({ kind: 'error', message: 'boom' });
+    expect(
+      mapClineEvent({ type: 'agent_event', event: { type: 'tool_use', tool: 'bash', status: 'running' } }),
+    ).toMatchObject({ kind: 'tool', tool: 'bash' });
+    expect(mapClineEvent(null)).toBeNull();
   });
 });
 
@@ -545,6 +690,30 @@ describe('media delivery', () => {
     expect(calls[0].url).toContain('/bottok/sendPhoto');
     expect(calls[0].init.body).toBeInstanceOf(FormData);
     fs.unlinkSync(file);
+  });
+});
+
+describe('extractCodeBlocks', () => {
+  it('returns fenced blocks verbatim for the standalone snippet message', () => {
+    const answer = [
+      'Here is the fix:',
+      '```ts',
+      'export const x = 1;',
+      '```',
+      'Done.',
+    ].join('\n');
+    expect(extractCodeBlocks(answer)).toEqual(['```ts\nexport const x = 1;\n```']);
+  });
+
+  it('keeps every block in order and handles missing language tags', () => {
+    const answer = ['```js', 'a();', '```', 'text', '```', 'b();', '```'].join('\n');
+    expect(extractCodeBlocks(answer)).toEqual(['```js\na();\n```', '```\nb();\n```']);
+  });
+
+  it('returns nothing when there is no fenced code', () => {
+    expect(extractCodeBlocks('just prose instructions')).toEqual([]);
+    expect(extractCodeBlocks('')).toEqual([]);
+    expect(extractCodeBlocks(null)).toEqual([]);
   });
 });
 
