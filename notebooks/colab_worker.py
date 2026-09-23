@@ -17,11 +17,24 @@ import subprocess
 import requests
 
 # ---------------------------------------------------------------------------
-# Mobile Configuration (Set your details here)
+# Mobile Configuration (Secure Colab Secrets or Environment Variables)
 # ---------------------------------------------------------------------------
-TELEGRAM_BOT_TOKEN = os.environ.get("COLLAB_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+try:
+    from google.colab import userdata
+    TELEGRAM_BOT_TOKEN = userdata.get("COLLAB_BOT_TOKEN")
+except Exception:
+    TELEGRAM_BOT_TOKEN = None
+
+if not TELEGRAM_BOT_TOKEN:
+    TELEGRAM_BOT_TOKEN = os.environ.get("COLLAB_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+
+try:
+    from google.colab import userdata
+    GITHUB_TOKEN = userdata.get("GITHUB_TOKEN")
+except Exception:
+    GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+
 ALLOWED_USER_ID = int(os.environ.get("COLLAB_CHAT_ID", "6218257274"))
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")  # Optional: GitHub Personal Access Token (for private repos)
 DEFAULT_REPO = "https://github.com/cwahli/Health-tracker.git"
 REPO_DIR = os.environ.get("REPO_DIR", "/content/Health-tracker")
 IDLE_TIMEOUT_MINUTES = 20
