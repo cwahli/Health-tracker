@@ -46,9 +46,12 @@
       "test": "T1",
       "scope": "common",
       "status": "partial",
-      "prove": "live smoke: matrix PNG delivered; user-asked tables arrive aligned, never raw pipes",
+      "prove": "live smoke: matrix PNG delivered; user-asked tables arrive aligned, never raw pipes; JSON pipeline builds on VPS",
       "expect": [
-        "public/capability-matrix.html"
+        "public/capability-matrix.html",
+        "qa-evidence/table_template.py",
+        "qa-evidence/build-table.py",
+        "qa-evidence/build-model-comparison.py"
       ],
       "skills": [
         "telegram-matrix",

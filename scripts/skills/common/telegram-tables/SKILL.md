@@ -29,10 +29,34 @@ characters so it fits a phone bubble without sideways scroll; right-align
 numbers where it helps; no language tag needed (use `text` — a real language
 tag adds a copy button, which is wrong for a read-only table).
 
-## Wide tables (>3 columns or >30 chars): image via `MEDIA:`
+## Wide tables (>3 columns or >30 chars): JSON pipeline → HTML grid → `MEDIA:`
 
-Render the table to HTML, screenshot it, deliver with the `MEDIA:` convention —
-same path as the **`telegram-photo`** skill. Never shrink a wide table by
+Do NOT hand-write HTML. Populate a small JSON file and build it — the agent
+writes data only (token-cheap positional arrays), the builder renders the
+mobile/TG-friendly grid (sticky header + first column, click-to-sort, readable
+with scripts blocked):
+
+```bash
+python3 qa-evidence/build-table.py /tmp/nutrients.json /tmp/nutrients.html
+ls -la /tmp/nutrients.html
+```
+
+Input schema (`title`, `preamble[]`, `tables[{heading, columns[], align[],
+rows[[]], intro[]/outro[]}]`, `notes[]`; align letters `l`/`r`/`c`; every row
+must match its `columns` length). Full schema + example in
+`qa-evidence/build-table.py`. For the model bake-off specifically, edit
+`qa-evidence/model-comparison.json` and run
+`python3 qa-evidence/build-model-comparison.py` instead.
+
+Then deliver:
+
+```
+MEDIA:/tmp/nutrients.html
+Full breakdown table — opens in chat, sortable columns.
+```
+
+The `.html` arrives as a file that opens in Telegram's in-app browser. Requires
+`markdown-it-py` on the build host (VPS has it). Never shrink a wide table by
 dropping columns silently; if you must trim, say which columns you dropped.
 
 ## Honesty rule for estimated tables

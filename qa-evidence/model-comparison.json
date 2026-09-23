@@ -1,0 +1,108 @@
+{
+  "_help": "SOURCE OF TRUTH for qa-evidence/model-comparison.html. Edit THIS file, then run: python3 qa-evidence/build-model-comparison.py (writes only the .html; no LLM, free). Table rows are positional arrays matching the section's 'columns'. Add/change a model = edit one row line.",
+  "title": "Model comparison — value, performance & cost",
+  "preamble": [
+    "**Last updated:** 2026-09-23",
+    "**Canonical file:** `qa-evidence/model-comparison.json` (edit this; `model-comparison.html` is generated for reading)",
+    "**One performance metric:** Artificial Analysis **Intelligence Index v4.3** (composite of 10 evals — GDPval-AA v2, AA-Briefcase, AutomationBench-AA, Terminal-Bench 4.0, SciCode, Humanity's Last Exam, GDP.pdf, CritPt, AA-Omniscience, AA-LCR v1.1). Only v4.3 scores are compared here; earlier index versions are not comparable.",
+    "**Cost basis:** one **dev-hour** = 2,000,000 input tokens (90% served from cache) + 150,000 output tokens. `cost/hr = 0.2·in + 1.8·cache + 0.15·out` (rates per 1M).",
+    "**Value** = Intelligence Index ÷ cost per dev-hour (higher = better). Rows sorted best value → lowest.",
+    "",
+    "Pricing from the models.dev cache (`~/.cache/opencode/models.json`, refreshed 2026-09-22), USD list rates. **(you)** = the model this stack currently runs."
+  ],
+  "ranking": {
+    "heading": "Ranking (best value first)",
+    "columns": ["Model", "Perf: AA Index v4.3", "Cost / dev-hr", "Value (idx ÷ $/hr)", "In $/1M", "Out $/1M", "Cache $/1M", "Context", "Inputs", "Notes"],
+    "align": ["l", "r", "r", "r", "r", "r", "r", "r", "l", "l"],
+    "rows": [
+      ["**Muse Spark 1.3 Contributor**", "48.2", "$0.054", "**893**", "0.10", "0.20", "0.002", "1.05M", "text+img+vid+pdf+audio", "Contributor tier **trains on your data**; `muse-spark-1.3-contributor-free` = $0"],
+      ["**DeepSeek V4.1 Flash**", "39.5", "$0.125", "**315**", "0.15", "0.60", "0.003", "1M", "text+img", "Ultra-cheap cache; weak on long autonomous loops; last paid stack default (until 2026-09-23)"],
+      ["Qwen3.8 Flash", "39.9", "$0.129", "**309**", "0.15", "0.47", "0.016", "1M", "text+img+video", "Latest Qwen Flash; close peer to DeepSeek"],
+      ["GLM-5.3-Flash", "41.9", "$0.159", "**264**", "0.15", "0.50", "0.03", "1M", "text+img+vid+pdf", "Near-free swap, more modalities"],
+      ["GPT-5.6 Luna", "37.5", "$0.256", "**146**", "0.20", "1.20", "0.02", "1.05M", "text+img+pdf", "Cheapest OpenAI tier"],
+      ["Gemini 3.5 Flash Lite", "22.0", "$0.489", "**45**", "0.30", "2.50", "0.03", "1.05M", "text+img+vid+audio+pdf", "Fast/cheap, weakest index here"],
+      ["Qwen3.8 Max", "45.4", "$1.75", "**26**", "2.00", "6.00", "0.25", "1M", "text+img+video", "Strong agentic Elo, mid price"],
+      ["Gemini 3.8 Flash", "41.2", "$1.70", "**24**", "1.50", "7.50", "0.15", "1.05M", "text+img+vid+audio+pdf", "Broadest modal input; good coding benches"],
+      ["Grok 4.7", "46.0", "$2.20", "**21**", "2.00", "6.00", "0.50", "500K", "text+img+pdf", "Frontier knowledge work; ~81k output tokens/task"],
+      ["GPT-5.6 Sol", "47.1", "$4.52", "**10.4**", "4.00", "20.00", "0.40", "1.05M", "text+img+pdf", "Strong on long tasks"],
+      ["**Claude Opus 5** (latest Opus)", "50.7", "$5.65", "**9.0**", "5.00", "25.00", "0.50", "1M", "text+img+pdf", "Highest raw performance; ~50–65% more tokens on the same work"],
+      ["Claude Opus 4.8 (previous)", "42.0", "$5.65", "**7.4**", "5.00", "25.00", "0.50", "1M", "text+img+pdf", "Last-gen Opus, same price as Opus 5"]
+    ],
+    "outro": [
+      "**Read-out:** DeepSeek V4.1 Flash (this stack's last paid default) is #2 on value — within ~1% of the top of the \"normal\" (non-data-sharing) field and ~4x cheaper per dev-hour than Gemini 3.8 Flash, ~18x cheaper than GPT-5.6 Sol, ~45x cheaper than Opus 5. The stack now runs free **Big Pickle**, so the paid ranking is what an upgrade would buy, not what is running. Muse Spark Contributor tops the list only because Meta subsidizes it and trains on your traffic."
+    ]
+  },
+  "free": {
+    "heading": "Free models (OpenCode picker + Hermes) — combined",
+    "intro": [
+      "All free models from the OpenCode `/model` picker and the Hermes picker in one table. Cost is **$0** everywhere, so the value ratio above is undefined — rows are ranked by capability (AA Intelligence Index v4.3) instead, with the modality that matters for photo input called out. **Free via** shows which surface offers it; **Allowance** is per surface."
+    ],
+    "columns": ["Model", "Free via", "AA v4.3", "Context", "Inputs", "Allowance", "Notes"],
+    "align": ["l", "l", "r", "r", "l", "l", "l"],
+    "rows": [
+      ["**Muse Spark 1.3 Free**", "OpenCode Zen", "**48**", "1.05M", "text+img+vid+pdf+audio", "Free, no card; no per-day cap published", "Best free model; multimodal. **Cannot be used in the VM.** Contributor tier **trains on your data**"],
+      ["**Muse Spark 1.2 Free**", "OpenCode Zen", "**40**", "1.05M", "text+img+vid+pdf+audio", "Free, no card; no per-day cap published", "Predecessor; multimodal; contributor tier trains on your data. **Cannot be used in the VM**"],
+      ["`z-ai/glm-5.2:free`", "Hermes", "**34**", "32K", "text", "OpenRouter free: 50 req/day (20/min); 1,000/day at ≥$10 credits", "Best Hermes score, but free-SKU context is only **32K** (paid = 1M)"],
+      ["`minimax/minimax-m3:free`", "Hermes", "**30**", "1M", "text+img+video", "OpenRouter free: 50 req/day (20/min); 1,000/day at ≥$10 credits", "Free on Hermes/OpenRouter; also runs on **OpenCode Go** as `opencode-go/minimax-m3` (subscription; verified working here)"],
+      ["`upstage/solar-pro4:free`", "Hermes", "**28**", "512K", "text", "OpenRouter/Nous free: 50 req/day (20/min); 1,000/day at ≥$10 credits", "Strongest of the new Hermes free pair; **text-only**"],
+      ["`thinkingmachines/inkling:free`", "Hermes", "**~26**", "1M", "text+img+audio", "OpenRouter free: 50 req/day (20/min); 1,000/day at ≥$10 credits", "Open weights; multimodal; TB 2.1 ~64%"],
+      ["`thinkingmachines/inkling-small:free`", "Hermes", "**~26**", "1M", "text+img+audio", "OpenRouter free: 50 req/day (20/min); 1,000/day at ≥$10 credits", "Smaller/faster Inkling; multimodal"],
+      ["**Nemotron 3 Ultra Free**", "OpenCode Zen + Hermes", "**23**", "1M", "text", "Free, no card (Zen); OpenRouter free 50 req/day (Hermes)", "Large but weak on the v4.3 composite; **text-only**"],
+      ["**Ling 3.0 Flash Fin Free**", "OpenCode Zen + Hermes", "**21**", "262K", "text", "Free, no card (Zen); OpenRouter free 50 req/day (Hermes)", "Base Ling 3.0 Flash = 21; **text-only**"],
+      ["`meituan/longcat-2.0:free`", "OpenCode Zen + Hermes", "**20**", "1M", "text", "Free, no card (Zen); OpenRouter/Nous free 50 req/day (Hermes)", "New Hermes free pair; **text-only**"],
+      ["`stepfun/step-3.7-flash:free`", "Hermes", "**19**", "262K", "text+image", "OpenRouter/Nous free: 50 req/day (20/min); 1,000/day at ≥$10 credits", "Open weights; fast; multimodal (text+image)"],
+      ["**Nemotron 3.5 Lightning Free**", "OpenCode Zen + Hermes", "**13**", "262K", "text", "Free, no card (Zen); OpenRouter free 50 req/day (Hermes)", "Small/fast (31.6B/3.6B active); weakest scored; **text-only**"],
+      ["**Big Pickle** (you)", "OpenCode Zen", "**~30** (est.)", "200K", "text", "Free, no card; no per-day cap published", "**Est. band 25–35:** anchored on **50.8%** SWE Atlas Codebase QnA ≈ GLM-5.2's 48.1% (AA 34), docked a few points for unconfirmed identity (leaks→DeepSeek; community guesses GLM-4.6/4.7) and reported degradation past ~50–70K of the 200K context. That SWE Atlas run is self-reported (single trial, 250-step cap vs Scale's 500, ±4.5pt); **no AA v4.3 published**. Stack default since 2026-09-23 — `--variant low` replies; default/`high` gave no reply within 150s. **Text-only**; prompts may train the model"],
+      ["**MiMo-V2.6-Flash Free**", "OpenCode Zen", "**41** (est.)", "200K", "text+img+audio+video+pdf", "Free, no card; no per-day cap published", "Newest free multimodal; Pro sibling = 46.3 measured, Flash score not published"],
+      ["`stealth/union-alpha`", "Hermes", "**30** (est.)", "1M (est.)", "text (est.)", "Free (Nous Portal); no cap published", "$0 stealth SKU, maker/specs unconfirmed"],
+      ["`poolside/laguna-s-2.1:free`", "OpenCode Zen + Hermes", "**26** (est.)", "262K", "text", "Free, no card (Zen); OpenRouter free 50 req/day (Hermes)", "Coding model (SWE Atlas 46.2, TB 2.1 70.2); **text-only**"],
+      ["`nvidia/nemotron-3-super-120b-a12b:free`", "OpenCode Zen + Hermes", "**18** (est.)", "262K", "text", "Free, no card (Zen); OpenRouter free 50 req/day (Hermes)", "No published v4.3 (older index ≈ 36); **text-only**"],
+      ["`poolside/laguna-xs-2.1:free`", "Hermes", "**18** (est.)", "262K", "text", "OpenRouter free: 50 req/day (20/min); 1,000/day at ≥$10 credits", "Smaller Laguna; **text-only**"]
+    ],
+    "outro": [
+      "**Which free model can be used:** every row is usable now with no card. Ranked by capability, **Muse Spark 1.3 Free (48)** is the strongest and best for photo input — **but it cannot be used in the VM**, so for VM work the best free picks are **GLM-5.2 free (34)** (mind the 32K context), **MiniMax-M3 free (30, multimodal)**, **Solar Pro 4 free (28)**, or **Inkling (multimodal)**. **Big Pickle (~30 est.)** is the free coding specialist, text-only, and **the model this stack runs** (`opencode/big-pickle`, `--variant low`). The Nemotron, Ling, LongCat, Laguna and union-alpha rows are **text-only** and score well below Muse.",
+      "**Allowance caveats:** OpenCode Free/Zen and Nous Portal publish no hard per-day cap for these SKUs; OpenRouter `:free` models are capped at **50 requests/day (20/min)**, rising to **1,000/day once ≥$10 of credits have been purchased**, and failed attempts still count. Free tiers on both OpenCode and OpenRouter may use your prompts to train the model.",
+      "**Estimates:** values marked **(est.)** have no published figure — they are indicative estimates, not measurements.",
+      "Paid alternatives on the same pickers (not free): DeepSeek V4.1 Flash — `opencode-go` $0.15/$0.60, `opencode` (Zen) $0.30/$1.20."
+    ]
+  },
+  "notes_heading": "Notes & assumptions",
+  "notes": [
+    "- **Dev-hour is an assumption, not a vendor number.** It models a long agentic coding loop on a typical web app (big repeated context, mostly cache hits, moderate output). Change the token mix and every dollar scales linearly; the *ranking by value* is stable because it tracks rate ratios.",
+    "- **Muse Spark 1.3 Contributor** is priced at the contributor rate; the standard (no-training) Muse Spark 1.3 is `1.25 / 4.25 / 0.15` → ~$1.16/dev-hr (value ~42), i.e. still mid-pack.",
+    "- **Long-context cliffs:** GPT-5.6 and Grok double rates above 200K–272K input tokens per request; the table uses the sub-threshold rates.",
+    "- **Zen vs Go:** DeepSeek V4.1 Flash is `0.15 / 0.60` on OpenCode Go but `0.30 / 1.20` on OpenCode Zen.",
+    "- **Proxy flags:** Grok 4.7 index is the measured xhigh figure; DeepSeek V4.1 Flash index is the (max) figure. Harnesses/effort levels differ.",
+    "- **Your long-horizon caveat:** on LiveBench's agentic-coding column DeepSeek ranked last of seven frontier peers (V4-Flash 46.77 vs Opus 5 65.20) — near-best on scoped fixes, weakest on long autonomous loops.",
+    "- **Free models:** the §Free models table merges the OpenCode picker and the Hermes picker into one list, uses the same AA v4.3 metric, and marks rows with no published v4.3 score **(est.)**. \"Free\" = $0 list price; OpenCode Free/Zen and Nous Portal publish no hard cap, while OpenRouter `:free` SKUs cap at **50 req/day (1,000/day at ≥$10 credits)**. **Muse Spark (1.3/1.2) cannot be used in the VM.** Free tiers may use prompts to train the model.",
+    "- **Big Pickle's ~30 is the least certain cell in the document.** There is no AA v4.3 figure and no confirmed maker; the estimate is: SWE Atlas 50.8% (±4.5) ≈ GLM-5.2's 48.1%, whose AA v4.3 is 34 → take 34, then dock for unconfirmed identity (GLM-4.6/4.7 guesses score lower) and long-context degradation → point **~30**, honest band **25–35**. Treat it as an informed guess, not a measurement."
+  ],
+  "sources_heading": "Sources",
+  "sources": [
+    "- **Pricing & specs:** `~/.cache/opencode/models.json` (models.dev), 2026-09-22.",
+    "- **Performance (AA Intelligence Index v4.3):** artificialanalysis.ai (v4.3 announcement, Grok 4.7 benchmarking post), DataLearnerAI, wojciech.io, Tabbit.",
+    "- **Coding/agentic cross-checks:** benchleader.com (SWE-bench Vals), benchmarklist.com (DeepSWE 1.1), genztech.blog, i10x.ai, hackaigc.com, docsbot.ai, acecloud.ai, codersera.com, mindstudio.ai."
+  ],
+  "howto_heading": "How to update this file",
+  "howto": [
+    "1. Edit `qa-evidence/model-comparison.json` (the source of truth) — tables are positional arrays; add/change a model = one row line.",
+    "2. Refresh prices: `opencode models --refresh`, then re-read `~/.cache/opencode/models.json`.",
+    "3. Regenerate the view: `python3 qa-evidence/build-model-comparison.py`. It writes `model-comparison.html` (no Markdown) via the shared template (`qa-evidence/table_template.py`): full-bleed, sticky header, sticky 150px first column, click-to-sort headers, wrapping cells. No LLM — free and instant.",
+    "4. Bump **Last updated** and add a §Changelog row.",
+    "5. Share: emit `MEDIA:/home/ubuntu/src/Health-tracker/qa-evidence/model-comparison.html`."
+  ],
+  "changelog": {
+    "heading": "Changelog",
+    "columns": ["Date", "Change"],
+    "align": ["l", "l"],
+    "rows": [
+      ["2026-09-23", "Big Pickle AA v4.3: replaced the earlier invented `40` with a sourced estimate **~30 (est., band 25–35)** and documented its basis; moved `(you)` from DeepSeek V4.1 Flash to Big Pickle after switching the bot to `opencode/big-pickle` (`--variant low`)."],
+      ["2026-09-22", "Made the doc data-driven: `model-comparison.json` is the source of truth; `build-model-comparison.py` generates only the `.html` (no Markdown)."],
+      ["2026-09-22", "Merged all free models (OpenCode + Hermes) into one combined table with AA v4.3 and per-surface allowance; added Solar Pro 4 free and LongCat 2.0 free; flagged that Muse Spark cannot be used in the VM."],
+      ["2026-09-22", "Added the Hermes free set (GLM-5.2, MiniMax-M3, Inkling/Inkling Small, Nemotron 3 Super/Ultra/3.5 Lightning, Laguna S/XS 2.1, union-alpha) to the free-models section."],
+      ["2026-09-22", "Added §Free models in the OpenCode picker (Big Pickle, Muse Spark 1.3/1.2 Free, MiMo-V2.6-Flash Free, Nemotron 3 Ultra/3.5 Lightning, Ling 3.0 Flash Fin, plus the paid DeepSeek Go/Zen rows) with AA v4.3 where published."],
+      ["2026-09-22", "Consolidated into one value-sorted table; single metric = AA Intelligence Index v4.3; added estimated cost per dev-hour and value ratio."],
+      ["2026-09-22", "Initial file: 12 models, price + relative cost + benchmarks."]
+    ]
+  }
+}
