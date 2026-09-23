@@ -28,8 +28,62 @@ import {
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
-const DISPATCH_LOCK = path.join(HOME, '.hermes', 'dispatch_lock');
+const LOCKS_DIR = path.join(HOME, '.hermes', 'file_locks');
 const BOOTED_AT = Date.now();
+
+/** Live per-file claims (informational only — /fix never blocks on them). */
+function liveClaims() {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(LOCKS_DIR);
+  } catch {
+    return [];
+  }
+  const now = Date.now();
+  const out = [];
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) continue;
+    let claim = null;
+    try {
+      claim = JSON.parse(fs.readFileSync(path.join(LOCKS_DIR, entry), 'utf8'));
+    } catch {
+      continue;
+    }
+    if (!claim || !claim.file) continue;
+    try {
+      process.kill(Number(claim.pid), 0);
+    } catch {
+      continue;
+    }
+    if (Number(claim.expiresAt) > 0 && Number(claim.expiresAt) <= now) continue;
+    out.push(claim);
+  }
+  return out;
+}
+
+function claimWarning(arg) {
+  const claims = liveClaims();
+  if (!claims.length) return '';
+  const lower = String(arg ?? '').toLowerCase();
+  const hits = claims.filter((c) => c.file && lower.includes(String(c.file).toLowerCase()));
+  if (!hits.length) return '';
+  const names = [...new Set(hits.map((h) => `${h.file} (by ${h.bugId || 'another run'})`))].slice(0, 5);
+  return `\n⚠️ Live claims: ${names.join(', ')} — the fix will route around them, not wait.`;
+}
+
+function lockHolder() {
+  return null;
+}
+
+function acquireDispatchLock(taskName = 'collab-bot') {
+  // Chat/fix never blocks on other agents. File claims are advisory at
+  // run start (see run-coding-dispatch.sh) + claim-guard on open PRs.
+  return null;
+}
+
+function releaseDispatchLock() {
+  // No global lock to release anymore.
+}
 
 function getTargetCwd() {
   const p = getActiveProject();
@@ -49,38 +103,6 @@ function parseArgs(argv) {
     else if (a.startsWith('--simulate=')) args.simulate = a.slice(11);
   }
   return args;
-}
-
-function lockHolder() {
-  try {
-    const info = fs.readFileSync(DISPATCH_LOCK, 'utf8').trim();
-    const splitAt = info.indexOf(':');
-    if (splitAt < 1) return null;
-    const pid = Number(info.slice(0, splitAt));
-    const bug = info.slice(splitAt + 1) || 'unknown';
-    if (!Number.isFinite(pid) || pid <= 0) return null;
-    process.kill(pid, 0);
-    return { pid, bug };
-  } catch {
-    return null;
-  }
-}
-
-function acquireDispatchLock(taskName = 'collab-bot') {
-  fs.mkdirSync(path.dirname(DISPATCH_LOCK), { recursive: true });
-  const holder = lockHolder();
-  if (holder) return holder;
-  fs.writeFileSync(DISPATCH_LOCK, `${process.pid}:${taskName}`, 'utf8');
-  return null;
-}
-
-function releaseDispatchLock() {
-  try {
-    const current = fs.readFileSync(DISPATCH_LOCK, 'utf8').trim();
-    if (current.startsWith(`${process.pid}:`)) {
-      fs.unlinkSync(DISPATCH_LOCK);
-    }
-  } catch {}
 }
 
 export function parseCollabCommand(text) {
@@ -170,8 +192,10 @@ Mobile-first AI dev assistant and compute router for your projects.
     }
 
     const sessionMsg = getSessionSummary();
-    const holder = lockHolder();
-    const lockMsg = holder ? `⚠️ *Dispatch Lock:* Active (${holder.bug}, pid ${holder.pid})` : `🟢 *Dispatch Lock:* Free`;
+    const claims = liveClaims().slice(0, 8);
+    const lockMsg = claims.length
+      ? `📁 *File claims (${claims.length} live):*\n${claims.map((c) => `• \`${c.file}\` (${c.bugId || '?'}, pid ${c.pid || '?'})`).join('\n')}`
+      : `🟢 *File claims:* none — every file is free`;
 
     const sharedBlock = formatStatusPlain(
       buildStatusSnapshot({
@@ -183,7 +207,7 @@ Mobile-first AI dev assistant and compute router for your projects.
         handoff: false,
         usage: null,
         totals: null,
-        runtime: { bootedAt: BOOTED_AT, taskState: 'idle', lock: lockHolder() },
+        runtime: { bootedAt: BOOTED_AT, taskState: 'idle', lock: null },
         health: null,
       }),
     );
@@ -299,16 +323,15 @@ Mobile-first AI dev assistant and compute router for your projects.
       return;
     }
 
-    const holder = acquireDispatchLock(`fix:${arg.slice(0, 30)}`);
-    if (holder) {
-      await api.sendMessage(chatId, `⚠️ Repo is busy with ${holder.bug} (pid ${holder.pid}). Please wait or send \`/cancel\`.`);
-      return;
-    }
+    // Parallel by design: /fix never waits on another agent. Advisory claims
+    // warn; the run proceeds in its own worktree via run-coding-dispatch.sh.
+    acquireDispatchLock(`fix:${arg.slice(0, 30)}`);
+    const warn = claimWarning(arg);
 
     const session = loadSession();
     await api.sendMessage(
       chatId,
-      `⏳ *[Colab Bot]* Starting dev workflow on *${currentProject.name}*:\n"${arg}"\n• Model: \`${session.model}\` (${session.activeBackend})\n• Pulling latest \`origin/main\`...`,
+      `⏳ *[Colab Bot]* Starting dev workflow on *${currentProject.name}*:${warn}\n"${arg}"\n• Model: \`${session.model}\` (${session.activeBackend})\n• Pulling latest \`origin/main\`...`,
       { parse_mode: 'Markdown' }
     );
 

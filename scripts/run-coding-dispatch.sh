@@ -29,137 +29,182 @@ cd "$REPO_DIR"
 HERMES_DIR="${HERMES_DIR:-${HOME}/.hermes}"
 AUDIT_LOG="${HERMES_DIR}/dispatch_audit.log"
 TELEGRAM_SCRIPT="${REPO_DIR}/scripts/telegram-send.sh"
-DISPATCH_LOCK="${HERMES_DIR}/dispatch_lock"
-DISPATCH_ACTIVE="${HERMES_DIR}/dispatch_active.json"
-mkdir -p "$HERMES_DIR" "${HERMES_DIR}/logs"
+DISPATCH_LOCK_DIR="${HERMES_DIR}/dispatch_locks"
+DISPATCH_ACTIVE_DIR="${HERMES_DIR}/dispatch_active"
+# Legacy single-file lock (pre-parallel). Kept as read-only fallback so an
+# old bot process that still holds it is visible in `status` instead of
+# silently ignored.
+LEGACY_DISPATCH_LOCK="${HERMES_DIR}/dispatch_lock"
+LEGACY_DISPATCH_ACTIVE="${HERMES_DIR}/dispatch_active.json"
+FILE_LOCKS_CLI="${REPO_DIR}/scripts/lib/file-locks.mjs"
+mkdir -p "$HERMES_DIR" "${HERMES_DIR}/logs" "$DISPATCH_LOCK_DIR" "$DISPATCH_ACTIVE_DIR"
 
 # ---------------------------------------------------------------
 # Subcommands: status, stop, cancel, list-models, list-agents
 # ---------------------------------------------------------------
 SUBCOMMAND="${1:-}"
 
+# One lock JSON per bug id: ${DISPATCH_LOCK_DIR}/<BUG_ID>.json
+#   pid:bug_id:tool:model:thinking:start_time:log_file (+ area, worktree rows)
+# Parallel by design: every active bug id gets its own record. `stop` targets
+# one bug (`stop --bug-id=X`) and only touches that process/files.
+lock_file_for() { printf '%s/%s.json' "$DISPATCH_LOCK_DIR" "$1"; }
+active_file_for() { printf '%s/%s.json' "$DISPATCH_ACTIVE_DIR" "$1"; }
+
+active_pids() {
+  local f pid
+  for f in "$DISPATCH_LOCK_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    pid=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$f" 2>/dev/null || true)
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && printf '%s:%s\n' "$pid" "$f"
+  done
+}
+
 status_cmd() {
   echo "=== Health-tracker Coding Dispatch Status ==="
-  local pid="" bug_id="" category="" tool="" model="" thinking="" start_time="" log_file="" task=""
+  local count=0
+  local f pid bug_id category tool model thinking start_time log_file task area worktree lock_files
+  local legacy_shown=0
+  for f in "$DISPATCH_LOCK_DIR"/*.json "$DISPATCH_ACTIVE_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    pid=""; bug_id=""; category=""; tool=""; model=""; thinking=""; start_time=""; log_file=""; task=""; area=""; worktree=""; lock_files=""
 
-  if [ -f "$DISPATCH_ACTIVE" ]; then
-    pid=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("pid",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    bug_id=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("bug_id",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    category=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("category",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    tool=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("tool",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    model=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("model",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    thinking=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("thinking",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    start_time=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("start_time",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    log_file=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("log_file",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    task=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("task",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-  fi
-
-  if [ -z "$pid" ] && [ -f "$DISPATCH_LOCK" ]; then
-    IFS=: read -r pid bug_id tool model thinking start_time log_file < "$DISPATCH_LOCK" || true
-  fi
-
-  if [ -n "$pid" ]; then
-    if kill -0 "$pid" 2>/dev/null; then
-      local now; now=$(date +%s)
-      local elapsed=$(( now - ${start_time:-$now} ))
-      local mins=$(( elapsed / 60 ))
-      local secs=$(( elapsed % 60 ))
-
-      local current_activity="Investigating codebase..."
-      local last_clean_lines=""
-      if [ -n "$log_file" ] && [ -f "$log_file" ]; then
-        last_clean_lines=$(sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' "$log_file" 2>/dev/null | tr -d '\r' | grep -vE '^[[:space:]]*$' | tail -n 8 || true)
-        local candidate
-        candidate=$(printf '%s\n' "$last_clean_lines" | tail -n 1 | cut -c1-140)
-        if [ -n "$candidate" ]; then
-          current_activity="$candidate"
-        fi
+    pid=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("pid",""))' "$f" 2>/dev/null || true)
+    bug_id=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("bug_id",""))' "$f" 2>/dev/null || true)
+    category=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("category",""))' "$f" 2>/dev/null || true)
+    tool=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("tool",""))' "$f" 2>/dev/null || true)
+    model=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("model",""))' "$f" 2>/dev/null || true)
+    thinking=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("thinking",""))' "$f" 2>/dev/null || true)
+    start_time=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("start_time",""))' "$f" 2>/dev/null || true)
+    log_file=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("log_file",""))' "$f" 2>/dev/null || true)
+    task=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("task",""))' "$f" 2>/dev/null || true)
+    area=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("area",""))' "$f" 2>/dev/null || true)
+    worktree=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("worktree",""))' "$f" 2>/dev/null || true)
+    lock_files=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(",".join(d.get("lock_files",[]) or []))' "$f" 2>/dev/null || true)
+    [ -n "$pid" ] || continue
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "---"
+      echo "State: STALE (bug ${bug_id:-?}, pid $pid dead; run '$0 stop --bug-id=${bug_id:-?}' to clean)"
+      continue
+    fi
+    count=$((count + 1))
+    local now; now=$(date +%s)
+    local elapsed=$(( now - ${start_time:-$now} ))
+    local mins=$(( elapsed / 60 ))
+    local secs=$(( elapsed % 60 ))
+    local current_activity="Investigating codebase..."
+    local last_clean_lines=""
+    if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+      last_clean_lines=$(sed -r 's/\x1B\[[0-9;]*[a-zA-Z]//g' "$log_file" 2>/dev/null | tr -d '\r' | grep -vE '^[[:space:]]*$' | tail -n 8 || true)
+      local candidate
+      candidate=$(printf '%s\n' "$last_clean_lines" | tail -n 1 | cut -c1-140)
+      if [ -n "$candidate" ]; then
+        current_activity="$candidate"
       fi
-
-      echo "State: ACTIVE_RUNNING"
-      echo "Agent: ${tool:-unknown} (Model: ${model:-default}, Thinking: ${thinking:-auto})"
-      echo "Bug ID: ${bug_id:-N/A} (Category: ${category:-general})"
-      echo "PID: $pid (Elapsed: ${mins}m ${secs}s)"
-      echo "Log: ${log_file:-none}"
-      echo "Task: ${task:-none}"
-      echo "Current Activity: $current_activity"
-      echo ""
-      echo "Recent Log Tail:"
-      printf '%s\n' "$last_clean_lines" | tail -n 5
-      return 0
+    fi
+    echo "---"
+    echo "Bug: ${bug_id:-N/A} (Category: ${category:-general})"
+    echo "Agent: ${tool:-unknown} (Model: ${model:-default}, Thinking: ${thinking:-auto})"
+    echo "PID: $pid (Elapsed: ${mins}m ${secs}s)"
+    [ -n "$area" ] && echo "Area: $area  Worktree: ${worktree:-$REPO_DIR}"
+    [ -n "$lock_files" ] && echo "Claimed files: $lock_files"
+    echo "Log: ${log_file:-none}"
+    echo "Task: ${task:-none}"
+    echo "Current Activity: $current_activity"
+  done
+  # Legacy single lock: visible for old processes, never blocks new work.
+  if [ -f "$LEGACY_DISPATCH_LOCK" ]; then
+    local info; info=$(cat "$LEGACY_DISPATCH_LOCK" 2>/dev/null || true)
+    local lpid; lpid=$(printf '%s' "$info" | cut -d: -f1)
+    if [ -n "$lpid" ] && kill -0 "$lpid" 2>/dev/null; then
+      legacy_shown=1
+      echo "---"
+      echo "Legacy lock (pre-parallel): $info — informational only, does not block new dispatches."
     else
-      echo "State: STALE_LOCK"
-      echo "Process PID $pid is not alive. Lock was held for $bug_id ($tool)."
-      echo "Run '$0 stop' to release the lock."
-      return 0
+      rm -f "$LEGACY_DISPATCH_LOCK" 2>/dev/null || true
     fi
   fi
-
-  echo "State: IDLE"
-  echo "No coding agent is currently running."
-  if [ -f "$AUDIT_LOG" ]; then
-    local last_audit; last_audit=$(tail -n 1 "$AUDIT_LOG" 2>/dev/null || true)
-    if [ -n "$last_audit" ]; then
-      echo "Last Audit Entry: $last_audit"
+  if [ -f "$LEGACY_DISPATCH_ACTIVE" ] && [ "$legacy_shown" = "0" ]; then
+    rm -f "$LEGACY_DISPATCH_ACTIVE" 2>/dev/null || true
+  fi
+  if [ "$count" -eq 0 ] && [ "$legacy_shown" = "0" ]; then
+    echo "State: IDLE"
+    echo "No coding agent is currently running."
+    if [ -f "$AUDIT_LOG" ]; then
+      local last_audit; last_audit=$(tail -n 1 "$AUDIT_LOG" 2>/dev/null || true)
+      if [ -n "$last_audit" ]; then
+        echo "Last Audit Entry: $last_audit"
+      fi
     fi
+  else
+    echo "---"
+    echo "Active runs: $count. File claims: run '$0 locks'."
+  fi
+}
+
+locks_cmd() {
+  if [ -f "$FILE_LOCKS_CLI" ]; then
+    node "$FILE_LOCKS_CLI" list 2>/dev/null || echo "[]"
+  else
+    echo "file-locks helper missing: $FILE_LOCKS_CLI"
   fi
 }
 
 stop_cmd() {
   echo "[Dispatcher] Processing stop request..."
-  local pid="" bug_id="" tool="" log_file=""
-
-  if [ -f "$DISPATCH_ACTIVE" ]; then
-    pid=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("pid",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    bug_id=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("bug_id",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-    tool=$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("tool",""))' "$DISPATCH_ACTIVE" 2>/dev/null || true)
-  fi
-
-  if [ -z "$pid" ] && [ -f "$DISPATCH_LOCK" ]; then
-    IFS=: read -r pid bug_id tool _ < "$DISPATCH_LOCK" || true
-  fi
-
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    echo "[Dispatcher] Terminating agent '$tool' (PID $pid) for $bug_id..."
-    kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-    pkill -P "$pid" 2>/dev/null || true
-    sleep 1.5
-
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "[Dispatcher] Process $pid did not exit after SIGTERM, sending SIGKILL..."
-      kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-      pkill -9 -P "$pid" 2>/dev/null || true
+  local STOP_BUG=""
+  local STOP_ALL=0
+  for a in "$@"; do
+    case "$a" in
+      --bug-id=*|--bug=*) STOP_BUG="${a#*=}" ;;
+      --all) STOP_ALL=1 ;;
+    esac
+  done
+  local stopped=0
+  local f pid bug_id tool worktree
+  for f in "$DISPATCH_LOCK_DIR"/*.json "$DISPATCH_ACTIVE_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    bug_id=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("bug_id",""))' "$f" 2>/dev/null || true)
+    if [ "$STOP_ALL" != "1" ] && [ -n "$STOP_BUG" ] && [ "$bug_id" != "$STOP_BUG" ]; then
+      continue
     fi
-  fi
-
-  # Terminate common background tools if lingering
-  pkill -f "opencode run" 2>/dev/null || true
-  pkill -f "cline --auto-approve" 2>/dev/null || true
-  pkill -f "grok -p" 2>/dev/null || true
-
-  # Remove lock files
-  local had_lock=0
-  if [ -f "$DISPATCH_LOCK" ] || [ -f "$DISPATCH_ACTIVE" ]; then
-    had_lock=1
-  fi
-  rm -f "$DISPATCH_LOCK" "$DISPATCH_ACTIVE" 2>/dev/null || true
-
-  # Revert source changes if an active coder was running
-  if [ "$had_lock" -eq 1 ] && [ -n "$pid" ]; then
-    cd "$REPO_DIR"
-    git checkout -- src/ 2>/dev/null || true
-  fi
-
-  # Notify Telegram
-  if [ -n "$tool" ] && [ -n "$bug_id" ]; then
-    bash "$TELEGRAM_SCRIPT" --profile="${HERMES_PROFILE:-orchestrator}" \
-      --text="🛑 *[Orchestrator]* Stopped agent '*$tool*' on \`$bug_id\`.
-• Process terminated (PID $pid).
-• Workspace uncommitted source changes reverted to clean \`main\`.
+    pid=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$f" 2>/dev/null || true)
+    tool=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("tool",""))' "$f" 2>/dev/null || true)
+    worktree=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("worktree",""))' "$f" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "[Dispatcher] Terminating agent '${tool:-?}' (PID $pid) for ${bug_id:-?}..."
+      kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+      pkill -P "$pid" 2>/dev/null || true
+      sleep 1.5
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+        pkill -9 -P "$pid" 2>/dev/null || true
+      fi
+    fi
+    # Scoped revert: only this run's worktree, only files this run changed.
+    if [ -n "$worktree" ] && [ -d "$worktree" ]; then
+      ( cd "$worktree" && git checkout -- src/ 2>/dev/null ) || true
+    fi
+    node "$FILE_LOCKS_CLI" release-bug "--bug-id=${bug_id:-?}" >/dev/null 2>&1 || true
+    rm -f "$f" 2>/dev/null || true
+    stopped=$((stopped + 1))
+    if [ -n "$tool" ] && [ -n "$bug_id" ]; then
+      bash "$TELEGRAM_SCRIPT" --profile="${HERMES_PROFILE:-orchestrator}" \
+        --text="🛑 *[Orchestrator]* Stopped agent '*$tool*' on \`$bug_id\`.
+• Process terminated (PID ${pid:-?}).
+• That run's worktree reverted; other agents keep working.
 • No further fallback agent will be started." 2>/dev/null || true
+    fi
+  done
+  if [ "$stopped" -eq 0 ]; then
+    echo "[Dispatcher] Nothing to stop (no matching active run). Use 'status' to list runs."
+  else
+    echo "[Dispatcher] Stopped $stopped run(s). Other agents untouched."
   fi
-
-  echo "[Dispatcher] Stopped successfully. Lock released."
+  # Legacy cleanup only when nothing modern is active and --all was asked.
+  if [ "$STOP_ALL" = "1" ]; then
+    rm -f "$LEGACY_DISPATCH_LOCK" "$LEGACY_DISPATCH_ACTIVE" 2>/dev/null || true
+  fi
 }
 
 case "$SUBCOMMAND" in
@@ -168,7 +213,16 @@ case "$SUBCOMMAND" in
     exit 0
     ;;
   stop|cancel)
-    stop_cmd
+    shift
+    stop_cmd "$@"
+    exit 0
+    ;;
+  locks|claims|files)
+    locks_cmd
+    exit 0
+    ;;
+  prune-locks)
+    node "$FILE_LOCKS_CLI" prune 2>/dev/null || true
     exit 0
     ;;
   list-models|models)
@@ -203,13 +257,13 @@ PRINT_PLAN=0
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--screenshot='/path/to/img.png'] [--verify=true|false|auto] [--profile=orchestrator] [--foreground] [--print-plan]"
+      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--screenshot='/path/to/img.png'] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
       echo ""
       echo "Subcommands:"
-      echo "  $0 status                     Check live running agent activity"
-      echo "  $0 stop                       Cleanly stop running agent and release lock"
-      echo "  $0 list-models                List available tools, models, and thinking modes"
-      echo "  $0 list-agents                List agent pool status"
+      echo "  $0 status                     List all running agents (parallel-safe)"
+      echo "  $0 stop [--bug-id=X|--all]    Stop one run (default: all active) without touching others"
+      echo "  $0 locks                      Show live per-file claims"
+      echo "  $0 prune-locks                Drop stale per-file claims"
       exit 0
       ;;
     --task=*)       TASK="${arg#*=}" ;;
@@ -222,6 +276,9 @@ for arg in "$@"; do
     --cascade)      CASCADE=1 ;;
     --verify=*)     PREFER_VERIFY="${arg#*=}" ;;
     --profile=*)    DISPATCH_PROFILE="${arg#*=}" ;;
+    --area=*)       DISPATCH_AREA="${arg#*=}" ;;
+    --files=*)      DISPATCH_FILES="${arg#*=}" ;;
+    --worktree=*)   DISPATCH_WORKTREE="${arg#*=}" ;; # advanced: reuse an existing checkout
     --foreground)   FOREGROUND=1 ;;
     --print-plan)   PRINT_PLAN=1 ;;
     *)
@@ -285,7 +342,9 @@ if [ "$FOREGROUND" != "1" ] && [ "${DISPATCH_FOREGROUND:-}" != "1" ]; then
 fi
 
 # ---------------------------------------------------------------
-# Heartbeat & Lock Cleanup Trap (V-23, V-24)
+# Parallel run setup: per-bug lock record + per-run worktree + file claims.
+# Nothing here blocks on other agents. Two runs may proceed at once; the
+# only shared gate is claim-guard on the open PRs at merge time.
 # ---------------------------------------------------------------
 stop_heartbeat() {
   if [ -n "${HEARTBEAT_PID:-}" ]; then
@@ -295,52 +354,87 @@ stop_heartbeat() {
   fi
 }
 
+RUN_LOCK_FILE="$(lock_file_for "$BUG_ID")"
+RUN_ACTIVE_FILE="$(active_file_for "$BUG_ID")"
 WE_OWN_LOCK=0
 cleanup_dispatch() {
   stop_heartbeat
   if [ "$WE_OWN_LOCK" != "1" ]; then
     return 0
   fi
-  local info=""
-  info=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
-  case "$info" in
-    "$$:"*)
-      rm -f "$DISPATCH_LOCK" "$DISPATCH_ACTIVE" 2>/dev/null || true
-      ;;
-  esac
+  # Refresh dies with us; claims expire by TTL so a crash cannot wedge files.
+  rm -f "$RUN_LOCK_FILE" "$RUN_ACTIVE_FILE" 2>/dev/null || true
 }
 trap cleanup_dispatch EXIT INT TERM
 
-lock_holder_alive() {
-  local info pid
-  info=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
-  pid=$(printf '%s\n' "$info" | cut -d: -f1)
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
-}
-
-waited=0
-while lock_holder_alive; do
-  LOCKED_INFO=$(cat "$DISPATCH_LOCK" 2>/dev/null || true)
-  LOCKED_PID=$(printf '%s\n' "$LOCKED_INFO" | cut -d: -f1)
-  LOCKED_BUG=$(printf '%s\n' "$LOCKED_INFO" | cut -d: -f2)
-  if [ "$waited" -eq 0 ]; then
-    echo "[Dispatcher] Concurrency lock: PID $LOCKED_PID is active on $LOCKED_BUG. Waiting."
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` is waiting. \`$LOCKED_BUG\` (PID \`$LOCKED_PID\`) still has the repo." 2>/dev/null || true
-  fi
-  if [ "$waited" -ge 180 ]; then
-    echo "[Dispatcher] Lock still held after 180s."
-    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` did not start. \`$LOCKED_BUG\` (PID \`$LOCKED_PID\`) still has the repo." 2>/dev/null || true
+# Same bug id re-dispatched while alive: refuse only that duplicate, never
+# other bugs. (Chat itself is never gated — this is run-start only.)
+if [ -f "$RUN_LOCK_FILE" ]; then
+  dup_pid=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$RUN_LOCK_FILE" 2>/dev/null || true)
+  if [ -n "$dup_pid" ] && kill -0 "$dup_pid" 2>/dev/null; then
+    echo "[Dispatcher] $BUG_ID is already running (PID $dup_pid). Use a new --bug-id for parallel work."
+    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="ℹ️ *[Orchestrator]* \`$BUG_ID\` is already running (PID \`$dup_pid\`). Send a new bug id to run in parallel." 2>/dev/null || true
     exit 1
   fi
-  sleep 10
-  waited=$((waited + 10))
-done
+  rm -f "$RUN_LOCK_FILE" "$RUN_ACTIVE_FILE" 2>/dev/null || true
+fi
+
+# Area/worktree: one checkout per run so coders never share an index.
+slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//' | cut -c1-48; }
+if [ -z "${DISPATCH_AREA:-}" ]; then
+  DISPATCH_AREA="$(slugify "$BUG_ID")"
+  [ -n "$DISPATCH_AREA" ] || DISPATCH_AREA="run-$(date +%s)"
+fi
+WORKTREE_BASE="${DISPATCH_WORKTREE:-}"
+if [ -z "$WORKTREE_BASE" ]; then
+  WORKTREE_BASE="/home/ubuntu/dev/dispatch-${DISPATCH_AREA}"
+  if [ ! -e "$WORKTREE_BASE/.git" ] && [ ! -f "$WORKTREE_BASE/.git" ]; then
+    ( cd "$REPO_DIR" && git fetch origin main >/dev/null 2>&1 ) || true
+    branch="agent/dispatch-${DISPATCH_AREA}"
+    if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$branch"; then
+      git -C "$REPO_DIR" worktree add "$WORKTREE_BASE" "$branch" >/dev/null 2>&1 || true
+    else
+      git -C "$REPO_DIR" worktree add -b "$branch" "$WORKTREE_BASE" origin/main >/dev/null 2>&1 || WORKTREE_BASE="$REPO_DIR"
+    fi
+  fi
+  [ -d "$WORKTREE_BASE" ] || WORKTREE_BASE="$REPO_DIR"
+  if [ -f "$REPO_DIR/.env" ] && [ ! -f "$WORKTREE_BASE/.env" ]; then cp "$REPO_DIR/.env" "$WORKTREE_BASE/.env" 2>/dev/null || true; fi
+fi
+CODER_DIR="$WORKTREE_BASE"
+
+# File claims: explicit --files plus paths scraped from the task. Advisory
+# only — conflicts warn and steer the prompt, they never block the run.
+TASK_FILES="$(python3 - "$TASK" "${DISPATCH_FILES:-}" <<'PY' 2>/dev/null || true
+import json, re, sys
+text = sys.argv[1] + "\n" + sys.argv[2].replace(",", "\n")
+seen = []
+for m in re.finditer(r'(?:^|[\s("\'`\[])([A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,5})(?=[\s)",;:\'\].]|$)', text):
+    p = m.group(1).lstrip('./').rstrip(':;,)"\']')
+    if p and '..' not in p and len(p) <= 256 and p not in seen:
+        seen.append(p)
+print(",".join(seen[:25]))
+PY
+)"
+LOCKED_FILES_JSON=""
+if [ -n "$TASK_FILES" ]; then
+  LOCKED_FILES_JSON=$(node "$FILE_LOCKS_CLI" claim "--bug-id=$BUG_ID" "--tool=$REQUESTED_TOOL" "--pid=$$" "--area=$DISPATCH_AREA" "--worktree=$CODER_DIR" "--files=$TASK_FILES" 2>/dev/null || echo "")
+fi
+LOCK_CONFLICTS=""
+LOCKED_FILES=""
+if [ -n "$LOCKED_FILES_JSON" ]; then
+  LOCKED_FILES=$(python3 -c 'import json,sys; print(",".join(json.loads(sys.argv[1]).get("claimed",[])))' "$LOCKED_FILES_JSON" 2>/dev/null || true)
+  LOCK_CONFLICTS=$(python3 -c 'import json,sys; print("\n".join(f"{c[\"file\"]} (held by {c[\"holder\"].get(\"bugId\",\"?\")} / {c[\"holder\"].get(\"tool\",\"?\")})" for c in json.loads(sys.argv[1]).get("conflicts",[])))' "$LOCKED_FILES_JSON" 2>/dev/null || true)
+fi
+if [ -n "$LOCK_CONFLICTS" ]; then
+  echo "[Dispatcher] File overlap (advisory): $BUG_ID routes around live claims:"
+  printf '%s\n' "$LOCK_CONFLICTS" | while IFS= read -r line; do echo "[Dispatcher]   locked: $line"; done
+fi
 
 START_TIME=$(date +%s)
 CURRENT_LOG="${HERMES_DIR}/logs/dispatch_${BUG_ID}_${REQUESTED_TOOL}.log"
 
-echo "$$:${BUG_ID}:${REQUESTED_TOOL}:${PREFERRED_MODEL}:${THINKING}:${START_TIME}:${CURRENT_LOG}" > "$DISPATCH_LOCK"
-cat <<JSON > "$DISPATCH_ACTIVE"
+LOCKED_FILES_ARR=$(python3 -c 'import json,sys; print(json.dumps([s for s in sys.argv[1].split(",") if s]))' "${LOCKED_FILES:-}" 2>/dev/null || echo "[]")
+cat <<JSON > "$RUN_LOCK_FILE"
 {
   "pid": $$,
   "bug_id": "${BUG_ID}",
@@ -350,10 +444,18 @@ cat <<JSON > "$DISPATCH_ACTIVE"
   "thinking": "${THINKING}",
   "start_time": ${START_TIME},
   "log_file": "${CURRENT_LOG}",
+  "area": "${DISPATCH_AREA}",
+  "worktree": "${CODER_DIR}",
+  "lock_files": ${LOCKED_FILES_ARR},
   "task": $(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$TASK")
 }
 JSON
+cp "$RUN_LOCK_FILE" "$RUN_ACTIVE_FILE" 2>/dev/null || true
 WE_OWN_LOCK=1
+if [ -n "$LOCK_CONFLICTS" ]; then
+  bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` starts in parallel — routing around live file claims:
+$(printf '%s' "$LOCK_CONFLICTS" | head -n 8)" 2>/dev/null || true
+fi
 
 # Executable search paths
 OPENCODE_BIN=$(which opencode 2>/dev/null || echo "${HOME}/.opencode/bin/opencode")
@@ -452,14 +554,14 @@ SNAP_FILE=""
 snapshot_workspace() {
   rm -f "${SNAP_FILE:-}"
   SNAP_FILE=$(mktemp)
-  git status --porcelain | grep -v 'src/git-version.generated.ts' > "$SNAP_FILE" || true
+  git -C "$CODER_DIR" status --porcelain | grep -v 'src/git-version.generated.ts' > "$SNAP_FILE" || true
 }
 
 # Lines that appeared after snapshot_workspace. Pre-existing dirt does not count.
 new_changes() {
   local now
   now=$(mktemp)
-  git status --porcelain | grep -v 'src/git-version.generated.ts' > "$now" || true
+  git -C "$CODER_DIR" status --porcelain | grep -v 'src/git-version.generated.ts' > "$now" || true
   if [ -n "$SNAP_FILE" ] && [ -f "$SNAP_FILE" ]; then
     comm -13 <(sort "$SNAP_FILE") <(sort "$now") || true
   else
@@ -470,14 +572,14 @@ new_changes() {
 
 commit_fix() {
   local msg="$1"
-  if git config user.email >/dev/null 2>&1; then
-    git commit -m "$msg"
+  if git -C "$CODER_DIR" config user.email >/dev/null 2>&1; then
+    git -C "$CODER_DIR" commit -m "$msg"
   else
     GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-cwahli}" \
     GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-cwahli@users.noreply.github.com}" \
     GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-cwahli}" \
     GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-cwahli@users.noreply.github.com}" \
-    git commit -m "$msg"
+    git -C "$CODER_DIR" commit -m "$msg"
   fi
 }
 
@@ -514,35 +616,42 @@ ${tail_output:-No output logged}
     return 1
   fi
 
-  tg_msg "📝 *[Orchestrator]* Code modified by *$tool_name*:
+  tg_msg "📝 *[Orchestrator]* Code modified by *$tool_name* (\`$BUG_ID\`, worktree \`$CODER_DIR\`):
 \`\`\`
 $(printf '%s\n' "$diff_files" | head -10)
 \`\`\`
 Running TypeScript build check ('npx tsc --noEmit')..."
 
   local tsc_output
-  if tsc_output=$(npx tsc --noEmit 2>&1); then
+  if tsc_output=$(git -C "$CODER_DIR" rev-parse --show-toplevel >/dev/null 2>&1 && (cd "$CODER_DIR" && npx tsc --noEmit 2>&1)); then
     echo "[Dispatcher] tsc clean — committing real changes..."
     local line path
     while IFS= read -r line; do
       [ -z "$line" ] && continue
       path="${line:3}"
-      [ -n "$path" ] && git add -- "$path" || true
+      [ -n "$path" ] && git -C "$CODER_DIR" add -- "$path" || true
     done <<< "$diff_files"
     if ! commit_fix "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)"; then
       echo "[Dispatcher] git commit failed."
       tg_msg "⚠️ *[Orchestrator]* *$tool_name* edited files for \`$BUG_ID\`, but \`git commit\` failed."
       return 1
     fi
-    if ! git push origin main; then
-      echo "[Dispatcher] Error: git push origin main failed."
-      tg_msg "⚠️ *[Orchestrator]* Fix coded by *$tool_name*, but \`git push origin main\` failed. Check GitHub credentials on VPS (SSH key or PAT)."
+    # Push the per-run branch (never main directly). Parallel runs land on
+    # agent/dispatch-* branches; claim-guard blocks same-file overlap at PR.
+    run_branch=$(git -C "$CODER_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [ "$run_branch" = "main" ] || [ -z "$run_branch" ]; then
+      run_branch="agent/dispatch-${DISPATCH_AREA}"
+      git -C "$CODER_DIR" checkout -b "$run_branch" 2>/dev/null || true
+    fi
+    if ! git -C "$CODER_DIR" push -u origin "$run_branch"; then
+      echo "[Dispatcher] Error: git push $run_branch failed."
+      tg_msg "⚠️ *[Orchestrator]* Fix coded by *$tool_name* on \`$run_branch\`, but \`git push\` failed. Check GitHub credentials on VPS (SSH key or PAT)."
       return 1
     fi
     local commit_hash
-    commit_hash=$(git rev-parse --short HEAD)
-    tg_msg "🚀 *[Orchestrator]* Fix committed and pushed to \`main\` (\`$commit_hash\`)."
-    node scripts/tool-allowance.mjs report-result --tool="$tool_name" --status="success" --bug-id="$BUG_ID" --category="$CATEGORY" --duration=$(( $(date +%s) - START_TIME )) || true
+    commit_hash=$(git -C "$CODER_DIR" rev-parse --short HEAD)
+    tg_msg "🚀 *[Orchestrator]* Fix committed and pushed to \`$run_branch\` (\`$commit_hash\`). Merges sequentially; claim-guard blocks same-file overlap."
+    node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="$tool_name" --status="success" --bug-id="$BUG_ID" --category="$CATEGORY" --duration=$(( $(date +%s) - START_TIME )) || true
     record_audit "$tool_name" "$model_desc" "resolved" "deployed_pending_qa"
     snapshot_workspace
     return 0
@@ -561,14 +670,16 @@ Reverting this attempt's uncommitted changes..."
 }
 
 clean_workspace() {
+  # Scoped to THIS run's worktree + THIS attempt's snapshot. Never touches
+  # the shared checkout, so other parallel agents keep their edits.
   local line path
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     path="${line:3}"
     [ -z "$path" ] && continue
     case "$line" in
-      \?\?*) rm -rf -- "$path" ;;
-      *) git checkout -- "$path" >/dev/null 2>&1 || true ;;
+      \?\?*) rm -rf -- "$CODER_DIR/$path" ;;
+      *) git -C "$CODER_DIR" checkout -- "$path" >/dev/null 2>&1 || true ;;
     esac
   done < <(new_changes)
   snapshot_workspace
@@ -596,7 +707,20 @@ build_prompt() {
 [CRITICAL CODEBASE INVARIANTS]:
 - Never delete or disable active features ('Health status', 'Clinical Actions', 'Daily Benefits').
 - Never rename or delete navigation locators (e.g. '#nav-tab-health', '#nav-tab-food', '#nav-tab-home') which are required by Playwright tests.
-- Scope changes strictly to the single defect described. Do not rewrite unrelated components."
+- Scope changes strictly to the single defect described. Do not rewrite unrelated components.
+- You work in an isolated checkout. Other agents work in parallel on other bugs."
+  if [ -n "${LOCK_CONFLICTS:-}" ]; then
+    base_prompt="${base_prompt}
+
+[PARALLEL RUN — FILE CLAIMS (advisory)]:
+The following files are currently edited by another agent. Do NOT edit them unless the defect cannot be fixed otherwise; pick an adjacent file or coordinate:
+$(printf '%s' "$LOCK_CONFLICTS" | head -n 10)"
+  fi
+  if [ -n "${LOCKED_FILES:-}" ]; then
+    base_prompt="${base_prompt}
+
+[YOUR CLAIMED FILES]: $(printf '%s' "$LOCKED_FILES" | head -c 600). Prefer these; leave other agents' claims alone."
+  fi
 
   # Target File Hints
   if echo "$TASK" | grep -qiE "theme|dark|navy|#0f172a|#f8fafc|background|color"; then
@@ -634,8 +758,14 @@ run_opencode_agent() {
   local model_id
   model_id=$(opencode_model_id "$model")
   snapshot_workspace
-  echo "[Dispatcher] opencode run --auto --dir ${REPO_DIR} -m ${model_id}"
-  run_with_timeout "$duration" "$OPENCODE_BIN" run --auto --dir "$REPO_DIR" -m "$model_id" "$prompt" 2>&1 | tee "$log_file" || true
+  echo "[Dispatcher] opencode run --auto --dir ${CODER_DIR} -m ${model_id}"
+  ( cd "$CODER_DIR" && run_with_timeout "$duration" "$OPENCODE_BIN" run --auto --dir "$CODER_DIR" -m "$model_id" "$prompt" 2>&1 | tee "$log_file" ) || true
+  # Refresh claimed files with what this attempt actually touched (prompt may
+  # not have named them all).
+  if [ -f "$FILE_LOCKS_CLI" ]; then
+    touched=$(git -C "$CODER_DIR" status --porcelain 2>/dev/null | awk '{print $2}' | tr '\n' ',' || true)
+    [ -n "$touched" ] && node "$FILE_LOCKS_CLI" claim "--bug-id=$BUG_ID" "--tool=$REQUESTED_TOOL" "--pid=$$" "--area=$DISPATCH_AREA" "--worktree=$CODER_DIR" "--files=$touched" >/dev/null 2>&1 || true
+  fi
 }
 
 try_opencode() {
@@ -672,7 +802,7 @@ $prompt_preview
   local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "insufficient account funds|insufficient funds|out of credits"; then
-    node scripts/tool-allowance.mjs report-result --tool="opencode" --status="depleted" --bug-id="$BUG_ID" --reason="Insufficient account funds" || true
+    node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="opencode" --status="depleted" --bug-id="$BUG_ID" --reason="Insufficient account funds" || true
     clean_workspace
     if [ "$model" != "deepseek-v4.1-flash" ]; then
       tg_msg "⚠️ *[Orchestrator]* OpenCode hit insufficient funds on \`$model\`. Retrying once with \`opencode/deepseek-v4.1-flash\`..."
@@ -689,13 +819,13 @@ $prompt_preview
       tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (funds depleted)."
     fi
     clean_workspace
-    node scripts/tool-allowance.mjs report-result --tool="opencode" --status="failed" --bug-id="$BUG_ID" || true
+    node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="opencode" --status="failed" --bug-id="$BUG_ID" || true
     return 1
   fi
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|insufficient credits|429|allowance"; then
     tg_msg "⚠️ *[Orchestrator]* OpenCode hit rate limit for \`$BUG_ID\`."
-    node scripts/tool-allowance.mjs report-result --tool="opencode" --status="rate_limited" --bug-id="$BUG_ID" --reason="Rate limit" || true
+    node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="opencode" --status="rate_limited" --bug-id="$BUG_ID" --reason="Rate limit" || true
     clean_workspace
     return 2
   fi
@@ -716,7 +846,7 @@ $prompt_preview
     tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\`."
   fi
   clean_workspace
-  node scripts/tool-allowance.mjs report-result --tool="opencode" --status="failed" --bug-id="$BUG_ID" || true
+  node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="opencode" --status="failed" --bug-id="$BUG_ID" || true
   return 1
 }
 
@@ -749,14 +879,14 @@ $prompt_preview
 
   snapshot_workspace
   start_heartbeat "Cline" "$log_file"
-  run_with_timeout 8m "$CLINE_BIN" --auto-approve true --thinking "$thinking" "$prompt" 2>&1 | tee "$log_file" || true
+  ( cd "$CODER_DIR" && run_with_timeout 8m "$CLINE_BIN" --auto-approve true --thinking "$thinking" "$prompt" 2>&1 | tee "$log_file" ) || true
   stop_heartbeat
 
   local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "rate limit|quota exceeded|insufficient credits|429|exhausted|allowance"; then
     tg_msg "⚠️ *[Orchestrator]* Cline hit rate limit for \`$BUG_ID\`."
-    node scripts/tool-allowance.mjs report-result --tool="cline" --status="rate_limited" --bug-id="$BUG_ID" --reason="Rate limit" || true
+    node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="cline" --status="rate_limited" --bug-id="$BUG_ID" --reason="Rate limit" || true
     clean_workspace
     return 2
   fi
@@ -769,7 +899,7 @@ $prompt_preview
     tg_msg "❌ *[Orchestrator]* Cline could not resolve \`$BUG_ID\`."
   fi
   clean_workspace
-  node scripts/tool-allowance.mjs report-result --tool="cline" --status="failed" --bug-id="$BUG_ID" || true
+  node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="cline" --status="failed" --bug-id="$BUG_ID" || true
   return 1
 }
 
@@ -801,7 +931,7 @@ $prompt_preview
 
   snapshot_workspace
   start_heartbeat "Grok" "$log_file"
-  run_with_timeout 6m "$GROK_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
+  ( cd "$CODER_DIR" && run_with_timeout 6m "$GROK_BIN" -p "$prompt" 2>&1 | tee "$log_file" ) || true
   stop_heartbeat
 
   local output; output=$(cat "$log_file" 2>/dev/null || true)
@@ -812,7 +942,7 @@ $prompt_preview
     else
       tg_msg "⚠️ *[Orchestrator]* Grok hit rate limit for \`$BUG_ID\`."
     fi
-    node scripts/tool-allowance.mjs report-result --tool="grok" --status="rate_limited" --bug-id="$BUG_ID" || true
+    node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="grok" --status="rate_limited" --bug-id="$BUG_ID" || true
     clean_workspace
     return 2
   fi
@@ -825,7 +955,7 @@ $prompt_preview
     tg_msg "❌ *[Orchestrator]* Grok could not resolve \`$BUG_ID\`."
   fi
   clean_workspace
-  node scripts/tool-allowance.mjs report-result --tool="grok" --status="failed" --bug-id="$BUG_ID" || true
+  node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="grok" --status="failed" --bug-id="$BUG_ID" || true
   return 1
 }
 
@@ -837,7 +967,7 @@ try_agy() {
     return 1
   fi
 
-  if node scripts/tool-allowance.mjs status 2>/dev/null | grep -i 'Antigravity' | grep -qi 'unavailable'; then
+  if node "${REPO_DIR}/scripts/tool-allowance.mjs" status 2>/dev/null | grep -i 'Antigravity' | grep -qi 'unavailable'; then
     echo "[Dispatcher] Antigravity CLI is marked unavailable on VPS. Skipping."
     tg_msg "⏭️ *[Orchestrator]* Skipping *Antigravity CLI* (marked unavailable on VPS datacenter IP)."
     return 1
@@ -863,7 +993,7 @@ $prompt_preview
 
   snapshot_workspace
   start_heartbeat "Agy" "$log_file"
-  run_with_timeout 8m "$AGY_BIN" -p "$prompt" 2>&1 | tee "$log_file" || true
+  ( cd "$CODER_DIR" && run_with_timeout 8m "$AGY_BIN" -p "$prompt" 2>&1 | tee "$log_file" ) || true
   stop_heartbeat
 
   local output; output=$(cat "$log_file" 2>/dev/null || true)
@@ -886,7 +1016,7 @@ echo " Screenshot: ${SCREENSHOT:-none}"
 echo "=========================================================="
 
 # Announce to Telegram with tool list
-AGENT_LIST="$(node scripts/tool-allowance.mjs status 2>/dev/null | grep '^-' | sed 's/^- /• /' | head -4 || echo '• OpenCode • Cline • Grok • Agy')"
+AGENT_LIST="$(node "${REPO_DIR}/scripts/tool-allowance.mjs" status 2>/dev/null | grep '^-' | sed 's/^- /• /' | head -4 || echo '• OpenCode • Cline • Grok • Agy')"
 tg_msg "📋 *[Orchestrator]* Bug \`$BUG_ID\` received.
 
 *Task:* $TASK
@@ -911,7 +1041,7 @@ if [ "$CASCADE" -eq 1 ]; then
   if [ "$REQUESTED_TOOL" != "auto" ]; then
     TOOL_SEQUENCE+=("$REQUESTED_TOOL")
   fi
-  BEST_TOOL=$(node scripts/tool-allowance.mjs pick-tool --category="$CATEGORY" 2>/dev/null | grep '"tool":' | head -n1 | cut -d '"' -f4)
+  BEST_TOOL=$(node "${REPO_DIR}/scripts/tool-allowance.mjs" pick-tool --category="$CATEGORY" 2>/dev/null | grep '"tool":' | head -n1 | cut -d '"' -f4)
   if [ "$BEST_TOOL" != "none" ] && [[ ! " ${TOOL_SEQUENCE[*]} " =~ " ${BEST_TOOL} " ]]; then
     TOOL_SEQUENCE+=("$BEST_TOOL")
   fi
@@ -923,7 +1053,7 @@ if [ "$CASCADE" -eq 1 ]; then
 else
   # Granular Single-Tool Execution Mode (Default)
   if [ "$REQUESTED_TOOL" = "auto" ]; then
-    BEST_TOOL=$(node scripts/tool-allowance.mjs pick-tool --category="$CATEGORY" 2>/dev/null | grep '"tool":' | head -n1 | cut -d '"' -f4)
+    BEST_TOOL=$(node "${REPO_DIR}/scripts/tool-allowance.mjs" pick-tool --category="$CATEGORY" 2>/dev/null | grep '"tool":' | head -n1 | cut -d '"' -f4)
     if [ "$BEST_TOOL" = "none" ]; then
       tg_msg "🚨 *[Orchestrator]* No available tools in agent pool for \`$BUG_ID\`."
       exit 1

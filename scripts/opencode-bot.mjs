@@ -38,63 +38,76 @@ import {
   formatStatusPlain,
   COMPACT_SUMMARY_PROMPT,
 } from './lib/bot-status.mjs';
+import { claimFiles, releaseFiles, extractFiles } from './lib/file-locks.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
-const DISPATCH_LOCK = path.join(HOME, '.hermes', 'dispatch_lock');
+const LOCKS_DIR = path.join(HOME, '.hermes', 'file_locks');
 
+/**
+ * Parallel-chat gate: chat is NEVER blocked. This only reports live file
+ * claims so the reply can warn when the asked-about files are owned by
+ * another agent. Edit-moment enforcement is the dispatcher's advisory claim
+ * (scripts/lib/file-locks.mjs) + claim-guard on the open PRs.
+ */
+function liveClaims() {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(LOCKS_DIR);
+  } catch {
+    return [];
+  }
+  const now = Date.now();
+  const out = [];
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) continue;
+    const full = path.join(LOCKS_DIR, entry);
+    let claim = null;
+    try {
+      claim = JSON.parse(fs.readFileSync(full, 'utf8'));
+    } catch {
+      continue;
+    }
+    if (!claim || !claim.file) continue;
+    let alive = false;
+    try {
+      process.kill(Number(claim.pid), 0);
+      alive = true;
+    } catch {
+      alive = false;
+    }
+    if (!alive) continue;
+    if (Number(claim.expiresAt) > 0 && Number(claim.expiresAt) <= now) continue;
+    out.push(claim);
+  }
+  return out;
+}
+
+/** Warn-line when text names files another agent currently holds. */
+function claimWarning(text) {
+  const claims = liveClaims();
+  if (!claims.length) return '';
+  const lower = String(text ?? '').toLowerCase();
+  const hits = claims.filter((c) => c.file && lower.includes(String(c.file).toLowerCase()));
+  if (!hits.length) return '';
+  const names = [...new Set(hits.map((h) => `${h.file} (by ${h.bugId || 'another run'})`))].slice(0, 5);
+  return `\n⚠️ Another agent is editing: ${names.join(', ')}. Chat away — if you start a fix here it will route around those files.`;
+}
+
+/** Kept for the /status read path; legacy global lock is informational only. */
 function lockHolder() {
-  let info = '';
-  try {
-    info = fs.readFileSync(DISPATCH_LOCK, 'utf8').trim();
-  } catch {
-    return null;
-  }
-  const splitAt = info.indexOf(':');
-  if (splitAt < 1) return null;
-  const pid = Number(info.slice(0, splitAt));
-  const bug = info.slice(splitAt + 1) || 'unknown';
-  if (!Number.isFinite(pid) || pid <= 0) return null;
-  try {
-    process.kill(pid, 0);
-  } catch {
-    return null;
-  }
-  return { pid, bug };
+  return null;
 }
 
 function acquireDispatchLock() {
-  fs.mkdirSync(path.dirname(DISPATCH_LOCK), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const holder = lockHolder();
-    if (holder) return holder;
-    try {
-      const fd = fs.openSync(DISPATCH_LOCK, 'wx');
-      fs.writeFileSync(fd, `${process.pid}:opencode-chat\n`);
-      fs.closeSync(fd);
-      return null;
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      if (!lockHolder()) {
-        try {
-          fs.unlinkSync(DISPATCH_LOCK);
-        } catch {
-          // another writer removed it
-        }
-      }
-    }
-  }
-  return lockHolder() || { pid: 0, bug: 'unknown' };
+  // Chat must never block. Locking happens at coder-run start (per-bug
+  // record + per-file advisory claims in run-coding-dispatch.sh).
+  return null;
 }
 
 function releaseDispatchLock() {
-  try {
-    const info = fs.readFileSync(DISPATCH_LOCK, 'utf8');
-    if (info.startsWith(`${process.pid}:`)) fs.unlinkSync(DISPATCH_LOCK);
-  } catch {
-    // already gone
-  }
+  // No global lock to release anymore.
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -687,8 +700,18 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       return;
     }
     if (kind === 'm') {
-      const models = await getModels(config, caches);
-      const model = models[Number(value)];
+      let models = await getModels(config, caches);
+      // New buttons carry the full id (`m:opencode/...`); old keyboards
+      // carry an index (`m:0`). Support both so already-shown keyboards keep
+      // working.
+      let model = models.includes(value) ? value : models[Number(value)];
+      if (!model) {
+        // Model list may have been refetched/re-sorted since the keyboard
+        // was shown (free-first sort). Refresh once before giving up.
+        caches.models = null;
+        models = await getModels(config, caches);
+        model = models.includes(value) ? value : models[Number(value)];
+      }
       if (!model) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /model again' });
         return;
@@ -709,8 +732,16 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       return;
     }
     if (kind === 'a') {
-      const agents = await getAgents(config, caches);
-      const agent = agents[Number(value)];
+      let agents = await getAgents(config, caches);
+      // New buttons carry the name (`a:build`); old keyboards carry an index
+      // (`a:0`). Support both so already-shown keyboards keep working.
+      let agent = agents.find((a) => a.name === value) || agents[Number(value)];
+      if (!agent) {
+        // `opencode agent list` may print extra permission JSON; refresh once.
+        caches.agents = null;
+        agents = await getAgents(config, caches);
+        agent = agents.find((a) => a.name === value) || agents[Number(value)];
+      }
       if (!agent) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /agent again' });
         return;
@@ -725,8 +756,16 @@ async function handleCallback({ api, config, prefs, caches, query }) {
     }
     if (kind === 'v') {
       const eff = effective(config, prefs, chatId);
-      const variants = await getVariants(config, caches, eff.model);
-      const variant = variants[Number(value)];
+      let variants = await getVariants(config, caches, eff.model);
+      // New buttons carry the name (`v:high`); old cached keyboards carry an
+      // index (`v:0`). Support both so already-shown keyboards keep working.
+      let variant = variants.includes(value) ? value : variants[Number(value)];
+      if (!variant) {
+        // `models --verbose` output can flicker; refresh once before giving up.
+        caches.verbose = null;
+        variants = await getVariants(config, caches, eff.model);
+        variant = variants.includes(value) ? value : variants[Number(value)];
+      }
       if (!variant) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /thinking again' });
         return;
@@ -767,14 +806,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     return;
   }
 
-  const holder = acquireDispatchLock();
-  if (holder) {
-    await api.sendMessage(
-      chatId,
-      `The repo is busy with ${holder.bug} (pid ${holder.pid}). Wait until that finishes. A second coding agent would overwrite the same tree.`,
-    );
-    return;
+  // Parallel by design: chat never waits on another agent. If the message
+  // names a file someone else is editing, warn but still answer. This run
+  // claims the files it expects to touch so the next run can route around them.
+  const warn = claimWarning(text);
+  if (warn) {
+    await api.sendMessage(chatId, `Heads up:${warn}`).catch(() => {});
   }
+
+  const claimId = `chat-${chatId}`;
+  const claimed = claimFiles(extractFiles(text), {
+    bugId: claimId,
+    tool: 'opencode',
+    pid: process.pid,
+    worktree: config.agent.workspace,
+  }).claimed;
 
   busy.add(chatId);
   const renderer = new ProgressRenderer({ api, throttle, chatId, ...config.progress });
@@ -782,7 +828,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     await renderer.start();
     const eff = effective(config, prefs, chatId);
     const handoff = prefs.get(chatId)?.handoff || '';
-    const prompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${text}` : text;
+    const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${text}` : text;
+    const blocked = liveClaims()
+      .filter((c) => c.bugId !== claimId && !claimed.includes(c.file))
+      .map((c) => c.file);
+    const routeNote = blocked.length
+      ? `\n\n[PARALLEL AGENTS] Another agent is editing: ${blocked.slice(0, 10).join(', ')}. Do not modify those files; work only on the rest.`
+      : '';
+    const prompt = basePrompt + routeNote;
     const extraArgs = [];
     const sessionId = sessions.get(chatId);
     if (sessionId) extraArgs.push('--session', sessionId);
@@ -825,7 +878,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     renderer.stopTyping();
     running.delete(chatId);
     busy.delete(chatId);
-    releaseDispatchLock();
+    releaseFiles(claimed, claimId);
   }
 }
 

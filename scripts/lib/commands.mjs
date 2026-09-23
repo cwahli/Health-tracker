@@ -132,8 +132,13 @@ export function modelKeyboard(models, { page = 0, pageSize = 8 } = {}) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(0, page), pages - 1);
   const slice = models.slice(current * pageSize, current * pageSize + pageSize);
-  const rows = slice.map((model, index) => [
-    { text: isFreeModel(model) ? `✓ ${model}` : model, callback_data: `m:${current * pageSize + index}` },
+  // Embed the full model id (<=40 chars, well under Telegram's 64-byte
+  // callback_data limit) instead of a bare index, so taps stay valid even
+  // if the list was refetched/re-sorted (free-first) between showing the
+  // keyboard and tapping it. Old `m:<index>` buttons still decode via the
+  // index fallback in handleCallback.
+  const rows = slice.map((model) => [
+    { text: isFreeModel(model) ? `✓ ${model}` : model, callback_data: `m:${model}` },
   ]);
   const nav = [];
   if (current > 0) nav.push({ text: 'Prev', callback_data: `mp:${current - 1}` });
@@ -144,22 +149,32 @@ export function modelKeyboard(models, { page = 0, pageSize = 8 } = {}) {
 }
 
 export function agentKeyboard(agents) {
+  // Embed the agent name (short, e.g. "build") instead of a bare index so
+  // taps stay valid even if `opencode agent list` output changes between
+  // showing the keyboard and tapping it. Old `a:<index>` buttons still
+  // decode via the index fallback in handleCallback.
   return {
-    inline_keyboard: agents.map((agent, index) => [
-      { text: `${agent.name} (${agent.type})`, callback_data: `a:${index}` },
+    inline_keyboard: agents.map((agent) => [
+      { text: `${agent.name} (${agent.type})`, callback_data: `a:${agent.name}` },
     ]),
   };
 }
 
 export function variantKeyboard(variants) {
+  // Embed the variant name (short, e.g. "low"/"high") instead of a bare
+  // index so taps stay valid even if the cached model list was refetched
+  // or reordered between showing the keyboard and tapping it.
+  // Old `v:<index>` buttons still decode via the index fallback.
   return {
-    inline_keyboard: variants.map((variant, index) => [{ text: variant, callback_data: `v:${index}` }]),
+    inline_keyboard: variants.map((variant) => [{ text: variant, callback_data: `v:${variant}` }]),
   };
 }
 
 export function decodeCallback(data) {
-  const [kind, value] = String(data ?? '').split(':');
-  return { kind, value };
+  const raw = String(data ?? '');
+  const splitAt = raw.indexOf(':');
+  if (splitAt < 0) return { kind: raw, value: '' };
+  return { kind: raw.slice(0, splitAt), value: raw.slice(splitAt + 1) };
 }
 
 export function helpText(config, { model, agent, variant } = {}) {

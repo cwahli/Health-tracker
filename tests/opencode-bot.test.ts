@@ -396,10 +396,11 @@ describe('pickers', () => {
     const models = Array.from({ length: 20 }, (_, i) => `p/m${i}`);
     const page0 = modelKeyboard(models, { page: 0, pageSize: 8 });
     expect(page0.inline_keyboard).toHaveLength(9);
-    expect(page0.inline_keyboard[0][0].callback_data).toBe('m:0');
+    // Name-embedded callbacks stay valid across list refetch/re-sort.
+    expect(page0.inline_keyboard[0][0].callback_data).toBe('m:p/m0');
     expect(page0.inline_keyboard[8].some((b: { callback_data: string }) => b.callback_data === 'mp:1')).toBe(true);
     const page2 = modelKeyboard(models, { page: 2, pageSize: 8 });
-    expect(page2.inline_keyboard[0][0].callback_data).toBe('m:16');
+    expect(page2.inline_keyboard[0][0].callback_data).toBe('m:p/m16');
     for (const row of page0.inline_keyboard) {
       for (const button of row) {
         expect(button.callback_data.length).toBeLessThanOrEqual(64);
@@ -423,7 +424,7 @@ describe('pickers', () => {
     ]);
     const kb = modelKeyboard(sorted, { page: 0, pageSize: 8 });
     expect(kb.inline_keyboard[0][0].text).toMatch(/^\u2713 /);
-    expect(kb.inline_keyboard[0][0].callback_data).toBe('m:0');
+    expect(kb.inline_keyboard[0][0].callback_data).toBe('m:opencode/muse-spark-1.3-contributor-free');
     expect(kb.inline_keyboard[2][0].text).toBe('opencode/deepseek-v4-flash');
   });
 
@@ -478,11 +479,12 @@ describe('pickers', () => {
 
   it('builds agent and variant keyboards and decodes callbacks', () => {
     const agents = agentKeyboard([{ name: 'build', type: 'primary' }]);
-    expect(agents.inline_keyboard[0][0]).toEqual({ text: 'build (primary)', callback_data: 'a:0' });
+    expect(agents.inline_keyboard[0][0]).toEqual({ text: 'build (primary)', callback_data: 'a:build' });
     const variants = variantKeyboard(['low', 'high']);
-    expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:1' });
+    expect(variants.inline_keyboard[1][0]).toEqual({ text: 'high', callback_data: 'v:high' });
     expect(decodeCallback('m:5')).toEqual({ kind: 'm', value: '5' });
-    expect(decodeCallback('noop')).toEqual({ kind: 'noop', value: undefined });
+    expect(decodeCallback('v:high')).toEqual({ kind: 'v', value: 'high' });
+    expect(decodeCallback('noop')).toEqual({ kind: 'noop', value: '' });
   });
 });
 
