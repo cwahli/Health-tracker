@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { execSync, spawn } from 'node:child_process';
 
 import { TelegramApi, TelegramError, chunkText } from './lib/tg-api.mjs';
+import { sendCopyable } from './lib/tg-copy-code.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
@@ -124,7 +125,7 @@ Mobile-first AI dev assistant and compute router for your projects.
 • \`/fix <task>\` — Pull latest $\\to$ code fix $\\to$ Playwright test $\\to$ git push
 • \`/test [filter]\` — Run Playwright E2E tests headlessly
 • \`/status\` — View git branch, working directory & lock status
-• `/compact` - Session compaction (opencode bots only; not on collab)
+• \`/compact\` - Session compaction (opencode bots only; not on collab)
 • \`/cancel\` — Revert working tree & release dispatch lock`;
     await api.sendMessage(chatId, helpMsg, { parse_mode: 'Markdown' });
     return;
@@ -274,10 +275,12 @@ Mobile-first AI dev assistant and compute router for your projects.
       const output = execSync(cmd, { cwd: targetDir, encoding: 'utf8', timeout: 180000 });
       const lines = output.trim().split('\n');
       const summary = lines.slice(-5).join('\n');
-      await api.sendMessage(chatId, `✅ *[Playwright Tests Passed]*\n\`\`\`\n${summary}\n\`\`\``, { parse_mode: 'Markdown' });
+      await api.sendMessage(chatId, `✅ *[Playwright Tests Passed]*`, { parse_mode: 'Markdown' });
+      await sendCopyable(api, chatId, `\`\`\`plaintext\n${summary}\n\`\`\``);
     } catch (err) {
       const out = (err.stdout || err.stderr || err.message).slice(-600);
-      await api.sendMessage(chatId, `❌ *[Playwright Tests Failed]*\n\`\`\`\n${out}\n\`\`\``, { parse_mode: 'Markdown' });
+      await api.sendMessage(chatId, `❌ *[Playwright Tests Failed]*`, { parse_mode: 'Markdown' });
+      await sendCopyable(api, chatId, `\`\`\`plaintext\n${out}\n\`\`\``);
     }
     return;
   }
