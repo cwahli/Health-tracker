@@ -26,6 +26,8 @@ import {
   parseAgentList,
   parseModelsVerbose,
   modelKeyboard,
+  sortModelsFreeFirst,
+  isFreeModel,
   agentKeyboard,
   variantKeyboard,
   decodeCallback,
@@ -392,6 +394,26 @@ describe('pickers', () => {
         expect(button.callback_data.length).toBeLessThanOrEqual(64);
       }
     }
+  });
+
+  it('sorts free models first and marks them in the keyboard', () => {
+    const models = [
+      'opencode/deepseek-v4-flash',
+      'opencode/minimax-m2.7',
+      'opencode/muse-spark-1.3-contributor-free',
+      'opencode/nemotron-3.5-lightning-free',
+    ];
+    expect(isFreeModel('opencode/muse-spark-1.3-contributor-free')).toBe(true);
+    expect(isFreeModel('opencode/deepseek-v4-flash')).toBe(false);
+    const sorted = sortModelsFreeFirst(models);
+    expect(sorted.slice(0, 2)).toEqual([
+      'opencode/muse-spark-1.3-contributor-free',
+      'opencode/nemotron-3.5-lightning-free',
+    ]);
+    const kb = modelKeyboard(sorted, { page: 0, pageSize: 8 });
+    expect(kb.inline_keyboard[0][0].text).toMatch(/^\u2713 /);
+    expect(kb.inline_keyboard[0][0].callback_data).toBe('m:0');
+    expect(kb.inline_keyboard[2][0].text).toBe('opencode/deepseek-v4-flash');
   });
 
   it('builds agent and variant keyboards and decodes callbacks', () => {

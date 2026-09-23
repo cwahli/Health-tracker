@@ -61,12 +61,25 @@ export function parseModelsVerbose(text) {
   return models;
 }
 
+export function isFreeModel(modelId) {
+  return /free/i.test(String(modelId ?? ''));
+}
+
+export function sortModelsFreeFirst(models) {
+  const free = [];
+  const paid = [];
+  for (const m of models) (isFreeModel(m) ? free : paid).push(m);
+  return [...free, ...paid];
+}
+
 export function modelKeyboard(models, { page = 0, pageSize = 8 } = {}) {
   const total = models.length;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(0, page), pages - 1);
   const slice = models.slice(current * pageSize, current * pageSize + pageSize);
-  const rows = slice.map((model, index) => [{ text: model, callback_data: `m:${current * pageSize + index}` }]);
+  const rows = slice.map((model, index) => [
+    { text: isFreeModel(model) ? `✓ ${model}` : model, callback_data: `m:${current * pageSize + index}` },
+  ]);
   const nav = [];
   if (current > 0) nav.push({ text: 'Prev', callback_data: `mp:${current - 1}` });
   nav.push({ text: `${current + 1}/${pages}`, callback_data: 'noop' });

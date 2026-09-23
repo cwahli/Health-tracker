@@ -20,6 +20,7 @@ import {
   parseAgentList,
   parseModelsVerbose,
   modelKeyboard,
+  sortModelsFreeFirst,
   agentKeyboard,
   variantKeyboard,
   decodeCallback,
@@ -186,7 +187,9 @@ function chatEnv(api, chatId) {
 
 async function getModels(config, caches) {
   if (!caches.models) {
-    caches.models = await listModels({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) });
+    caches.models = sortModelsFreeFirst(
+      await listModels({ opencodeBin: config.agent.opencodeBin, env: opencodeEnv(config) }),
+    );
   }
   return caches.models;
 }
