@@ -9,3 +9,13 @@ Canonical cross-agent pack:
 - `bin/deploy-to-live.sh` — push code to `~/.config/telegram-opencode/router/`
 
 This git tree is the versioned source; the shared pack is what every Grok agent should open first.
+
+## Alignment (R-14)
+
+Health-tracker already owns shared bot skills (`scripts/skills/common`, bot-host inbound-media).
+This package + the box pack must **align** with that rail — see `plan/RELIABILITY.md` §14.
+Do not add a second photo downloader.
+
+## Propagation (§14.7)
+
+Feature updates fan out per bot class (Hermes / VPS / Mobile / Grok TG / Collab) with scope tags — see `plan/RELIABILITY.md` §14.7 for the pipeline and case-by-case examples.
