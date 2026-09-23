@@ -1084,3 +1084,7 @@ Capability ID
 When a capability ships, append one line under this subsection or in `tools/telegram-provider-router/CHANGELOG.md`:
 
 `YYYY-MM-DD  <capability-id>  scope=<…>  classes=<hermes,vps,…>  sync=<script|restart|pull>`
+
+- `2026-09-24  telegram-matrix  scope=common  classes=hermes,vps,mobile,grok-tg,collab(link-only)  sync=sync-hermes-skills.sh` (Case D core)
+- `2026-09-24  telegram-allowance  scope=runtime-adapter  classes=grok-tg(primary),vps/mobile(vocabulary only)  sync=sync-hermes-skills.sh` (Case E discoverability)
+- `2026-09-24  telegram-inbound-media  scope=runtime-adapter  classes=vps/mobile(auto),hermes,grok-tg(import/mirror)  sync=sync-hermes-skills.sh` (Case C discoverability)
