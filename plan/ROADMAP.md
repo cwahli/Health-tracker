@@ -469,9 +469,13 @@ Canonical steps: [COLLAB_BOT_MOBILE_WORKFLOW.md](./COLLAB_BOT_MOBILE_WORKFLOW.md
 |---|---|---|---|
 | **CB-1** | Colab Bot identity in `bots/registry.json`, systemd service unit `collab-bot.service`, Termux launcher `start-collab-bot.sh`. | `node scripts/collab-bot.mjs --check-config` passes. | **COMPLETE** |
 | **CB-2** | Model switching (`/switch muse-spark-1.3`, `/switch qwen-3.8`, `/switch status`) inside Colab via `scripts/lib/collab-session.mjs`. | Dynamic switcher simulation passes. | **COMPLETE** |
-| **CB-3** | Headless Colab compute worker notebook `notebooks/colab_qwen38_vllm.ipynb` with 20m auto-unassign idle watchdog. | Notebook auto-unassigns on idle to preserve 200 compute units. | **COMPLETE** |
+| **CB-3** | Headless Colab compute worker notebook `notebooks/colab_qwen38_vllm.ipynb` with 20m auto-unassign idle watchdog. | Notebook auto-unassigns on idle to preserve 200 compute units. | **COMPLETE & LIVE-VERIFIED** (unassigned at 01:18 to protect 200 units) |
 | **CB-4** | Automated verification pipeline: `scripts/run-playwright-headless.sh` running `tsc` + Playwright before git push. | Playwright runner script executable and tested. | **COMPLETE** |
-| **CB-5** | End-to-end mobile dev loop (`/fix <task>` -> git pull -> model fix -> Playwright test -> git push origin main). | Live atomic test from mobile Telegram phone client. | **READY FOR MOBILE TEST** |
+| **CB-5** | Conversational AI Coding Agent Upgrade: `notebooks/colab_worker.py` upgraded to full autonomous OpenCode agent (natural conversation + task execution + on-screen `getpass` token input fallback + 2-line auto-updating launcher in `colab_qwen38_vllm.ipynb`). | Pulls latest GitHub code on every run; responds to conversation and fixes. | **COMPLETE** |
+| **CB-6** | Live Mobile Dev Loop Verification: User enters Telegram bot token in interactive prompt on Colab, validates live conversational greeting (`Hi`), executes first autonomous bug fix/feature via Telegram, and verifies clean Playwright run + git commit pushed to `origin/main`. | Live verification from mobile Telegram phone client. | **OPEN / READY TO TEST** |
+| **CB-7** | Local Qwen 3.8 GPU Inference Pipeline: Embed vLLM / llama-cpp-python in `colab_worker.py` for `/switch qwen-3.8` so 100% of reasoning runs on Colab's Tesla T4/L4 GPU offline without external API dependency. | Qwen 3.8 generates code directly via GPU VRAM. | **NEXT** |
+| **CB-8** | Session Continuity & Multi-Turn Memory: Wire OpenCode `--session` persistence across multiple Telegram turns in Colab worker so the agent retains memory of previous conversation turns and file changes. | Agent remembers prior context across conversational turns. | **NEXT** |
+
 
 
 
