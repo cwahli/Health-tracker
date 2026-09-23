@@ -4,7 +4,7 @@
 # current => noop | diverged => skipped untouched.
 set -u
 
-HOOK="/root/Health-tracker/scripts/sync-workbench-clean-ff.sh"
+HOOK="${HOOK:-/root/Health-tracker/scripts/sync-workbench-clean-ff.sh}"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
@@ -52,6 +52,18 @@ check "diverged keeps local commit" 'git -C "$T/div" log --oneline | grep -q loc
 check "diverged has no merge commit" '[ "$(git -C "$T/div" log --oneline | wc -l)" = "3" ]'
 check "diverged absent from origin" '[ "$(git -C "$T/seed" log --oneline | grep -c local-only)" = "0" ]'
 check "log records diverged skip" 'grep -q "SKIP $T/div.*diverged" "$T/sync.log"'
+
+# Linked worktree (".git" is a FILE, not a directory — the /home/ubuntu/dev/* layout).
+# Regression: a `[ -d "$root/.git" ]` guard silently skipped every worktree.
+git -C "$T/seed" worktree add -q -b wtmain "$T/wt" 2>/dev/null
+git -C "$T/wt" branch -q --set-upstream-to=origin/main wtmain 2>/dev/null
+git -C "$T/seed" commit -q --allow-empty -m fourth && git -C "$T/seed" push -q origin main
+check "worktree .git is a file" 'test -f "$T/wt/.git"'
+check "worktree was behind before sync" 'test "$(git -C "$T/wt" rev-list --count HEAD..origin/main)" = "1"'
+WORKBENCH_ROOTS="$T/wt" bash "$HOOK" --log "$T/sync.log" >/dev/null
+check "worktree fast-forwarded" '[ "$(git -C "$T/wt" rev-list --count HEAD..origin/main)" = "0" ]'
+check "worktree has new commit" 'git -C "$T/wt" log --oneline | grep -q fourth'
+check "log records worktree pull" 'grep -q "PULLED $T/wt" "$T/sync.log"'
 
 echo "---"
 echo "pass=$pass fail=$fail"

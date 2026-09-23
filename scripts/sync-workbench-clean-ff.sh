@@ -71,7 +71,10 @@ current=0
 skipped=0
 
 for root in $ROOTS; do
-  [ -d "$root/.git" ] || continue
+  # Accept both a clone (".git" is a directory) and a linked worktree
+  # (".git" is a file holding "gitdir: ..."), which is how /home/ubuntu/dev/*
+  # are laid out. Testing only for -d silently skipped every agent worktree.
+  { [ -d "$root/.git" ] || [ -f "$root/.git" ]; } || continue
   branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
   [ "$branch" = "HEAD" ] && { log "SKIP $root: detached HEAD"; skipped=$((skipped+1)); continue; }
 
