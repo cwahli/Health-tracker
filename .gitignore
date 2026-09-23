@@ -35,3 +35,8 @@ settings.json
 agent
 download
 screenshots
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
