@@ -14,6 +14,8 @@ import {
   isTimeoutError,
   extractLogError,
   parseRetryAfter,
+  isQuotaOrLimitError,
+  runWithModelFailover,
 } from '../scripts/lib/agent-opencode.mjs';
 import {
   clamp,
@@ -343,6 +345,134 @@ describe('parseRetryAfter', () => {
     );
     expect(out).toContain('rate limit');
     expect(out).toContain('Retry in ~3h 20m.');
+  });
+});
+
+describe('small-model errors are not fatal', () => {
+  // Measured on the VPS: opencode runs a cosmetic "small" model for session
+  // titles BEFORE the model the user asked for. Its failure is not fatal — a run
+  // logged `small=true ... Insufficient account funds` and still answered.
+  it('ignores small=true title-agent failures when the real run succeeds', () => {
+    const log =
+      'level=ERROR modelID=gpt-5.4-nano small=true agent=title error.error="AI_APICallError: Insufficient account funds"';
+    expect(extractLogError(log)).toBeNull();
+  });
+
+  it('still reports the real (small=false) model failure', () => {
+    const log = [
+      'level=ERROR modelID=gpt-5.4-nano small=true agent=title error.error="AI_APICallError: Insufficient account funds"',
+      'level=ERROR modelID=big-pickle small=false agent=build error.error="AI_APICallError: Rate limit exceeded. Please try again later."',
+    ].join('\n');
+    const out = extractLogError(log);
+    expect(out).toContain('rate limit');
+    expect(out).not.toContain('out of funds');
+  });
+});
+
+describe('isQuotaOrLimitError', () => {
+  it('recognises lane-unavailable wording (router vocabulary)', () => {
+    for (const msg of [
+      'AI_APICallError: Rate limit exceeded. Please try again later.',
+      'AI_APICallError: Upstream request failed: Insufficient account funds',
+      'quota exceeded',
+      'free_tier_limit reached',
+      'neuron limit reached',
+      'HTTP 429 Too Many Requests',
+    ]) {
+      expect(isQuotaOrLimitError(msg)).toBe(true);
+    }
+  });
+
+  it('does not treat a transport error or empty value as a lane failure', () => {
+    expect(isQuotaOrLimitError('')).toBe(false);
+    expect(isQuotaOrLimitError(null)).toBe(false);
+    expect(isQuotaOrLimitError('fetch failed')).toBe(false);
+  });
+});
+
+describe('runWithModelFailover', () => {
+  const quota = (model) => ({ finalText: '', lastError: 'Rate limit exceeded', _model: model });
+  const ok = (model) => ({ finalText: 'PONG', lastError: null, _model: model });
+
+  it('re-runs the SAME prompt on the next lane after a quota failure', () => {
+    const prompts = [];
+    return runWithModelFailover({
+      models: ['a/one', 'b/two'],
+      makeRun: (model) => {
+        prompts.push(model);
+        return Promise.resolve(model === 'a/one' ? quota(model) : ok(model));
+      },
+    }).then(({ result, attempts }) => {
+      expect(prompts).toEqual(['a/one', 'b/two']);
+      expect(result.finalText).toBe('PONG');
+      expect(attempts).toHaveLength(2);
+      expect(attempts[0]).toMatchObject({ model: 'a/one', ok: false });
+      expect(attempts[1]).toMatchObject({ model: 'b/two', ok: true });
+    });
+  });
+
+  it('stops at the first success and does not burn the rest', async () => {
+    const prompts = [];
+    const { result } = await runWithModelFailover({
+      models: ['a/one', 'b/two', 'c/three'],
+      makeRun: (model) => {
+        prompts.push(model);
+        return Promise.resolve(ok(model));
+      },
+    });
+    expect(prompts).toEqual(['a/one']);
+    expect(result._model).toBe('a/one');
+  });
+
+  it('never auto-retries a timeout — re-running would just wait again', async () => {
+    const prompts = [];
+    const { attempts } = await runWithModelFailover({
+      models: ['a/one', 'b/two'],
+      makeRun: (model) => {
+        prompts.push(model);
+        return Promise.resolve({ finalText: '', lastError: 'timed out after 900000ms' });
+      },
+    });
+    expect(prompts).toEqual(['a/one']);
+    expect(attempts).toHaveLength(1);
+  });
+
+  it('reports the switch so the chat can show what happened', async () => {
+    const switches = [];
+    await runWithModelFailover({
+      models: ['a/one', 'b/two'],
+      makeRun: (model) => Promise.resolve(model === 'a/one' ? quota(model) : ok(model)),
+      onSwitch: (info) => switches.push(info),
+    });
+    expect(switches).toHaveLength(1);
+    expect(switches[0]).toMatchObject({ from: 'a/one', to: 'b/two' });
+  });
+
+  it('dedupes candidates and needs at least one', async () => {
+    let calls = 0;
+    await runWithModelFailover({
+      models: ['a/one', 'a/one', null],
+      makeRun: (model) => {
+        calls += 1;
+        return Promise.resolve(ok(model));
+      },
+    });
+    expect(calls).toBe(1);
+    await expect(runWithModelFailover({ models: [], makeRun: () => {} })).rejects.toThrow(
+      /at least one model/,
+    );
+  });
+
+  it('does not fail over when text was already delivered to the user', async () => {
+    const prompts = [];
+    await runWithModelFailover({
+      models: ['a/one', 'b/two'],
+      makeRun: (model) => {
+        prompts.push(model);
+        return Promise.resolve({ finalText: 'partial answer', lastError: 'Rate limit exceeded' });
+      },
+    });
+    expect(prompts).toEqual(['a/one']);
   });
 });
 

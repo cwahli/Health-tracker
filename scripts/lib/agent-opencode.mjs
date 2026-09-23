@@ -247,11 +247,22 @@ export function parseRetryAfter(text) {
 export function extractLogError(stderr) {
   const text = String(stderr || '');
   if (!text || !/level=ERROR/.test(text)) return null;
-  const details = [...text.matchAll(/error\.error="([^"]+)"/g)].map((m) => m[1]);
-  // The last detail is the one from the real (non-"small") model, i.e. the run
-  // the user actually asked for — session-title errors come first.
+  // opencode runs a cosmetic "small" model (session titles) before the model the
+  // user actually asked for, so its failures are NOT fatal: a run can still
+  // answer normally after one (measured on the VPS: `ling-3.0-flash-fin-free`
+  // returned a full reply while the title agent logged "Insufficient account
+  // funds"). Counting those would kill a run that was about to succeed, so only
+  // `small=false` (or unlabelled) errors are considered.
+  const lines = text
+    .split('\n')
+    .filter((line) => /level=ERROR/.test(line) && !/\bsmall=true\b/.test(line));
+  if (!lines.length) return null;
+  const details = lines
+    .map((line) => line.match(/error\.error="([^"]+)"/)?.[1])
+    .filter(Boolean);
+  // The last detail is the one from the run the user asked for.
   const detail = details.length ? details[details.length - 1] : '';
-  const haystack = detail || text;
+  const haystack = detail || lines.join('\n');
   const hint = parseRetryAfter(haystack);
   for (const { pattern, reason } of FATAL_LOG_ERRORS) {
     if (pattern.test(haystack)) {
@@ -259,8 +270,75 @@ export function extractLogError(stderr) {
     }
   }
   if (detail) return hint ? `${detail} ${hint}` : detail;
-  const errors = text.split('\n').filter((line) => /level=ERROR/.test(line));
-  return errors.length ? `opencode error: ${errors[errors.length - 1].trim().slice(0, 300)}` : null;
+  return `opencode error: ${lines[lines.length - 1].trim().slice(0, 300)}`;
+}
+
+/**
+ * Does this error mean "this lane is unavailable right now" (free allowance
+ * spent, account unfunded, throttled, capacity) rather than "your request was
+ * wrong"? Used to decide whether the same prompt is worth re-running on another
+ * model.
+ *
+ * Vocabulary aligned with the provider router's `isQuotaOrLimitError`
+ * (tools/telegram-provider-router, plan/RELIABILITY.md §14) so both runtimes
+ * classify a lane failure the same way.
+ */
+const QUOTA_OR_LIMIT_RE =
+  /quota|rate.?limit|\b429\b|\b402\b|\b4006\b|insufficient|out of credits|no credits|usage limit|free.?limit|exhausted|freebuck|free.?usage|payment required|exceeded|throttl|capacity|limit reached|daily.?cap|freeusagelimit|credit.?balance|neuron|workers ai|too many requests/i;
+
+export function isQuotaOrLimitError(msg) {
+  return QUOTA_OR_LIMIT_RE.test(String(msg || ''));
+}
+
+/** A timeout/abort means re-running would just wait again — never auto-retry those. */
+const NO_RETRY_RE = /timed out after|aborted|^Abort/i;
+
+/**
+ * Run the user's prompt on the first model that works, mirroring the provider
+ * router's free-lane failover: when a lane is rate-limited/unfunded, re-run the
+ * SAME prompt on the next candidate instead of dead-ending in the chat.
+ *
+ * `makeRun(model)` is supplied by the caller so session/prompt/env wiring stays
+ * in bot-host; this function only owns the retry decision, which keeps it unit
+ * testable without spawning a real CLI.
+ */
+export async function runWithModelFailover({
+  models,
+  makeRun,
+  onSwitch,
+  isRetryable = defaultIsRetryable,
+}) {
+  const candidates = [...new Set((models || []).filter(Boolean))];
+  if (!candidates.length) throw new Error('runWithModelFailover needs at least one model');
+  const attempts = [];
+  let result = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const model = candidates[i];
+    result = await makeRun(model);
+    attempts.push({ model, lastError: result?.lastError || null, ok: !isRetryable(result) });
+    if (!isRetryable(result) || i === candidates.length - 1) break;
+    if (typeof onSwitch === 'function') {
+      try {
+        onSwitch({ from: model, to: candidates[i + 1], reason: result?.lastError || '', attempt: i + 1 });
+      } catch {
+        // a UI hiccup must never break failover
+      }
+    }
+  }
+  return { result, attempts };
+}
+
+/**
+ * Failover is only worth it when nothing was delivered to the user and the
+ * failure was not a wait (timeout/abort). Any other error — quota, unfunded
+ * account, unknown model, provider 5xx — is a reason to try the next lane.
+ */
+export function defaultIsRetryable(result) {
+  if (!result) return false;
+  if (result.finalText && String(result.finalText).trim()) return false;
+  const err = String(result.lastError || '');
+  if (!err) return false;
+  return !NO_RETRY_RE.test(err);
 }
 
 export function runOpencode({
