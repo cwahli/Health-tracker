@@ -33,6 +33,21 @@ except Exception:
 if not TELEGRAM_BOT_TOKEN:
     TELEGRAM_BOT_TOKEN = os.environ.get("COLLAB_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 
+if not TELEGRAM_BOT_TOKEN or "YOUR_TELEGRAM" in TELEGRAM_BOT_TOKEN:
+    try:
+        from getpass import getpass
+        print("\n" + "=" * 60)
+        print("🔑 Telegram Bot Token not found in Secrets.")
+        user_input = getpass("👉 Paste your Telegram Bot Token here and press Enter: ").strip()
+        if user_input:
+            TELEGRAM_BOT_TOKEN = user_input
+            os.environ["COLLAB_BOT_TOKEN"] = user_input
+            print("✅ Token saved for this session!")
+        print("=" * 60 + "\n")
+    except Exception:
+        pass
+
+
 try:
     from google.colab import userdata
     GITHUB_TOKEN = userdata.get("GITHUB_TOKEN")
