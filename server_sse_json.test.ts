@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { attachSseJsonResponder, parseSseFinalResult } from './server_sse_json';
 import { markDietDegraded, buildSavableMealFromParsed } from './server_meal_orchestrator';
+import { humanizeJobFailure } from './src/utils/jobFailure';
 import { toPendingFoodLog } from './src/mealBuild/adapters';
 import { previewStatusLabel } from './src/jobs/jobPreview';
 import fs from 'fs';
@@ -34,6 +35,21 @@ describe('SSE res.json wrap (DEGRADE_NOT_TERMINAL)', () => {
   it('food-analyze stream path attaches the SSE json responder', () => {
     const src = fs.readFileSync(path.join(__dirname, 'server_food_analyze_run_setup.ts'), 'utf8');
     expect(src).toMatch(/attachSseJsonResponder\(res\)/);
+  });
+
+  it('R-13.2: loopback analyze stream emits a : ping keepalive with cleanup', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'server_food_analyze_run_setup.ts'), 'utf8');
+    expect(src).toMatch(/setInterval/);
+    expect(src).toMatch(/: ping\\n\\n/);
+    expect(src).toMatch(/\.on\('close'/);
+    expect(src).toMatch(/\.on\('finish'/);
+  });
+
+  it('R-13.2: 180s loopback abort is kept and its copy is aligned', () => {
+    const jobsSrc = fs.readFileSync(path.join(__dirname, 'serverJobs.ts'), 'utf8');
+    expect(jobsSrc).toMatch(/180000/);
+    expect(jobsSrc).toMatch(/timed out after 180s/);
+    expect(humanizeJobFailure('Analysis request timed out after 180s.')).toMatch(/180s wall/);
   });
 });
 
