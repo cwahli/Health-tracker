@@ -25,11 +25,15 @@ import {
   variantKeyboard,
   decodeCallback,
   helpText,
-  statusText,
   formatModelList,
   formatUsage,
   extractMedia,
 } from './lib/commands.mjs';
+import {
+  buildStatusSnapshot,
+  formatStatusPlain,
+  COMPACT_SUMMARY_PROMPT,
+} from './lib/bot-status.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -154,6 +158,8 @@ const loadSessions = (id) => loadMap(id, 'sessions.json');
 const saveSessions = (id, sessions) => saveMap(id, 'sessions.json', sessions);
 const loadPrefs = (id) => loadMap(id, 'prefs.json');
 const savePrefs = (id, prefs) => saveMap(id, 'prefs.json', prefs);
+const loadTotals = (id) => loadMap(id, 'totals.json');
+const saveTotals = (id, totals) => saveMap(id, 'totals.json', totals);
 
 function loadOffset(id) {
   return Number(readJson(path.join(stateDir(id), 'offset.json'), { offset: 0 }).offset) || 0;
@@ -410,7 +416,30 @@ async function sendChunked(api, chatId, text) {
 
 const CLEAR_KEYBOARD = { inline_keyboard: [] };
 
-async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, chatId, cmd }) {
+async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsage }) {
+  let contextLimit = 0;
+  try {
+    contextLimit = await getContextLimit(config, caches, eff.model);
+  } catch {
+    // usage is best-effort; never fail the answer over it
+  }
+  const raw = {
+    tokens: result.usage?.tokens ?? null,
+    cost: Number(result.usage?.cost) || 0,
+    contextLimit,
+    agent: eff.agent,
+  };
+  lastUsage.set(chatId, raw);
+  const prev = totals.get(chatId) || { runs: 0, tokens: 0, cost: 0 };
+  prev.runs += 1;
+  prev.tokens += Number(result.usage?.tokens?.total) || 0;
+  prev.cost += raw.cost;
+  totals.set(chatId, prev);
+  saveTotals(config.id, totals);
+  return formatUsage(raw);
+}
+
+async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
   const eff = effective(config, prefs, chatId);
 
   switch (cmd.name) {
@@ -419,12 +448,26 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await api.sendMessage(chatId, helpText(config, eff));
       return;
 
-    case 'status':
-      await api.sendMessage(
-        chatId,
-        statusText(config, { sessionId: sessions.get(chatId), ...eff, usage: lastUsage?.get(chatId) }),
-      );
+    case 'status': {
+      const snap = buildStatusSnapshot({
+        bot: { id: config.id, name: config.name },
+        platform: config.agent.kind || 'opencode',
+        capabilities: { compact: true, costTracking: true, backends: false },
+        effective: eff,
+        session: sessions.get(chatId) ? { id: sessions.get(chatId) } : null,
+        handoff: Boolean((prefs.get(chatId) || {}).handoff),
+        usage: lastUsage?.get(chatId) || null,
+        totals: totals?.get(chatId) || null,
+        runtime: {
+          bootedAt,
+          taskState: running.get(chatId) ? 'running' : 'idle',
+          lock: lockHolder(),
+        },
+        health,
+      });
+      await api.sendMessage(chatId, formatStatusPlain(snap));
       return;
+    }
 
     case 'build':
     case 'plan':
@@ -438,6 +481,54 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       saveSessions(config.id, sessions);
       await api.sendMessage(chatId, 'Started a fresh session.');
       return;
+
+    case 'compact': {
+      if (running.get(chatId)) {
+        await api.sendMessage(chatId, 'A request is already running. Send /abort to cancel it first.');
+        return;
+      }
+      const compactSessionId = sessions.get(chatId);
+      if (!compactSessionId) {
+        await api.sendMessage(chatId, 'Nothing to compact — no active session in this chat yet.');
+        return;
+      }
+      await api.sendMessage(chatId, 'Compacting — summarizing this session, then starting fresh…');
+      try {
+        const result = await runOpencode({
+          prompt: COMPACT_SUMMARY_PROMPT,
+          model: eff.model,
+          variant: eff.variant,
+          workspace: config.agent.workspace,
+          thinking: config.agent.thinking,
+          timeoutMs: config.agent.timeoutMs,
+          opencodeBin: config.agent.opencodeBin,
+          onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+          extraArgs: ['--session', compactSessionId],
+          env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+        });
+        if (running.get(chatId)?.aborted) {
+          await api.sendMessage(chatId, 'Aborted — session kept as-is.');
+        } else if (result.code !== 0 || !result.finalText?.trim()) {
+          await api.sendMessage(chatId, `Compact failed (${result.lastError || `exit ${result.code}`}) — session kept as-is.`);
+        } else {
+          const brief = result.finalText.trim().slice(0, 2000);
+          prefs.set(chatId, { ...(prefs.get(chatId) || {}), handoff: brief });
+          savePrefs(config.id, prefs);
+          sessions.delete(chatId);
+          saveSessions(config.id, sessions);
+          const compactUsage = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
+          await api.sendMessage(
+            chatId,
+            `Compacted. Fresh session starts on your next message; the brief below carries over once.\n\n${brief}${compactUsage ? `\n\n${compactUsage}` : ''}`,
+          );
+        }
+      } catch (err) {
+        await api.sendMessage(chatId, `Compact failed: ${err.message} — session kept as-is.`).catch(() => {});
+      } finally {
+        running.delete(chatId);
+      }
+      return;
+    }
 
     case 'model': {
       if (!cmd.args) {
@@ -636,7 +727,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
   }
 }
 
-async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, busy, message }) {
+async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
   if (!config.telegram.allowedUserIds.includes(userId)) {
@@ -648,7 +739,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
 
   const cmd = parseCommand(text);
   if (cmd) {
-    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, chatId, cmd });
+    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd });
     return;
   }
 
@@ -671,13 +762,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   try {
     await renderer.start();
     const eff = effective(config, prefs, chatId);
+    const handoff = prefs.get(chatId)?.handoff || '';
+    const prompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${text}` : text;
     const extraArgs = [];
     const sessionId = sessions.get(chatId);
     if (sessionId) extraArgs.push('--session', sessionId);
     if (eff.agent) extraArgs.push('--agent', eff.agent);
 
     const result = await runOpencode({
-      prompt: text,
+      prompt,
       model: eff.model,
       variant: eff.variant,
       workspace: config.agent.workspace,
@@ -698,19 +791,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       renderer.status = 'aborted';
       await renderer.deliver('Aborted.');
     } else {
-      let contextLimit = 0;
-      try {
-        contextLimit = await getContextLimit(config, caches, eff.model);
-      } catch {
-        // usage is best-effort; never fail the answer over it
+      const usageText = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
+      if (handoff) {
+        const kept = prefs.get(chatId) || {};
+        delete kept.handoff;
+        prefs.set(chatId, kept);
+        savePrefs(config.id, prefs);
       }
-      const usageText = formatUsage({
-        tokens: result.usage?.tokens,
-        cost: result.usage?.cost,
-        contextLimit,
-        agent: eff.agent,
-      });
-      if (usageText) lastUsage.set(chatId, usageText);
       await renderer.finish(result, { footer: usageText });
     }
   } catch (err) {
@@ -731,6 +818,9 @@ async function runLoop({ api, config }) {
   const running = new Map();
   const busy = new Set();
   const lastUsage = new Map();
+  const totals = loadTotals(config.id);
+  const bootedAt = Date.now();
+  const health = { okAt: 0, errAt: 0, err: '' };
   let offset = loadOffset(config.id);
   let running_ = true;
 
@@ -744,9 +834,14 @@ async function runLoop({ api, config }) {
     let updates;
     try {
       updates = await api.getUpdates({ offset, timeout: 30, allowedUpdates: ['message', 'callback_query'] });
+      health.okAt = Date.now();
+      health.errAt = 0;
+      health.err = '';
     } catch (err) {
       if (err instanceof TelegramError && err.isRateLimit) throttle.pause(err.retryAfter);
       console.error(`[${config.id}] getUpdates failed: ${err.message}`);
+      health.errAt = Date.now();
+      health.err = err.message;
       await sleep(2000);
       continue;
     }
@@ -758,7 +853,7 @@ async function runLoop({ api, config }) {
           console.error(`[${config.id}] callback handler error: ${err.message}`);
         });
       } else if (update.message) {
-        handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, busy, message: update.message }).catch(
+        handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message: update.message }).catch(
           (err) => {
             console.error(`[${config.id}] handler error: ${err.message}`);
           },
@@ -790,6 +885,9 @@ async function simulate(config, args) {
     caches,
     running: new Map(),
     lastUsage: new Map(),
+    totals: new Map(),
+    health: null,
+    bootedAt: Date.now(),
     chatId: 'sim',
     cmd,
   });

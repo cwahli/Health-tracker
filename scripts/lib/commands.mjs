@@ -124,7 +124,8 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/plan             switch to the plan agent',
     '/thinking [level] pick the thinking level (variant)',
     '/new              start a fresh session',
-    '/status           show session, model, agent, workspace, usage',
+    '/compact          summarize session + start fresh (one-shot handoff)',
+    '/status           show model, usage totals, poll health, session',
     '/abort            cancel the running request',
     '/help             this message',
   ].join('\n');

@@ -38,6 +38,13 @@ import {
   formatTokens,
   extractMedia,
 } from '../scripts/lib/commands.mjs';
+import {
+  buildStatusSnapshot,
+  formatStatusPlain,
+  compactUnsupported,
+  formatAgo,
+  COMPACT_SUMMARY_PROMPT,
+} from '../scripts/lib/bot-status.mjs';
 
 describe('reasoning-compress', () => {
   it('strips code fences and markdown noise', () => {
@@ -414,6 +421,36 @@ describe('pickers', () => {
     expect(kb.inline_keyboard[0][0].text).toMatch(/^\u2713 /);
     expect(kb.inline_keyboard[0][0].callback_data).toBe('m:0');
     expect(kb.inline_keyboard[2][0].text).toBe('opencode/deepseek-v4-flash');
+  });
+
+  it('builds a shared status snapshot for any bot platform', () => {
+    const now = Date.now();
+    const snap = buildStatusSnapshot({
+      bot: { id: 'android', name: 'Android OpenCode Bot' },
+      platform: 'opencode',
+      capabilities: { compact: true },
+      effective: { model: 'opencode/muse-spark-1.3-contributor-free', agent: 'build', variant: null },
+      session: { id: 'ses_0123456789abcdef' },
+      handoff: false,
+      usage: { tokens: { total: 22700 }, cost: 0, contextLimit: 1000000, agent: 'build' },
+      totals: { runs: 5, tokens: 118000, cost: 0.0042 },
+      runtime: { bootedAt: now - 192 * 60 * 1000, taskState: 'idle', lock: null },
+      health: { okAt: now - 4000, errAt: 0, err: '' },
+    });
+    const text = formatStatusPlain(snap);
+    expect(text).toContain('Android OpenCode Bot (android)');
+    expect(text).toContain('model: \u2713 opencode/muse-spark-1.3-contributor-free (free)');
+    expect(text).toContain('session: ses_01234567\u2026');
+    expect(text).toContain('chat total: 5 runs');
+    expect(text).toContain('poll: ok 4s ago');
+    expect(text).toContain('/compact');
+    const failing = formatStatusPlain(
+      buildStatusSnapshot({ health: { okAt: now - 900000, errAt: now - 60000, err: 'fetch failed' } }),
+    );
+    expect(failing).toContain('poll: FAILING since 1m ago (fetch failed)');
+    expect(formatAgo(0)).toBe('never');
+    expect(COMPACT_SUMMARY_PROMPT.length).toBeGreaterThan(20);
+    expect(compactUnsupported('collab', 'gpu tunnels')).toContain('/compact');
   });
 
   it('builds agent and variant keyboards and decodes callbacks', () => {
