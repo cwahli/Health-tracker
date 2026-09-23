@@ -1336,6 +1336,13 @@ app.get('/nutrient-table', (req, res) => {
   res.send(fs.readFileSync(path.join(process.cwd(), 'public', 'nutrient-table.html'), 'utf-8'));
 });
 
+// Bot capability matrix page (same static-HTML component pattern)
+app.get('/capability-matrix', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.send(fs.readFileSync(path.join(process.cwd(), 'public', 'capability-matrix.html'), 'utf-8'));
+});
+
 process.on('uncaughtException', (err) => {
   console.error('[UNCAUGHT EXCEPTION]', err);
 });
