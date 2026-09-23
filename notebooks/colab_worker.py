@@ -235,8 +235,37 @@ def polling_loop():
             time.sleep(5)
 
 if __name__ == "__main__":
-    setup_environment()
-    run_git_sync()
+    print("=" * 60)
+    print("🚀 Colab Compute Worker Initializing...")
+    print("=" * 60)
+
     gpu = get_gpu_info()
-    tg_send(ALLOWED_USER_ID, f"🚀 *[Colab Worker is ONLINE]*\n• Hardware: \`{gpu}\`\n• Active Engine: \`{CURRENT_ENGINE}\`\n• Auto-shutdown: {IDLE_TIMEOUT_MINUTES}m idle timer.\n\nReady for \`/switch\`, \`/project\`, or \`/fix\` from your phone!")
+    print(f"• Hardware Detected: {gpu}")
+
+    if not TELEGRAM_BOT_TOKEN or "YOUR_TELEGRAM" in TELEGRAM_BOT_TOKEN:
+        print("\n⚠️  [WARNING] COLLAB_BOT_TOKEN not found!")
+        print("👉 To fix on mobile:")
+        print("   1. Tap the 🔑 (Secrets) tab on the left sidebar in Colab.")
+        print("   2. Add Secret: Name = COLLAB_BOT_TOKEN, Value = <your bot token>.")
+        print("   3. Turn ON the toggle for Notebook access.")
+        print("   Or paste it directly into TELEGRAM_BOT_TOKEN at the top of this cell.\n")
+    else:
+        print("• Telegram Token: Loaded successfully!")
+        tg_send(ALLOWED_USER_ID, f"🚀 *[Colab Worker Booting]*\n• Hardware: `{gpu}`\n• Preparing repository...")
+        print("• Boot Alert: Sent to your Telegram!")
+
+    print("\n⏳ [1/2] Syncing repository from GitHub...")
+    run_git_sync()
+    print("✅ Repository ready.")
+
+    print("\n⏳ [2/2] Checking development tools (OpenCode CLI)...")
+    setup_environment()
+    print("✅ Environment ready.")
+
+    tg_send(ALLOWED_USER_ID, f"🚀 *[Colab Worker is ONLINE]*\n• Hardware: `{gpu}`\n• Active Engine: `{CURRENT_ENGINE}`\n• Auto-shutdown: {IDLE_TIMEOUT_MINUTES}m idle timer.\n\nReady for `/switch`, `/project`, or `/fix` from your phone!")
+    print("\n" + "=" * 60)
+    print("🎉 Colab Worker is ONLINE and listening for Telegram commands!")
+    print("📱 You can now safely minimize Chrome and work from Telegram.")
+    print("=" * 60)
     polling_loop()
+
