@@ -944,8 +944,143 @@ From `golden/scorecard/current/FREE_MODEL_TOOL_PICKER.md` + bake-off:
 | Secrets in git? | No — `.env` stays live-only |
 | Assert / test | P1+: extend `telegram-smoke-test` / bot-host unit for inbound path; no live Gemini |
 
+### 14.7 Propagation process — every bot class (flexible common core)
+
+Telegram is the **common transport**. Runtimes and tools differ. Features must declare a **scope** so updates fan out only where they apply, with optional per-class adapters.
+
+#### Bot classes (inventory)
+
+| Class | Registry examples | Runtime / host | How skills & tools load today | Typical TG token |
+|-------|-------------------|----------------|-------------------------------|------------------|
+| **Hermes** | `hermes_default`, `hermes_qa_*`, `hermes_orchestrator`, `hermes_meal_audit` | Hermes gateway profiles | `scripts/sync-hermes-skills.sh` → `~/.hermes/**/skills` (+ profile filters) | One token per profile; **never** dual-poll with bot-host |
+| **VPS** | `vm`, `opencode`, `vm2` | `bot-host` on OVH/VPS | `bots/registry.json` → `sharedSkills` / workspace `.agents/skills` | VPS coding bots (`@Opencode_135_bot`, VM bots, …) |
+| **Mobile** | `android` | Device (Termux/proot) | Phone paths + Hermes `shared_skills` + device OpenCode | `@Android_opencode_bot` (phone owns poller) |
+| **Grok TG** | `tg_provider_router` (+ future Grok chat bot) | Box provider-router / Channels | Box pack `registry.json` + skill `telegram-shared-capabilities`; live `~/.config/telegram-opencode/router/` | Free-lane / Grok token — **separate** from coding tokens |
+| **Collab** | `collab` | `scripts/collab-bot.mjs` (Colab GPU tunnel) | Collab session helpers; **not** the LLM coding skill pack by default | `@Collab_bot` — project/GPU commands, not meal-audit |
+
+**Flexibility model**
+
+```text
+Capability ID
+  ├─ scope: common | transport | runtime-adapter | bot-specific
+  ├─ core:   scripts/skills/common/<id>  and/or  scripts/lib/<id>.mjs
+  ├─ adapters:
+  │     hermes:   (symlink via sync-hermes-skills / profile allowlist)
+  │     bot-host: (sharedSkills entry + optional adapter .mjs)
+  │     mobile:   (sync script / registry paths on device)
+  │     grok-tg:  (box pack registry row + router hook)
+  │     collab:   (opt-in; often N/A or thin TG UX only)
+  └─ overrides: bots/registry.json per-bot flags (enable, paths, commands)
+```
+
+| Scope | Meaning | Propagates to |
+|-------|---------|---------------|
+| **transport** | Pure Telegram API UX (typing, sendPhoto, getFile) | Any class that speaks that TG API helper |
+| **common** | Skill/lib every coding agent should know | Hermes + VPS + Mobile + Grok TG (if coding); Collab only if opted in |
+| **runtime-adapter** | Same capability, different glue (Hermes soul vs bot-host MEDIA: vs router command) | Classes listed in adapters |
+| **bot-specific** | One profile/command surface only | Explicit registry ids only |
+
+#### Propagation pipeline (every feature update)
+
+```text
+1. CLASSIFY   → common | transport | runtime-adapter | bot-specific
+2. IMPLEMENT  → core in scripts/skills/common or scripts/lib
+3. ADAPT      → thin per-runtime glue (only if API differs)
+4. DECLARE    → bots/registry.json + capability row in
+                tools/telegram-provider-router + box pack registry.json
+5. DISTRIBUTE → class-specific sync (see matrix below)
+6. SMOKE      → one check per affected class (no dual-poller)
+7. DOCUMENT   → RELIABILITY §14 changelog line + AGENT_HANDOFF
+```
+
+**Distribute matrix**
+
+| Class | After core lands on `main`, do |
+|-------|--------------------------------|
+| Hermes | `bash scripts/sync-hermes-skills.sh` on VPS/phone profiles that should receive it; restart only that gateway if skill load is boot-time |
+| VPS | Deploy/restart **that** `bot-host@<id>` (or shared host process); confirm `sharedSkills` lists the skill |
+| Mobile | `git pull` on device workspace; re-run Hermes/shared_skills sync; restart **phone** poller only |
+| Grok TG | `bin/sync-from-repo.sh` → `bin/deploy-to-live.sh` on box; restart **one** provider-router; refresh skill text if needed |
+| Collab | Bump only if capability is in collab scope; restart `collab-bot` / Colab session as needed — **skip** by default for coding-only skills |
+
+#### Case-by-case examples
+
+**Case A — Transport: typing pulse / “waiting for …” (V-28 style)**  
+- **Scope:** `transport`  
+- **Core:** shared TG helper + `docs/agents/telegram_work.md`  
+- **Propagate:** Hermes ✅ · VPS bot-host ✅ · Mobile ✅ · Grok TG ✅ (router progress UX) · Collab ✅ (if it long-runs)  
+- **Adapter:** each runtime calls the same “pulse every N s” rule; Collab may pulse only during `/project` jobs  
+- **Do not:** fork a second typing protocol per bot
+
+**Case B — Common outbound image: `MEDIA:/abs/path.png`**  
+- **Scope:** `common`  
+- **Core:** `scripts/skills/common/telegram-photo`  
+- **Propagate:** Hermes ✅ (sync) · VPS ✅ (`sharedSkills`) · Mobile ✅ · Grok TG ✅ if agent emits `MEDIA:` and host uploads · Collab ❌ default (not an LLM screenshot bot)  
+- **Override:** meal-audit Hermes profile keeps stricter fence rules (BOT-8); Collab registry `capabilities.media: false`
+
+**Case C — Inbound user photo (the “agent can’t see uploads” gap)**  
+- **Scope:** `runtime-adapter` over **one** lib  
+- **Core:** `scripts/lib/inbound-media.mjs` (already live in bot-host)  
+- **Adapters:**  
+  - VPS / Mobile bot-host: already downloads → `.bot-media/<chat>/` → prompt attach  
+  - Hermes: ensure profile uses same download helper or documents equivalent attachment injection  
+  - Grok TG: **import** the same lib into provider-router *or* mirror files into box `inbox/photos/` for Read  
+  - Collab: usually N/A (commands, not meal photos) unless a future `/vision` flag  
+- **Propagate checklist:** turn feature on per registry id; smoke: send photo → path appears in that bot’s prompt/logs  
+- **Do not:** implement a second downloader only in the Grok pack
+
+**Case D — Capability matrix table (`/matrix` or “show matrix”)**  
+- **Scope:** `common` + thin adapters  
+- **Core (P2):** `scripts/skills/common/telegram-matrix` emitting `MEDIA:` PNG from `public/capability-matrix.html`  
+- **Propagate:** Hermes ✅ · VPS ✅ · Mobile ✅ · Grok TG ✅ (skill + optional router `/matrix`) · Collab optional (link-only reply is enough)  
+- **Adapter:** Collab may answer with HTTPS link to live `/capability-matrix` instead of uploading PNG
+
+**Case E — Free-lane `/allowance` buckets + Busy self-heal**  
+- **Scope:** `runtime-adapter` (**provider-router primary**)  
+- **Core:** `tools/telegram-provider-router` implementation  
+- **Propagate:** Grok TG / free-lane ✅ · thin SKILL.md via Hermes sync so coding bots *know* the vocabulary ✅ · VPS/Mobile coding bots do **not** need the full router unless they share that token (they must not)  
+- **Collab:** ❌ (different quota: Colab compute units, not Muse free buckets)  
+- **Override:** document Collab quotas in CB-* docs, not in `/allowance`
+
+**Case F — Collab-only `/switch muse-spark` / GPU tunnel**  
+- **Scope:** `bot-specific` (`collab`)  
+- **Core:** `scripts/lib/collab-session.mjs` + `collab-bot.mjs`  
+- **Propagate:** Collab ✅ only · Hermes/VPS/Mobile/Grok TG ❌  
+- **Registry:** `capabilities: { collabSession: true }` on `collab` id only
+
+**Case G — Meal-audit ledger + `MEDIA:` fence hardening**  
+- **Scope:** `bot-specific` (+ skill used by Model A self-serve)  
+- **Core:** meal-audit skill under Hermes + repo `artifacts/meal_audits/`  
+- **Propagate:** `hermes_meal_audit` ✅ · master OpenCode via **shared skill self-serve** ✅ · VPS android ❌ · Collab ❌ · Grok TG ❌ unless explicitly tasked  
+- **Sync:** Hermes sync **includes** skill for meal_audit + orchestrator allowlist; `sync-hermes-skills.sh` still **excludes** orchestrator-dispatcher from QA/meal_audit profiles
+
+**Case H — New shared skill “X” (template)**  
+1. Add `scripts/skills/common/x/SKILL.md`  
+2. Set `registry.json` capability `x` with adapters `{ hermes: true, bot-host: true, mobile: true, grok-tg: true, collab: false }`  
+3. Land on `main`  
+4. Run distribute matrix for classes where adapter=true  
+5. Smoke one message per class  
+6. If one class needs different UX, add `scripts/skills/common/x/adapters/<class>.md` or a 20-line runtime hook — **do not** copy the whole skill
+
+#### Failure modes this process prevents
+
+| Failure | Prevention |
+|---------|------------|
+| Two pollers on one token after a “sync everything” restart | Distribute matrix says restart **only** the owning host; BOT-5 guard |
+| Collab picks up meal-audit or `/allowance` noise | `bot-specific` / `collab: false` defaults |
+| Grok invents a parallel photo inbox | Case C forces import/mirror of `inbound-media` |
+| Mobile lags VPS forever | Mobile row requires device `git pull` + sync in the same change checklist |
+| “Common” feature that only works on bot-host | Case must list Hermes + Grok adapters or downgrade scope to `runtime-adapter` |
+
+#### Changelog hook (keep short)
+
+When a capability ships, append one line under this subsection or in `tools/telegram-provider-router/CHANGELOG.md`:
+
+`YYYY-MM-DD  <capability-id>  scope=<…>  classes=<hermes,vps,…>  sync=<script|restart|pull>`
+
 ### 14.6 Out of scope
 
 - Replacing Hermes meal-audit bot or V-28/V-29 toolkit
 - Merging provider-router into bot-host in one bang (strangler: shared libs first)
 - Paying for Go/Freebuff to finish alignment
+- Forcing Collab or meal-audit to load every common coding skill (see §14.7 scopes)

@@ -114,7 +114,7 @@ Contact model is **A**: OpenCode master **self-serves** meal-audit via shared sk
 | **BOT-6** | `run-coding-dispatch.sh` `meal_audit` category | **DONE** (`meal_audit) printf 'meal_audit'`). Optional product choice if tickets should land in that chat. |
 | **BOT-7** | Stale BOT_ROLES facts | **DONE 2026-09-22 — verified already clean:** global `MEMORY.md` is 3 lines, no Render refs; QA souls have no placeholders; `system_prompt_suffix` only in qa_* backup yamls, not live configs. |
 | **BOT-8** | Meal-audit OPEN items (from live handoff) | **DONE 2026-09-22:** (1) canonical = repo `artifacts/meal_audits/` via absolute `--output-dir` (SKILL 2.2.0); (2) `MEDIA:` fence hardened + self-check; `boundingBox2D` field name pinned (gate caught `bbox`); (3) `suite promote` ships (PASS-only unless `--force`, no-overwrite guard); (4) scanner reads `holdout/Meal-*` with `holdout:true`; (5) W2 live run DONE on `job_1789430101458` (oatmeal photo; site invented nasi-uduk dish -> DIVERGED, ledger +34); (6) BotFather path in MEAL_AUDIT_BOT_PLAN §11. |
-| **BOT-9** | Align provider-router + Grok shared pack with **bot-host / `scripts/skills/common`** (inbound-media, `telegram-photo`, Hermes sync). Same work as **R-14**. | **OPEN** — do not invent a second photo/matrix stack. See RELIABILITY.md §14. |
+| **BOT-9** | Align provider-router + Grok shared pack with **bot-host / `scripts/skills/common`** (inbound-media, `telegram-photo`, Hermes sync) and ship **§14.7 propagation** (Hermes, VPS, Mobile, Grok TG, Collab — common vs bot-specific). Same work as **R-14**. | **OPEN** — do not invent a second photo/matrix stack; Collab stays opt-in. See RELIABILITY.md §14. |
 
 **Do not** dual-poll one Telegram token (VPS + phone, or Hermes + bot-host). **Do not** restart `hermes-gateway` from this track unless a named V-28/V-29 task says so. **Do not** run `bot-host@android` on the VPS. Restart phone bot: `setsid nohup ~/start-android-opencode-bot.sh </dev/null >/dev/null 2>&1 &`.
 
@@ -392,7 +392,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | **R-11** | `HomeTab` / `LogChat` stay out of other tabs’ first paint | Already lazy-tabbed; do not eagerly import them from Insights / History | Regression after R-10 |
 | **R-12** | One-line stall/503 count (free-tier hang rate) | After F-8.13 JSON tree has `latency_ms` / error on dispatches. A number in `AI_HANDOVER.md`, **not** a metrics product. RELIABILITY.md §11.12 **H** | LangSmith; Grafana; inner-loop Gemini |
 | **R-13** | VPS-2 go-live + AI Studio parity | Packet **locked**. R-13.0 agent preflight **PASS**. R-13.1 = Track V Phase 4, `blocked_human` until V-0. Not R-2. Not Cloud Run. |
-| **R-14** | **Telegram shared-capability alignment** — one rail for bot-host skills + provider-router + Grok agents (photos, matrix, allowance, self-heal). Plan in [RELIABILITY.md](./RELIABILITY.md) **§14**. | Dual stacks / missing photo-view / matrix not visible to all agents; after R-13.1 live. Owner: thin PM + free CLI. |
+| **R-14** | **Telegram shared-capability alignment** — one rail for bot-host skills + provider-router + Grok agents (photos, matrix, allowance, self-heal) **+ propagation flow across Hermes / VPS / Mobile / Grok TG / Collab** (§14.7 cases). Plan in [RELIABILITY.md](./RELIABILITY.md) **§14**. | Dual stacks / missing photo-view / matrix not visible to all agents; uneven skill fan-out; after R-13.1 live. Owner: thin PM + free CLI. |
 
 ### R-13 sub-IDs (one at a time after lock)
 
