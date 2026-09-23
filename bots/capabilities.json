@@ -46,12 +46,13 @@
       "test": "T1",
       "scope": "common",
       "status": "partial",
-      "prove": "live smoke: matrix PNG delivered",
+      "prove": "live smoke: matrix PNG delivered; user-asked tables arrive aligned, never raw pipes",
       "expect": [
         "public/capability-matrix.html"
       ],
       "skills": [
-        "telegram-matrix"
+        "telegram-matrix",
+        "telegram-tables"
       ],
       "classes": {
         "hermes": true,
