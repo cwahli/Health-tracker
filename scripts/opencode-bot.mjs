@@ -33,12 +33,29 @@ import {
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
-const DISPATCH_LOCK = path.join(HOME, '.hermes', 'dispatch_lock');
 
-function lockHolder() {
+// Lock path is lazy so tests can point it at a temp dir without touching ~/.hermes.
+function dispatchLockPath() {
+  return process.env.OPENCODE_BOT_DISPATCH_LOCK || path.join(HOME, '.hermes', 'dispatch_lock');
+}
+
+// True only while this process actually holds the lock for a live run.
+// Lets acquireDispatchLock tell a stale self-lock (deadlock after crash/release
+// failure) apart from "another chat in this same bot is running right now".
+let activeDispatchRun = false;
+
+export function beginDispatchRun() {
+  activeDispatchRun = true;
+}
+
+export function endDispatchRun() {
+  activeDispatchRun = false;
+}
+
+export function lockHolder() {
   let info = '';
   try {
-    info = fs.readFileSync(DISPATCH_LOCK, 'utf8').trim();
+    info = fs.readFileSync(dispatchLockPath(), 'utf8').trim();
   } catch {
     return null;
   }
@@ -55,13 +72,27 @@ function lockHolder() {
   return { pid, bug };
 }
 
-function acquireDispatchLock() {
-  fs.mkdirSync(path.dirname(DISPATCH_LOCK), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
+export function acquireDispatchLock() {
+  const lockPath = dispatchLockPath();
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  for (let attempt = 0; attempt < 3; attempt++) {
     const holder = lockHolder();
-    if (holder) return holder;
+    if (holder) {
+      // Our own pid but no run in flight = stale self-lock (release failed or
+      // the process restarted). Reclaim instead of rejecting every message
+      // forever. With a run in flight it is a real concurrent chat — keep it.
+      if (holder.pid === process.pid && !activeDispatchRun) {
+        try {
+          fs.unlinkSync(lockPath);
+        } catch {
+          // another writer removed it
+        }
+        continue;
+      }
+      return holder;
+    }
     try {
-      const fd = fs.openSync(DISPATCH_LOCK, 'wx');
+      const fd = fs.openSync(lockPath, 'wx');
       fs.writeFileSync(fd, `${process.pid}:opencode-chat\n`);
       fs.closeSync(fd);
       return null;
@@ -69,7 +100,7 @@ function acquireDispatchLock() {
       if (err.code !== 'EEXIST') throw err;
       if (!lockHolder()) {
         try {
-          fs.unlinkSync(DISPATCH_LOCK);
+          fs.unlinkSync(lockPath);
         } catch {
           // another writer removed it
         }
@@ -79,13 +110,29 @@ function acquireDispatchLock() {
   return lockHolder() || { pid: 0, bug: 'unknown' };
 }
 
-function releaseDispatchLock() {
+export function releaseDispatchLock() {
   try {
-    const info = fs.readFileSync(DISPATCH_LOCK, 'utf8');
-    if (info.startsWith(`${process.pid}:`)) fs.unlinkSync(DISPATCH_LOCK);
+    const info = fs.readFileSync(dispatchLockPath(), 'utf8');
+    if (info.startsWith(`${process.pid}:`)) fs.unlinkSync(dispatchLockPath());
   } catch {
     // already gone
   }
+}
+
+/** Raw run failures → one line a human can act on (never raw ms). */
+export function humanizeRunError(raw) {
+  const s = String(raw || '');
+  const timeout = s.match(/timed out after (\d+)ms/);
+  if (timeout) {
+    const ms = Number(timeout[1]);
+    const dur = ms >= 60000 ? `${Math.round(ms / 60000)}m` : `${Math.round(ms / 1000)}s`;
+    return `Timed out after ${dur} — the model didn't finish. Send /new to reset the session, or /model to pick a faster model, then retry.`;
+  }
+  return s;
+}
+
+export function isTimeoutError(raw) {
+  return /timed out after \d+ms/.test(String(raw || ''));
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -362,7 +409,9 @@ class ProgressRenderer {
       this.status = 'failed';
       if (this.messageId != null) this._schedule();
       const tail = result.stderr ? `\n${result.stderr.trim().slice(0, 400)}` : '';
-      await this.deliver(`Error: ${result.lastError}${tail}`);
+      const friendly = humanizeRunError(result.lastError);
+      const prefix = friendly === result.lastError ? 'Error: ' : '⏱ ';
+      await this.deliver(`${prefix}${friendly}${tail}`);
       return;
     }
     this.status = 'done';
@@ -373,7 +422,10 @@ class ProgressRenderer {
       return;
     }
     const { text: body, media } = extractMedia(withFooter(result.finalText));
-    await this.deliver(body);
+    const timeoutNote = isTimeoutError(result.lastError)
+      ? `\n\n⏱ ${humanizeRunError(result.lastError)}`
+      : '';
+    await this.deliver(body + timeoutNote);
     await this.deliverMedia(media);
   }
 
@@ -656,12 +708,16 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
 
   const holder = acquireDispatchLock();
   if (holder) {
+    const selfBusy = holder.pid === process.pid;
     await api.sendMessage(
       chatId,
-      `The repo is busy with ${holder.bug} (pid ${holder.pid}). Wait until that finishes. A second coding agent would overwrite the same tree.`,
+      selfBusy
+        ? `Still working on an earlier request in this bot (pid ${holder.pid}). Send /abort to cancel it, or wait for it to finish.`
+        : `The repo is busy with ${holder.bug} (pid ${holder.pid}). Wait until that finishes. A second coding agent would overwrite the same tree.`,
     );
     return;
   }
+  beginDispatchRun();
 
   busy.add(chatId);
   const renderer = new ProgressRenderer({ api, throttle, chatId, ...config.progress });
@@ -716,6 +772,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     renderer.stopTyping();
     running.delete(chatId);
     busy.delete(chatId);
+    endDispatchRun();
     releaseDispatchLock();
   }
 }
@@ -875,7 +932,20 @@ async function main() {
   await runLoop({ api, config });
 }
 
-main().catch((err) => {
-  console.error(`opencode-bot fatal: ${err.message}`);
-  process.exit(1);
-});
+// Run main() only when executed as a CLI (node scripts/opencode-bot.mjs),
+// not when imported by a test.
+function isDirectRun() {
+  try {
+    if (!process.argv[1]) return false;
+    return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectRun()) {
+  main().catch((err) => {
+    console.error(`opencode-bot fatal: ${err.message}`);
+    process.exit(1);
+  });
+}
