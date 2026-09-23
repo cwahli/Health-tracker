@@ -217,7 +217,12 @@ export function newestSucceededFoodJob<T extends PriorSucceededJobLike>(
     if (!j || (currentJobId != null && j.id === currentJobId)) continue;
     if (j.status !== 'succeeded') continue;
     if (j.kind != null && j.kind !== 'food_log' && j.kind !== 'food') continue;
-    if (!pendingMealOfJob(j)) continue;
+    // An attached-but-empty meal (stale demo seed, zero dishes) is what made
+    // live T2 return zero dishes — only adopt meals that carry dishes.
+    const meal = pendingMealOfJob(j);
+    if (!meal) continue;
+    const dishes = (meal as any).itemsBreakdown || (meal as any).items;
+    if (!Array.isArray(dishes) || dishes.length === 0) continue;
     best = j;
   }
   return best;

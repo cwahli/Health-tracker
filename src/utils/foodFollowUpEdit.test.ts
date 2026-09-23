@@ -234,8 +234,15 @@ describe('newestSucceededFoodJob (Case-12 T2 blank-draft adoption)', () => {
     const failed = { id: 'x', status: 'failed', kind: 'food_log', result: { pendingFoodLog: { id: 'z' } } };
     const medical = { id: 'y', status: 'succeeded', kind: 'medical', result: { pendingFoodLog: { id: 'z' } } };
     const nomeal = { id: 'w', status: 'succeeded', kind: 'food_log', result: null };
-    expect(newestSucceededFoodJob([failed, medical, nomeal, stale], 'other')).toBe(stale);
     expect(newestSucceededFoodJob([failed, medical, nomeal], 'other')).toBeNull();
     expect(pendingMealOfJob(nomeal)).toBeNull();
+  });
+
+  it('skips attached-but-empty meals (stale demo seeds with zero dishes)', () => {
+    const empty = { id: 'job_old', status: 'succeeded', kind: 'food_log', result: { pendingFoodLog: { id: 'demo_food_log_3', itemsBreakdown: [] } } };
+    const full = { id: 'job_t1', status: 'succeeded', kind: 'food_log', result: { clean_result: { pendingFoodLog: { id: 'log_t1', itemsBreakdown: [bigMac] } } } };
+    expect(newestSucceededFoodJob([empty, full], 'other')).toBe(full);
+    expect(newestSucceededFoodJob([full, empty], 'other')).toBe(full);
+    expect(newestSucceededFoodJob([empty], 'other')).toBeNull();
   });
 });

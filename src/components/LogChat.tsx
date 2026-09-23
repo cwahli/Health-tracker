@@ -2603,12 +2603,6 @@ ${logsText}`);
               sessionJob: sessionPriorJob?.id || null,
               meal: (prunedMealForJob as any)?.id || (prunedMealForJob as any)?.name || null,
               mealItems: Array.isArray((prunedMealForJob as any)?.itemsBreakdown) ? (prunedMealForJob as any).itemsBreakdown.length : -1,
-              store: JobStore.getAllJobs().map((j: any) => ({
-                id: j.id, kind: j.kind, status: j.status,
-                meal: j.result?.pendingFoodLog?.id || j.result?.clean_result?.pendingFoodLog?.id || j.result?.data?.pendingFoodLog?.id || null,
-                mealItems: j.result?.pendingFoodLog?.itemsBreakdown?.length ?? j.result?.clean_result?.pendingFoodLog?.itemsBreakdown?.length ?? -1,
-                msgMeal: (() => { const m = [...(j.messages || [])].reverse().find((x: any) => x?.data?.pendingFoodLog || x?.pendingFoodLog); const mm = m?.data?.pendingFoodLog || m?.pendingFoodLog; return mm ? ((mm as any).id || (mm as any).name || 'unnamed') : null; })(),
-              })),
             },
           });
           // Fresh-thread edits attach a D1-pulled meal that carries light
