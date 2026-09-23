@@ -179,3 +179,7 @@ Do not add `meal_audit` to `bots/registry.json`. Do not reuse that profile token
     ```
   - A fenced `MEDIA:` line = failed delivery. Re-emit the reply with a bare
     `MEDIA:` line.
+  - One reply = at most ONE `MEDIA:` line (the bundle `meal_result.md`).
+    Never emit one `MEDIA:` per photo/report, never repeat `meal_result.md`.
+    Never write "Here's the file" yourself — the gateway adds that caption
+    once per MEDIA line, so N MEDIA lines render as N× "Here's the file" spam.
