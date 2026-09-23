@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectDownloadablePhotoUrls,
+  filterCandidates,
+  filterFoodCandidates,
+  jobTitleHaystack,
   isDownloadablePhotoUrl,
   isImageBuffer,
+  matchesNormalizedHaystack,
+  normalizeMealText,
+  parseTimestampWindow,
+  tokenizeMealQuery,
   turnRemoteUrls,
 } from './meal-audit-fetch.mjs';
 
@@ -57,5 +64,63 @@ describe('meal-audit-fetch photo truth (screenshot 20260923-161925)', () => {
       dispatches: [],
     };
     expect(turnRemoteUrls(textOnly)).toEqual([]);
+  });
+});
+
+describe('meal-audit-fetch full-meal visibility (Mr Oat Quick Cook Oatmeal)', () => {
+  it('normalizes punctuation: "Mr. Oat" matches "Mr Oat"', () => {
+    expect(normalizeMealText('Mr. Oat Quick Cook Oatmeal')).toBe('mr oat quick cook oatmeal');
+    expect(tokenizeMealQuery('Mr. Oat')).toEqual(['mr', 'oat']);
+    expect(matchesNormalizedHaystack('Mr Oat Rolled Oats', 'Mr. Oat')).toBe(true);
+    expect(matchesNormalizedHaystack('Mr. Oat Quick Cook Oatmeal', 'Quick Cook')).toBe(true);
+    expect(matchesNormalizedHaystack('Mr. Oat Quick Cook Oatmeal', 'Quick Cook Oatmeal')).toBe(true);
+  });
+
+  it('job filter is punctuation-insensitive (old exact-substring bug)', () => {
+    const jobs: any[] = [
+      { id: 'job_1', clean_result: { dishes: [{ dishName: 'Mr Oat Rolled Oats' }] }, status_message: '', photo_url: '' },
+      { id: 'job_2', clean_result: { dishes: [{ dishName: 'Mr. Oat Quick Cook Oatmeal' }] }, status_message: '', photo_url: '' },
+    ];
+    const hits = filterCandidates(jobs, { timestampWindow: null, name: 'Mr. Oat Quick Cook Oatmeal' });
+    expect(hits.map((j: any) => j.id)).toEqual(['job_2']);
+    const mrHits = filterCandidates(jobs, { timestampWindow: null, name: 'Mr. Oat' });
+    expect(mrHits.length).toBe(2);
+  });
+
+  it('prefers dish-title hits over blob-text noise', () => {
+    const jobs: any[] = [
+      { id: 'job_2', clean_result: { dishes: [{ dishName: 'Mr. Oat Quick Cook Oatmeal' }] }, status_message: '', photo_url: '' },
+      { id: 'job_3', clean_result: { dishes: [{ dishName: 'Oatmeal' }], message: 'fiber check' }, status_message: '', photo_url: 'https://cdn.example.com/photos/quick_cook_ref.jpg' },
+    ];
+    expect(jobTitleHaystack(jobs[0])).toContain('Mr. Oat Quick Cook Oatmeal');
+    const blob = filterCandidates(jobs, { timestampWindow: null, name: 'Quick Cook' });
+    expect(blob.map((j: any) => j.id).sort()).toEqual(['job_2', 'job_3']);
+    const titles = blob.filter((j: any) => matchesNormalizedHaystack(jobTitleHaystack(j), 'Quick Cook'));
+    expect(titles.map((j: any) => j.id)).toEqual(['job_2']);
+  });
+
+  it('parses Food History day-first timestamps "23 sep 14:56"', () => {
+    const w = parseTimestampWindow('23 sep 14:56');
+    expect(w).not.toBeNull();
+    expect(w!.hasTime).toBe(true);
+    const d = new Date(w!.dateMs);
+    expect(d.getDate()).toBe(23);
+    expect(d.getMonth()).toBe(8);
+    expect(d.getHours()).toBe(14);
+    expect(d.getMinutes()).toBe(56);
+    expect(d.getFullYear()).toBe(new Date().getFullYear());
+  });
+
+  it('food-log candidates match Food History titles + timestamp', () => {
+    const foods: any[] = [
+      { id: 'f1', name: 'Mr. Oat Quick Cook Oatmeal', date: '2026-09-23T14:56:00.000Z', updated_at: '2026-09-23T14:56:00.000Z' },
+      { id: 'f2', name: 'Nasi Uduk Oatmeal', date: '2026-09-14T10:00:00.000Z', updated_at: '2026-09-14T10:00:00.000Z' },
+    ];
+    expect(filterFoodCandidates(foods, { name: 'Mr. Oat Quick Cook Oatmeal', timestampWindow: null }).map((f: any) => f.id)).toEqual(['f1']);
+    const w = parseTimestampWindow('23 sep 14:56');
+    // year defaults to current year; compare against same-year food date
+    const thisYear = new Date().getFullYear();
+    const sameYearFoods = [{ id: 'f1', name: 'Mr. Oat Quick Cook Oatmeal', date: `${thisYear}-09-23T14:56:00`, updated_at: `${thisYear}-09-23T14:56:00` }];
+    expect(filterFoodCandidates(sameYearFoods, { name: 'oatmeal', timestampWindow: w }).map((f: any) => f.id)).toEqual(['f1']);
   });
 });
