@@ -33,7 +33,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ## Current work — D-2 Supabase code drain (locked packet, `auto_go: true`)
 
-**Active executable ID: D-2** — [`specs/active/D-2.md`](../specs/active/D-2.md). It is **locked and pre-approved**; do **not** wait for a human "go" and do **not** call it "needs a packet." Work one file per commit and **`git push` immediately** — the VPS auto-deploy runs `git reset --hard origin/main`, so any uncommitted drain is lost. The packet carries a **progress ledger**; resume from the first ⬜ row (or ⛔ if schema-blocked). `server_routes_sync.ts` is DONE (`395fa61`); `server_food_catalog.ts` + `server_fdc_resolve.ts` are ⛔ blocked on missing D1 catalog tables (`food_aliases`, `food_observations`, `food_catalog_sync_events`) and need a schema packet — do not repaint them.
+**Active executable ID: D-2** — [`specs/active/D-2.md`](../specs/active/D-2.md). It is **locked and pre-approved**; do **not** wait for a human "go" and do **not** call it "needs a packet." Work one file per commit and **`git push` immediately** — the VPS auto-deploy runs `git reset --hard origin/main`, so any uncommitted drain is lost. The packet carries a **progress ledger**; resume from the first ⬜ row (or ⛔ if schema-blocked). `server_routes_sync.ts` is DONE (`395fa61`); catalog/fdc/curator drained + D1 schema packet landed (`ef16d1b`); gates green 2026-09-23 (tsc 0, 60 tests, guard PASS). Residual: `golden_cases` has no D1 table (skipped by design).
 
 B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are **shipped**. Do not restart them.
 
