@@ -112,7 +112,7 @@
       "id": "vm2",
       "name": "VM2 Bot",
       "runtime": "bot-host",
-      "enabled": false,
+      "enabled": true,
       "telegram": {
         "tokenEnv": "VM2_BOT_TOKEN"
       },
