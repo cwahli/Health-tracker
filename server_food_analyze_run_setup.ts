@@ -20,6 +20,25 @@ export function initializeAnalysisRun(req: any, res: any) {
     if (typeof (res as any).flushHeaders === 'function') (res as any).flushHeaders();
     hasSentHeaders = true;
     attachSseJsonResponder(res);
+    // R-13.2: SSE comment keepalive on the loopback analyze stream. The
+    // serverJobs loopback fetch aborts at 180s; without traffic a proxy
+    // (orange-cloud) kills the silent connection with a 524 first.
+    // Same 15s idiom as the debug live-stream in server.ts.
+    const pingInterval = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+        if (typeof (res as any).flush === 'function') (res as any).flush();
+      } catch {
+        clearInterval(pingInterval);
+      }
+    }, 15000);
+    if (typeof (pingInterval as any).unref === 'function') (pingInterval as any).unref();
+    const stopSsePing = () => clearInterval(pingInterval);
+    if (typeof req?.on === 'function') req.on('close', stopSsePing);
+    if (typeof (res as any)?.on === 'function') {
+      (res as any).on('finish', stopSsePing);
+      (res as any).on('error', stopSsePing);
+    }
   }
 
   const sendStreamEvent = (data: any) => {

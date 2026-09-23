@@ -15,7 +15,6 @@ allowed_files:
   - wrangler.jsonc
   - public/_redirects
   - server_sse_json.test.ts
-  - server_food_analyze_run_setup.ts
   - server_d1_schema.ts
   - server_auth.ts
   - server_auth.test.ts
@@ -111,15 +110,6 @@ Better = a real user can open the prod host, sign in with Google, submit a meal 
 ## Plan
 
 Procedural graph.
-
-R-13.2 node (loopback SSE keepalive): `server_food_analyze_run_setup.ts` is the
-SSE home for the food-analyze loopback stream (`serverJobs.ts` 180s abort +
-`jobFailure.ts` 180s copy already aligned — verify, do not touch those files).
-Emit `: ping` comments on that stream so an orange-cloud proxy never sees a
-silent 180s; self-contained cleanup on req close / res finish+error (no caller
-change). Sensor: source-wiring case in `server_sse_json.test.ts` (repo idiom —
-that file already asserts setup wiring via text, never importing `server.ts`).
-Medical SSE (`server_routes_medical_gemini.ts`) stays residual.
 
 0. **R-13.0 Preflight (agent).** `node --env-file=.env scripts/r13-0-preflight.mjs`. Done when all PASS. Secrets stay in env — never commit `.env`.
 1. **R-13.1 Ship.** `build:web` vs `build:server` split in `package.json`. PORT default 3000. Loopback URLs use `process.env.INTERNAL_BASE_URL || http://127.0.0.1:${PORT}`. Dockerfile and .dockerignore for Node process. `public/_redirects` and `wrangler.jsonc` for Cloudflare routing.

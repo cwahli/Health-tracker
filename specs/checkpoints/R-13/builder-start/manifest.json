@@ -1,15 +1,16 @@
 {
   "slug": "R-13",
   "node": "builder-start",
-  "at": "2026-09-17T16:05:43.755Z",
+  "at": "2026-09-23T09:17:05.961Z",
   "git": {
-    "head": "63f75a55e080099e5f44cc0920b6154f6ba9e359",
-    "stashCommit": null
+    "head": "fb6616143f8fa2386447e620e16c9e6c73022b7a",
+    "stashCommit": "da51df25bea2e095e56457671792cf3cacede426"
   },
   "files": [
     "docs/agent/standing.json",
     "server_vision_scout.ts",
     "src/server/food/server_food_analyze_schema.ts",
-    "prototype/meallog/compare/scout_only_compare_instructions.ts"
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/R-13.md"
   ]
 }
