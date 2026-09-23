@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { TelegramApi, TelegramError, chunkText, isSendableMedia } from './lib/tg-api.mjs';
+import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
+import { chunkForTelegram } from './lib/tg-copy-code.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
 import {
@@ -342,19 +343,20 @@ class ProgressRenderer {
   async deliver(text) {
     const body = String(text ?? '').trim();
     if (!body) return;
+    const payloads = chunkForTelegram(body);
     if (this.dryRun) {
-      console.log(`[final] ${body}`);
+      for (const p of payloads) console.log(`[final] ${p.text}`);
       return;
     }
-    for (const part of chunkText(body)) {
-      await this._send(part);
+    for (const p of payloads) {
+      await this._send(p.text, p.extra);
     }
   }
 
-  async _send(part) {
+  async _send(part, extra = {}) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        await this.api.sendMessage(this.chatId, part);
+        await this.api.sendMessage(this.chatId, part, extra);
         return;
       } catch (err) {
         if (err instanceof TelegramError && err.isRateLimit) {
@@ -413,8 +415,8 @@ class ProgressRenderer {
 }
 
 async function sendChunked(api, chatId, text) {
-  for (const part of chunkText(text)) {
-    await api.sendMessage(chatId, part);
+  for (const p of chunkForTelegram(text)) {
+    await api.sendMessage(chatId, p.text, p.extra);
   }
 }
 
