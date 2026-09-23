@@ -529,6 +529,33 @@ describe('registry', () => {
     expect(() => resolveToken(bot, {})).toThrow(/MISSING_TOKEN_ENV/);
     expect(resolveToken(bot, { MISSING_TOKEN_ENV: 'abc' })).toBe('abc');
   });
+
+  it('tolerates foreign-runtime pointers without agent.kind (tg_provider_router outage)', () => {
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        bots: [
+          { id: 'opencode', enabled: true, telegram: { tokenEnv: 'A' }, agent: { kind: 'opencode' } },
+          {
+            id: 'box-router',
+            enabled: true,
+            runtime: 'tg-provider-router',
+            telegram: { tokenEnv: 'BOX' },
+            path: 'tools/telegram-provider-router',
+          },
+        ],
+      }),
+    );
+    const registry = loadRegistry(file);
+    expect(registry.bots).toHaveLength(2);
+    expect(getBot(registry, 'opencode').id).toBe('opencode');
+    expect(getBot(registry).id).toBe('opencode');
+    expect(() => getBot(registry, 'box-router')).toThrow(/not runnable by bot-host/);
+  });
+
+  it('loads the real registry despite foreign-runtime entries', () => {
+    expect(() => loadRegistry('bots/registry.json')).not.toThrow();
+  });
 });
 
 describe('commands', () => {

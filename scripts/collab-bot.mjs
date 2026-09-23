@@ -8,7 +8,7 @@ import { execSync, spawn } from 'node:child_process';
 import { TelegramApi, TelegramError, chunkText } from './lib/tg-api.mjs';
 import { sendCopyable } from './lib/tg-copy-code.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
-import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
+import { loadRegistry, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   loadSession,
   saveSession,
@@ -402,7 +402,10 @@ async function main() {
 
   const registryPath = resolveRegistryPath(args.registry, REPO_ROOT);
   const registry = loadRegistry(registryPath);
-  const botDef = getBot(registry, args.id);
+  // Collab owns its runtime (not bot-host): look up by id directly instead of
+  // getBot, which only serves runtime bot-host entries.
+  const botDef = (registry.bots || []).find((b) => b.id === args.id && b.enabled !== false);
+  if (!botDef) throw new Error(`Bot "${args.id}" not found or not enabled`);
   const config = normalizeConfig(botDef, { defaultWorkspace: REPO_ROOT });
 
   if (args.checkConfig) {

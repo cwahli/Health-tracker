@@ -16,6 +16,18 @@ function mergeOnto(base, override) {
   return out;
 }
 
+/**
+ * Runtimes bot-host can start. Any other `runtime` marks a registry pointer:
+ * a bot owned by another host (e.g. the Grok box provider-router) that is
+ * documented here for the one-poller guard but never started by bot-host
+ * (see getBot). Pointers are exempt from agent requirements.
+ */
+export const BOT_HOST_RUNTIMES = ['bot-host', 'device', 'collab', 'hermes'];
+
+export function isForeignRuntime(bot) {
+  return Boolean(bot?.runtime) && !BOT_HOST_RUNTIMES.includes(bot.runtime);
+}
+
 export function applyMasterDefaults(registry) {
   const bots = registry.bots;
   const masterId = registry.master || bots[0]?.id;
@@ -112,12 +124,21 @@ export function loadRegistry(registryPath) {
 
   for (const bot of parsed.bots) {
     if (!bot.telegram?.tokenEnv) throw new Error(`Bot "${bot.id}" needs telegram.tokenEnv`);
+    if (isForeignRuntime(bot)) continue; // pointer: documented, never started here
     if (!bot.agent?.kind) throw new Error(`Bot "${bot.id}" needs agent.kind`);
   }
   return parsed;
 }
 
 export function getBot(registry, id) {
+  if (id) {
+    const foreign = (registry.bots || []).find((b) => b.id === id && isForeignRuntime(b));
+    if (foreign) {
+      throw new Error(
+        `Bot "${id}" uses runtime "${foreign.runtime}", not runnable by bot-host (see ${foreign.path || 'its own host docs'})`,
+      );
+    }
+  }
   const bots = registry.bots.filter(
     (b) => b.enabled !== false && (b.runtime || 'bot-host') === 'bot-host',
   );
