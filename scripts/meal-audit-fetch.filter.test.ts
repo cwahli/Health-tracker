@@ -111,6 +111,18 @@ describe('meal-audit-fetch full-meal visibility (Mr Oat Quick Cook Oatmeal)', ()
     expect(d.getFullYear()).toBe(new Date().getFullYear());
   });
 
+  it('food timestamp falls back to UTC calendar day (display TZ vs UTC stamp)', () => {
+    // Prod truth: log stamped 2026-09-23T07:56Z, UI shows "23 sep 14:56" (WIB = UTC+7).
+    const prodFoods: any[] = [
+      { id: 'food_1790150172895_0u01o4', name: 'Mr. Oat Quick Cook Oatmeal', date: '2026-09-23', updated_at: '2026-09-23T07:56:15.236Z' },
+      { id: 'other', name: 'Mr. Oat Quick Cook Oatmeal', date: '2026-09-22', updated_at: '2026-09-22T05:21:00.000Z' },
+    ];
+    const w2 = parseTimestampWindow('23 sep 14:56');
+    expect(w2!.hasTime).toBe(true);
+    expect(filterFoodCandidates(prodFoods, { name: 'Mr. Oat Quick Cook Oatmeal', timestampWindow: w2 }).map((f: any) => f.id))
+      .toEqual(['food_1790150172895_0u01o4']);
+  });
+
   it('food-log candidates match Food History titles + timestamp', () => {
     const foods: any[] = [
       { id: 'f1', name: 'Mr. Oat Quick Cook Oatmeal', date: '2026-09-23T14:56:00.000Z', updated_at: '2026-09-23T14:56:00.000Z' },

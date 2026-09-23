@@ -58,6 +58,7 @@ import {
   extractMedia,
   extractCodeBlocks,
 } from '../scripts/lib/commands.mjs';
+import { ProgressRenderer } from '../scripts/bot-host.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -745,5 +746,47 @@ describe('tg-api chunkText', () => {
       expect(chunk.length).toBeLessThanOrEqual(MAX_MESSAGE_CHARS);
     }
     expect(chunks.join('\n')).toBe(text);
+  });
+});
+
+describe('ProgressRenderer finish (bot restart/timeout truthfulness)', () => {
+  const makeRenderer = () => {
+    const sent: string[] = [];
+    const api = {
+      sendMessage: async (_chatId: unknown, text: string, _extra?: unknown) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+    };
+    const renderer = new ProgressRenderer({ api: api as never, chatId: 1 });
+    return { renderer, sent };
+  };
+
+  it('killed before any output says Interrupted (not misleading Done)', async () => {
+    const { renderer, sent } = makeRenderer();
+    await renderer.finish({ code: null, finalText: '', lastError: '', stderr: '' });
+    expect(sent.join('\n')).toContain('Interrupted before the model produced output');
+  });
+
+  it('provider timeout keeps Error text and adds a retry hint', async () => {
+    const { renderer, sent } = makeRenderer();
+    await renderer.finish({ code: null, finalText: '', lastError: 'timed out after 90000ms', stderr: '' });
+    const all = sent.join('\n');
+    expect(all).toContain('Error: timed out after 90000ms');
+    expect(all).toContain('/thinking medium');
+  });
+
+  it('partial output is delivered and the error is not swallowed', async () => {
+    const { renderer, sent } = makeRenderer();
+    await renderer.finish({ code: null, finalText: 'partial answer', lastError: 'timed out after 90000ms', stderr: '' });
+    const all = sent.join('\n');
+    expect(all).toContain('partial answer');
+    expect(all).toContain('Finished with an error after partial output');
+  });
+
+  it('clean empty run keeps the legacy Done message', async () => {
+    const { renderer, sent } = makeRenderer();
+    await renderer.finish({ code: 0, finalText: '', lastError: '', stderr: '' });
+    expect(sent.join('\n')).toContain('no text output');
   });
 });

@@ -257,7 +257,7 @@ async function getFreeModels(caches) {
   return caches.free;
 }
 
-class ProgressRenderer {
+export class ProgressRenderer {
   constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false }) {
     this.api = api;
     this.throttle = throttle;
@@ -396,25 +396,51 @@ class ProgressRenderer {
   async finish(result, { footer = '' } = {}) {
     this.stopTyping();
     const withFooter = (body) => (footer ? `${body}\n\n${footer}` : body);
-    if (result.lastError && !result.finalText) {
+    const partial = String(result.finalText || '').trim();
+    const errText = String(result.lastError || '').trim();
+    const errTail = result.stderr ? `\n${String(result.stderr).trim().slice(0, 400)}` : '';
+    const stderrBlank = !String(result.stderr || '').trim();
+    // Killed before producing anything (SIGKILL on bot restart/redeploy, OOM):
+    // close code is null, no error event, empty stderr. Nothing was computed.
+    const killedNoOutput = result.code == null && !errText && stderrBlank && !partial;
+    if (killedNoOutput) {
       this.status = 'failed';
       if (this.messageId != null) this._schedule();
-      const tail = result.stderr ? `\n${result.stderr.trim().slice(0, 400)}` : '';
-      await this.deliver(`Error: ${result.lastError}${tail}`);
+      await this.deliver(
+        withFooter(
+          'Interrupted before the model produced output (the bot process restarted mid-run). Nothing was computed — just send your request again.',
+        ),
+      );
+      return;
+    }
+    if (errText && !partial) {
+      this.status = 'failed';
+      if (this.messageId != null) this._schedule();
+      let hint = '';
+      if (/timed out after/i.test(errText)) {
+        hint =
+          '\nTip: the model did not answer in time. Retry with /thinking medium, a smaller ask, or /new for a fresh session.';
+      }
+      await this.deliver(`Error: ${errText}${errTail}${hint}`);
       return;
     }
     this.status = 'done';
     if (this.messageId != null) this._schedule();
-    if (!result.finalText) {
+    if (!partial) {
       const code = result.code === 0 ? '' : ` (exit ${result.code})`;
       await this.deliver(withFooter(`Done${code}, but the model returned no text output.`));
       return;
     }
-    const { text: body, media } = extractMedia(withFooter(result.finalText));
+    const { text: body, media } = extractMedia(withFooter(partial));
     await this.deliver(body);
     await this.deliverMedia(media);
-    const blocks = extractCodeBlocks(result.finalText);
+    const blocks = extractCodeBlocks(partial);
     if (blocks.length) await this.deliver(blocks.join('\n\n'));
+    if (errText) {
+      // Partial output arrived but the run still errored (e.g. a late timeout):
+      // never swallow the error silently.
+      await this.deliver(`(Finished with an error after partial output: ${errText})`);
+    }
   }
 
   async deliverMedia(paths) {
@@ -1006,9 +1032,18 @@ async function runLoop({ api, config }) {
   const health = { okAt: 0, errAt: 0, err: '' };
   let offset = loadOffset(config.id);
   let running_ = true;
+  // In-flight update handlers. On SIGTERM (service restart/redeploy) we stop
+  // polling for NEW updates but let running requests finish (bounded) so a
+  // restart no longer kills runs into "exit null, no text output".
+  const inflight = new Set();
+  const DRAIN_MS = 60000;
 
   const stop = () => {
     running_ = false;
+  };
+  const track = (promise) => {
+    inflight.add(promise);
+    promise.finally(() => inflight.delete(promise));
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
@@ -1032,17 +1067,26 @@ async function runLoop({ api, config }) {
       offset = update.update_id + 1;
       saveOffset(config.id, offset);
       if (update.callback_query) {
-        handleCallback({ api, config, prefs, caches, query: update.callback_query }).catch((err) => {
-          console.error(`[${config.id}] callback handler error: ${err.message}`);
-        });
+        track(
+          handleCallback({ api, config, prefs, caches, query: update.callback_query }).catch((err) => {
+            console.error(`[${config.id}] callback handler error: ${err.message}`);
+          }),
+        );
       } else if (update.message) {
-        handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message: update.message }).catch(
-          (err) => {
-            console.error(`[${config.id}] handler error: ${err.message}`);
-          },
+        track(
+          handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message: update.message }).catch(
+            (err) => {
+              console.error(`[${config.id}] handler error: ${err.message}`);
+            },
+          ),
         );
       }
     }
+  }
+  if (inflight.size > 0) {
+    console.log(`[${config.id}] shutting down: draining ${inflight.size} in-flight request(s) (up to ${DRAIN_MS}ms)`);
+    await Promise.race([Promise.allSettled([...inflight]), sleep(DRAIN_MS)]);
+    if (inflight.size > 0) console.log(`[${config.id}] shutdown: ${inflight.size} request(s) still running; exiting anyway`);
   }
 }
 
@@ -1184,7 +1228,17 @@ async function main() {
   await runLoop({ api, config });
 }
 
-main().catch((err) => {
-  console.error(`bot-host fatal: ${err.message}`);
-  process.exit(1);
-});
+// Import-safe: vitest and other tooling import ProgressRenderer without booting the bot.
+const invokedAsCli = (() => {
+  try {
+    return process.argv[1] != null && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+})();
+if (invokedAsCli) {
+  main().catch((err) => {
+    console.error(`bot-host fatal: ${err.message}`);
+    process.exit(1);
+  });
+}
