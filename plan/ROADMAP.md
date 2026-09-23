@@ -166,7 +166,7 @@ Found while triaging `debug-job_1789169906811` + red gates. Work in this order:
 
 | ID | Class | Item | Gate (inner) | Do not |
 |---|---|---|---|---|
-| **S-7** | `MEAL_JOURNEY_OPEN` | Meal-log journey: quick-action → Log Meal dialog → composer → stubbed card (Q-8.3 `prototype/tests/dialog-inventory.spec.ts` 2 failing: composer never appears after Log Meal click) | Spec green; if the dialog itself fails to open in-app, fix the app open flow, not the locators | Paint the spec to match a broken dialog; live Gemini in the loop |
+| **S-7** | `MEAL_JOURNEY_OPEN` | **DONE 2026-09-23:** `dialog-inventory.spec.ts` 4/4 PASS on built server AND on dev server — dialog opens, composer appears, no app-open-flow bug. The failures were VPS env: systemic partial `node_modules` (grpc, aws-sdk, react-dom, leaflet, recharts, firebase, @babel/core) repaired via rm+reinstall (`npm install <pkg>` alone does not replace corrupt dirs). Dev servers on :3001/:3002 stopped after proof; prod :3000 untouched. | Spec green (built + dev) | Paint the spec to match a broken dialog; live Gemini in the loop |
 | **S-8** | `LEAK_KEY` | Raw i18n keys from meal compose/narration (`ledgerLoggedMeal`, `adviceProbioticSugar`, `balancedMealFallbackName`, `apMealPosition/…`): 10 failing tests in `server_food_dietitian_dispatch.test.ts` + `narration.test.ts` | The 10 tests + `src/utils/i18n.test.ts` parity (en + id) | Touch helper logic; add en without id |
 | **S-9** | `CHAT_STALE` | Empty-demo wipe misses prefixes: export `CHAT_MEMORY_PREFIXES` from `storageUtils.ts`, clear `last_sent_payload_` / `active_session_id_` / `jobstore_` / `chat_messages_` (`tests/deskProcess.golden.test.ts` 1 failing) | deskProcess golden | Widen beyond demo-wipe callers; drop `preferred_language` |
 
