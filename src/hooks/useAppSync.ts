@@ -60,7 +60,7 @@ import {
 import { mergeFoodLogsDeduped, rehydrateFoodImagesFromDonors } from '../utils/foodLogDedupe';
 import { isUsableImageUrl, uniqueMealImageUrls } from '../utils/foodImageSources';
 import { JobStore } from '../jobs/JobStore';
-import { hydrateUserJobs, upsertJobToSupabase } from '../jobs/SupabaseJobSync';
+import { hydrateUserJobs, upsertJobToSupabase } from '../jobs/BackendJobSync';
 import { supabase, isSupabaseConfigured } from '../utils/supabaseClient';
 import { toYYYYMMDD } from '../utils/dateUtils';
 import type { AppSyncState } from './useAppProfile';
