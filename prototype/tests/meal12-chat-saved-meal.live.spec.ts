@@ -66,6 +66,28 @@ async function demoLogin(page: Page) {
   await expect(homeTab).toBeAttached({ timeout: LOGIN_TIMEOUT });
 }
 
+async function freshSignup(page: Page) {
+  // Pristine backend identity for the live journey: the fixed demo account
+  // accumulates jobs across runs, and stale demo seeds outrank the just-saved
+  // meal in blank-draft adoption (live T2 attached demo_food_log_3).
+  const ts = Date.now();
+  await page.evaluate(() => localStorage.clear());
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.locator('#auth-mode-switch-btn').click({ timeout: 10000 });
+  await page.locator('#auth-nickname-input').fill('T2Live' + ts, { timeout: 10000 });
+  await page.locator('#auth-email-input').fill('t2live' + ts + '@example.com');
+  await page.locator('#auth-password-input').fill('LivePass123!');
+  await page.locator('#auth-submit-btn').click();
+  await page.waitForTimeout(5000);
+  for (const id of ['#auth-bypass-verify-btn', '#auth-simulate-verify-btn']) {
+    if (await page.locator(id).isVisible().catch(() => false)) {
+      await page.locator(id).click().catch(() => {});
+      await page.waitForTimeout(2000);
+    }
+  }
+  await expect(page.locator('#nav-tab-home')).toBeAttached({ timeout: 45000 });
+}
+
 async function openFoodChat(page: Page) {
   await first(page, ['button[title="Open quick actions"]', 'button.w-14.h-14', '[aria-label*="quick"]']).click();
   await first(page, ['button:has-text("Catat Makanan")', 'button:has-text("Log meal")', 'button:has-text("Log Meal")']).click();
@@ -172,6 +194,10 @@ test.describe('Golden Meal_04 case 12 — chat saved-meal journey', () => {
     test.skip(process.env.LIVE_MEAL12 !== '1', 'Set LIVE_MEAL12=1 to run the case-12 live journey');
     test.setTimeout(1200000);
     const jobIds: string[] = [];
+    // Fresh backend identity (see freshSignup): the fixed demo account
+    // accumulates stale seeds across runs, which poison blank-draft adoption.
+    await freshSignup(page);
+    await bumpQuota(page);
 
     // ---- T0 setup: saved-meal precondition ----
     await openFoodChat(page);
