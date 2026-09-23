@@ -164,11 +164,13 @@ jobsRouter.get('/api/jobs/status', async (req, res) => {
     if (isD1Configured()) {
       try {
         const isFull = req.query.full === 'true';
+        const rawLimit = req.query.limit != null ? parseInt(String(req.query.limit), 10) : 20;
+        const safeLimit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 200) : 20;
         const data = await d1ListJobs({
           jobId: jobId ? String(jobId) : undefined,
           userId: userId ? String(userId) : undefined,
           isFull,
-          limit: 20
+          limit: safeLimit
         });
 
         if (data && data.length > 0) {
@@ -674,4 +676,50 @@ jobsRouter.get('/api/debug/job-lock-check', async (req, res) => {
   }
 });
 
-
+// AUDIT-ONLY search over food_logs (Food History source of truth).
+// The meal-audit fetcher historically searched only agent_jobs
+// (ORDER BY updated_at DESC LIMIT 20), so Saved/Tracked meals visible in
+// FoodHistoryTab (food_logs) were invisible to the bot.
+// Unauthenticated like /api/jobs/status; returns lightweight metadata only.
+jobsRouter.get('/api/audit/food-search', async (req, res) => {
+  try {
+    if (!isD1Configured()) return res.json({ foods: [] });
+    const q = String((req.query as any).q || '').trim();
+    const uidParam = (req.query as any).uid != null ? String((req.query as any).uid).trim() : '';
+    const rawLim = (req.query as any).limit != null ? parseInt(String((req.query as any).limit), 10) : 20;
+    const limit = Number.isFinite(rawLim) ? Math.min(Math.max(rawLim, 1), 50) : 20;
+    const tokens: string[] = q.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((t: string) => t.length >= 2);
+    let uidFilter: string[] | null = null;
+    if (uidParam) {
+      const s = new Set<string>([uidParam]);
+      const lc = uidParam.toLowerCase();
+      const isCwah = lc.includes('cwah_liu') || lc.includes('chiwah_liu') || lc.includes('cwah.liu') || lc.includes('chiwah.liu') || uidParam === 'hiJun2hTdDTk2igwerun2LKvwb42';
+      if (isCwah) {
+        for (const a of ['hiJun2hTdDTk2igwerun2LKvwb42', 'cwah.liu@gmail.com', 'chiwah.liu@gmail.com', 'admin_cwah_liu_gmail_com', 'admin_chiwah_liu_gmail_com']) s.add(a);
+      }
+      uidFilter = Array.from(s);
+    }
+    const where: string[] = [];
+    const params: any[] = [];
+    if (uidFilter) {
+      where.push('firebase_uid IN (' + uidFilter.map(() => '?').join(', ') + ')');
+      params.push(...uidFilter);
+    }
+    for (const t of tokens) {
+      where.push('lower(name) LIKE ?');
+      params.push('%' + t + '%');
+    }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const sql = 'SELECT id, firebase_uid, date, name, calories, weight_grams, quantity, debug_url, source_meal_id, image_urls, updated_at FROM food_logs ' + whereSql + ' ORDER BY updated_at DESC LIMIT ?';
+    params.push(limit);
+    const r = await d1Query<any>(sql, params);
+    const foods = (r.results || []).map((row: any) => {
+      let imageUrls: any = [];
+      try { imageUrls = JSON.parse(row.image_urls || '[]'); } catch { imageUrls = []; }
+      return { ...row, image_urls: Array.isArray(imageUrls) ? imageUrls.slice(0, 4) : [] };
+    });
+    return res.json({ foods, count: foods.length, tokens });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'food-search failed' });
+  }
+});
