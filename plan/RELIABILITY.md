@@ -944,6 +944,13 @@ From `golden/scorecard/current/FREE_MODEL_TOOL_PICKER.md` + bake-off:
 | Secrets in git? | No — `.env` stays live-only |
 | Assert / test | P1+: extend `telegram-smoke-test` / bot-host unit for inbound path; no live Gemini |
 
+### 14.6 Out of scope
+
+- Replacing Hermes meal-audit bot or V-28/V-29 toolkit
+- Merging provider-router into bot-host in one bang (strangler: shared libs first)
+- Paying for Go/Freebuff to finish alignment
+- Forcing Collab or meal-audit to load every common coding skill (see §14.7 scopes)
+
 ### 14.7 Propagation process — every bot class (flexible common core)
 
 Telegram is the **common transport**. Runtimes and tools differ. Features must declare a **scope** so updates fan out only where they apply, with optional per-class adapters.
@@ -1078,9 +1085,3 @@ When a capability ships, append one line under this subsection or in `tools/tele
 
 `YYYY-MM-DD  <capability-id>  scope=<…>  classes=<hermes,vps,…>  sync=<script|restart|pull>`
 
-### 14.6 Out of scope
-
-- Replacing Hermes meal-audit bot or V-28/V-29 toolkit
-- Merging provider-router into bot-host in one bang (strangler: shared libs first)
-- Paying for Go/Freebuff to finish alignment
-- Forcing Collab or meal-audit to load every common coding skill (see §14.7 scopes)
