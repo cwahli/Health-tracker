@@ -55,63 +55,48 @@ import {
   inboundMediaDir,
   buildInboundPrompt,
 } from './lib/inbound-media.mjs';
+import { claimFiles, releaseFiles, listLocks, extractFiles } from './lib/file-locks.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
-const DISPATCH_LOCK = path.join(HOME, '.hermes', 'dispatch_lock');
 
+/**
+ * Per-file advisory locks for concurrent agents.
+ *
+ * Chat is NEVER blocked: a second agent may always be messaged. A coder run
+ * claims the files it expects to touch for the run's duration, so another run
+ * can see which files are owned and route around them. Same-file overlap
+ * warns; it never refuses. Store: ~/.hermes/file_locks/*.json
+ * (scripts/lib/file-locks.mjs).
+ */
+function liveClaims() {
+  return listLocks();
+}
+
+/** Warn-line when text names files another agent currently holds. */
+function claimWarning(text) {
+  const claims = liveClaims();
+  if (!claims.length) return '';
+  const lower = String(text ?? '').toLowerCase();
+  const hits = claims.filter((c) => c.file && lower.includes(String(c.file).toLowerCase()));
+  if (!hits.length) return '';
+  const names = [...new Set(hits.map((h) => `${h.file} (by ${h.bugId || 'another run'})`))].slice(0, 5);
+  return `\n⚠️ Another agent is editing: ${names.join(', ')}. Chat away — a fix here will route around those files.`;
+}
+
+/** Kept for the /status read path; the legacy global lock is gone. */
 function lockHolder() {
-  let info = '';
-  try {
-    info = fs.readFileSync(DISPATCH_LOCK, 'utf8').trim();
-  } catch {
-    return null;
-  }
-  const splitAt = info.indexOf(':');
-  if (splitAt < 1) return null;
-  const pid = Number(info.slice(0, splitAt));
-  const bug = info.slice(splitAt + 1) || 'unknown';
-  if (!Number.isFinite(pid) || pid <= 0) return null;
-  try {
-    process.kill(pid, 0);
-  } catch {
-    return null;
-  }
-  return { pid, bug };
+  return null;
 }
 
 function acquireDispatchLock() {
-  fs.mkdirSync(path.dirname(DISPATCH_LOCK), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const holder = lockHolder();
-    if (holder) return holder;
-    try {
-      const fd = fs.openSync(DISPATCH_LOCK, 'wx');
-      fs.writeFileSync(fd, `${process.pid}:opencode-chat\n`);
-      fs.closeSync(fd);
-      return null;
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      if (!lockHolder()) {
-        try {
-          fs.unlinkSync(DISPATCH_LOCK);
-        } catch {
-          // another writer removed it
-        }
-      }
-    }
-  }
-  return lockHolder() || { pid: 0, bug: 'unknown' };
+  // Chat must never block. Locking happens per file at coder-run start.
+  return null;
 }
 
 function releaseDispatchLock() {
-  try {
-    const info = fs.readFileSync(DISPATCH_LOCK, 'utf8');
-    if (info.startsWith(`${process.pid}:`)) fs.unlinkSync(DISPATCH_LOCK);
-  } catch {
-    // already gone
-  }
+  // No global lock to release anymore.
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -913,14 +898,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     return;
   }
 
-  const holder = acquireDispatchLock();
-  if (holder) {
-    await api.sendMessage(
-      chatId,
-      `The repo is busy with ${holder.bug} (pid ${holder.pid}). Wait until that finishes. A second coding agent would overwrite the same tree.`,
-    );
-    return;
+  // Parallel by design: chat never waits on another agent. Advisory per-file
+  // claims warn when the request names a file someone else is editing.
+  const warn = claimWarning(text);
+  if (warn) {
+    await api.sendMessage(chatId, `Heads up:${warn}`).catch(() => {});
   }
+
+  const claimId = `chat-${chatId}`;
+  const claimed = claimFiles(extractFiles(text), {
+    bugId: claimId,
+    tool: 'opencode',
+    pid: process.pid,
+    worktree: config.agent.workspace,
+  }).claimed;
 
   busy.add(chatId);
   const renderer = new ProgressRenderer({ api, throttle, chatId, ...config.progress });
@@ -928,7 +919,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     await renderer.start();
     const eff = effective(config, prefs, chatId);
     const handoff = prefs.get(chatId)?.handoff || '';
-    const prompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${text}` : text;
+    const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${text}` : text;
+    const blocked = liveClaims()
+      .filter((c) => c.bugId !== claimId && !claimed.includes(c.file))
+      .map((c) => c.file);
+    const routeNote = blocked.length
+      ? `\n\n[PARALLEL AGENTS] Another agent is editing: ${blocked.slice(0, 10).join(', ')}. Do not modify those files; work only on the rest.`
+      : '';
+    const prompt = basePrompt + routeNote;
     const extraArgs = [];
     const sessionId = sessions.get(chatId);
     if (sessionId) extraArgs.push('--session', sessionId);
@@ -989,7 +987,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     renderer.stopTyping();
     running.delete(chatId);
     busy.delete(chatId);
-    releaseDispatchLock();
+    releaseFiles(claimed, claimId);
   }
 }
 
