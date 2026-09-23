@@ -43,3 +43,14 @@ Prior packet (Telegram consolidation / Cline) is fully closed out. State below i
 - Dual-poll one Telegram token (VPS + phone).
 - Start `bot-host@android` on the VPS (phone owns that token).
 - Delete unmerged `wip/*` / `fix/portion-wrong-basis` without a content review.
+
+## Telegram provider router (now in git — 2026-09-24)
+
+Shareable multi-provider Telegram system (was box-only at `~/.config/telegram-opencode/router/`):
+
+- **Package:** [`tools/telegram-provider-router/`](../tools/telegram-provider-router/README.md)
+- **Pointer:** [`docs/agents/telegram-provider-router.md`](../docs/agents/telegram-provider-router.md)
+- **Registry:** `bots/registry.json` → `tg_provider_router`
+- Covers: OpenCode / Cline / Token Harbor / Cloudflare / Freebuff management, shared vs per-model `/allowance` buckets, single-poller flock, sticky Busy / hang self-heal, failover that re-dispatches the user prompt.
+- Secrets + live `state/` stay on the box path; do not commit `.env`.
+- Still open: `tools/telegram-provider-router/tickets/TG-CLINE-FREEBUFF-LONGTERM.md`
