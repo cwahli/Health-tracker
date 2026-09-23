@@ -180,11 +180,32 @@ You send from phone: "/fix BUG-20260923-01: Round Omega-3 to 1 decimal place on 
   2. Integrated test gates: `tsc --noEmit` followed by Playwright suite.
   3. Failure diagnostics with screenshot attachments sent to Telegram.
 
-### Milestone CB-5: End-to-End Mobile Dev Loop (`/fix` $\to$ Git Push)
+### Milestone CB-5: Conversational AI Coding Agent Upgrade (COMPLETE)
 - **Deliverables:**
-  1. Wire complete `/fix` command to pull `origin/main`, code, test, and push.
-  2. Implement Telegram typing pulse (`...`) throughout the run.
-  3. Live mobile test of atomic bug fix executed entirely from Telegram on your phone.
+  1. Upgraded `notebooks/colab_worker.py` from static `/fix` dispatcher to full autonomous OpenCode agent.
+  2. Implemented natural language conversational handling (`run_agent_turn`): responds to greetings ("Hi"), answers repository architecture queries, and executes code tasks without mandatory slash commands.
+  3. Created 2-line auto-updating launcher in `notebooks/colab_qwen38_vllm.ipynb` that automatically fast-forwards `origin/main` on every cell run.
+  4. Added on-screen interactive token prompt (`getpass`) so mobile users can paste their token without editing Python source code.
+  5. Live-verified 20-minute idle watchdog auto-unassign (safely disconnected at 01:18 to protect 200 compute units).
+
+### Milestone CB-6: Live Mobile Dev Loop Verification (IN PROGRESS)
+- **Deliverables:**
+  1. User enters bot token via on-screen prompt in Colab.
+  2. Validate live conversational greeting (`Hi`) from mobile Telegram client.
+  3. Execute first live end-to-end task from mobile phone (e.g. `/fix` or feature prompt).
+  4. Verify clean Playwright E2E verification + git commit pushed to `origin/main`.
+
+### Milestone CB-7: Local Qwen 3.8 / vLLM GPU Inference Pipeline (NEXT)
+- **Deliverables:**
+  1. Embed local vLLM or llama-cpp-python in `colab_worker.py` for `/switch qwen-3.8`.
+  2. Run 100% of code generation reasoning directly on Colab's Tesla T4/L4 GPU offline without external API dependency.
+  3. Automatic VRAM memory management to prevent OOM errors on 16GB VRAM.
+
+### Milestone CB-8: Session Continuity & Multi-Turn Memory (NEXT)
+- **Deliverables:**
+  1. Connect OpenCode `--session` persistence across consecutive Telegram turns.
+  2. Retain conversation context, file history, and previous test results across turns.
+
 
 ---
 
