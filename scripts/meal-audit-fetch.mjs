@@ -290,7 +290,16 @@ export function filterCandidates(jobs, { timestampWindow, name }) {
     out = out.filter((j) => {
       const ms = jobCreatedMs(j);
       if (ms == null) return false;
-      if (timestampWindow.hasTime) return ms >= timestampWindow.startMs && ms <= timestampWindow.endMs;
+      if (timestampWindow.hasTime) {
+        if (ms >= timestampWindow.startMs && ms <= timestampWindow.endMs) return true;
+        // Food logs often carry date-only precision or a display TZ different from
+        // the audit runner (UI shows profile TZ, e.g. WIB = UTC+7, while updated_at
+        // is UTC). Fall back to same UTC calendar day so "23 sep 14:56" still finds
+        // a log stamped 2026-09-23T07:56Z. Name matching disambiguates within the day.
+        const d = new Date(ms);
+        const dd = new Date(timestampWindow.dateMs);
+        return d.getUTCFullYear() === dd.getUTCFullYear() && d.getUTCMonth() === dd.getUTCMonth() && d.getUTCDate() === dd.getUTCDate();
+      }
       const d = new Date(ms);
       const dd = new Date(timestampWindow.dateMs);
       return d.getFullYear() === dd.getFullYear() && d.getMonth() === dd.getMonth() && d.getDate() === dd.getDate();
@@ -333,7 +342,16 @@ export function filterFoodCandidates(foods, { name, timestampWindow }) {
         if (!Number.isNaN(t)) { ms = t; break; }
       }
       if (ms == null) return false;
-      if (timestampWindow.hasTime) return ms >= timestampWindow.startMs && ms <= timestampWindow.endMs;
+      if (timestampWindow.hasTime) {
+        if (ms >= timestampWindow.startMs && ms <= timestampWindow.endMs) return true;
+        // Food logs often carry date-only precision or a display TZ different from
+        // the audit runner (UI shows profile TZ, e.g. WIB = UTC+7, while updated_at
+        // is UTC). Fall back to same UTC calendar day so "23 sep 14:56" still finds
+        // a log stamped 2026-09-23T07:56Z. Name matching disambiguates within the day.
+        const d = new Date(ms);
+        const dd = new Date(timestampWindow.dateMs);
+        return d.getUTCFullYear() === dd.getUTCFullYear() && d.getUTCMonth() === dd.getUTCMonth() && d.getUTCDate() === dd.getUTCDate();
+      }
       const d = new Date(ms);
       const dd = new Date(timestampWindow.dateMs);
       return d.getFullYear() === dd.getFullYear() && d.getMonth() === dd.getMonth() && d.getDate() === dd.getDate();
