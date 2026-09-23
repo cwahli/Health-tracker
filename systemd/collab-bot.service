@@ -1,0 +1,19 @@
+[Unit]
+Description=Colab Telegram Bot Daemon
+Documentation=file:///root/Health-tracker/plan/COLLAB_BOT_MOBILE_WORKFLOW.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Health-tracker
+Environment=HOME=/root
+Environment=PATH=/root/.opencode/bin:/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/root/.config/opencode-bot/collab.env
+ExecStart=/usr/bin/node /root/Health-tracker/scripts/collab-bot.mjs --id=collab
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

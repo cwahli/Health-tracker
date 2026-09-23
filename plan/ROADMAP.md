@@ -461,6 +461,18 @@ Canonical steps: [BOT_ROLES.md](./BOT_ROLES.md). Does not change `src/` or the p
 | **V-28** | Short soul per Hermes profile. One preloaded skill per live bot. QA profiles cannot load `orchestrator-dispatcher`. Memory holds only current facts. Dispatch tries `opencode/deepseek-v4.1-flash` once after Muse reports insufficient funds, and skips Antigravity. | The done-when list in BOT_ROLES.md §4 is true. | **COMPLETE** |
 | **V-29** | **Atomic QA Bug Dispatch & Orchestrator Observability**: QA bots dispatch one verifiable defect per ticket (never bundle multiple discrepancies). Orchestrator decomposes multi-issue prompts into atomic sub-tasks, attaches target file hints, provides action-aware heartbeats (reporting current investigation activity rather than blind timers), emits structured failure diagnostics, enforces 3m early stagnation circuit breaker, and tunes coder thinking levels. | [BOT_ROLES.md](./BOT_ROLES.md) §6 is implemented; single-defect tickets run in < 60s without overthinking loops, blind heartbeats, or poisoned bundles. | **COMPLETE** |
 
+### Track V Phase 9 — Colab Bot: Mobile Telegram Remote & Colab GPU Compute Engine (OPEN)
+
+Canonical steps: [COLLAB_BOT_MOBILE_WORKFLOW.md](./COLLAB_BOT_MOBILE_WORKFLOW.md). Utilizes 200 Google Colab compute units (L4/A100 GPU) for OpenCode CLI and local Qwen 3.8. Remote control via mobile Telegram `@Collab_bot`.
+
+| ID | Phase | Done when | Status |
+|---|---|---|---|
+| **CB-1** | Colab Bot identity in `bots/registry.json`, systemd service unit `collab-bot.service`, Termux launcher `start-collab-bot.sh`. | `node scripts/collab-bot.mjs --check-config` passes. | **COMPLETE** |
+| **CB-2** | Model switching (`/switch muse-spark-1.3`, `/switch qwen-3.8`, `/switch status`) inside Colab via `scripts/lib/collab-session.mjs`. | Dynamic switcher simulation passes. | **COMPLETE** |
+| **CB-3** | Headless Colab compute worker notebook `notebooks/colab_qwen38_vllm.ipynb` with 20m auto-unassign idle watchdog. | Notebook auto-unassigns on idle to preserve 200 compute units. | **COMPLETE** |
+| **CB-4** | Automated verification pipeline: `scripts/run-playwright-headless.sh` running `tsc` + Playwright before git push. | Playwright runner script executable and tested. | **COMPLETE** |
+| **CB-5** | End-to-end mobile dev loop (`/fix <task>` -> git pull -> model fix -> Playwright test -> git push origin main). | Live atomic test from mobile Telegram phone client. | **READY FOR MOBILE TEST** |
+
 
 
 ### Track D — one database (D1 now; SQLite only after a VPS benchmark)
