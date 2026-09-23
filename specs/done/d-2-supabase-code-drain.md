@@ -1,6 +1,6 @@
 ---
 id: D-2
-status: locked
+status: done
 class: SUPABASE_CODE_DRAIN
 skill: sync-jobs
 edit_mode: patch
