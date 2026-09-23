@@ -1405,7 +1405,7 @@ export function registerBrandMenuRoutes(app: Express) {
       notes: it.notes || '',
       enabled: true,
       updated_at: new Date().toISOString()
-    }));
+    })) as any[];
 
     // D-2: D1 is the only remote store (Supabase upsert removed, no 402).
     // Stable ids keep D1 upserts idempotent per chain+dish (matches the old
