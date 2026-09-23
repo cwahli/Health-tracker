@@ -131,6 +131,30 @@ export class TelegramApi {
     return this.call('getUpdates', { offset, timeout, allowed_updates: allowedUpdates });
   }
 
+  getFile(fileId) {
+    return this.call('getFile', { file_id: fileId });
+  }
+
+  async downloadFile(remoteFilePath, destPath) {
+    const url = `${this.baseUrl}/file/bot${this.token}/${remoteFilePath}`;
+    const res = await this.fetch(url);
+    if (!res.ok) {
+      throw new TelegramError('downloadFile', res.status, `HTTP ${res.status}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+    await fs.promises.writeFile(destPath, buf);
+    return destPath;
+  }
+
+  async downloadFileById(fileId, destPath) {
+    const file = await this.getFile(fileId);
+    if (!file?.file_path) {
+      throw new TelegramError('getFile', 200, 'Telegram returned no file_path');
+    }
+    return this.downloadFile(file.file_path, destPath);
+  }
+
   deleteWebhook({ dropPendingUpdates = false } = {}) {
     return this.call('deleteWebhook', { drop_pending_updates: dropPendingUpdates });
   }

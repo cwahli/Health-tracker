@@ -106,6 +106,27 @@ describe('loadRegistry', () => {
     expect(cfg.agent.playwrightOutputDir).toBe('');
   });
 
+  it('appends child agent.skills to inherited sharedSkills', () => {
+    const reg = applyMasterDefaults({
+      master: 'opencode',
+      bots: [
+        {
+          id: 'opencode',
+          telegram: { tokenEnv: 'T1' },
+          agent: { kind: 'opencode', sharedSkills: ['a', 'b'] },
+        },
+        {
+          id: 'child',
+          telegram: { tokenEnv: 'T2' },
+          agent: { skills: ['c'] },
+        },
+      ],
+    });
+    expect(getBot(reg, 'child').agent.sharedSkills).toEqual(['a', 'b', 'c']);
+    // master untouched
+    expect(getBot(reg, 'opencode').agent.sharedSkills).toEqual(['a', 'b']);
+  });
+
   it('requires tokenEnv on every bot', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reg-'));
     const file = path.join(dir, 'registry.json');
@@ -181,7 +202,7 @@ describe('resolveToken / normalizeConfig', () => {
 });
 
 describe("one poller per token", () => {
-  it("registry tokenEnv values are unique", () => {
+  it("loadRegistry rejects duplicate tokenEnv values", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reg-"));
     const file = path.join(dir, "registry.json");
     fs.writeFileSync(
@@ -190,13 +211,65 @@ describe("one poller per token", () => {
         master: "opencode",
         bots: [
           { id: "opencode", telegram: { tokenEnv: "SAME" }, agent: { kind: "opencode" } },
-          { id: "dup", telegram: { tokenEnv: "SAME" } },
+          { id: "dup", telegram: { tokenEnv: "SAME" }, agent: { kind: "opencode" } },
         ],
       }),
     );
-    const reg = loadRegistry(file);
-    const envs = reg.bots.map((b) => b.telegram.tokenEnv);
-    expect(new Set(envs).size).toBe(envs.length);
+    expect(() => loadRegistry(file)).toThrow(/Duplicate tokenEnv/);
   });
 });
-\n
+
+describe("runtime isolation", () => {
+  const mixed = () =>
+    applyMasterDefaults({
+      master: "vm",
+      bots: [
+        {
+          id: "vm",
+          runtime: "bot-host",
+          telegram: { tokenEnv: "VM", allowedUserIds: [1] },
+          agent: { kind: "opencode", model: "m1", sharedSkills: ["a"] },
+        },
+        {
+          id: "h",
+          runtime: "hermes",
+          telegram: { tokenEnv: "H" },
+          agent: { kind: "hermes" },
+          hermes: { profile: "qa_meal" },
+        },
+      ],
+    });
+
+  it("does not merge bot-host master defaults into a hermes bot", () => {
+    const h = mixed().bots.find((b) => b.id === "h");
+    expect(h.agent.kind).toBe("hermes");
+    expect(h.agent.model).toBeUndefined();
+    expect(h.agent.sharedSkills).toBeUndefined();
+    expect(h.telegram.allowedUserIds).toBeUndefined();
+  });
+
+  it("getBot never returns a hermes-runtime bot", () => {
+    const reg = applyMasterDefaults({
+      master: "vm",
+      bots: [
+        { id: "vm", runtime: "bot-host", telegram: { tokenEnv: "VM" }, agent: { kind: "opencode" } },
+        {
+          id: "h",
+          runtime: "hermes",
+          enabled: true,
+          telegram: { tokenEnv: "H" },
+          agent: { kind: "hermes" },
+        },
+      ],
+    });
+    expect(() => getBot(reg, "h")).toThrow(/not found|not enabled/);
+    expect(getBot(reg).id).toBe("vm");
+  });
+
+  it("normalizeConfig exposes runtime and hermes metadata", () => {
+    const h = mixed().bots.find((b) => b.id === "h");
+    const cfg = normalizeConfig(h);
+    expect(cfg.runtime).toBe("hermes");
+    expect(cfg.hermes).toEqual({ profile: "qa_meal" });
+  });
+});

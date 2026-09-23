@@ -153,7 +153,7 @@ meal_audit token would conflict with `hermes-gateway`.
 | Wake the Hermes meal_audit **agent** | Not via Telegram. Local only: headless `hermes` CLI / file spool (future) |
 
 Do not add `meal_audit` to `bots/registry.json`. Do not reuse that profile token in
-`opencode-bot`. Shared skills already include this file via registry `sharedSkills`.
+`bot-host`. Shared skills already include this file via registry `sharedSkills`.
 
 ## Holdout & Telegram delivery
 
@@ -165,7 +165,7 @@ Do not add `meal_audit` to `bots/registry.json`. Do not reuse that profile token
   MEDIA:/absolute/path/to/file
   ```
 
-  on its own line in your final reply (see `scripts/skills/telegram-photo/SKILL.md`).
+  on its own line in your final reply (see `scripts/skills/common/telegram-photo/SKILL.md`).
   Absolute paths only; never wrap `MEDIA:` in prose or a code fence.
 
   **Delivery self-check (do this before sending):**

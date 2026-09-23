@@ -15,6 +15,15 @@ import {
   listModelsVerbose,
   buildOpencodeEnv,
 } from './lib/agent-opencode.mjs';
+import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
+import {
+  parseModelRef,
+  buildFreeModelList,
+  formatFreeModelText,
+  formatFreeLabel,
+  CLINE_FREE_MODELS,
+  toModelRef,
+} from './lib/freemodels.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -33,12 +42,19 @@ import {
   formatModelList,
   formatUsage,
   extractMedia,
+  extractCodeBlocks,
 } from './lib/commands.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
   COMPACT_SUMMARY_PROMPT,
 } from './lib/bot-status.mjs';
+import {
+  selectInboundMedia,
+  sanitizeFileName,
+  inboundMediaDir,
+  buildInboundPrompt,
+} from './lib/inbound-media.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -115,16 +131,16 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`opencode-bot - Telegram bridge for opencode (config-driven)
+  console.log(`bot-host - Telegram bridge for bots (config-driven)
 
 Usage:
-  node scripts/opencode-bot.mjs [--id=<botId>] [--registry=<path>]
-  node scripts/opencode-bot.mjs --check-config [--id=<botId>]
-  node scripts/opencode-bot.mjs --dry-run [--id=<botId>] [--prompt="..."]
-  node scripts/opencode-bot.mjs --simulate="/model" [--id=<botId>]
+  node scripts/bot-host.mjs [--id=<botId>] [--registry=<path>]
+  node scripts/bot-host.mjs --check-config [--id=<botId>]
+  node scripts/bot-host.mjs --dry-run [--id=<botId>] [--prompt="..."]
+  node scripts/bot-host.mjs --simulate="/model" [--id=<botId>]
 
 Bots are defined in bots/registry.json. Add a new bot by appending an entry,
-exporting its token env var, and starting opencode-bot@<id>. No code changes.
+exporting its token env var, and starting bot-host@<id>. No code changes.
 `);
 }
 
@@ -134,7 +150,7 @@ function printConfig(config, registryPath) {
 }
 
 function stateDir(id) {
-  const dir = path.join(HOME, '.local', 'state', 'opencode-bot', id);
+  const dir = path.join(HOME, '.local', 'state', 'bot-host', id);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -184,7 +200,7 @@ function effective(config, prefs, chatId) {
 }
 
 function makeCaches() {
-  return { models: null, verbose: null, agents: null };
+  return { models: null, verbose: null, agents: null, free: null };
 }
 
 function opencodeEnv(config) {
@@ -232,6 +248,13 @@ async function getAgents(config, caches) {
     ).filter((a) => a.type === 'primary');
   }
   return caches.agents;
+}
+
+async function getFreeModels(caches) {
+  if (!caches.free) {
+    caches.free = buildFreeModelList();
+  }
+  return caches.free;
 }
 
 class ProgressRenderer {
@@ -390,6 +413,8 @@ class ProgressRenderer {
     const { text: body, media } = extractMedia(withFooter(result.finalText));
     await this.deliver(body);
     await this.deliverMedia(media);
+    const blocks = extractCodeBlocks(result.finalText);
+    if (blocks.length) await this.deliver(blocks.join('\n\n'));
   }
 
   async deliverMedia(paths) {
@@ -543,7 +568,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, 'Could not read the model list from opencode.');
           return;
         }
-        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):`, {
+        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists free models from opencode + cline.`, {
           reply_markup: modelKeyboard(models),
         });
         return;
@@ -558,10 +583,26 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, `Model reset to ${config.agent.model}.`);
         return;
       }
-      const target = cmd.args;
+      const ref = parseModelRef(cmd.args);
+      if (ref.surface === 'cline') {
+        if (!CLINE_FREE_MODELS.includes(ref.id)) {
+          await api.sendMessage(chatId, `Unknown cline model: ${ref.id}\nUse /freemodel to pick from the free list.`);
+          return;
+        }
+        const stored = toModelRef('cline', ref.id);
+        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
+        return;
+      }
       const models = await getModels(config, caches);
+      let target = ref.id;
+      if (models.length && !models.includes(target) && !target.includes('/')) {
+        const hit = models.find((m) => m.split('/').pop() === target);
+        if (hit) target = hit;
+      }
       if (models.length && !models.includes(target)) {
-        await api.sendMessage(chatId, `Unknown model: ${target}\nUse /model to pick from the list.`);
+        await api.sendMessage(chatId, `Unknown model: ${cmd.args}\nUse /model to pick from the list or /freemodel for free models.`);
         return;
       }
       prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: target });
@@ -591,6 +632,21 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'freemodel': {
+      const entries = await getFreeModels(caches);
+      if (!entries.length) {
+        await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
+        return;
+      }
+      await api.sendMessage(chatId, formatFreeModelText(entries, { current: eff.model }), {
+        reply_markup: modelKeyboard(
+          entries.map((entry) => entry.label),
+          { kind: 'fm' },
+        ),
+      });
+      return;
+    }
+
     case 'agent': {
       const agents = await getAgents(config, caches);
       if (!cmd.args) {
@@ -615,7 +671,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'thinking': {
-      const variants = await getVariants(config, caches, eff.model);
+      const ref = parseModelRef(eff.model);
+      const variants =
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
       if (!cmd.args) {
         if (!variants.length) {
           await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
@@ -689,8 +747,16 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       return;
     }
     if (kind === 'm') {
-      const models = await getModels(config, caches);
-      const model = models[Number(value)];
+      let models = await getModels(config, caches);
+      // New buttons carry the full id (`m:opencode/...`); old keyboards
+      // carry an index (`m:0`). Support both so already-shown keyboards keep
+      // working.
+      let model = models.includes(value) ? value : models[Number(value)];
+      if (!model) {
+        caches.models = null;
+        models = await getModels(config, caches);
+        model = models.includes(value) ? value : models[Number(value)];
+      }
       if (!model) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /model again' });
         return;
@@ -710,9 +776,54 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       await api.answerCallbackQuery(query.id, { text: model });
       return;
     }
+    if (kind === 'fmp') {
+      const entries = await getFreeModels(caches);
+      const eff = effective(config, prefs, chatId);
+      await api.editMessageText(chatId, messageId, formatFreeModelText(entries, { current: eff.model }), {
+        reply_markup: modelKeyboard(
+          entries.map((entry) => entry.label),
+          { page: Number(value) || 0, kind: 'fm' },
+        ),
+      });
+      await api.answerCallbackQuery(query.id);
+      return;
+    }
+    if (kind === 'fm') {
+      const entries = await getFreeModels(caches);
+      const entry =
+        entries.find((e) => e.label === value || e.ref === value) || entries[Number(value)];
+      if (!entry) {
+        await api.answerCallbackQuery(query.id, { text: 'Expired, run /freemodel again' });
+        return;
+      }
+      prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: entry.ref });
+      savePrefs(config.id, prefs);
+      if (entry.surface === 'opencode') {
+        const variants = await getVariants(config, caches, entry.ref);
+        if (variants.length) {
+          await api.editMessageText(chatId, messageId, `Model: ${entry.ref}\nPick a thinking level:`, {
+            reply_markup: variantKeyboard(variants),
+          });
+          await api.answerCallbackQuery(query.id, { text: entry.ref });
+          return;
+        }
+      }
+      await api.editMessageText(chatId, messageId, `Model set to ${entry.label}.`, {
+        reply_markup: CLEAR_KEYBOARD,
+      });
+      await api.answerCallbackQuery(query.id, { text: entry.ref });
+      return;
+    }
     if (kind === 'a') {
-      const agents = await getAgents(config, caches);
-      const agent = agents[Number(value)];
+      let agents = await getAgents(config, caches);
+      // New buttons carry the name (`a:build`); old keyboards carry an index
+      // (`a:0`). Support both so already-shown keyboards keep working.
+      let agent = agents.find((a) => a.name === value) || agents[Number(value)];
+      if (!agent) {
+        caches.agents = null;
+        agents = await getAgents(config, caches);
+        agent = agents.find((a) => a.name === value) || agents[Number(value)];
+      }
       if (!agent) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /agent again' });
         return;
@@ -727,8 +838,18 @@ async function handleCallback({ api, config, prefs, caches, query }) {
     }
     if (kind === 'v') {
       const eff = effective(config, prefs, chatId);
-      const variants = await getVariants(config, caches, eff.model);
-      const variant = variants[Number(value)];
+      const ref = parseModelRef(eff.model);
+      // Cline models expose fixed thinking levels, not opencode model variants.
+      let variants =
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+      // New buttons carry the name (`v:high`); old keyboards carry an index
+      // (`v:0`). Support both so already-shown keyboards keep working.
+      let variant = variants.includes(value) ? value : variants[Number(value)];
+      if (!variant && ref.surface !== 'cline') {
+        caches.verbose = null;
+        variants = await getVariants(config, caches, eff.model);
+        variant = variants.includes(value) ? value : variants[Number(value)];
+      }
       if (!variant) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /thinking again' });
         return;
@@ -748,6 +869,28 @@ async function handleCallback({ api, config, prefs, caches, query }) {
   }
 }
 
+async function collectInboundMedia(api, message, config) {
+  const items = selectInboundMedia(message);
+  if (!items.length) return [];
+  const dir = inboundMediaDir({
+    workspace: config.agent.workspace,
+    chatId: message.chat?.id,
+    allowExternalDirectory: config.agent.allowExternalDirectory,
+  });
+  const saved = [];
+  for (const item of items) {
+    const dest = path.join(dir, `${Date.now()}-${sanitizeFileName(item.name)}`);
+    try {
+      await api.downloadFileById(item.fileId, dest);
+      saved.push(dest);
+      console.log(`[${config.id}] [media] inbound ${item.kind} saved: ${dest}`);
+    } catch (err) {
+      console.error(`[${config.id}] [media] inbound ${item.kind} download failed: ${err.message}`);
+    }
+  }
+  return saved;
+}
+
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
@@ -755,10 +898,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     console.warn(`[${config.id}] ignored message from unauthorized user ${userId}`);
     return;
   }
-  const text = (message.text || '').trim();
-  if (!text) return;
+  const text = (message.text || message.caption || '').trim();
+  const hasMedia = selectInboundMedia(message).length > 0;
+  if (!text && !hasMedia) return;
 
-  const cmd = parseCommand(text);
+  const cmd = text ? parseCommand(text) : null;
   if (cmd) {
     await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd });
     return;
@@ -790,19 +934,37 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     if (sessionId) extraArgs.push('--session', sessionId);
     if (eff.agent) extraArgs.push('--agent', eff.agent);
 
-    const result = await runOpencode({
-      prompt,
-      model: eff.model,
-      variant: eff.variant,
-      workspace: config.agent.workspace,
-      thinking: config.agent.thinking,
-      timeoutMs: config.agent.timeoutMs,
-      opencodeBin: config.agent.opencodeBin,
-      onEvent: (event) => renderer.onEvent(event),
-      onSpawn: (child) => running.set(chatId, { child, aborted: false }),
-      extraArgs,
-      env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
-    });
+    const media = await collectInboundMedia(api, message, config);
+    const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
+
+    const ref = parseModelRef(eff.model);
+    const result =
+      ref.surface === 'cline'
+        ? await runCline({
+            prompt: promptWithMedia,
+            model: ref.id,
+            variant: eff.variant,
+            plan: eff.agent === 'plan',
+            workspace: config.agent.workspace,
+            timeoutMs: config.agent.timeoutMs,
+            clineBin: config.agent.clineBin,
+            onEvent: (event) => renderer.onEvent(event),
+            onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+            env: chatEnv(api, chatId),
+          })
+        : await runOpencode({
+            prompt: promptWithMedia,
+            model: eff.model,
+            variant: eff.variant,
+            workspace: config.agent.workspace,
+            thinking: config.agent.thinking,
+            timeoutMs: config.agent.timeoutMs,
+            opencodeBin: config.agent.opencodeBin,
+            onEvent: (event) => renderer.onEvent(event),
+            onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+            extraArgs,
+            env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+          });
 
     if (result.sessionID) {
       sessions.set(chatId, result.sessionID);
@@ -918,17 +1080,30 @@ async function dryRun(config, args) {
   const prompt = args.prompt || 'Say hello in one short sentence.';
   const renderer = new ProgressRenderer({ chatId: 'dry-run', dryRun: true, ...config.progress });
   await renderer.start();
-  const result = await runOpencode({
-    prompt,
-    model: config.agent.model,
-    variant: config.agent.variant,
-    workspace: config.agent.workspace,
-    thinking: config.agent.thinking,
-    timeoutMs: config.agent.timeoutMs,
-    opencodeBin: config.agent.opencodeBin,
-    onEvent: (event) => renderer.onEvent(event),
-    env: opencodeEnv(config),
-  });
+  const ref = parseModelRef(config.agent.model);
+  const result =
+    ref.surface === 'cline'
+      ? await runCline({
+          prompt,
+          model: ref.id,
+          variant: config.agent.variant,
+          workspace: config.agent.workspace,
+          timeoutMs: config.agent.timeoutMs,
+          clineBin: config.agent.clineBin,
+          onEvent: (event) => renderer.onEvent(event),
+          env: opencodeEnv(config),
+        })
+      : await runOpencode({
+          prompt,
+          model: config.agent.model,
+          variant: config.agent.variant,
+          workspace: config.agent.workspace,
+          thinking: config.agent.thinking,
+          timeoutMs: config.agent.timeoutMs,
+          opencodeBin: config.agent.opencodeBin,
+          onEvent: (event) => renderer.onEvent(event),
+          env: opencodeEnv(config),
+        });
   await renderer.finish(result);
   console.log(`\n[dry-run] session=${result.sessionID} code=${result.code} error=${result.lastError || 'none'}`);
 }
@@ -944,6 +1119,11 @@ async function main() {
   const registry = loadRegistry(registryPath);
   const bot = getBot(registry, args.id);
   const config = normalizeConfig(bot, { defaultWorkspace: REPO_ROOT });
+  if (config.runtime !== 'bot-host') {
+    throw new Error(
+      `Bot "${config.id}" has runtime "${config.runtime}" — it is not run by bot-host`,
+    );
+  }
   if (config.agent.playwrightOutputDir) {
     fs.mkdirSync(config.agent.playwrightOutputDir, { recursive: true });
   }
@@ -1005,6 +1185,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`opencode-bot fatal: ${err.message}`);
+  console.error(`bot-host fatal: ${err.message}`);
   process.exit(1);
 });

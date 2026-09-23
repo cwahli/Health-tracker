@@ -1,28 +1,23 @@
 /**
- * Single source of truth for opencode-bot Telegram commands.
+ * Telegram command list for the "/" autocomplete popup.
  *
- * Telegram shows the "/" autocomplete popup from BotFather / setMyCommands,
- * NOT from what the bot code handles. Publish this list via `setMyCommands`
- * on startup so typing `/fr` suggests `/free`. Import this file — never
- * hardcode a command list elsewhere.
+ * Telegram shows the popup from BotFather / setMyCommands, NOT from what
+ * the bot code handles. This list is published via `setMyCommands` on
+ * startup in bot-host.mjs. Keep COMMAND_NAMES in sync with the
+ * `handleCommand` switch cases below.
  */
 
-/**
- * @typedef {{ command: string, description: string }} BotCommand
- * command: lowercase, a-z0-9_, 1-32 chars (Telegram Bot API rule).
- * description: 1-256 chars, shown in the autocomplete popup.
- */
-
-/** @type {BotCommand[]} */
+/** @type {{ command: string, description: string }[]} */
 export const BOT_COMMANDS = [
   { command: 'start', description: 'Start the bot and show help' },
   { command: 'help', description: 'Show available commands' },
   { command: 'status', description: 'Show session, model, agent, usage' },
   { command: 'new', description: 'Start a fresh session' },
   { command: 'compact', description: 'Summarize session and start fresh' },
-  { command: 'model', description: 'Pick a model (free models first)' },
+  { command: 'model', description: 'Pick a model (or set it directly)' },
+  { command: 'models', description: 'List available models' },
   { command: 'free', description: 'List free models only' },
-  { command: 'models', description: 'List all available models' },
+  { command: 'freemodel', description: 'List free models (opencode + cline)' },
   { command: 'agent', description: 'Pick an agent' },
   { command: 'build', description: 'Switch to the build agent' },
   { command: 'plan', description: 'Switch to the plan agent' },
@@ -30,7 +25,7 @@ export const BOT_COMMANDS = [
   { command: 'abort', description: 'Cancel the running request' },
 ];
 
-/** Names handled by opencode-bot.mjs handleCommand (kept in sync). */
+/** Names handled by bot-host.mjs handleCommand (kept in sync). */
 export const COMMAND_NAMES = BOT_COMMANDS.map((c) => c.command);
 
 /** Payload for Telegram `setMyCommands` (strips nothing — already valid). */
@@ -127,39 +122,55 @@ export function sortModelsFreeFirst(models) {
   return [...free, ...paid];
 }
 
-export function modelKeyboard(models, { page = 0, pageSize = 8 } = {}) {
+export function modelKeyboard(models, { page = 0, pageSize = 8, kind = 'm' } = {}) {
   const total = models.length;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(0, page), pages - 1);
   const slice = models.slice(current * pageSize, current * pageSize + pageSize);
-  const rows = slice.map((model, index) => [
-    { text: isFreeModel(model) ? `✓ ${model}` : model, callback_data: `m:${current * pageSize + index}` },
+  // Embed the full model id (<=40 chars, well under Telegram's 64-byte
+  // callback_data limit) instead of a bare index, so taps stay valid even
+  // if the list was refetched/re-sorted (free-first) between showing the
+  // keyboard and tapping it. Old `m:<index>` buttons still decode via the
+  // index fallback in handleCallback. Labels are plain ids here (the /freemodel
+  // path passes entry labels, not raw ids, so no free-checkmark here).
+  const rows = slice.map((model) => [
+    { text: model, callback_data: `${kind}:${model}` },
   ]);
   const nav = [];
-  if (current > 0) nav.push({ text: 'Prev', callback_data: `mp:${current - 1}` });
+  if (current > 0) nav.push({ text: 'Prev', callback_data: `${kind}p:${current - 1}` });
   nav.push({ text: `${current + 1}/${pages}`, callback_data: 'noop' });
-  if (current < pages - 1) nav.push({ text: 'Next', callback_data: `mp:${current + 1}` });
+  if (current < pages - 1) nav.push({ text: 'Next', callback_data: `${kind}p:${current + 1}` });
   if (nav.length > 1 || pages > 1) rows.push(nav);
   return { inline_keyboard: rows };
 }
 
 export function agentKeyboard(agents) {
+  // Embed the agent name (short, e.g. "build") instead of a bare index so
+  // taps stay valid even if `opencode agent list` output changes between
+  // showing the keyboard and tapping it. Old `a:<index>` buttons still
+  // decode via the index fallback in handleCallback.
   return {
-    inline_keyboard: agents.map((agent, index) => [
-      { text: `${agent.name} (${agent.type})`, callback_data: `a:${index}` },
+    inline_keyboard: agents.map((agent) => [
+      { text: `${agent.name} (${agent.type})`, callback_data: `a:${agent.name}` },
     ]),
   };
 }
 
 export function variantKeyboard(variants) {
+  // Embed the variant name (short, e.g. "low"/"high") instead of a bare
+  // index so taps stay valid even if the cached model list was refetched
+  // or reordered between showing the keyboard and tapping it.
+  // Old `v:<index>` buttons still decode via the index fallback.
   return {
-    inline_keyboard: variants.map((variant, index) => [{ text: variant, callback_data: `v:${index}` }]),
+    inline_keyboard: variants.map((variant) => [{ text: variant, callback_data: `v:${variant}` }]),
   };
 }
 
 export function decodeCallback(data) {
-  const [kind, value] = String(data ?? '').split(':');
-  return { kind, value };
+  const raw = String(data ?? '');
+  const splitAt = raw.indexOf(':');
+  if (splitAt < 0) return { kind: raw, value: undefined };
+  return { kind: raw.slice(0, splitAt), value: raw.slice(splitAt + 1) };
 }
 
 export function helpText(config, { model, agent, variant } = {}) {
@@ -173,15 +184,14 @@ export function helpText(config, { model, agent, variant } = {}) {
     '',
     'Commands:',
     '/model [name]     pick a model (or set it directly)',
-    '/free             list free models only',
     '/models           list available models',
+    '/freemodel        list free models (opencode + cline)',
     '/agent [name]     pick an agent',
     '/build            switch to the build agent',
     '/plan             switch to the plan agent',
     '/thinking [level] pick the thinking level (variant)',
     '/new              start a fresh session',
-    '/compact          summarize session + start fresh (one-shot handoff)',
-    '/status           show model, usage totals, poll health, session',
+    '/status           show session, model, agent, workspace, usage',
     '/abort            cancel the running request',
     '/help             this message',
   ].join('\n');
@@ -209,6 +219,19 @@ export function extractMedia(text) {
   }
   const cleaned = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return { text: cleaned, media };
+}
+
+export function extractCodeBlocks(text) {
+  const source = String(text ?? '');
+  const blocks = [];
+  const re = /```([A-Za-z0-9_+-]*)[ \t]*\r?\n([\s\S]*?)```/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const lang = match[1] || '';
+    const code = match[2].replace(/\s+$/, '');
+    if (code.trim()) blocks.push(lang ? `\`\`\`${lang}\n${code}\n\`\`\`` : `\`\`\`\n${code}\n\`\`\``);
+  }
+  return blocks;
 }
 
 export function formatUsage({ tokens, cost, contextLimit, agent } = {}) {
