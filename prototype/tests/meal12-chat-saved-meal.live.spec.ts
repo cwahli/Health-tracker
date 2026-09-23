@@ -318,7 +318,14 @@ test.describe('Golden Meal_04 case 12 — chat saved-meal journey', () => {
     }
     const oats = t2dishes.find((d: any) => d.name === 'Mr Oat Rolled Oats');
     expect(oats?.weightGrams).toBe(40);
-    await clickNewestSaveLog(page);
+    // Edit mode persists onto the log directly (history shows Edit/Delete, not
+    // Save Log), so a final Save click is only needed when the card is unsaved.
+    const t2save = page.getByRole('button', { name: /Save Log|Simpan Log/i }).first();
+    if (await t2save.isVisible().catch(() => false)) {
+      await t2save.click();
+      await page.waitForTimeout(4000);
+    }
+    await expect(page.getByRole('heading', { name: /Mr Oat Rolled Oats/i }).first()).toBeVisible({ timeout: 30000 });
 
     const fs = await import('node:fs');
     fs.writeFileSync('./tests/captures/pw_meal12_jobids.json', JSON.stringify(jobIds, null, 2));
