@@ -5,6 +5,8 @@ import {
   hasEditIntent,
   mostRecentActiveMeal,
   ensureMealBreakdown,
+  newestSucceededFoodJob,
+  pendingMealOfJob,
   FOLLOW_UP_EDIT_MAX_AGE_MS,
 } from './foodFollowUpEdit';
 
@@ -200,5 +202,26 @@ describe('ensureMealBreakdown', () => {
     await expect(ensureMealBreakdown(light)).resolves.toBe(light);
     await expect(ensureMealBreakdown({ name: 'noid' }, async () => ({ itemsBreakdown: [1] })))
       .resolves.toMatchObject({ name: 'noid' });
+  });
+});
+
+describe('newestSucceededFoodJob (Case-12 T2 blank-draft adoption)', () => {
+  const bigMac = { name: 'Big Mac', weightGrams: 215 };
+  const t1 = { id: 'job_t1', status: 'succeeded', kind: 'food_log', result: { pendingFoodLog: { id: 'log_t1', itemsBreakdown: [bigMac] } } };
+  const stale = { id: 'job_old', status: 'succeeded', kind: 'food_log', result: { pendingFoodLog: { id: 'demo_food_log_3', itemsBreakdown: [] } } };
+  const draft = { id: 'job_t2', status: 'running', kind: 'food_log', result: null };
+
+  it('adopts the newest succeeded food job, skipping the current draft', () => {
+    expect(newestSucceededFoodJob([stale, t1, draft], 'job_t2')).toBe(t1);
+    expect(pendingMealOfJob(t1)).toMatchObject({ id: 'log_t1' });
+  });
+
+  it('skips failed jobs, non-food kinds, and jobs with no meal', () => {
+    const failed = { id: 'x', status: 'failed', kind: 'food_log', result: { pendingFoodLog: { id: 'z' } } };
+    const medical = { id: 'y', status: 'succeeded', kind: 'medical', result: { pendingFoodLog: { id: 'z' } } };
+    const nomeal = { id: 'w', status: 'succeeded', kind: 'food_log', result: null };
+    expect(newestSucceededFoodJob([failed, medical, nomeal, stale], 'other')).toBe(stale);
+    expect(newestSucceededFoodJob([failed, medical, nomeal], 'other')).toBeNull();
+    expect(pendingMealOfJob(nomeal)).toBeNull();
   });
 });
