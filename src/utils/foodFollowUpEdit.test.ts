@@ -7,6 +7,7 @@ import {
   ensureMealBreakdown,
   newestSucceededFoodJob,
   pendingMealOfJob,
+  mealMessageOfJob,
   FOLLOW_UP_EDIT_MAX_AGE_MS,
 } from './foodFollowUpEdit';
 
@@ -214,6 +215,19 @@ describe('newestSucceededFoodJob (Case-12 T2 blank-draft adoption)', () => {
   it('adopts the newest succeeded food job, skipping the current draft', () => {
     expect(newestSucceededFoodJob([stale, t1, draft], 'job_t2')).toBe(t1);
     expect(pendingMealOfJob(t1)).toMatchObject({ id: 'log_t1' });
+  });
+
+  it('finds the meal in persisted messages when the result is bare', () => {
+    const bare = {
+      id: 'job_t1b', status: 'succeeded', kind: 'food_log', result: null,
+      messages: [
+        { role: 'user', text: 'hi' },
+        { role: 'assistant', data: { pendingFoodLog: { id: 'log_t1', itemsBreakdown: [bigMac] } } },
+      ],
+    };
+    expect(mealMessageOfJob(bare)).toMatchObject({ id: 'log_t1' });
+    expect(newestSucceededFoodJob([bare], 'other')).toBe(bare);
+    expect(pendingMealOfJob(bare)).toMatchObject({ id: 'log_t1' });
   });
 
   it('skips failed jobs, non-food kinds, and jobs with no meal', () => {

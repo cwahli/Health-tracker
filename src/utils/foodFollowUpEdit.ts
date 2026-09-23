@@ -172,9 +172,22 @@ export interface PriorSucceededJobLike {
   result?: { pendingFoodLog?: any; clean_result?: any; data?: any } | null;
 }
 
+/** Meal message inside a job's persisted messages, if any. */
+export function mealMessageOfJob(job: PriorSucceededJobLike | null | undefined): any | null {
+  const msgs = (job as any)?.messages;
+  if (!Array.isArray(msgs)) return null;
+  for (let i = msgs.length - 1; i >= 0; i -= 1) {
+    const m = msgs[i];
+    const meal = m?.data?.pendingFoodLog || m?.pendingFoodLog;
+    if (meal) return meal;
+  }
+  return null;
+}
+
 /** Meal carried by a succeeded session job, if any. Mirrors the spec's
-`dishesOf` read paths: live T1 jobs carry the meal under
-`result.clean_result.pendingFoodLog`, not `result.pendingFoodLog`. */
+`dishesOf` read paths, plus the persisted messages: normal completions only
+flip JobStore status (the meal card lives in the job's messages), so the
+result alone is not enough. */
 export function pendingMealOfJob(job: PriorSucceededJobLike | null | undefined): any | null {
   const r = job?.result;
   return (
@@ -182,6 +195,7 @@ export function pendingMealOfJob(job: PriorSucceededJobLike | null | undefined):
     r?.clean_result?.pendingFoodLog ||
     (job as any)?.clean_result?.pendingFoodLog ||
     r?.data?.pendingFoodLog ||
+    mealMessageOfJob(job) ||
     null
   );
 }
