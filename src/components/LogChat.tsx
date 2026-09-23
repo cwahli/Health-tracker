@@ -2597,13 +2597,7 @@ ${logsText}`);
             jobId: currentJobId,
             promptLength: textToSend?.length,
             imageCount: stagedImagesForSubmit.length,
-            submissionMode,
-            debugAdopt: {
-              blankDraft: blankDraftForAdopt,
-              sessionJob: sessionPriorJob?.id || null,
-              meal: (prunedMealForJob as any)?.id || (prunedMealForJob as any)?.name || null,
-              mealItems: Array.isArray((prunedMealForJob as any)?.itemsBreakdown) ? (prunedMealForJob as any).itemsBreakdown.length : -1,
-            },
+            submissionMode
           });
           // Fresh-thread edits attach a D1-pulled meal that carries light
           // columns only (no itemsBreakdown) — hydrate the one chosen meal to
