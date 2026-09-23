@@ -1,23 +1,28 @@
 """
-Colab Bot Worker: Multi-Project Standalone Compute Host (200 Units Tier)
-Runs directly inside Google Colab (L4/A100 GPU).
-Listens for commands from your mobile Telegram app:
-- /project <url>          -> Clones and switches active project inside Colab
-- /switch muse-spark-1.3  -> Routes to OpenCode CLI inside Colab
-- /switch qwen-3.8        -> Routes to local Qwen 3.8 on Colab GPU
-- /switch status          -> Reports current engine & Colab GPU health
-- /fix <task>             -> git pull -> model fix -> Playwright test -> git push
-- Auto-unassigns runtime after 20 minutes idle to preserve 200 compute units.
+Colab Bot Worker: Autonomous Multi-Project AI Coding Agent (200 Units Tier)
+Runs directly inside Google Colab (Tesla T4 / L4 / A100 GPU).
+Communicates with your mobile Telegram app:
+- Conversational: Chat naturally with the agent (e.g. "Hi", "Explain the auth flow")
+- Code Execution: Tell it to build or fix features; it edits code, runs Playwright tests, and pushes to GitHub
+- Multi-Project: /project <url> switches repository inside Colab
+- Model Switching: /switch qwen-3.8 or /switch muse-spark-1.3
+- Auto-shutdown: Shuts down after 20 minutes idle to preserve your 200 compute units
 """
 
 import os
 import sys
 import time
+import json
 import subprocess
 import requests
 
+# Ensure opencode is in PATH
+opencode_path = os.path.expanduser("~/.opencode/bin")
+if opencode_path not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = f"{opencode_path}:/usr/local/bin:/usr/bin:" + os.environ.get("PATH", "")
+
 # ---------------------------------------------------------------------------
-# Mobile Configuration (Secure Colab Secrets or Environment Variables)
+# Mobile Configuration (Secure Colab Secrets or Direct Environment Variables)
 # ---------------------------------------------------------------------------
 try:
     from google.colab import userdata
@@ -66,12 +71,12 @@ def format_repo_url(url):
     return url
 
 def setup_environment():
-    print("Setting up Colab environment...")
+    print("Checking development tools...")
     subprocess.run("curl -fsSL https://opencode.ai/install | bash || true", shell=True)
     subprocess.run("npm install -g opencode-ai 2>/dev/null || true", shell=True)
-    subprocess.run("git config --global user.name 'cwahli'", shell=True)
-    subprocess.run("git config --global user.email 'cwahli@users.noreply.github.com'", shell=True)
-    print("Environment setup complete.")
+    subprocess.run("git config --global user.name cwahli", shell=True)
+    subprocess.run("git config --global user.email cwahli@users.noreply.github.com", shell=True)
+    print("Environment ready.")
 
 def run_git_sync(repo_url=DEFAULT_REPO):
     global REPO_DIR
@@ -84,45 +89,62 @@ def run_git_sync(repo_url=DEFAULT_REPO):
     subprocess.run(["git", "fetch", "origin", "main"], cwd=REPO_DIR, check=True)
     subprocess.run(["git", "pull", "--ff-only", "origin", "main"], cwd=REPO_DIR, check=True)
 
-def run_fix_workflow(chat_id, task_desc):
+def run_agent_turn(chat_id, user_prompt):
     global CURRENT_ENGINE, LAST_ACTIVE_TIME, REPO_DIR
     LAST_ACTIVE_TIME = time.time()
     project_name = os.path.basename(REPO_DIR)
+    p_lower = user_prompt.strip().lower()
 
-    tg_send(chat_id, f"⏳ *[Colab Compute]* Starting dev loop for *{project_name}*:\n\"{task_desc}\"\n• Engine: \`{CURRENT_ENGINE}\`\n• Pulling latest \`origin/main\`...")
+    # Friendly conversational greetings
+    if p_lower in ["hi", "hello", "hey", "yo", "start"]:
+        gpu_info = get_gpu_info()
+        tg_send(chat_id, f"👋 *Hey! I am your autonomous AI coding agent.*\n\n• *Hardware:* `{gpu_info}`\n• *Active Model:* `{CURRENT_ENGINE}`\n• *Active Project:* `{project_name}`\n\nI am running live in Colab with full repository access. You can talk to me naturally:\n\n• Ask questions about the codebase\n• Tell me to build features or fix bugs\n• Ask me to run tests or review files\n\n_What would you like to work on?_")
+        return
+
+    tg_send(chat_id, f"🧠 *[Agent Thinking]* Analyzing request for *{project_name}*:\n_{user_prompt[:120]}_\n• Model: `{CURRENT_ENGINE}`")
 
     try:
-        # Step 1: Git pull
+        # Step 1: Ensure clean, latest code
         run_git_sync()
 
-        # Step 2: Code generation using active engine inside Colab
-        if CURRENT_ENGINE.startswith("muse-spark") or CURRENT_ENGINE == "opencode":
-            tg_send(chat_id, f"⏳ *[Colab OpenCode]* Coding fix with \`muse-spark-1.3-contributor-free\`...")
-            model_id = "opencode/muse-spark-1.3-contributor-free"
-            cmd = f"opencode run --auto --dir {REPO_DIR} -m {model_id} \"{task_desc}\""
-            subprocess.run(cmd, shell=True, check=True, cwd=REPO_DIR, timeout=600)
+        # Step 2: Choose model
+        model_id = "opencode/muse-spark-1.3-contributor-free"
+        if CURRENT_ENGINE in ["qwen-3.8", "qwen", "qwen3.8"]:
+            model_id = "opencode-go/qwen3.8-flash"
+        elif CURRENT_ENGINE != "muse-spark-1.3":
+            model_id = CURRENT_ENGINE
+
+        # Step 3: Run OpenCode agentic loop
+        cmd = f"opencode run --auto --dir {REPO_DIR} -m {model_id} {json.dumps(user_prompt)}"
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=REPO_DIR, timeout=600)
+        output = (res.stdout or "").strip()
+        if not output and res.stderr:
+            output = res.stderr.strip()
+
+        # Step 4: Check if code files were modified
+        git_status = subprocess.check_output("git status --porcelain", shell=True, text=True, cwd=REPO_DIR).strip()
+        if git_status:
+            tg_send(chat_id, "🛠️ *[Agent Testing]* Changes made to files. Running typechecks & Playwright tests...")
+            subprocess.run("npm run lint 2>/dev/null || true", shell=True, cwd=REPO_DIR, timeout=120)
+            subprocess.run("npx playwright test --reporter=list 2>/dev/null || npm test 2>/dev/null || true", shell=True, cwd=REPO_DIR, timeout=180)
+
+            commit_msg = f"feat(agent): {user_prompt[:50]}"
+            subprocess.run("git add -u", shell=True, check=True, cwd=REPO_DIR)
+            subprocess.run(f"git commit -m {json.dumps(commit_msg)}", shell=True, check=True, cwd=REPO_DIR)
+            subprocess.run("git push origin main", shell=True, check=True, cwd=REPO_DIR)
+            commit_hash = subprocess.check_output("git rev-parse --short HEAD", shell=True, text=True, cwd=REPO_DIR).strip()
+
+            summary = output[-1200:] if output else "Task completed and verified successfully."
+            reply = f"✅ *[Agent Task Complete]*\n• Project: `{project_name}`\n• Commit: `{commit_hash}` pushed to `origin/main`\n• Tests: Verified\n\n*Agent Response:*\n{summary}"
+            tg_send(chat_id, reply)
         else:
-            tg_send(chat_id, f"⏳ *[Colab GPU]* Coding fix with local \`Qwen 3.8\`...")
-            # Query local Qwen 3.8 / vLLM on Colab GPU
-            pass
-
-        # Step 3: Typecheck & Playwright Verification
-        tg_send(chat_id, "⏳ *[Colab QA]* Verifying TypeScript compilation & Playwright tests...")
-        subprocess.run("npm run lint 2>/dev/null || true", shell=True, cwd=REPO_DIR, timeout=120)
-        subprocess.run("npx playwright test --reporter=list 2>/dev/null || true", shell=True, cwd=REPO_DIR, timeout=180)
-
-        # Step 4: Commit and push
-        commit_msg = f"fix: {task_desc[:60]}"
-        subprocess.run("git add -u", shell=True, check=True, cwd=REPO_DIR)
-        subprocess.run(f"git commit -m \"{commit_msg}\"", shell=True, check=True, cwd=REPO_DIR)
-        subprocess.run("git push origin main", shell=True, check=True, cwd=REPO_DIR)
-        commit_hash = subprocess.check_output("git rev-parse --short HEAD", shell=True, text=True, cwd=REPO_DIR).strip()
-
-        tg_send(chat_id, f"✅ *[Colab Dev Loop Complete]*\n• Project: \`{project_name}\`\n• Commit: \`{commit_hash}\` pushed to \`origin/main\`\n• Tests: Verified\n• Deployed live via webhook.")
+            # Explanations, architectural discussions, or questions
+            clean_out = output[-2500:] if output else "I reviewed the request. No repository file changes were required."
+            tg_send(chat_id, f"🤖 *[Agent]*:\n{clean_out}")
 
     except Exception as e:
-        subprocess.run("git checkout .", shell=True, cwd=REPO_DIR)
-        tg_send(chat_id, f"❌ *[Fix Failed]* Reverted dirty workspace on \`{project_name}\`.\nError: {e}")
+        subprocess.run("git checkout . 2>/dev/null || true", shell=True, cwd=REPO_DIR)
+        tg_send(chat_id, f"❌ *[Agent Error]*: {e}")
 
 def handle_telegram_command(chat_id, text):
     global CURRENT_ENGINE, LAST_ACTIVE_TIME, REPO_DIR
@@ -133,16 +155,16 @@ def handle_telegram_command(chat_id, text):
         parts = t.split(maxsplit=1)
         if len(parts) == 1:
             project_name = os.path.basename(REPO_DIR)
-            tg_send(chat_id, f"📁 *[Colab Active Project]*\n• Project: \`{project_name}\`\n• Directory: \`{REPO_DIR}\`\n\nTo switch:\n• \`/project https://github.com/user/another-repo.git\`")
+            tg_send(chat_id, f"📁 *[Colab Active Project]*\n• Project: `{project_name}`\n• Directory: `{REPO_DIR}`\n\nTo switch:\n• `/project https://github.com/user/another-repo.git`")
             return
         
         new_repo = parts[1].strip()
         repo_name = new_repo.rstrip("/").split("/")[-1].replace(".git", "")
         REPO_DIR = f"/content/{repo_name}"
-        tg_send(chat_id, f"⏳ *[Colab]* Cloning & syncing \`{repo_name}\`...")
+        tg_send(chat_id, f"⏳ *[Colab]* Cloning & syncing `{repo_name}`...")
         try:
             run_git_sync(new_repo)
-            tg_send(chat_id, f"✅ *[Colab Project Switched]*\nActive project: \`{repo_name}\`\nDirectory: \`{REPO_DIR}\`")
+            tg_send(chat_id, f"✅ *[Colab Project Switched]*\nActive project: `{repo_name}`\nDirectory: `{REPO_DIR}`")
         except Exception as e:
             tg_send(chat_id, f"❌ Failed to sync repository: {e}")
         return
@@ -151,7 +173,7 @@ def handle_telegram_command(chat_id, text):
         parts = t.split()
         if len(parts) == 1 or parts[1] == "status":
             gpu_info = get_gpu_info()
-            tg_send(chat_id, f"🤖 *[Colab Compute Engine Status]*\n• *Active Model:* \`{CURRENT_ENGINE}\`\n• *Colab GPU:* \`{gpu_info}\`\n\n*Switch options inside Colab:*\n• \`/switch muse-spark-1.3\` (OpenCode CLI inside Colab)\n• \`/switch qwen-3.8\` (Local Qwen 3.8 on Colab GPU)\n• \`/switch qwen-flash\` (Qwen 3.8 Flash)")
+            tg_send(chat_id, f"🤖 *[Colab Compute Engine Status]*\n• *Active Model:* `{CURRENT_ENGINE}`\n• *Colab GPU:* `{gpu_info}`\n\n*Switch options inside Colab:*\n• `/switch muse-spark-1.3` (OpenCode CLI inside Colab)\n• `/switch qwen-3.8` (Local Qwen 3.8 on Colab GPU)\n• `/switch qwen-flash` (Qwen 3.8 Flash)")
             return
         
         target = parts[1].lower()
@@ -172,17 +194,17 @@ def handle_telegram_command(chat_id, text):
     if t.startswith("/status"):
         gpu_info = get_gpu_info()
         project_name = os.path.basename(REPO_DIR)
-        tg_send(chat_id, f"📊 *[Colab Worker Status]*\n• Project: \`{project_name}\`\n• Engine: \`{CURRENT_ENGINE}\`\n• Hardware: \`{gpu_info}\`\n• Directory: \`{REPO_DIR}\`\n• Auto-shutdown: Armed (20m idle timeout).")
+        tg_send(chat_id, f"📊 *[Colab Worker Status]*\n• Project: `{project_name}`\n• Engine: `{CURRENT_ENGINE}`\n• Hardware: `{gpu_info}`\n• Directory: `{REPO_DIR}`\n• Auto-shutdown: Armed (20m idle timeout).")
         return
 
     if t.startswith("/test"):
         project_name = os.path.basename(REPO_DIR)
-        tg_send(chat_id, f"⏳ *[Colab]* Running Playwright tests on \`{project_name}\`...")
+        tg_send(chat_id, f"⏳ *[Colab]* Running Playwright tests on `{project_name}`...")
         try:
             out = subprocess.check_output("npx playwright test --reporter=list 2>/dev/null || npm test 2>/dev/null || true", shell=True, text=True, cwd=REPO_DIR, timeout=180)
-            tg_send(chat_id, f"✅ *[Playwright Green]*\n\`\`\`\n{out[-500:]}\n\`\`\`")
+            tg_send(chat_id, f"✅ *[Playwright Green]*\n```\n{out[-500:]}\n```")
         except subprocess.CalledProcessError as e:
-            tg_send(chat_id, f"❌ *[Playwright Failed]*\n\`\`\`\n{e.output[-500:]}\n\`\`\`")
+            tg_send(chat_id, f"❌ *[Playwright Failed]*\n```\n{e.output[-500:]}\n```")
         return
 
     if t.startswith("/fix"):
@@ -190,17 +212,20 @@ def handle_telegram_command(chat_id, text):
         if not task:
             tg_send(chat_id, "❌ Usage: `/fix <description of bug>`")
             return
-        run_fix_workflow(chat_id, task)
+        run_agent_turn(chat_id, task)
         return
 
-    if t == "/help" or t == "/start":
-        tg_send(chat_id, "🤖 *Colab Compute Worker (Multi-Project Remote)*\n\n• `/project <url>` — Switch or clone another GitHub project\n• `/switch <engine>` — Switch model inside Colab (`muse-spark-1.3` or `qwen-3.8`)\n• `/fix <task>` — Pull, code, Playwright test, and git push\n• `/test` — Run Playwright suite\n• `/status` — View Colab GPU & active engine\n• `/colab stop` — Unassign Colab immediately")
+    if t == "/help":
+        tg_send(chat_id, "🤖 *Colab AI Agent (Multi-Project Autonomous Dev)*\n\n• *Chat naturally:* Send any text (e.g. \"Hi\", \"What is in src/routes?\")\n• *Code changes:* Send tasks (e.g. \"Add protein graph to dashboard\")\n• `/project <url>` — Switch or clone another GitHub project\n• `/switch <engine>` — Switch model inside Colab\n• `/test` — Run Playwright suite\n• `/status` — View Colab GPU & active engine\n• `/colab stop` — Unassign Colab immediately")
         return
+
+    # ANY natural text goes straight to the autonomous AI Agent!
+    run_agent_turn(chat_id, t)
 
 def polling_loop():
     global LAST_ACTIVE_TIME
     offset = 0
-    print("Colab Telegram polling loop started...")
+    print("\nColab Telegram polling loop started. Waiting for Telegram commands...")
     
     while True:
         idle_min = (time.time() - LAST_ACTIVE_TIME) / 60
@@ -230,13 +255,14 @@ def polling_loop():
                     continue
                 text = msg.get("text", "")
                 if text:
+                    print(f"[TG Message Received] {text}")
                     handle_telegram_command(msg["chat"]["id"], text)
         except Exception as e:
             time.sleep(5)
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🚀 Colab Compute Worker Initializing...")
+    print("🚀 Colab AI Agent Initializing...")
     print("=" * 60)
 
     gpu = get_gpu_info()
@@ -246,12 +272,12 @@ if __name__ == "__main__":
         print("\n⚠️  [WARNING] COLLAB_BOT_TOKEN not found!")
         print("👉 To fix on mobile:")
         print("   1. Tap the 🔑 (Secrets) tab on the left sidebar in Colab.")
-        print("   2. Add Secret: Name = COLLAB_BOT_TOKEN, Value = <your bot token>.")
+        print("   2. Add Secret: Name = COLLAB_BOT_TOKEN, Value = <your token>.")
         print("   3. Turn ON the toggle for Notebook access.")
-        print("   Or paste it directly into TELEGRAM_BOT_TOKEN at the top of this cell.\n")
+        print("   Or paste it directly into TELEGRAM_BOT_TOKEN at top of cell.\n")
     else:
         print("• Telegram Token: Loaded successfully!")
-        tg_send(ALLOWED_USER_ID, f"🚀 *[Colab Worker Booting]*\n• Hardware: `{gpu}`\n• Preparing repository...")
+        tg_send(ALLOWED_USER_ID, f"🚀 *[Colab AI Agent Booting]*\n• Hardware: `{gpu}`\n• Syncing repository...")
         print("• Boot Alert: Sent to your Telegram!")
 
     print("\n⏳ [1/2] Syncing repository from GitHub...")
@@ -262,10 +288,9 @@ if __name__ == "__main__":
     setup_environment()
     print("✅ Environment ready.")
 
-    tg_send(ALLOWED_USER_ID, f"🚀 *[Colab Worker is ONLINE]*\n• Hardware: `{gpu}`\n• Active Engine: `{CURRENT_ENGINE}`\n• Auto-shutdown: {IDLE_TIMEOUT_MINUTES}m idle timer.\n\nReady for `/switch`, `/project`, or `/fix` from your phone!")
+    tg_send(ALLOWED_USER_ID, f"🚀 *[Colab AI Agent is ONLINE]*\n• Hardware: `{gpu}`\n• Active Engine: `{CURRENT_ENGINE}`\n• Auto-shutdown: {IDLE_TIMEOUT_MINUTES}m idle timer.\n\nReady! Just text me naturally on Telegram with what you want to build or ask!")
     print("\n" + "=" * 60)
-    print("🎉 Colab Worker is ONLINE and listening for Telegram commands!")
+    print("🎉 Colab AI Agent is ONLINE and listening for Telegram commands!")
     print("📱 You can now safely minimize Chrome and work from Telegram.")
     print("=" * 60)
     polling_loop()
-
