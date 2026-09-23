@@ -207,7 +207,7 @@ describe('ensureMealBreakdown', () => {
 
 describe('newestSucceededFoodJob (Case-12 T2 blank-draft adoption)', () => {
   const bigMac = { name: 'Big Mac', weightGrams: 215 };
-  const t1 = { id: 'job_t1', status: 'succeeded', kind: 'food_log', result: { pendingFoodLog: { id: 'log_t1', itemsBreakdown: [bigMac] } } };
+  const t1 = { id: 'job_t1', status: 'succeeded', kind: 'food_log', result: { clean_result: { pendingFoodLog: { id: 'log_t1', itemsBreakdown: [bigMac] } } } };
   const stale = { id: 'job_old', status: 'succeeded', kind: 'food_log', result: { pendingFoodLog: { id: 'demo_food_log_3', itemsBreakdown: [] } } };
   const draft = { id: 'job_t2', status: 'running', kind: 'food_log', result: null };
 

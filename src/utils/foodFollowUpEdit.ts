@@ -172,10 +172,18 @@ export interface PriorSucceededJobLike {
   result?: { pendingFoodLog?: any; data?: any } | null;
 }
 
-/** Meal carried by a succeeded session job, if any. */
+/** Meal carried by a succeeded session job, if any. Mirrors the spec's
+`dishesOf` read paths: live T1 jobs carry the meal under
+`result.clean_result.pendingFoodLog`, not `result.pendingFoodLog`. */
 export function pendingMealOfJob(job: PriorSucceededJobLike | null | undefined): any | null {
   const r = job?.result;
-  return r?.pendingFoodLog || r?.data?.pendingFoodLog || null;
+  return (
+    r?.pendingFoodLog ||
+    r?.clean_result?.pendingFoodLog ||
+    (job as any)?.clean_result?.pendingFoodLog ||
+    r?.data?.pendingFoodLog ||
+    null
+  );
 }
 
 /**
