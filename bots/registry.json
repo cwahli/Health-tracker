@@ -2,13 +2,27 @@
   "master": "vm",
   "bots": [
     {
+      "id": "tg_provider_router",
+      "name": "TG Provider Router",
+      "runtime": "tg-provider-router",
+      "enabled": true,
+      "path": "tools/telegram-provider-router",
+      "notes": "Unified Telegram long-poller \u2192 OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
+      "telegram": {
+        "tokenEnv": "TELEGRAM_BOT_TOKEN",
+        "onePollerOnly": true
+      }
+    },
+    {
       "id": "vm",
       "name": "VM Bot",
       "runtime": "bot-host",
       "enabled": true,
       "telegram": {
         "tokenEnv": "VM_BOT_TOKEN",
-        "allowedUserIds": [6218257274]
+        "allowedUserIds": [
+          6218257274
+        ]
       },
       "agent": {
         "kind": "opencode",
@@ -90,7 +104,9 @@
       "enabled": true,
       "telegram": {
         "tokenEnv": "COLLAB_BOT_TOKEN",
-        "allowedUserIds": [6218257274]
+        "allowedUserIds": [
+          6218257274
+        ]
       },
       "agent": {
         "kind": "collab",
