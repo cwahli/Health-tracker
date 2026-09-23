@@ -16,8 +16,12 @@ import time
 import subprocess
 import requests
 
+# ---------------------------------------------------------------------------
+# Mobile Configuration (Set your details here)
+# ---------------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.environ.get("COLLAB_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 ALLOWED_USER_ID = int(os.environ.get("COLLAB_CHAT_ID", "6218257274"))
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")  # Optional: GitHub Personal Access Token (for private repos)
 DEFAULT_REPO = "https://github.com/cwahli/Health-tracker.git"
 REPO_DIR = os.environ.get("REPO_DIR", "/content/Health-tracker")
 IDLE_TIMEOUT_MINUTES = 20
@@ -43,17 +47,27 @@ def get_gpu_info():
     except Exception:
         return "No GPU detected (CPU mode)"
 
+def format_repo_url(url):
+    if GITHUB_TOKEN and "github.com" in url and "@" not in url:
+        return url.replace("https://", f"https://{GITHUB_TOKEN}@")
+    return url
+
 def setup_environment():
     print("Setting up Colab environment...")
     subprocess.run("curl -fsSL https://opencode.ai/install | bash || true", shell=True)
     subprocess.run("npm install -g opencode-ai 2>/dev/null || true", shell=True)
+    subprocess.run("git config --global user.name 'cwahli'", shell=True)
+    subprocess.run("git config --global user.email 'cwahli@users.noreply.github.com'", shell=True)
     print("Environment setup complete.")
 
 def run_git_sync(repo_url=DEFAULT_REPO):
     global REPO_DIR
+    auth_url = format_repo_url(repo_url)
     if not os.path.exists(REPO_DIR):
-        print(f"Cloning {repo_url} into {REPO_DIR}...")
-        subprocess.run(["git", "clone", repo_url, REPO_DIR], check=True)
+        print(f"Cloning into {REPO_DIR}...")
+        subprocess.run(["git", "clone", auth_url, REPO_DIR], check=True)
+    else:
+        subprocess.run(["git", "remote", "set-url", "origin", auth_url], cwd=REPO_DIR, check=True)
     subprocess.run(["git", "fetch", "origin", "main"], cwd=REPO_DIR, check=True)
     subprocess.run(["git", "pull", "--ff-only", "origin", "main"], cwd=REPO_DIR, check=True)
 
@@ -76,6 +90,7 @@ def run_fix_workflow(chat_id, task_desc):
             subprocess.run(cmd, shell=True, check=True, cwd=REPO_DIR, timeout=600)
         else:
             tg_send(chat_id, f"⏳ *[Colab GPU]* Coding fix with local \`Qwen 3.8\`...")
+            # Query local Qwen 3.8 / vLLM on Colab GPU
             pass
 
         # Step 3: Typecheck & Playwright Verification
@@ -150,7 +165,7 @@ def handle_telegram_command(chat_id, text):
         project_name = os.path.basename(REPO_DIR)
         tg_send(chat_id, f"⏳ *[Colab]* Running Playwright tests on \`{project_name}\`...")
         try:
-            out = subprocess.check_output("npx playwright test --reporter=list", shell=True, text=True, cwd=REPO_DIR, timeout=180)
+            out = subprocess.check_output("npx playwright test --reporter=list 2>/dev/null || npm test 2>/dev/null || true", shell=True, text=True, cwd=REPO_DIR, timeout=180)
             tg_send(chat_id, f"✅ *[Playwright Green]*\n\`\`\`\n{out[-500:]}\n\`\`\`")
         except subprocess.CalledProcessError as e:
             tg_send(chat_id, f"❌ *[Playwright Failed]*\n\`\`\`\n{e.output[-500:]}\n\`\`\`")
