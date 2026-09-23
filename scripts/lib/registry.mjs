@@ -138,15 +138,22 @@ export function getBot(registry, id) {
         `Bot "${id}" uses runtime "${foreign.runtime}", not runnable by bot-host (see ${foreign.path || 'its own host docs'})`,
       );
     }
+    // Explicit --id may select a device bot (phone-owned token, run on phone).
+    // Default selection stays bot-host-only so VPS systemd never picks mobile.
+    const bot = (registry.bots || []).find(
+      (b) =>
+        b.id === id &&
+        b.enabled !== false &&
+        ['bot-host', 'device'].includes(b.runtime || 'bot-host'),
+    );
+    if (bot) return bot;
+    throw new Error(`Bot "${id}" not found or not enabled`);
   }
   const bots = registry.bots.filter(
     (b) => b.enabled !== false && (b.runtime || 'bot-host') === 'bot-host',
   );
   if (!bots.length) throw new Error('No enabled bots in registry');
-  if (!id) return bots[0];
-  const bot = bots.find((b) => b.id === id);
-  if (!bot) throw new Error(`Bot "${id}" not found or not enabled`);
-  return bot;
+  return bots[0];
 }
 
 export function normalizeConfig(bot, { defaultWorkspace = process.cwd() } = {}) {
