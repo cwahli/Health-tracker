@@ -122,3 +122,14 @@ Verify single poller: `pgrep -af 'node src/index.js'` → one process; second st
 - Hermes / multi-bot `bot-host` registry (see repo root `bots/`, `scripts/bot-host.mjs`)
 
 When you change quota or self-heal behavior, update this README and add a short ticket/report under `tickets/` so the next agent does not rediscover the same outage.
+
+---
+
+## Cross-agent shared pack (this computer)
+
+Canonical location for **all** Grok agents (not only Health-tracker):
+
+`/home/box/agent-data/shared/telegram-capabilities/`
+
+See [SHARED_ROOT.md](./SHARED_ROOT.md). Skill: `telegram-shared-capabilities`.
+Planned shared adds: capability matrix table, inbound photo inbox.
