@@ -89,9 +89,12 @@
       "id": "mobile",
       "name": "Mobile Bot 8768",
       "runtime": "device",
-      "enabled": false,
+      "enabled": true,
       "telegram": {
-        "tokenEnv": "MOBILE_BOT_TOKEN"
+        "tokenEnv": "MOBILE_BOT_TOKEN",
+        "allowedUserIds": [
+          6218257274
+        ]
       },
       "agent": {
         "kind": "opencode",

@@ -1166,7 +1166,7 @@ async function main() {
   const registry = loadRegistry(registryPath);
   const bot = getBot(registry, args.id);
   const config = normalizeConfig(bot, { defaultWorkspace: REPO_ROOT });
-  if (config.runtime !== 'bot-host') {
+  if (config.runtime !== 'bot-host' && config.runtime !== 'device') {
     throw new Error(
       `Bot "${config.id}" has runtime "${config.runtime}" — it is not run by bot-host`,
     );
