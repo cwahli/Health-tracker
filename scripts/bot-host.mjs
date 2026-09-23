@@ -14,6 +14,8 @@ import {
   listAgents,
   listModelsVerbose,
   buildOpencodeEnv,
+  humanizeRunError,
+  isTimeoutError,
 } from './lib/agent-opencode.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import {
@@ -401,12 +403,15 @@ export class ProgressRenderer {
     if (errText && !partial) {
       this.status = 'failed';
       if (this.messageId != null) this._schedule();
+      const friendly = humanizeRunError(errText);
       let hint = '';
-      if (/timed out after/i.test(errText)) {
+      let lead = `Error: ${friendly}`;
+      if (isTimeoutError(errText)) {
+        lead = `⏱ ${friendly}`;
         hint =
-          '\nTip: the model did not answer in time. Retry with /thinking medium, a smaller ask, or /new for a fresh session.';
+          '\nTip: retry with /thinking medium, a smaller ask, /model for a faster model, or /new for a fresh session.';
       }
-      await this.deliver(`Error: ${errText}${errTail}${hint}`);
+      await this.deliver(`${lead}${errTail}${hint}`);
       return;
     }
     this.status = 'done';
@@ -424,7 +429,7 @@ export class ProgressRenderer {
     if (errText) {
       // Partial output arrived but the run still errored (e.g. a late timeout):
       // never swallow the error silently.
-      await this.deliver(`(Finished with an error after partial output: ${errText})`);
+      await this.deliver(`(Finished with an error after partial output: ${humanizeRunError(errText)})`);
     }
   }
 

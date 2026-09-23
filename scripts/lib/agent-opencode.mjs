@@ -273,3 +273,23 @@ export function runOpencode({
     });
   });
 }
+
+/**
+ * Raw run failures → one line a human can act on. The timeout above is
+ * `timed out after ${timeoutMs}ms` — never surface raw ms in a chat.
+ */
+export function humanizeRunError(raw) {
+  const s = String(raw || '');
+  const timeout = s.match(/timed out after (\d+)ms/);
+  if (timeout) {
+    const ms = Number(timeout[1]);
+    const mins = ms / 60000;
+    const dur = mins >= 2 ? `${Math.round(mins)}m` : `${Math.round(ms / 1000)}s`;
+    return `Timed out after ${dur} — the model didn't finish.`;
+  }
+  return s;
+}
+
+export function isTimeoutError(raw) {
+  return /timed out after \d+ms/.test(String(raw || ''));
+}
