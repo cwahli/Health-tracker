@@ -1061,13 +1061,26 @@ Capability ID
 - **Propagate:** `hermes_meal_audit` ✅ · master OpenCode via **shared skill self-serve** ✅ · VPS android ❌ · Collab ❌ · Grok TG ❌ unless explicitly tasked  
 - **Sync:** Hermes sync **includes** skill for meal_audit + orchestrator allowlist; `sync-hermes-skills.sh` still **excludes** orchestrator-dispatcher from QA/meal_audit profiles
 
-**Case H — New shared skill “X” (template)**  
-1. Add `scripts/skills/common/x/SKILL.md`  
-2. Set `registry.json` capability `x` with adapters `{ hermes: true, bot-host: true, mobile: true, grok-tg: true, collab: false }`  
-3. Land on `main`  
-4. Run distribute matrix for classes where adapter=true  
-5. Smoke one message per class  
-6. If one class needs different UX, add `scripts/skills/common/x/adapters/<class>.md` or a 20-line runtime hook — **do not** copy the whole skill
+**Case H — Adding a feature “X” (continuous intake ladder)**  
+Every new feature, regardless of kind, climbs the same ladder so it propagates
+to all agents accordingly (scope-respecting, never blast-everywhere). Scaffold
+it with `node scripts/add-capability.mjs --id x --test T1 --scope common`
+then work the steps — the checker fails until each is satisfied:
+1. **Build the core** where it belongs: agent-facing text → `scripts/skills/common/x/SKILL.md`;
+   shared code → `scripts/lib/x.mjs` (+ unit test); free-lane runtime behaviour → `tools/telegram-provider-router`
+   (never a private copy on one box — §14 rule).
+2. **Register** it in `bots/capabilities.json`: `test` (T1–T6), `scope`, all 5
+   classes (`true` / `"adapter"` / `false`), `expect` files, `skills`, and
+   `prove`. `adapter`/`false` without explanatory `notes` fails the checker.
+3. **Checker green**: `node scripts/check-capability-propagation.mjs`.
+   Orphan skills/libs fail here — nothing ships unmapped.
+4. **Land on `main`**, then run the distribute matrix for classes where the
+   value is `true`/`adapter` (`false` classes are skipped **by design**).
+5. **Smoke** one scripted check per affected class (the capability's `prove`
+   line says which); never restart a host that doesn't own the token.
+6. **Changelog line** below + `AGENT_HANDOFF` if user-visible.
+7. If one class needs different UX, add `scripts/skills/common/x/adapters/<class>.md`
+   or a ~20-line runtime hook — **do not** copy the whole skill.
 
 #### Failure modes this process prevents
 
@@ -1079,6 +1092,22 @@ Capability ID
 | Mobile lags VPS forever | Mobile row requires device `git pull` + sync in the same change checklist |
 | “Common” feature that only works on bot-host | Case must list Hermes + Grok adapters or downgrade scope to `runtime-adapter` |
 
+#### Failure learning loop (every bot failure teaches once)
+
+1. **Record structured** — opencode failures auto-append to `~/.hermes/bot-failures.jsonl`
+   via `scripts/lib/failure-log.mjs` (`{at, bot, lane, kind, hint}`, best-effort,
+   `BOT_FAILURE_LOG=0` disables). Kinds reuse the shared quota/billing vocabulary,
+   so both runtimes group the same outage together. Never free-text-only logs.
+2. **Review repeats** — `node scripts/review-failures.mjs [--since <ISO>]` groups by
+   signature. First occurrence is data; the **second** of the same signature without a
+   linked learning is flagged and must produce a sensor (unit test, checker rule,
+   guard) or a standing/capability update — the SHEPHERD ratchet (AGENTS.md L17)
+   applied to operations. Suggested cadence: weekly, or after any user-visible outage.
+3. **Tell the user plainly** — classified reason + provider retry hint when present
+   (`humanizeRunError`/`parseRetryAfter`); never raw milliseconds, never silence.
+4. **Don't learn from one-offs** — threshold default 2; a single transport blip
+   (`fetch failed`) is watched, not converted.
+
 #### Changelog hook (keep short)
 
 When a capability ships, append one line under this subsection or in `tools/telegram-provider-router/CHANGELOG.md`:
@@ -1088,3 +1117,4 @@ When a capability ships, append one line under this subsection or in `tools/tele
 - `2026-09-24  telegram-matrix  scope=common  classes=hermes,vps,mobile,grok-tg,collab(link-only)  sync=sync-hermes-skills.sh` (Case D core)
 - `2026-09-24  telegram-allowance  scope=runtime-adapter  classes=grok-tg(primary),vps/mobile(vocabulary only)  sync=sync-hermes-skills.sh` (Case E discoverability)
 - `2026-09-24  telegram-inbound-media  scope=runtime-adapter  classes=vps/mobile(auto),hermes,grok-tg(import/mirror)  sync=sync-hermes-skills.sh` (Case C discoverability)
+- `2026-09-24  capability-registry  scope=common  classes=all  sync=none(repo-static)` (BOT-11 automation: `bots/capabilities.json` + `scripts/check-capability-propagation.mjs`; 19 capabilities, orphan scan over common skills + shared TG libs)

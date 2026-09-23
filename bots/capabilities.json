@@ -1,0 +1,438 @@
+{
+  "version": 1,
+  "classes": [
+    "hermes",
+    "vps",
+    "mobile",
+    "grok_tg",
+    "collab"
+  ],
+  "tests": {
+    "T1": "Chat capability — what the agent can do inside chat answers",
+    "T2": "Service usage — services the agent can discover and call out to",
+    "T3": "UI capability — Telegram client-facing surfaces",
+    "T4": "Process management — pipeline, concurrency, quota recovery",
+    "T5": "Tool management — per-tool rules shared across agents",
+    "T6": "Session continuity — sessions, context, crash-safe resume"
+  },
+  "classValues": {
+    "true": "works on this class",
+    "adapter": "works via a per-class adapter (see notes)",
+    "false": "explicitly out of scope for this class"
+  },
+  "capabilities": [
+    {
+      "id": "chat-copy",
+      "test": "T1",
+      "scope": "common",
+      "status": "done",
+      "prove": "unit test scripts/lib/tg-copy-code.test.mjs",
+      "expect": [
+        "scripts/lib/tg-copy-code.mjs",
+        "scripts/lib/tg-copy-code.test.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": "adapter",
+        "vps": true,
+        "mobile": true,
+        "grok_tg": true,
+        "collab": true
+      },
+      "notes": "Native <pre> copy blocks + copy_text buttons via sendCopyable (bot-host, collab-bot). Hermes gateway renders fenced blocks; buttons are bot-host/collab only."
+    },
+    {
+      "id": "chat-table",
+      "test": "T1",
+      "scope": "common",
+      "status": "partial",
+      "prove": "live smoke: matrix PNG delivered",
+      "expect": [
+        "public/capability-matrix.html"
+      ],
+      "skills": [
+        "telegram-matrix"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": true,
+        "collab": "adapter"
+      },
+      "notes": "Matrix table standardised. Generic agent-emitted JSON→table pipeline still open: one shared convention, no second format per bot. Collab replies link-only."
+    },
+    {
+      "id": "chat-chunk",
+      "test": "T1",
+      "scope": "common",
+      "status": "done",
+      "prove": "unit test + live long answers unsplit mid-word",
+      "expect": [
+        "scripts/lib/tg-api.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": "adapter",
+        "vps": true,
+        "mobile": true,
+        "grok_tg": "adapter",
+        "collab": true
+      },
+      "notes": "chunkText long-message splitting. Hermes/router use their own senders with the same limits."
+    },
+    {
+      "id": "svc-orchestrator",
+      "test": "T2",
+      "scope": "common",
+      "status": "done",
+      "prove": "live smoke: bug dispatch lands in orchestrator queue",
+      "expect": [
+        "scripts/run-coding-dispatch.sh"
+      ],
+      "skills": [
+        "orchestrator-dispatcher"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": true,
+        "mobile": "adapter",
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "Bug → orchestrator so the agent doesn't fix it itself. status/stop/cancel/list-models per bug (V-29). Box lanes have their own dispatch."
+    },
+    {
+      "id": "svc-meal-audit",
+      "test": "T2",
+      "scope": "common",
+      "status": "done",
+      "prove": "live smoke: Meal-* audit bundle written",
+      "expect": [
+        "plan/MEAL_AUDIT_BOT_PLAN.md"
+      ],
+      "skills": [
+        "meal-audit-engine"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": true,
+        "mobile": "adapter",
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "Model A self-serves via shared skill (contact model A); never message @Meal_audit_bot from coding bots."
+    },
+    {
+      "id": "svc-qa",
+      "test": "T2",
+      "scope": "common",
+      "status": "done",
+      "prove": "live smoke: QA screenshot + ticket handoff",
+      "expect": [
+        "scripts/qa-runner.mjs",
+        "scripts/telegram-smoke-test.sh"
+      ],
+      "skills": [
+        "qa-telegram-journey",
+        "qa-meal-journey",
+        "telegram-testing"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": true,
+        "mobile": "adapter",
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "QA observes+reports, never diagnoses. telegram-testing is the shared pass/fail standard for all delivery claims."
+    },
+    {
+      "id": "ui-commands",
+      "test": "T3",
+      "scope": "common",
+      "status": "done",
+      "prove": "live smoke: / popup lists commands on each class",
+      "expect": [
+        "scripts/lib/commands.mjs",
+        "scripts/lib/bot-commands.mjs",
+        "scripts/lib/bot-status.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": "adapter",
+        "vps": true,
+        "mobile": true,
+        "grok_tg": true,
+        "collab": "adapter"
+      },
+      "notes": "Single BOT_COMMANDS source published via setMyCommands (bot-host + provider-router). Collab exposes /help text instead of a registered menu."
+    },
+    {
+      "id": "ui-typing",
+      "test": "T3",
+      "scope": "transport",
+      "status": "done",
+      "prove": "live smoke: dots never gap on a >30s run",
+      "expect": [
+        "docs/agents/telegram_work.md",
+        "scripts/telegram-send.sh"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": true,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": true,
+        "collab": "adapter"
+      },
+      "notes": "V-28: sendChatAction pulse every 4s + trailing ... + waiting-for lines. Collab pulses during long jobs only."
+    },
+    {
+      "id": "ui-throttle",
+      "test": "T3",
+      "scope": "runtime-adapter",
+      "status": "done",
+      "prove": "unit behaviour: bursts serialised, no flood 429",
+      "expect": [
+        "scripts/lib/tg-throttle.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": "adapter",
+        "vps": true,
+        "mobile": true,
+        "grok_tg": "adapter",
+        "collab": false
+      },
+      "notes": "Flood protection on bot-host send path. Hermes/router apply their own equivalents."
+    },
+    {
+      "id": "ui-photo-out",
+      "test": "T3",
+      "scope": "common",
+      "status": "done",
+      "prove": "live smoke: MEDIA: PNG arrives as photo",
+      "expect": [
+        "scripts/qa-runner.mjs"
+      ],
+      "skills": [
+        "telegram-photo",
+        "browser-screenshot"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": "adapter",
+        "collab": false
+      },
+      "notes": "Outbound MEDIA: convention (§14.7 Case B). Grok TG uploads if the host can, else links."
+    },
+    {
+      "id": "ui-media-in",
+      "test": "T3",
+      "scope": "runtime-adapter",
+      "status": "partial",
+      "prove": "live smoke: photo → absolute path in prompt, per class",
+      "expect": [
+        "scripts/lib/inbound-media.mjs"
+      ],
+      "skills": [
+        "telegram-inbound-media"
+      ],
+      "classes": {
+        "hermes": "adapter",
+        "vps": true,
+        "mobile": true,
+        "grok_tg": "adapter",
+        "collab": false
+      },
+      "notes": "One downloader (§14.7 Case C). Grok TG import/mirror into the router still pending; Hermes profile wiring per-profile."
+    },
+    {
+      "id": "proc-failover",
+      "test": "T4",
+      "scope": "runtime-adapter",
+      "status": "partial",
+      "prove": "live smoke: depleted lane → same prompt completes on next lane with switch line",
+      "expect": [
+        "tools/telegram-provider-router/src/index.js",
+        "scripts/lib/agent-opencode.mjs"
+      ],
+      "skills": [
+        "telegram-allowance"
+      ],
+      "classes": {
+        "hermes": false,
+        "vps": "adapter",
+        "mobile": "adapter",
+        "grok_tg": true,
+        "collab": false
+      },
+      "notes": "Grok-built buckets/deplete-tracking/failover vendored; bot-host has vocabulary + runWithModelFailover but live auto-failover wiring is still open. Collab quota is compute units, not Muse buckets."
+    },
+    {
+      "id": "proc-failfast",
+      "test": "T4",
+      "scope": "common",
+      "status": "done",
+      "prove": "unit test: provider stderr classified in ~10s, small=true ignored",
+      "expect": [
+        "scripts/lib/agent-opencode.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": false,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": "adapter",
+        "collab": "adapter"
+      },
+      "notes": "extractLogError/humanizeRunError + --print-logs fail-fast. small=true title-agent errors never fatal. Router mirrors the vocabulary."
+    },
+    {
+      "id": "proc-concurrency",
+      "test": "T4",
+      "scope": "common",
+      "status": "done",
+      "prove": "live smoke: second agent routes around claimed files, never refuses",
+      "expect": [
+        "scripts/lib/file-locks.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": false,
+        "vps": true,
+        "mobile": "adapter",
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "Per-file advisory claims replace the old global dispatch lock. Chat never gated; same-file overlap warns, never blocks."
+    },
+    {
+      "id": "proc-dispatch-ops",
+      "test": "T4",
+      "scope": "runtime-adapter",
+      "status": "done",
+      "prove": "live smoke: status/stop/list-models on a live bug id",
+      "expect": [
+        "scripts/run-coding-dispatch.sh"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": false,
+        "vps": true,
+        "mobile": false,
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "V-29 ops: per-bug records, action-aware heartbeats, 3m stagnation breaker. Single-runtime by design."
+    },
+    {
+      "id": "proc-supervision",
+      "test": "T4",
+      "scope": "runtime-adapter",
+      "status": "done",
+      "prove": "live smoke: killed service restarts; one poller per token enforced",
+      "expect": [
+        "scripts/lib/registry.mjs",
+        "systemd/bot-host@.service",
+        "systemd/collab-bot.service",
+        "systemd/tmux-work@.service"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": false,
+        "vps": true,
+        "mobile": "adapter",
+        "grok_tg": false,
+        "collab": "adapter"
+      },
+      "notes": "systemd restart + registry one-poller guard (BOT-5). Phone uses its own restart loop; Colab uses the GPU-only watchdog."
+    },
+    {
+      "id": "tool-models",
+      "test": "T5",
+      "scope": "common",
+      "status": "done",
+      "prove": "live smoke: /models + /freemodel list; mid-chat /model switch works",
+      "expect": [
+        "scripts/lib/freemodels.mjs",
+        "scripts/lib/agent-cline.mjs",
+        "scripts/lib/agent-opencode.mjs",
+        "golden/scorecard/current/FREE_MODEL_TOOL_PICKER.md",
+        "golden/scorecard/current/FREE_CODING_TOOLS_CATALOG.md",
+        "golden/scorecard/current/FREE_MODEL_BAKEOFF.md"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": false,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": "adapter",
+        "collab": "adapter"
+      },
+      "notes": "Learnings land in the picker/catalog once; all agents inherit. Cline Free deepseek is wallet-independent of OpenCode."
+    },
+    {
+      "id": "tool-thinking",
+      "test": "T5",
+      "scope": "common",
+      "status": "done",
+      "prove": "unit behaviour: thinking variants + compressed reasoning traces",
+      "expect": [
+        "scripts/lib/reasoning-compress.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": false,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "Thinking-level quirks (variants, CLINE_THINKING_LEVELS, compression) propagate here, not per-bot."
+    },
+    {
+      "id": "proc-learning",
+      "test": "T4",
+      "scope": "common",
+      "status": "partial",
+      "prove": "unit test failure-log roundtrip/grouping; review flags repeats at threshold",
+      "expect": [
+        "scripts/lib/failure-log.mjs",
+        "scripts/review-failures.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": false,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": "adapter",
+        "collab": false
+      },
+      "notes": "Learning loop: opencode failures auto-record (lane/kind/hint, best-effort, BOT_FAILURE_LOG=0 disables); review-failures.mjs groups by signature — 2nd occurrence without a linked sensor/learning must produce one (ratchet). Grok TG keeps its ticket reports; Hermes stack separate."
+    },
+    {
+      "id": "session-continuity",
+      "test": "T6",
+      "scope": "common",
+      "status": "partial",
+      "prove": "live smoke: /new /compact /abort behave per class; resume after restart",
+      "expect": [
+        "scripts/lib/commands.mjs",
+        "bots/registry.json"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": "adapter",
+        "vps": true,
+        "mobile": true,
+        "grok_tg": "adapter",
+        "collab": "adapter"
+      },
+      "notes": "NEW (added by this review): per-chat sessions + crash-safe resume. CB-8 cross-turn memory still open; that's the remaining partial."
+    }
+  ]
+}

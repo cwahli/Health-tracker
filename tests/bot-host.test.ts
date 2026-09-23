@@ -18,6 +18,12 @@ import {
   runWithModelFailover,
 } from '../scripts/lib/agent-opencode.mjs';
 import {
+  buildFailure,
+  recordFailure,
+  loadFailures,
+  groupFailures,
+} from '../scripts/lib/failure-log.mjs';
+import {
   clamp,
   chunkText,
   MAX_MESSAGE_CHARS,
@@ -1052,5 +1058,39 @@ describe('humanizeRunError / isTimeoutError', () => {
     expect(isTimeoutError('timed out after 900000ms')).toBe(true);
     expect(isTimeoutError('quota exceeded')).toBe(false);
     expect(isTimeoutError(null)).toBe(false);
+  });
+});
+
+describe('failure learning loop', () => {
+  it('buildFailure truncates long kinds/hints', () => {
+    const f = buildFailure({ lane: 'a/one', kind: 'x'.repeat(500), hint: 'y'.repeat(500) });
+    expect(f.kind).toHaveLength(160);
+    expect(f.hint).toHaveLength(160);
+    expect(f.at).toMatch(/^20\d{2}-/);
+  });
+
+  it('record/load roundtrips and skips corrupt lines', () => {
+    const p = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fail-')), 'f.jsonl');
+    expect(recordFailure({ lane: 'a/one', kind: 'Rate limit exceeded' }, p)).toBe(true);
+    fs.appendFileSync(p, 'not json\n');
+    expect(recordFailure({ lane: 'b/two', kind: 'Rate limit exceeded' }, p)).toBe(true);
+    const rows = loadFailures(p);
+    expect(rows).toHaveLength(2);
+    expect(groupFailures(rows)[0]).toMatchObject({ kind: 'Rate limit exceeded', count: 2 });
+  });
+
+  it('recording is disabled and safe', () => {
+    expect(recordFailure({ kind: 'x' }, null)).toBe(false);
+    expect(loadFailures('/nonexistent/path.jsonl')).toEqual([]);
+  });
+
+  it('groups by kind with per-lane counts', () => {
+    const groups = groupFailures([
+      buildFailure({ lane: 'a/one', kind: 'out of funds' }),
+      buildFailure({ lane: 'b/two', kind: 'out of funds' }),
+      buildFailure({ lane: 'a/one', kind: 'CB-8 flipped' }),
+    ]);
+    expect(groups[0]).toMatchObject({ kind: 'out of funds', count: 2 });
+    expect(groups[0].lanes).toEqual({ 'a/one': 1, 'b/two': 1 });
   });
 });

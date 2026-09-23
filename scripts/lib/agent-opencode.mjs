@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { recordFailure } from './failure-log.mjs';
 
 const HOME = os.homedir();
 
@@ -399,6 +400,11 @@ export function runOpencode({
       // Safety net: a fatal startup error can arrive before any stdout, leaving
       // lastError empty. Without this the caller only sees "exit 0 / no text".
       if (!lastError && !textParts.length && stderr) lastError = extractLogError(stderr);
+      // Learning loop: record classified failures best-effort so repeats can
+      // be grouped into learnings (recordFailure never throws; BOT_FAILURE_LOG=0 disables).
+      if (lastError && !textParts.length) {
+        recordFailure({ lane: model || null, kind: lastError, hint: parseRetryAfter(String(lastError)) });
+      }
       resolve({
         code,
         sessionID,
