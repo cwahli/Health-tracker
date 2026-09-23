@@ -22,6 +22,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const BASE_URL = (process.env.API_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const TS_WINDOW_MS = 3 * 60 * 1000;
@@ -284,6 +285,98 @@ function loadDebugFile(file) {
 }
 
 /**
+ * True when a turn image entry is a real downloadable photo URL.
+ * Rejects debug-contract placeholders produced by stripHeavyImages
+ * ("[image omitted 20KB]"), data-URLs, empty strings, and non-URL junk.
+ * Those placeholders used to be treated as relative paths
+ * (`<BASE>/<placeholder>`), fetched as HTML error pages (1.4KB),
+ * and saved as fake `_image_20omitted_200KB_.jpg` files.
+ */
+export function isDownloadablePhotoUrl(u) {
+  if (typeof u !== 'string') return false;
+  const s = u.trim();
+  if (!s) return false;
+  if (s.startsWith('data:')) return false;
+  if (s.startsWith('[') || s.includes('image omitted') || s.includes('omitted_')) return false;
+  if (/^https?:\/\//i.test(s)) return true;
+  if (s.startsWith('/photos/') || s.startsWith('/')) return true;
+  // R2 public hosts and site photo paths only; bare filenames from the
+  // photos/ dir are downloadable via the proxy. Anything else is junk.
+  if (/^photos\//i.test(s)) return true;
+  if (/\.r2\.dev\/photos\//i.test(s)) return true;
+  if (/\.(jpe?g|png|webp|gif|heic|heif)(\?.*)?$/i.test(s) && !/\s/.test(s)) return true;
+  return false;
+}
+
+/**
+ * True when a downloaded buffer looks like a real image.
+ * Rejects HTML error pages / placeholders (start with "<", "<!DOCTYPE",
+ * "<html") which the photo proxy returns for unknown keys.
+ */
+export function isImageBuffer(buf, contentType) {
+  if (!buf || buf.length === 0) return false;
+  if (typeof contentType === 'string' && /text\/html/i.test(contentType)) return false;
+  const head = buf.subarray(0, Math.min(buf.length, 200)).toString('latin1').trimStart();
+  if (head.startsWith('<')) return false;
+  if (/^<!doctype\s+html/i.test(head) || /^<html/i.test(head)) return false;
+  // Magic bytes: JPEG FF D8 FF, PNG 89 50 4E 47, GIF 47 49 46, WEBP RIFF....WEBP, HEIC ftyp, BMP 42 4D
+  const b = buf;
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true;
+  if (b.length >= 4 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true;
+  if (b.length >= 3 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return true;
+  if (b.length >= 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return true;
+  if (b.length >= 12 && b.toString('latin1', 4, 8) === 'ftyp') return true;
+  if (b.length >= 2 && b[0] === 0x42 && b[1] === 0x4d) return true;
+  // Unknown binary (e.g. signed R2 bytes without a known header): accept as long
+  // as it is not HTML/text. Content-type image/* already passed above.
+  if (typeof contentType === 'string' && /^image\//i.test(contentType)) return true;
+  // No content-type and no known magic: reject small text-like payloads only.
+  if (b.length < 256) return false;
+  return true;
+}
+
+/**
+ * Collect unique downloadable photo URLs from a turn list.
+ * Skips placeholders and data-URLs; preserves first-seen order.
+ */
+export function collectDownloadablePhotoUrls(turns) {
+  const seen = new Set();
+  const out = [];
+  let skippedPlaceholders = 0;
+  for (const t of turns || []) {
+    const urls = [
+      ...(Array.isArray(t.images) ? t.images : []),
+      ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
+    ];
+    for (const u of urls) {
+      if (typeof u !== 'string' || !u || u.startsWith('data:')) continue;
+      if (!isDownloadablePhotoUrl(u)) {
+        skippedPlaceholders++;
+        continue;
+      }
+      if (!seen.has(u)) {
+        seen.add(u);
+        out.push(u);
+      }
+    }
+  }
+  return { urls: out, skippedPlaceholders };
+}
+
+/**
+ * Per-turn remote URLs for the skeleton. A turn whose CanonicalRunTree
+ * imageCount is 0 is text-only: it must get zero photos even when other
+ * turns in the same job carry photos (no stale carry-over).
+ */
+export function turnRemoteUrls(t) {
+  if (t && typeof t.imageCount === 'number' && t.imageCount === 0) return [];
+  const remote = [
+    ...(Array.isArray(t.images) ? t.images : []),
+    ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
+  ];
+  return remote.filter(isDownloadablePhotoUrl);
+}
+/**
  * Rewrite R2 public URLs to the site's /photos/ proxy.
  * The raw *.r2.dev host often has an expired/mismatched cert; the Caddy-served
  * /photos/<key> endpoint serves the same bytes and trusts our CA chain.
@@ -316,10 +409,16 @@ async function downloadPhoto(url, photosDir) {
 
   const res = await fetch(abs);
   if (!res.ok) throw new Error(`photo HTTP ${res.status}: ${abs}`);
+  const contentType = res.headers ? res.headers.get('content-type') : null;
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length === 0) throw new Error(`photo empty: ${abs}`);
+  if (!isImageBuffer(buf, contentType)) {
+    throw new Error(
+      `photo not an image (content-type=${contentType || 'unknown'}, bytes=${buf.length}): ${abs} — placeholder/HTML error page, not a photo`
+    );
+  }
   fs.writeFileSync(dest, buf);
-  return { url, resolvedUrl: abs, localPath: dest, bytes: buf.length };
+  return { url, resolvedUrl: abs, localPath: dest, bytes: buf.length, contentType };
 }
 
 async function main() {
@@ -376,19 +475,9 @@ async function main() {
 
   fs.writeFileSync(path.join(outDir, 'run_tree.json'), JSON.stringify(runTree, null, 2), 'utf-8');
 
-  const seenUrls = new Set();
-  const photoUrls = [];
-  for (const t of turns) {
-    const urls = [
-      ...(Array.isArray(t.images) ? t.images : []),
-      ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
-    ];
-    for (const u of urls) {
-      if (typeof u === 'string' && u && !u.startsWith('data:') && !seenUrls.has(u)) {
-        seenUrls.add(u);
-        photoUrls.push(u);
-      }
-    }
+  const { urls: photoUrls, skippedPlaceholders } = collectDownloadablePhotoUrls(turns);
+  if (skippedPlaceholders > 0) {
+    console.error(`[Fetch] Skipped ${skippedPlaceholders} placeholder/non-photo image entrie(s) ("[image omitted ...]", data-URLs).`);
   }
 
   const downloaded = [];
@@ -408,10 +497,7 @@ async function main() {
   const localByRemote = new Map(downloaded.map((d) => [d.url, path.relative(outDir, d.localPath)]));
 
   const passes = turns.map((t, idx) => {
-    const remote = [
-      ...(Array.isArray(t.images) ? t.images : []),
-      ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
-    ];
+    const remote = turnRemoteUrls(t);
     const addedPhotos = [...new Set(remote.map((u) => localByRemote.get(u)).filter(Boolean))];
     const turnNo = typeof t.turn === 'number' ? t.turn : idx + 1;
     return {
@@ -450,6 +536,8 @@ async function main() {
     notes: [
       'dishes[] intentionally empty — audit agent must fill after reviewing photos (no placeholder ground truth).',
       'Turn structure comes from the server CanonicalRunTree (buildTurnTimeline); do not re-parse invented event types.',
+      'Photo truth: only downloadable http(s)//photos URLs are fetched; "[image omitted ...]" placeholders and data-URLs are skipped, HTML error pages are rejected (not saved as .jpg), and a turn with imageCount 0 stays photo-less (no carry-over from other turns).',
+      'Audit rule: if a pass has zero usable photos, audit that pass from user text/debug only and say so — never borrow a photo from another turn or invent a Big Mac out of frame.',
     ],
   };
 
@@ -463,7 +551,21 @@ async function main() {
   console.error(`  node scripts/generate-meal-result.mjs --input="${skeletonPath}" --bundle-name="Meal-${bundleSlug}-01"`);
 }
 
-main().catch((err) => {
-  console.error('[MealAuditFetch] Fatal:', err);
-  process.exit(1);
-});
+const isDirectCli = Boolean(
+  process.argv[1] &&
+  (import.meta.url === `file://${process.argv[1]}` ||
+    (() => {
+      try {
+        return fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+      } catch {
+        return false;
+      }
+    })())
+);
+
+if (isDirectCli) {
+  main().catch((err) => {
+    console.error('[MealAuditFetch] Fatal:', err);
+    process.exit(1);
+  });
+}
