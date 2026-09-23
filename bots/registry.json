@@ -1,31 +1,28 @@
 {
-  "master": "opencode",
+  "master": "vm",
   "bots": [
     {
-      "id": "opencode",
-      "name": "OpenCode Bot",
+      "id": "vm",
+      "name": "VM Bot",
+      "runtime": "bot-host",
       "enabled": true,
       "telegram": {
-        "tokenEnv": "OPENCODE_BOT_TOKEN",
-        "allowedUserIds": [
-          6218257274
-        ]
+        "tokenEnv": "VM_BOT_TOKEN",
+        "allowedUserIds": [6218257274]
       },
       "agent": {
         "kind": "opencode",
-        "model": "opencode-go/deepseek-v4.1-flash",
-        "variant": "high",
+        "model": "opencode/big-pickle",
+        "variant": "low",
         "defaultAgent": "build",
         "workspace": "/home/ubuntu/src/Health-tracker",
         "timeoutMs": 900000,
         "thinking": true,
         "allowExternalDirectory": true,
-        "playwrightOutputDir": "/tmp/opencode-bot-shots",
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm",
         "sharedSkills": [
           ".agents/skills",
-          "/home/ubuntu/opencode-bot/scripts/skills",
-          "~/.hermes/shared_skills/social-media/telegram-media-delivery",
-          "~/.hermes/shared_skills/autonomous-ai-agents/opencode"
+          "/home/ubuntu/bot-host/scripts/skills/common"
         ]
       },
       "progress": {
@@ -39,13 +36,27 @@
       }
     },
     {
-      "id": "android",
-      "name": "Android OpenCode Bot",
+      "id": "opencode",
+      "name": "OpenCode Bot",
+      "runtime": "bot-host",
       "enabled": true,
+      "telegram": {
+        "tokenEnv": "OPENCODE_BOT_TOKEN"
+      },
+      "agent": {
+        "playwrightOutputDir": "/tmp/bot-host-shots"
+      }
+    },
+    {
+      "id": "android",
+      "name": "Mobile Bot",
+      "runtime": "device",
+      "enabled": false,
       "telegram": {
         "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
       },
       "agent": {
+        "kind": "opencode",
         "workspace": "/root/Health-tracker",
         "opencodeBin": "/root/.opencode/bin/opencode",
         "playwrightOutputDir": null,
@@ -60,14 +71,25 @@
       }
     },
     {
+      "id": "vm2",
+      "name": "VM2 Bot",
+      "runtime": "bot-host",
+      "enabled": false,
+      "telegram": {
+        "tokenEnv": "VM2_BOT_TOKEN"
+      },
+      "agent": {
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm2"
+      }
+    },
+    {
       "id": "collab",
       "name": "Collab Bot",
+      "runtime": "collab",
       "enabled": true,
       "telegram": {
         "tokenEnv": "COLLAB_BOT_TOKEN",
-        "allowedUserIds": [
-          6218257274
-        ]
+        "allowedUserIds": [6218257274]
       },
       "agent": {
         "kind": "collab",
@@ -75,6 +97,102 @@
         "opencodeBin": "/root/.opencode/bin/opencode",
         "model": "opencode/muse-spark-1.3-contributor-free",
         "variant": null
+      }
+    },
+    {
+      "id": "hermes_default",
+      "name": "Health Tracker Bot",
+      "runtime": "hermes",
+      "enabled": false,
+      "telegram": {
+        "tokenEnv": "HERMES_DEFAULT_TOKEN"
+      },
+      "hermes": {
+        "profile": "default",
+        "username": "@Health_tracker_159bot"
+      },
+      "agent": {
+        "kind": "hermes"
+      }
+    },
+    {
+      "id": "hermes_qa_meal",
+      "name": "Meal Journey QA Bot",
+      "runtime": "hermes",
+      "enabled": false,
+      "telegram": {
+        "tokenEnv": "HERMES_QA_MEAL_TOKEN"
+      },
+      "hermes": {
+        "profile": "qa_meal",
+        "username": "@Meal_journey_QA_bot"
+      },
+      "agent": {
+        "kind": "hermes"
+      }
+    },
+    {
+      "id": "hermes_orchestrator",
+      "name": "Orchestrator Health Tracker Bot",
+      "runtime": "hermes",
+      "enabled": false,
+      "telegram": {
+        "tokenEnv": "HERMES_ORCHESTRATOR_TOKEN"
+      },
+      "hermes": {
+        "profile": "orchestrator",
+        "username": "@Orchestrator_health_tracker_bot"
+      },
+      "agent": {
+        "kind": "hermes"
+      }
+    },
+    {
+      "id": "hermes_meal_audit",
+      "name": "Meal Audit Bot",
+      "runtime": "hermes",
+      "enabled": false,
+      "telegram": {
+        "tokenEnv": "HERMES_MEAL_AUDIT_TOKEN"
+      },
+      "hermes": {
+        "profile": "meal_audit",
+        "username": "@Meal_audit_bot"
+      },
+      "agent": {
+        "kind": "hermes"
+      }
+    },
+    {
+      "id": "hermes_qa_biomarker",
+      "name": "Biomarker QA Bot",
+      "runtime": "hermes",
+      "enabled": false,
+      "telegram": {
+        "tokenEnv": "HERMES_QA_BIOMARKER_TOKEN"
+      },
+      "hermes": {
+        "profile": "qa_biomarker",
+        "username": null
+      },
+      "agent": {
+        "kind": "hermes"
+      }
+    },
+    {
+      "id": "hermes_qa_onboarding",
+      "name": "Onboarding QA Bot",
+      "runtime": "hermes",
+      "enabled": false,
+      "telegram": {
+        "tokenEnv": "HERMES_QA_ONBOARDING_TOKEN"
+      },
+      "hermes": {
+        "profile": "qa_onboarding",
+        "username": null
+      },
+      "agent": {
+        "kind": "hermes"
       }
     }
   ]

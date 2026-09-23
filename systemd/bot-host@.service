@@ -1,0 +1,22 @@
+[Unit]
+Description=Bot Host Telegram Bot (%i)
+Documentation=file:///home/ubuntu/bot-host/bots/registry.json
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bot-host
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/ubuntu/.config/bot-host/common.env
+EnvironmentFile=-/home/ubuntu/.config/bot-host/%i.env
+ExecStart=/usr/bin/node /home/ubuntu/bot-host/scripts/bot-host.mjs --id=%i
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

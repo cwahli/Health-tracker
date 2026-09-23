@@ -40,8 +40,8 @@ version: 1.6.0
 ```bash
 if [ -f /home/ubuntu/src/Health-tracker/scripts/run-coding-dispatch.sh ]; then
   REPO_DIR=/home/ubuntu/src/Health-tracker
-elif [ -f /home/ubuntu/opencode-bot/scripts/run-coding-dispatch.sh ]; then
-  REPO_DIR=/home/ubuntu/opencode-bot
+elif [ -f /home/ubuntu/bot-host/scripts/run-coding-dispatch.sh ]; then
+  REPO_DIR=/home/ubuntu/bot-host
 else
   REPO_DIR="$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null)"
 fi
