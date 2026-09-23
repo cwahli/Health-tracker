@@ -144,15 +144,16 @@ def handle_telegram_command(chat_id, text):
         target = parts[1].lower()
         if target in ["muse-spark-1.3", "opencode", "contributor"]:
             CURRENT_ENGINE = "muse-spark-1.3"
-            tg_send(chat_id, f"✅ *[Engine Switched inside Colab]*\nActive engine: *OpenCode CLI* (\`muse-spark-1.3-contributor-free\`).")
-        elif target in ["qwen-3.8", "qwen", "qwen3.8"]:
-            CURRENT_ENGINE = "qwen-3.8"
-            tg_send(chat_id, f"✅ *[Engine Switched inside Colab]*\nActive engine: *Local Qwen 3.8 on Colab GPU*.")
-        elif target in ["qwen-flash", "flash"]:
-            CURRENT_ENGINE = "qwen-flash"
-            tg_send(chat_id, f"✅ *[Engine Switched inside Colab]*\nActive engine: *Local Qwen 3.8 Flash on Colab GPU*.")
+            tg_send(chat_id, f"✅ *[Engine Switched inside Colab]*\nActive engine: *OpenCode CLI* (`muse-spark-1.3-contributor-free`).\n• Runtime: Compatible with CPU & GPU.")
+        elif target in ["qwen-3.8", "qwen", "qwen3.8", "qwen-flash", "flash"]:
+            gpu = get_gpu_info()
+            if "No GPU" in gpu:
+                tg_send(chat_id, f"⚠️ *[CPU Mode Active]*\nYou are currently running Colab on **Standard CPU** (0 compute units burned!).\n• OpenCode (`muse-spark-1.3`) works 100% on CPU.\n• Local Qwen 3.8 inference requires a GPU runtime. When you are ready to test Qwen, switch runtime to L4/A100 GPU in Colab.")
+            else:
+                CURRENT_ENGINE = target
+                tg_send(chat_id, f"✅ *[Engine Switched inside Colab]*\nActive engine: *Local {target} on Colab GPU*.")
         else:
-            tg_send(chat_id, f"❌ Unknown engine \`{target}\`. Available: \`muse-spark-1.3\`, \`qwen-3.8\`, \`qwen-flash\`.")
+            tg_send(chat_id, f"❌ Unknown engine `{target}`. Available: `muse-spark-1.3`, `qwen-3.8`, `qwen-flash`.")
         return
 
     if t.startswith("/status"):
