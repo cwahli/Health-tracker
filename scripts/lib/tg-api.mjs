@@ -81,14 +81,31 @@ export class TelegramApi {
     // Long-poll needs slack past Telegram timeout; everything else fails fast.
     // Without AbortSignal, a dead proot/Termux socket hangs forever and the bot
     // stops consuming updates while Telegram has already dropped the connection.
+    // Roaming/carrier networks intermittently blackhole api.telegram.org IPv6
+    // (undici tries AAAA first and fails without fallback), so non-poll calls
+    // retry on network-level throws. TelegramErrors are never retried: a 4xx
+    // means the request was processed, and resending could double-deliver.
     const pollSec = method === 'getUpdates' ? Number(payload.timeout) || 30 : 0;
     const abortMs = (pollSec + 10) * 1000;
-    const res = await this.fetch(`${this.baseUrl}/bot${this.token}/${method}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(abortMs),
-    });
+    const attempts = method === 'getUpdates' ? 1 : 3;
+    let res = null;
+    let lastErr = null;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        res = await this.fetch(`${this.baseUrl}/bot${this.token}/${method}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(abortMs),
+        });
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (i < attempts - 1) await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+      }
+    }
+    if (!res) throw lastErr;
     let body = {};
     try {
       body = await res.json();
