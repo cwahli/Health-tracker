@@ -19,11 +19,17 @@ import {
   getSessionSummary,
   BACKENDS,
 } from './lib/collab-session.mjs';
+import {
+  buildStatusSnapshot,
+  formatStatusPlain,
+  compactUnsupported,
+} from './lib/bot-status.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 const DISPATCH_LOCK = path.join(HOME, '.hermes', 'dispatch_lock');
+const BOOTED_AT = Date.now();
 
 function getTargetCwd() {
   const p = getActiveProject();
@@ -118,6 +124,7 @@ Mobile-first AI dev assistant and compute router for your projects.
 • \`/fix <task>\` — Pull latest $\\to$ code fix $\\to$ Playwright test $\\to$ git push
 • \`/test [filter]\` — Run Playwright E2E tests headlessly
 • \`/status\` — View git branch, working directory & lock status
+• `/compact` - Session compaction (opencode bots only; not on collab)
 • \`/cancel\` — Revert working tree & release dispatch lock`;
     await api.sendMessage(chatId, helpMsg, { parse_mode: 'Markdown' });
     return;
@@ -166,8 +173,30 @@ Mobile-first AI dev assistant and compute router for your projects.
     const holder = lockHolder();
     const lockMsg = holder ? `⚠️ *Dispatch Lock:* Active (${holder.bug}, pid ${holder.pid})` : `🟢 *Dispatch Lock:* Free`;
 
-    const reply = `${sessionMsg}\n\n📂 *[Workspace Status]*\n${gitInfo}\n\n${lockMsg}`;
+    const sharedBlock = formatStatusPlain(
+      buildStatusSnapshot({
+        bot: { id: config.id, name: config.name },
+        platform: 'collab',
+        capabilities: { compact: false, costTracking: false, backends: true },
+        effective: {},
+        session: null,
+        handoff: false,
+        usage: null,
+        totals: null,
+        runtime: { bootedAt: BOOTED_AT, taskState: 'idle', lock: lockHolder() },
+        health: null,
+      }),
+    );
+    const reply = `${sessionMsg}\n\n📂 *[Workspace Status]*\n${gitInfo}\n\n${lockMsg}\n\n${sharedBlock}`;
     await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
+    return;
+  }
+
+  if (name === 'compact') {
+    await api.sendMessage(
+      chatId,
+      compactUnsupported('collab', 'sessions here are GPU/backend tunnels, not LLM context'),
+    );
     return;
   }
 
