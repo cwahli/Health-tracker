@@ -17,6 +17,10 @@ import {
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
+  BOT_COMMANDS,
+  toTelegramCommands,
+  assertValidCommands,
+  isFreeModel,
   parseAgentList,
   parseModelsVerbose,
   modelKeyboard,
@@ -564,6 +568,21 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'free': {
+      const models = await getModels(config, caches);
+      const free = models.filter(isFreeModel);
+      if (!models.length) {
+        await api.sendMessage(chatId, 'Could not read the model list from opencode.');
+        return;
+      }
+      if (!free.length) {
+        await api.sendMessage(chatId, 'No free models found.');
+        return;
+      }
+      await sendChunked(api, chatId, formatModelList(sortModelsFreeFirst(free).slice(0, free.length)));
+      return;
+    }
+
     case 'models': {
       const models = await getModels(config, caches);
       await sendChunked(api, chatId, formatModelList(models));
@@ -973,6 +992,13 @@ async function main() {
     }
   }
   console.log(`[${config.id}] connected as @${me.username}`);
+  try {
+    assertValidCommands(BOT_COMMANDS);
+    await api.call('setMyCommands', { commands: toTelegramCommands() });
+    console.log(`[${config.id}] published ${BOT_COMMANDS.length} bot commands`);
+  } catch (err) {
+    console.error(`[${config.id}] setMyCommands failed (non-fatal): ${err.message}`);
+  }
   await runLoop({ api, config });
 }
 

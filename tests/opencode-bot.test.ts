@@ -23,6 +23,10 @@ import {
 import { loadRegistry, getBot, resolveToken, normalizeConfig } from '../scripts/lib/registry.mjs';
 import {
   parseCommand,
+  BOT_COMMANDS,
+  COMMAND_NAMES,
+  toTelegramCommands,
+  assertValidCommands,
   parseAgentList,
   parseModelsVerbose,
   modelKeyboard,
@@ -451,6 +455,25 @@ describe('pickers', () => {
     expect(formatAgo(0)).toBe('never');
     expect(COMPACT_SUMMARY_PROMPT.length).toBeGreaterThan(20);
     expect(compactUnsupported('collab', 'gpu tunnels')).toContain('/compact');
+  });
+
+  it('keeps one command source of truth including /free + /compact', async () => {
+    expect(assertValidCommands()).toBe(true);
+    // every advertised command has a handler case in opencode-bot.mjs
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/opencode-bot.mjs', import.meta.url), 'utf8',
+    );
+    for (const name of COMMAND_NAMES) {
+      expect(src).toContain(`case '${name}'`);
+    }
+    expect(COMMAND_NAMES).toContain('free');
+    expect(COMMAND_NAMES).toContain('compact');
+    expect(helpText({ name: 'b', agent: {} }, {})).toContain('/free');
+    expect(toTelegramCommands().find((c) => c.command === 'free')?.description.length).toBeGreaterThan(0);
+    expect(BOT_COMMANDS.length).toBe(new Set(COMMAND_NAMES).size);
+    const shim = await import('../scripts/lib/bot-commands.mjs');
+    expect(shim.BOT_COMMANDS).toEqual(BOT_COMMANDS);
+    expect(shim.COMMAND_NAMES).toEqual(COMMAND_NAMES);
   });
 
   it('builds agent and variant keyboards and decodes callbacks', () => {

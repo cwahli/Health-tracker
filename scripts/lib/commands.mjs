@@ -1,4 +1,59 @@
-export const COMMAND_NAMES = ['start', 'help', 'status', 'new', 'model', 'models', 'agent', 'thinking', 'abort'];
+/**
+ * Single source of truth for opencode-bot Telegram commands.
+ *
+ * Telegram shows the "/" autocomplete popup from BotFather / setMyCommands,
+ * NOT from what the bot code handles. Publish this list via `setMyCommands`
+ * on startup so typing `/fr` suggests `/free`. Import this file — never
+ * hardcode a command list elsewhere.
+ */
+
+/**
+ * @typedef {{ command: string, description: string }} BotCommand
+ * command: lowercase, a-z0-9_, 1-32 chars (Telegram Bot API rule).
+ * description: 1-256 chars, shown in the autocomplete popup.
+ */
+
+/** @type {BotCommand[]} */
+export const BOT_COMMANDS = [
+  { command: 'start', description: 'Start the bot and show help' },
+  { command: 'help', description: 'Show available commands' },
+  { command: 'status', description: 'Show session, model, agent, usage' },
+  { command: 'new', description: 'Start a fresh session' },
+  { command: 'compact', description: 'Summarize session and start fresh' },
+  { command: 'model', description: 'Pick a model (free models first)' },
+  { command: 'free', description: 'List free models only' },
+  { command: 'models', description: 'List all available models' },
+  { command: 'agent', description: 'Pick an agent' },
+  { command: 'build', description: 'Switch to the build agent' },
+  { command: 'plan', description: 'Switch to the plan agent' },
+  { command: 'thinking', description: 'Pick the thinking level (variant)' },
+  { command: 'abort', description: 'Cancel the running request' },
+];
+
+/** Names handled by opencode-bot.mjs handleCommand (kept in sync). */
+export const COMMAND_NAMES = BOT_COMMANDS.map((c) => c.command);
+
+/** Payload for Telegram `setMyCommands` (strips nothing — already valid). */
+export function toTelegramCommands() {
+  return BOT_COMMANDS.map(({ command, description }) => ({ command, description }));
+}
+
+/** Validate against Telegram Bot API limits; throws on violation. */
+export function assertValidCommands(commands = BOT_COMMANDS) {
+  const seen = new Set();
+  for (const entry of commands) {
+    if (!/^[a-z0-9_]{1,32}$/.test(entry.command)) {
+      throw new Error(`Invalid bot command "${entry.command}" (must match /^[a-z0-9_]{1,32}$/)`);
+    }
+    if (seen.has(entry.command)) throw new Error(`Duplicate bot command "${entry.command}"`);
+    seen.add(entry.command);
+    const desc = String(entry.description ?? '');
+    if (!desc || desc.length > 256) {
+      throw new Error(`Invalid description for /${entry.command} (1-256 chars required)`);
+    }
+  }
+  return true;
+}
 
 export function parseCommand(text) {
   const raw = String(text ?? '').trim();
@@ -118,6 +173,7 @@ export function helpText(config, { model, agent, variant } = {}) {
     '',
     'Commands:',
     '/model [name]     pick a model (or set it directly)',
+    '/free             list free models only',
     '/models           list available models',
     '/agent [name]     pick an agent',
     '/build            switch to the build agent',
