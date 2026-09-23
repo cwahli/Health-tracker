@@ -55,13 +55,16 @@ Every audit is packaged as a standardized benchmark bundle:
 *Triggered when reviewing an inaccurate meal log from the live site (via timestamp, meal name, or job ID).*
 1. **Fetch Flow & Photos** (real turns from the server CanonicalRunTree; photos downloaded to disk; never invents job IDs):
    ```bash
-   node scripts/meal-audit-fetch.mjs \
+   # ALWAYS use the absolute path (cwd often differs; relative scripts/ may be a stale checkout):
+   node /home/ubuntu/deploy/Health-tracker/scripts/meal-audit-fetch.mjs \
      --name="<Meal Name>" \
      --timestamp="<Timestamp>" \
      --job-id="<JobId>" \
+     --source=both \
      --output-dir="artifacts/meal_audits/flow_review"
    ```
-   Exit `2` + candidate JSON → re-run with `--job-id`. Exit `1` → debug missing/expired or photo download failed.
+   Exit `2` + candidate JSON → if `foodLogs` is non-empty, the meal exists in Food History (Saved/Tracked/manual) and often has **no analysis job** — audit from the food-log row (`foodLogId`, photos, `sourceMealId`) instead of hunting `job_` IDs. Re-run with `--job-id` only when a job is listed. Exit `1` → debug missing/expired or photo download failed.
+   Name matching is punctuation-insensitive token-AND over **both** `agent_jobs` and `food_logs`. Timestamps like `23 sep 14:56` fall back to the UTC calendar day (UI display TZ may differ from `updated_at`). Never conclude "title does not exist" from jobs-only greps — Food History (`/api/audit/food-search`) is the source of truth for Saved meals.
 2. **Turn-by-Turn Reconstruction** (debug user prompts are authoritative corrections):
    - **Turn 1 (Initial Intake)**: Audit initial dishes, bounding boxes, and 32-nutrient ledger.
    - **Turn 2 (Photo Clarification / Add-on)**: Audit user instruction + new photo, adjust or replace dishes, scale weights, recalculate Turn 2 32-nutrient ledger.
