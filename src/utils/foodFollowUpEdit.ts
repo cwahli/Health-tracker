@@ -164,3 +164,39 @@ export async function ensureMealBreakdown(
   }
   return meal;
 }
+
+export interface PriorSucceededJobLike {
+  id?: string;
+  status?: string;
+  kind?: string;
+  result?: { pendingFoodLog?: any; data?: any } | null;
+}
+
+/** Meal carried by a succeeded session job, if any. */
+export function pendingMealOfJob(job: PriorSucceededJobLike | null | undefined): any | null {
+  const r = job?.result;
+  return r?.pendingFoodLog || r?.data?.pendingFoodLog || null;
+}
+
+/**
+ * Newest succeeded food job in this session (excluding the current draft).
+ *
+ * Blank-draft follow-ups must adopt THIS meal first: the `foodLogs` list can
+ * hold stale demo seeds that outrank the just-saved meal, which made live T2
+ * attach a stale log with an empty breakdown (server returned zero dishes).
+ * `getAllJobs` is createdAt-ascending, so the last match is the newest.
+ */
+export function newestSucceededFoodJob<T extends PriorSucceededJobLike>(
+  jobs: readonly T[] | null | undefined,
+  currentJobId?: string | null,
+): T | null {
+  let best: T | null = null;
+  for (const j of jobs || []) {
+    if (!j || (currentJobId != null && j.id === currentJobId)) continue;
+    if (j.status !== 'succeeded') continue;
+    if (j.kind != null && j.kind !== 'food_log' && j.kind !== 'food') continue;
+    if (!pendingMealOfJob(j)) continue;
+    best = j;
+  }
+  return best;
+}
