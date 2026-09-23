@@ -10,6 +10,8 @@ import {
   buildOpencodeArgs,
   buildOpencodeEnv,
   expandSkillPath,
+  humanizeRunError,
+  isTimeoutError,
 } from '../scripts/lib/agent-opencode.mjs';
 import {
   clamp,
@@ -768,12 +770,29 @@ describe('ProgressRenderer finish (bot restart/timeout truthfulness)', () => {
     expect(sent.join('\n')).toContain('Interrupted before the model produced output');
   });
 
-  it('provider timeout keeps Error text and adds a retry hint', async () => {
+  it('provider timeout is humanized (no raw ms) and keeps a retry hint', async () => {
     const { renderer, sent } = makeRenderer();
     await renderer.finish({ code: null, finalText: '', lastError: 'timed out after 90000ms', stderr: '' });
     const all = sent.join('\n');
-    expect(all).toContain('Error: timed out after 90000ms');
+    expect(all).toContain('⏱ Timed out after 90s — the model didn\'t finish.');
+    expect(all).not.toContain('90000ms');
     expect(all).toContain('/thinking medium');
+    expect(all).toContain('/new');
+  });
+
+  it('provider timeout at the 900s wall reads as 15m, never raw ms', async () => {
+    const { renderer, sent } = makeRenderer();
+    await renderer.finish({ code: null, finalText: '', lastError: 'timed out after 900000ms', stderr: '' });
+    const all = sent.join('\n');
+    expect(all).toContain('Timed out after 15m');
+    expect(all).not.toContain('900000ms');
+    expect(all).toContain('/model');
+  });
+
+  it('non-timeout errors keep the Error: prefix unchanged', async () => {
+    const { renderer, sent } = makeRenderer();
+    await renderer.finish({ code: 1, finalText: '', lastError: 'spawn opencode ENOENT', stderr: '' });
+    expect(sent.join('\n')).toContain('Error: spawn opencode ENOENT');
   });
 
   it('partial output is delivered and the error is not swallowed', async () => {
@@ -782,11 +801,36 @@ describe('ProgressRenderer finish (bot restart/timeout truthfulness)', () => {
     const all = sent.join('\n');
     expect(all).toContain('partial answer');
     expect(all).toContain('Finished with an error after partial output');
+    expect(all).toContain('90s');
+    expect(all).not.toContain('90000ms');
   });
 
   it('clean empty run keeps the legacy Done message', async () => {
     const { renderer, sent } = makeRenderer();
     await renderer.finish({ code: 0, finalText: '', lastError: '', stderr: '' });
     expect(sent.join('\n')).toContain('no text output');
+  });
+});
+
+describe('humanizeRunError / isTimeoutError', () => {
+  it('maps the 900000ms wall to minutes without raw ms', () => {
+    const out = humanizeRunError('timed out after 900000ms');
+    expect(out).toMatch(/15m/);
+    expect(out).not.toMatch(/900000ms/);
+  });
+
+  it('maps sub-minute timeouts to seconds', () => {
+    expect(humanizeRunError('timed out after 30000ms')).toMatch(/30s/);
+  });
+
+  it('passes non-timeout errors through unchanged', () => {
+    expect(humanizeRunError('quota exceeded')).toBe('quota exceeded');
+    expect(humanizeRunError('')).toBe('');
+  });
+
+  it('isTimeoutError detects only timeout strings', () => {
+    expect(isTimeoutError('timed out after 900000ms')).toBe(true);
+    expect(isTimeoutError('quota exceeded')).toBe(false);
+    expect(isTimeoutError(null)).toBe(false);
   });
 });

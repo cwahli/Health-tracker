@@ -31,9 +31,9 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ---
 
-## Current work — D-2 Supabase code drain (locked packet, `auto_go: true`)
+## Current work — D-2 Supabase code drain DONE 2026-09-24 (`specs/done/d-2-supabase-code-drain.md`)
 
-**Active executable ID: D-2** — [`specs/active/D-2.md`](../specs/active/D-2.md). It is **locked and pre-approved**; do **not** wait for a human "go" and do **not** call it "needs a packet." Work one file per commit and **`git push` immediately** — the VPS auto-deploy runs `git reset --hard origin/main`, so any uncommitted drain is lost. The packet carries a **progress ledger**; resume from the first ⬜ row (or ⛔ if schema-blocked). `server_routes_sync.ts` is DONE (`395fa61`); catalog/fdc/curator drained + D1 schema packet landed (`ef16d1b`); gates green 2026-09-23 (tsc 0, 60 tests, guard PASS). Residual: `golden_cases` has no D1 table (skipped by design).
+**D-2 is CLOSED.** All ledger rows DONE; verified clean-tree on 2026-09-24: `tsc` 0, 60/60 packet vitest, `journey-guard D-2` PASS (retired from `specs/active/`). Residual: `golden_cases` has no D1 table (skipped by design). Next open work: **F-13.2** (blocked — needs a live T2 `per_100g` lock capture; do not guess math in `finalizeDishLedger`) or **V-27 phone check** (`blocked_human` until the phone test passes).
 
 B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are **shipped**. Do not restart them.
 
@@ -483,7 +483,7 @@ Canonical plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 is superseded** (D1 is a
 |---|---|---|---|
 | **D-0** | Record SoT: Firebase Auth + D1 + R2; index Muse audit | **This plan** | Agents follow DATA_PLANE.md, not “stay on Supabase” |
 | **D-1** | Unpaid recovery when 402 lifts (~**2026-09-24**): dump + diff vs D1; insert missing only | `blocked_human` until REST ≠ 402 | Dated recovery log in DATA_PLANE.md (0 gaps is OK). **No extra bill.** |
-| **D-2** | Drain dead Supabase **code**; keep the remote project until D-1 | **ACTIVE — `specs/active/D-2.md` locked, `auto_go: true`.** `server_routes_sync.ts` DONE (`395fa61`); ledger inside the packet; catalog/fdc ⛔ need a D1 schema packet | D1 is the only production SQL path; project still exists |
+| **D-2** | Drain dead Supabase **code**; keep the remote project until D-1 | **DONE 2026-09-24** (`specs/done/d-2-supabase-code-drain.md`) — all ledger rows DONE; verified clean-tree `tsc` 0, 60/60 packet vitest, `journey-guard D-2` PASS; residual `golden_cases` has no D1 table (skipped by design) | D1 is the only production SQL path; project still exists |
 | **D-3** | Workers Paid ~$5 before ~100 users | `blocked_human` | Free D1 daily cap cannot hard-stop the app |
 | **D-4** | Named D1 timing script; record wall vs SQL ms | Mac **2026-09-20** done; VPS pending | Dated Mac + VPS-dev + VPS-prod rows in DATA_PLANE.md |
 | **D-5** | **SQLite vs D1 benchmark on the VPS** (read-only copy, not a writer) | `blocked_human` until **V-16** | Table: D1 p50/p90 vs SQLite p50/p90 from that region |
