@@ -178,13 +178,66 @@ export function buildOpencodeArgs({ prompt, model, variant, thinking = true, ext
 /**
  * Provider errors that opencode logs to stderr and then hangs on. Order matters:
  * the first match wins, so put the most specific/actionable reasons first.
+ *
+ * Vocabulary is deliberately aligned with the provider router's
+ * `isQuotaOrLimitError` (tools/telegram-provider-router/src/index.js) so both
+ * runtimes classify the same outage the same way — see plan/RELIABILITY.md §14.
  */
 const FATAL_LOG_ERRORS = [
-  { pattern: /rate limit exceeded/i, reason: 'Provider rate limit hit — this model is throttled right now.' },
-  { pattern: /insufficient account funds/i, reason: 'Provider account is out of funds.' },
-  { pattern: /no payment method/i, reason: 'Provider has no payment method on file.' },
-  { pattern: /unauthoriz|invalid api key|authentication/i, reason: 'Provider rejected the credentials (auth failed).' },
+  {
+    pattern: /free_tier_limit|free usage exceeded|free limit reached|subscribe to go/i,
+    reason: 'Free-tier allowance for this model is used up.',
+  },
+  {
+    pattern: /rate limit exceeded|too many requests|throttl/i,
+    reason: 'Provider rate limit hit — this model is throttled right now.',
+  },
+  {
+    pattern: /insufficient account funds|out of credits|no credits|credit.?balance/i,
+    reason: 'Provider account is out of funds.',
+  },
+  {
+    pattern: /no payment method|payment required/i,
+    reason: 'Provider has no payment method on file.',
+  },
+  {
+    pattern: /unauthoriz|invalid api key|authentication/i,
+    reason: 'Provider rejected the credentials (auth failed).',
+  },
+  {
+    pattern: /quota|usage limit|daily.?cap|capacity|exhausted/i,
+    reason: 'Provider quota or capacity limit reached.',
+  },
 ];
+
+/**
+ * Parse a provider's own "when can I retry" hint out of an error string.
+ *
+ * Ported from the provider router's `parseDepletedUntil`: a bare "rate limited"
+ * leaves the user guessing, while "try again in 3h 20m" / an ISO reset stamp
+ * lets us say exactly when the model comes back. Returns '' when the provider
+ * gives no hint (`0`-equivalent), never throws.
+ */
+export function parseRetryAfter(text) {
+  const s = String(text || '');
+  const iso = s.match(/(20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
+  if (iso) {
+    const t = Date.parse(iso[1]);
+    if (Number.isFinite(t) && t > Date.now()) {
+      const mins = Math.ceil((t - Date.now()) / 60000);
+      return mins >= 60 ? `Retry in ~${Math.round(mins / 60)}h.` : `Retry in ~${mins}m.`;
+    }
+  }
+  const hm = s.match(/in\s+(\d+)\s*h(?:ours?|rs?)?\s*(\d+)?\s*m/i);
+  if (hm) return `Retry in ~${Number(hm[1])}h${Number(hm[2] || 0) ? ` ${Number(hm[2])}m` : ''}.`;
+  const hOnly = s.match(/in\s+(\d+)\s*h(?:ours?|rs?)?\b/i);
+  if (hOnly) return `Retry in ~${Number(hOnly[1])}h.`;
+  const mOnly = s.match(/in\s+(\d+)\s*m(?:in(?:utes?)?)?\b/i);
+  if (mOnly) return `Retry in ~${Number(mOnly[1])}m.`;
+  const sOnly = s.match(/in\s+(\d+)\s*s(?:ec(?:onds?)?)?\b/i);
+  if (sOnly) return `Retry in ~${Number(sOnly[1])}s.`;
+  return '';
+}
 
 /**
  * Pull an actionable reason out of opencode's stderr log lines. Returns null when
@@ -199,10 +252,13 @@ export function extractLogError(stderr) {
   // the user actually asked for — session-title errors come first.
   const detail = details.length ? details[details.length - 1] : '';
   const haystack = detail || text;
+  const hint = parseRetryAfter(haystack);
   for (const { pattern, reason } of FATAL_LOG_ERRORS) {
-    if (pattern.test(haystack)) return detail ? `${reason} (${detail})` : reason;
+    if (pattern.test(haystack)) {
+      return [reason, hint, detail ? `(${detail})` : ''].filter(Boolean).join(' ');
+    }
   }
-  if (detail) return detail;
+  if (detail) return hint ? `${detail} ${hint}` : detail;
   const errors = text.split('\n').filter((line) => /level=ERROR/.test(line));
   return errors.length ? `opencode error: ${errors[errors.length - 1].trim().slice(0, 300)}` : null;
 }

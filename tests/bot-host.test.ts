@@ -13,6 +13,7 @@ import {
   humanizeRunError,
   isTimeoutError,
   extractLogError,
+  parseRetryAfter,
 } from '../scripts/lib/agent-opencode.mjs';
 import {
   clamp,
@@ -298,6 +299,50 @@ describe('extractLogError', () => {
     expect(extractLogError('')).toBeNull();
     expect(extractLogError('level=INFO message="booting location services"')).toBeNull();
     expect(extractLogError(null)).toBeNull();
+  });
+
+  // Vocabulary shared with tools/telegram-provider-router isQuotaOrLimitError
+  // (plan/RELIABILITY.md §14) — free lanes are the recommended path, so the
+  // free-tier wording must classify, not fall through as a raw string.
+  it('classifies free-tier limit wording', () => {
+    const out = extractLogError(
+      'level=ERROR error.error="AI_APICallError: free_tier_limit reached — subscribe to Go"',
+    );
+    expect(out).toContain('Free-tier allowance');
+    expect(out).toContain('free_tier_limit');
+  });
+
+  it('classifies out-of-credits and quota wording', () => {
+    expect(extractLogError('level=ERROR error.error="out of credits"')).toContain('out of funds');
+    expect(extractLogError('level=ERROR error.error="daily cap reached"')).toContain('quota or capacity');
+  });
+});
+
+describe('parseRetryAfter', () => {
+  it('reads an ISO reset stamp', () => {
+    const future = new Date(Date.now() + 3 * 3600 * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+    const out = parseRetryAfter(`quota exceeded, resets at ${future}`);
+    expect(out).toMatch(/Retry in ~3h/);
+  });
+
+  it('reads "try again in Xh Ym" hints', () => {
+    expect(parseRetryAfter('rate limited, try again in 3h 20m')).toBe('Retry in ~3h 20m.');
+    expect(parseRetryAfter('try again in 2h')).toBe('Retry in ~2h.');
+    expect(parseRetryAfter('try again in 45m')).toBe('Retry in ~45m.');
+  });
+
+  it('returns empty string when the provider gives no hint', () => {
+    expect(parseRetryAfter('Rate limit exceeded. Please try again later.')).toBe('');
+    expect(parseRetryAfter('')).toBe('');
+    expect(parseRetryAfter(null)).toBe('');
+  });
+
+  it('appends the hint to a classified reason for the user', () => {
+    const out = extractLogError(
+      'level=ERROR error.error="AI_APICallError: Rate limit exceeded, try again in 3h 20m"',
+    );
+    expect(out).toContain('rate limit');
+    expect(out).toContain('Retry in ~3h 20m.');
   });
 });
 
