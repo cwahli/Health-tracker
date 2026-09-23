@@ -12,8 +12,9 @@
       },
       "agent": {
         "kind": "opencode",
-        "model": "opencode/big-pickle",
-        "variant": "low",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "variant": "high",
+        "smallModel": "opencode-go/deepseek-v4.1-flash",
         "defaultAgent": "build",
         "workspace": "/home/ubuntu/src/Health-tracker",
         "timeoutMs": 900000,

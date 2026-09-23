@@ -12,6 +12,7 @@ import {
   expandSkillPath,
   humanizeRunError,
   isTimeoutError,
+  extractLogError,
 } from '../scripts/lib/agent-opencode.mjs';
 import {
   clamp,
@@ -183,6 +184,11 @@ describe('buildOpencodeEnv', () => {
     expect(buildOpencodeEnv({})).toEqual({});
   });
 
+  it('routes the small model when one is configured', () => {
+    const env = buildOpencodeEnv({ workspace: '/ws', smallModel: 'opencode-go/deepseek-v4.1-flash' });
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT).small_model).toBe('opencode-go/deepseek-v4.1-flash');
+  });
+
   it('expands ~ and keeps absolute skill paths', () => {
     expect(expandSkillPath('scripts/skills', '/ws')).toBe('/ws/scripts/skills');
     expect(expandSkillPath('/abs/skills', '/ws')).toBe('/abs/skills');
@@ -244,6 +250,9 @@ describe('agent-opencode event mapping', () => {
       'run',
       '--format',
       'json',
+      '--print-logs',
+      '--log-level',
+      'ERROR',
       '--thinking',
       '--variant',
       'high',
@@ -253,6 +262,42 @@ describe('agent-opencode event mapping', () => {
       'ses_1',
       'fix it',
     ]);
+  });
+});
+
+describe('extractLogError', () => {
+  const rateLimitLog =
+    'timestamp=2026-09-23T20:53:03.552Z level=ERROR run=692ab56a message="stream error" ' +
+    'providerID=opencode modelID=big-pickle small=false agent=build mode=primary ' +
+    'error.error="AI_APICallError: Rate limit exceeded. Please try again later."';
+
+  it('turns a rate-limit log line into an actionable reason', () => {
+    const out = extractLogError(rateLimitLog);
+    expect(out).toContain('rate limit');
+    expect(out).toContain('Rate limit exceeded');
+  });
+
+  it('prefers the real model error over the earlier small-model error', () => {
+    const out = extractLogError(
+      'level=ERROR modelID=gpt-5.4-nano small=true error.error="Insufficient account funds"\n' + rateLimitLog,
+    );
+    expect(out).toContain('rate limit');
+    expect(out).not.toContain('out of funds');
+  });
+
+  it('reports out-of-funds and missing payment method', () => {
+    expect(extractLogError('level=ERROR error.error="AI_APICallError: Insufficient account funds"')).toContain(
+      'out of funds',
+    );
+    expect(
+      extractLogError('level=ERROR error.error="No payment method. Add a payment method here: https://x/y"'),
+    ).toContain('no payment method');
+  });
+
+  it('ignores stderr without an ERROR line, and empty input', () => {
+    expect(extractLogError('')).toBeNull();
+    expect(extractLogError('level=INFO message="booting location services"')).toBeNull();
+    expect(extractLogError(null)).toBeNull();
   });
 });
 

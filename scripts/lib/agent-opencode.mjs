@@ -13,8 +13,19 @@ export function expandSkillPath(p, workspace) {
   return path.isAbsolute(value) ? value : path.resolve(workspace || '.', value);
 }
 
-export function buildOpencodeEnv({ workspace, allowExternalDirectory, sharedSkills, playwrightOutputDir } = {}) {
+export function buildOpencodeEnv({
+  workspace,
+  allowExternalDirectory,
+  sharedSkills,
+  playwrightOutputDir,
+  smallModel,
+} = {}) {
   const content = { $schema: 'https://opencode.ai/config.json' };
+  // opencode uses a separate "small" model for session titles and other
+  // background work. When it points at a model the account cannot use, every
+  // run logs a hard error before the real prompt even starts — route it at a
+  // model we know is funded.
+  if (smallModel) content.small_model = smallModel;
   if (allowExternalDirectory) content.permission = { external_directory: 'allow' };
   const paths = (Array.isArray(sharedSkills) ? sharedSkills : [])
     .map((p) => expandSkillPath(p, workspace))
@@ -151,12 +162,49 @@ export function listModelsVerbose(opts = {}) {
 
 export function buildOpencodeArgs({ prompt, model, variant, thinking = true, extraArgs = [] }) {
   const args = ['run', '--format', 'json'];
+  // Provider failures (rate limit, no funds, bad auth) are written to stderr as
+  // ERROR log lines, after which opencode sits there forever with an EMPTY
+  // stdout — no JSON events at all. Without these flags the only thing the bot
+  // can report is "timed out after 900000ms", 15 minutes later.
+  args.push('--print-logs', '--log-level', 'ERROR');
   if (thinking) args.push('--thinking');
   if (variant) args.push('--variant', variant);
   if (model) args.push('-m', model);
   if (extraArgs.length) args.push(...extraArgs);
   args.push(prompt);
   return args;
+}
+
+/**
+ * Provider errors that opencode logs to stderr and then hangs on. Order matters:
+ * the first match wins, so put the most specific/actionable reasons first.
+ */
+const FATAL_LOG_ERRORS = [
+  { pattern: /rate limit exceeded/i, reason: 'Provider rate limit hit — this model is throttled right now.' },
+  { pattern: /insufficient account funds/i, reason: 'Provider account is out of funds.' },
+  { pattern: /no payment method/i, reason: 'Provider has no payment method on file.' },
+  { pattern: /unauthoriz|invalid api key|authentication/i, reason: 'Provider rejected the credentials (auth failed).' },
+];
+
+/**
+ * Pull an actionable reason out of opencode's stderr log lines. Returns null when
+ * stderr holds no ERROR-level line. The `error.error="..."` detail is preferred
+ * because it carries the provider's own wording.
+ */
+export function extractLogError(stderr) {
+  const text = String(stderr || '');
+  if (!text || !/level=ERROR/.test(text)) return null;
+  const details = [...text.matchAll(/error\.error="([^"]+)"/g)].map((m) => m[1]);
+  // The last detail is the one from the real (non-"small") model, i.e. the run
+  // the user actually asked for — session-title errors come first.
+  const detail = details.length ? details[details.length - 1] : '';
+  const haystack = detail || text;
+  for (const { pattern, reason } of FATAL_LOG_ERRORS) {
+    if (pattern.test(haystack)) return detail ? `${reason} (${detail})` : reason;
+  }
+  if (detail) return detail;
+  const errors = text.split('\n').filter((line) => /level=ERROR/.test(line));
+  return errors.length ? `opencode error: ${errors[errors.length - 1].trim().slice(0, 300)}` : null;
 }
 
 export function runOpencode({
@@ -214,6 +262,9 @@ export function runOpencode({
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      // Safety net: a fatal startup error can arrive before any stdout, leaving
+      // lastError empty. Without this the caller only sees "exit 0 / no text".
+      if (!lastError && !textParts.length && stderr) lastError = extractLogError(stderr);
       resolve({
         code,
         sessionID,
@@ -262,6 +313,20 @@ export function runOpencode({
     });
     child.stderr?.on('data', (chunk) => {
       stderr += chunk.toString();
+      // A fatal provider error leaves opencode hung with an empty stdout and no
+      // JSON error event, so nothing would ever settle this run. Report the real
+      // reason and stop now rather than waiting out the full 15-minute timeout.
+      if (!settled && !textParts.length && !lastError) {
+        const fatal = extractLogError(stderr);
+        if (fatal) {
+          lastError = fatal;
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            // ignore
+          }
+        }
+      }
     });
     child.on('error', (err) => {
       lastError = err.message;
