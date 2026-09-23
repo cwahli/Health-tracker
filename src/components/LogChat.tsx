@@ -21,7 +21,7 @@ import { compressMultipleImages, compressImage } from '../utils/imageCompressor'
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { computeRemainingAllowance, calculateCompositeMeal, parseTrayGramInput, normalizeTrayGrams, hydratePreviousMealTag, buildCompositeHealthImpact } from '../utils/compositeFoodCalculation';
 import { stampChildLineage, applyReviewMealId } from '../utils/savedMealLineage';
-import { isMealFollowUpEdit, mostRecentActiveMeal, ensureMealBreakdown } from '../utils/foodFollowUpEdit';
+import { isMealFollowUpEdit, mostRecentActiveMeal, ensureMealBreakdown, newestSucceededFoodJob, pendingMealOfJob } from '../utils/foodFollowUpEdit';
 import { enrichReviewModificationCommands, collectCatalogUnitMap, sanitizeReviewReply } from '../utils/biomarkerLifecycle';
 import ImageSlider from './ImageSlider';
 import PreviousMealThumbnail from './PreviousMealThumbnail';
@@ -2553,6 +2553,15 @@ ${logsText}`);
           }
           throw lastErr || new Error('Network request failed');
         };
+        // Case-12 T2: a blank draft adopts the newest succeeded SESSION job first.
+        // The foodLogs list can hold stale demo seeds that outrank the
+        // just-saved meal, which attached a stale log with an empty breakdown
+        // (server returned zero dishes). Session jobs are always this chat.
+        const blankDraftForAdopt = !hasPriorResult && (job?.messages?.length || 0) === 0;
+        const sessionPriorJob = (submissionMode === 'edit' && blankDraftForAdopt && !extraOptions?.portionChoices)
+          ? newestSucceededFoodJob(JobStore.getAllJobs(), currentJobId)
+          : null;
+        const sessionPriorMeal = sessionPriorJob ? pendingMealOfJob(sessionPriorJob) : null;
         const lastFoodLogForJob = job?.result?.pendingFoodLog || 
           job?.result?.data || 
           [...existingMsgs].reverse().find(m => m.data?.pendingFoodLog || m.pendingFoodLog)?.data?.pendingFoodLog || 
@@ -2566,6 +2575,7 @@ ${logsText}`);
           // original photos). submissionMode === 'edit' already scopes this fallback
           // correctly, so gating on image count is unnecessary and causes edits to be
           // silently rejected server-side with "No active meal exists in Firestore".
+          sessionPriorMeal ||
           (submissionMode === 'edit' && !extraOptions?.portionChoices && activeFoodLogs && activeFoodLogs.length > 0 ? (mostRecentActiveMeal(activeFoodLogs) || activeFoodLogs[activeFoodLogs.length - 1]) : null);
         let prunedMealForJob = null;
         if (lastFoodLogForJob) {
