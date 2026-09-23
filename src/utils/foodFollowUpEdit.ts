@@ -169,7 +169,7 @@ export interface PriorSucceededJobLike {
   id?: string;
   status?: string;
   kind?: string;
-  result?: { pendingFoodLog?: any; data?: any } | null;
+  result?: { pendingFoodLog?: any; clean_result?: any; data?: any } | null;
 }
 
 /** Meal carried by a succeeded session job, if any. Mirrors the spec's
