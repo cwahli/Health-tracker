@@ -245,6 +245,11 @@ def polling_loop():
     while True:
         idle_min = (time.time() - LAST_ACTIVE_TIME) / 60
         if idle_min >= IDLE_TIMEOUT_MINUTES:
+            gpu_state = get_gpu_info()
+            if "No GPU" in gpu_state:
+                print(f"[Watchdog] Idle {IDLE_TIMEOUT_MINUTES}m on CPU (0 units) — staying awake.")
+                LAST_ACTIVE_TIME = time.time()
+                continue
             msg = f"⏱️ *[Colab Watchdog]* Worker has been idle for {IDLE_TIMEOUT_MINUTES}m.\nUnassigning GPU now to preserve your 200 compute units!"
             tg_send(ALLOWED_USER_ID, msg)
             print(msg)
@@ -254,6 +259,7 @@ def polling_loop():
             except ImportError:
                 print("Local environment: exiting.")
                 sys.exit(0)
+            break
 
         if not TELEGRAM_BOT_TOKEN or "YOUR_TELEGRAM" in TELEGRAM_BOT_TOKEN:
             time.sleep(10)
@@ -303,7 +309,7 @@ if __name__ == "__main__":
     setup_environment()
     print("✅ Environment ready.")
 
-    tg_send(ALLOWED_USER_ID, f"🚀 *[Colab AI Agent is ONLINE]*\n• Hardware: `{gpu}`\n• Active Engine: `{CURRENT_ENGINE}`\n• Auto-shutdown: {IDLE_TIMEOUT_MINUTES}m idle timer.\n\nReady! Just text me naturally on Telegram with what you want to build or ask!")
+    tg_send(ALLOWED_USER_ID, f"🚀 *[Colab AI Agent is ONLINE]*\n• Hardware: `{gpu}`\n• Active Engine: `{CURRENT_ENGINE}`\n• Auto-shutdown: {IDLE_TIMEOUT_MINUTES}m idle (GPU only, CPU stays awake).\n\nReady! Just text me naturally on Telegram with what you want to build or ask!")
     print("\n" + "=" * 60)
     print("🎉 Colab AI Agent is ONLINE and listening for Telegram commands!")
     print("📱 You can now safely minimize Chrome and work from Telegram.")
