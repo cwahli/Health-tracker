@@ -1084,4 +1084,3 @@ Capability ID
 When a capability ships, append one line under this subsection or in `tools/telegram-provider-router/CHANGELOG.md`:
 
 `YYYY-MM-DD  <capability-id>  scope=<…>  classes=<hermes,vps,…>  sync=<script|restart|pull>`
-
