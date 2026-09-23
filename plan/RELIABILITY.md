@@ -867,4 +867,85 @@ Safety protocol per batch (SHEPHERD):
 3. Journey proof — meal log: `meal01-golden.live`, `key-journeys`, `multiturn-meal-edit.live`, `portion-funnel`; compare: `compare-mode-six-cases`, `meal03-compare-benchmark`; contract: `dialog-inventory`. Live (`.live`, benchmark) specs are Tier 3 budget — **one live shape per batch**, not per file; stub specs run every batch.
 4. Red → `restore purge-<Dn>`, fork hypothesis 2; two failed attempts → STOP + Reviewer/Learner (L17, L14).
 
+## 14. Telegram shared-capability alignment (R-14) — 2026-09-24
 
+**ROADMAP IDs:** Track R **R-14** · Bot side **BOT-9**.  
+**Trigger:** Dual Telegram stacks (Grok box pack vs Health-tracker bot-host skills) and missing cross-agent photo/matrix.  
+**Non-goal:** A second long-poller on any existing bot token. One `getUpdates` consumer per token (BOT-5 / V-28 law).
+
+### 14.1 What already exists (do not rebuild)
+
+| Rail | Location | Already provides |
+|------|----------|------------------|
+| **Shared bot skills** | `scripts/skills/common/` (`telegram-photo`, `telegram-testing`, `qa-telegram-journey`, …) | Outbound `MEDIA:` delivery; QA/journey standards |
+| **Hermes sync** | `scripts/sync-hermes-skills.sh` | Symlinks common skills into `~/.hermes/**/skills` |
+| **bot-host** | `scripts/bot-host.mjs` + `scripts/lib/inbound-media.mjs` + `tg-api.mjs` | **Inbound photo/document download** to workspace `.bot-media/<chatId>/`; prompt attach; outbound sendPhoto |
+| **Registry** | `bots/registry.json` | Per-bot `sharedSkills`, one-poller guard |
+| **Observability docs** | `docs/agents/telegram_work.md` | Typing pulse + waiting-for rules (V-28) |
+| **Provider router (new)** | `tools/telegram-provider-router/` + live `~/.config/telegram-opencode/router/` | Multi-provider `/switch`, shared vs per-model `/allowance`, Busy/hang self-heal |
+| **Grok box pack (new)** | `/home/box/agent-data/shared/telegram-capabilities/` + skill `telegram-shared-capabilities` | Cross-Grok-agent registry; planned matrix + photo stubs |
+
+**Gap diagnosis (2026-09-24):** The Grok pack’s planned `photo-intake` duplicates **bot-host inbound-media** (already live). Planned `capability-matrix` is not yet a `scripts/skills/common` skill, so coding bots that only load Hermes/common packs cannot show the table. Mac working copy can lag `main` (pull after #54/#55). Provider-router is not wired through `bot-host` `sharedSkills`.
+
+### 14.2 Target architecture (one capability model, two runtimes)
+
+```text
+                    ┌─ scripts/skills/common/*     ◄── single skill source of truth
+                    │     telegram-photo (out)
+                    │     telegram-matrix (new)
+                    │     telegram-allowance (thin doc skill → router behaviour)
+ Health-tracker ────┤
+                    ├─ scripts/lib/inbound-media.mjs  ◄── single inbound photo API
+                    ├─ scripts/bot-host.mjs           ◄── OpenCode/Hermes coding bots
+                    └─ tools/telegram-provider-router ◄── multi-provider free-lane router
+                              │
+                              ▼
+              bots/registry.json (one poller / token)
+                              │
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+   VPS / phone bot-host   Box live router    Grok agents (skill
+   (coding tokens)        (free-lane token)  telegram-shared-capabilities
+                                             reads registry + inbox)
+```
+
+**Rule:** New TG capability = (1) `scripts/skills/common/<id>/SKILL.md` + (2) registry status in `tools/telegram-provider-router` / shared pack `registry.json` + (3) `sync-hermes-skills.sh`. Never a third private copy only on the Grok box.
+
+### 14.3 Phased plan
+
+| Phase | Work | Done when |
+|-------|------|-----------|
+| **P0 — Map & freeze** | Document this §; mark Grok `photo-intake` stub as **delegates to inbound-media**; Mac/`main` pull | Agents cite §14; no new parallel inbox invented |
+| **P1 — Photo parity** | Ensure every coding bot that should see uploads has bot-host inbound path on; provider-router either **imports** `inbound-media.mjs` or documents “coding bots only” | Uploaded TG photo → path in agent prompt on bot-host lanes; Grok agents Read same path or mirrored inbox |
+| **P2 — Matrix skill** | Add `scripts/skills/common/telegram-matrix` (`MEDIA:` PNG/HTML from `public/capability-matrix.html`); `/matrix` on router optional | Any sharedSkills bot + Grok agent can show the table |
+| **P3 — Allowance & self-heal as skills** | Thin SKILL.md pointers to router behaviour (buckets, Busy unlock); keep implementation in router | `/allowance` + hang rules discoverable via Hermes sync, not only box README |
+| **P4 — Registry glue** | `bots/registry.json` `tg_provider_router` stays separate **token**; coding bots list common skills; Grok pack `registry.json` **links** repo paths | One registry story in AGENT_HANDOFF |
+| **P5 — Grok TG agent (optional)** | Pattern A (route inside provider-router) or B (new bot token + Channels); consume common skills | User can talk to Grok on TG with matrix + photos without forking stacks |
+
+### 14.4 Preferred free model for implementation
+
+From `golden/scorecard/current/FREE_MODEL_TOOL_PICKER.md` + bake-off:
+
+| Role | Model | Why |
+|------|-------|-----|
+| **Default implementer** | **Cline Free `deepseek-v4.1-flash` (high thinking)** | Best surgical PASS rate on tracker waves; independent of OpenCode Muse wallet |
+| Concurrent / Muse-shaped | OpenCode or Cline **Muse Spark 1.3 Contributor free** | Second wallet; good for docs+wiring when DeepSeek capped |
+| Fallback | Token Harbor `deepseek-v4.1-flash:free` | When Cline free depleted |
+| Avoid for this | Freebuff (burn Freebucks), DeepSeek V4, Grok Task/executor | Cost / policy / thin-PM |
+
+**Orchestration:** Health-tracker thin PM writes ticket → Cline DeepSeek implements P1–P3 → second free CLI checks. Docs/roadmap edits (this §) are PM-local.
+
+### 14.5 Reliability §10 gate (this change)
+
+| Gate | Answer |
+|------|--------|
+| Dual-write / fat pull risk? | No — docs + skill packaging only in P0 |
+| New Telegram poller? | **Forbidden** on existing tokens |
+| Secrets in git? | No — `.env` stays live-only |
+| Assert / test | P1+: extend `telegram-smoke-test` / bot-host unit for inbound path; no live Gemini |
+
+### 14.6 Out of scope
+
+- Replacing Hermes meal-audit bot or V-28/V-29 toolkit
+- Merging provider-router into bot-host in one bang (strangler: shared libs first)
+- Paying for Go/Freebuff to finish alignment
