@@ -77,3 +77,46 @@ Rules:
 P1 is proposed next (needs one live probe to find the cline session id).
 P2–P5 are recorded here so they get built on these rails, not as five
 one-agent patches.
+
+## 4. Prior art reviewed 2026-09-24 — what the field validates, what to steal
+
+Sources: TG Bot API rate-limit studies (Jan 2026), grammY/PTB production
+practices, ESAA-Conversational (arxiv 2606.23752), PROJECTMEM (2606.12329),
+Shared Selective Persistent Memory (2607.09493), Kairo, passbaton, OpenAI
+Agents SDK session-memory cookbook, TG UX practices.
+
+**Already aligned (keep):** long-polling for single-instance (webhook only wins
+>30k msg/h — correctly not our problem); 429-honouring backoff; per-chat
+1 msg/s pacing; `/abort` (= industry `/cancel`); progress lines + completion
+notice; copy buttons over retyping; disk-persisted sessions (= "save progress
+between sessions"); cooperative file leases (≈ Kairo `kairo_lease`, no
+consensus needed); bots-can't-see-bots ⇒ file-claims coordination (matches
+platform constraint, not just our choice).
+
+**Steal — memory design (sharpens P2/P4):**
+- *Selective > full history (96% vs 71% task completion).* Persist task specs,
+  decisions, tool configs, output constraints; DISCARD reasoning traces.
+  Consequence for BOT-12: cline resume should inject the compact summary, not
+  raw history — raw replay actively degrades.
+- *Handoff as entry contract* (ESAA): `/compact` output must be goal + state +
+  files-to-read-first, sized (tiny ~1500 / normal ~4000 / deep ~20000 chars,
+  cf. Kairo brief modes), so any cold agent (even another lane) can continue.
+- *Memory-as-Governance* (PROJECTMEM): deterministic pre-action gate — warn
+  before repeating a logged failed fix or touching a known-fragile file.
+  Our `file-locks` + `failure-log` are 80% there; the gate is the missing 20%
+  (BOT-15).
+- *Mechanical capture, judgment only for curation* (ESAA): turns/failures log
+  automatically; the agent curates only decisions. Maps to auto failure-log +
+  manual `/remember`.
+
+**Steal — transport (new items, file as follow-ups):**
+- *Proactive throttling:* Bot API 7.8+ returns `X-RateLimit-Remaining`; slow
+  workers ~20% when remaining < 5 instead of waiting for 429
+  (`scripts/lib/tg-api.mjs` + `tg-throttle.mjs`).
+- *409-conflict loud exit:* a second poller on a token must `process.exit(1)`
+  with a clear log, not silently fight over offsets (BOT-5 is registry-level;
+  the runtime has no 409 detection — verified 2026-09-24).
+- *Abandoned-task nudge:* industry UX practice; only Hermes (cron) could do it —
+  repo bots are reactive-only. Hermes-side item.
+- *Defensive AI parsing:* validate nested fields of every CLI JSON event
+  before reading (`mapClineEvent` does some; audit the rest).
