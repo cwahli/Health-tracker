@@ -132,17 +132,26 @@ function appendJournal(publicN, op) {
   fs.appendFileSync(file, JSON.stringify(row) + '\n');
 }
 
+// V-30.4: only WRITES queue when the API is unavailable. A queued read
+// (packet/queue/next/list/show/state) can never be replayed by `flush` — it
+// would keep `bugctl flush` red forever. Reads fail loud instead.
+const WRITE_OPS = new Set([
+  'create', 'pack', 'defect', 'repro', 'plan', 'attempt', 'verify', 'close',
+  'claim', 'duplicate', 'unblock', 'block', 'evidence',
+]);
+
 async function withFallback(op, args, fn) {
+  const isWrite = WRITE_OPS.has(op?.op);
   try {
     const result = await fn();
     if (result.status === 401 || result.status === 503) {
-      appendQueue(op);
-      return { ...result.json, queued: true, queue_path: QUEUE_PATH };
+      if (isWrite) appendQueue(op);
+      return { ...result.json, ...(isWrite ? { queued: true, queue_path: QUEUE_PATH } : {}) };
     }
     return result.json;
   } catch (e) {
-    appendQueue(op);
-    return { error: String(e?.message || e), queued: true, queue_path: QUEUE_PATH };
+    if (isWrite) appendQueue(op);
+    return { error: String(e?.message || e), ...(isWrite ? { queued: true, queue_path: QUEUE_PATH } : {}) };
   }
 }
 
@@ -446,12 +455,15 @@ async function main() {
       const id = resolveId(args);
       if (!id) fail('--id required', args);
       const fmt = args.format ? `?format=${encodeURIComponent(args.format)}` : '';
-      const r = await withFallback({ op: 'packet', id, format: args.format }, args, () =>
-        api('GET', `/api/bugs/${encodeURIComponent(id)}/packet${fmt}`)
-      );
-      if (args.format === 'text' && typeof r === 'string') process.stdout.write(r + '\n');
-      else if (args.format === 'text' && r.packet) process.stdout.write(r.packet + '\n');
-      else out(r, args);
+      // V-30.4: a packet READ is never queued — withFallback would leave an
+      // unflushable op in the offline queue (flush counts it failed forever).
+      // The dispatcher needs a live read; writes still queue via withFallback.
+      const r = await api('GET', `/api/bugs/${encodeURIComponent(id)}/packet${fmt}`);
+      const payload = r.json;
+      if (args.format === 'text' && typeof payload === 'string') process.stdout.write(payload + '\n');
+      else if (args.format === 'text' && payload && payload.packet) process.stdout.write(payload.packet + '\n');
+      else out(payload, args);
+      if (payload && payload.error && !r.ok) process.exit(1);
       break;
     }
 
