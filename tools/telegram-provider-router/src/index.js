@@ -9,14 +9,28 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, openSyn
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn, execSync } from "child_process";
-// Single-source working-headline framework: vendored mirror of
-// scripts/lib/tg-progress.mjs (see scripts/sync-router-vendor.mjs).
-// Change the status line in the canonical file, never here.
-import { formatTokenCount, formatWorkingHeadline, ctxLimitFor } from "./tg-progress.vendor.mjs";
+// F) Free-lane allowance table: authoritative model + telegram-tables HTML grid
+// (JSON -> qa-evidence/build-table.py -> HTML -> MEDIA:). Never tool-allowance.mjs.
+import {
+  activeRouteAdvice,
+  allowanceTableReplyText,
+  isDocLikeQuotaNoise,
+  nextAvailableRoutes,
+  soonestResetAmongDepleted,
+  readJson,
+  renderFreeLaneTableHtml,
+  syncFreeLaneTableFromSession,
+  formatCompactAllowanceChat,
+} from "./free-lane-table.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
-const STATE_PATH = join(ROOT, "state", "session.json");
+// State dir defaults to <router>/state. TG_ROUTER_STATE_DIR redirects it so the
+// unit test can exercise markDepleted against a temp dir instead of the live box.
+const STATE_DIR = process.env.TG_ROUTER_STATE_DIR ? join(process.env.TG_ROUTER_STATE_DIR) : join(ROOT, "state");
+const STATE_PATH = join(STATE_DIR, "session.json");
+// Free-lane table (pref order + status + reset) lives next to session.json.
+const FREE_LANE_TABLE_PATH = join(STATE_DIR, "free-lane-table.json");
 // A) Single-poller lock: pidfile + lock live under the router dir.
 const RUN_DIR = join(ROOT, "run");
 const LOCK_PATH = join(RUN_DIR, "router.lock");
@@ -25,6 +39,9 @@ const LEGACY_PID_PATHS = ["/tmp/tg-router.pid"];
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED = String(process.env.TELEGRAM_USER_ID || process.env.TELEGRAM_ALLOWED_USER_ID || "").trim();
+// Import/test mode (scripts/test-quota-parse.mjs): expose the quota helpers
+// without acquiring the poller lock or starting Telegram long-polling.
+const NO_START = process.env.TG_ROUTER_NO_START === "1";
 const OC_URL = (process.env.OPENCODE_SERVER_URL || process.env.OPENCODE_BASE_URL || "http://127.0.0.1:4096").replace(/\/$/, "");
 const TH_URL = (process.env.TOKEN_HARBOR_BASE_URL || "https://tokenharbor.ai/v1").replace(/\/$/, "");
 const TH_KEY = process.env.TOKEN_HARBOR_API_KEY || "";
@@ -53,7 +70,26 @@ const OC_DIR_QS = `?directory=${encodeURIComponent(WORKSPACE)}`;
 const STATUS_PING_RE =
   /\b(are you (still |currently )?working|still working|are you done|are you finished|what are you doing|what('s| is) the (status|progress)|how('s| is) it going|progress\??|status\??)\b/i;
 
-if (!TOKEN || !ALLOWED) {
+/**
+ * F) "show the allowance as a table / as html / as a grid" — a free-lane ledger
+ * ask. Routed straight to the free-lane HTML renderer so the agent can never
+ * answer it with `scripts/tool-allowance.mjs` (CLI install matrix; smoke
+ * 2026-09-24).
+ */
+const ALLOWANCE_TABLE_ASK_RE =
+  /\b(?:allowance|free[-\s]?lane(?:\s+allowance)?|quota)\b[^.\n]{0,60}\b(?:table|grid|html|spreadsheet)\b|\b(?:table|grid|html)\b[^.\n]{0,40}\b(?:allowance|free[-\s]?lane)\b/i;
+/** "add/update/wire the allowance table" is a coding task — let the agent take it. */
+const WORK_ON_TABLE_RE = /\b(?:add|edit|update|fix|implement|write|change|refactor|delete|remove|wire|patch|test)\b/i;
+const VIEW_TABLE_RE = /\b(?:show|see|display|send|render|give|post|list|need|want)\b/i;
+
+function wantsAllowanceTable(text) {
+  const s = String(text || "");
+  if (!ALLOWANCE_TABLE_ASK_RE.test(s)) return false;
+  if (WORK_ON_TABLE_RE.test(s) && !VIEW_TABLE_RE.test(s)) return false;
+  return true;
+}
+
+if ((!TOKEN || !ALLOWED) && !NO_START) {
   console.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_USER_ID");
   process.exit(1);
 }
@@ -212,12 +248,72 @@ function markCfNeuronsExhausted(reason = "daily free allocation") {
   return led;
 }
 
+/**
+ * Text that is *documentation/status* about lanes or allowances (help markdown,
+ * /freemodel replies, rendered free-lane table, /allowance board). These mention
+ * words like "limit"/"depleted" without being a provider quota failure, so they
+ * must never mark a lane depleted.
+ */
+const HELP_OR_STATUS_DOC_RE =
+  /free-lane-preference\.json|FREE_LANE_TABLE|free-lane-table\.json|FREE_ALLOWANCE_BUCKETS|free[\s-]?lane\s+table|\/freemodel\b|\*\*[^\n]{0,80}free[\s-]?lane|\|\s*#\s*\|\s*Lane\s*\||\|\s*Bucket\s*\|\s*Scope\s*\||\bunknown remaining\b|\bOK\s*\/\s*unknown\b|\blastPingNote\b|\bresetHypotheses\b|\bpingPolicy\b|tool-allowance|tool\s+allowance|\|\s*Tool\s*\|\s*Installed|\|\s*Installed\s*\||Success\s*\/\s*Fail|\bGrok\s+Build\b|Antigravity|\|\s*Allowance\s*\||\bfree[\s-]?lane[\s-]?allowance\b/i;
+
+/**
+ * Any rendered markdown pipe table (header row + `|---|---|` separator). An agent
+ * answer that formats data as a table is documentation, never a vendor quota
+ * error — smoke 2026-09-24 marked Cline Muse depleted from a tool-allowance
+ * markdown table reply.
+ */
+const MARKDOWN_PIPE_TABLE_RE = /^\s*\|.*\|\s*$/m;
+const MARKDOWN_TABLE_SEP_RE = /\|\s*:?-{2,}:?\s*\|/;
+
+function looksLikeMarkdownTable(msg) {
+  const s = String(msg || "");
+  return MARKDOWN_TABLE_SEP_RE.test(s) && MARKDOWN_PIPE_TABLE_RE.test(s);
+}
+
+function looksLikeHelpOrStatusDoc(msg) {
+  const s = String(msg || "");
+  return HELP_OR_STATUS_DOC_RE.test(s) || looksLikeMarkdownTable(s) || isDocLikeQuotaNoise(s);
+}
+
+/**
+ * Clear vendor quota phrases. Bare "limit" / "exhausted" in passing is NOT enough
+ * (that was the bug: free-lane help markdown matched and stamped a 6h TTL).
+ */
+const QUOTA_VENDOR_PHRASES = [
+  /daily\s+free\s+(?:model\s+)?limit/i,
+  /free\s+usage\s+limit/i,
+  /reached\s+(?:today'?s|your|the)\s+(?:daily\s+)?free\s+(?:usage\s+)?limit/i,
+  /try\s+again\s+in\s+\d/i,
+  /retry[\s-]*after\s*[:=]?\s*\d/i,
+  /INFERENCE_CAP/i,
+  /quota\s+(?:exceeded|exhausted|reached|hit)/i,
+  /(?:out\s+of|no\s+more|run\s+out\s+of|low\s+on|zero)\s+(?:free\s+)?(?:credits?|freebucks|quota|balance|neurons?)/i,
+  /no\s+(?:free\s+)?(?:credits?|freebucks)\b/i,
+  /(?:credits?|freebucks|quota|neurons?)\s+(?:are\s+)?(?:exhausted|empty|used\s+up|depleted|all\s+used)/i,
+  /used\s+up\s+(?:your|all|the)\s+(?:daily\s+)?(?:free\s+)?(?:allocation|credits?|neurons?|quota)/i,
+  /insufficient\s+(?:credits?|balance|quota|funds)/i,
+  /payment\s+required/i,
+  /too\s+many\s+requests/i,
+  /rate[\s-]?limit(?:ed|ing)?\s+(?:exceeded|reached|error|hit)|rate[\s-]?limited|hit\s+(?:the\s+)?rate[\s-]?limit/i,
+  /throttl(?:ed|ing)/i,
+];
+/** Status-ish codes that only show up on real failures. */
+const QUOTA_STATUS_CODE_RE = /\b(?:429|402|4006)\b/;
+
 function isQuotaOrLimitError(msg) {
   const s = String(msg || "");
+  if (!s.trim()) return false;
+  // Help/docs/status boards first: they are not provider failures.
+  if (looksLikeHelpOrStatusDoc(s)) return false;
+  // Sticky ledger Stop — treat as quota so dispatch can walk preference list.
+  if (/Sticky OpenCode lane depleted/i.test(s)) return true;
   if (isCfNeuronExhaustedError(s)) {
     try { markCfNeuronsExhausted(s); } catch {}
+    return true;
   }
-  return /quota|rate.?limit|429\b|402\b|4006\b|insufficient|out of credits|no credits|usage limit|free.?limit|exhausted|freebuck|free.?usage|payment required|exceeded|throttl|capacity|limit reached|daily.?cap|FreeUsageLimit|credit.?balance|neuron|workers ai|too many requests/i.test(s);
+  if (QUOTA_VENDOR_PHRASES.some((re) => re.test(s))) return true;
+  return QUOTA_STATUS_CODE_RE.test(s);
 }
 
 function looksLikeHardFailure(reply) {
@@ -232,20 +328,61 @@ function currentRoute() {
   return { provider, model };
 }
 
+function loadFreeLaneTable() {
+  try {
+    if (!existsSync(FREE_LANE_TABLE_PATH)) return null;
+    return readJson(FREE_LANE_TABLE_PATH);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Failover list after sticky: preference table (same family → pref #), then
+ * legacy FREE_FAMILIES chain. Never limited to one family when the table has
+ * later ✅ lanes (CF Qwen / CF GLM / …).
+ */
 function nextFailoverRoutes(fromProvider, fromModel) {
+  const table = loadFreeLaneTable();
+  if (table) {
+    try {
+      const fromTable = nextAvailableRoutes(table, state, { fromProvider, fromModel });
+      if (fromTable.length) {
+        return fromTable.map((r) => ({ provider: r.provider, model: r.model }));
+      }
+    } catch (e) {
+      console.error("nextFailoverRoutes table walk failed:", e.message || e);
+    }
+  }
   const family = freeFamilyKey(fromModel);
   const chain = FREE_FAMILIES[family] || [];
   if (!chain.length) return [];
-  // Find current index (match provider+model loosely)
   let idx = chain.findIndex(
     (r) => r.provider === fromProvider && freeFamilyKey(r.model) === family &&
       (r.model === fromModel || r.model.endsWith(fromModel) || fromModel.endsWith(r.model.replace(/^[^/]+\//, "")))
   );
   if (idx < 0) {
-    // Not on chain — start from beginning, skip identical provider+model
     return chain.filter((r) => !(r.provider === fromProvider && r.model === fromModel));
   }
   return chain.slice(idx + 1);
+}
+
+function allFreeLanesDepletedMessage(fromProvider, fromModel) {
+  const table = loadFreeLaneTable();
+  const soon = table ? soonestResetAmongDepleted(table, state) : null;
+  const sticky = `${fromProvider}/${fromModel}`;
+  if (soon?.label) {
+    return (
+      `All free Telegram lanes are depleted right now (sticky was ${sticky}). ` +
+      `Soonest Reset in: ${soon.label}` +
+      (soon.lane?.model ? ` · ${soon.lane.model}` : "") +
+      `. Try /allowance or wait for reset — no hang on Stop.`
+    );
+  }
+  return (
+    `All free Telegram lanes are depleted right now (sticky was ${sticky}). ` +
+    `Check /allowance for Reset in times.`
+  );
 }
 
 function applyRoute(provider, model, { note } = {}) {
@@ -567,6 +704,14 @@ function bucketMemberShort(m) {
 }
 
 const QUOTA_TTL_MS = Number(process.env.QUOTA_DEPLETED_TTL_MS || 6 * 3600 * 1000);
+/** OpenCode Zen / 429 style rate-limits usually cool off faster than period empties. */
+const RATE_LIMIT_TTL_MS = Number(process.env.QUOTA_RATE_LIMIT_TTL_MS || 45 * 60 * 1000);
+function isRateLimitError(msg) {
+  const s = String(msg || "");
+  return /rate\s*limit\s+exceeded|rate[\s-]?limited|too\s+many\s+requests|\b429\b/i.test(s)
+    && !/rolling\s+7-day|period'?s\s+free\s+allowance|try\s+again\s+in\s+\d/i.test(s);
+}
+
 function quotaKey(provider, model) { return `${provider}/${model || ""}`; }
 
 /** Resolve the memory key: shared buckets collapse to one entry, per-model keeps route key. */
@@ -576,50 +721,260 @@ function quotaRecordKey(provider, model) {
   return { key: quotaKey(provider, model), bucket, shared: false };
 }
 
-/** Parse "try again in 3h 20m" / "until 2026-…Z" hints. 0 = none found. */
-function parseDepletedUntil(errText) {
+/** ISO reset stamp: with/without ms, Z or ±hh:mm offset. */
+const ISO_RESET_RE = /(20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))/;
+/** Verbs vendors put right before a countdown ("Try again in …", "Retry after …"). */
+const RETRY_PREFIX_RE =
+  /(?:try\s+again(?:\s+in|\s+after)?|retry[\s-]*(?:after|in)?|available\s+in|resets?\s+in|come\s+back\s+in|again\s+in)\s*[:=]?\s*/gi;
+
+/** Parse a leading "23h 15m" / "23 hours 15 minutes" / "45m" / "900s" / "2d 4h" chunk. */
+function parseDurationHint(text) {
+  const t = String(text || "");
+  const dh = t.match(/^(\d+)\s*d(?:ays?)?(?:\s*(\d+)\s*h(?:ours?|rs?)?)?/i);
+  if (dh) {
+    const days = Number(dh[1]);
+    const hours = Number(dh[2] || 0);
+    return { ms: (days * 24 + hours) * 3600 * 1000, hint: hours ? `${days}d ${hours}h` : `${days}d` };
+  }
+  const hm = t.match(/^(\d+)\s*h(?:ours?|rs?)?(?:\s*(?:and\s+)?(\d+)\s*m(?:in(?:utes?)?)?)?/i);
+  if (hm) {
+    const hours = Number(hm[1]);
+    const mins = Number(hm[2] || 0);
+    return { ms: (hours * 3600 + mins * 60) * 1000, hint: mins ? `${hours}h ${mins}m` : `${hours}h` };
+  }
+  const mins = t.match(/^(\d+)\s*m(?:in(?:utes?)?)?/i);
+  if (mins) return { ms: Number(mins[1]) * 60 * 1000, hint: `${Number(mins[1])}m` };
+  const secs = t.match(/^(\d+)\s*s(?:ec(?:onds?)?)?/i);
+  if (secs) return { ms: Number(secs[1]) * 1000, hint: `${Number(secs[1])}s` };
+  return null;
+}
+
+/**
+ * Parse a vendor reset hint into { until, hint, countdownParsed }.
+ * Accepts ISO stamps plus countdowns: "Try again in 23h 15m",
+ * "try again in 23 hours 15 minutes", "Retry after 23h15m", "in 1h 16m".
+ * until = 0 and countdownParsed = false when the text has no countdown at all
+ * (the caller then falls back to QUOTA_DEPLETED_TTL_MS).
+ */
+function parseCountdownHint(errText) {
   const s = String(errText || "");
-  const iso = s.match(/(20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
+  const iso = s.match(ISO_RESET_RE);
   if (iso) {
     const t = Date.parse(iso[1]);
-    if (Number.isFinite(t) && t > Date.now()) return t;
+    if (Number.isFinite(t) && t > Date.now()) return { until: t, hint: iso[1], countdownParsed: true };
   }
-  const hm = s.match(/in\s+(\d+)\s*h(?:ours?|rs?)?\s*(\d+)?\s*m/i);
-  if (hm) return Date.now() + (Number(hm[1]) * 3600 + Number(hm[2] || 0) * 60) * 1000;
-  const hOnly = s.match(/in\s+(\d+)\s*h(?:ours?|rs?)?\b/i);
-  if (hOnly) return Date.now() + Number(hOnly[1]) * 3600 * 1000;
-  const mOnly = s.match(/in\s+(\d+)\s*m(?:in(?:utes?)?)?\b/i);
-  if (mOnly) return Date.now() + Number(mOnly[1]) * 60 * 1000;
-  const sOnly = s.match(/in\s+(\d+)\s*s(?:ec(?:onds?)?)?\b/i);
-  if (sOnly) return Date.now() + Number(sOnly[1]) * 1000;
-  return 0;
+  for (const m of s.matchAll(RETRY_PREFIX_RE)) {
+    const tail = s.slice(m.index + m[0].length, m.index + m[0].length + 48);
+    const dur = parseDurationHint(tail);
+    if (dur && dur.ms > 0) return { until: Date.now() + dur.ms, hint: dur.hint, countdownParsed: true };
+  }
+  return { until: 0, hint: "", countdownParsed: false };
 }
+
+/** Back-compat helper: "try again in 3h 20m" / "until 2026-…Z" → epoch ms (0 = none). */
+function parseDepletedUntil(errText) {
+  return parseCountdownHint(errText).until;
+}
+
+/** Human reset label for the free-lane table (UTC ISO + Jakarta clock). */
+function resetHumanLabel(untilMs, hint) {
+  const iso = new Date(untilMs).toISOString().replace(/\.\d{3}Z$/, "Z");
+  let wib = "";
+  try {
+    wib = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Jakarta",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date(untilMs));
+  } catch {}
+  const why = hint ? `from vendor countdown ${hint}` : "default TTL, no countdown in vendor text";
+  return `${iso} (${why})${wib ? ` / ${wib} WIB` : ""}`;
+}
+
+/** Does a free-lane-table lane describe this provider+model route? */
+function laneMatchesRoute(lane, provider, model) {
+  try {
+    if (!lane) return false;
+    const lp = String(lane.provider || "");
+    const p = String(provider || "");
+    if (lp && p && lp !== p) return false;
+    const lm = String(lane.model || "");
+    const m = String(model || "");
+    if (!lm || !m) return false;
+    if (lm === m) return true;
+    const tail = (x) => String(x).replace(/^[^/]+\//, "").replace(/:free$/i, "");
+    return tail(lm) === tail(m);
+  } catch { return false; }
+}
+/**
+ * C) Bug-3 fix: write the parsed vendor countdown into <state>/free-lane-table.json
+ * so rolling lanes stop reporting "unknown until a limit response" forever.
+ * Never reorders pref; only stamps status/reset/cooldown + the capture note.
+ */
+function syncFreeLaneTable(provider, model, { depletedUntil, hint, sharedBucketId } = {}) {
+  try {
+    if (!existsSync(FREE_LANE_TABLE_PATH)) return { updated: false, reason: "no free-lane-table.json" };
+    const tbl = JSON.parse(readFileSync(FREE_LANE_TABLE_PATH, "utf8"));
+    const lane = (Array.isArray(tbl.lanes) ? tbl.lanes : []).find((l) => laneMatchesRoute(l, provider, model));
+    if (!lane) return { updated: false, reason: `no lane matching ${provider}/${model}` };
+    const iso = new Date(depletedUntil).toISOString();
+    const label = resetHumanLabel(depletedUntil, hint);
+    const observedAt = new Date().toISOString();
+    lane.status = "depleted";
+    lane.depletedObservedAt = observedAt;
+    lane.nextResetAt = iso;
+    lane.cooldownUntil = iso;
+    lane.nextReset = label;
+    lane.cooldownLeft = "until reset";
+    if (hint) lane.countdownHint = hint;
+    lane.lastPingAt = observedAt;
+    lane.lastPingNote = "auto-capture from vendor limit text";
+    const bucket = sharedBucketId ? tbl.buckets?.[sharedBucketId] : null;
+    if (bucket) {
+      bucket.nextResetAt = iso;
+      bucket.nextResetLabel = label;
+    }
+    tbl.updatedAt = new Date().toISOString();
+    // Atomic write, same pattern as saveState.
+    const tmp = `${FREE_LANE_TABLE_PATH}.tmp.${process.pid}`;
+    try {
+      writeFileSync(tmp, JSON.stringify(tbl, null, 2));
+      renameSync(tmp, FREE_LANE_TABLE_PATH);
+    } catch {
+      try { writeFileSync(FREE_LANE_TABLE_PATH, JSON.stringify(tbl, null, 2)); } catch {}
+      try { if (existsSync(tmp)) unlinkSync(tmp); } catch {}
+    }
+    return { updated: true, pref: lane.pref, lane: lane.label || lane.model, nextResetAt: iso, nextReset: label };
+  } catch (e) {
+    return { updated: false, reason: `table sync failed: ${e.message || e}` };
+  }
+}
+
+
+/**
+ * Shell/OpenCode often leaves "Rate limit exceeded" only in the internal log and
+ * never returns it to Telegram — so markDepleted never ran. Sweep recent lines
+ * and stamp the Zen free bucket / matching model.
+ */
+function ingestOpenCodeLogLimits({ maxBytes = 400_000 } = {}) {
+  const candidates = [
+    join(process.env.HOME || "/home/box", ".local/share/opencode/log/opencode.log"),
+    join(process.env.HOME || "/home/box", ".local/share/opencode/logs/opencode.log"),
+  ];
+  let raw = "";
+  let pathUsed = null;
+  for (const p of candidates) {
+    try {
+      if (!existsSync(p)) continue;
+      const st = readFileSync(p); // Buffer
+      raw = st.slice(Math.max(0, st.length - maxBytes)).toString("utf8");
+      pathUsed = p;
+      break;
+    } catch {}
+  }
+  if (!raw) return { stamped: 0, reason: "no opencode log" };
+  const lines = raw.split(/\n/).slice(-400);
+  let stamped = 0;
+  const now = Date.now();
+  // Only consider errors from the last 2 hours
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!/stream error|AI_APICallError|Rate limit exceeded|free allowance|INFERENCE_CAP/i.test(line)) continue;
+    const tsM = line.match(/timestamp=(\d{4}-\d{2}-\d{2}T[^ ]+)/);
+    const ts = tsM ? Date.parse(tsM[1]) : now;
+    if (Number.isFinite(ts) && now - ts > 2 * 3600 * 1000) continue;
+    const modelM = line.match(/modelID=([^\s]+)/);
+    const providerM = line.match(/providerID=([^\s]+)/);
+    const errM = line.match(/error\.error="([^"]+)"/) || line.match(/error\.error=([^\s]+)/);
+    const modelID = modelM ? modelM[1] : "";
+    const providerID = providerM ? providerM[1] : "opencode";
+    let errText = errM ? errM[1].replace(/\\"/g, '"') : line;
+    if (!isQuotaOrLimitError(errText) && !/Rate limit exceeded/i.test(line)) continue;
+    if (/Rate limit exceeded/i.test(line) && !/Rate limit exceeded/i.test(errText)) {
+      errText = "AI_APICallError: Rate limit exceeded. Please try again later.";
+    }
+    // Map OpenCode Zen free models
+    let provider = "opencode";
+    let model = modelID;
+    if (providerID === "opencode" || providerID === "opencode") {
+      model = modelID.includes("/") ? modelID : `opencode/${modelID}`;
+    } else if (providerID === "tokenharbor" || providerID === "tokenharbor") {
+      provider = "opencode";
+      model = `tokenharbor/${modelID}`;
+    }
+    try {
+      const info = markDepleted(provider, model, errText);
+      if (info) stamped++;
+    } catch {}
+  }
+  return { stamped, pathUsed };
+}
+
 function markDepleted(provider, model, errText) {
   try {
+    // E) Defense in depth: documentation/status text (help markdown, tool-allowance
+    // matrix, any rendered pipe table) is never a vendor quota failure. The caller
+    // already gates on isQuotaOrLimitError, but a direct call must not pollute the
+    // quota ledger either.
+    if (looksLikeHelpOrStatusDoc(errText)) {
+      console.log(`markDepleted ${quotaRecordKey(provider, model).key}: refused — errText is doc/status text, not a provider limit`);
+      return null;
+    }
     const { key, bucket, shared } = quotaRecordKey(provider, model);
-    const parsed = parseDepletedUntil(errText);
+    const parsed = parseCountdownHint(errText);
+    const rateLimited = isRateLimitError(errText);
+    const defaultTtl = rateLimited ? RATE_LIMIT_TTL_MS : QUOTA_TTL_MS;
     const rec = {
-      depletedUntil: parsed || Date.now() + QUOTA_TTL_MS,
+      depletedUntil: parsed.until || Date.now() + defaultTtl,
       lastError: String(errText || "").slice(0, 300),
       scope: shared ? "shared" : "per-model",
+      depletedObservedAt: new Date().toISOString(),
+      countdownParsed: parsed.countdownParsed,
+      kind: rateLimited ? "rate-limit" : (parsed.countdownParsed ? "allowance-empty" : "limit-unknown"),
     };
+    if (parsed.countdownParsed) rec.countdownHint = parsed.hint;
     if (shared) {
       rec.bucket = bucket.id;
       rec.hitBy = String(model || "").includes("/") ? String(model) : quotaKey(provider, model);
     }
     state.quota[key] = rec;
     saveState(state);
+    // C) Keep free-lane-table.json in sync with the parsed countdown (pref untouched).
+    const sync = syncFreeLaneTable(provider, model, {
+      depletedUntil: rec.depletedUntil,
+      hint: parsed.hint,
+      sharedBucketId: shared ? bucket.id : null,
+    });
+    if (parsed.countdownParsed) {
+      console.log(
+        `markDepleted ${key}: countdownParsed=true hint="${parsed.hint}" → depletedUntil=${new Date(rec.depletedUntil).toISOString()}`
+      );
+    } else {
+      console.log(
+        `markDepleted ${key}: countdownParsed=false kind=${rec.kind} — default TTL ${Math.round(((rec.kind === "rate-limit") ? RATE_LIMIT_TTL_MS : QUOTA_TTL_MS) / 60000)}m`
+      );
+    }
+    if (sync?.updated) console.log(`markDepleted ${key}: free-lane-table lane #${sync.pref} → ${sync.nextReset}`);
+    else console.log(`markDepleted ${key}: free-lane-table not updated (${sync?.reason || "unknown"})`);
+    const extra = {
+      countdownParsed: parsed.countdownParsed,
+      countdownHint: parsed.hint || "",
+      depletedUntil: rec.depletedUntil,
+    };
     if (shared) {
       return {
         key,
         bucketId: bucket.id,
         label: bucket.label,
+        ...extra,
         sharedNote:
           `${bucket.label} [shared] — a quota/limit here means every ${bucket.label} ` +
           `model fails until reset (${bucket.resetHint}).`,
       };
     }
-    return { key, bucketId: bucket?.id || null, label: bucket?.label || null, sharedNote: "" };
+    return { key, bucketId: bucket?.id || null, label: bucket?.label || null, sharedNote: "", ...extra };
   } catch { return null; }
 }
 
@@ -1283,6 +1638,19 @@ async function extractLatestAssistantSince(sid, sinceCreated, excludeIds) {
 }
 
 async function runOpenCode(prompt, { onProgress, onTyping } = {}) {
+  try { ingestOpenCodeLogLimits(); } catch {}
+  // Fail fast if sticky OpenCode free lane is known-empty/rate-limited
+  try {
+    const mid = state.models?.opencode;
+    if (mid && isDepleted("opencode", mid)) {
+      const info = state.quota?.[quotaRecordKey("opencode", mid).key];
+      throw new Error(
+        `Sticky OpenCode lane depleted until ${info?.depletedUntil ? new Date(info.depletedUntil).toISOString() : "?"}: ${info?.lastError || "ledger"}`
+      );
+    }
+  } catch (e) {
+    if (/Sticky OpenCode lane depleted/.test(String(e.message || e))) throw e;
+  }
   const sid = await ensureOcSession();
   const modelBody = ocModelBody();
   const body = {
@@ -1612,7 +1980,19 @@ async function dispatch(prompt, opts = {}) {
   });
   // E) Skip routes known-depleted until depletedUntil passes.
   routes = routes.filter((r) => !isDepleted(r.provider, r.model));
-  if (!routes.length) routes = [{ provider: start.provider, model: start.model }];
+  // Never re-stick to a still-depleted lane when another ✅ preference exists.
+  if (!routes.length) {
+    const table = loadFreeLaneTable();
+    const more = table
+      ? nextAvailableRoutes(table, state, { fromProvider: start.provider, fromModel: start.model })
+          .filter((r) => !isDepleted(r.provider, r.model))
+          .map((r) => ({ provider: r.provider, model: r.model }))
+      : [];
+    if (more.length) routes = more;
+  }
+  if (!routes.length) {
+    throw new Error(allFreeLanesDepletedMessage(start.provider, start.model));
+  }
 
   let lastReply = null;
   let lastErr = null;
@@ -1721,7 +2101,48 @@ function statusPingReply() {
   );
 }
 
-/** Working headline lives in ./tg-progress.vendor.mjs (single source). */
+function formatTokenCount(n) {
+  const v = Number(n) || 0;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(v);
+}
+
+
+/** One-line status: "OpenCode muse spark 1.3 (high) working… 184s - 150k" */
+function formatWorkingHeadline({
+  providerLabel = "OpenCode",
+  modelLabel = "",
+  thinking = "",
+  elapsedSec = 0,
+  used = null,
+  ctxLimit = null,
+  pct = null,
+  detail = "working",
+} = {}) {
+  const modelBit = modelLabel ? ` ${modelLabel}` : "";
+  const thinkBit =
+    thinking && thinking !== "default" && thinking !== "none"
+      ? ` (${thinking})`
+      : "";
+  const timeBit = `${Math.max(0, Math.round(Number(elapsedSec) || 0))}s`;
+  let ctxBit = "";
+  if (used != null && Number.isFinite(Number(used))) {
+    ctxBit = ` - ${formatTokenCount(used)}`;
+    if (ctxLimit) ctxBit += `/${formatTokenCount(ctxLimit)}`;
+    if (pct != null && Number.isFinite(Number(pct))) ctxBit += ` (${Number(pct).toFixed(0)}%)`;
+  }
+  const warn =
+    pct != null && Number(pct) >= 75
+      ? "\n⚠️ Context high — /compact if answers get lost or slow"
+      : pct != null && Number(pct) >= 60
+        ? "\n💡 Context warming up — /compact when you want a fresh window"
+        : "";
+  const verb = detail && detail !== "working" && detail !== "busy"
+    ? detail
+    : "working";
+  return `⏳ ${providerLabel}${modelBit}${thinkBit} ${verb}… ${timeBit}${ctxBit}${warn}`;
+}
 
 function headlineFromState(elapsedSec = 0, detail = "working") {
   const p = state.provider;
@@ -1786,16 +2207,23 @@ async function fetchOpenCodeModelMeta(providerID, modelID) {
   }
 }
 
+/** Known context windows when OpenCode meta reports limit.context = 0. */
+const KNOWN_CTX_LIMITS = {
+  "@cf/qwen/qwen3.8-27b": 262144,
+  "@cf/zai-org/glm-4.7-flash": 131072,
+  "cloudflare/@cf/qwen/qwen3.8-27b": 262144,
+  "cloudflare/@cf/zai-org/glm-4.7-flash": 131072,
+};
+
 function resolveCtxLimit(providerID, modelID, meta) {
   const fromMeta = Number(meta?.limit?.context) || 0;
   if (fromMeta > 0) return fromMeta;
   const id = String(modelID || "");
   const full = id.includes("/") ? id : `${providerID}/${id}`;
-  // Single-source limits table lives in the vendored tg-progress framework.
   return (
-    ctxLimitFor(id) ||
-    ctxLimitFor(full) ||
-    ctxLimitFor(`${providerID}/${id}`) ||
+    KNOWN_CTX_LIMITS[id] ||
+    KNOWN_CTX_LIMITS[full] ||
+    KNOWN_CTX_LIMITS[`${providerID}/${id}`] ||
     null
   );
 }
@@ -2264,7 +2692,7 @@ async function freemodelReply(filterProvider) {
 
 
 const CF_NEURON_DAY = 10000;
-const CF_NEURON_LEDGER = join(ROOT, "state", "cf-neurons.json");
+const CF_NEURON_LEDGER = join(STATE_DIR, "cf-neurons.json");
 /** Rough Workers AI neuron rates (per 1M tokens) for local Telegram estimates. */
 const CF_NEURON_RATES = {
   "@cf/qwen/qwen3.8-27b": { inPerM: 40909, outPerM: 290909 },
@@ -2347,14 +2775,67 @@ async function fetchCfNeuronsToday() {
 }
 
 
+/**
+ * F) Build the free-lane allowance HTML grid (telegram-tables convention) and
+ * format the reply: one short caption + `MEDIA:<abs-path.html>`. Reuses the
+ * router's own MEDIA delivery, so the .html opens in Telegram's in-app browser
+ * with the sticky/sortable grid. Source = free-lane-table.json + live session
+ * quota — never `scripts/tool-allowance.mjs`.
+ */
+function allowanceTableReply() {
+  const render = renderFreeLaneTableHtml({
+    tablePath: FREE_LANE_TABLE_PATH,
+    sessionPath: STATE_PATH,
+    outDir: join(STATE_DIR, "tables"),
+    buildTablePy: process.env.TG_BUILD_TABLE_PY || null,
+    labelFn: resetHumanLabel,
+  });
+  console.log(`allowance table: ${render.renderer} → ${render.htmlPath}${render.pyError ? ` (${render.pyError})` : ""}`);
+  return allowanceTableReplyText(render);
+}
+
+/** Is this /allowance argument (or free-form ask) requesting the HTML grid? */
+function wantsAllowanceTableArg(arg) {
+  const a = String(arg || "").trim();
+  if (/^(?:table|html|grid|spreadsheet)$/i.test(a)) return true;
+  return wantsAllowanceTable(a);
+}
+
 async function allowanceText() {
+  // Refresh ledger from OpenCode internal log (shell agents often miss Telegram markDepleted).
+  try {
+    const ing = ingestOpenCodeLogLimits();
+    if (ing?.stamped) console.log(`allowance: ingestOpenCodeLogLimits stamped=${ing.stamped}`);
+  } catch (e) {
+    console.error("allowance ingest:", e.message || e);
+  }
+  try {
+    syncFreeLaneTableFromSession({ tablePath: FREE_LANE_TABLE_PATH, session: state });
+  } catch {}
+  let table = null;
+  try {
+    if (existsSync(FREE_LANE_TABLE_PATH)) table = JSON.parse(readFileSync(FREE_LANE_TABLE_PATH, "utf8"));
+  } catch {}
+  if (table && typeof formatCompactAllowanceChat === "function") {
+    return formatCompactAllowanceChat(table, state, { labelFn: resetHumanLabel });
+  }
+  // Fallback: legacy long board if table missing
   const lines = ["Allowance (best-effort)", ""];
+
   // Buckets first: structure (shared vs per-model) is real even when the API
   // does not expose remaining counts, so estimates/failover stay honest.
   lines.push(...allowanceBucketSection());
   lines.push("");
-  // Active route + failover family
-  lines.push(`Active route: ${PROVIDERS[state.provider]?.label || state.provider} · \`${state.models[state.provider] || "?"}\``);
+  // Active route + failover family. D) When the sticky route is depleted, say so
+  // and name the next available lane — never present a depleted sticky route as
+  // healthy.
+  const laneTable = readJson(FREE_LANE_TABLE_PATH);
+  const advice = laneTable ? activeRouteAdvice(laneTable, state, { labelFn: resetHumanLabel }) : null;
+  if (advice) {
+    lines.push(...advice.lines);
+  } else {
+    lines.push(`Active route: ${PROVIDERS[state.provider]?.label || state.provider} · \`${state.models[state.provider] || "?"}\``);
+  }
   const family = freeFamilyKey(state.models[state.provider]);
   const chain = FREE_FAMILIES[family] || [];
   if (chain.length) {
@@ -2461,6 +2942,7 @@ async function allowanceText() {
   }
 
   lines.push("");
+  lines.push("Table: /allowance table → HTML grid from free-lane-table.json + live session quota.");
   lines.push("Tip: quota errors auto-try the next lane in the family above.");
   lines.push("Dashboards: tokenharbor.ai · app.cline.bot · freebuff.ai · commandcode.ai · dash.cloudflare.com → AI → Workers AI");
   return lines.join("\n");
@@ -2478,6 +2960,7 @@ bot.command("start", async (ctx) => {
       "/status — live provider status (usage, thinking, …)\n" +
       "/think [level] — show/set thinking effort (cline)\n" +
       "/allowance — remaining free-lane allowance (best-effort)\n" +
+      "/allowance table — same ledger as an HTML grid (opens in chat)\n" +
       "/compact — compact OpenCode session context\n" +
       "/new — new OpenCode session\n" +
       "/help — this\n\n" +
@@ -2495,6 +2978,7 @@ bot.command("help", async (ctx) => {
       "/status — live usage/thinking (opencode) + Thinking level (cline)\n" +
       "/think [none|low|medium|high|xhigh] — show/set Cline thinking\n" +
       "/allowance — free-lane allowance snapshot\n" +
+      "/allowance table — free-lane allowance as an HTML grid (pref/lane/status/reset/cooldown)\n" +
       "/compact — compact OpenCode context\n" +
       "/new — fresh OpenCode session\n" +
       "/unlock — cancel stuck work and unlock the bot\n" +
@@ -2518,13 +3002,30 @@ bot.command("status", async (ctx) => {
 
 bot.command("allowance", async (ctx) => {
   if (!gate(ctx)) return;
-  const thinking = await ctx.reply("Checking allowance…");
+  const arg = String(ctx.match || "").trim();
+  const askTable = wantsAllowanceTableArg(arg);
+  const thinking = await ctx.reply(askTable ? "Building free-lane allowance table…" : "Checking allowance…");
   try {
+    if (askTable) {
+      await deliverReply(ctx, thinking, allowanceTableReply());
+      return;
+    }
     const body = await allowanceText();
-    await ctx.api.editMessageText(ctx.chat.id, thinking.message_id, body).catch(async () => {
-      await ctx.reply(body);
+    const htmlOpts = { parse_mode: "HTML" };
+    await ctx.api.editMessageText(ctx.chat.id, thinking.message_id, body, htmlOpts).catch(async () => {
+      await ctx.reply(body, htmlOpts);
     });
   } catch (e) {
+    if (askTable) {
+      // Render failure must never dead-end: fall back to the text board.
+      const fallback = await allowanceText().catch(
+        () => `allowance table failed: ${String(e.message || e).slice(0, 300)}`
+      );
+      await ctx.api.editMessageText(ctx.chat.id, thinking.message_id, fallback).catch(async () => {
+        await ctx.reply(fallback);
+      });
+      return;
+    }
     await ctx.reply(`allowance failed: ${String(e.message || e).slice(0, 400)}`);
   }
 });
@@ -2820,6 +3321,23 @@ bot.on("message:text", async (ctx) => {
     await ctx.reply(statusPingReply()).catch(() => {});
     return;
   }
+  // 1b) F) "show the allowance as a table" is answered locally from the free-lane
+  // ledger (HTML grid via MEDIA:). Never dispatched to the agent — that path ran
+  // scripts/tool-allowance.mjs and answered with the CLI install matrix instead.
+  if (wantsAllowanceTable(text)) {
+    const thinking = await ctx.reply("Building free-lane allowance table…");
+    try {
+      await deliverReply(ctx, thinking, allowanceTableReply());
+    } catch (e) {
+      const fallback = await allowanceText().catch(
+        () => `allowance table failed: ${String(e.message || e).slice(0, 300)}`
+      );
+      await ctx.api.editMessageText(ctx.chat.id, thinking.message_id, fallback).catch(async () => {
+        await ctx.reply(fallback);
+      });
+    }
+    return;
+  }
   // 2) Single-flight: refuse parallel work while busy.
   if (state.busy) {
     // Self-heal: lock with no in-process dispatch is an orphan (restart / crashed waiter).
@@ -2963,7 +3481,7 @@ const BOT_COMMANDS = [
   { command: "help", description: "List all commands" },
   { command: "status", description: "Live status: usage %, thinking, model" },
   { command: "think", description: "Show/set thinking effort (cline: none|low|medium|high|xhigh)" },
-  { command: "allowance", description: "Free-lane allowance snapshot (best-effort)" },
+  { command: "allowance", description: "Free-lane allowance (add 'table' for the HTML grid)" },
   { command: "compact", description: "Compact OpenCode session context" },
   { command: "switch", description: "Switch provider (opencode, cline, …)" },
   { command: "model", description: "List or set model for active provider" },
@@ -3021,17 +3539,21 @@ async function busyWatchdogTick() {
     console.log("busyWatchdog status failed:", e.message || e);
   }
 }
-setInterval(() => {
-  busyWatchdogTick().catch((e) => console.log("busyWatchdog error:", e.message || e));
-}, BUSY_WATCHDOG_MS);
+// Runtime bootstrap is skipped in import/test mode (TG_ROUTER_NO_START=1) so
+// scripts/test-quota-parse.mjs can exercise the helpers without polling Telegram.
+if (!NO_START) {
+  setInterval(() => {
+    busyWatchdogTick().catch((e) => console.log("busyWatchdog error:", e.message || e));
+  }, BUSY_WATCHDOG_MS);
+}
 
-console.log(`tg-provider-router starting; allowlist=${ALLOWED}; default=${state.provider}`);
+if (!NO_START) console.log(`tg-provider-router starting; allowlist=${ALLOWED}; default=${state.provider}`);
 // A) Single-poller lock: exit 0 if another router owns the token (stale pid cleaned).
-acquireSinglePollerLock();
-console.log(`single-poller lock ok: pidfile=${PID_PATH} lock=${LOCK_PATH}`);
+if (!NO_START) acquireSinglePollerLock();
+if (!NO_START) console.log(`single-poller lock ok: pidfile=${PID_PATH} lock=${LOCK_PATH}`);
 // Crash/restart mid-wait leaves sticky busy with nobody awaiting the turn.
 // Always clear the Telegram lock; abort leftover OpenCode work so the next message can start.
-if (state.busy) {
+if (!NO_START && state.busy) {
   const sid = state.sessions?.opencode;
   console.log("startup: sticky busy=true; aborting leftover OpenCode turn and clearing lock…");
   Promise.resolve()
@@ -3056,8 +3578,31 @@ if (state.busy) {
     });
 }
 // B) Reap any cline child persisted from a crashed run before polling.
-try { reapClineChild("startup reap"); } catch {}
-registerBotCommands().catch((e) => console.error("setMyCommands failed:", e.message || e));
+if (!NO_START) {
+  try { reapClineChild("startup reap"); } catch {}
+}
+// D) Free-lane table drift repair: overlay the live session quota onto
+// free-lane-table.json (pref order untouched) so the ledger always matches
+// /allowance. Never invent counts and never touch a lane the session does not
+// mark as still depleted.
+if (!NO_START) {
+  try {
+    const sync = syncFreeLaneTableFromSession({
+      tablePath: FREE_LANE_TABLE_PATH,
+      session: state,
+      labelFn: resetHumanLabel,
+    });
+    if (sync.updated) {
+      console.log(`startup: free-lane-table.json synced from session quota (${(sync.changes || []).length} lane change(s))`);
+      for (const c of sync.changes || []) console.log(`  · pref ${c.pref} ${c.lane}: ${c.from} → ${c.to}`);
+    } else {
+      console.log(`startup: free-lane-table.json already in sync (${sync.reason || "ok"})`);
+    }
+  } catch (e) {
+    console.log("startup: free-lane-table sync failed:", e.message || e);
+  }
+}
+if (!NO_START) registerBotCommands().catch((e) => console.error("setMyCommands failed:", e.message || e));
 
 async function startPollingWithRetry() {
   // A) Optional one-shot drain is OK, but never leave two long-pollers running.
@@ -3097,4 +3642,32 @@ async function startPollingWithRetry() {
     }
   }
 }
-startPollingWithRetry();
+if (!NO_START) startPollingWithRetry();
+
+// Test/import surface (scripts/test-quota-parse.mjs) — pure helpers only.
+export {
+  allowanceText,
+  nextFailoverRoutes,
+  nextAvailableRoutes,
+  isQuotaOrLimitError,
+  looksLikeHelpOrStatusDoc,
+  looksLikeMarkdownTable,
+  wantsAllowanceTable,
+  wantsAllowanceTableArg,
+  allowanceTableReply,
+  renderFreeLaneTableHtml,
+  isCfNeuronExhaustedError,
+  parseCountdownHint,
+  parseDurationHint,
+  parseDepletedUntil,
+  resetHumanLabel,
+  laneMatchesRoute,
+  syncFreeLaneTable,
+  syncFreeLaneTableFromSession,
+  markDepleted,
+  ingestOpenCodeLogLimits,
+  quotaKey,
+  quotaRecordKey,
+  FREE_LANE_TABLE_PATH,
+  STATE_PATH,
+};

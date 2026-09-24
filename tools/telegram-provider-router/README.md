@@ -32,7 +32,7 @@ This package encodes the fixes. Read `docs/` and `tickets/*_REPORT.md` before ch
 | **Cloudflare** | OpenCode `@cf/…` / Workers AI | **Shared** 10k neurons/day (UTC) | `/allowance` uses per-reply neuron estimates; live GraphQL needs Analytics Read on the token. |
 | **Freebuff** | CLI / session Freebucks | **Shared** daily Freebucks (region-based) | Prefer **terminal-only** until durable one-shot chat is restored; do not burn Freebucks just to probe. |
 
-Commands (high level): `/switch`, `/model`, `/freemodel`, `/allowance`, `/status`, `/think`, `/compact`, `/unlock`, Cancel & unlock on Busy replies.
+Commands (high level): `/switch`, `/model`, `/freemodel`, `/allowance`, `/allowance table` (same free-lane ledger as an HTML grid, delivered with `MEDIA:<abs-path.html>`), `/status`, `/think`, `/compact`, `/unlock`, Cancel & unlock on Busy replies.
 
 ---
 
