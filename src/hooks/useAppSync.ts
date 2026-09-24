@@ -190,7 +190,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
       setFoodLogs(prev => mergeFoodLogsDeduped(prev, newFoods));
     }
     if (typeof newTotal === 'number' && newTotal > 0) {
-      setTotalFoodsCount(newTotal);
+      setTotalFoodsCount(prev => Math.max(prev || 0, newTotal));
     }
   }, [profile?.uid, profile?.email]);
 
@@ -229,6 +229,9 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
     }
     // Load local storage first so we don't wipe it on page load
     const parsedLocal = await getAggregatedAppData(activeEmail) || {};
+    if (typeof parsedLocal.totalFoodsCount === 'number' && parsedLocal.totalFoodsCount > 0) {
+      setTotalFoodsCount(prev => Math.max(prev || 0, parsedLocal.totalFoodsCount));
+    }
     // Snapshot of current local state (from storage or memory) for safe merge
     const currentEmail = activeEmail?.toLowerCase().trim() || 'guest';
     const profileEmail = profile?.email?.toLowerCase().trim();
@@ -363,7 +366,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           { lastSyncTime: (forcePull || forceReplaceLocal) ? undefined : (parsedLocal.lastSyncedAt || 0) }
         );
         if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
-          setTotalFoodsCount(fetchedTotalFoods);
+          setTotalFoodsCount(prev => Math.max(prev || 0, fetchedTotalFoods));
         }
         
         let mergedBioHist = sb;
@@ -439,7 +442,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           { timeoutMs: 90000, skipFirebaseFallback: true }
         );
         if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
-          setTotalFoodsCount(fetchedTotalFoods);
+          setTotalFoodsCount(prev => Math.max(prev || 0, fetchedTotalFoods));
         }
 
         if (!serverProfile && serverBiomarkers.length === 0 && serverFoods.length === 0) {
@@ -528,6 +531,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           actions: mergedActions,
           dailyBenefits: mergedBenefits,
           report: resolvedReport,
+          totalFoodsCount: fetchedTotalFoods || totalFoodsCount,
           lastSyncedAt: Date.now()
         });
 
@@ -729,7 +733,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
                 }
               );
               if (typeof fetchedTotalFoods === 'number' && fetchedTotalFoods > 0) {
-                setTotalFoodsCount(fetchedTotalFoods);
+                setTotalFoodsCount(prev => Math.max(prev || 0, fetchedTotalFoods));
               }
               const isIncrementalPull = !forcePull && !forceReplaceLocal && !!parsedLocal.lastSyncedAt && Array.isArray(localFoods) && localFoods.length > 0;
               const activeDeletedFoodIds = {
@@ -1315,6 +1319,7 @@ export function useAppSync(options: UseAppSyncOptions): UseAppSyncReturn {
           actions: mergedActions,
           dailyBenefits: mergedBenefits,
           report: resolvedReport,
+          totalFoodsCount,
           lastSyncedAt: Date.now()
         };
         await safeSaveToLocalStorage(getStorageKey(mergedProfile?.email || profile?.email || auth.currentUser?.email), bundle);

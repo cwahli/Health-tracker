@@ -14,8 +14,21 @@ export async function pullAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
     const { auth } = await import('../firebase');
+    if (!auth.currentUser && typeof (auth as any)?.authStateReady === 'function') {
+      await Promise.race([
+        (auth as any).authStateReady(),
+        new Promise(r => setTimeout(r, 1500))
+      ]);
+    }
     const token = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => undefined) : undefined;
-    if (token) headers['Authorization'] = 'Bearer ' + token;
+    if (token) {
+      headers['Authorization'] = 'Bearer ' + token;
+    } else {
+      const localToken = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+      if (localToken) {
+        headers['Authorization'] = 'Bearer ' + localToken;
+      }
+    }
   } catch { /* offline / signed out: server decides */ }
   return headers;
 }

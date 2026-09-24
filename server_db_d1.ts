@@ -398,12 +398,37 @@ export async function d1PullSync(opts: D1PullOptions): Promise<{
     data: safeJsonParse(row.data, {}),
   }));
 
-  const totalFoodsCount = countFoodRes.success && countFoodRes.results?.[0]?.cnt != null
-    ? Number(countFoodRes.results[0].cnt)
-    : rawFoods.length;
-  const totalBiomarkersCount = countBioRes.success && countBioRes.results?.[0]?.cnt != null
-    ? Number(countBioRes.results[0].cnt)
-    : rawBiomarkers.length;
+  let totalFoodsCount: number | undefined;
+  if (countFoodRes.success && countFoodRes.results?.[0]?.cnt != null) {
+    totalFoodsCount = Number(countFoodRes.results[0].cnt);
+  } else {
+    if (!countFoodRes.success) console.warn('[D1 Pull] countFood query failed, retrying once...', countFoodRes.error);
+    const retryCount = await d1Query<any>(countFoodSql, possibleUids);
+    if (retryCount.success && retryCount.results?.[0]?.cnt != null) {
+      totalFoodsCount = Number(retryCount.results[0].cnt);
+    } else {
+      if (!retryCount.success) console.error('[D1 Pull] countFood query retry also failed:', retryCount.error);
+      if ((!offset || offset === 0) && !lastSyncTime && rawFoods.length < limit) {
+        totalFoodsCount = rawFoods.length;
+      }
+    }
+  }
+
+  let totalBiomarkersCount: number | undefined;
+  if (countBioRes.success && countBioRes.results?.[0]?.cnt != null) {
+    totalBiomarkersCount = Number(countBioRes.results[0].cnt);
+  } else {
+    if (!countBioRes.success) console.warn('[D1 Pull] countBio query failed, retrying once...', countBioRes.error);
+    const retryCount = await d1Query<any>(countBioSql, possibleUids);
+    if (retryCount.success && retryCount.results?.[0]?.cnt != null) {
+      totalBiomarkersCount = Number(retryCount.results[0].cnt);
+    } else {
+      if (!retryCount.success) console.error('[D1 Pull] countBio query retry also failed:', retryCount.error);
+      if ((!offset || offset === 0) && !lastSyncTime && rawBiomarkers.length < limit) {
+        totalBiomarkersCount = rawBiomarkers.length;
+      }
+    }
+  }
 
   return { foods: rawFoods, biomarkers: rawBiomarkers, profiles, totalFoodsCount, totalBiomarkersCount };
 }
