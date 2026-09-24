@@ -16,7 +16,9 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 **BOT-20 is DONE 2026-09-24.** `run-coding-dispatch.sh` calls `scripts/lib/bug-pack.mjs` (`packForDispatch` calling `packCheck` / `splitMultiItemReport`). Input is a versioned `work_item` or the four fields (`page`, `observed`, `expected`, `screenshot`). Multi-item reports are split to 1 card + split list. Any payload failing `packCheck` is rejected with exit code 1 and never passed through as `--task`. Tests: `src/utils/bugPackFixtures.test.ts` (17/17 green), `scripts/assert-bug-pack.mjs` (31/31 green).
 
-**Next code: BOT-21.** Log `(ticket, agent, tool, args-hash)`. The same hash twice on one ticket alerts. Two repro verdicts on one card must match or escalate.
+**BOT-21 is DONE 2026-09-24.** Log `(ticket, agent, tool, args-hash)` in `scripts/lib/coordination-tax.mjs` and `run-coding-dispatch.sh`. The same hash twice on one ticket alerts (`REPEAT_ARGS_HASH`). Two repro verdicts on one card must match or escalate (`repro_verdict_conflict`, `assignee=orchestrator`, `queue=blocked`). Tests: vitest 123/123 + 35/35, assert-coordination-tax 29/29.
+
+**Next code: BOT-14.** The two missing `shared_skills` paths in `bots/registry.json` become links to `scripts/skills/common`.
 
 **BOT-18 is DONE 2026-09-24.** Lease `{chatId, messageId, startedAt, pid}` written on run start and updated on progress create; boot sweep edits orphaned messages to `restarted mid-run — send it again` and appends `crash-pending` row; Telegram 409 conflict exits `process.exit(1)`. Tests: 119/119 green.
 
@@ -26,8 +28,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 ## Then, in order
 
-1. **BOT-21.** Log `(ticket, agent, tool, args-hash)`. The same hash twice on one ticket alerts. Two repro verdicts on one card must match or escalate.
-3. **BOT-14.** The two missing `shared_skills` paths in `bots/registry.json` become links to `scripts/skills/common`.
+1. **BOT-14.** The two missing `shared_skills` paths in `bots/registry.json` become links to `scripts/skills/common`.
 4. **BOT-13.** Stores: `decisions/`, `dead-ends/`, `facts/`, plus shared `USER.md` (caps 1,375 / 2,200). Retrieve on a build, investigate, or decide turn only. Do not inject a whole memory file. Do not append a `/compact` summary. Missing, over-cap, or stale → a receipt. Count false-fires.
 5. **BOT-15.** One outcome row per dispatch: ticket, surface, provider/model, defect class, tokens, wall-clock, outcome. The pre-action gate reads it in code, beside the file locks. The second identical signature writes one test or rule the same day.
 6. **BOT-16.** Composed soul, line budgets. The three laws below live in that soul, because the Hermes gateway cwd is `~/.hermes` and a Telegram turn does not load `AGENTS.md`.

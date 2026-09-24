@@ -15,6 +15,7 @@ import {
   mapLegacyStatus,
   type BugAttempt,
   type BugCommit,
+  type BugRepro,
   type BugWorkItem,
 } from './bugWorkItem';
 
@@ -37,6 +38,90 @@ export type BugTicketState = {
   /** Legacy-compatible queue for old readers. */
   queue: BugWorkItem['queue'];
 };
+
+export type ReproConsensusResult = {
+  ok: boolean;
+  match: boolean;
+  escalated: boolean;
+  status: string;
+  consensus?: string;
+  blocked_reason?: string;
+  escalation_assignee?: string;
+  reason?: string;
+  count: number;
+  verdicts: Array<{ status: string; by?: string; [k: string]: any }>;
+};
+
+/**
+ * Evaluate reproduction verdicts on a card (BOT-21 rule).
+ * "Two repro verdicts on one card must match or escalate."
+ */
+export function evaluateReproVerdicts(verdictsRaw: any = []): ReproConsensusResult {
+  const rawList = Array.isArray(verdictsRaw)
+    ? verdictsRaw
+    : verdictsRaw?.verdicts || [verdictsRaw?.prev, verdictsRaw?.next].filter(Boolean);
+
+  const verdicts = (rawList || [])
+    .map((v: any) => (typeof v === 'string' ? { status: v } : v))
+    .filter((v: any) => v && typeof v.status === 'string');
+
+  const substantive = verdicts.filter((v: any) =>
+    ['confirmed', 'failed', 'ambiguous'].includes(v.status)
+  );
+
+  if (substantive.length === 0) {
+    return {
+      ok: true,
+      match: true,
+      escalated: false,
+      status: verdicts[0]?.status || 'none',
+      count: 0,
+      verdicts,
+    };
+  }
+
+  if (substantive.length === 1) {
+    return {
+      ok: true,
+      match: true,
+      escalated: false,
+      status: substantive[0].status,
+      consensus: substantive[0].status,
+      count: 1,
+      verdicts: substantive,
+    };
+  }
+
+  // Two or more substantive verdicts: check consensus
+  const firstStatus = substantive[0].status;
+  const allMatch = substantive.every((v: any) => v.status === firstStatus && v.status !== 'ambiguous');
+
+  if (allMatch) {
+    return {
+      ok: true,
+      match: true,
+      escalated: false,
+      status: firstStatus,
+      consensus: firstStatus,
+      count: substantive.length,
+      verdicts: substantive,
+    };
+  }
+
+  // Conflict / mismatch / ambiguous -> ESCALATE!
+  const statusSummary = substantive.map((v: any) => `${v.by ? v.by + ':' : ''}${v.status}`).join(' vs ');
+  return {
+    ok: true,
+    match: false,
+    escalated: true,
+    status: 'ambiguous',
+    blocked_reason: 'repro_verdict_conflict',
+    escalation_assignee: 'orchestrator',
+    reason: `Two repro verdicts on one card conflict (${statusSummary}); escalated with blocked_reason=repro_verdict_conflict`,
+    count: substantive.length,
+    verdicts: substantive,
+  };
+}
 
 function lastAttemptRow(item: BugWorkItem): (BugAttempt & { applied?: boolean }) | undefined {
   for (let i = item.commits.length - 1; i >= 0; i--) {
@@ -68,6 +153,20 @@ export function bugState(item: BugWorkItem): BugTicketState {
   if (!blockedReason && mapLegacyStatus(undefined, item.queue) === 'blocked') {
     blockedReason = 'queue_blocked';
   }
+
+  // BOT-21: Multi-verdict consensus check
+  if (Array.isArray(item.repro_verdicts) && item.repro_verdicts.length >= 2) {
+    const reproEval = evaluateReproVerdicts(item.repro_verdicts);
+    if (!reproEval.match && reproEval.escalated) {
+      if (!blockedReason) {
+        blockedReason = reproEval.blocked_reason || 'repro_verdict_conflict';
+      }
+      flags.not_reproducible = true;
+    } else if (reproEval.status === 'failed') {
+      flags.not_reproducible = true;
+    }
+  }
+
   if (blockedReason) flags.blocked_reason = blockedReason;
 
   if (item.defect && item.repro?.status === 'needed') flags.needs_repro = true;
@@ -108,7 +207,7 @@ export function bugState(item: BugWorkItem): BugTicketState {
   // blocked is a flag, not a state — but queue=blocked is preserved for old readers.
   let queue: BugWorkItem['queue'];
   if (state === 'done') queue = 'done';
-  else if (flags.blocked_reason && legacy === 'blocked') queue = 'blocked';
+  else if (flags.blocked_reason && (legacy === 'blocked' || flags.blocked_reason === 'repro_verdict_conflict')) queue = 'blocked';
   else if (state === 'in_fix' || state === 'verifying') queue = 'in_progress';
   else if (legacy === 'blocked') queue = 'blocked';
   else if (legacy === 'in_progress') queue = 'in_progress';
