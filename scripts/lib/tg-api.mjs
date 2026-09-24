@@ -73,12 +73,25 @@ export function chunkText(text, limit = MAX_MESSAGE_CHARS) {
 }
 
 export class TelegramApi {
-  constructor(token, { baseUrl = API_BASE, fetchImpl = globalThis.fetch } = {}) {
+  constructor(token, { baseUrl = API_BASE, fetchImpl = globalThis.fetch, onHeaders = null } = {}) {
     if (!token) throw new Error('TelegramApi: token is required');
     if (typeof fetchImpl !== 'function') throw new Error('TelegramApi: fetch is not available');
     this.token = token;
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.fetch = fetchImpl;
+    // BOT-9 transport hardening: optional per-response headers hook so a
+    // shared Throttle can slow down proactively (see Throttle.noteHeaders).
+    this.onHeaders = typeof onHeaders === 'function' ? onHeaders : null;
+  }
+
+  notifyHeaders(res) {
+    if (this.onHeaders && res && res.headers) {
+      try {
+        this.onHeaders(res.headers);
+      } catch {
+        // header observation must never break a call
+      }
+    }
   }
 
   async call(method, payload = {}) {
@@ -103,6 +116,7 @@ export class TelegramApi {
           signal: AbortSignal.timeout(abortMs),
         });
         lastErr = null;
+        this.notifyHeaders(res);
         break;
       } catch (err) {
         lastErr = err;

@@ -427,8 +427,10 @@ async function main() {
   }
 
   const token = resolveToken(config);
-  const api = new TelegramApi({ token });
   const throttle = new Throttle();
+  const api = new TelegramApi(token, {
+    onHeaders: (headers) => throttle.noteHeaders(headers),
+  });
 
   console.log(`[collab-bot] Starting polling for @${config.name} (${config.id})...`);
   let offset = 0;
@@ -453,6 +455,20 @@ async function main() {
         }
       }
     } catch (err) {
+      // BOT-9 transport hardening (mirrors bot-host): a 409 means a second
+      // poller owns this token — die loudly instead of fighting over offsets.
+      // A 429 pauses for the server's retry_after instead of hammering.
+      if (err instanceof TelegramError && err.isConflict) {
+        console.error('[collab-bot] Telegram 409 Conflict: another poller owns this token. Exiting.');
+        process.exit(1);
+      }
+      if (err instanceof TelegramError && err.isRateLimit) {
+        const wait = Math.min(Math.max(err.retryAfter, 1), 60);
+        console.error(`[collab-bot] Telegram 429 rate-limited; pausing ${wait}s.`);
+        throttle.pause(wait);
+        await new Promise((r) => setTimeout(r, wait * 1000));
+        continue;
+      }
       console.error('[collab-bot] Polling error:', err.message);
       await new Promise((r) => setTimeout(r, 5000));
     }
