@@ -1427,6 +1427,30 @@ export default function FoodHistoryTab({
                 activeFoodLogs,
                 log
               );
+            const hasPreview = resolvedImgs.length > 0 || Boolean(resolvedImg);
+            const savedMealSourceId = String((log as any)?.sourceMealId || (log as any)?.source_meal_id || '').trim();
+            const savedMealMaster = savedMealSourceId ? masterByChildId.get(String(log.id)) : undefined;
+            const savedMealOpenable = Boolean(savedMealMaster && savedMealMaster.id !== log.id &&
+              combinedItems.some((it: any) => it.type === 'log' && it.data?.id === savedMealMaster.id));
+            const renderSavedMealTag = (positionClassName = '') => {
+              if (isEditing || !savedMealSourceId) return null;
+              return (
+                <button
+                  type="button"
+                  disabled={!savedMealOpenable}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openMasterMeal(log);
+                  }}
+                  title={savedMealOpenable ? `${t.savedMealTag || 'Saved meal'}: ${savedMealMaster?.name}` : (t.savedMealTag || 'Saved meal')}
+                  className={`${positionClassName} text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wide shadow-sm ${savedMealOpenable
+                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800 cursor-pointer'
+                    : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 cursor-default'}`}
+                >
+                  {t.savedMealTag || 'Saved meal'}
+                </button>
+              );
+            };
             
             return (
               <div
@@ -1440,7 +1464,7 @@ export default function FoodHistoryTab({
                 className={`overflow-hidden transition-all border-b border-theme-border pb-4 mb-4 ${!isEditing && !isExpanded ? 'cursor-pointer' : ''} ${isExpanded ? 'ring-2 ring-indigo-500/40 rounded-2xl bg-indigo-50/10 dark:bg-indigo-950/10' : ''}`}
               >
                 {/* Large visual rendering of attached meal images (lazy-loaded in ImageSlider) */}
-                {(resolvedImgs.length > 0 || resolvedImg) ? (
+                {hasPreview ? (
                   <div className="w-full h-48 overflow-hidden relative">
                     <ImageSlider
                       images={resolvedImgs}
@@ -1449,6 +1473,7 @@ export default function FoodHistoryTab({
                       deferUntilVisible
                       language={profile.language}
                     />
+                    {renderSavedMealTag('absolute left-3 top-3 z-20')}
                   </div>
                 ) : null}
 
@@ -1822,29 +1847,7 @@ export default function FoodHistoryTab({
                             <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
                               {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
                             </span>
-                            {(() => {
-                              const pid = String((log as any)?.sourceMealId || (log as any)?.source_meal_id || '').trim();
-                              if (!pid) return null;
-                              const master = masterByChildId.get(String(log.id));
-                              const openable = Boolean(master && master.id !== log.id &&
-                                combinedItems.some((it: any) => it.type === 'log' && it.data?.id === master.id));
-                              return (
-                                <button
-                                  type="button"
-                                  disabled={!openable}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openMasterMeal(log);
-                                  }}
-                                  title={openable ? `${t.savedMealTag || 'Saved meal'}: ${master.name}` : (t.savedMealTag || 'Saved meal')}
-                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wide ${openable
-                                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800 cursor-pointer'
-                                    : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 cursor-default'}`}
-                                >
-                                  {t.savedMealTag || 'Saved meal'}
-                                </button>
-                              );
-                            })()}
+                            {!hasPreview ? renderSavedMealTag() : null}
                             {(() => {
                               const v = resolveMealVerdict(log, profile?.language);
                               if (!v?.label) return null;

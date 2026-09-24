@@ -364,6 +364,7 @@
       "expect": [
         "scripts/lib/freemodels.mjs",
         "scripts/lib/agent-cline.mjs",
+      "scripts/lib/agent-gemini.mjs",
         "scripts/lib/agent-opencode.mjs",
         "golden/scorecard/current/FREE_MODEL_TOOL_PICKER.md",
         "golden/scorecard/current/FREE_CODING_TOOLS_CATALOG.md",
