@@ -10,6 +10,7 @@ import {
 import {
   BUG_STATE_NAMES,
   bugState,
+  evaluateReproVerdicts,
   projectBugState,
   validateDefect,
   validatePlan,
@@ -279,5 +280,110 @@ describe('artifact validators', () => {
     expect(d.ok && 'state' in (d.value as any)).toBe(false);
     const v = validateVerify({ command: 'x', result: 'green', state: 'done' });
     expect(v.ok && 'state' in (v.value as any)).toBe(false);
+  });
+});
+
+describe('BOT-21 — Repro Consensus (evaluateReproVerdicts & bugState)', () => {
+  it('empty or non-substantive verdicts return count 0 and match true', () => {
+    expect(evaluateReproVerdicts([]).match).toBe(true);
+    expect(evaluateReproVerdicts([{ status: 'not_needed' }]).count).toBe(0);
+    expect(evaluateReproVerdicts([{ status: 'needed' }]).count).toBe(0);
+  });
+
+  it('single substantive verdict returns that status and does not escalate', () => {
+    const res = evaluateReproVerdicts([{ status: 'confirmed', command: 'cmd', exit_code: 1 }]);
+    expect(res.match).toBe(true);
+    expect(res.escalated).toBe(false);
+    expect(res.status).toBe('confirmed');
+    expect(res.count).toBe(1);
+  });
+
+  it('two matching confirmed verdicts maintain consensus without escalation', () => {
+    const res = evaluateReproVerdicts([
+      { status: 'confirmed', command: 'cmd1', exit_code: 1, by: 'qa1' },
+      { status: 'confirmed', command: 'cmd2', exit_code: 1, by: 'qa2' },
+    ]);
+    expect(res.match).toBe(true);
+    expect(res.escalated).toBe(false);
+    expect(res.status).toBe('confirmed');
+    expect(res.consensus).toBe('confirmed');
+    expect(res.count).toBe(2);
+  });
+
+  it('two matching failed verdicts maintain consensus and mark status failed', () => {
+    const res = evaluateReproVerdicts([
+      { status: 'failed', run_log: 'log1', by: 'qa1' },
+      { status: 'failed', run_log: 'log2', by: 'qa2' },
+    ]);
+    expect(res.match).toBe(true);
+    expect(res.escalated).toBe(false);
+    expect(res.status).toBe('failed');
+    expect(res.consensus).toBe('failed');
+  });
+
+  it('two conflicting verdicts (confirmed vs failed) escalate to orchestrator with repro_verdict_conflict', () => {
+    const res = evaluateReproVerdicts([
+      { status: 'confirmed', command: 'cmd', exit_code: 1, by: 'qa1' },
+      { status: 'failed', run_log: 'log', by: 'qa2' },
+    ]);
+    expect(res.match).toBe(false);
+    expect(res.escalated).toBe(true);
+    expect(res.blocked_reason).toBe('repro_verdict_conflict');
+    expect(res.escalation_assignee).toBe('orchestrator');
+    expect(res.status).toBe('ambiguous');
+  });
+
+  it('two conflicting verdicts with ambiguous status escalate to orchestrator', () => {
+    const res = evaluateReproVerdicts([
+      { status: 'confirmed', command: 'cmd', exit_code: 1 },
+      { status: 'ambiguous', run_log: 'flaky' },
+    ]);
+    expect(res.match).toBe(false);
+    expect(res.escalated).toBe(true);
+    expect(res.blocked_reason).toBe('repro_verdict_conflict');
+  });
+
+  it('bugState: card with conflicting repro_verdicts derives blocked_reason and queue=blocked', () => {
+    const item = base({
+      defect: { component: 'a', observed: 'b', expected: 'c', criteria: 'd' },
+      repro_verdicts: [
+        { status: 'confirmed', command: 'cmd', exit_code: 1 },
+        { status: 'failed', run_log: 'log' },
+      ],
+    });
+    const s = bugState(item);
+    expect(s.flags.blocked_reason).toBe('repro_verdict_conflict');
+    expect(s.flags.not_reproducible).toBe(true);
+    expect(s.queue).toBe('blocked');
+    expect(s.state).toBe('packed');
+  });
+
+  it('bugState: card with matching confirmed repro_verdicts stays in ready queue (no conflict flag)', () => {
+    const item = base({
+      defect: { component: 'a', observed: 'b', expected: 'c', criteria: 'd' },
+      repro_verdicts: [
+        { status: 'confirmed', command: 'cmd', exit_code: 1 },
+        { status: 'confirmed', command: 'cmd', exit_code: 1 },
+      ],
+    });
+    const s = bugState(item);
+    expect(s.flags.blocked_reason).toBeUndefined();
+    expect(s.flags.not_reproducible).toBeUndefined();
+    expect(s.queue).toBe('ready');
+    expect(s.state).toBe('packed');
+  });
+
+  it('bugState: card with matching failed repro_verdicts derives not_reproducible', () => {
+    const item = base({
+      defect: { component: 'a', observed: 'b', expected: 'c', criteria: 'd' },
+      repro_verdicts: [
+        { status: 'failed', run_log: 'log1' },
+        { status: 'failed', run_log: 'log2' },
+      ],
+    });
+    const s = bugState(item);
+    expect(s.flags.blocked_reason).toBeUndefined();
+    expect(s.flags.not_reproducible).toBe(true);
+    expect(s.state).toBe('packed');
   });
 });

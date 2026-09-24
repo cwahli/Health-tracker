@@ -4,6 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { compressReasoning, cleanReasoning } from '../scripts/lib/reasoning-compress.mjs';
+import {
+  canonicalString,
+  argsHash,
+  normalizeTicket,
+  recordCoordination,
+  readCoordinationLog,
+  evaluateReproVerdicts as evaluateCoordinationReproVerdicts,
+} from '../scripts/lib/coordination-tax.mjs';
 import { Throttle } from '../scripts/lib/tg-throttle.mjs';
 import {
   mapOpencodeEvent,
@@ -1553,6 +1561,124 @@ describe('BOT-18 — silence to a receipt and 409 conflict handling', () => {
       process.env.BOT_FAILURE_LOG = prevLogEnv;
       fs.rmSync(path.dirname(tmpFailLog), { recursive: true, force: true });
     }
+  });
+});
+
+describe('BOT-21 — Coordination Tax Logger & Repro Consensus', () => {
+  it('canonicalString produces deterministic key ordering and canonical JSON', () => {
+    const objA = { z: 1, a: 2, m: { y: 'bar', x: 'foo' } };
+    const objB = { a: 2, z: 1, m: { x: 'foo', y: 'bar' } };
+    expect(canonicalString(objA)).toBe(canonicalString(objB));
+    expect(canonicalString(JSON.stringify(objA))).toBe(canonicalString(objB));
+    expect(argsHash(objA)).toBe(argsHash(objB));
+    expect(argsHash(objA)).toHaveLength(16);
+  });
+
+  it('normalizeTicket normalizes ticket identifiers', () => {
+    expect(normalizeTicket('12')).toBe('12');
+    expect(normalizeTicket('#12')).toBe('12');
+    expect(normalizeTicket('BUG-12')).toBe('12');
+    expect(normalizeTicket('#BUG-12')).toBe('12');
+  });
+
+  it('recordCoordination logs invocations and alerts on repeated args-hash on same ticket', () => {
+    const tmpLog = path.join(os.tmpdir(), `coord_tax_test_${Date.now()}_${Math.random().toString(36).slice(2)}.jsonl`);
+    try {
+      const args1 = { task: 'fix typo', tool: 'opencode', model: 'flash' };
+      // First call on ticket 101 -> count 1, alert false
+      const r1 = recordCoordination({
+        ticket: '101',
+        agent: 'orchestrator',
+        tool: 'opencode',
+        args: args1,
+        logPath: tmpLog,
+      });
+      expect(r1.ok).toBe(true);
+      expect(r1.count).toBe(1);
+      expect(r1.alert).toBe(false);
+
+      // Second call with IDENTICAL args on same ticket -> count 2, alert true, alertReason REPEAT_ARGS_HASH
+      const r2 = recordCoordination({
+        ticket: '101',
+        agent: 'orchestrator',
+        tool: 'opencode',
+        args: args1,
+        logPath: tmpLog,
+      });
+      expect(r2.ok).toBe(true);
+      expect(r2.count).toBe(2);
+      expect(r2.alert).toBe(true);
+      expect(r2.alertReason).toBe('REPEAT_ARGS_HASH');
+
+      // Call on DIFFERENT ticket with same args -> count 1, alert false (per-ticket tracking)
+      const r3 = recordCoordination({
+        ticket: '102',
+        agent: 'orchestrator',
+        tool: 'opencode',
+        args: args1,
+        logPath: tmpLog,
+      });
+      expect(r3.count).toBe(1);
+      expect(r3.alert).toBe(false);
+
+      // Call on ticket 101 with DIFFERENT args -> count 1 for new hash, alert false
+      const r4 = recordCoordination({
+        ticket: '101',
+        agent: 'orchestrator',
+        tool: 'opencode',
+        args: { task: 'different task' },
+        logPath: tmpLog,
+      });
+      expect(r4.count).toBe(1);
+      expect(r4.alert).toBe(false);
+
+      // readCoordinationLog filters by ticket
+      const list101 = readCoordinationLog({ ticket: '101', logPath: tmpLog });
+      expect(list101).toHaveLength(3);
+      const listAll = readCoordinationLog({ logPath: tmpLog });
+      expect(listAll).toHaveLength(4);
+    } finally {
+      if (fs.existsSync(tmpLog)) fs.unlinkSync(tmpLog);
+    }
+  });
+
+  it('evaluateReproVerdicts enforces matching verdicts or escalates to orchestrator', () => {
+    // Matching confirmed verdicts
+    const matchConfirmed = evaluateCoordinationReproVerdicts([
+      { status: 'confirmed', by: 'qa1' },
+      { status: 'confirmed', by: 'qa2' },
+    ]);
+    expect(matchConfirmed.match).toBe(true);
+    expect(matchConfirmed.escalated).toBe(false);
+    expect(matchConfirmed.consensus).toBe('confirmed');
+
+    // Matching failed verdicts
+    const matchFailed = evaluateCoordinationReproVerdicts([
+      { status: 'failed', by: 'qa1' },
+      { status: 'failed', by: 'qa2' },
+    ]);
+    expect(matchFailed.match).toBe(true);
+    expect(matchFailed.escalated).toBe(false);
+    expect(matchFailed.consensus).toBe('failed');
+
+    // Conflicting verdicts (confirmed vs failed) -> escalate!
+    const conflict = evaluateCoordinationReproVerdicts([
+      { status: 'confirmed', by: 'qa1' },
+      { status: 'failed', by: 'qa2' },
+    ]);
+    expect(conflict.match).toBe(false);
+    expect(conflict.escalated).toBe(true);
+    expect(conflict.blocked_reason).toBe('repro_verdict_conflict');
+    expect(conflict.escalation_assignee).toBe('orchestrator');
+
+    // Ambiguous verdict -> escalate!
+    const ambiguous = evaluateCoordinationReproVerdicts([
+      { status: 'confirmed', by: 'qa1' },
+      { status: 'ambiguous', by: 'qa2' },
+    ]);
+    expect(ambiguous.match).toBe(false);
+    expect(ambiguous.escalated).toBe(true);
+    expect(ambiguous.blocked_reason).toBe('repro_verdict_conflict');
   });
 });
 

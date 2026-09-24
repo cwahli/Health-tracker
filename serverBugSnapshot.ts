@@ -42,6 +42,7 @@ import {
 } from './src/utils/bugWorkItem';
 import {
   bugState,
+  evaluateReproVerdicts,
   projectBugState,
   validateDefect,
   validatePlan,
@@ -2071,7 +2072,25 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       }
       const repro = v.value;
       return applyAndRespond(req, res, (item) => {
-        item.repro = repro;
+        const verdicts = Array.isArray(item.repro_verdicts) ? item.repro_verdicts.slice() : [];
+        if (item.repro && !verdicts.length) {
+          verdicts.push(item.repro);
+        }
+        verdicts.push(repro);
+        item.repro_verdicts = verdicts;
+
+        const consensus = evaluateReproVerdicts(verdicts);
+        if (consensus.escalated) {
+          item.blocked_reason = consensus.blocked_reason || 'repro_verdict_conflict';
+          item.assignee = (consensus.escalation_assignee as any) || 'orchestrator';
+          item.repro = {
+            ...repro,
+            status: 'ambiguous',
+          };
+          item.queue = 'blocked';
+        } else {
+          item.repro = repro;
+        }
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'repro failed' });

@@ -355,6 +355,33 @@ if [ "$THINKING" = "auto" ] || [ -z "$THINKING" ]; then
   fi
 fi
 
+# ---------------------------------------------------------------
+# BOT-21: Coordination tax logging & repeat args-hash alert
+# Log (ticket, agent, tool, args-hash).
+# Same hash twice on one ticket alerts (REPEAT_ARGS_HASH).
+# ---------------------------------------------------------------
+TAX_HELPER="${REPO_DIR}/scripts/lib/coordination-tax.mjs"
+record_coordination_tax() {
+  local tool_name="$1"
+  local extra_info="${2:-}"
+  if [ -f "$TAX_HELPER" ]; then
+    local payload="{\"task\": \"$TASK\", \"model\": \"${PREFERRED_MODEL:-default}\", \"thinking\": \"${THINKING:-auto}\", \"extra\": \"$extra_info\"}"
+    local tax_res=""
+    set +e
+    tax_res=$(node "$TAX_HELPER" record --ticket="$BUG_ID" --agent="${DISPATCH_PROFILE:-orchestrator}" --tool="$tool_name" --args="$payload" 2>&1)
+    local tax_status=$?
+    set -e
+    if [ "$tax_status" -eq 2 ] || echo "$tax_res" | grep -q '"alert": true'; then
+      local count
+      count=$(echo "$tax_res" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("count","2"))' 2>/dev/null || echo "2")
+      local alert_hash
+      alert_hash=$(echo "$tax_res" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("entry",{}).get("args_hash",""))' 2>/dev/null || echo "")
+      echo "[Dispatcher] WARNING: Coordination tax alert on $BUG_ID (REPEAT_ARGS_HASH): tool=$tool_name hash=$alert_hash count=$count" >&2
+      tg_msg "⚠️ *[CoordinationTax]* Repeated tool invocation detected on \`$BUG_ID\` (tool: \`$tool_name\`, hash: \`$alert_hash\`, count: $count). Potential spinning loop."
+    fi
+  fi
+}
+
 opencode_model_id() {
   local model="$1"
   case "$model" in
@@ -845,6 +872,7 @@ run_opencode_agent() {
 try_opencode() {
   local model="${1:-$PREFERRED_MODEL}"
   echo "[Dispatcher] --> OpenCode (Model: $model)"
+  record_coordination_tax "opencode" "model=$model"
   if [ ! -x "$OPENCODE_BIN" ]; then
     echo "[Dispatcher] OpenCode not executable at $OPENCODE_BIN, skipping."
     tg_msg "⚠️ *[Orchestrator]* OpenCode binary not found or not executable."
@@ -881,6 +909,7 @@ $prompt_preview
     if [ "$model" != "deepseek-v4.1-flash" ]; then
       tg_msg "⚠️ *[Orchestrator]* OpenCode hit insufficient funds on \`$model\`. Retrying once with \`opencode/deepseek-v4.1-flash\`..."
       local alt_model="deepseek-v4.1-flash"
+      record_coordination_tax "opencode" "model=$alt_model"
       local alt_log="${log_dir}/dispatch_${BUG_ID}_opencode_deepseek.log"
       start_heartbeat "OpenCode (deepseek)" "$alt_log"
       run_opencode_agent "$prompt" "$alt_log" 8m "$alt_model"
@@ -908,6 +937,7 @@ $prompt_preview
 
   # One nudge attempt
   tg_msg "🔄 *[Orchestrator]* OpenCode nudged to retry \`$BUG_ID\`..."
+  record_coordination_tax "opencode_nudge" "model=$model"
   local nudge_log="${log_dir}/dispatch_${BUG_ID}_opencode_nudge.log"
   start_heartbeat "OpenCode (nudge)" "$nudge_log"
   run_opencode_agent "Previous attempt for $BUG_ID had errors or no changes. Inspect git status, analyze errors, and complete the fix now." "$nudge_log" 4m "$model"
@@ -927,6 +957,7 @@ $prompt_preview
 try_cline() {
   local thinking="${THINKING:-high}"
   echo "[Dispatcher] --> Cline CLI (Thinking: $thinking)"
+  record_coordination_tax "cline" "thinking=$thinking"
   if [ ! -x "$CLINE_BIN" ]; then
     echo "[Dispatcher] Cline not executable at $CLINE_BIN, skipping."
     tg_msg "⚠️ *[Orchestrator]* Cline CLI is not installed on this system."
@@ -979,6 +1010,7 @@ $prompt_preview
 
 try_grok() {
   echo "[Dispatcher] --> Grok Build CLI"
+  record_coordination_tax "grok" "default"
   if [ ! -x "$GROK_BIN" ]; then
     echo "[Dispatcher] Grok not executable at $GROK_BIN, skipping."
     tg_msg "⚠️ *[Orchestrator]* Grok Build CLI is not installed on this system."
@@ -1035,6 +1067,7 @@ $prompt_preview
 
 try_agy() {
   echo "[Dispatcher] --> Antigravity CLI"
+  record_coordination_tax "antigravity" "default"
   if [ ! -x "$AGY_BIN" ]; then
     echo "[Dispatcher] Antigravity CLI not executable at $AGY_BIN, skipping."
     tg_msg "⚠️ *[Orchestrator]* Antigravity CLI not found or executable."

@@ -141,6 +141,8 @@ export type BugWorkItem = {
   idem_key?: string;
   defect?: BugDefect;
   repro?: BugRepro;
+  /** BOT-21: Multi-verdict history on a card (evaluated by evaluateReproVerdicts). */
+  repro_verdicts?: BugRepro[];
   plan?: BugPlan;
   verify?: BugVerify;
   assignee?: BugAssignee;
@@ -259,6 +261,11 @@ export function hydrateWorkItem(tag: any): BugWorkItem {
     done: Array.isArray(parsed.done) ? parsed.done.map(String) : [],
     parked: Array.isArray(parsed.parked) ? parsed.parked.map(String) : [],
     checks: Array.isArray(parsed.checks) ? parsed.checks : [],
+    repro_verdicts: Array.isArray(parsed.repro_verdicts)
+      ? parsed.repro_verdicts
+      : Array.isArray(tag?.repro_verdicts)
+        ? tag.repro_verdicts
+        : undefined,
   });
 }
 
