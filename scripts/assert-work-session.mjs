@@ -55,6 +55,9 @@ const {
   handoffSession,
   abortSession,
   ensureTmuxWorkView,
+  disableTmuxObserver,
+  observerLogPath,
+  createObserver,
   debugProbe,
   sessionStatus,
   scrubSecrets,
@@ -67,23 +70,47 @@ for (const fn of ['resolveSession', 'setTx', 'handoffSession', 'abortSession', '
 
 // Isolated store for the gate (never the live ~/.hermes file).
 const tmpStore = path.join(os.tmpdir(), `ws_gate_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
+const observerRoot = path.join(os.tmpdir(), `ws_observer_gate_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+const oldObserverRoot = process.env.WORK_OBSERVERS;
+process.env.WORK_OBSERVERS = observerRoot;
 const noTmux = () => false;
-const yesTmux = () => true;
 const lifecycleSessions = new Map();
+const lifecyclePanes = new Map();
 const lifecycleCalls = [];
+let lifecyclePaneId = 0;
+const lifecycleTarget = (target) => String(target).replace(/:$/, '');
+const addLifecyclePane = (target, command) => {
+  const id = `%${++lifecyclePaneId}`;
+  lifecyclePanes.set(`${lifecycleTarget(target)}\t${id}`, { target: lifecycleTarget(target), id, command });
+  return id;
+};
 const lifecycleTmux = (args) => {
   lifecycleCalls.push(args);
   if (args[0] === 'has-session') return lifecycleSessions.has(args[2]);
-  if (args[0] === 'list-windows') {
-    return [...(lifecycleSessions.get(args[2]) || [])].join('\n');
-  }
+  if (args[0] === 'list-windows') return [...(lifecycleSessions.get(args[2]) || [])].join('\n');
   if (args[0] === 'new-session') {
-    lifecycleSessions.set(args[3], new Set([args[5]]));
+    const session = args[3];
+    lifecycleSessions.set(session, new Set([args[5]]));
+    addLifecyclePane(`${session}:${args[5]}`, args.at(-1));
     return true;
   }
   if (args[0] === 'new-window') {
     const session = args[3].replace(/:$/, '');
-    lifecycleSessions.get(session).add(args[5]);
+    const windows = lifecycleSessions.get(session) || new Set();
+    windows.add(args[5]);
+    lifecycleSessions.set(session, windows);
+    addLifecyclePane(`${session}:${args[5]}`, args.at(-1));
+    return true;
+  }
+  if (args[0] === 'list-panes') {
+    return [...lifecyclePanes.values()].filter((pane) => pane.target === lifecycleTarget(args[2])).map((pane) => `${pane.id}\t${pane.command}`).join('\n');
+  }
+  if (args[0] === 'split-window') return addLifecyclePane(args[3], args.at(-1));
+  if (args[0] === 'select-pane' || args[0] === 'kill-pane') {
+    if (args[0] === 'kill-pane') {
+      const entry = [...lifecyclePanes.entries()].find(([, pane]) => pane.id === args[2]);
+      if (entry) lifecyclePanes.delete(entry[0]);
+    }
     return true;
   }
   return false;
@@ -112,23 +139,38 @@ for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'human']) {
   check(`${backend} probe keys`, true);
 }
 check('probe shape identical across backends', new Set(shapes).size === 1, [...new Set(shapes)].join(' / '));
-const termProbe = debugProbe('opencode', { session: s1, tmux: yesTmux });
-check('terminal lane attaches through the location tmux session',
-  termProbe.surface === 'terminal' && termProbe.attach === true && termProbe.tmuxSession === 'work-vps');
-const apiProbe = debugProbe('gemini', { session: s1, tmux: yesTmux });
+const apiProbe = debugProbe('gemini', { session: s1, tmux: noTmux });
 check('API lane honestly reports attach:false with an event view',
-  apiProbe.surface === 'api' && apiProbe.attach === false && apiProbe.events === true);
+  apiProbe.surface === 'api' && apiProbe.attach === false && apiProbe.events === true && apiProbe.observerLive === false);
 
 const createdView = ensureTmuxWorkView({ ...s1, lane: 'opencode' }, { tmux: lifecycleTmux });
 const expectedTarget = `work-vps:${tmuxWindowFor(s1.id)}`;
 check('/tx on can create the exact session and workstream window',
-  createdView.ok === true && createdView.created === true && createdView.target === expectedTarget);
+  createdView.ok === true && createdView.created === true && createdView.target === expectedTarget && createdView.observerPane);
 const firstCreateCount = lifecycleCalls.length;
 const reusedView = ensureTmuxWorkView({ ...s1, lane: 'opencode' }, { tmux: lifecycleTmux });
-check('repeated /tx on reuses without another create',
-  reusedView.ok === true && reusedView.created === false && lifecycleCalls.length === firstCreateCount + 2);
+check('repeated /tx on reuses the exact observer pane',
+  reusedView.ok === true && reusedView.created === false && reusedView.observerPane === createdView.observerPane && lifecycleCalls.length > firstCreateCount);
 check('tmux lifecycle contains no destructive replacement command',
   lifecycleCalls.flat().every((arg) => !/kill-session|kill-window|respawn-pane|send-keys/.test(String(arg))));
+const termProbe = debugProbe('opencode', { session: s1, tmux: lifecycleTmux });
+check('terminal lane reports verified observer liveness',
+  termProbe.surface === 'terminal' && termProbe.attach === true && termProbe.observerLive === true && termProbe.tmuxSession === 'work-vps');
+const migrationSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-migrate' };
+const migrationWindow = tmuxWindowFor(migrationSession.id);
+lifecycleSessions.get('work-vps').add(migrationWindow);
+addLifecyclePane(`work-vps:${migrationWindow}`, 'bash');
+const migratedView = ensureTmuxWorkView(migrationSession, { tmux: lifecycleTmux });
+check('legacy blank window migrates non-destructively',
+  migratedView.ok === true && migratedView.migrated === true && lifecycleCalls.some((args) => args[0] === 'split-window'));
+const observer = createObserver(s1, { root: observerRoot, now: () => '2026-09-24T00:00:00.000Z' });
+observer.onEvent({ kind: 'reasoning', text: 'private reasoning' });
+observer.onEvent({ kind: 'tool', tool: 'read', status: 'done', input: 'private input', output: 'private output' });
+const observerBody = fs.readFileSync(observer.path, 'utf8');
+check('observer path is private and hashed', !observer.path.includes(s1.id) && (fs.statSync(observerRoot).mode & 0o777) === 0o700 && (fs.statSync(observer.path).mode & 0o777) === 0o600);
+check('observer projection excludes prompts, reasoning, payloads, and errors', !/private reasoning|private input|private output/.test(observerBody) && observerBody.includes('"kind":"thinking"'));
+const stopped = disableTmuxObserver(s1, { tmux: lifecycleTmux });
+check('/tx off stops only the exact observer pane', stopped.ok === true && stopped.stopped === true && lifecycleCalls.some((args) => args[0] === 'kill-pane' && args[2] === createdView.observerPane));
 let apiTmuxCalls = 0;
 const apiView = ensureTmuxWorkView({ ...s1, lane: 'gemini' }, { tmux: () => { apiTmuxCalls += 1; return false; } });
 check('API-only /tx on never invokes tmux',
@@ -150,6 +192,9 @@ check('Telegram status view carries no bot-token shape', !/\b\d{6,}:[A-Za-z0-9_-
 check('sessionStatus probe attached', sessionStatus(s1.id, { tmux: noTmux }, tmpStore).probe.backend === 'grok');
 
 try { if (fs.existsSync(tmpStore)) fs.unlinkSync(tmpStore); } catch {}
+try { fs.rmSync(observerRoot, { recursive: true, force: true }); } catch {}
+if (oldObserverRoot === undefined) delete process.env.WORK_OBSERVERS;
+else process.env.WORK_OBSERVERS = oldObserverRoot;
 
 // 7. /tx is wired into the live bot (command list, handler case, helper).
 {
@@ -158,7 +203,8 @@ try { if (fs.existsSync(tmpStore)) fs.unlinkSync(tmpStore); } catch {}
   check('bot-host exports handleTxCommand', hostSrc.includes('export async function handleTxCommand'));
   const cmdSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'lib', 'commands.mjs'), 'utf8');
   check('/tx advertised in BOT_COMMANDS', cmdSrc.includes("{ command: 'tx'"));
-  check('/tx in help text', cmdSrc.includes('/tx [on|off]'));
+  check('/debug and /handoff advertised in BOT_COMMANDS', cmdSrc.includes("{ command: 'debug'") && cmdSrc.includes("{ command: 'handoff'"));
+  check('/tx vocabulary in help text', cmdSrc.includes('/tx [on|off|status|debug]'));
 }
 
 console.log(`\n${pass} pass, ${fail} fail`);

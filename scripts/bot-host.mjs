@@ -11,10 +11,16 @@ import { Throttle } from './lib/tg-throttle.mjs';
 import {
   sessionKey,
   resolveSession,
+  getSession,
   setTx,
+  handoffSession,
+  abortSession,
+  checkpointSession,
   statusForTelegram,
   defaultTmuxRunner,
   ensureTmuxWorkView,
+  disableTmuxObserver,
+  createObserver,
 } from './lib/work-session.mjs';
 import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
@@ -704,7 +710,9 @@ export async function handleTxCommand({ api, config, chatId, arg, tmux = default
   const id = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
   const sub = String(arg || '').trim().toLowerCase();
   if (sub === 'on') {
-    const session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: config.agent.kind || 'opencode' });
+    const lane = config.agent.kind || 'opencode';
+    let session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane });
+    if (session.lane !== lane) session = handoffSession(id, lane) || session;
     const created = ensureTmuxWorkView(session, { tmux });
     if (!created.ok) {
       await api.sendMessage(chatId, `Shared work view unavailable: could not create \`${created.target}\` without replacing an existing tmux session.`);
@@ -712,9 +720,14 @@ export async function handleTxCommand({ api, config, chatId, arg, tmux = default
     }
     setTx(id, true);
   } else if (sub === 'off') {
+    const session = getSession(id);
+    if (session) disableTmuxObserver(session, { tmux });
     setTx(id, false);
-  } else if (sub !== '' && sub !== 'status') {
-    await api.sendMessage(chatId, 'Usage: /tx on|off|status — shared work-view for this chat.');
+  } else if (sub === 'help') {
+    await api.sendMessage(chatId, 'Usage: /tx on|off|status|debug|help — shared work-view for this chat.');
+    return;
+  } else if (sub !== '' && sub !== 'status' && sub !== 'debug') {
+    await api.sendMessage(chatId, 'Usage: /tx on|off|status|debug|help — shared work-view for this chat.');
     return;
   }
   const view = statusForTelegram(id, { tmux });
@@ -722,18 +735,23 @@ export async function handleTxCommand({ api, config, chatId, arg, tmux = default
     await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
     return;
   }
-  const attach = view.probe?.attach
-    ? `Attach: \`tmux attach -t ${view.probe.target}\``
+  const observer = view.probe?.observerLive
+    ? `Observer: live on \`${view.probe.target}\``
     : view.probe?.surface === 'terminal'
-      ? 'Attach: unavailable — work view is not running'
+      ? 'Observer: unavailable — use /tx on to create the live observer'
       : 'Live attach: unavailable for this execution surface';
   const lines = [
-    `*Shared work view:* ${view.tx ? 'ON 📺' : 'OFF'}`,
+    `*Shared work view:* ${view.tx ? 'ON' : 'OFF'}`,
     `Session: \`${view.id}\``,
     `Lane: \`${view.lane}\` (${view.state})`,
-    attach,
-    `Terminal: ${view.probe?.attach ? 'attached' : 'not attached'}`,
+    observer,
   ];
+  if (sub === 'debug') {
+    lines.push(`Events: ${view.probe?.events ? 'structured observer stream available' : 'unavailable'}`);
+    lines.push(`Debug: ${view.probe?.observerLive ? 'live pane verified' : 'no verified observer pane'}`);
+  } else if (view.probe?.attach) {
+    lines.push(`Attach: \`tmux attach -t ${view.probe.target}\``);
+  }
   await api.sendMessage(chatId, lines.join('\n'));
 }
 
@@ -747,6 +765,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
 
     case 'status': {
+      const location = workLocation();
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+      const work = statusForTelegram(workId);
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
         platform: config.agent.kind || 'opencode',
@@ -762,6 +783,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           lock: lockHolder(),
         },
         health,
+        extras: work
+          ? [
+              `work session: ${work.id} (${work.state})`,
+              `observer: ${work.probe?.observerLive ? 'live' : work.probe?.surface === 'terminal' ? 'offline' : 'unavailable'}`,
+              `controller: ${config.agent.kind || 'opencode'}`,
+              `debug: ${work.probe?.events ? 'structured events' : 'unavailable'}`,
+            ]
+          : ['work session: none', 'observer: unavailable', `controller: ${config.agent.kind || 'opencode'}`, 'debug: structured events'],
       });
       await api.sendMessage(chatId, formatStatusPlain(snap));
       return;
@@ -1025,6 +1054,43 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // already gone
       }
       await api.sendMessage(chatId, 'Aborting the running request...');
+      const workId = sessionKey({ location: workLocation(), chat: String(chatId), workspace: config.agent.workspace });
+      abortSession(workId, { transcriptRef: sessions.get(chatId) || null });
+      return;
+    }
+
+    case 'debug': {
+      const location = workLocation();
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+      const view = statusForTelegram(workId);
+      if (!view) {
+        await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
+        return;
+      }
+      await api.sendMessage(chatId, [
+        `Work session: \`${view.id}\``,
+        `Lane: \`${view.lane}\` (${view.state})`,
+        `Observer: ${view.probe?.observerLive ? `live on \`${view.probe.target}\`` : view.probe?.surface === 'terminal' ? 'not running' : 'unavailable'}`,
+        'Events: structured observer stream',
+        'Controller: existing agent child',
+      ].join('\n'));
+      return;
+    }
+
+    case 'handoff': {
+      if (running.get(chatId)) {
+        await api.sendMessage(chatId, 'A request is running. Finish or /abort it before checkpointing the work session.');
+        return;
+      }
+      const location = workLocation();
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+      const session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: config.agent.kind || 'opencode' });
+      const checkpoint = checkpointSession(workId, { handoffRef: 'manual' });
+      if (!checkpoint) {
+        await api.sendMessage(chatId, 'Could not checkpoint the work session.');
+        return;
+      }
+      await api.sendMessage(chatId, `Handoff checkpoint saved for \`${session.id}\`. The workspace and session were preserved.`);
       return;
     }
 
@@ -1225,10 +1291,26 @@ async function collectInboundMedia(api, message, config) {
  * The switch posts a user-visible line. A single-model chain behaves exactly
  * like a direct runOpencode call. Exported for unit tests.
  */
-export async function runOpencodeWithFailover({ api, chatId, prompt, models, onSwitchNotify, ...runArgs }) {
+export function fanoutProgressEvent({ renderer, observer, event, context = {} }) {
+  try { renderer?.onEvent(event); } catch {}
+  try { observer?.onEvent(event, context); } catch {}
+}
+
+export async function runOpencodeWithFailover({ api, chatId, prompt, models, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, ...runArgs }) {
+  let attempt = 0;
   const { result } = await runWithModelFailover({
     models,
-    makeRun: (model) => runOpencode({ prompt, model, ...runArgs }),
+    makeRun: async (model) => {
+      attempt += 1;
+      if (typeof onAttemptStart === 'function') {
+        try { onAttemptStart({ model, attempt }); } catch {}
+      }
+      const attemptResult = await runOpencode({ prompt, model, ...runArgs });
+      if (typeof onAttemptComplete === 'function') {
+        try { onAttemptComplete({ model, attempt, result: attemptResult, aborted: Boolean(isAborted()) }); } catch {}
+      }
+      return attemptResult;
+    },
     onSwitch: ({ from, to, reason }) => {
       const line = `🔀 *${from}* failed (${String(reason || 'error').slice(0, 200)}) — switching to *${to}*…`;
       try {
@@ -1295,6 +1377,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       recordRunStart(config.id, { chatId, messageId: msgId, startedAt: runStartedAt, pid: process.pid });
     },
   });
+  let observer = null;
+  let observerContext = null;
+  let observerTerminalWritten = false;
   try {
     await renderer.start();
     const eff = effective(config, prefs, chatId);
@@ -1324,8 +1409,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
     const ref = parseModelRef(eff.model);
-    // Gemini is a keyed single-shot lane (no tools/session/plan/agent): same
-    // prompt and renderer, no workspace wiring.
+    const location = workLocation();
+    const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+    const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
+    let workSession = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: workLane });
+    if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
+    try { observer = createObserver(workSession); } catch {}
+    observerContext = { model: ref.id, attempt: 1, surface: ref.surface, provider: ref.surface };
+    const onObserverEvent = (event) => fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+    const writeObserverTerminal = (result) => {
+      if (observerTerminalWritten) return;
+      observerTerminalWritten = true;
+      if (observer) observer.write(running.get(chatId)?.aborted ? 'aborted' : result?.finalText ? 'run_complete' : 'failed', result || {}, observerContext);
+    };
+    if (observer && workLane !== 'opencode') observer.write('run_start', {}, observerContext);
+
     const result =
       ref.surface === 'gemini'
         ? await runGemini({
@@ -1343,25 +1441,36 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
               workspace: config.agent.workspace,
               timeoutMs: config.agent.timeoutMs,
               clineBin: config.agent.clineBin,
-              onEvent: (event) => renderer.onEvent(event),
+              onEvent: onObserverEvent,
               onSpawn: (child) => running.set(chatId, { child, aborted: false }),
               env: chatEnv(api, chatId),
             })
           : await runOpencodeWithFailover({
-            api,
-            chatId,
-            prompt: promptWithMedia,
-            models: failoverModels(eff.model, config.agent.model),
-            variant: eff.variant,
-            workspace: config.agent.workspace,
-            thinking: config.agent.thinking,
-            timeoutMs: config.agent.timeoutMs,
-            opencodeBin: config.agent.opencodeBin,
-            onEvent: (event) => renderer.onEvent(event),
-            onSpawn: (child) => running.set(chatId, { child, aborted: false }),
-            extraArgs,
-            env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
-          });
+             api,
+             chatId,
+             prompt: promptWithMedia,
+             models: failoverModels(eff.model, config.agent.model),
+             variant: eff.variant,
+             workspace: config.agent.workspace,
+             thinking: config.agent.thinking,
+             timeoutMs: config.agent.timeoutMs,
+             opencodeBin: config.agent.opencodeBin,
+             onEvent: onObserverEvent,
+             onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+             onAttemptStart: ({ model, attempt }) => {
+               observerTerminalWritten = false;
+               observerContext = { model, attempt, surface: 'opencode', provider: 'opencode' };
+               if (observer) observer.write('run_start', {}, observerContext);
+             },
+             onAttemptComplete: ({ result: attemptResult, aborted }) => {
+               observerTerminalWritten = true;
+               if (observer) observer.write(aborted ? 'aborted' : attemptResult?.finalText ? 'run_complete' : 'failed', attemptResult || {}, observerContext);
+             },
+             isAborted: () => Boolean(running.get(chatId)?.aborted),
+             extraArgs,
+             env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+           });
+    if (workLane !== 'opencode') writeObserverTerminal(result);
 
     if (result.sessionID) {
       sessions.set(chatId, result.sessionID);
@@ -1384,6 +1493,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       await renderer.finish(result, { footer: usageText });
     }
   } catch (err) {
+    if (observer && !observerTerminalWritten) {
+      observerTerminalWritten = true;
+      observer.write('failed', {}, observerContext || {});
+    }
     await api.sendMessage(chatId, `Error: ${err.message}`).catch(() => {});
   } finally {
     renderer.stopTyping();

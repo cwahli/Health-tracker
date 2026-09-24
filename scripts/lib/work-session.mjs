@@ -25,6 +25,118 @@ import { fileURLToPath } from 'node:url';
 import { laneFor } from './lane-contract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const OBSERVER_MAX_BYTES = 1024 * 1024;
+
+function observerRootPath() {
+  return process.env.WORK_OBSERVERS || path.join(os.homedir(), '.hermes', 'work-observers');
+}
+
+export function observerLogPath(session, root = observerRootPath()) {
+  const identity = session?.id || sessionKey(session || {});
+  const digest = createHash('sha256').update(String(identity)).digest('hex');
+  return path.join(root, `session-${digest}.log`);
+}
+
+function safeObserverString(value, max = 120) {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function safeObserverNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function observerContext(context = {}) {
+  const record = {};
+  if (context.model != null) record.model = safeObserverString(context.model, 160);
+  if (context.attempt != null) record.attempt = safeObserverNumber(context.attempt);
+  if (context.surface != null) record.surface = safeObserverString(context.surface, 40);
+  if (context.provider != null) record.provider = safeObserverString(context.provider, 80);
+  return record;
+}
+
+export function formatObserverRecord(type, payload = {}, context = {}, at = new Date().toISOString()) {
+  const record = { at: String(at), type: String(type) };
+  Object.assign(record, observerContext(context));
+  if (type === 'event') {
+    const kind = String(payload?.kind || '');
+    if (kind === 'reasoning') return { ...record, kind: 'thinking' };
+    if (kind === 'tool') {
+      return {
+        ...record,
+        kind: 'tool',
+        tool: safeObserverString(payload.tool, 100),
+        status: safeObserverString(payload.status, 60),
+      };
+    }
+    if (kind === 'step_finish') {
+      const tokens = payload?.tokens;
+      const total = typeof tokens === 'object' ? tokens?.total : tokens;
+      return {
+        ...record,
+        kind: 'usage',
+        tokens: safeObserverNumber(total),
+        cost: safeObserverNumber(payload?.cost),
+      };
+    }
+    return null;
+  }
+  if (type === 'run_start' || type === 'run_complete' || type === 'aborted' || type === 'failed') {
+    if (type === 'run_complete' || type === 'failed') {
+      const tokens = payload?.usage?.tokens;
+      const total = typeof tokens === 'object' ? tokens?.total : tokens;
+      record.tokens = safeObserverNumber(total);
+      record.cost = safeObserverNumber(payload?.usage?.cost);
+    }
+  }
+  return record;
+}
+
+function ensureObserverFile(logPath) {
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
+    fs.chmodSync(path.dirname(logPath), 0o700);
+    if (!fs.existsSync(logPath)) fs.writeFileSync(logPath, '', { mode: 0o600 });
+    fs.chmodSync(logPath, 0o600);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+export function writeObserverRecord(logPath, record, maxBytes = OBSERVER_MAX_BYTES) {
+  const line = `${JSON.stringify(record)}\n`;
+  const bytes = Buffer.byteLength(line);
+  try {
+    ensureObserverFile(logPath);
+    if (fs.statSync(logPath).size + bytes > maxBytes) {
+      const previous = `${logPath}.1`;
+      try { fs.rmSync(previous, { force: true }); } catch {}
+      try { fs.renameSync(logPath, previous); } catch {}
+    }
+    fs.appendFileSync(logPath, line, { mode: 0o600 });
+    fs.chmodSync(logPath, 0o600);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function createObserver(session, { root = observerRootPath(), maxBytes = OBSERVER_MAX_BYTES, now = () => new Date().toISOString() } = {}) {
+  const logPath = observerLogPath(session, root);
+  ensureObserverFile(logPath);
+  const write = (type, payload = {}, context = {}) => {
+    const record = formatObserverRecord(type, payload, context, now());
+    return record ? writeObserverRecord(logPath, record, maxBytes) : false;
+  };
+  return {
+    path: logPath,
+    write,
+    onEvent(event, context = {}) {
+      return write('event', event, context);
+    },
+  };
+}
 
 export function sessionsPath() {
   if (process.env.WORK_SESSIONS === '0') return null;
@@ -141,6 +253,11 @@ export function abortSession(id, { transcriptRef = null } = {}, storePath = sess
   return updateSession(id, { state: 'aborted', transcriptRef }, storePath);
 }
 
+export function checkpointSession(id, { handoffRef = null } = {}, storePath = sessionsPath()) {
+  if (!getSession(id, storePath)) return null;
+  return updateSession(id, { state: 'handoff', handoffRef }, storePath);
+}
+
 /** Default tmux runner. Injected (fake) in tests. */
 export function defaultTmuxRunner(args) {
   try {
@@ -156,33 +273,84 @@ function tmuxWindowExists(tmuxSession, tmuxWindow, tmux) {
   return output.split(/\r?\n/).includes(tmuxWindow);
 }
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function observerCommand(logPath) {
+  return `/usr/bin/tail -n 40 -F -- ${shellQuote(logPath)}`;
+}
+
+function parseObserverPanes(output) {
+  if (typeof output !== 'string') return [];
+  return output.split(/\r?\n/).filter(Boolean).map((line) => {
+    const tab = line.indexOf('\t');
+    return { id: tab >= 0 ? line.slice(0, tab) : line, command: tab >= 0 ? line.slice(tab + 1) : '' };
+  });
+}
+
+function observerPaneFor(target, logPath, tmux) {
+  const expected = observerCommand(logPath);
+  const panes = parseObserverPanes(tmux(['list-panes', '-t', target, '-F', '#{pane_id}\t#{pane_start_command}']));
+  return panes.find((pane) => pane.command === expected) || null;
+}
+
+export function disableTmuxObserver(session, { tmux = defaultTmuxRunner } = {}) {
+  if (!session) return { ok: false, stopped: false, pane: null };
+  const lane = laneFor(session.lane);
+  if (lane.kind !== 'cli' || !session) return { ok: false, stopped: false, pane: null };
+  const tmuxSession = tmuxSessionFor(session.location);
+  const tmuxWindow = tmuxWindowFor(session.id);
+  const target = `${tmuxSession}:${tmuxWindow}`;
+  const logPath = observerLogPath(session);
+  const pane = observerPaneFor(target, logPath, tmux);
+  if (!pane) return { ok: true, stopped: false, pane: null };
+  const stopped = Boolean(tmux(['kill-pane', '-t', pane.id]));
+  return { ok: stopped, stopped, pane: pane.id };
+}
+
 export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
   const lane = laneFor(session?.lane);
   const tmuxSession = tmuxSessionFor(session?.location);
   const tmuxWindow = tmuxWindowFor(session?.id);
   const target = `${tmuxSession}:${tmuxWindow}`;
+  const logPath = observerLogPath(session);
   if (lane.kind !== 'cli') {
-    return { ok: true, created: false, surface: 'api', tmuxSession: null, tmuxWindow: null, target: null };
+    return { ok: true, created: false, migrated: false, surface: 'api', tmuxSession: null, tmuxWindow: null, target: null, observerPane: null, observerLog: null };
   }
-
+  if (!ensureObserverFile(logPath)) {
+    return { ok: false, created: false, migrated: false, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: null, observerLog: logPath };
+  }
+  const command = observerCommand(logPath);
   let created = false;
   if (!tmux(['has-session', '-t', tmuxSession])) {
-    tmux(['new-session', '-d', '-s', tmuxSession, '-n', tmuxWindow, '-c', session.workspace]);
+    tmux(['new-session', '-d', '-s', tmuxSession, '-n', tmuxWindow, '-c', session.workspace, command]);
     if (!tmux(['has-session', '-t', tmuxSession])) {
-      return { ok: false, created, surface: 'terminal', tmuxSession, tmuxWindow, target };
+      return { ok: false, created, migrated: false, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: null, observerLog: logPath };
     }
     created = true;
   }
 
   if (!tmuxWindowExists(tmuxSession, tmuxWindow, tmux)) {
-    tmux(['new-window', '-d', '-t', `${tmuxSession}:`, '-n', tmuxWindow, '-c', session.workspace]);
+    tmux(['new-window', '-d', '-t', `${tmuxSession}:`, '-n', tmuxWindow, '-c', session.workspace, command]);
     if (!tmuxWindowExists(tmuxSession, tmuxWindow, tmux)) {
-      return { ok: false, created, surface: 'terminal', tmuxSession, tmuxWindow, target };
+      return { ok: false, created, migrated: false, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: null, observerLog: logPath };
     }
     created = true;
   }
 
-  return { ok: true, created, surface: 'terminal', tmuxSession, tmuxWindow, target };
+  let pane = observerPaneFor(target, logPath, tmux);
+  let migrated = false;
+  if (!pane) {
+    const paneId = tmux(['split-window', '-h', '-t', target, '-c', session.workspace, '-P', '-F', '#{pane_id}', command]);
+    if (typeof paneId === 'string' && paneId.trim()) pane = { id: paneId.trim(), command };
+    if (!pane) {
+      return { ok: false, created, migrated, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: null, observerLog: logPath };
+    }
+    migrated = true;
+  }
+  if (pane.id) tmux(['select-pane', '-t', pane.id]);
+  return { ok: true, created, migrated, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: pane.id, observerLog: logPath };
 }
 
 /**
@@ -192,23 +360,28 @@ export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
  */
 export function debugProbe(backend, { session = null, tmux = defaultTmuxRunner } = {}) {
   const lane = laneFor(backend);
-  if (lane.kind === 'cli') {
-    const tmuxSession = session ? tmuxSessionFor(session.location) : null;
-    const tmuxWindow = session ? tmuxWindowFor(session.id) : null;
-    const target = tmuxSession && tmuxWindow ? `${tmuxSession}:${tmuxWindow}` : null;
-    const attached = target ? tmuxWindowExists(tmuxSession, tmuxWindow, tmux) : false;
-    return {
-      backend: lane.backend, surface: 'terminal', attach: attached,
-      events: true, tmuxSession, tmuxWindow, target,
-      note: attached
-        ? `attach: tmux attach -t ${target}`
-        : 'no live tmux work view on this host — use /tx on to create one',
-    };
-  }
+  const tmuxSession = session ? tmuxSessionFor(session.location) : null;
+  const tmuxWindow = session ? tmuxWindowFor(session.id) : null;
+  const target = tmuxSession && tmuxWindow ? `${tmuxSession}:${tmuxWindow}` : null;
+  const observerLog = session && lane.kind === 'cli' ? observerLogPath(session) : null;
+  const observer = lane.kind === 'cli' && target ? observerPaneFor(target, observerLog, tmux) : null;
+  const observerLive = Boolean(observer);
   return {
-    backend: lane.backend, surface: 'api', attach: false,
-    events: true, tmuxSession: null, tmuxWindow: null, target: null,
-    note: 'API-only lane: structured events/transcripts only; live attach unavailable',
+    backend: lane.backend,
+    surface: lane.kind === 'cli' ? 'terminal' : 'api',
+    attach: observerLive,
+    observerLive,
+    observerPane: observer?.id || null,
+    observerLog,
+    events: true,
+    tmuxSession: lane.kind === 'cli' ? tmuxSession : null,
+    tmuxWindow: lane.kind === 'cli' ? tmuxWindow : null,
+    target: lane.kind === 'cli' ? target : null,
+    note: lane.kind === 'cli'
+      ? observerLive
+        ? `observer live: ${target}`
+        : 'observer not running — use /tx on to create one'
+      : 'API-only lane: structured events/transcripts only; live attach unavailable',
   };
 }
 

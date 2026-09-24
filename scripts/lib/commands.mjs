@@ -24,7 +24,9 @@ export const BOT_COMMANDS = [
   { command: 'plan', description: 'Switch to the plan agent' },
   { command: 'thinking', description: 'Pick the thinking level (variant)' },
   { command: 'abort', description: 'Cancel the running request' },
-  { command: 'tx', description: 'Shared work view on|off|status for this chat' },
+  { command: 'debug', description: 'Show the active work-session debug view' },
+  { command: 'handoff', description: 'Checkpoint this work session for continuation' },
+  { command: 'tx', description: 'Shared work view on|off|status|debug for this chat' },
 ];
 
 /** Names handled by bot-host.mjs handleCommand (kept in sync). */
@@ -195,7 +197,9 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/thinking [level] pick the thinking level (variant)',
     '/new              start a fresh session',
     '/status           show session, model, agent, workspace, usage',
-    '/tx [on|off]       shared work view for this chat (tmux attach line)',
+    '/debug            show the active work-session debug view',
+    '/handoff          checkpoint this work session for continuation',
+    '/tx [on|off|status|debug] shared work view for this chat',
     '/abort            cancel the running request',
     '/help             this message',
   ].join('\n');
