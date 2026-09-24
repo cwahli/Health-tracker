@@ -112,6 +112,8 @@ export function processJobRows(rows: any[], userId: string = 'anonymous'): void 
       let initialMessages: any[] = [];
       if (row.status === 'awaiting_user' && cleanResObj) {
         const clarifyMsg = cleanResObj.message || row.status_message || 'Confirm how much you ate';
+        const clarifyFoodLog = cleanResObj.pendingFoodLog || cleanResObj.data || (cleanResObj.mealBuild ? toPendingFoodLog(cleanResObj.mealBuild) : null);
+        const clarifyLogWith = clarifyFoodLog ? { ...clarifyFoodLog, portionClarify: cleanResObj.portionClarify } : undefined;
         initialMessages = [{
           id: `msg_assistant_clarify_${row.id}`,
           role: 'assistant',
@@ -119,9 +121,11 @@ export function processJobRows(rows: any[], userId: string = 'anonymous'): void 
           timestamp: new Date().toISOString(),
           isLive: false,
           agentType: 'food',
+          pendingFoodLog: clarifyLogWith,
           data: {
             needsPortionClarify: true,
             portionClarify: cleanResObj.portionClarify,
+            pendingFoodLog: clarifyLogWith,
             scoutItems: cleanResObj.scoutItems || [],
             photoUrl: row.photo_url || cleanResObj.photoUrl,
             debugUrl: row.debug_url || cleanResObj.debugUrl,
@@ -198,6 +202,8 @@ export function processJobRows(rows: any[], userId: string = 'anonymous'): void 
       }
       if (row.status === 'awaiting_user' && cleanRes && (!existing.messages || existing.messages.length === 0)) {
         const clarifyMsg = cleanRes.message || row.status_message || 'Confirm how much you ate';
+        const clarifyFoodLog = cleanRes.pendingFoodLog || cleanRes.data || (cleanRes.mealBuild ? toPendingFoodLog(cleanRes.mealBuild) : null);
+        const clarifyLogWith = clarifyFoodLog ? { ...clarifyFoodLog, portionClarify: cleanRes.portionClarify } : undefined;
         updatePayload.messages = [{
           id: `msg_assistant_clarify_${row.id}`,
           role: 'assistant',
@@ -205,9 +211,11 @@ export function processJobRows(rows: any[], userId: string = 'anonymous'): void 
           timestamp: new Date().toISOString(),
           isLive: false,
           agentType: 'food',
+          pendingFoodLog: clarifyLogWith,
           data: {
             needsPortionClarify: true,
             portionClarify: cleanRes.portionClarify,
+            pendingFoodLog: clarifyLogWith,
             scoutItems: cleanRes.scoutItems || [],
             photoUrl: row.photo_url || cleanRes.photoUrl,
             debugUrl: row.debug_url || cleanRes.debugUrl,
