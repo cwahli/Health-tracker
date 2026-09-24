@@ -880,6 +880,32 @@ describe('agent-gemini', () => {
     expect(resolveGeminiKey({})).toBe(process.env.GEMINI_API_KEY?.trim() || '');
   });
 
+  it('mirrors the live-site key chain (GOOGLE_API_KEY, API_KEY, GEMINI_API_KEYS[0])', () => {
+    const saved = {
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+      GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
+      API_KEY: process.env.API_KEY,
+      GEMINI_API_KEYS: process.env.GEMINI_API_KEYS,
+    };
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.API_KEY;
+    delete process.env.GEMINI_API_KEYS;
+    try {
+      expect(resolveGeminiKey({ GOOGLE_API_KEY: 'g' })).toBe('g');
+      expect(resolveGeminiKey({ API_KEY: 'a' })).toBe('a');
+      expect(resolveGeminiKey({ GEMINI_API_KEYS: ' first , second ' })).toBe('first');
+      expect(resolveGeminiKey({})).toBe('');
+      process.env.GOOGLE_API_KEY = 'env-g';
+      expect(resolveGeminiKey({})).toBe('env-g');
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
   it('validates refs against the catalog', () => {
     expect(geminiModelId('gemini:gemini/gemini-3.7-flash')).toBe('gemini-3.7-flash');
     expect(geminiModelId('gemini/gemini-3.1-pro')).toBe('gemini-3.1-pro');
@@ -914,19 +940,55 @@ describe('agent-gemini', () => {
   });
 
   it('returns text and usage on success', async () => {
-    const fetchImpl = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ choices: [{ message: { content: 'PONG' } }], usage: { total_tokens: 42 } }),
-    });
+    let seen: any = null;
+    const fetchImpl = async (_url: string, opts: any) => {
+      seen = { url: _url, body: JSON.parse(opts.body), auth: opts.headers.Authorization };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: 'PONG' } }], usage: { total_tokens: 42 } }),
+      };
+    };
     const result = await runGemini({
       prompt: 'hi',
       model: 'gemini:gemini/gemini-3.8-flash',
+      system: 'You are a test system.',
       env: { GEMINI_API_KEY: 'k' },
       fetchImpl,
     });
     expect(result).toMatchObject({ code: 0, finalText: 'PONG', lastError: null, sessionID: null });
     expect(result.usage.tokens).toEqual({ total: 42 });
+    expect(seen.body.model).toBe('gemini-3.8-flash');
+    expect(seen.body.messages).toEqual([
+      { role: 'system', content: 'You are a test system.' },
+      { role: 'user', content: 'hi' },
+    ]);
+    expect(seen.auth).toBe('Bearer k');
+  });
+
+  it('falls back to gemini-2.5-flash once on 404 (live-site parity)', async () => {
+    const models: string[] = [];
+    const fetchImpl = async (_url: string, opts: any) => {
+      const model = JSON.parse(opts.body).model;
+      models.push(model);
+      if (model !== 'gemini-2.5-flash') {
+        return { ok: false, status: 404, json: async () => ({ error: { message: 'model not found' } }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: 'FB' } }], usage: {} }),
+      };
+    };
+    const result = await runGemini({
+      prompt: 'hi',
+      model: 'gemini/gemini-3.7-flash',
+      env: { GEMINI_API_KEY: 'k' },
+      fetchImpl,
+    });
+    expect(models).toEqual(['gemini-3.7-flash', 'gemini-2.5-flash']);
+    expect(result.finalText).toBe('FB');
+    expect(result.stderr).toContain('fallback:gemini-2.5-flash');
   });
 
   it('classifies provider 429 as quota without throwing', async () => {

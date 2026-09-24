@@ -7,9 +7,17 @@
  * scripts/lib/freemodels.mjs (GEMINI_MODELS) next to CLINE_FREE_MODELS so the
  * /freemodel picker, /model validation, and this runner validate one list.
  *
- * Transport: Gemini OpenAI-compatible chat-completions endpoint. Single-shot
- * answers only — no tools, no session resume, no plan mode, no variants. The
- * result shape matches runOpencode/runCline
+ * Live-site parity (server.ts getGeminiApiKey / callUnifiedLLM /
+ * server_gemini_retry.ts): same key chain, same quota vocabulary (429 is never
+ * auto-retried — it burns the shared 15/min bucket), same single 404 fallback
+ * to gemini-2.5-flash. Transport differs on purpose: the live site uses the
+ * @google/genai SDK, but its deps (google-auth-library) are not installed in
+ * the bot runtimes (VPS bot-host / phone / collab), so this lane speaks the
+ * first-party OpenAI-compatible REST endpoint with plain fetch (zero deps).
+ * Behaviour, not mechanism, is what callers depend on.
+ *
+ * Single-shot answers only — no tools, no session resume, no plan mode, no
+ * variants. The result shape matches runOpencode/runCline
  * ({ code, sessionID, finalText, lastError, stderr, usage }) so callers can
  * swap lanes without re-wiring renderers or totals.
  *
@@ -27,11 +35,29 @@ export const GEMINI_API_URL =
   'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 export const GEMINI_DEFAULT_TIMEOUT_MS = 300000;
 
-/** Empty string when unset — callers report it, never crash on it. */
+/** Fallback the live site uses when a model 404s (one hop, like callUnifiedLLMInternal). */
+export const GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash';
+
+function pickKey(scope) {
+  if (!scope || typeof scope !== 'object') return '';
+  const list = String(scope.GEMINI_API_KEYS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const name of ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'API_KEY']) {
+    const value = scope[name];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return list[0] || '';
+}
+
+/**
+ * Key chain mirrors the live site's getGeminiApiKey (server.ts):
+ * GEMINI_API_KEY -> GOOGLE_API_KEY -> API_KEY -> GEMINI_API_KEYS[0].
+ * Empty string when unset — callers report it, never crash on it.
+ */
 export function resolveGeminiKey(env = process.env) {
-  const fromOpts = env?.GEMINI_API_KEY;
-  const key = (typeof fromOpts === 'string' && fromOpts.trim() ? fromOpts : process.env.GEMINI_API_KEY) || '';
-  return key.trim();
+  return pickKey(env) || pickKey(process.env);
 }
 
 /**
@@ -58,7 +84,7 @@ export function mapGeminiError({ status, body, message } = {}) {
   if (
     code === 401 ||
     code === 403 ||
-    /invalid api key|api key.*invalid|authentication|unauthorized|permission denied/i.test(text)
+    /invalid api key|api key.*invalid|api key not valid|API_KEY_INVALID|authentication|unauthorized|permission denied/i.test(text)
   ) {
     return `Gemini API rejected the credentials (auth failed)${short ? ` (${short})` : ''}. Set GEMINI_API_KEY on this host.`;
   }
@@ -80,6 +106,7 @@ export function mapGeminiError({ status, body, message } = {}) {
 export async function runGemini({
   prompt,
   model,
+  system,
   timeoutMs = GEMINI_DEFAULT_TIMEOUT_MS,
   env,
   fetchImpl = fetch,
@@ -106,27 +133,44 @@ export async function runGemini({
   if (!apiModel) {
     return fail(`Unknown gemini model: ${model}. Use /freemodel to pick from the list.`);
   }
-  let res;
-  try {
-    res = await fetchImpl(GEMINI_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: apiModel, messages: [{ role: 'user', content: text }] }),
-      signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
-    });
-  } catch (err) {
-    const msg = String(err?.message || err || 'fetch failed');
-    if (/timed out|timeout|abort/i.test(msg)) {
-      return fail(`Gemini run timed out after ${Math.round(timeoutMs / 1000)}s.`);
+  const systemText = String(system ?? '').trim();
+  const messages = systemText ? [{ role: 'system', content: systemText }] : [];
+  messages.push({ role: 'user', content: text });
+  const post = async (vendorModel) => {
+    let res;
+    try {
+      res = await fetchImpl(GEMINI_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model: vendorModel, messages }),
+        signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
+      });
+    } catch (err) {
+      const msg = String(err?.message || err || 'fetch failed');
+      if (/timed out|timeout|abort/i.test(msg)) {
+        return { transportError: `Gemini run timed out after ${Math.round(timeoutMs / 1000)}s.` };
+      }
+      return { transportError: `Gemini transport error: ${msg.slice(0, 200)}` };
     }
-    return fail(`Gemini transport error: ${msg.slice(0, 200)}`);
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    return { res, data };
+  };
+  let fellBack = '';
+  let attempt = await post(apiModel);
+  if (attempt.transportError) return fail(attempt.transportError);
+  // Live-site parity: one 404 hop to gemini-2.5-flash (callUnifiedLLMInternal).
+  if (!attempt.res.ok && Number(attempt.res.status) === 404 && apiModel !== GEMINI_FALLBACK_MODEL) {
+    console.warn(`[agent-gemini] Model "${apiModel}" 404 — falling back to "${GEMINI_FALLBACK_MODEL}" (live-site parity).`);
+    fellBack = ` (answered by fallback ${GEMINI_FALLBACK_MODEL})`;
+    attempt = await post(GEMINI_FALLBACK_MODEL);
+    if (attempt.transportError) return fail(attempt.transportError);
   }
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
+  const { res, data } = attempt;
   if (!res.ok) {
     const body = typeof data === 'string' ? data : JSON.stringify(data || {});
     return fail(mapGeminiError({ status: res.status, body }), Number(res.status) || -1);
@@ -147,7 +191,7 @@ export async function runGemini({
     sessionID: null,
     finalText,
     lastError: null,
-    stderr: '',
+    stderr: fellBack ? `fallback:${GEMINI_FALLBACK_MODEL}` : '',
     usage: { cost: 0, tokens: total ? { total } : null },
   };
 }
