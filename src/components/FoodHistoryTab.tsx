@@ -1428,6 +1428,7 @@ export default function FoodHistoryTab({
                 log
               );
             const hasPreview = resolvedImgs.length > 0 || Boolean(resolvedImg);
+            const hasCompositionGallery = (Array.isArray(effectiveScoutItems) && effectiveScoutItems.length > 0) || Boolean(effectiveComposition);
             const savedMealSourceId = String((log as any)?.sourceMealId || (log as any)?.source_meal_id || '').trim();
             const savedMealMaster = savedMealSourceId ? masterByChildId.get(String(log.id)) : undefined;
             const savedMealOpenable = Boolean(savedMealMaster && savedMealMaster.id !== log.id &&
@@ -1473,7 +1474,6 @@ export default function FoodHistoryTab({
                       deferUntilVisible
                       language={profile.language}
                     />
-                    {renderSavedMealTag('absolute left-3 top-3 z-20')}
                   </div>
                 ) : null}
 
@@ -1847,7 +1847,7 @@ export default function FoodHistoryTab({
                             <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
                               {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
                             </span>
-                            {!hasPreview ? renderSavedMealTag() : null}
+                            {!(isExpanded && hasCompositionGallery) ? renderSavedMealTag() : null}
                             {(() => {
                               const v = resolveMealVerdict(log, profile?.language);
                               if (!v?.label) return null;
@@ -2006,10 +2006,11 @@ export default function FoodHistoryTab({
 
                             return (
                               <div className="bg-slate-50 dark:bg-slate-900/40 rounded-xl p-3 text-left space-y-2.5 border border-slate-200/50 dark:border-slate-800/50">
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between gap-2">
                                   <span className="text-[10.5px] font-bold text-indigo-500 dark:text-indigo-400 flex items-center gap-1">
                                     🔍 {t.mealComposition} {scoutItemsList.length > 0 ? `(${scoutItemsList.length})` : ''}
                                   </span>
+                                  {renderSavedMealTag()}
                                 </div>
 
                                 {scoutItemsList.length > 0 && (
