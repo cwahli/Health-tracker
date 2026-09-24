@@ -57,18 +57,20 @@ done
 
 cat > "${PROFILES_DIR}/bug_ticket/memories/MEMORY.md" << 'BUG_TICKET_MEM_EOF'
 Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
-The only binary is scripts/bugctl.mjs (pack --check before pack POST). State is derived from artifacts — never set it.
+The only binary: run from the repo root — cd /home/ubuntu/src/Health-tracker && node scripts/bugctl.mjs (gateway cwd is ~/.hermes, a relative path fails there). pack --check before pack POST; repro --check before repro POST. State is derived from artifacts — never set it.
 Multi-item reports (e.g. BUG-8449's 7 Home discrepancies): ONE card + a split list, never a bundled ticket.
 Vague report → card + repro status=needed (needs_repro). Fingerprint = class|canonical_key|iso-week.
-Token HERMES_BUG_TICKET_TOKEN may be unset until the human BotFather step; never invent a successful reply.
+Token HERMES_BUG_TICKET_TOKEN lives in ~/.config/bot-host/tokens.env (handle @Bug_ticket_bot); never print it.
 Packer never dispatches coders; triage handoff is a separate phase after packed.
 BUG_TICKET_MEM_EOF
 echo "  ✓ USER.md synced across profiles; bug_ticket MEMORY.md written"
 
 cat > "${PROFILES_DIR}/qa_meal/memories/MEMORY.md" << 'QA_MEM_EOF'
 Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
-OpenCode model opencode/muse-spark-1.3 returned insufficient funds on 2026-09-22. Antigravity is blocked in this region.
+Tickets: cd /home/ubuntu/src/Health-tracker && node scripts/bugctl.mjs queue --assignee=qa_meal (boot, never MEMORY.md).
+Reproduce-only lane: qa-reproduce skill + scripts/qa-runner.mjs --ticket=<n>; never fix, dispatch, or verify.
 A QA bug is fixed only by run-coding-dispatch.sh. The OpenCode Telegram bot is a separate interactive door.
+OpenCode model opencode/muse-spark-1.3 returned insufficient funds on 2026-09-22. Antigravity is blocked in this region.
 QA_MEM_EOF
 
 cat > "${PROFILES_DIR}/orchestrator/memories/MEMORY.md" << 'ORCH_MEM_EOF'
@@ -96,6 +98,7 @@ agent:
   max_turns: 2
   preload_skills:
     - qa-meal-journey
+    - qa-reproduce
 QA_MEAL_CFG
 
 for dark_qa in qa_biomarker qa_onboarding; do
@@ -132,7 +135,7 @@ model:
   default: ${DEFAULT_FREE_MODEL}
   provider: ${DEFAULT_PROVIDER}
 agent:
-  max_turns: 4
+  max_turns: 12
   preload_skills:
     - bug-ticket
 BUG_TICKET_CFG
