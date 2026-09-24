@@ -211,13 +211,87 @@ export function buildCopyKeyboard(copies, { maxButtons = MAX_COPY_BUTTONS } = {}
 }
 
 /**
+ * Align GFM pipe tables found OUTSIDE fenced blocks into padded monospace,
+ * wrapped in a ```text fence so they render aligned on every Telegram client.
+ *
+ * Why: Telegram has no table rendering — a raw `| a | b |` table arrives as
+ * unaligned plain text (the VM2 nutrient-table outage). The fence routes the
+ * block through the existing <pre> path below. Fenced content is never
+ * touched; text without a valid table (header + `---` delimiter row) is
+ * returned byte-identical.
+ */
+const PIPE_LINE_RE = /^\s*\|.*\|\s*$/;
+const FENCE_RE = /^\s*```/;
+
+function isDelimRow(line) {
+  const cells = line.trim().replace(/^\||\|$/g, '').split('|');
+  return cells.length > 0 && cells.every((c) => /^[\s:\-]+$/.test(c)) && cells.some((c) => /---/.test(c));
+}
+
+function splitPipeRow(line) {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  return s.split('|').map((c) => c.trim());
+}
+
+function isNumericCell(s) {
+  return /^~?-?[\d][\d,.\s]*[a-zA-Zµ%°]*$/.test(s.trim()) && /[\d]/.test(s);
+}
+
+export function alignPipeTables(text) {
+  const lines = String(text ?? '').split('\n');
+  const out = [];
+  let i = 0;
+  let changed = false;
+  let inFence = false;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    if (!inFence && PIPE_LINE_RE.test(line)) {
+      const group = [];
+      while (i < lines.length && !FENCE_RE.test(lines[i]) && PIPE_LINE_RE.test(lines[i])) {
+        group.push(lines[i]);
+        i += 1;
+      }
+      if (group.length >= 2 && isDelimRow(group[1])) {
+        const rows = group.filter((_, idx) => idx !== 1).map(splitPipeRow);
+        const cols = Math.max(...rows.map((r) => r.length));
+        const norm = rows.map((r) => [...r, ...Array(Math.max(0, cols - r.length)).fill('')]);
+        const widths = norm[0].map((_, c) => Math.max(...norm.map((r) => r[c].length)));
+        const aligned = norm.map((r, ri) =>
+          r.map((cell, c) => {
+            const right = ri > 0 && isNumericCell(cell);
+            return right ? cell.padStart(widths[c]) : cell.padEnd(widths[c]);
+          }).join('  ').trimEnd(),
+        );
+        aligned.splice(1, 0, widths.map((w) => '-'.repeat(w)).join('  '));
+        out.push('```text', ...aligned, '```');
+        changed = true;
+      } else {
+        out.push(...group);
+      }
+      continue;
+    }
+    out.push(line);
+    i += 1;
+  }
+  return changed ? out.join('\n') : String(text ?? '');
+}
+
+/**
  * Split long text into sendable Telegram payloads.
  * Each payload: { text, extra: { parse_mode?, reply_markup? }, hasCode }.
  * Messages without code are returned verbatim (no parse_mode, no keyboard)
  * so non-code traffic is byte-identical to the old plain-text path.
  */
 export function chunkForTelegram(text, { limit = MAX_MESSAGE_CHARS, maxButtons = MAX_COPY_BUTTONS } = {}) {
-  const body = String(text ?? '').trim();
+  const body = alignPipeTables(String(text ?? '').trim());
   if (!body) return [];
   const payloads = [];
   for (const chunk of chunkText(body, limit)) {

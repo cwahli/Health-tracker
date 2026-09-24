@@ -1156,3 +1156,77 @@ describe('VM2 transcript error shapes', () => {
     expect(out).not.toContain('\x1b');
   });
 });
+
+describe('ProgressRenderer coalescing (VM2 thinking-spam outage)', () => {
+  const makeRenderer = (opts = {}) => {
+    const sent = [];
+    const edited = [];
+    const api = {
+      sendMessage: async (_c, text) => {
+        sent.push(text);
+        return { message_id: sent.length };
+      },
+      editMessageText: async (_c, _id, text) => {
+        edited.push(text);
+        return true;
+      },
+    };
+    const throttle = { submit: (fn) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api, throttle, chatId: 1, maxEdits: 40, ...opts });
+    const flush = async () => {
+      for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+    };
+    return { renderer, sent, edited, flush };
+  };
+
+  it('creates one progress message no matter how many reasoning events arrive', async () => {
+    const { renderer, sent, flush } = makeRenderer();
+    for (let i = 0; i < 25; i += 1) {
+      renderer.onEvent({ kind: 'reasoning', text: `exploring the repository structure part ${i}` });
+    }
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('Status: thinking');
+  });
+
+  it('drops compressor fragments and repeats', async () => {
+    const { renderer, sent, flush } = makeRenderer();
+    for (const noise of ['.', '/', 'check', 'meal', 'at', ':', '`/']) {
+      renderer.onEvent({ kind: 'reasoning', text: noise });
+    }
+    await flush();
+    expect(sent).toHaveLength(0);
+    renderer.onEvent({ kind: 'reasoning', text: 'checking the food logs table in D1 for the latest meal' });
+    renderer.onEvent({ kind: 'reasoning', text: 'checking the food logs table in D1 for the latest meal' });
+    await flush();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('enforces maxEdits instead of editing forever', async () => {
+    const { renderer, edited, flush } = makeRenderer({ maxEdits: 3 });
+    renderer.onEvent({ kind: 'reasoning', text: 'first substantive exploration of the codebase structure' });
+    await flush();
+    for (let i = 0; i < 10; i += 1) {
+      renderer.onEvent({ kind: 'reasoning', text: `follow-up investigation number ${i} into test files` });
+    }
+    await flush();
+    expect(edited.length).toBeLessThanOrEqual(3);
+  });
+
+  it('survives a failed create without spawning a message per event', async () => {
+    const sent = [];
+    const api = {
+      sendMessage: async () => {
+        sent.push(1);
+        return null;
+      },
+    };
+    const throttle = { submit: (fn) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({ api, throttle, chatId: 1 });
+    for (let i = 0; i < 10; i += 1) {
+      renderer.onEvent({ kind: 'reasoning', text: `substantive exploration round ${i} of the food database` });
+    }
+    for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+    expect(sent).toHaveLength(1);
+  });
+});

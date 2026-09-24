@@ -255,6 +255,8 @@ export class ProgressRenderer {
     this.dryRun = dryRun;
     this.messageId = null;
     this.edits = 0;
+    this.creating = false;
+    this.createRetryAt = 0;
     this.thinking = '';
     this.tool = '';
     this.status = 'starting';
@@ -299,11 +301,13 @@ export class ProgressRenderer {
   onEvent(event) {
     if (event.kind === 'reasoning' && event.text) {
       const gist = compressReasoning(event.text, { maxChars: this.maxChars });
-      if (gist) {
-        this.thinking = gist;
-        this.status = 'thinking';
-        this._schedule();
-      }
+      // Drop compressor fragments (".", "/", "check", "at", ":") and repeats:
+      // each accepted gist would otherwise become its own chat message.
+      const clean = gist.trim();
+      if (!clean || clean.length < 8 || clean === this.thinking) return;
+      this.thinking = gist;
+      this.status = 'thinking';
+      this._schedule();
     } else if (event.kind === 'tool') {
       this.tool = `${event.tool} (${event.status})`;
       this.status = 'working';
@@ -321,15 +325,31 @@ export class ProgressRenderer {
     }
     if (this.messageId == null) {
       if (!this.thinking && !this.tool) return;
+      // One progress message per run: never queue a second create while the
+      // first is in flight, and back off after a failed create (rate-limit
+      // returns null) instead of spawning a new message per event.
+      if (this.creating || Date.now() < this.createRetryAt) return;
+      this.creating = true;
       this.throttle
         .submit(async () => {
-          const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
-          if (result?.message_id != null) this.messageId = result.message_id;
+          try {
+            const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
+            if (result?.message_id != null) {
+              this.messageId = result.message_id;
+            } else {
+              this.createRetryAt = Date.now() + 5000;
+            }
+          } finally {
+            this.creating = false;
+          }
         })
-        .catch(() => {});
+        .catch(() => {
+          this.creating = false;
+        });
       return;
     }
     if (this.edits >= this.maxEdits) return;
+    this.edits += 1;
     this.throttle
       .submit(() => this._guarded(() => this.api.editMessageText(this.chatId, this.messageId, this._render())))
       .catch(() => {});

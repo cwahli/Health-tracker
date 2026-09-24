@@ -121,3 +121,38 @@ describe('sendCopyable', () => {
     expect(calls[0][2].parse_mode).toBe('HTML');
   });
 });
+
+describe('alignPipeTables (VM2 nutrient-table outage)', () => {
+  it('aligns a GFM table into a text fence, dropping the delimiter row', async () => {
+    const { alignPipeTables } = await import('./tg-copy-code.mjs');
+    const out = alignPipeTables('| Nutrient | Amount |\n|---|---|\n| Energy | ~300 kcal |\n| Protein | ~8 g |');
+    expect(out).toContain('```text');
+    expect(out).not.toContain('|');
+    expect(out).not.toContain('|---|---|');
+    const [head, under, ...rows] = out.replace(/```text\n?|\n?```/g, '').split('\n');
+    expect(head).toBe('Nutrient  Amount');
+    expect(under).toMatch(/^-+  -+$/);
+    expect(rows[0]).toBe('Energy    ~300 kcal');
+  });
+
+  it('right-aligns numeric columns and leaves fenced content alone', async () => {
+    const { alignPipeTables } = await import('./tg-copy-code.mjs');
+    const out = alignPipeTables('```\n| a | b |\n|---|---|\n```\n\n| N | V |\n|---|---|\n| x | 12 |');
+    expect(out).toContain('| a | b |');
+    expect(out).toContain('```text\nN  V');
+  });
+
+  it('returns non-tables byte-identical', async () => {
+    const { alignPipeTables } = await import('./tg-copy-code.mjs');
+    expect(alignPipeTables('just text')).toBe('just text');
+    expect(alignPipeTables('| lone pipe line')).toBe('| lone pipe line');
+    expect(alignPipeTables('')).toBe('');
+  });
+
+  it('routes aligned tables through the HTML pre path end to end', () => {
+    const [p] = chunkForTelegram('| N | V |\n|---|---|\n| x | 12 |');
+    expect(p.extra.parse_mode).toBe('HTML');
+    expect(p.text).toContain('<pre>');
+    expect(p.text).not.toContain('|');
+  });
+});
