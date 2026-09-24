@@ -34,9 +34,7 @@ failure the same way.
 
 ## Scope limits
 
-- **Grok TG / free-lane bots:** full behaviour (`/allowance`, buckets, failover).
-- **VPS / Mobile coding bots:** know the vocabulary (this skill) so failures are
-  named precisely; they do **not** run the full router unless they share that
-  token (forbidden — one poller per token, BOT-5).
+- **Grok TG / free-lane bots:** full behaviour (`/allowance`, buckets, failover) from the box ledger (`TG_ROUTER_STATE_DIR`).
+- **VPS / Mobile coding bots:** same `/allowance` table + `/freemodel` depletion filter via the shared `scripts/lib/free-lanes.mjs` against each bot's OWN ledger (`~/.local/state/bot-host/<botId>/free-lanes`, auto-stamped on quota failures). Per-account quotas mean bot A never reads bot B's stamps.
 - **Collab:** excluded — its quota is Colab compute units, documented in CB-*
   docs, not here.

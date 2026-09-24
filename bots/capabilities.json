@@ -283,22 +283,27 @@
       "test": "T4",
       "scope": "runtime-adapter",
       "status": "partial",
-      "prove": "live smoke: depleted lane \u2192 same prompt completes on next lane with switch line",
+      "prove": "live smoke: depleted lane → same prompt completes on next lane with switch line; gate: scripts/check-capability-propagation.mjs vendor-drift + unit tests for free-lanes",
       "expect": [
         "tools/telegram-provider-router/src/index.js",
-        "scripts/lib/agent-opencode.mjs"
+        "scripts/lib/agent-opencode.mjs",
+        "scripts/lib/free-lanes.mjs",
+        "scripts/bot-host.mjs",
+        "scripts/sync-router-vendor.mjs",
+        "scripts/probe-free-lanes.mjs",
+        "tools/telegram-provider-router/src/free-lane-table.vendor.mjs"
       ],
       "skills": [
         "telegram-allowance"
       ],
       "classes": {
         "hermes": false,
-        "vps": "adapter",
-        "mobile": "adapter",
+        "vps": true,
+        "mobile": true,
         "grok_tg": true,
-        "collab": false
+        "collab": "adapter"
       },
-      "notes": "Grok-built buckets/deplete-tracking/failover vendored; bot-host has vocabulary + runWithModelFailover but live auto-failover wiring is still open. Collab quota is compute units, not Muse buckets."
+      "notes": "Single-source free-lane ledger: scripts/lib/free-lanes.mjs canonical, router holds vendored mirror (drift fails gate). /allowance text + /allowance table + /freemodel depletion filter shared by bot-host family + router; collab shows text only (link-only media). Grok-built buckets/deplete-tracking/failover vendored; bot-host runWithModelFailover consumes same ledger."
     },
     {
       "id": "proc-failfast",

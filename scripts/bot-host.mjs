@@ -28,6 +28,8 @@ import {
   buildOpencodeEnv,
   humanizeRunError,
   isTimeoutError,
+  isQuotaOrLimitError,
+  extractLogError,
 } from './lib/agent-opencode.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
@@ -40,6 +42,16 @@ import {
   GEMINI_MODELS,
   toModelRef,
 } from './lib/freemodels.mjs';
+import {
+  loadFreeLaneLedger,
+  annotateFreemodelEntries,
+  isFreemodelEntryDepleted,
+  buildAllowanceTextForBots,
+  renderFreeLaneTableHtml,
+  ensureBotLedger,
+  stampDepleted,
+  freemodelRefToRoute,
+} from './lib/free-lanes.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -309,6 +321,78 @@ async function getFreeModels(caches) {
     caches.free = buildFreeModelList();
   }
   return caches.free;
+}
+
+/**
+ * Per-bot free-lane ledger (consolidated from the Grok router tracker).
+ * Each bot id owns its dir — quota is per-account/host, so bot A never
+ * reads bot B's stamps. Seeded from the repo pref doc on first use.
+ * Never throws; falls back to pref order when the ledger is missing.
+ */
+function getLedger(botId) {
+  try {
+    const ensured = ensureBotLedger(botId || 'default');
+    const loaded = loadFreeLaneLedger({ stateDir: ensured.dir });
+    if (loaded.table) return { ...loaded, dir: ensured.dir };
+    return { table: null, session: {}, tablePath: null, sessionPath: null, source: 'empty', dir: ensured.dir };
+  } catch {
+    return { table: null, session: {}, tablePath: null, sessionPath: null, source: 'empty', dir: null };
+  }
+}
+
+function getAnnotatedFreeModels(caches, botId) {
+  const base = caches.free || buildFreeModelList();
+  caches.free = base;
+  const { table, session, source } = getLedger(botId);
+  if (!table) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
+  return { entries: base, annotated: annotateFreemodelEntries(base, table, session), table, session, source };
+}
+
+/**
+ * Auto-track: stamp a run's quota failure into the bot's OWN ledger (the
+ * automation behind "empty/rate-limit stamps Reset"). Uses the
+ * small=true-filtered error so cosmetic title-agent failures never deplete
+ * a lane. Best-effort — never throws, never blocks the chat.
+ */
+function trackRunQuota({ botId, modelRef, result }) {
+  try {
+    if (!result || result.aborted) return null;
+    const text = String(result.finalText || '').trim();
+    const filtered = extractLogError(result.stderr || '') || String(result.lastError || '');
+    if (text || !filtered || !isQuotaOrLimitError(filtered)) return null;
+    const { provider, model } = freemodelRefToRoute(modelRef || '');
+    if (!provider || !model || provider === 'gemini') return null;
+    const { dir } = ensureBotLedger(botId || 'default');
+    const stamped = stampDepleted({ stateDir: dir, provider, model, errText: filtered });
+    if (stamped.stamped) console.log(`[free-lanes] ${botId}: stamped ${stamped.keys.join(', ')} from quota error`);
+    return stamped.stamped ? stamped : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Send raw HTML (router parity for the <code> grid) — NOT via the markdown converter. */
+async function sendHtml(api, chatId, html) {
+  const body = String(html || '');
+  if (body.length <= 4000) {
+    await api.sendMessage(chatId, body, { parse_mode: 'HTML' });
+    return;
+  }
+  let i = 0;
+  while (i < body.length) {
+    await api.sendMessage(chatId, body.slice(i, i + 4000), { parse_mode: 'HTML' });
+    i += 4000;
+  }
+}
+
+function formatFreemodelWithDepletion(entries, annotated, { current } = {}) {
+  const base = formatFreeModelText(entries, { current });
+  const depleted = annotated.filter((a) => a.depleted);
+  if (!depleted.length) return `${base}\n\nAllowance: all listed lanes look available (shared ledger). /allowance for Reset in times.`;
+  const lines = depleted.map((d) => `❌ ${d.label} — depleted (reset in ${d.resetIn || 'unknown'})`);
+  const next = annotated.find((a) => !a.depleted);
+  if (next) lines.push(`Next up: ${next.label}`);
+  return `${base}\n\nAllowance (shared ledger):\n${lines.join('\n')}\n\n/allowance for full table.`;
 }
 
 export class ProgressRenderer {
@@ -819,12 +903,43 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
         return;
       }
-      await api.sendMessage(chatId, formatFreeModelText(entries, { current: eff.model }), {
+      const { annotated } = getAnnotatedFreeModels(caches, config.id);
+      const available = annotated.filter((a) => !a.depleted);
+      const keyboardEntries = available.length ? available : annotated;
+      await api.sendMessage(chatId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model }), {
         reply_markup: modelKeyboard(
-          entries.map((entry) => entry.label),
+          keyboardEntries.map((entry) => entry.label),
           { kind: 'fm' },
         ),
       });
+      return;
+    }
+
+    case 'allowance': {
+      const arg = String(cmd.args || '').trim().toLowerCase();
+      const route = freemodelRefToRoute(eff.model || '');
+      if (arg === 'table' || arg === 'html' || arg === 'grid') {
+        try {
+          const { tablePath, sessionPath, table, dir } = getLedger(config.id);
+          if (!table) {
+            await api.sendMessage(chatId, 'Allowance: no free-lane ledger found. Use /freemodel to list free models.');
+            return;
+          }
+          const outDir = path.join(os.tmpdir(), `bot-host-allowance-${config.id}`);
+          const render = renderFreeLaneTableHtml({ tablePath, sessionPath, outDir });
+          await api.sendMessage(chatId, `Free-lane allowance table — ${render.lanes} lanes, ${render.buckets} buckets (per-bot ledger). Sending HTML grid…`);
+          await api.sendMediaFile(chatId, render.htmlPath);
+          return;
+        } catch (e) {
+          const route2 = freemodelRefToRoute(eff.model || '');
+          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model }));
+          return;
+        }
+      }
+      // Router parity: raw HTML grid text (screenshot), NOT the markdown converter.
+      await sendHtml(api, chatId, buildAllowanceTextForBots({
+        stateDir: getLedger(config.id).dir, provider: route.provider, model: route.model,
+      }));
       return;
     }
 
@@ -966,9 +1081,10 @@ async function handleCallback({ api, config, prefs, caches, query }) {
     if (kind === 'fmp') {
       const entries = await getFreeModels(caches);
       const eff = effective(config, prefs, chatId);
-      await api.editMessageText(chatId, messageId, formatFreeModelText(entries, { current: eff.model }), {
+      const { annotated } = getAnnotatedFreeModels(caches, config.id);
+      await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model }), {
         reply_markup: modelKeyboard(
-          entries.map((entry) => entry.label),
+          (annotated.filter((a) => !a.depleted).length ? annotated.filter((a) => !a.depleted) : annotated).map((entry) => entry.label),
           { page: Number(value) || 0, kind: 'fm' },
         ),
       });
@@ -981,6 +1097,16 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         entries.find((e) => e.label === value || e.ref === value) || entries[Number(value)];
       if (!entry) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /freemodel again' });
+        return;
+      }
+      const { table, session, dir } = getLedger(config.id);
+      if (table && isFreemodelEntryDepleted(entry, table, session)) {
+        const { annotated } = getAnnotatedFreeModels(caches, config.id);
+        const hit = annotated.find((a) => a.ref === entry.ref);
+        const next = annotated.find((a) => !a.depleted);
+        await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${hit?.resetIn || 'unknown'}) — pick ${next?.label || 'another lane'}` });
+        const route = freemodelRefToRoute(entry.ref);
+        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model })}`);
         return;
       }
       prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: entry.ref });
@@ -1228,6 +1354,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       sessions.set(chatId, result.sessionID);
       saveSessions(config.id, sessions);
     }
+    // Auto-track (screenshot footer): a quota/rate-limit failure stamps Reset
+    // into this bot's OWN free-lane ledger so /allowance goes ❌ with a time.
+    trackRunQuota({ botId: config.id, modelRef: eff.model, result });
     if (running.get(chatId)?.aborted) {
       renderer.status = 'aborted';
       await renderer.deliver('Aborted.');

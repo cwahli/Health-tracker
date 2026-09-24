@@ -35,7 +35,7 @@ const ORPHAN_LIBS = [
   'tg-copy-code.mjs', 'tg-copy-code.test.mjs', 'tg-api.mjs', 'tg-throttle.mjs',
   'inbound-media.mjs', 'agent-opencode.mjs', 'agent-cline.mjs', 'agent-gemini.mjs', 'freemodels.mjs',
   'reasoning-compress.mjs', 'bot-commands.mjs', 'bot-status.mjs', 'commands.mjs',
-  'file-locks.mjs', 'registry.mjs', 'failure-log.mjs',
+  'file-locks.mjs', 'registry.mjs', 'failure-log.mjs', 'free-lanes.mjs',
 ];
 
 const SCOPES = new Set(['common', 'transport', 'runtime-adapter', 'bot-specific']);
@@ -51,6 +51,11 @@ const VENDOR_MIRRORS = [
     'scripts/lib/tg-progress.mjs',
     'tools/telegram-provider-router/src/tg-progress.vendor.mjs',
     '// === VENDORED FROM scripts/lib/tg-progress.mjs — DO NOT EDIT ===',
+  ],
+  [
+    'scripts/lib/free-lanes.mjs',
+    'tools/telegram-provider-router/src/free-lane-table.vendor.mjs',
+    '// === VENDORED FROM scripts/lib/free-lanes.mjs — DO NOT EDIT ===',
   ],
 ];
 
