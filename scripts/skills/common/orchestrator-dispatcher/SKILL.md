@@ -68,7 +68,7 @@ If a bug report lists multiple discrepancies:
 
 ### Step 2 — Model & Tool Selection (Agent Decides)
 The Orchestrator LLM decides the best tool and model based on task complexity and quota:
-- **OpenCode**: Free, reliable active model is `deepseek-v4.1-flash` (or `deepseek-chat`). Note: `muse-spark-1.3` is depleted.
+- **OpenCode**: Free-only defaults: `nemotron-3.5-lightning-free` (default, probed working) / `space-bunny-free` (fallback). Paid zen models are depleted and `opencode-go` is paid — never default to paid models.
 - **Cline CLI**: `deepseek` with native `--thinking=high|low|none`.
 - **Grok Build**: `grok-build` for fast fixes (6m quota).
 - **Antigravity**: `gemini-flash` (geo-blocked on European VPS).
@@ -82,7 +82,7 @@ bash "$REPO_DIR/scripts/run-coding-dispatch.sh" \
   --bug-id="<BUG-ID>" \
   --category="<meal|biomarker|onboarding>" \
   --tool="<opencode|cline|grok>" \
-  --model="<deepseek-v4.1-flash|deepseek|grok-build>" \
+  --model="<nemotron-3.5-lightning-free|space-bunny-free|grok-build>" \
   --thinking="<low|high>" \
   --screenshot="<path to screenshot if visual, omit if text/formatting>" \
   --profile=orchestrator

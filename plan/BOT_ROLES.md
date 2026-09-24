@@ -51,7 +51,7 @@ OpenCode master **self-serves** meal-audit via shared skill `meal-audit-engine` 
 
 | Agent | Invocation | Stop condition already seen |
 |---|---|---|
-| OpenCode CLI | `opencode run --auto --dir "$REPO_DIR" -m opencode/<model> "<task>"` | `muse-spark-1.3`: insufficient funds. Next model, once: `opencode/deepseek-v4.1-flash` (the model in `bots/registry.json`). Do not retry Muse in the same bug. |
+| OpenCode CLI | `opencode run --auto --dir "$REPO_DIR" -m opencode/<model> "<task>"` | Paid models (`muse-spark-1.3`, `deepseek-v4.1-flash`): insufficient funds — zen balance depleted. Free-only defaults: `nemotron-3.5-lightning-free`, fallback `space-bunny-free`. Never retry a paid model in the same bug. |
 | Cline CLI | `cline --auto-approve true --thinking high "<task>"` | No new files means failure. Do not treat a long think as a fix. |
 | Grok Build CLI | headless grok with the task as the prompt | No new files means failure. |
 | Antigravity `agy` | do not call | `User location is not supported`. Set allowance status so `pick-tool` skips it. |
@@ -67,7 +67,7 @@ No parallel fan-out. One checkout, one coder. A failed attempt reverts only path
 1. The person messages the matching QA bot.
 2. That bot writes four lines (page, observed, expected, screenshot path), starts `run-coding-dispatch.sh` without `--foreground`, and stops.
 3. The script takes `~/.hermes/dispatch_lock` or waits 180 seconds.
-4. OpenCode with Muse, then once with `opencode/deepseek-v4.1-flash` if Muse says insufficient funds. Then Cline. Then Grok. Skip Antigravity.
+4. OpenCode with the free default (`nemotron-3.5-lightning-free`), then once with the free fallback `space-bunny-free` on failure. Then Cline. Then Grok. Skip Antigravity. Never paid models — zen balance is depleted.
 5. Done for a coder means new porcelain lines since the snapshot and `npx tsc --noEmit` exit 0. Then commit those paths and `git push origin main`.
 6. Sleep 45 seconds. Run `node scripts/qa-runner.mjs --journey=<category>`. Post the screenshot to that QA profile.
 7. On failure, one more OpenCode attempt with the QA failure text, push, validate once more, stop.
@@ -151,7 +151,7 @@ Confirm `qa-meal-journey` dispatches the user's actual report, category meal, no
 
 Keep the `28486b1` behavior (detach, own the lock, snapshot revert, QA hand-back).
 
-Add: on `Insufficient account funds`, one retry on the same surface with `-m opencode/deepseek-v4.1-flash`, then stop and post the real error. Do not hop to another vendor. Skip `agy` when `~/.hermes/tool_allowances.json` says `unavailable`. Antigravity is location-blocked. A coder with no new files is a failed attempt. The Telegram line must include the real error (funds, abort, or location), not only “0 code changes.”
+Add: on `Insufficient account funds`, one retry on the same surface with the free fallback `-m opencode/space-bunny-free`, then stop and post the real error. Do not hop to another vendor. Skip `agy` when `~/.hermes/tool_allowances.json` says `unavailable`. Antigravity is location-blocked. A coder with no new files is a failed attempt. The Telegram line must include the real error (funds, abort, or location), not only “0 code changes.”
 
 ### 3f. Orchestrator Health Probing, Investigation Mode & Dual-Sync Memory
 
@@ -160,7 +160,7 @@ To prevent 36-minute stall ladders (where broken tools loop or timeout before to
 1. **Autonomous Model Health Analysis (Pre-Flight Canary)**:
    - `scripts/tool-allowance.mjs` tracks granular model status per tool.
    - When a model returns `Insufficient account funds`, mark that model permanently `depleted` in `~/.hermes/tool_allowances.json` (do not clear it on the 15-minute cooldown timer).
-   - Fast fail-over: switch `opencode` active model to `opencode/deepseek-v4.1-flash` without burning 8 minutes.
+   - Fast fail-over: switch `opencode` active model to the free default `opencode/nemotron-3.5-lightning-free` without burning 8 minutes.
 
 2. **Investigation Mode on Stagnation / Abort**:
    - If a coder makes 0 code changes after 4 minutes or outputs an explicit abort:
@@ -214,7 +214,7 @@ A live bug run is not required to close V-28.
 - **Target File Hints**: Automatically attach known component paths based on the defect category (e.g. nutrition card $\to$ `src/components/`, styling $\to$ `src/index.css`) so coders don't crawl 90+ files.
 
 ### 6c. Coders: Scoped Prompts & Dynamic Thinking
-- **OpenCode**: Primary model `opencode/deepseek-v4.1-flash`; fallback to DeepSeek Chat. Pass `--dir "$REPO_DIR"` with scoped component targets.
+- **OpenCode**: Primary model `opencode/nemotron-3.5-lightning-free` (free); fallback `opencode/space-bunny-free` (free). Pass `--dir "$REPO_DIR"` with scoped component targets.
 - **Cline**: Use `--thinking=low` for atomic UI/text fixes (fast 30s execution); reserve `--thinking=high` only for multi-file architectural refactors. Append invariant guard: *"Never modify elements protected by Playwright tests in prototype/ or AGENTS.md."*
 - **Grok**: Reduce execution timeout to 6 minutes max. Do not attach screenshot images for pure text/formatting tickets to prevent visual over-analysis loops.
 
