@@ -16,11 +16,16 @@
  */
 
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
+
+function read(rel) {
+  return fs.readFileSync(path.join(ROOT, rel), 'utf8');
+}
 
 let pass = 0;
 let fail = 0;
@@ -99,6 +104,13 @@ try {
   check('CLI check-registry exits 0', JSON.parse(out).ok === true);
 } catch (err) {
   check('CLI check-registry exits 0', false, err.message);
+}
+
+// 6. bot-host enforces the contract at startup (fail loud, never boot bad).
+{
+  const hostSrc = read('scripts/bot-host.mjs');
+  check('bot-host imports checkRegistry', hostSrc.includes('checkRegistry'));
+  check('bot-host refuses to start on violations', hostSrc.includes('Refusing to start.'));
 }
 
 console.log(`\n${pass} pass, ${fail} fail`);

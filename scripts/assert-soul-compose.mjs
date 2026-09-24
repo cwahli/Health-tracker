@@ -51,9 +51,8 @@ const {
   composeSoul,
   checkSoul,
   writeSouls,
-} = await import(new URL(`file://${path.join(ROOT, 'scripts/lib/soul-compose.mjs').replace(/\\/g, '/')}`).href);
-
-// 1. Sources exist and parse.
+  verifySouls,
+} = await import(new URL(`file://${path.join(ROOT, 'scripts/lib/soul-compose.mjs').replace(/\\/g, '/')}`).href);// 1. Sources exist and parse.
 check('bots/soul.md exists', fs.existsSync(path.join(BOTS, 'soul.md')));
 let caps = null;
 try {
@@ -118,6 +117,21 @@ try {
   check('written souls byte-identical to composeSoul', identical);
 } finally {
   fs.rmSync(path.join(tmpHome, '.hermes'), { recursive: true, force: true });
+}
+
+// 6. verifySouls detects drift read-only (the VPS live check).
+const tmpHome2 = fs.mkdtempSync(path.join(os.tmpdir(), 'soul_verify_'));
+try {
+  writeSouls({ home: tmpHome2, dir: BOTS });
+  const clean = verifySouls({ home: tmpHome2, dir: BOTS });
+  check('verify passes on fresh souls', clean.ok === true && clean.drift.length === 0);
+  fs.writeFileSync(path.join(tmpHome2, '.hermes', 'SOUL.md'), '# drifted\n');
+  const dirty = verifySouls({ home: tmpHome2, dir: BOTS });
+  check('verify flags a drifted soul', dirty.ok === false && dirty.drift.some((d) => d.profile === 'default'));
+  const missing = verifySouls({ home: path.join(tmpHome2, 'nowhere'), dir: BOTS });
+  check('verify flags missing souls', missing.ok === false && missing.drift.length === PROFILES.length);
+} finally {
+  fs.rmSync(tmpHome2, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} pass, ${fail} fail`);

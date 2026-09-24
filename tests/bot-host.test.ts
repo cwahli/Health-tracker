@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1753,5 +1753,58 @@ describe('BOT-9 live failover wiring', () => {
     });
     expect(result.finalText).toBe('done');
     expect(sent).toEqual([]);
+  });
+});
+
+describe('BOT-19 /tx wiring', () => {
+  const OLD_WS = process.env.WORK_SESSIONS;
+  const OLD_LOC = process.env.BOT_LOCATION;
+  let wsFile;
+  beforeEach(() => {
+    wsFile = `${os.tmpdir()}/tx_test_${Date.now()}_${Math.random().toString(36).slice(2)}.json`;
+    process.env.WORK_SESSIONS = wsFile;
+    process.env.BOT_LOCATION = 'testbox';
+  });
+  afterEach(() => {
+    if (OLD_WS === undefined) delete process.env.WORK_SESSIONS;
+    else process.env.WORK_SESSIONS = OLD_WS;
+    if (OLD_LOC === undefined) delete process.env.BOT_LOCATION;
+    else process.env.BOT_LOCATION = OLD_LOC;
+    try { fs.unlinkSync(wsFile); } catch {}
+  });
+
+  const fakeCfg = () => ({ agent: { workspace: '/ws', kind: 'opencode' } });
+  const fakeApi = (sent) => ({ sendMessage: async (chatId, text) => { sent.push(text); return {}; } });
+
+  it('/tx on enables and reports the attach line', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on' });
+    expect(sent.length).toBe(1);
+    expect(sent[0]).toContain('ON');
+    expect(sent[0]).toContain('tmux attach -t work-testbox');
+    expect(sent[0]).toContain('testbox|9|/ws');
+  });
+
+  it('/tx off disables without stopping', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on' });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'off' });
+    expect(sent[1]).toContain('OFF');
+  });
+
+  it('/tx status reports without a prior toggle', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: '' });
+    expect(sent[0]).toContain('No work session');
+  });
+
+  it('/tx usage on unknown subcommand', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'nope' });
+    expect(sent[0]).toContain('Usage: /tx on|off|status');
   });
 });

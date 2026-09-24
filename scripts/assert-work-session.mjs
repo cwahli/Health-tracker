@@ -115,6 +115,16 @@ check('sessionStatus probe attached', sessionStatus(s1.id, { tmux: noTmux }, tmp
 
 try { if (fs.existsSync(tmpStore)) fs.unlinkSync(tmpStore); } catch {}
 
+// 7. /tx is wired into the live bot (command list, handler case, helper).
+{
+  const hostSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'bot-host.mjs'), 'utf8');
+  check('bot-host handles /tx', hostSrc.includes("case 'tx':"));
+  check('bot-host exports handleTxCommand', hostSrc.includes('export async function handleTxCommand'));
+  const cmdSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'lib', 'commands.mjs'), 'utf8');
+  check('/tx advertised in BOT_COMMANDS', cmdSrc.includes("{ command: 'tx'"));
+  check('/tx in help text', cmdSrc.includes('/tx [on|off]'));
+}
+
 console.log(`\n${pass} pass, ${fail} fail`);
 if (fail > 0) {
   console.error('\nFailures:\n' + failures.map((f) => `  - ${f}`).join('\n'));

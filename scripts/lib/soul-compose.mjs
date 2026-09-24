@@ -139,8 +139,36 @@ export function writeSouls({ home = os.homedir(), dir = DEFAULT_DIR } = {}) {
   return written;
 }
 
+/**
+ * Verify live souls against composed output (VPS-safe, read-only).
+ * Returns { ok, drift } where drift lists profiles whose on-disk soul
+ * differs from what the composer produces. Never writes.
+ */
+export function verifySouls({ home = os.homedir(), dir = DEFAULT_DIR } = {}) {
+  const drift = [];
+  for (const p of PROFILES) {
+    const target = soulTarget(p, home);
+    let live = null;
+    try {
+      live = fs.readFileSync(target, 'utf8');
+    } catch {
+      drift.push({ profile: p, target, reason: 'missing' });
+      continue;
+    }
+    let expected = null;
+    try {
+      expected = composeSoul(p, { dir });
+    } catch (err) {
+      drift.push({ profile: p, target, reason: `compose failed: ${err.message}` });
+      continue;
+    }
+    if (live !== expected) drift.push({ profile: p, target, reason: 'differs from composed output' });
+  }
+  return { ok: drift.length === 0, drift };
+}
+
 function printUsage() {
-  console.log('usage: soul-compose.mjs <compose|check|write> [--profile=X] [--dir=PATH] [--home=PATH]');
+  console.log('usage: soul-compose.mjs <compose|check|write|verify> [--profile=X] [--dir=PATH] [--home=PATH]');
 }
 
 async function cli(argv) {
@@ -167,6 +195,12 @@ async function cli(argv) {
     case 'write': {
       const written = writeSouls({ home: opts.home || os.homedir(), dir });
       console.log(JSON.stringify({ written }, null, 2));
+      break;
+    }
+    case 'verify': {
+      const { ok, drift } = verifySouls({ home: opts.home || os.homedir(), dir });
+      console.log(JSON.stringify({ ok, drift }, null, 2));
+      process.exitCode = ok ? 0 : 1;
       break;
     }
     default:
