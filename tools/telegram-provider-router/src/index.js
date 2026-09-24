@@ -2551,7 +2551,7 @@ async function probeOpenCodeFree() {
         if (out.some((x) => x.id === fullId)) continue;
         out.push({
           id: fullId,
-          label: prettyFreeLabel("opencode", fullId) + " (cf)",
+          label: prettyFreeLabel("opencode", fullId),
           display: name,
         });
       }
@@ -2563,11 +2563,13 @@ async function probeOpenCodeFree() {
         const name = (meta && meta.name) || mid;
         const idLow = String(mid).toLowerCase();
         if (!(idLow.includes("free") || idLow.includes(":free") || /free/i.test(name))) continue;
-        const fullId = mid.includes("/") ? mid : `tokenharbor/${mid}`;
+        // Always namespace the OpenCode-hosted TH model as `tokenharbor/…` so
+        // the freemodel dedupe can collapse it with the chat-only TH lane.
+        const fullId = String(mid).startsWith("tokenharbor/") ? mid : `tokenharbor/${mid}`;
         if (out.some((x) => x.id === fullId)) continue;
         out.push({
           id: fullId,
-          label: prettyFreeLabel("opencode", fullId) + " (th)",
+          label: prettyFreeLabel("tokenharbor", mid),
           display: name,
         });
       }
@@ -2655,11 +2657,15 @@ async function probeTokenHarborFree() {
   }
 }
 
-function freebuffCredsOk() {
+/** Freebuff CLI credentials on this box (test seam: pass a temp path). */
+const FREEBUFF_CREDS_PATH = "/home/box/.config/manicode/credentials.json";
+/** Freebuff ledger id for DeepSeek V4.1 Flash (docs/free-lane-preference.json pref 17). */
+const FREEBUFF_DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
+
+function freebuffCredsOk(credsPath = FREEBUFF_CREDS_PATH) {
   try {
-    const p = "/home/box/.config/manicode/credentials.json";
-    if (!existsSync(p)) return false;
-    const d = JSON.parse(readFileSync(p, "utf8"));
+    if (!existsSync(credsPath)) return false;
+    const d = JSON.parse(readFileSync(credsPath, "utf8"));
     const inner = d.default || d;
     return Boolean(inner.authToken || inner.token || inner.accessToken);
   } catch {
@@ -2667,13 +2673,24 @@ function freebuffCredsOk() {
   }
 }
 
-async function probeFreebuffFree() {
-  // Freebuff CLI is terminal/TUI only — never offer Telegram taps.
-  const signed = freebuffCredsOk() ? "signed in" : "not signed in";
+/**
+ * Freebuff is terminal-only for *chat*, but it still gets a /freemodel tap so
+ * it is discoverable: selecting it replies with terminal-only instructions
+ * instead of a hard error. Returns ok:false (→ "Not available" footer) when
+ * this box is not signed in.
+ */
+async function probeFreebuffFree(credsPath = FREEBUFF_CREDS_PATH) {
+  if (!freebuffCredsOk(credsPath)) {
+    return {
+      ok: false,
+      reason: "not signed in on this box — run `freebuff` in a terminal to sign in",
+      items: [],
+    };
+  }
   return {
-    ok: false,
-    reason: `terminal only (${signed}) — no Telegram chat path yet`,
-    items: [],
+    ok: true,
+    reason: "",
+    items: [{ id: FREEBUFF_DEFAULT_MODEL, label: "DeepSeek V4.1 Flash" }],
   };
 }
 
@@ -2687,17 +2704,22 @@ async function probeCommandCodeFree() {
   };
 }
 
-async function listAvailableFreeModels(filterProvider) {
+async function listAvailableFreeModels(filterProvider, opts = {}) {
   const want = filterProvider ? PROVIDER_ALIASES[filterProvider] || filterProvider : null;
   if (want && !PROVIDERS[want]) {
     return { error: `Unknown provider. Try: ${Object.keys(PROVIDERS).join(", ")}` };
   }
+  const overrides = opts.probes || {};
   const probes = [];
   const order = ["opencode", "cline", "tokenharbor", "freebuff", "commandcode"];
   for (const key of order) {
     if (want && key !== want) continue;
     probes.push(
       (async () => {
+        // Test seam: opts.probes[key] (result object or thunk) replaces the live probe.
+        const override = Object.prototype.hasOwnProperty.call(overrides, key) ? overrides[key] : null;
+        if (typeof override === "function") return [key, await override()];
+        if (override) return [key, override];
         if (key === "opencode") return [key, await probeOpenCodeFree()];
         if (key === "cline") return [key, await probeClineFree()];
         if (key === "tokenharbor") return [key, await probeTokenHarborFree()];
@@ -2731,8 +2753,19 @@ function freemodelCallbackData(providerKey, modelId) {
 function applyFreeModelPick(providerKey, modelId) {
   if (!PROVIDERS[providerKey]) throw new Error(`Unknown provider: ${providerKey}`);
   if (providerKey === "freebuff") {
-    throw new Error(
-      "Freebuff is terminal-only (no Telegram chat). Pick OpenCode Muse, Token Harbor, or Cline."
+    // Freebuff has no Telegram chat lane. Do NOT switch the active route — just
+    // record the terminal preference and answer with honest instructions.
+    const mid = String(modelId || state.models.freebuff || FREEBUFF_DEFAULT_MODEL);
+    state.models.freebuff = mid;
+    saveState(state);
+    return (
+      "Freebuff is terminal-only — there is no Telegram chat lane.\n" +
+      `Model: \`${mid}\` (DeepSeek V4.1 Flash)\n\n` +
+      "Use it on this box:\n" +
+      "• Open a terminal (tmux) on the host and run `freebuff`.\n" +
+      "• Pick DeepSeek V4.1 Flash in the Freebuff session.\n" +
+      "• Freebucks are shared daily — use it promptly.\n\n" +
+      `Telegram messages still go to ${PROVIDERS[state.provider]?.label || state.provider}. Nothing was switched.`
     );
   }
   // Token Harbor free taps → OpenCode + tokenharbor/<id> so tools/files work.
@@ -2766,58 +2799,135 @@ function applyFreeModelPick(providerKey, modelId) {
   );
 }
 
-/** Fixed /freemodel header (exported so tests can assert the deplete contract). */
+/**
+ * Fixed /freemodel header (exported so tests can assert the deplete contract).
+ * Keep it SHORT: the models are the buttons — never dump a per-model text list.
+ */
 const FREEMODEL_HEADER = [
-  "Available free models (live check):",
-  "Tap a model to select, or Cancel to keep your current one.",
-  "Token Harbor / Cloudflare taps use OpenCode (tools). Quota auto-fails over to the next free lane.",
-  "Depleted lanes are marked ❌ with a Reset in time — tapping one still switches, but the first message auto-failovers.",
-  "Auto-failover announces switches (sticky depleted → next free lane, even for a greeting).",
-  "Freebuff is terminal-only — not listed as a Telegram tap.",
+  "Free models — tap a button below (❌ = depleted; the first message auto-fails over).",
+  "Depleted lanes are marked ❌ and stay tappable; auto-failover announces switches to the next free lane.",
+  "Token Harbor / Cloudflare taps run via OpenCode (tools).",
+  "Freebuff is a terminal-only coding lane — no Telegram chat (tap for instructions).",
 ];
 
-async function freemodelReply(filterProvider) {
-  const packed = await listAvailableFreeModels(filterProvider);
-  if (packed.error) return { text: packed.error, keyboard: null };
-  const now = Date.now();
+/**
+ * Telegram's InlineKeyboardButton has no `align`; those clients render button
+ * text centred. Practical workaround: keep the label short and right-pad with
+ * spaces so it reads flush-left-ish. Telegram caps button text at 64 chars.
+ */
+const FREEMODEL_BUTTON_WIDTH = 38;
+function leftishButtonLabel(text, width = FREEMODEL_BUTTON_WIDTH) {
+  const s = String(text ?? "").slice(0, 64);
+  if (s.length >= width) return s.slice(0, Math.max(1, width));
+  return s.padEnd(width);
+}
+
+/** Short provider tag for a /freemodel button (the body no longer lists providers). */
+function freemodelProviderTag(providerKey, item) {
+  const mid = String(item?.id || "").toLowerCase();
+  if (mid.startsWith("tokenharbor/")) return "TH tools";
+  if (mid.startsWith("cloudflare/")) return "Cloudflare";
+  return PROVIDERS[providerKey]?.label || providerKey;
+}
+
+/** Does this /freemodel result describe the shared Token Harbor free lane? */
+function isFreemodelTokenHarborRoute(providerKey, modelId) {
+  const p = String(providerKey || "").toLowerCase();
+  const m = String(modelId || "").toLowerCase();
+  return p === "tokenharbor" || m.startsWith("tokenharbor/");
+}
+/** Provider-agnostic key so TH chat + OpenCode `tokenharbor/…` collapse to one. */
+function freemodelTokenHarborKey(modelId) {
+  return String(modelId || "")
+    .toLowerCase()
+    .replace(/^tokenharbor\//, "")
+    .replace(/:free$/, "")
+    .replace(/-free$/, "");
+}
+/** OpenCode + `tokenharbor/…` (tools) is preferred over the chat-only TH lane. */
+function freemodelPrefersTools(modelId) {
+  return String(modelId || "").toLowerCase().startsWith("tokenharbor/");
+}
+
+/**
+ * Display-only dedupe for /freemodel. Token Harbor chat and OpenCode
+ * `tokenharbor/…` are the same free bar, so render ONE button per model and
+ * prefer the OpenCode tools path (same spirit as `dedupeTokenHarborLanes`).
+ * Zen / Cline / Cloudflare / Freebuff lanes are left untouched.
+ */
+function dedupeFreemodelItems(results) {
+  const kept = []; // ordered survivors: { key, item }
+  const thByKey = new Map();
+  for (const [key, res] of results || []) {
+    for (const item of res?.items || []) {
+      if (!isFreemodelTokenHarborRoute(key, item.id)) {
+        kept.push({ key, item });
+        continue;
+      }
+      const tk = freemodelTokenHarborKey(item.id);
+      const prev = thByKey.get(tk);
+      if (!prev) {
+        const entry = { key, item };
+        thByKey.set(tk, entry);
+        kept.push(entry);
+      } else if (freemodelPrefersTools(item.id) && !freemodelPrefersTools(prev.item.id)) {
+        const idx = kept.indexOf(prev);
+        if (idx >= 0) {
+          const entry = { key, item };
+          kept[idx] = entry;
+          thByKey.set(tk, entry);
+        }
+      }
+    }
+  }
+  return (results || []).map(([key, res]) => [
+    key,
+    { ...res, items: kept.filter((e) => e.key === key).map((e) => e.item) },
+  ]);
+}
+
+/** Pure body + keyboard builder (tests call this with fixture probe results). */
+function buildFreemodelReply(results, now = Date.now()) {
   const lines = [...FREEMODEL_HEADER, ""];
-  const skipped = [];
   let total = 0;
   let depletedCount = 0;
+  // "Not available" is about the probe, never about a lane that dedupe merged
+  // into the OpenCode tools button (that lane IS available, just not repeated).
+  const skipped = (results || [])
+    .filter(([, res]) => !res?.ok || !res.items?.length)
+    .map(([key, res]) => ({ label: PROVIDERS[key]?.label || key, reason: res?.reason || "none available" }));
   const kb = new InlineKeyboard();
-  for (const [key, res] of packed.results) {
-    const label = PROVIDERS[key]?.label || key;
-    if (!res.ok || !res.items.length) {
-      skipped.push(`• ${label}: ${res.reason || "none available"}`);
-      continue;
-    }
-    lines.push(`${label}`);
+  for (const [key, res] of dedupeFreemodelItems(results)) {
     for (const item of res.items) {
       total += 1;
       const dep = freeModelDepletion(key, item.id, now);
       if (dep) depletedCount += 1;
-      lines.push(formatFreeLine(key, item.id, item.label, dep));
-      // Buttons stay tappable for depleted lanes, prefixed ❌ so the mark is visible.
-      const btn = `${dep ? "❌ " : ""}${key}: ${item.label}`.slice(0, 64);
-      kb.text(btn, freemodelCallbackData(key, item.id)).row();
+      const btnText = `${dep ? "❌ " : ""}${freemodelProviderTag(key, item)}: ${item.label}`;
+      kb.text(leftishButtonLabel(btnText), freemodelCallbackData(key, item.id)).row();
     }
-    lines.push("");
-  }
-  if (!total) {
-    lines.push("No free models available right now.");
-  } else {
-    lines.push(`Total: ${total}${depletedCount ? ` · ${depletedCount} depleted ❌` : ""}`);
-    lines.push("Or: /switch <provider> then /model <id>");
-  }
-  if (skipped.length) {
-    lines.push("");
-    lines.push("Not available:");
-    lines.push(...skipped);
   }
   if (total) {
-    kb.text("Cancel — keep current model", "fm_cancel").row();
+    lines.push(`Total: ${total}${depletedCount ? ` · ${depletedCount} depleted ❌` : ""}`);
+  } else {
+    lines.push("No free models available right now.");
   }
-  return { text: lines.join("\n"), keyboard: total ? kb : null };
+  if (skipped.length) {
+    // One short footer line — never a second per-model list.
+    lines.push(
+      "Not available: " +
+        skipped
+          .map((s) => `${s.label} — ${String(s.reason).replace(/\s+/g, " ").slice(0, 60)}`)
+          .join("; ")
+    );
+  }
+  if (total) kb.text(leftishButtonLabel("Cancel — keep current model"), "fm_cancel").row();
+  return { text: lines.join("\n"), keyboard: total ? kb : null, total, depletedCount, skipped };
+}
+
+async function freemodelReply(filterProvider, opts = {}) {
+  const packed = await listAvailableFreeModels(filterProvider, opts);
+  if (packed.error) return { text: packed.error, keyboard: null };
+  return buildFreemodelReply(packed.results);
 }
 
 
@@ -3336,7 +3446,9 @@ bot.callbackQuery(/^fm/, async (ctx) => {
   }
   try {
     const msg = applyFreeModelPick(pick.provider, pick.modelId);
-    await ctx.answerCallbackQuery({ text: "Selected" }).catch(() => {});
+    await ctx
+      .answerCallbackQuery({ text: pick.provider === "freebuff" ? "Terminal only" : "Selected" })
+      .catch(() => {});
     await ctx.reply(msg);
   } catch (e) {
     await ctx.answerCallbackQuery({
@@ -3790,8 +3902,16 @@ export {
   freeModelDepletion,
   formatFreeLine,
   FREEMODEL_HEADER,
+  FREEMODEL_BUTTON_WIDTH,
+  leftishButtonLabel,
+  freemodelProviderTag,
+  dedupeFreemodelItems,
+  buildFreemodelReply,
   applyFreeModelPick,
   freemodelReply,
+  probeFreebuffFree,
+  freebuffCredsOk,
+  FREEBUFF_DEFAULT_MODEL,
   formatResetIn,
   allFreeLanesDepletedMessage,
   isGreetingOnly,

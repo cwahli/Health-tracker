@@ -34,6 +34,8 @@ This package encodes the fixes. Read `docs/` and `tickets/*_REPORT.md` before ch
 
 Commands (high level): `/switch`, `/model`, `/freemodel`, `/allowance`, `/allowance table` (same free-lane ledger as an HTML grid, delivered with `MEDIA:<abs-path.html>`), `/status`, `/think`, `/compact`, `/unlock`, Cancel & unlock on Busy replies.
 
+`/freemodel` is **buttons-only**: a short header plus one inline button per free lane (no per-model text dump). Token Harbor chat and OpenCode `tokenharbor/…` are the same free bar, so they render as **one** button (the OpenCode tools path wins). Freebuff gets a button whenever the box is signed in; tapping it replies with terminal-only instructions (run `freebuff` in a tmux on the host) and does **not** switch the Telegram route. Labels are right-padded with spaces because Telegram's `InlineKeyboardButton` has no `align` (see `tmp/ht-freemodel-buttons-only/REPORT.md`).
+
 ---
 
 ## Quota memory (`FREE_ALLOWANCE_BUCKETS`)
