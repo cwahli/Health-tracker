@@ -345,7 +345,7 @@ async function main() {
         by: args.by,
       };
       const r = await withFallback({ op: 'verify', id, ...body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/verify`, body));
-      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'verify', tag_id: r.tag_id, state: r.state, flags: r.flags, result: body.result });
+      if (r.state) appendJournal(journalPub(r), { op: 'verify', tag_id: r.tag_id, state: r.state, flags: r.flags, result: body.result });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -358,7 +358,7 @@ async function main() {
       const r = await withFallback({ op: 'claim', id, assignee: args.assignee }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { assignee: args.assignee })
       );
-      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'claim', tag_id: r.tag_id, state: r.state, assignee: args.assignee });
+      if (r.state) appendJournal(journalPub(r), { op: 'claim', tag_id: r.tag_id, state: r.state, assignee: args.assignee });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -372,7 +372,7 @@ async function main() {
       const r = await withFallback({ op: 'duplicate', id, of }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { duplicate_of: of })
       );
-      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'duplicate', tag_id: r.tag_id, state: r.state, flags: r.flags, of });
+      if (r.state) appendJournal(journalPub(r), { op: 'duplicate', tag_id: r.tag_id, state: r.state, flags: r.flags, of });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -387,7 +387,7 @@ async function main() {
           reset_burns: args['reset-burns'] === true || args['reset-burns'] === 'true',
         })
       );
-      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'unblock', tag_id: r.tag_id, state: r.state, flags: r.flags });
+      if (r.state) appendJournal(journalPub(r), { op: 'unblock', tag_id: r.tag_id, state: r.state, flags: r.flags });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -400,7 +400,7 @@ async function main() {
       const r = await withFallback({ op: 'block', id, reason }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { blocked_reason: reason, queue: 'blocked' })
       );
-      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'block', tag_id: r.tag_id, state: r.state, flags: r.flags, reason });
+      if (r.state) appendJournal(journalPub(r), { op: 'block', tag_id: r.tag_id, state: r.state, flags: r.flags, reason });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
