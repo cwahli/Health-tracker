@@ -12,27 +12,39 @@ import {
   handoffSession,
   abortSession,
   ensureTmuxWorkView,
+  disableTmuxObserver,
   debugProbe,
   sessionStatus,
   scrubSecrets,
   statusForTelegram,
+  observerLogPath,
+  createObserver,
+  formatObserverRecord,
+  writeObserverRecord,
 } from '../scripts/lib/work-session.mjs';
 
 let store;
 const noTmux = () => false;
-const yesTmux = () => true;
 
 function fakeTmux(initial = {}) {
   const sessions = new Map(Object.entries(initial).map(([name, windows]) => [name, new Set(windows)]));
+  const panes = new Map();
   const calls = [];
+  let nextPane = 1;
+  const paneKey = (target) => String(target).replace(/:$/, '');
+  const addPane = (target, command) => {
+    const id = `%${nextPane++}`;
+    panes.set(`${paneKey(target)}\t${id}`, { target: paneKey(target), id, command });
+    return id;
+  };
   const run = (args) => {
     calls.push(args);
     if (args[0] === 'has-session') return sessions.has(args[2]);
-    if (args[0] === 'list-windows') {
-      return [...(sessions.get(args[2]) || [])].join('\n');
-    }
+    if (args[0] === 'list-windows') return [...(sessions.get(args[2]) || [])].join('\n');
     if (args[0] === 'new-session') {
-      sessions.set(args[3], new Set([args[5]]));
+      const session = args[3];
+      sessions.set(session, new Set([args[5]]));
+      addPane(`${session}:${args[5]}`, args.at(-1));
       return true;
     }
     if (args[0] === 'new-window') {
@@ -40,11 +52,29 @@ function fakeTmux(initial = {}) {
       const windows = sessions.get(session) || new Set();
       windows.add(args[5]);
       sessions.set(session, windows);
+      addPane(`${session}:${args[5]}`, args.at(-1));
+      return true;
+    }
+    if (args[0] === 'list-panes') {
+      const target = paneKey(args[2]);
+      return [...panes.values()].filter((pane) => pane.target === target).map((pane) => `${pane.id}\t${pane.command}`).join('\n');
+    }
+    if (args[0] === 'split-window') {
+      return addPane(args[3], args.at(-1));
+    }
+    if (args[0] === 'select-pane' || args[0] === 'kill-pane') {
+      if (args[0] === 'kill-pane') {
+        const entry = [...panes.entries()].find(([, pane]) => pane.id === args[2]);
+        if (entry) panes.delete(entry[0]);
+      }
       return true;
     }
     return false;
   };
-  return { calls, run, sessions };
+  for (const [session, windows] of sessions) {
+    for (const window of windows) addPane(`${session}:${window}`, 'bash');
+  }
+  return { calls, run, sessions, panes };
 }
 
 beforeEach(() => {
@@ -89,18 +119,20 @@ describe('tx', () => {
 });
 
 describe('tmux work view', () => {
-  it('creates a session and workstream window once', () => {
+  it('creates a tail-backed session and reuses the exact observer pane', () => {
     const session = resolveSession({ ...loc, lane: 'opencode' }, store);
     const tmux = fakeTmux();
     const first = ensureTmuxWorkView(session, { tmux: tmux.run });
-    const count = tmux.calls.length;
     const second = ensureTmuxWorkView(session, { tmux: tmux.run });
 
-    expect(first).toMatchObject({ ok: true, created: true, surface: 'terminal', tmuxSession: 'work-vps' });
+    expect(first).toMatchObject({ ok: true, created: true, migrated: false, surface: 'terminal', tmuxSession: 'work-vps' });
     expect(first.target).toBe(`work-vps:${tmuxWindowFor(session.id)}`);
-    expect(tmux.calls).toContainEqual(['new-session', '-d', '-s', 'work-vps', '-n', tmuxWindowFor(session.id), '-c', session.workspace]);
-    expect(second).toMatchObject({ ok: true, created: false });
-    expect(tmux.calls).toHaveLength(count + 2);
+    expect(first.observerLog).toBe(observerLogPath(session));
+    expect(tmux.calls.some((args) => args[0] === 'new-session' && String(args.at(-1)).includes('/usr/bin/tail -n 40 -F --'))).toBe(true);
+    expect(second).toMatchObject({ ok: true, created: false, migrated: false, observerPane: first.observerPane });
+    expect(tmux.calls.filter((args) => args[0] === 'split-window')).toHaveLength(0);
+    expect(tmux.calls.filter((args) => args[0] === 'select-pane').length).toBeGreaterThanOrEqual(2);
+    expect(tmux.calls.flat().some((arg) => /send-keys|respawn-pane|kill-window|kill-session/.test(String(arg)))).toBe(false);
   });
 
   it('adds only a missing window to an existing session', () => {
@@ -108,18 +140,29 @@ describe('tmux work view', () => {
     const tmux = fakeTmux({ 'work-vps': ['other'] });
     const result = ensureTmuxWorkView(session, { tmux: tmux.run });
     expect(result.ok).toBe(true);
-    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'list-windows', 'new-window', 'list-windows']);
+    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'list-windows', 'new-window', 'list-windows', 'list-panes', 'select-pane']);
     expect(tmux.sessions.get('work-vps')).toEqual(new Set(['other', tmuxWindowFor(session.id)]));
   });
 
-  it('reuses an existing workstream without creating or killing anything', () => {
+  it('migrates a legacy blank window with a non-destructive observer pane', () => {
     const session = resolveSession({ ...loc, lane: 'opencode' }, store);
     const window = tmuxWindowFor(session.id);
     const tmux = fakeTmux({ 'work-vps': [window] });
     const result = ensureTmuxWorkView(session, { tmux: tmux.run });
-    expect(result).toMatchObject({ ok: true, created: false });
-    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'list-windows']);
-    expect(tmux.calls.flat().some((arg) => /kill|respawn|send-keys/.test(String(arg)))).toBe(false);
+    expect(result).toMatchObject({ ok: true, created: false, migrated: true });
+    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'list-windows', 'list-panes', 'split-window', 'select-pane']);
+    expect(tmux.calls.flat().some((arg) => /send-keys|respawn-pane|kill-window|kill-session/.test(String(arg)))).toBe(false);
+    expect(debugProbe('opencode', { session, tmux: tmux.run }).observerLive).toBe(true);
+  });
+
+  it('cleans up only the exact observer pane', () => {
+    const session = resolveSession({ ...loc, lane: 'opencode' }, store);
+    const tmux = fakeTmux();
+    const view = ensureTmuxWorkView(session, { tmux: tmux.run });
+    const result = disableTmuxObserver(session, { tmux: tmux.run });
+    expect(result).toMatchObject({ ok: true, stopped: true, pane: view.observerPane });
+    expect(tmux.calls.some((args) => args[0] === 'kill-pane' && args[2] === view.observerPane)).toBe(true);
+    expect(tmux.calls.flat().some((arg) => /kill-window|kill-session|send-keys|respawn-pane/.test(String(arg)))).toBe(false);
   });
 
   it('never invokes tmux for an API-only lane', () => {
@@ -146,16 +189,18 @@ describe('debugProbe', () => {
     expect(keys.size).toBe(1);
   });
 
-  it('terminal lanes attach via tmux when present', () => {
+  it('terminal lanes report observer liveness, not window existence', () => {
     const s = resolveSession(loc, store);
-    const p = debugProbe('opencode', { session: s, tmux: yesTmux });
-    expect(p).toMatchObject({ surface: 'terminal', attach: true, tmuxSession: 'work-vps' });
+    const tmux = fakeTmux();
+    ensureTmuxWorkView(s, { tmux: tmux.run });
+    const p = debugProbe('opencode', { session: s, tmux: tmux.run });
+    expect(p).toMatchObject({ surface: 'terminal', attach: true, observerLive: true, tmuxSession: 'work-vps' });
     expect(p.target).toBe(`work-vps:${tmuxWindowFor(s.id)}`);
   });
 
   it('API lanes never claim attach', () => {
     const s = resolveSession(loc, store);
-    const p = debugProbe('gemini', { session: s, tmux: yesTmux });
+    const p = debugProbe('gemini', { session: s, tmux: noTmux });
     expect(p).toMatchObject({ surface: 'api', attach: false, events: true });
   });
 
@@ -186,6 +231,41 @@ describe('handoff / abort', () => {
     expect(dead.transcriptRef).toBe('dispatch_BUG-9_grok.log');
     expect(dead.lane).toBe('grok');
     expect(getSession(s.id, store)).not.toBeNull();
+  });
+});
+
+describe('private observer log', () => {
+  it('writes only allowlisted activity and uses a hashed private path', () => {
+    const root = path.join(os.tmpdir(), `observer_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    const session = resolveSession(loc, store);
+    const observer = createObserver(session, { root, now: () => '2026-09-24T00:00:00.000Z' });
+    expect(path.basename(observer.path)).not.toContain(session.id);
+    expect(path.dirname(observer.path)).toBe(root);
+    observer.onEvent({ kind: 'reasoning', text: 'private reasoning secret' });
+    observer.onEvent({ kind: 'tool', tool: 'read', status: 'completed', input: 'secret input', output: 'secret output' });
+    observer.onEvent({ kind: 'step_finish', tokens: { total: 42, input: 'secret input' }, cost: 0.01 });
+    observer.onEvent({ kind: 'text', text: 'secret final text' });
+    observer.onEvent({ kind: 'error', message: 'secret provider error' });
+    const content = fs.readFileSync(observer.path, 'utf8');
+    expect(content).toContain('"kind":"thinking"');
+    expect(content).toContain('"tool":"read"');
+    expect(content).toContain('"tokens":42');
+    expect(content).not.toMatch(/private reasoning|secret input|secret output|secret final text|secret provider error/);
+    expect(fs.statSync(root).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(observer.path).mode & 0o777).toBe(0o600);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rotates a bounded append-only log', () => {
+    const root = path.join(os.tmpdir(), `observer_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    const logPath = path.join(root, 'events.log');
+    for (let i = 0; i < 5; i += 1) {
+      writeObserverRecord(logPath, formatObserverRecord('run_start', {}, { model: 'm1' }, `t${i}`), 80);
+    }
+    expect(fs.existsSync(`${logPath}.1`)).toBe(true);
+    expect(fs.statSync(logPath).size).toBeLessThanOrEqual(80);
+    expect(fs.statSync(`${logPath}.1`).size).toBeLessThanOrEqual(80);
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });
 
