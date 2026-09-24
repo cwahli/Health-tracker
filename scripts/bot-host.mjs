@@ -12,6 +12,8 @@ import { compressReasoning } from './lib/reasoning-compress.mjs';
 import { recordFailure } from './lib/failure-log.mjs';
 import {
   runOpencode,
+  runWithModelFailover,
+  failoverModels,
   listModels,
   listAgents,
   listModelsVerbose,
@@ -1027,6 +1029,34 @@ async function collectInboundMedia(api, message, config) {
   return saved;
 }
 
+/**
+ * BOT-9 live failover wiring for the main message path: run the prompt on
+ * the chat's effective model, falling back to the bot default on retryable
+ * failures (quota/unfunded/5xx — never timeout/abort, per defaultIsRetryable).
+ * The switch posts a user-visible line. A single-model chain behaves exactly
+ * like a direct runOpencode call. Exported for unit tests.
+ */
+export async function runOpencodeWithFailover({ api, chatId, prompt, models, onSwitchNotify, ...runArgs }) {
+  const { result } = await runWithModelFailover({
+    models,
+    makeRun: (model) => runOpencode({ prompt, model, ...runArgs }),
+    onSwitch: ({ from, to, reason }) => {
+      const line = `🔀 *${from}* failed (${String(reason || 'error').slice(0, 200)}) — switching to *${to}*…`;
+      try {
+        if (typeof onSwitchNotify === 'function') {
+          onSwitchNotify(line);
+        } else {
+          const p = api.sendMessage(chatId, line);
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
+      } catch {
+        // a UI hiccup must never break failover
+      }
+    },
+  });
+  return result;
+}
+
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
@@ -1128,9 +1158,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
               onSpawn: (child) => running.set(chatId, { child, aborted: false }),
               env: chatEnv(api, chatId),
             })
-          : await runOpencode({
+          : await runOpencodeWithFailover({
+            api,
+            chatId,
             prompt: promptWithMedia,
-            model: eff.model,
+            models: failoverModels(eff.model, config.agent.model),
             variant: eff.variant,
             workspace: config.agent.workspace,
             thinking: config.agent.thinking,

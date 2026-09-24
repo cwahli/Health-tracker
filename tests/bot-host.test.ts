@@ -1682,3 +1682,76 @@ describe('BOT-21 — Coordination Tax Logger & Repro Consensus', () => {
   });
 });
 
+
+describe('BOT-9 live failover wiring', () => {
+  it('failoverModels collapses duplicates and drops empties', async () => {
+    const { failoverModels } = await import('../scripts/lib/agent-opencode.mjs');
+    expect(failoverModels('m1', 'm1')).toEqual(['m1']);
+    expect(failoverModels('m1', 'm2')).toEqual(['m1', 'm2']);
+    expect(failoverModels('m1', '')).toEqual(['m1']);
+    expect(failoverModels('', null)).toEqual([]);
+  });
+
+  it('runOpencodeWithFailover switches lanes with a user-visible line', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const oldLog = process.env.BOT_FAILURE_LOG;
+    process.env.BOT_FAILURE_LOG = `${os.tmpdir()}/failover_test_${Date.now()}.jsonl`;
+    try {
+      const modelsSeen = [];
+      const spawnImpl = (bin, args) => {
+        const model = String(args[args.indexOf('-m') + 1]);
+        modelsSeen.push(model);
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => { child.emit('close', 1); };
+        queueMicrotask(() => {
+          if (model === 'm1') {
+            child.stderr.emit('data', Buffer.from('level=ERROR msg="run failed" error.error="rate limit exceeded, retry later"\n'));
+          } else {
+            child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"fixed it"}}\n'));
+          }
+          child.emit('close', model === 'm1' ? 1 : 0);
+        });
+        return child;
+      };
+      const sent = [];
+      const api = { sendMessage: async (chatId, text) => { sent.push(text); return {}; } };
+      const result = await runOpencodeWithFailover({
+        api, chatId: 7, prompt: 'fix x', models: ['m1', 'm2'],
+        workspace: '/tmp', timeoutMs: 5000, spawnImpl,
+      });
+      expect(modelsSeen).toEqual(['m1', 'm2']);
+      expect(result.finalText).toBe('fixed it');
+      expect(sent.length).toBe(1);
+      expect(sent[0]).toMatch(/m1.*switching to.*m2/);
+    } finally {
+      if (oldLog === undefined) delete process.env.BOT_FAILURE_LOG;
+      else process.env.BOT_FAILURE_LOG = oldLog;
+    }
+  });
+
+  it('single-model chain behaves like a direct call with no switch line', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const spawnImpl = () => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => {};
+      queueMicrotask(() => {
+        child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"done"}}\n'));
+        child.emit('close', 0);
+      });
+      return child;
+    };
+    const sent = [];
+    const api = { sendMessage: async (chatId, text) => { sent.push(text); return {}; } };
+    const result = await runOpencodeWithFailover({
+      api, chatId: 7, prompt: 'fix x', models: ['m1'], workspace: '/tmp', timeoutMs: 5000, spawnImpl,
+    });
+    expect(result.finalText).toBe('done');
+    expect(sent).toEqual([]);
+  });
+});

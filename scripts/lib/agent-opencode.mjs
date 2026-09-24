@@ -303,6 +303,16 @@ export function isQuotaOrLimitError(msg) {
 const NO_RETRY_RE = /timed out after|aborted|^Abort/i;
 
 /**
+ * Failover chain for one dispatch: the chat's effective model first, then
+ * the bot default. Identical entries collapse, so a chat on the default
+ * model runs exactly once (current behavior). No invented models — both
+ * ends come from the registry/prefs.
+ */
+export function failoverModels(primary, fallback) {
+  return [...new Set([primary, fallback].filter(Boolean))];
+}
+
+/**
  * Run the user's prompt on the first model that works, mirroring the provider
  * router's free-lane failover: when a lane is rate-limited/unfunded, re-run the
  * SAME prompt on the next candidate instead of dead-ending in the chat.
