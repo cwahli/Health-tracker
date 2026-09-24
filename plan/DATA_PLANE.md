@@ -160,6 +160,14 @@ Dump R2 key: none
 Follow-up: retry ~2026-09-24 when quota reset window opens
 ```
 
+```text
+Date probed: 2026-09-24 (agent probe from VPS, food_logs + profiles)
+REST status: HTTP 402 Payment Required — still locked
+Gap food_logs / biomarker_logs / profiles / agent_jobs / food_items: [unreachable]
+Dump R2 key: none
+Follow-up: D-1 stays parked; retry on next quota window. Do not pay.
+```
+
 ## Decision (empty until D-6)
 
 ```text
