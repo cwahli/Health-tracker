@@ -1354,7 +1354,8 @@ describe('ProgressRenderer coalescing (VM2 thinking-spam outage)', () => {
     }
     await flush();
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain('Status: thinking');
+    expect(sent[0]).toContain('⏳');
+    expect(sent[0]).toContain('thinking…');
   });
 
   it('drops compressor fragments and repeats', async () => {
@@ -1381,8 +1382,7 @@ describe('ProgressRenderer coalescing (VM2 thinking-spam outage)', () => {
     expect(edited.length).toBeLessThanOrEqual(3);
   });
 
-  it('survives a failed create without spawning a message per event', async () => {
-    const sent = [];
+  it('survives a failed create without spawning a message per event', async () => {    const sent = [];
     const api = {
       sendMessage: async () => {
         sent.push(1);
@@ -1396,5 +1396,17 @@ describe('ProgressRenderer coalescing (VM2 thinking-spam outage)', () => {
     }
     for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
     expect(sent).toHaveLength(1);
+  });
+
+  it('shows one shared working headline: provider + model + elapsed + usage', async () => {
+    const { renderer, sent, flush } = makeRenderer();
+    renderer.setHeadline({ providerLabel: 'Cline', modelLabel: 'glm-4.7-free' });
+    renderer.onEvent({ kind: 'reasoning', text: 'substantive exploration of the food database tables' });
+    renderer.onEvent({ kind: 'step_finish', tokens: 39321 });
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('⏳ Cline glm-4.7-free');
+    expect(sent[0]).toContain('working…');
+    expect(sent[0]).toContain('- 39.3K/131.1K (30%)');
   });
 });

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
 import { chunkForTelegram } from './lib/tg-copy-code.mjs';
+import { formatWorkingHeadline, ctxLimitFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
 import {
@@ -247,7 +248,7 @@ async function getFreeModels(caches) {
 }
 
 export class ProgressRenderer {
-  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false }) {
+  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false, providerLabel = '', modelLabel = '', thinking = '' }) {
     this.api = api;
     this.throttle = throttle;
     this.chatId = chatId;
@@ -255,6 +256,11 @@ export class ProgressRenderer {
     this.maxChars = maxChars;
     this.maxEdits = maxEdits;
     this.dryRun = dryRun;
+    this.providerLabel = providerLabel;
+    this.modelLabel = modelLabel;
+    this.thinkingLevel = thinking;
+    this.startedAt = null;
+    this.usedTokens = null;
     this.messageId = null;
     this.edits = 0;
     this.creating = false;
@@ -266,11 +272,28 @@ export class ProgressRenderer {
     this.typingIntervalMs = 4000;
   }
 
+  setHeadline({ providerLabel, modelLabel, thinking } = {}) {
+    if (providerLabel != null) this.providerLabel = providerLabel;
+    if (modelLabel != null) this.modelLabel = modelLabel;
+    if (thinking != null) this.thinkingLevel = thinking;
+  }
+
   _render() {
     const lines = [];
+    const elapsedSec = this.startedAt ? (Date.now() - this.startedAt) / 1000 : 0;
+    lines.push(
+      formatWorkingHeadline({
+        providerLabel: this.providerLabel || 'Agent',
+        modelLabel: this.modelLabel,
+        thinking: this.thinkingLevel,
+        elapsedSec,
+        used: this.usedTokens,
+        ctxLimit: ctxLimitFor(this.modelLabel),
+        detail: this.status,
+      }),
+    );
     if (this.thinking) lines.push(`Thinking: ${this.thinking}`);
     if (this.tool) lines.push(`Tool: ${this.tool}`);
-    lines.push(`Status: ${this.status}`);
     return lines.join('\n');
   }
 
@@ -280,6 +303,7 @@ export class ProgressRenderer {
       this.messageId = 1;
       return;
     }
+    this.startedAt = Date.now();
     this._startTyping();
   }
 
@@ -315,6 +339,9 @@ export class ProgressRenderer {
       this.status = 'working';
       this._schedule();
     } else if (event.kind === 'step_finish') {
+      if (event.tokens != null && Number.isFinite(Number(event.tokens))) {
+        this.usedTokens = (this.usedTokens || 0) + Number(event.tokens);
+      }
       this.status = 'working';
       this._schedule();
     }
@@ -984,6 +1011,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   try {
     await renderer.start();
     const eff = effective(config, prefs, chatId);
+    // One shared working headline (provider + model + elapsed + usage) for
+    // every bot-host agent — same line shape as the Grok TG router.
+    const kind = config.agent.kind || 'opencode';
+    renderer.setHeadline({
+      providerLabel: kind === 'cline' ? 'Cline' : kind === 'gemini' ? 'Gemini' : 'OpenCode',
+      modelLabel: eff.model || '',
+    });
     const handoff = prefs.get(chatId)?.handoff || '';
     const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${text}` : text;
     const blocked = liveClaims()

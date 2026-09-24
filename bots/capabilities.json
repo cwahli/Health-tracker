@@ -172,8 +172,29 @@
       },
       "notes": "Single BOT_COMMANDS source published via setMyCommands (bot-host + provider-router). Collab exposes /help text instead of a registered menu."
     },
-    {
-      "id": "ui-typing",
+  {
+   "id": "ui-progress",
+   "test": "T3",
+   "scope": "transport",
+   "status": "done",
+   "prove": "unit test scripts/lib/tg-progress.test.mjs + renderer headline test tests/bot-host.test.ts",
+   "expect": [
+    "scripts/lib/tg-progress.mjs",
+    "scripts/lib/tg-progress.test.mjs",
+    "scripts/bot-host.mjs"
+   ],
+   "skills": [],
+   "classes": {
+    "hermes": false,
+    "vps": true,
+    "mobile": true,
+    "grok_tg": true,
+    "collab": "adapter"
+   },
+   "notes": "One shared working headline (provider + model + thinking + elapsed + usage %, with 60/75% context warnings), ported from the Grok TG router's formatWorkingHeadline into scripts/lib/tg-progress.mjs; every bot-host agent sets it (vm/opencode/vm2/mobile). Collab sends single thinking notes, no live headline. Hermes gateway is a separate stack."
+  },
+  {
+   "id": "ui-typing",
       "test": "T3",
       "scope": "transport",
       "status": "done",
