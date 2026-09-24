@@ -26,9 +26,9 @@
       },
       "agent": {
         "kind": "opencode",
-        "model": "opencode-go/deepseek-v4.1-flash",
-        "variant": "high",
-        "smallModel": "opencode-go/deepseek-v4.1-flash",
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free",
         "defaultAgent": "build",
         "workspace": "/home/ubuntu/src/Health-tracker",
         "timeoutMs": 900000,
