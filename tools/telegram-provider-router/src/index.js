@@ -9,6 +9,10 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, openSyn
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn, execSync } from "child_process";
+// Single-source working-headline framework: vendored mirror of
+// scripts/lib/tg-progress.mjs (see scripts/sync-router-vendor.mjs).
+// Change the status line in the canonical file, never here.
+import { formatTokenCount, formatWorkingHeadline, ctxLimitFor } from "./tg-progress.vendor.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -1717,48 +1721,7 @@ function statusPingReply() {
   );
 }
 
-function formatTokenCount(n) {
-  const v = Number(n) || 0;
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-  return String(v);
-}
-
-
-/** One-line status: "OpenCode muse spark 1.3 (high) working… 184s - 150k" */
-function formatWorkingHeadline({
-  providerLabel = "OpenCode",
-  modelLabel = "",
-  thinking = "",
-  elapsedSec = 0,
-  used = null,
-  ctxLimit = null,
-  pct = null,
-  detail = "working",
-} = {}) {
-  const modelBit = modelLabel ? ` ${modelLabel}` : "";
-  const thinkBit =
-    thinking && thinking !== "default" && thinking !== "none"
-      ? ` (${thinking})`
-      : "";
-  const timeBit = `${Math.max(0, Math.round(Number(elapsedSec) || 0))}s`;
-  let ctxBit = "";
-  if (used != null && Number.isFinite(Number(used))) {
-    ctxBit = ` - ${formatTokenCount(used)}`;
-    if (ctxLimit) ctxBit += `/${formatTokenCount(ctxLimit)}`;
-    if (pct != null && Number.isFinite(Number(pct))) ctxBit += ` (${Number(pct).toFixed(0)}%)`;
-  }
-  const warn =
-    pct != null && Number(pct) >= 75
-      ? "\n⚠️ Context high — /compact if answers get lost or slow"
-      : pct != null && Number(pct) >= 60
-        ? "\n💡 Context warming up — /compact when you want a fresh window"
-        : "";
-  const verb = detail && detail !== "working" && detail !== "busy"
-    ? detail
-    : "working";
-  return `⏳ ${providerLabel}${modelBit}${thinkBit} ${verb}… ${timeBit}${ctxBit}${warn}`;
-}
+/** Working headline lives in ./tg-progress.vendor.mjs (single source). */
 
 function headlineFromState(elapsedSec = 0, detail = "working") {
   const p = state.provider;
@@ -1823,23 +1786,16 @@ async function fetchOpenCodeModelMeta(providerID, modelID) {
   }
 }
 
-/** Known context windows when OpenCode meta reports limit.context = 0. */
-const KNOWN_CTX_LIMITS = {
-  "@cf/qwen/qwen3.8-27b": 262144,
-  "@cf/zai-org/glm-4.7-flash": 131072,
-  "cloudflare/@cf/qwen/qwen3.8-27b": 262144,
-  "cloudflare/@cf/zai-org/glm-4.7-flash": 131072,
-};
-
 function resolveCtxLimit(providerID, modelID, meta) {
   const fromMeta = Number(meta?.limit?.context) || 0;
   if (fromMeta > 0) return fromMeta;
   const id = String(modelID || "");
   const full = id.includes("/") ? id : `${providerID}/${id}`;
+  // Single-source limits table lives in the vendored tg-progress framework.
   return (
-    KNOWN_CTX_LIMITS[id] ||
-    KNOWN_CTX_LIMITS[full] ||
-    KNOWN_CTX_LIMITS[`${providerID}/${id}`] ||
+    ctxLimitFor(id) ||
+    ctxLimitFor(full) ||
+    ctxLimitFor(`${providerID}/${id}`) ||
     null
   );
 }

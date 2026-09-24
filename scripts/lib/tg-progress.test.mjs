@@ -37,6 +37,17 @@ describe('formatWorkingHeadline', () => {
     expect(line).toContain('- 39.3K/131.1K (30%)');
   });
 
+  it('honours a live pct override (router session status)', () => {
+    const line = formatWorkingHeadline({
+      providerLabel: 'OpenCode',
+      modelLabel: 'muse spark',
+      elapsedSec: 184,
+      used: 150000,
+      pct: 62.4,
+    });
+    expect(line).toBe('⏳ OpenCode muse spark working… 184s - 150.0K (62%)\n💡 Context warming up — /compact when you want a fresh window');
+  });
+
   it('warns as context fills', () => {
     expect(formatWorkingHeadline({ used: 80000, ctxLimit: 100000 })).toContain('⚠️');
     expect(formatWorkingHeadline({ used: 65000, ctxLimit: 100000 })).toContain('💡');

@@ -9,6 +9,8 @@
  *   3. schema valid: 5 classes declared, known scope/status/test values
  *   4. no orphans: every common skill dir and every shared TG lib is mapped
  *      to at least one capability (orphans = features BOT-11 doesn't cover)
+ *   5. no vendor drift: the Grok TG router's vendored framework mirrors must
+ *      be byte-identical to their canonical source (change once, everywhere)
  *
  * Live per-class smoke tests (one message per affected class, no dual-poller)
  * stay manual per the §14.7 distribute matrix — this script is the gate BEFORE
@@ -39,6 +41,18 @@ const ORPHAN_LIBS = [
 const SCOPES = new Set(['common', 'transport', 'runtime-adapter', 'bot-specific']);
 const STATUSES = new Set(['done', 'partial', 'open']);
 const CLASS_KEYS = ['hermes', 'vps', 'mobile', 'grok_tg', 'collab'];
+
+// Single-source frameworks vendored into standalone runtimes. Each entry:
+// [canonical source, vendored mirror, marker line]. The mirror must equal
+// marker + canonical byte-for-byte; run scripts/sync-router-vendor.mjs after
+// editing the canonical file.
+const VENDOR_MIRRORS = [
+  [
+    'scripts/lib/tg-progress.mjs',
+    'tools/telegram-provider-router/src/tg-progress.vendor.mjs',
+    '// === VENDORED FROM scripts/lib/tg-progress.mjs — DO NOT EDIT ===',
+  ],
+];
 
 const strict = process.argv.includes('--strict');
 const failures = [];
@@ -121,6 +135,19 @@ for (const entry of fs.readdirSync(SKILLS_DIR, { withFileTypes: true })) {
 for (const lib of ORPHAN_LIBS) {
   if (!fs.existsSync(path.join(LIB_DIR, lib))) { warn(`orphan-scope lib missing on disk: scripts/lib/${lib}`); continue; }
   if (!libToCap.has(lib)) fail(`orphan lib "scripts/lib/${lib}" — no capability covers it`);
+}
+
+// Vendor drift scan: standalone runtimes must mirror the canonical framework.
+for (const [src, mirror, marker] of VENDOR_MIRRORS) {
+  const srcPath = path.join(ROOT, src);
+  const mirrorPath = path.join(ROOT, mirror);
+  if (!fs.existsSync(srcPath)) { fail(`vendor source missing: ${src}`); continue; }
+  if (!fs.existsSync(mirrorPath)) { fail(`vendor mirror missing: ${mirror} (run scripts/sync-router-vendor.mjs)`); continue; }
+  const want = fs.readFileSync(srcPath, 'utf8');
+  const got = fs.readFileSync(mirrorPath, 'utf8');
+  if (!got.includes(marker) || !got.endsWith(want)) {
+    fail(`vendor drift: ${mirror} != ${src} (edit the canonical file, then run scripts/sync-router-vendor.mjs)`);
+  }
 }
 
 console.log(`capability propagation check: ${checked} capabilities, ${failures.length} failures, ${warnings.length} warnings`);

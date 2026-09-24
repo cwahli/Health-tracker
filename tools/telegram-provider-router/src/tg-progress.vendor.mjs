@@ -1,3 +1,6 @@
+// === VENDORED FROM scripts/lib/tg-progress.mjs — DO NOT EDIT ===
+// Mirrored by scripts/sync-router-vendor.mjs. Edit the canonical file, not this copy.
+
 // Shared working-headline formatter for bot-host progress messages.
 //
 // Ports the Grok TG router's formatWorkingHeadline
