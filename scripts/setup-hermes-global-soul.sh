@@ -80,8 +80,8 @@ Available commands:
 - run-coding-dispatch.sh status — shows active agent PID, elapsed time, current agent activity.
 - run-coding-dispatch.sh stop — cleanly stops running coding agent, releases lock, resets workspace.
 - run-coding-dispatch.sh list-models — available tools, healthy models, quotas.
-- run-coding-dispatch.sh --tool=opencode --model=opencode-go/deepseek-v4.1-flash --thinking=high --task="..." — granular dispatch.
-Available coding tools: OpenCode (active model: opencode-go/deepseek-v4.1-flash; muse-spark-1.3 is depleted), Grok Build CLI, Antigravity CLI. Cline CLI is not installed.
+- run-coding-dispatch.sh --tool=opencode --model=nemotron-3.5-lightning-free --thinking=high --task="..." — granular dispatch.
+Available coding tools: OpenCode (free-only models: nemotron-3.5-lightning-free default, space-bunny-free fallback; paid zen balance depleted, opencode-go is paid — do not default to it), Grok Build CLI, Antigravity CLI. Cline CLI is not installed.
 ORCH_MEM_EOF
 rm -f "${PROFILES_DIR}/qa_biomarker/memories/MEMORY.md"
 rm -f "${PROFILES_DIR}/qa_onboarding/memories/MEMORY.md"

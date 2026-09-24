@@ -273,7 +273,10 @@ TASK=""
 BUG_ID="BUG-UNKNOWN"
 CATEGORY="general"
 REQUESTED_TOOL="auto"
-PREFERRED_MODEL="deepseek-v4.1-flash"
+# Free-only defaults (paid zen balance is depleted; opencode-go is paid).
+# Probed working on the VPS 2026-09-24: nemotron-3.5-lightning-free, space-bunny-free.
+PREFERRED_MODEL="nemotron-3.5-lightning-free"
+FREE_FALLBACK_MODEL="space-bunny-free"
 THINKING="auto"
 SCREENSHOT=""
 DISPATCH_PROFILE="${HERMES_PROFILE:-orchestrator}"
@@ -1268,22 +1271,21 @@ $prompt_preview
   local output; output=$(cat "$log_file" 2>/dev/null || true)
 
   if echo "$output" | grep -qiE "insufficient account funds|insufficient funds|out of credits"; then
-    node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="opencode" --status="depleted" --bug-id="$BUG_ID" --reason="Insufficient account funds" || true
     clean_workspace
-    if [ "$model" != "deepseek-v4.1-flash" ]; then
-      tg_msg "⚠️ *[Orchestrator]* OpenCode hit insufficient funds on \`$model\`. Retrying once with \`opencode/deepseek-v4.1-flash\`..."
-      local alt_model="deepseek-v4.1-flash"
+    if [ "$model" != "$FREE_FALLBACK_MODEL" ]; then
+      tg_msg "⚠️ *[Orchestrator]* OpenCode model \`$model\` has no funds. Retrying once with free model \`opencode/$FREE_FALLBACK_MODEL\`..."
+      local alt_model="$FREE_FALLBACK_MODEL"
       record_coordination_tax "opencode" "model=$alt_model"
-      local alt_log="${log_dir}/dispatch_${BUG_ID}_opencode_deepseek.log"
-      start_heartbeat "OpenCode (deepseek)" "$alt_log"
+      local alt_log="${log_dir}/dispatch_${BUG_ID}_opencode_free_fallback.log"
+      start_heartbeat "OpenCode (free fallback)" "$alt_log"
       run_opencode_agent "$prompt" "$alt_log" 8m "$alt_model"
       stop_heartbeat
       if check_git_and_tsc "opencode" "$alt_model" "$alt_log"; then return 0; fi
     fi
     if [ "$CASCADE" -eq 1 ]; then
-      tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (funds depleted). Escalating to Cline..."
+      tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (no free model succeeded). Escalating to Cline..."
     else
-      tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (funds depleted)."
+      tg_msg "❌ *[Orchestrator]* OpenCode could not resolve \`$BUG_ID\` (no free model succeeded)."
     fi
     clean_workspace
     node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="opencode" --status="failed" --bug-id="$BUG_ID" || true

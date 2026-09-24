@@ -995,7 +995,8 @@ Start only after V-30.3's two verdict fixtures and named gate are green.
     found and fixed three defects: #98 (heartbeat TERM trap + stop SIGKILL
     race left an `in_fix` zombie), #102/#103 (block/unblock journal rows
     dropped on the legacy response shape). Ops notes: opencode zen balance
-    depleted — dispatch with `--model=opencode-go/deepseek-v4.1-flash`.
+    depleted and `opencode-go` is paid — dispatch defaults to free models
+    (`nemotron-3.5-lightning-free`, fallback `space-bunny-free`).
 
 #### V-30.5 — memory, CI, and ratchet packet
 
