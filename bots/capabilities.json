@@ -64,7 +64,7 @@
         "grok_tg": true,
         "collab": "adapter"
       },
-      "notes": "Matrix table standardised. Generic agent-emitted JSON→table pipeline still open: one shared convention, no second format per bot. Collab replies link-only."
+      "notes": "Matrix table standardised. Generic agent-emitted JSON→table pipeline still open: one shared convention, no second format per bot. Collab replies link-only. Delivery guarantee (auto-align to <pre>) lives in chunkForTelegram/sendCopyable: covers bot-host family + collab router. Grok TG router sends plain text (no parse_mode), so its path is the MEDIA: pipeline, not pre-blocks; Hermes gateway is a separate stack."
     },
     {
       "id": "chat-chunk",
