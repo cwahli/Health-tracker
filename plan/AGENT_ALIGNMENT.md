@@ -42,15 +42,7 @@ tools/telegram-provider-router/src/*.vendor.mjs ← mirrors, never hand-edited
 
 Rules:
 
-0. **Bot = location, lane = tool.** A bot id names a *place* (vm = VPS,
-   mobile = phone, collab = Colab, hermes_* = gateway). The lane
-   (`opencode` CLI with tools+session, `cline` CLI with tools+thinking,
-   `gemini` keyed API single-shot) is a per-message tool choice via
-   `/model` + `/freemodel` (`parseModelRef`), not an identity. Every lane
-   honors the same contracts — session, memory, headline, commands,
-   skills. Where a lane *cannot* (gemini: no tools/session by
-   construction), the picker must say so instead of silently degrading.
-   Lane-parity gaps are tracked as BOT-12…17, never as per-bot exceptions.
+0. **Bot = location, execution lane = tool, provider/model = backend.** A bot id names a *place* (vm = VPS, mobile = phone, collab = Colab, hermes_* = gateway). The execution lane is a per-message tool choice via `/model` + `/freemodel` (`parseModelRef`), not an identity. Gemini, Token Harbor, and other APIs are provider/model backends behind the selected runner; they do not create separate bot identities. Every execution surface honors the same contracts — session, memory, headline, commands, skills — where supported. API-only backends declare no live tools/session instead of silently pretending to provide a terminal. Lane/provider parity gaps are tracked as BOT-12…17 and the shared work-session/debug contract as BOT-19, never as per-bot exceptions.
 
 1. **Memory files are repo-owned, agent-written.** `bots/memory/<id>.md`
    (+ shared `USER.md`) load into every bot-host prompt like today's handoff
@@ -78,6 +70,18 @@ Rules:
 
 - **P1 — history:** cline `--id` resume + `reply_to_message` inclusion
   (both `scripts/lib`, all bot-host agents inherit; router per-chat later).
+- **P1.5 — `/tx` work sessions:** one on-demand work session per active
+  location/chat/workspace, shared by every execution surface. `tx on` enables
+  shared visibility, `tx off` hides it without stopping work, and `tx status` /
+  `tx debug` inspect the active session. Generic `/debug`, `/handoff`, and
+  `/abort` are backend-independent. tmux is only the live-terminal adapter where
+  the selected runner supports a TTY; API-only providers expose structured
+  events/transcripts and honestly report that live attach is unavailable.
+  One location maps to one tmux session; each bot/workstream maps to a window,
+  not a new top-level tmux session. `/status` reports work-session, execution
+  surface/provider, controller, and debug capability. Shared observation is the
+  default; input is serialized so bot and human do not interleave PTY writes.
+  BOT-18 consumes this contract for watchdog/recovery.
 - **P2 — memory:** `bots/memory/` + prompt injection + `/remember` (prompt-level:
   works on opencode/cline/gemini lanes with zero runner changes).
 - **P3 — skills bridge:** restore `shared_skills` paths + parity gate.

@@ -911,6 +911,74 @@ Safety protocol per batch (SHEPHERD):
 
 **Rule:** New TG capability = (1) `scripts/skills/common/<id>/SKILL.md` + (2) registry status in `tools/telegram-provider-router` / shared pack `registry.json` + (3) `sync-hermes-skills.sh`. Never a third private copy only on the Grok box.
 
+### 14.2a Work-session command and visibility contract (BOT-19)
+
+**Hierarchy (binding):**
+
+```text
+physical location → work session → execution surface → provider/model
+       VM             VM/VM1          OpenCode          Gemini
+```
+
+A bot names a location, not a model. An execution surface (OpenCode, Cline, or
+another runner) is selected per request. Gemini, Token Harbor, and similar APIs
+are provider/model backends behind that runner; they are not independent bots or
+terminal tools.
+
+**Generic commands (all bots, all backends):**
+
+| Command | Contract |
+|---|---|
+| `/status` | Show bot/runtime state and, when active, the work-session summary |
+| `/debug` | Show the most useful diagnostic view for the bot/runtime; include the active work session when one exists |
+| `/handoff` | Gracefully checkpoint and pause for continuation; preserve the workspace and write a compact handoff |
+| `/abort` | Safely cancel the current run; flush state, preserve the workspace, and mark the run non-resumable unless explicitly handed off |
+
+There is no `/stop` command. `/abort` is the single generic stop/cancel
+operation. `tx` never owns stop semantics.
+
+**Shared work visibility (`tx`):**
+
+| Command | Contract |
+|---|---|
+| `tx on` | Create/reuse the on-demand work session and enable shared observation |
+| `tx off` | Hide/disable shared observation without stopping the work |
+| `tx status` | Show the active work session, surface/provider, workspace, state, and debug capability |
+| `tx debug` | Show the active work action, recent events, tool/test activity, handoff, and sanitized transcript/debug view |
+| `tx help` | Show this short vocabulary |
+
+The user never supplies a tmux session ID, window name, process ID, or native
+runner session ID. The bot resolves the active work session from its state.
+
+**Adapters and capability honesty:**
+
+- One physical location maps to one persistent tmux session when a live terminal is useful; each bot/workstream maps to a window, not a new top-level tmux session.
+- tmux is an adapter for TTY-capable execution surfaces and human attach/continuation. It is not the transcript database or the product identity.
+- API-only runners expose structured request/response events, timing, errors, and sanitized transcript/debug data. They report `live attach: unavailable` rather than pretending to provide a terminal.
+- Provider/model changes remain inside the same logical work session. A lane change writes a handoff before starting the next surface; it never blindly replays an incompatible full transcript.
+
+**Shared co-work rule:**
+
+When `tx on` is active, the bot and human may observe the same terminal/event
+stream by default. PTY input is serialized through the work-session controller:
+the bot must not inject a new prompt while a human is actively entering a
+command, and vice versa. This is shared visibility with serialized writes, not
+uncontrolled simultaneous input. `tx off` hides the view; it does not cancel
+work.
+
+**Durability and safety:**
+
+- `/handoff` writes a resumable continuation record before pausing.
+- `/abort` writes a final minimal handoff and marks the run aborted; it never resets Git or deletes workspace changes.
+- `/debug` and `tx debug` default to sanitized output. Raw provider/tool output, secrets, and file contents never go to Telegram by default.
+- Every run records an ID, state, timestamps, execution surface, provider/model, workspace/branch, and handoff/debug capability.
+- A crash, reboot, or process exit is observable as a state; it is not silently treated as a fresh task.
+
+**BOT-19 gate:** one shared contract passes on every supported bot/backend:
+terminal surfaces attach and show shared activity; API-only surfaces return an
+honest structured debug view; handoff and abort preserve state; `/status` and
+`/debug` identify the same work session; no raw secrets reach Telegram.
+
 ### 14.3 Phased plan
 
 | Phase | Work | Done when |
