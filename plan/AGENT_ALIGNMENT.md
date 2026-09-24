@@ -148,6 +148,31 @@ Literature shape (ESAA: mechanical capture, judgment only for curation):
 
 ### 4c. Auto-healing — detection ladder + bounded recovery + repair on demand
 
+**Tracking substrate first (audited 2026-09-24): what exists, what's missing.**
+Exists but scattered: bot-host in-memory `health{okAt/errAt}` (lost on
+restart, not exposed), `totals.json` (cost/tokens per bot), `sessions.json`,
+opencode-lane failure rows, Hermes `dispatch_audit.log` (deploy records) +
+`learning_pod.json` (tool stats) + cron `executions.db`. Missing everywhere:
+a per-run record. So crash/pending/error is NOT automatically known anywhere
+— it is inferred by a human reading journals. Literature (Red Hat/Elastic/
+Databricks/Arize observability, all 2026) agrees on the shape: traces of
+every step, grouped by session, outcome recorded at the workflow boundary,
+diagnostic signals (tool failures, retries, latency, cost) attached, prompts
+stored separately from the ledger. Our local-first version:
+
+- `runs.jsonl` (host-local, one schema, append-only):
+  `{run_id, bot, lane, chat, model, started, ended, outcome, latency_s,
+  tokens, cost}`. Written OPEN at run start (this doubles as the Playbook-B
+  lease), closed at `finish()` with `ok|timeout|abort|error`. Any row still
+  OPEN at boot sweep = `crash` — closed then, TG message finalized, failure
+  row written. Crash/pending/error becomes a query, not an investigation.
+- Liveness: poll-loop heartbeat per bot (last `getUpdates` timestamp + last
+  reply timestamp) beside the ledger; systemd owns the process, the ledger
+  owns the truth about work.
+- Weekly merge (same job as the failure-log merge): all hosts' `runs.jsonl`
+  + failure rows in one place. The review reads crash rate, p95 latency,
+  error signatures — investigation triggers fall out of data, not vibes.
+
 Existing: systemd `Restart=always`, run timeouts (bot-host `timeoutMs`,
 router `OC_IDLE_MS`/`OC_MAX_MS`), lane failover, 409 handling (open item).
 Literature (Samsung reliability-threshold framework; Cloudflare durable
@@ -167,6 +192,12 @@ derailment watchdog):
   fix proposes, critic checks, output is a patch or a bug card, and the
   signature's learning artifact closes the loop so it never reproduces.
   Schedule: weekly alongside the failure review, plus manual trigger.
+  Auto-repair that actually works repairs CONFIG first (failover, restart,
+  throttle — automatic, bounded, measured) and code second (triggered run →
+  patch → existing review/CI, never autonomous commit). Rationale from the
+  field: half of automated recovery moves do nothing (Boucle 220-loop
+  dataset) — so every rung logs its hit rate and dead rungs are removed;
+  Cloudflare-style budgets keep recovery from becoming a second loop.
 
 **Playbook A — agent stuck a long time (progress message spinning, no answer).**
 Verified constraint: our runners are single-shot CLI calls, so mid-run
