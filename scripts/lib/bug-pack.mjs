@@ -1,9 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 /**
  * bug-pack.mjs — V-30.2 packer gate helpers (pure, no HTTP).
  *
  * packCheck: schema + single-defect + criteria + fingerprint (bugctl pack --check).
  * splitMultiItemReport: BUG-8449 rule — one card + a split list, never a bundle.
  * fingerprint / isoWeekKey: mirror of src/utils/bugWorkItem.ts (bugctl is pure mjs).
+ * packForDispatch: validate and pack inbound defect reports for run-coding-dispatch.sh (BOT-20).
  */
 
 export function isoWeekKey(at) {
@@ -164,3 +169,249 @@ export function isVagueReport(report) {
   if (!hasObservable) return true;
   return !hasSpecific && text.trim().length < 120;
 }
+
+/**
+ * Validate and pack an inbound dispatch payload for run-coding-dispatch.sh (BOT-20).
+ *
+ * Accepts:
+ *   - opts.workItem / opts['work-item']: versioned BugWorkItem / JSON string / @file path
+ *   - four fields: opts.page (or opts.component), opts.observed, opts.expected, opts.screenshot
+ *   - optional: opts.criteria, opts.class, opts.surface, opts.task
+ *
+ * Rules:
+ *   1. Several defects (bundled or items array) become 1 card + split list via splitMultiItemReport.
+ *   2. Must pass packCheck(). If packCheck fails, returns { ok: false, error, issues }.
+ *   3. Nothing failing packCheck passes through as a task.
+ */
+export function packForDispatch(opts = {}) {
+  let workItem = opts.workItem || opts['work-item'] || opts.work_item;
+  if (typeof workItem === 'string') {
+    const s = workItem.trim();
+    if (s.startsWith('@')) {
+      try {
+        workItem = JSON.parse(fs.readFileSync(s.slice(1), 'utf8'));
+      } catch (e) {
+        return { ok: false, error: `cannot read work_item file '${s.slice(1)}': ${e.message}`, issues: ['work_item file unreadable'] };
+      }
+    } else if (fs.existsSync(s) && (s.endsWith('.json') || s.includes('/') || s.includes('\\'))) {
+      try {
+        workItem = JSON.parse(fs.readFileSync(s, 'utf8'));
+      } catch (e) {
+        return { ok: false, error: `cannot read work_item file '${s}': ${e.message}`, issues: ['work_item file unreadable'] };
+      }
+    } else {
+      try {
+        workItem = JSON.parse(s);
+      } catch (e) {
+        return { ok: false, error: `invalid work_item JSON: ${e.message}`, issues: ['work_item JSON invalid'] };
+      }
+    }
+  }
+
+  // If no work_item was passed, check if task is JSON or path to JSON
+  if (!workItem && typeof opts.task === 'string') {
+    const t = opts.task.trim();
+    if (t.startsWith('{') || t.startsWith('[')) {
+      try {
+        workItem = JSON.parse(t);
+      } catch {}
+    } else if ((t.endsWith('.json') || t.startsWith('@')) && fs.existsSync(t.replace(/^@/, ''))) {
+      try {
+        workItem = JSON.parse(fs.readFileSync(t.replace(/^@/, ''), 'utf8'));
+      } catch {}
+    }
+  }
+
+  let card = null;
+  let split = [];
+
+  // If workItem is array or has multiple items/issues:
+  const rawItems = Array.isArray(workItem) ? workItem : workItem?.items || workItem?.issues;
+  if (Array.isArray(rawItems) && rawItems.length > 0) {
+    const sp = splitMultiItemReport(workItem);
+    if (!sp.ok) {
+      return { ok: false, error: sp.error || 'failed to split multi-item report', issues: [sp.error || 'multi-item split failed'], card: null, split: [] };
+    }
+    card = sp.card;
+    split = sp.split || [];
+  } else if (workItem && typeof workItem === 'object') {
+    const d = workItem.defect || workItem;
+    card = {
+      component: String(d.component || d.page || opts.component || opts.page || '').trim(),
+      observed: String(d.observed || opts.observed || '').trim(),
+      expected: String(d.expected || opts.expected || '').trim(),
+      criteria: String(d.criteria || opts.criteria || '').trim(),
+      class: String(d.class || d.bugClass || workItem.class || opts.class || '').trim(),
+      surface: String(d.surface || workItem.surface || opts.surface || opts.page || '').trim(),
+      fingerprint: String(d.fingerprint || workItem.fingerprint || opts.fingerprint || '').trim(),
+      idem_key: String(d.idem_key || workItem.idem_key || opts['idem-key'] || opts.idem_key || '').trim(),
+    };
+  }
+
+  // If no card yet, assemble from explicit fields or parse from task text:
+  if (!card) {
+    let component = String(opts.component || opts.page || '').trim();
+    let observed = String(opts.observed || '').trim();
+    let expected = String(opts.expected || '').trim();
+    let criteria = String(opts.criteria || '').trim();
+    let cls = String(opts.class || opts.bugClass || '').trim();
+    let surface = String(opts.surface || opts.page || '').trim();
+
+    // Try parsing structured key-value lines from task text if observed/expected are missing:
+    if ((!observed || !expected || !component) && opts.task && typeof opts.task === 'string') {
+      const taskText = opts.task;
+      const mComp = taskText.match(/(?:page|component):\s*([^\n;.]+)/i);
+      const mObs = taskText.match(/(?:observed|actual|defect|error):\s*([^\n;]+)/i);
+      const mExp = taskText.match(/(?:expected|desired|fix|suggested fix):\s*([^\n;]+)/i);
+      const mCrit = taskText.match(/(?:criteria|verification|verify):\s*([^\n;]+)/i);
+      if (mComp && !component) component = mComp[1].trim();
+      if (mObs && !observed) observed = mObs[1].trim();
+      if (mExp && !expected) expected = mExp[1].trim();
+      if (mCrit && !criteria) criteria = mCrit[1].trim();
+    }
+
+    card = {
+      component,
+      observed,
+      expected,
+      criteria,
+      class: cls,
+      surface,
+      fingerprint: String(opts.fingerprint || '').trim(),
+      idem_key: String(opts['idem-key'] || opts.idem_key || '').trim(),
+    };
+  }
+
+  // Default criteria if expected is present and criteria is empty:
+  if (!card.criteria && card.expected) {
+    card.criteria = 'named check proves this single discrepancy fixed';
+  }
+
+  // Check if observed/expected look bundled (multiple enumerated defects in text):
+  if (looksBundled(card.observed, card.expected)) {
+    const lines = String(card.observed || '')
+      .split('\n')
+      .map((l) => l.replace(/^[-*•\d.)\s|]+/, '').trim())
+      .filter((l) => l.length > 0);
+    if (lines.length > 1) {
+      const sp = splitMultiItemReport(
+        lines.map((l) => ({
+          issue: l,
+          observed: l,
+          component: card.component,
+          class: card.class,
+          surface: card.surface,
+        }))
+      );
+      if (sp.ok && sp.card) {
+        card = sp.card;
+        split = sp.split || [];
+      }
+    }
+  }
+
+  // Validate the resulting card with packCheck:
+  const chk = packCheck(card);
+  if (!chk.ok) {
+    return { ok: false, error: chk.error, issues: chk.issues, card: null, split: [] };
+  }
+
+  const screenshot = opts.screenshot || workItem?.screenshot || (Array.isArray(workItem?.photo_urls) ? workItem.photo_urls[0] : '') || '';
+
+  return {
+    ok: true,
+    card: chk.value,
+    split,
+    screenshot,
+  };
+}
+
+export function parseArgs(argv) {
+  const args = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      if (eq > 0) {
+        args[a.slice(2, eq)] = a.slice(eq + 1);
+      } else {
+        const key = a.slice(2);
+        const next = argv[i + 1];
+        if (next && !next.startsWith('--')) {
+          args[key] = next;
+          i++;
+        } else {
+          args[key] = true;
+        }
+      }
+    } else {
+      args._.push(a);
+    }
+  }
+  return args;
+}
+
+export async function cli(argv) {
+  const [cmd, ...rest] = argv;
+  const args = parseArgs(rest);
+  if (!cmd || cmd === 'help' || cmd === '--help') {
+    console.log('usage: bug-pack.mjs <dispatch|check|split> [options]');
+    return;
+  }
+  switch (cmd) {
+    case 'dispatch':
+    case 'pack-dispatch': {
+      const res = packForDispatch(args);
+      if (res.ok) {
+        process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+        process.exitCode = 0;
+      } else {
+        process.stderr.write(JSON.stringify(res, null, 2) + '\n');
+        process.exitCode = 1;
+      }
+      break;
+    }
+    case 'check':
+    case 'pack-check': {
+      const chk = packCheck(args);
+      if (chk.ok) {
+        process.stdout.write(JSON.stringify(chk, null, 2) + '\n');
+        process.exitCode = 0;
+      } else {
+        process.stderr.write(JSON.stringify(chk, null, 2) + '\n');
+        process.exitCode = 1;
+      }
+      break;
+    }
+    case 'split': {
+      const target = args.file || args._[0];
+      if (!target) {
+        process.stderr.write('split requires a file path\n');
+        process.exitCode = 1;
+        return;
+      }
+      const raw = JSON.parse(fs.readFileSync(target, 'utf8'));
+      const sp = splitMultiItemReport(raw);
+      if (sp.ok) {
+        process.stdout.write(JSON.stringify(sp, null, 2) + '\n');
+        process.exitCode = 0;
+      } else {
+        process.stderr.write(JSON.stringify(sp, null, 2) + '\n');
+        process.exitCode = 1;
+      }
+      break;
+    }
+    default:
+      console.error(`unknown command: ${cmd}`);
+      process.exitCode = 1;
+  }
+}
+
+const invokedAs = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (invokedAs === fileURLToPath(import.meta.url)) {
+  cli(process.argv.slice(2)).catch((err) => {
+    console.error(`bug-pack: ${err.message}`);
+    process.exit(1);
+  });
+}
+

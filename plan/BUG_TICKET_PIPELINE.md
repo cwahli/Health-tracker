@@ -867,6 +867,15 @@ Runbook:
 
 Implement only after V-30.2 is closed and the human gives the phase go.
 
+Reference transcript (what the output looks like on a real card): the stuck
+meal-analysis card — QA posts `repro{status: confirmed, command, exit_code,
+run_log, before.png → R2 key}` plus a Telegram line (`reproduced — spinner
+5min, result null, before.png linked`), then STOPs. Never "looks fine in
+code" as a verdict; never a fix; never a dispatch. The full step-by-step
+outputs (packer `packCheck` JSON → packet text → repro post → spec draft →
+`go` → dispatch → attempt rows → `verify` green → `done`) are recorded in
+`plan/ROADMAP.md` Track V Phase 10 (V-30.4 row) as the executable example.
+
 - Add `scripts/skills/common/qa-reproduce/SKILL.md` to the existing `qa_meal` profile first;
   do not create a QA bot or token. Add `qa-reproduce` to that profile's
   `preload_skills` in the durable setup/config path, not only as an unconfigured symlink. Keep
@@ -905,7 +914,19 @@ Start only after V-30.3's two verdict fixtures and named gate are green.
 - Refuse a second dispatch for a card already `in_fix` unless the existing per-bug lock proves
   it is the same run. Never push directly to `main`; use the repository PR flow.
 - Verification must be posted by a QA/verifier that did not author the fix, and only after the
-  named gate from `docs/agent/DOMAIN_REGRESSION_MAP.md` is green.
+  named gate from `docs/agent/DOMAIN_REGRESSION_MAP.md` is green. `verify.method`
+  must be `named_test` (or `manual` human check) — a journey-green alone stays
+  `verifying` and never closes the card.
+- The Specify role (any healthy backend — opencode/cline/grok/agy/human) writes
+  `specs/active/<card>.md` from `specs/TEMPLATE.md` with packet + repro on the
+  card, and must include the three anti-patch fields: **Understanding** (what the
+  bug is NOT, with `before.png` key + one explicit non-goal — kills wrong-thing
+  fixes), **Layer** (display / calc / data — one only; sibling layers frozen —
+  kills cross-layer sprawl), **Forbidden patch** (named: no symptom-hide, no new
+  flag, no renamed locator, no second merge path — kills patchy fixes), plus a
+  **two-sided fixture** (broken input → correct output; adjacent input →
+  unchanged — proves structure, not symptom). Reference: the `STALE_TURN-card22`
+  spec in the ROADMAP V-30.4 row.
 - Add a scratch dev-only fixture test that proves `packed → in_fix → verifying → done`, a failed
   dispatch `blocked`, and a double-dispatch refusal. No production card is the test fixture.
 
