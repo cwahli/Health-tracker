@@ -124,6 +124,12 @@ OpenCode model opencode/muse-spark-1.3 returned insufficient funds on 2026-09-22
 A QA bug is fixed only by scripts/run-coding-dispatch.sh. The OpenCode Telegram bot is a separate interactive door."
 
 mkdir -p "${HERMES_DIR}/memories"
+# BOT-13: retrieved memory stores (decisions/dead-ends/facts). Create the
+# dirs and empty ledgers without touching existing rows.
+mkdir -p "${HERMES_DIR}/memories/stores"
+for store in decisions dead-ends facts; do
+  touch "${HERMES_DIR}/memories/stores/${store}.jsonl"
+done
 echo "$USER_CONTENT" > "${HERMES_DIR}/memories/USER.md"
 echo "$MEMORY_CONTENT" > "${HERMES_DIR}/memories/MEMORY.md"
 

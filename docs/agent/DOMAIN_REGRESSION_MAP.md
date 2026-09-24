@@ -128,6 +128,7 @@ Treat silent changes to tombstone / merge semantics as **class X**.
 |---------------|-----|
 | `AGENTS.md` / `docs/agent/**` (only with confirmation) | `node scripts/assert-agent-governance.mjs` |
 | Sync/biomarker/food regression foundation files | Same smoke suites as domain sections above |
+| Bot memory stores (`scripts/lib/memory-stores.mjs`, `scripts/assert-memory-stores.mjs`) | `node scripts/assert-memory-stores.mjs` · `npx vitest run tests/memory-stores.test.ts` |
 
 ## Bugs / triage tooling
 
