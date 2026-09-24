@@ -461,7 +461,7 @@
         "grok_tg": "adapter",
         "collab": "adapter"
       },
-      "notes": "Per-chat opencode sessions (disk-persisted sessions.json, --session resume, /new /compact /abort) verified on bot-host. AUDITED GAPS (2026-09-24): (1) cline lane is stateless \u2014 runCline hardcodes sessionID:null and never passes --id, so any bot on a cline model (e.g. VM2 via /freemodel) starts fresh every message; CLI supports --id resume. (2) TG reply-quoting dropped on all bot-host lanes \u2014 prompt uses message.text/caption only, reply_to_message content never included. CB-8 cross-turn memory still open; that's the remaining partial."
+      "notes": "Per-chat opencode sessions (disk-persisted sessions.json, --session resume, /new /compact /abort) verified on bot-host. TG reply-quoting SHIPS via buildQuotedPrompt (text/caption, tested in tests/bot-host.test.ts) \u2014 the earlier dropped-quoting note was stale. Cline lane stays stateless by design: BOT-12 forbids a fake --id (3.0.65 forces interactive mode, rejects --json). CB-8 cross-turn memory still open; that's the remaining partial."
     },
     {
       "id": "svc-bug-ticket",
