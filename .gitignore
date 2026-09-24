@@ -40,3 +40,6 @@ screenshots
 __pycache__/
 *.py[cod]
 *.pyo
+
+# bugctl offline write queue (local replay state, never committed)
+.bugctl-queue.jsonl

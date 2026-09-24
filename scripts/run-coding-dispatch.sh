@@ -263,10 +263,18 @@ CRITERIA=""
 CLASS=""
 SURFACE=""
 
+# V-30.4 packet-driven dispatch: --ticket=#n (empty = legacy --task= path).
+TICKET=""
+TICKET_ATTEMPT_OPEN=0
+
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 [--work-item=JSON|FILE] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
+      echo "Usage: $0 [--work-item=JSON|FILE] [--ticket=#n] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
+      echo ""
+      echo "  --ticket=#n   V-30.4 packet-driven dispatch: the packed card packet is the"
+      echo "                prompt source (plan posted first, attempt rows at start/end,"
+      echo "                failure -> bugctl block). Legacy --task= stays unchanged."
       echo ""
       echo "Subcommands:"
       echo "  $0 status                     List all running agents (parallel-safe)"
@@ -284,6 +292,7 @@ for arg in "$@"; do
     --class=*)                   CLASS="${arg#*=}" ;;
     --surface=*)                 SURFACE="${arg#*=}" ;;
     --task=*)                    TASK="${arg#*=}" ;;
+    --ticket=*)                  TICKET="${arg#*=}" ;; # V-30.4: packed card packet drives the dispatch
     --bug-id=*)                  BUG_ID="${arg#*=}" ;;
     --category=*)                CATEGORY="${arg#*=}" ;;
     --tool=*)                    REQUESTED_TOOL="${arg#*=}" ;;
@@ -309,8 +318,30 @@ done
 # Input is a versioned work_item or the four fields (page, observed, expected, screenshot).
 # Several defects become one card plus a split list.
 # Nothing that fails packCheck is passed through as --task.
+#
+# V-30.4: --ticket=#n skips re-packing (the card is already packed) and loads
+# the full packet via `bugctl packet` — the packet, not chat history, is the
+# coder prompt (§6.2 audit note option B: ticket consumers read bugctl packet;
+# buildNow()/buildContinueJob() stay legacy and are never read here).
 # ---------------------------------------------------------------
 PACK_HELPER="${REPO_DIR}/scripts/lib/bug-pack.mjs"
+DISPATCH_HELPER="${REPO_DIR}/scripts/lib/bug-dispatch.mjs"
+BUGCTL="${REPO_DIR}/scripts/bugctl.mjs"
+PACK_RAW=""
+TAG_ID=""
+PUBLIC_N=""
+TITLE=""
+TICKET_HYP=""
+TICKET_FILES=""
+TICKET_GATES=""
+TICKET_STATE=""
+TICKET_ASSIGNEE=""
+SPEC_PATH=""
+SPEC_TEXT=""
+REPRO_TEXT=""
+
+if [ -z "$TICKET" ]; then
+
 PACK_RAW=$(node "$PACK_HELPER" dispatch "$@" 2>&1) || {
   echo "[Dispatcher] Rejected: inbound defect report failed packCheck:" >&2
   echo "$PACK_RAW" >&2
@@ -345,6 +376,114 @@ if [ -n "$PACKED_SCREENSHOT" ] && [ -z "$SCREENSHOT" ]; then
 fi
 
 TASK="Fix ${PACKED_COMPONENT}: ${PACKED_OBSERVED} -> expected ${PACKED_EXPECTED} (${PACKED_CRITERIA})"
+
+else
+  # ---------------------------------------------------------------
+  # V-30.4 ticket mode. Order: packet read -> idempotency guard -> field
+  # extraction -> locked spec -> plan artifact posted BEFORE dispatch.
+  # Writes go through bugctl (BUG_API_BASE/BUG_API_TOKEN; withFallback queues
+  # the write offline). A packet READ cannot be queued — fail fast (exit 2).
+  # ---------------------------------------------------------------
+  TICKET="${TICKET#\#}"
+  PACKET_FILE=$(mktemp "${TMPDIR:-/tmp}/dispatch_packet_${TICKET}.XXXXXX")
+  if ! node "$BUGCTL" packet --id "$TICKET" --json >"$PACKET_FILE" 2>/dev/null; then
+    echo "[Dispatcher] ticket #$TICKET: packet read failed (ticket mode needs a live API read; the offline queue only replays writes). Use --task= for the legacy path." >&2
+    rm -f "$PACKET_FILE"
+    exit 2
+  fi
+  if ! node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); process.exit(p && p.state && p.tag_id ? 0 : 1)' "$PACKET_FILE"; then
+    echo "[Dispatcher] ticket #$TICKET: unusable packet payload (offline/error response?)." >&2
+    rm -f "$PACKET_FILE"
+    exit 2
+  fi
+
+  # Idempotency: refuse a second dispatch unless the live per-bug lock proves
+  # it is the same run (lock check below also refuses an alive duplicate PID).
+  if ! GUARD_OUT=$(node "$DISPATCH_HELPER" guard --packet-file="$PACKET_FILE" --self-pid="$$" 2>&1); then
+    echo "[Dispatcher] Dispatch refused for ticket #$TICKET: $GUARD_OUT" >&2
+    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="🚫 *[Orchestrator]* Dispatch refused for \`#$TICKET\`: ${GUARD_OUT#refused: }" 2>/dev/null || true
+    rm -f "$PACKET_FILE"
+    exit 3
+  fi
+
+  TAG_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("tag_id",""))' "$PACKET_FILE")
+  PUBLIC_N=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("public_n") or "")' "$PACKET_FILE")
+  TITLE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("title") or "")' "$PACKET_FILE")
+  TICKET_STATE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("state") or "")' "$PACKET_FILE")
+  TICKET_ASSIGNEE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("assignee") or "")' "$PACKET_FILE")
+  PKT_SURFACE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("surface") or "")' "$PACKET_FILE")
+  PACKED_COMPONENT=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("defect") or {}; print(d.get("component",""))' "$PACKET_FILE")
+  PACKED_OBSERVED=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("defect") or {}; print(d.get("observed",""))' "$PACKET_FILE")
+  PACKED_EXPECTED=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("defect") or {}; print(d.get("expected",""))' "$PACKET_FILE")
+  PACKED_CRITERIA=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("defect") or {}; print(d.get("criteria",""))' "$PACKET_FILE")
+  PACKED_FINGERPRINT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("fingerprint") or "")' "$PACKET_FILE")
+
+  BUG_ID="#${PUBLIC_N:-$TICKET}"
+  [ -n "$SURFACE" ] || SURFACE="$PKT_SURFACE"
+  CATEGORY=$(node "$DISPATCH_HELPER" category --surface="$SURFACE")
+  SPLIT_COUNT=0
+  SPLIT_LIST_TEXT=""
+  TASK="Fix ${BUG_ID}: ${TITLE:-$PACKED_OBSERVED}"
+
+  # Repro lane verdict (V-30.3) rides along in the prompt.
+  REPRO_STATUS=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("repro") or {}; print(d.get("status",""))' "$PACKET_FILE")
+  if [ -n "$REPRO_STATUS" ]; then
+    REPRO_COMMAND=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("repro") or {}; print(d.get("command") or "")' "$PACKET_FILE")
+    REPRO_EXIT=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("repro") or {}; print(d.get("exit_code") if d.get("exit_code") is not None else "")' "$PACKET_FILE")
+    REPRO_TEXT="
+
+[REPRO (${REPRO_STATUS})]:
+- Command: ${REPRO_COMMAND:-—}
+- Exit code: ${REPRO_EXIT:-—}
+- Status '${REPRO_STATUS}' comes from the QA repro lane; reproduce the defect before changing code."
+  fi
+
+  # Locked spec from the specify role (specs/active/card-<n>.md from TEMPLATE).
+  SPEC_PATH=$(node "$DISPATCH_HELPER" spec-path --dir="${REPO_DIR}/specs/active" --n="${PUBLIC_N}" --tag="${TAG_ID}" 2>/dev/null || true)
+  if [ -n "$SPEC_PATH" ] && [ -f "$SPEC_PATH" ]; then
+    SPEC_TEXT=$(cat "$SPEC_PATH")
+  else
+    SPEC_PATH=""
+  fi
+
+  # Plan artifact BEFORE dispatch (posted here, in the parent, fail-fast).
+  HAS_PLAN=$(python3 -c 'import json,sys; print(1 if json.load(open(sys.argv[1])).get("plan") else 0)' "$PACKET_FILE")
+  if [ "$HAS_PLAN" = "1" ]; then
+    TICKET_HYP=$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("plan") or {}).get("hypothesis") or "")' "$PACKET_FILE")
+    TICKET_FILES=$(python3 -c 'import json,sys; print(",".join((json.load(open(sys.argv[1])).get("plan") or {}).get("files") or []))' "$PACKET_FILE")
+    TICKET_GATES=$(python3 -c 'import json,sys; print(",".join((json.load(open(sys.argv[1])).get("plan") or {}).get("gates") or []))' "$PACKET_FILE")
+  else
+    PLAN_ARGS=$(node "$DISPATCH_HELPER" plan-args --packet-file="$PACKET_FILE" ${SPEC_PATH:+--spec="$SPEC_PATH"} 2>/dev/null || true)
+    TICKET_HYP=$(printf '%s' "$PLAN_ARGS" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read() or "{}").get("hypothesis") or "")' 2>/dev/null || true)
+    TICKET_FILES=$(printf '%s' "$PLAN_ARGS" | python3 -c 'import json,sys; print(",".join(json.loads(sys.stdin.read() or "{}").get("files") or []))' 2>/dev/null || true)
+    TICKET_GATES=$(printf '%s' "$PLAN_ARGS" | python3 -c 'import json,sys; print(",".join(json.loads(sys.stdin.read() or "{}").get("gates") or []))' 2>/dev/null || true)
+    PLAN_REASON=$(printf '%s' "$PLAN_ARGS" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read() or "{}").get("reason") or "")' 2>/dev/null || true)
+    if [ -z "$TICKET_FILES" ]; then
+      # No locked spec yet — fall back to the defect component's real file.
+      GUESS_FILE=$(python3 - "$PACKED_COMPONENT" "$REPO_DIR" <<'PY' 2>/dev/null || true
+import os, re, sys
+toks = re.findall(r"[A-Za-z0-9_]+", sys.argv[1] or "")
+for t in toks:
+    for c in (f"src/components/{t}.tsx", f"src/components/{t}.ts", f"src/utils/{t}.ts", f"src/{t}.tsx", f"src/jobs/{t}.ts"):
+        if os.path.isfile(os.path.join(sys.argv[2], c)):
+            print(c)
+            raise SystemExit
+PY
+)
+      [ -n "$GUESS_FILE" ] && TICKET_FILES="$GUESS_FILE"
+    fi
+    if [ -n "$TICKET_FILES" ]; then
+      if ! node "$BUGCTL" plan --id "$TICKET" --hyp "$TICKET_HYP" --files "$TICKET_FILES" --gates "$TICKET_GATES" --by orchestrator --json >/dev/null 2>&1; then
+        echo "[Dispatcher] WARN: plan artifact for #$TICKET not recorded (API write failed — bugctl queues it offline)." >&2
+      fi
+    else
+      echo "[Dispatcher] WARN: no plan artifact for #$TICKET: ${PLAN_REASON:-no plan files} (specify role: write specs/active/card-${PUBLIC_N}.md from specs/TEMPLATE.md)." >&2
+    fi
+  fi
+
+  rm -f "$PACKET_FILE"
+  echo "[Dispatcher] ticket #$TICKET loaded: state=$TICKET_STATE surface=${SURFACE:-—} spec=${SPEC_PATH:-none} gates=${TICKET_GATES:-—}"
+fi
 
 # Dynamic Thinking Tuning (V-29): atomic UI/text fixes use low thinking to avoid overthinking loops
 if [ "$THINKING" = "auto" ] || [ -z "$THINKING" ]; then
@@ -408,11 +547,54 @@ if [ "$PRINT_PLAN" = "1" ]; then
   echo "defect_component=${PACKED_COMPONENT}"
   echo "defect_fingerprint=${PACKED_FINGERPRINT}"
   echo "split_count=${SPLIT_COUNT}"
+  if [ -n "$TICKET" ]; then
+    echo "ticket=${TICKET}"
+    echo "ticket_state=${TICKET_STATE}"
+    echo "tag_id=${TAG_ID}"
+    echo "spec=${SPEC_PATH:-none}"
+    echo "plan_gates=${TICKET_GATES:-none}"
+  fi
   if [ "$REQUESTED_TOOL" = "opencode" ] || [ "$REQUESTED_TOOL" = "auto" ]; then
     echo "opencode_argv=opencode run --auto --dir ${REPO_DIR} -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>"
   fi
   exit 0
 fi
+
+# ---------------------------------------------------------------
+# V-30.4 ticket rows: attempt start/end + block — same attempt schema as the
+# web lane (bugctl POST /attempts | PATCH blocked_reason). --burned=false is
+# mandatory: the server defaults non-green attempts to burned=true, which
+# would eat the burn budget on every bookkeeping row.
+# The dispatcher NEVER posts verify (author ≠ verifier): closure is a QA
+# action with method=named_test after the named gate is green.
+# ---------------------------------------------------------------
+ticket_attempt_row() {
+  [ -n "${TICKET:-}" ] || return 0
+  local result="$1" note="$2" applied="${3:-}"
+  local applied_flag=""
+  [ "$applied" = "true" ] && applied_flag="--applied"
+  node "$BUGCTL" attempt --id "$TICKET" --actor orchestrator \
+    --hyp "${TICKET_HYP:-dispatch}" --file "${TICKET_FILES%%,*}" --test "${TICKET_GATES%%,*}" \
+    --result "$result" --note "$note" --burned=false --json $applied_flag >/dev/null 2>&1 \
+    || echo "[Dispatcher] WARN: attempt row ($result) not recorded for #$TICKET" >&2
+}
+
+ticket_block() {
+  [ -n "${TICKET:-}" ] || return 0
+  node "$BUGCTL" block --id "$TICKET" --reason "$1" --json >/dev/null 2>&1 \
+    || echo "[Dispatcher] WARN: block for #$TICKET not recorded" >&2
+}
+
+# Terminal failure: end-row first (attempt history), then preserve the reason
+# as blocked_reason instead of only writing escalated_human to the audit.
+ticket_fail_and_block() {
+  [ -n "${TICKET:-}" ] || return 0
+  if [ "${TICKET_ATTEMPT_OPEN:-0}" = "1" ]; then
+    TICKET_ATTEMPT_OPEN=0
+    ticket_attempt_row "failed: $1" "$1"
+  fi
+  ticket_block "$1"
+}
 
 # Leave the Hermes tool call immediately. A 30s tool timeout used to kill the coder
 # mid-typecheck. setsid starts a new session so that kill does not reach the child.
@@ -443,6 +625,13 @@ RUN_ACTIVE_FILE="$(active_file_for "$BUG_ID")"
 WE_OWN_LOCK=0
 cleanup_dispatch() {
   stop_heartbeat
+  # V-30.4: an open ticket attempt must always end in a row + blocked_reason,
+  # even on signal/early exit (e.g. no tools available) — never a silent
+  # in_fix zombie. Normal success/failure paths close the attempt first.
+  if [ "${TICKET_ATTEMPT_OPEN:-0}" = "1" ] && [ -n "${TICKET:-}" ]; then
+    TICKET_ATTEMPT_OPEN=0
+    ticket_fail_and_block "dispatch aborted (signal or early exit)"
+  fi
   if [ "$WE_OWN_LOCK" != "1" ]; then
     return 0
   fi
@@ -538,6 +727,12 @@ cat <<JSON > "$RUN_LOCK_FILE"
 JSON
 cp "$RUN_LOCK_FILE" "$RUN_ACTIVE_FILE" 2>/dev/null || true
 WE_OWN_LOCK=1
+if [ -n "$TICKET" ]; then
+  # V-30.4 attempt START row: puts the card in_fix (queue in_progress) and
+  # marks this run as the fixer author (verifier must be someone else).
+  ticket_attempt_row "start" "dispatch start tool=$REQUESTED_TOOL model=$PREFERRED_MODEL thinking=$THINKING"
+  TICKET_ATTEMPT_OPEN=1
+fi
 if [ -n "$LOCK_CONFLICTS" ]; then
   bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" --text="⚠️ *[Orchestrator]* \`$BUG_ID\` starts in parallel — routing around live file claims:
 $(printf '%s' "$LOCK_CONFLICTS" | head -n 8)" 2>/dev/null || true
@@ -804,6 +999,13 @@ Reverting this attempt's uncommitted changes..."
     node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="$tool_name" --status="success" --bug-id="$BUG_ID" --category="$CATEGORY" --duration=$(( $(date +%s) - START_TIME )) || true
     record_audit "$tool_name" "$model_desc" "resolved" "deployed_pending_qa"
     record_run_outcome "committed" "$tool_name" "$model_desc"
+    if [ -n "$TICKET" ]; then
+      # V-30.4 attempt END row: applied=true moves the card to verifying —
+      # a journey green alone never closes it; only a named_test by a
+      # verifier who did not author this fix does.
+      ticket_attempt_row "committed" "pushed $run_branch ($commit_hash); awaiting non-author verifier" "true"
+      TICKET_ATTEMPT_OPEN=0
+    fi
     snapshot_workspace
     return 0
   else
@@ -848,6 +1050,31 @@ build_prompt() {
 - Expected: $PACKED_EXPECTED
 - Acceptance Criteria: $PACKED_CRITERIA
 - Fingerprint: $PACKED_FINGERPRINT"
+
+  if [ -n "${TICKET:-}" ]; then
+    base_prompt="${base_prompt}
+
+[TICKET PACKET (V-30.4 — the packet, not chat history, is your instruction)]:
+- Card: ${TICKET} (tag ${TAG_ID}) · state=${TICKET_STATE} · surface=${SURFACE:-—} · assignee=${TICKET_ASSIGNEE:-—}
+- Title: ${TITLE:-—}${REPRO_TEXT}
+
+[PLAN (posted before this dispatch)]:
+- Hypothesis: ${TICKET_HYP:-—}
+- Files: ${TICKET_FILES:-—}
+- Gates: ${TICKET_GATES:-—}"
+    if [ -n "$SPEC_TEXT" ]; then
+      base_prompt="${base_prompt}
+
+[LOCKED SPEC — Understanding / Layer / Forbidden patch bind this run; edit_mode + allowed_files are hard limits]:
+${SPEC_TEXT}"
+    fi
+    base_prompt="${base_prompt}
+
+[VERIFICATION CONTRACT — author ≠ verifier]:
+- You are the FIXER. Never post verify/close yourself: a QA verifier that did NOT author this fix runs the named gate (${TICKET_GATES:-see plan}) and posts verify with method=named_test.
+- A green journey run alone leaves the card in verifying; only named_test (or a manual human check) closes it.
+- Push the run branch only — never main; the repository PR flow merges."
+  fi
 
   if [ -n "$SPLIT_LIST_TEXT" ]; then
     base_prompt="${base_prompt}
@@ -1370,6 +1597,7 @@ done
 if [ "$CASCADE" -eq 1 ]; then
   record_audit "none" "none" "human" "escalated_human"
   record_run_outcome "escalated" "none" "none"
+  ticket_fail_and_block "dispatch failed: all cascade agents exhausted (${TOOL_SEQUENCE[*]})"
   tg_msg "🚨 *[Orchestrator]* All automated cascade agents exhausted for \`$BUG_ID\`.
 *Agents tried:* ${TOOL_SEQUENCE[*]}
 *Bug:* $TASK
@@ -1378,6 +1606,7 @@ Human intervention required. Please review the bug and assign manually."
   exit 1
 else
   record_run_outcome "unresolved" "${TOOL_SEQUENCE[0]}" "${PREFERRED_MODEL:-default}"
+  ticket_fail_and_block "dispatch failed: ${TOOL_SEQUENCE[0]} did not resolve (no fix committed)"
   tg_msg "⚠️ *[Orchestrator]* Agent *${TOOL_SEQUENCE[0]}* did not resolve \`$BUG_ID\`.
 Orchestrator awaiting next action or alternate model selection."
   exit 1
