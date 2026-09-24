@@ -66,4 +66,10 @@ for skill_path in "${SKILLS_SRC}"/*; do
 done
 
 
-echo "[SyncSkills] Successfully synced $SKILL_COUNT skills across all Hermes profiles."
+# BOT-14: Compatibility symlinks in ~/.hermes/shared_skills/ for legacy paths
+mkdir -p "${HERMES_DIR}/shared_skills/social-media"
+ln -sfn "${SKILLS_SRC}/telegram-photo" "${HERMES_DIR}/shared_skills/social-media/telegram-media-delivery"
+mkdir -p "${HERMES_DIR}/shared_skills/autonomous-ai-agents"
+ln -sfn "${SKILLS_SRC}/bug-ticket" "${HERMES_DIR}/shared_skills/autonomous-ai-agents/opencode"
+
+echo "[SyncSkills] Successfully synced $SKILL_COUNT skills across all Hermes profiles (plus legacy shared_skills links)."
