@@ -88,7 +88,64 @@ P1 is proposed next (needs one live probe to find the cline session id).
 P2–P5 are recorded here so they get built on these rails, not as five
 one-agent patches.
 
-## 4. Prior art reviewed 2026-09-24 — what the field validates, what to steal
+## 4. The three systems (reviewed 2026-09-24 + literature)
+
+### 4a. Soul — composed, not copied
+
+Problem: a feature change (e.g. "tables go via JSON pipeline") must reach
+every bot's instructions at once; per-agent souls fork on the first edit.
+Hermes already layers (default template → user `SOUL.md` → per-profile).
+
+Design: `bots/soul.md` = shared base (identity + reply-shape rules).
+Per-capability usage lines live IN `bots/capabilities.json` as a `soul`
+field (one line per capability, e.g. chat-table: "Tables: emit the JSON
+block, never pipe tables"). Compose at prompt time:
+`shared base + soul-lines of done capabilities + bots/soul.<id>.md override`.
+The checker verifies every done capability's soul line is present in the
+composed soul — editing a feature updates one line, all bots inherit.
+Hermes `SOUL.md` stays the wording source (import, never fork).
+
+### 4b. Learning — the missing process, now specified
+
+Existing pieces (verified): `recordFailure` (but opencode-lane only),
+`review-failures.mjs` (manual, never scheduled), VPS log HAS rows, Mac log
+empty, learnings scattered (`specs/learnings/`, picker catalog, nowhere).
+Literature shape (ESAA: mechanical capture, judgment only for curation):
+
+1. **Record (automatic):** all lanes + delivery + crash paths call
+   `recordFailure` (extend beyond opencode lane). Never throws, never blocks.
+2. **Merge (automatic, scheduled):** weekly job pulls the VPS log next to the
+   Mac log; `review-failures.mjs --threshold 2` groups by signature.
+3. **Curate (agent-assisted):** each LEARN-flagged signature must produce one
+   durable artifact — sensor test, checker rule, skill line, capability soul
+   line, or memory-footnote. No artifact = the process failed, not the agent.
+4. **Share (automatic):** artifacts land in git (tests/skills/soul/memory) so
+   every host inherits via pull. Host-local logs never need to sync beyond
+   the weekly merge.
+
+### 4c. Auto-healing — detection ladder + bounded recovery + repair on demand
+
+Existing: systemd `Restart=always`, run timeouts (bot-host `timeoutMs`,
+router `OC_IDLE_MS`/`OC_MAX_MS`), lane failover, 409 handling (open item).
+Literature (Samsung reliability-threshold framework; Cloudflare durable
+recovery; heartbeat zero-LLM watchdog; SelfHeal fix+critic pair; real-time
+derailment watchdog):
+
+- **L1 process:** systemd + 409 loud exit (already/queued). No LLM involved.
+- **L2 run watchdog (zero LLM):** the progress event stream IS the telemetry —
+  add stall timer (no events > N s), error-cascade counter, repeat
+  fingerprint (same tool+args ×3). Nudge = inject "try a different approach"
+  into the run; max nudges → abort with terminal message (never a raw stack).
+- **L3 bounded recovery:** retry / continue-with-summary / failover lane,
+  with a budget (max 2 recoveries per turn, then terminalize). Partial output
+  is preserved, never discarded.
+- **L4 repair on demand (not a standing agent):** a twice-flagged signature
+  spawns one investigatory run shaped like the literature's fix+critic pair —
+  fix proposes, critic checks, output is a patch or a bug card, and the
+  signature's learning artifact closes the loop so it never reproduces.
+  Schedule: weekly alongside the failure review, plus manual trigger.
+
+## 5. Prior art reviewed 2026-09-24 — what the field validates, what to steal
 
 Sources: TG Bot API rate-limit studies (Jan 2026), grammY/PTB production
 practices, ESAA-Conversational (arxiv 2606.23752), PROJECTMEM (2606.12329),
