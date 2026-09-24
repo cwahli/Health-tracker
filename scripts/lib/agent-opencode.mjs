@@ -186,6 +186,10 @@ export function buildOpencodeArgs({ prompt, model, variant, thinking = true, ext
  */
 const FATAL_LOG_ERRORS = [
   {
+    pattern: /model not found/i,
+    reason: 'Model not found on this provider — the model list may be stale, pick again from /freemodel.',
+  },
+  {
     pattern: /free_tier_limit|free usage exceeded|free limit reached|subscribe to go/i,
     reason: 'Free-tier allowance for this model is used up.',
   },
@@ -246,7 +250,9 @@ export function parseRetryAfter(text) {
  * because it carries the provider's own wording.
  */
 export function extractLogError(stderr) {
-  const text = String(stderr || '');
+  // Strip ANSI color (cline/opencode both emit \x1b[..m) so patterns match and
+  // chat output stays clean.
+  const text = String(stderr || '').replace(/\x1b\[[0-9;]*m/g, '');
   if (!text || !/level=ERROR/.test(text)) return null;
   // opencode runs a cosmetic "small" model (session titles) before the model the
   // user actually asked for, so its failures are NOT fatal: a run can still
@@ -258,9 +264,11 @@ export function extractLogError(stderr) {
     .split('\n')
     .filter((line) => /level=ERROR/.test(line) && !/\bsmall=true\b/.test(line));
   if (!lines.length) return null;
-  const details = lines
-    .map((line) => line.match(/error\.error="([^"]+)"/)?.[1])
-    .filter(Boolean);
+  const details = [...new Set(lines
+    .map((line) => line.match(/error\.error="([^"]+)"/)?.[1]
+      // Newer shape: ... cause="Cause([Fail(ModelNotFoundError: Model not found: x. Did you mean: y?)])"
+      || line.match(/Fail\(([A-Za-z]*Error): ([^)]+)\)/)?.slice(1).join(': '))
+    .filter(Boolean))];
   // The last detail is the one from the run the user asked for.
   const detail = details.length ? details[details.length - 1] : '';
   const haystack = detail || lines.join('\n');

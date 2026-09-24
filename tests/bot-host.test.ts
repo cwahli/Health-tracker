@@ -17,6 +17,7 @@ import {
   isQuotaOrLimitError,
   runWithModelFailover,
 } from '../scripts/lib/agent-opencode.mjs';
+import { buildClineArgs } from '../scripts/lib/agent-cline.mjs';
 import {
   buildFailure,
   recordFailure,
@@ -863,7 +864,7 @@ describe('agent-cline', () => {
 
   it('drops invalid variants and omits plan/timeout flags when unset', () => {
     const args = buildClineArgs({ prompt: 'hi', model: 'cline-free/kat-coder-pro', variant: 'auto' });
-    expect(args).toEqual(['-P', 'cline', '-m', 'cline-free/kat-coder-pro', '--json', '--auto-approve', 'true', 'hi']);
+    expect(args).toEqual(['-P', 'cline', '-m', 'cline-free/kat-coder-pro', '--json', '--auto-approve', 'true', 'hi ']);
     expect(CLINE_THINKING_LEVELS).toContain('xhigh');
     expect(typeof resolveClineBin('/custom/cline')).toBe('string');
     expect(resolveClineBin('/custom/cline')).toBe('/custom/cline');
@@ -1119,5 +1120,39 @@ describe('failure learning loop', () => {
     ]);
     expect(groups[0]).toMatchObject({ kind: 'out of funds', count: 2 });
     expect(groups[0].lanes).toEqual({ 'a/one': 1, 'b/two': 1 });
+  });
+});
+
+describe('cline single-word prompts (VM2 Hi outage)', () => {
+  const base = { model: 'm', workspace: '/tmp' };
+  it('forces prompt parsing for single-token prompts', () => {
+    const args = buildClineArgs({ ...base, prompt: 'Hi' });
+    expect(args.slice(-1)).toEqual(['Hi ']);
+  });
+
+  it('leaves multi-word and empty prompts untouched', () => {
+    expect(buildClineArgs({ ...base, prompt: 'fix the tests' }).slice(-1)).toEqual(['fix the tests']);
+    expect(buildClineArgs({ ...base, prompt: '' }).slice(-1)).toEqual(['']);
+  });
+});
+
+describe('VM2 transcript error shapes', () => {
+  const modelNotFoundLine =
+    'timestamp=2026-09-23T23:55:56.723Z level=ERROR run=897a105f message="share subscriber failed" ' +
+    'type=message.updated cause="Cause([Fail(ProviderModelNotFoundError: Model not found: opencode/glm-4.7-free. Did you mean: glm-5, glm-5.1, glm-5.2?)])"';
+
+  it('classifies ProviderModelNotFound with its suggestion, deduped', () => {
+    const out = extractLogError(`${modelNotFoundLine}\n${modelNotFoundLine}`);
+    expect(out).toContain('Model not found');
+    expect(out).toContain('/freemodel');
+    expect(out).toContain('glm-5');
+    expect(out).not.toContain('timestamp=');
+    expect(out.indexOf('glm-4.7-free')).toBe(out.lastIndexOf('glm-4.7-free'));
+  });
+
+  it('strips ANSI color before matching', () => {
+    const out = extractLogError('\x1b[31mlevel=ERROR error.error="AI_APICallError: Rate limit exceeded"\x1b[0m');
+    expect(out).toContain('rate limit');
+    expect(out).not.toContain('\x1b');
   });
 });

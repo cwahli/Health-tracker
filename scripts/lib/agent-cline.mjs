@@ -32,7 +32,12 @@ export function buildClineArgs({ prompt, model, variant, plan = false, timeoutMs
   if (plan) args.push('-p');
   if (timeoutMs > 0) args.push('-t', String(Math.ceil(timeoutMs / 1000)));
   if (workspace) args.push('-c', workspace);
-  args.push(prompt);
+  // cline declares `[command] [prompt]`: a lone single-word first positional is
+  // read as a subcommand and dies with "Unknown command or unquoted prompt"
+  // (so a plain "Hi" could never work). A trailing space forces the prompt
+  // branch (verified live against the real CLI); it is semantically null.
+  const single = String(prompt ?? '').trim().split(/\s+/).filter(Boolean).length === 1;
+  args.push(single ? `${prompt} ` : prompt);
   return args;
 }
 
