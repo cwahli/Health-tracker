@@ -17,6 +17,7 @@
  *           --check          validate payload only (schema + single-defect + criteria + fingerprint); no HTTP
  *           --split <file>   multi-item report JSON → { ok, card, split[] } (one card + split list)
  *   repro   --id N --status S [--command CMD] [--exit-code N] [--run-log L]
+ *           --check          validate verdict only (validateRepro vocabulary + artifacts); no HTTP
  *   plan    --id N --hyp H --files a.ts,b.ts --gates g1,g2
  *   attempt --id N --hyp H --file F --test T --result R [--line L] [--applied]
  *   verify  --id N --result green|red --command CMD [--evidence e1,e2]
@@ -34,7 +35,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packCheck, splitMultiItemReport, isVagueReport, fingerprint } from './lib/bug-pack.mjs';
+import { packCheck, splitMultiItemReport, isVagueReport, fingerprint, reproCheck } from './lib/bug-pack.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -242,8 +243,6 @@ async function main() {
     }
 
     case 'repro': {
-      const id = resolveId(args);
-      if (!id) fail('--id required', args);
       const body = {
         status: args.status,
         command: args.command,
@@ -255,8 +254,20 @@ async function main() {
         actual: args.actual,
         by: args.by,
       };
-      const r = await withFallback({ op: 'repro', id, ...body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/repro`, body));
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'repro', tag_id: r.tag_id, state: r.state, flags: r.flags, repro_status: body.status });
+      const chk = reproCheck(body);
+      if (args.check) {
+        out(chk.ok ? { ok: true, check: 'repro', value: chk.value } : chk, args);
+        if (!chk.ok) process.exit(1);
+        break;
+      }
+      if (!chk.ok) {
+        out({ ...chk, hint: 'bugctl repro --check failed — fix verdict before POST' }, args);
+        process.exit(1);
+      }
+      const id = resolveId(args);
+      if (!id) fail('--id required', args);
+      const r = await withFallback({ op: 'repro', id, ...chk.value }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/repro`, chk.value));
+      if (r.ok && r.state) appendJournal(r.public_n, { op: 'repro', tag_id: r.tag_id, state: r.state, flags: r.flags, repro_status: chk.value.status });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;

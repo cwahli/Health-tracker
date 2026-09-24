@@ -238,8 +238,8 @@
       "id": "hermes_bug_ticket",
       "name": "Bug Ticket Bot",
       "runtime": "hermes",
-      "enabled": false,
-      "notes": "V-30.2 packer. Start enabled:false until one E2E reply via HERMES_BUG_TICKET_TOKEN. Never links orchestrator-dispatcher.",
+      "enabled": true,
+      "notes": "V-30.2 packer, enabled after one live E2E reply (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2). Never links orchestrator-dispatcher.",
       "telegram": {
         "tokenEnv": "HERMES_BUG_TICKET_TOKEN",
         "allowedUserIds": [
@@ -248,7 +248,7 @@
       },
       "hermes": {
         "profile": "bug_ticket",
-        "username": null
+        "username": "@Bug_ticket_bot"
       },
       "agent": {
         "kind": "hermes"

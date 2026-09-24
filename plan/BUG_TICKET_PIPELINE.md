@@ -1,12 +1,13 @@
 # Bug ticket pipeline for TG agentic development — audit + plan (proposal)
 
-**Status:** **V-30.1 DONE 2026-09-24** (store + CLI + A-f1/A-f5); **V-30.2 CODE DONE 2026-09-24** (packer + offline fixtures green; operational closure still pending human P9 token + one Telegram E2E reply); **V-30.3…V-30.5 NOT STARTED** and remain in order. V-30.0 decisions all recorded (§6.1/§8). The executable handoff is §6.2.
+**Status:** **V-30.1 DONE 2026-09-24** (store + CLI + A-f1/A-f5); **V-30.2 DONE 2026-09-24** (packer + fixtures + P9 token + one live Telegram E2E reply + `enabled: true` + `@Bug_ticket_bot`; fixture traceability + packer-only boundary closed in the same change); **V-30.3 DONE 2026-09-24** (`qa-reproduce` skill, `qa-runner --ticket`, `bugctl repro --check`, §4.6 R2 bundle, `svc-repro` done, gate `assert-bug-repro` 57/0, and a live verdict posted on card #2: `failed` → `not_reproducible` with R2 evidence keys — card #2 was already fixed by `00b8cb1`, proving the known-good path end to end); **V-30.4…V-30.5 NOT STARTED** and remain in order, each requiring its explicit human go. V-30.0 decisions all recorded (§6.1/§8). The executable handoff is §6.2.
 **Drafted / last updated:** 2026-09-24
 **Scope:** make one durable bug-ticket store the working memory for the Telegram (TG) agent
 fleet, so a chat agent can never lose a bug between answers.
 **Roadmap entry:** `plan/ROADMAP.md` → *Track V Phase 10* — `V-30.0` **DECIDED 2026-09-24**;
-`V-30.1` **DONE 2026-09-24**; `V-30.2` **CODE DONE 2026-09-24** (P9 token + E2E pending human);
-`V-30.3…V-30.5` **NOT STARTED**, each requiring its explicit human go.
+`V-30.1` **DONE 2026-09-24**; `V-30.2` **DONE 2026-09-24** (P9 + E2E closed);
+`V-30.3` **DONE 2026-09-24** (human go received; live verdict posted on card #2);
+`V-30.4…V-30.5` **NOT STARTED**, each requiring its explicit human go.
 
 **This is not a fifth pillar.** It sits beside `plan/BOT_ROLES.md` and
 `docs/agents/telegram_work.md` and proposes a new **track** (see §6). It borrows the
@@ -27,13 +28,20 @@ local ground-truth file list is in §9.
 |---|---|---|
 | `plan/BUG_TICKET_PIPELINE.md` (this file) | **new, tracked in HEAD** | ✅ yes — it *is* the proposal |
 | `plan/ROADMAP.md` | Track V Phase 10 status + executable handoff pointer + decision mirror | ✅ yes |
-| implementation files listed in §5.2 (`src/`, `scripts/`, `bots/`, tests) | **V-30.1 and V-30.2 landed; V-30.3–V-30.5 still open** | follow the phase gates; do not re-open completed rows |
+| implementation files listed in §5.2 (`src/`, `scripts/`, `bots/`, tests) | **V-30.1–V-30.3 done; V-30.4–V-30.5 still open** | follow the phase gates; do not re-open completed rows |
 
-**State of the tree (2026-09-24 audit):** V-30.1 is merged and V-30.2's code/fixtures are merged
-(PRs #62/#66/#67). V-30.2 is **not operationally done**: the P9 Telegram token is absent, the
-profile `.env` has no `TELEGRAM_BOT_TOKEN`, the registry handle is `null`, and no live E2E reply
-has been recorded. V-30.3–V-30.5 have no implementation yet. Re-read §6.2 before starting any
-later phase; the dependency graph is intentional.
+**State of the tree (2026-09-24, updated after V-30.2 closure + V-30.3):** V-30.1 is merged and
+V-30.2 is **closed**: `HERMES_BUG_TICKET_TOKEN` present on the host, one live E2E reply recorded
+(session `20260924_162828_f191298f`, TG message ids 8/12/14/16, packed card #2) in
+`AI_HANDOVER.md`, registry `enabled: true` + `username: "@Bug_ticket_bot"`, and the §6.2
+audit follow-up (traceable fixture + packer-only boundary) landed with it. V-30.3 is
+**closed too**: skill, runner, `repro --check`, and gate (`assert-bug-repro` 57/0) landed,
+and the live run on card #2 posted `repro.status=failed` (exit 1 — the `7.700000000000001g`
+artifact no longer reproduces; fixed by `00b8cb1` on 2026-09-22), deriving
+`not_reproducible` with R2 keys `bugs/tag_mufs4t96_wj02x7/1790272128947-*` and
+`svc-repro` → `done`. The `confirmed` (known-bad) path is gate-proven and awaits the
+next genuinely-reproducing card. V-30.4–V-30.5 have no implementation. Re-read §6.2
+before starting any later phase; the dependency graph is intentional.
 
 **Review order:**
 1. §0 verdict (one screen) → §2 audit (evidence for every gap) → §3 prior art → §4 design →
@@ -45,9 +53,9 @@ later phase; the dependency graph is intentional.
    and re-sync the roadmap status strings. The sheet is the canonical record.
 
 **Historical review note (before implementation):** the proposal required an explicit human go
-before each phase. V-30.1 and V-30.2 code have since landed; the remaining P9 operation and
-V-30.3…V-30.5 still follow the same gate rule. Do not treat this document's review as a new
-authorization for token creation or protected-doc edits.
+before each phase. V-30.1 and V-30.2 have since landed and closed (P9 + E2E recorded 2026-09-24);
+V-30.3 received its human go and is code-done. V-30.4…V-30.5 still follow the same gate rule.
+Do not treat this document's review as a new authorization for token creation or protected-doc edits.
 
 **Do not, as part of a review:** edit protected docs (`AGENTS.md`, `docs/agent/**`,
 `scripts/assert-*.mjs` — AGENTS.md §3 requires an explicit before→after), create the
@@ -750,14 +758,14 @@ checker · `failure-log.mjs` + `review-failures.mjs` · `standing.json` /
 | File | Change |
 |---|---|
 | `src/utils/bugWorkItem.ts` | add `surface`, `source`, `idem_key`, `defect`, `repro`, `plan`, `verify`, `assignee`, `reply_to`, `blocked_by`, `duplicate_of`; per-state `instruction`; extend `buildStartPayload` / `formatContinuePrompt`. New module `src/utils/bugTicketState.ts` (the `bugState()` projection, §4.3.4) + `src/utils/bugTicketState.test.ts`; **extend** `mapLegacyStatus()` rather than replacing it |
-| `serverBugSnapshot.ts` | artifact endpoints `POST /api/bugs/:tagId/{defect,repro,plan,verify}` (each validated, then `bugState()` projected and persisted — there is **no agent-settable state route**), `GET /api/bugs/queue?state=&assignee=&surface=` (ready queue + `blocked_by`), `GET /api/bugs/:tagId/packet` (`?format=text`); fix **A-f1** ordering; add the token guard (**A-f5**) |
-| `scripts/bugctl.mjs` | **V-30.1/V-30.2 landed.** Thin HTTP client + offline JSONL queue: `next, list, show, packet, pack, repro, plan, claim, attempt, state, evidence, duplicate, unblock, queue` — `--json` everywhere. V-30.3 must add `repro --check`; V-30.5 must add `/resume` only if it is a Telegram command, not a second state store. |
+| `serverBugSnapshot.ts` | artifact endpoints `POST /api/bugs/:tagId/{defect,repro,plan,verify}` (each validated, then `bugState()` projected and persisted — there is **no agent-settable state route**), `GET /api/bugs/queue?state=&assignee=&surface=` (ready queue + `blocked_by`), `GET /api/bugs/:tagId/packet` (`?format=text`); fix **A-f1** ordering; add the token guard (**A-f5**). **Packer-only boundary (§6.2 audit follow-up, documented + tested):** `validateDefect()` enforces the required fields only; the single-defect/fingerprint rules live solely at `bugctl pack --check` (`scripts/lib/bug-pack.mjs`) and are proven against the committed fixture by `assert-bug-pack.mjs` — the server does **not** duplicate `looksBundled`/`splitMultiItemReport` (asserted by that gate). |
+| `scripts/bugctl.mjs` | **V-30.1/V-30.2/V-30.3 landed.** Thin HTTP client + offline JSONL queue: `next, list, show, packet, pack, repro, plan, claim, attempt, state, evidence, duplicate, unblock, queue` — `--json` everywhere. `pack --check` (V-30.2) and `repro --check` (V-30.3) validate the `validateRepro` vocabulary/artifacts and run **before** every POST. V-30.5 must add `/resume` only if it is a Telegram command, not a second state store. |
 | `scripts/run-coding-dispatch.sh` | **V-30.4 open:** add `--ticket=#21` (packet-driven prompt; keep `--task=` legacy), `bugctl` attempt rows on start/end, and failure as `bugctl block --reason ...` instead of only `escalated_human`. Add an idempotency guard for an already `in_fix` card; never push directly to main. |
-| `scripts/qa-runner.mjs` | **V-30.3 open:** add `--ticket=<#n>` to read the card, run its `repro` command/criteria, upload portable R2 keys (`repro.txt`, `run.log`, `before.png`, `expected.md`, `result.json`), and write the verdict through `bugctl repro`. Keep journey mode unchanged. |
+| `scripts/qa-runner.mjs` | **V-30.3 landed:** `--ticket=<#n>` loads the packet via `bugctl packet`, runs the card's command (exit 0 = reproduced → `confirmed`, non-zero → `failed`), captures `before.png`, uploads the §4.6 bundle as R2 keys (`repro.txt`, `run.log`, `before.png`, `expected.md`, `result.json` under `bugs/<tag_id>/<ts>-<kind>.<ext>`), and writes the verdict through `bugctl repro` (no R2 creds → exit 3, verdict withheld — a host path is not evidence). Journey mode unchanged. |
 | `scripts/bug-backlog.mjs` | **V-30.5 open:** generate `bug-backlog.md` from the store; do not delete the current hand-compiled file until the generator reproduces the BUG-8449 fixture and its source evidence is preserved. |
-| `bots/registry.json` | **V-30.2 landed** `hermes_bug_ticket` with `enabled: false`, `HERMES_BUG_TICKET_TOKEN`, and `hermes.profile=bug_ticket`; V-30.2 closure must fill `hermes.username` from BotFather and flip `enabled` only after one E2E reply. |
-| `bots/capabilities.json` | **V-30.2 landed** `svc-bug-ticket`, `proc-ticket-state`, `sess-ticket-resume`; V-30.3 adds `svc-repro`; V-30.5 updates statuses from proof and runs `check-capability-propagation.mjs --strict` in CI. Do not duplicate the three existing rows. |
-| `scripts/skills/common/qa-reproduce/SKILL.md` | **V-30.3 open:** add the reproduce-only procedure. V-30.4 updates the existing `orchestrator-dispatcher` skill for packet/plan/dispatch. V-30.2 already shipped `scripts/skills/common/bug-ticket/SKILL.md`; do not create a second `.agents/skills` copy. |
+| `bots/registry.json` | **V-30.2 landed + closed 2026-09-24:** `hermes_bug_ticket` with `enabled: true`, `HERMES_BUG_TICKET_TOKEN`, `hermes.profile=bug_ticket`, and `hermes.username="@Bug_ticket_bot"` (filled after one E2E reply per §6.2 runbook). |
+| `bots/capabilities.json` | **V-30.2 landed** `svc-bug-ticket` (now `done`, E2E proven), `proc-ticket-state`, `sess-ticket-resume`; **V-30.3 landed** `svc-repro` (**`done`** — gate 57/0 + live verdict on card #2 with real R2 keys); V-30.5 updates statuses from proof and runs `check-capability-propagation.mjs --strict` in CI. Do not duplicate the existing rows. |
+| `scripts/skills/common/qa-reproduce/SKILL.md` | **V-30.3 landed:** reproduce-only procedure (verdict table, `repro --check`, §4.6 keys, `not_needed` ≠ `not_reproducible`, never fix/dispatch/verify), preloaded into the `qa_meal` profile by `setup-hermes-global-soul.sh`. V-30.4 updates the existing `orchestrator-dispatcher` skill for packet/plan/dispatch. Do not create a second `.agents/skills` copy. |
 | `.github/workflows/ci.yml` | **V-30.5 open:** add the ticket-state, pack-fixture, continuity, and strict capability gates. Make `assert-bug-pack.mjs` host-independent first: it currently checks `~/.hermes/profiles/bug_ticket` and would fail in clean CI. |
 | `docs/agents/telegram_work.md` | **V-30.5 open:** add ticket-first handoff rules, the "needs human" list, and the exact waiting/claim rules. Keep the existing BUG-8449 incident section as evidence. |
 
@@ -797,8 +805,8 @@ active use (BOT-12…18 as of 2026-09-24 and growing), so V-30.x is the stable n
 | Phase | Deliverable | Gate (must exit 0) | Evidence artifact | Status |
 |---|---|---|---|---|
 | **V-30.1** store + CLI | schema fields + `bugState()` + `bugctl` + artifact endpoints + **A-f1/A-f5** fixes | `npx vitest run src/utils/bugTicketState.test.ts` · `node scripts/assert-bug-ticket-continuity.mjs` · `npm run lint`; scripted `new→packed→in_fix→done` via `bugctl` | scripted session and continuity assert | **DONE 2026-09-24** — PR #62 / `86e8495` |
-| **V-30.2** packer | code: `bug-pack.mjs`, `bugctl pack --check`/`--split`, Hermes profile/skill, registry entry, three capability rows. **Remaining:** traceable BUG-8449 fixture/server contract, P9 token, actual Telegram handle, one E2E reply, `enabled: true` | `node scripts/assert-bug-pack.mjs` + `npx vitest run src/utils/bugPackFixtures.test.ts`; then live E2E: intake → one card or needs_repro/duplicate → Telegram reply with `#n` | fixture transcript/card ids, token-sync output, Telegram message/reply id, final `enabled: true` | **CODE DONE / OPERATIONS PENDING** — PRs #66/#67; source/server parity and P9 open |
-| **V-30.3** reproducer | `qa-reproduce` skill; `qa-runner.mjs --ticket=<#n>`; `bugctl repro --check`; one QA write path using existing profiles/tokens | known-good card posts `repro.status=failed` with `run.log` → derived flag `not_reproducible`; known-bad card posts `status=confirmed` with `command`, `exit_code`, `run.log`, and portable `before.png` key; both verdicts persist on card | both fixture transcripts, artifact keys, and derived flags | **NOT STARTED** — blocked on V-30.2 P9/E2E and explicit human go; do not use `not_needed` as a synonym for `not_reproducible` |
+| **V-30.2** packer | code: `bug-pack.mjs`, `bugctl pack --check`/`--split`, Hermes profile/skill, registry entry, three capability rows. **Closed 2026-09-24:** traceable fixture (`scripts/fixtures/bug-8449.json`, checked against `bug-backlog.md` at gate time) + packer-only boundary doc/test, P9 token, `@Bug_ticket_bot` handle, one live E2E reply (session `20260924_162828_f191298f`, packed card #2), `enabled: true` | `node scripts/assert-bug-pack.mjs` + `npx vitest run src/utils/bugPackFixtures.test.ts`; then live E2E: intake → one card or needs_repro/duplicate → Telegram reply with `#n` | fixture transcript/card ids, token-sync output, Telegram message/reply id, final `enabled: true` | **DONE 2026-09-24** — PRs #66/#67; closure in AI_HANDOVER.md |
+| **V-30.3** reproducer | `qa-reproduce` skill; `qa-runner.mjs --ticket=<#n>`; `bugctl repro --check`; one QA write path using existing profiles/tokens | known-good card posts `repro.status=failed` with `run.log` → derived flag `not_reproducible`; known-bad card posts `status=confirmed` with `command`, `exit_code`, `run.log`, and portable `before.png` key; both verdicts persist on card | both fixture transcripts, artifact keys, and derived flags | **DONE 2026-09-24** — skill/runner/`repro --check`/§4.6 keys/`svc-repro` done/gate `assert-bug-repro` 57/0; **live verdict on card #2**: `failed` → `not_reproducible` (defect fixed by `00b8cb1`, so the known-good path is the one that proved live), R2 keys `bugs/tag_mufs4t96_wj02x7/1790272128947-*`; `confirmed` path gate-proven, awaits a genuinely-bad card; do not use `not_needed` as a synonym for `not_reproducible` |
 | **V-30.4** orchestrator | packet-driven `run-coding-dispatch.sh --ticket=#21`; plan block; start/end attempt rows; `bugctl block --reason`; idempotent in-flight guard; verifier cannot be fixer | scratch dev-only card reaches `done` only after named gate green; failed dispatch leaves `blocked_reason`; no direct main push or chat-only claim | card timeline, attempt rows, commit/PR, named-gate output, verify artifact | **NOT STARTED** — after V-30.3 and explicit human go |
 | **V-30.5** memory + ratchet | generated `bug-backlog.mjs`; `/resume`; `svc-repro`; status transitions; CI gates; `docs/agent/BUG_PIPELINE.md`; `telegram_work.md`; BUG-8449 retro-audit | `review-failures.mjs` has no repeated fixture signature; `check-capability-propagation.mjs --strict` exits 0; continuity + pack gates run in CI; retro-audit answers §4.10 questions 1–6 from disk/API only | generated backlog, resume transcript, CI output, retro-audit answers | **NOT STARTED** — after V-30.4 and explicit human go; do not delete hand-compiled backlog before fixture parity |
 
@@ -826,16 +834,25 @@ an unrelated open/partial capability row as proof.
 
 #### V-30.2 closure — human P9, then agent verification
 
-Current evidence: `HERMES_BUG_TICKET_TOKEN` is absent from
-`~/.config/bot-host/tokens.env`; `~/.hermes/profiles/bug_ticket/.env` has no
-`TELEGRAM_BOT_TOKEN`; `bots/registry.json` has `enabled: false` and `username: null`.
+**Closed 2026-09-24.** Recorded evidence: `HERMES_BUG_TICKET_TOKEN` present in
+`~/.config/bot-host/tokens.env` (line 22, never printed); live E2E session
+`20260924_162828_f191298f` with TG message ids 8/12/14/16 packing card #2
+(fingerprint `CLONE_UI|omega_3_weekly_shows_7_700000000000001g|2026-W39`);
+`bots/registry.json` has `enabled: true` and `username: "@Bug_ticket_bot"`;
+all recorded in `AI_HANDOVER.md`.
 
-**V-30.2 audit follow-up before calling it DONE:** the 7-item gate currently embeds a synthetic
-copy of BUG-8449 instead of reading a committed normalized fixture derived from
-`bug-backlog.md`, and the server's `validateDefect()` checks required fields but does not enforce
-the CLI's single-defect/fingerprint rules. Add a traceable fixture plus a server/CLI contract
-(or explicitly document and test the packer-only boundary) so the advertised fixture proves the
-real intake path, not only a helper.
+**V-30.2 audit follow-up — resolved 2026-09-24 (same change set):**
+(a) the gate fixture is now the committed normalized file
+`scripts/fixtures/bug-8449.json`, derived from the `bug-backlog.md`
+"Issues (7 items)" table and re-checked row-by-row against that source at
+gate time; the fixture also runs through the **CLI** intake path
+(`bugctl pack --split` + `bugctl pack --check`), not only the helper.
+(b) the server/CLI contract is resolved as an explicitly documented +
+tested **packer-only boundary**: `validateDefect()` enforces required
+fields (unit-tested in `bugTicketState.test.ts`), the single-defect and
+fingerprint rules stay solely at `bugctl pack --check`, the server does
+not duplicate them, and `assert-bug-pack.mjs` asserts all three facts.
+Both are named checks in that gate.
 
 Runbook:
 
@@ -866,6 +883,18 @@ Runbook:
 #### V-30.3 — reproducer implementation packet
 
 Implement only after V-30.2 is closed and the human gives the phase go.
+**DONE 2026-09-24:** all bullets below shipped together —
+`qa-reproduce` skill (preloaded into `qa_meal` by `setup-hermes-global-soul.sh`),
+`qa-runner.mjs --ticket=<#n>` (§4.6 R2 keys, exit-0 = `confirmed`),
+`bugctl repro --check`, and named gate `scripts/assert-bug-repro.mjs` (57/0).
+**Live proof:** `qa-runner --ticket=2` on 2026-09-24 posted
+`repro.status=failed` (exit 1) → derived `not_reproducible`, R2 keys
+`bugs/tag_mufs4t96_wj02x7/1790272128947-*`, `by: qa_meal` — card #2's
+`7.700000000000001g` artifact no longer reproduces because `00b8cb1`
+(2026-09-22) rounds `weeklyTarget`; the card's 2026-09-21 observation
+predates that fix. `svc-repro` is `done`. The `confirmed` (known-bad)
+path is covered by the gate's exec cases and will get its live proof on
+the next genuinely-reproducing card.
 
 Reference transcript (what the output looks like on a real card): the stuck
 meal-analysis card — QA posts `repro{status: confirmed, command, exit_code,

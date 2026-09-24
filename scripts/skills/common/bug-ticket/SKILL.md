@@ -38,6 +38,7 @@ duplicate #<new> → merged into #<existing> (occurrences++)
 ```
 
 ### What you NEVER DO — no exceptions:
+- NEVER reply with a numbered menu / "which direction?" when a `bug …` report arrived — create the card first.
 - NEVER edit `src/`, `server*.ts`, or any repo file.
 - NEVER run coding agents or `run-coding-dispatch.sh`.
 - NEVER link or invoke `orchestrator-dispatcher`.

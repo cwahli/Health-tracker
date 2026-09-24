@@ -467,8 +467,8 @@
       "id": "svc-bug-ticket",
       "test": "T2",
       "scope": "common",
-      "status": "open",
-      "prove": "unit: scripts/lib/bug-pack.mjs fixtures; live: packer replies via bugctl",
+      "status": "done",
+      "prove": "unit: scripts/lib/bug-pack.mjs fixtures; live: packer reply via bugctl E2E (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2)",
       "expect": [
         "scripts/bugctl.mjs",
         "scripts/lib/bug-pack.mjs",
@@ -484,7 +484,7 @@
         "grok_tg": false,
         "collab": false
       },
-      "notes": "V-30.2 packer service \u2014 bugctl is the one binary; hermes profile bug_ticket owns intake. E2E blocked on HERMES_BUG_TICKET_TOKEN."
+      "notes": "V-30.2 packer service — bugctl is the one binary; hermes profile bug_ticket owns intake. E2E proven 2026-09-24 via HERMES_BUG_TICKET_TOKEN (@Bug_ticket_bot); registry enabled:true."
     },
     {
       "id": "proc-ticket-state",
@@ -527,6 +527,30 @@
         "collab": false
       },
       "notes": "Offline JSONL queue is the durability path for pack ops when API is unreachable (A-f5/offline)."
+    },
+    {
+      "id": "svc-repro",
+      "test": "T2",
+      "scope": "common",
+      "status": "done",
+      "prove": "unit: scripts/assert-bug-repro.mjs (both verdicts + derived flags via reproCheck + bugState walk); live: qa-runner --ticket=2 posted repro.status=failed with run.log/before.png R2 keys (bugs/tag_mufs4t96_wj02x7/1790272128947-*, by qa_meal) and derived flag not_reproducible",
+      "expect": [
+        "scripts/qa-runner.mjs",
+        "scripts/bugctl.mjs",
+        "scripts/skills/common/qa-reproduce/SKILL.md",
+        "scripts/assert-bug-repro.mjs"
+      ],
+      "skills": [
+        "qa-reproduce"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": "adapter",
+        "mobile": false,
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "V-30.3 reproducer — reuses the existing qa_meal profile (preload qa-reproduce), no new QA bot/token. Verdicts via bugctl repro --check (validateRepro vocabulary); evidence is R2 keys under bugs/<tag_id>/<ts>-<kind>.<ext>."
     }
   ]
 }
