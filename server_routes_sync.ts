@@ -513,13 +513,13 @@ syncRouter.post("/api/sync/supabase-pull", async (req, res) => {
       foods: activeFoods,
       biomarkers: activeBiomarkers,
       profileData,
-      totalFoodsCount: totalFoodsCount ?? activeFoods.length,
-      totalBiomarkersCount: totalBiomarkersCount ?? activeBiomarkers.length,
+      totalFoodsCount: totalFoodsCount !== undefined ? totalFoodsCount : undefined,
+      totalBiomarkersCount: totalBiomarkersCount !== undefined ? totalBiomarkersCount : undefined,
       meta: {
         foodCount: activeFoods.length,
-        totalFoodsCount: totalFoodsCount ?? activeFoods.length,
+        totalFoodsCount: totalFoodsCount !== undefined ? totalFoodsCount : undefined,
         biomarkerCount: activeBiomarkers.length,
-        totalBiomarkersCount: totalBiomarkersCount ?? activeBiomarkers.length,
+        totalBiomarkersCount: totalBiomarkersCount !== undefined ? totalBiomarkersCount : undefined,
         hasProfileData: !!profileData,
         queriedUids: possibleUids
       }

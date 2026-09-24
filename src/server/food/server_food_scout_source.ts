@@ -8,7 +8,7 @@
 import { getFallbackCategoryProfile } from '../../../server_food_catalog.js';
 import { isPackagedBindItem, inferChainNameFromPackageLabel } from '../../../server_brand_match.js';
 import { userSafeScoutFailureMessage, parseAndHealVisionScout } from '../../../server_vision_scout.js';
-import { isGeminiQuotaError, nextGeminiFallbackEngine } from '../../../server_gemini_retry.js';
+import { isGeminiQuotaError, isGeminiUnavailableError, nextGeminiFallbackEngine } from '../../../server_gemini_retry.js';
 import { t, withScoutLanguage } from '../../utils/i18n.js';
 import { extractFoodSearchQueriesFromText } from './server_food_analyze_helpers.js';
 import { scoutSystemInstruction } from '../../../agents/scoutInstructions.js';
@@ -827,7 +827,7 @@ export function restoreTurnOneCandidates(args: TurnOneRestoreArgs): number {
 
 /** Scout retry backoff: 503/UNAVAILABLE waits longer than other failures. */
 export function computeScoutRetryDelay(lastScoutErr: any): number {
-  return lastScoutErr?.message?.includes('503') || lastScoutErr?.message?.includes('UNAVAILABLE') ? 2000 : 1000;
+  return lastScoutErr?.message?.includes('503') || lastScoutErr?.message?.includes('UNAVAILABLE') ? 2500 : 1000;
 }
 
 export interface SkipScoutShortcutArgs {
@@ -1032,6 +1032,10 @@ export async function runScoutRetryLoop(args: ScoutRetryArgs): Promise<{
           alreadyFellBack = true;
         } else if (isGeminiQuotaError(lastScoutErr)) {
           break;
+        } else if (isGeminiUnavailableError(lastScoutErr) && currentEngine === 'gemini-3.1-flash-lite') {
+          // If gemini-3.1-flash-lite ALSO 503s under peak demand, hop to gemini-2.5-flash as emergency safety net
+          onLog(`[Vision Scout] gemini-3.1-flash-lite also unavailable (503). Switching to gemini-2.5-flash emergency fallback.`);
+          currentEngine = 'gemini-2.5-flash';
         }
 
         const delay = computeScoutRetryDelay(lastScoutErr);
