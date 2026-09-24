@@ -48,25 +48,46 @@ check('work-session.mjs exists', fs.existsSync(libPath));
 const {
   sessionKey,
   tmuxSessionFor,
+  tmuxWindowFor,
   resolveSession,
   getSession,
   setTx,
   handoffSession,
   abortSession,
+  ensureTmuxWorkView,
   debugProbe,
   sessionStatus,
   scrubSecrets,
   statusForTelegram,
 } = await import(new URL(`file://${libPath.replace(/\\/g, '/')}`).href);
 
-for (const fn of ['resolveSession', 'setTx', 'handoffSession', 'abortSession', 'debugProbe', 'sessionStatus', 'statusForTelegram']) {
-  check(`exports ${fn}`, typeof ({ resolveSession, setTx, handoffSession, abortSession, debugProbe, sessionStatus, statusForTelegram })[fn] === 'function');
+for (const fn of ['resolveSession', 'setTx', 'handoffSession', 'abortSession', 'ensureTmuxWorkView', 'debugProbe', 'sessionStatus', 'statusForTelegram']) {
+  check(`exports ${fn}`, typeof ({ resolveSession, setTx, handoffSession, abortSession, ensureTmuxWorkView, debugProbe, sessionStatus, statusForTelegram })[fn] === 'function');
 }
 
 // Isolated store for the gate (never the live ~/.hermes file).
 const tmpStore = path.join(os.tmpdir(), `ws_gate_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
 const noTmux = () => false;
 const yesTmux = () => true;
+const lifecycleSessions = new Map();
+const lifecycleCalls = [];
+const lifecycleTmux = (args) => {
+  lifecycleCalls.push(args);
+  if (args[0] === 'has-session') return lifecycleSessions.has(args[2]);
+  if (args[0] === 'list-windows') {
+    return [...(lifecycleSessions.get(args[2]) || [])].join('\n');
+  }
+  if (args[0] === 'new-session') {
+    lifecycleSessions.set(args[3], new Set([args[5]]));
+    return true;
+  }
+  if (args[0] === 'new-window') {
+    const session = args[3].replace(/:$/, '');
+    lifecycleSessions.get(session).add(args[5]);
+    return true;
+  }
+  return false;
+};
 
 // 2. On-demand sessions keyed without any bot id.
 const s1 = resolveSession({ location: 'vps', chat: 'qa_meal', workspace: '/home/ubuntu/src/Health-tracker', lane: 'opencode' }, tmpStore);
@@ -97,6 +118,21 @@ check('terminal lane attaches through the location tmux session',
 const apiProbe = debugProbe('gemini', { session: s1, tmux: yesTmux });
 check('API lane honestly reports attach:false with an event view',
   apiProbe.surface === 'api' && apiProbe.attach === false && apiProbe.events === true);
+
+const createdView = ensureTmuxWorkView({ ...s1, lane: 'opencode' }, { tmux: lifecycleTmux });
+const expectedTarget = `work-vps:${tmuxWindowFor(s1.id)}`;
+check('/tx on can create the exact session and workstream window',
+  createdView.ok === true && createdView.created === true && createdView.target === expectedTarget);
+const firstCreateCount = lifecycleCalls.length;
+const reusedView = ensureTmuxWorkView({ ...s1, lane: 'opencode' }, { tmux: lifecycleTmux });
+check('repeated /tx on reuses without another create',
+  reusedView.ok === true && reusedView.created === false && lifecycleCalls.length === firstCreateCount + 2);
+check('tmux lifecycle contains no destructive replacement command',
+  lifecycleCalls.flat().every((arg) => !/kill-session|kill-window|respawn-pane|send-keys/.test(String(arg))));
+let apiTmuxCalls = 0;
+const apiView = ensureTmuxWorkView({ ...s1, lane: 'gemini' }, { tmux: () => { apiTmuxCalls += 1; return false; } });
+check('API-only /tx on never invokes tmux',
+  apiView.ok === true && apiView.target === null && apiTmuxCalls === 0);
 
 // 5. Handoff preserves state; abort preserves the transcript.
 const moved = handoffSession(s1.id, 'grok', tmpStore);

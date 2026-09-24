@@ -13,7 +13,8 @@ import {
   resolveSession,
   setTx,
   statusForTelegram,
-  tmuxSessionFor,
+  defaultTmuxRunner,
+  ensureTmuxWorkView,
 } from './lib/work-session.mjs';
 import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
@@ -614,27 +615,39 @@ export function workLocation() {
   return os.homedir() === '/root' ? 'mobile' : 'vps';
 }
 
-export async function handleTxCommand({ api, config, chatId, arg }) {
+export async function handleTxCommand({ api, config, chatId, arg, tmux = defaultTmuxRunner }) {
   const location = workLocation();
   const id = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
   const sub = String(arg || '').trim().toLowerCase();
-  if (sub === 'on' || sub === 'off') {
-    resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: config.agent.kind || 'opencode' });
-    setTx(id, sub === 'on');
+  if (sub === 'on') {
+    const session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: config.agent.kind || 'opencode' });
+    const created = ensureTmuxWorkView(session, { tmux });
+    if (!created.ok) {
+      await api.sendMessage(chatId, `Shared work view unavailable: could not create \`${created.target}\` without replacing an existing tmux session.`);
+      return;
+    }
+    setTx(id, true);
+  } else if (sub === 'off') {
+    setTx(id, false);
   } else if (sub !== '' && sub !== 'status') {
     await api.sendMessage(chatId, 'Usage: /tx on|off|status — shared work-view for this chat.');
     return;
   }
-  const view = statusForTelegram(id);
+  const view = statusForTelegram(id, { tmux });
   if (!view) {
-    await api.sendMessage(chatId, 'No work session for this chat yet — send a message first, then /tx.');
+    await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
     return;
   }
+  const attach = view.probe?.attach
+    ? `Attach: \`tmux attach -t ${view.probe.target}\``
+    : view.probe?.surface === 'terminal'
+      ? 'Attach: unavailable — work view is not running'
+      : 'Live attach: unavailable for this execution surface';
   const lines = [
     `*Shared work view:* ${view.tx ? 'ON 📺' : 'OFF'}`,
     `Session: \`${view.id}\``,
     `Lane: \`${view.lane}\` (${view.state})`,
-    `Attach: \`tmux attach -t ${tmuxSessionFor(location)}\``,
+    attach,
     `Terminal: ${view.probe?.attach ? 'attached' : 'not attached'}`,
   ];
   await api.sendMessage(chatId, lines.join('\n'));
