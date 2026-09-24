@@ -710,7 +710,34 @@ Running TypeScript build check ('npx tsc --noEmit')..."
 
   local tsc_output
   if tsc_output=$(git -C "$CODER_DIR" rev-parse --show-toplevel >/dev/null 2>&1 && (cd "$CODER_DIR" && npx tsc --noEmit 2>&1)); then
-    echo "[Dispatcher] tsc clean — committing real changes..."
+    echo "[Dispatcher] tsc clean."
+
+    # BOT-23: Pre-dispatch dev regression & blast radius verification
+    echo "[Dispatcher] Running pre-dispatch dev regression & blast radius check (BOT-23)..."
+    local reg_output reg_status=0
+    local REG_HELPER="${REPO_DIR}/scripts/lib/dev-regression.mjs"
+    if [ -f "$REG_HELPER" ]; then
+      set +e
+      reg_output=$(node "$REG_HELPER" --dir="$CODER_DIR" 2>&1)
+      reg_status=$?
+      set -e
+      if [ "$reg_status" -ne 0 ]; then
+        echo "[Dispatcher] Pre-dispatch regression check failed (exit $reg_status):"
+        echo "$reg_output"
+        local reg_tail
+        reg_tail=$(printf '%s\n' "$reg_output" | tail -n 8 | tr -d '`' | cut -c1-350)
+        tg_msg "❌ *[Orchestrator]* Pre-dispatch regression check failed after *$tool_name* (\`$BUG_ID\`):
+\`\`\`
+${reg_tail:-Regression test or Rule L1 blast radius failure}
+\`\`\`
+Reverting this attempt's uncommitted changes..."
+        clean_workspace
+        return 1
+      fi
+      echo "[Dispatcher] Dev regression passed cleanly."
+    fi
+
+    echo "[Dispatcher] All pre-commit checks green — committing real changes..."
     local line path
     while IFS= read -r line; do
       [ -z "$line" ] && continue
