@@ -40,10 +40,44 @@ import {
   pickQueueTag,
   prefillBug,
 } from './src/utils/bugWorkItem';
+import {
+  bugState,
+  projectBugState,
+  validateDefect,
+  validatePlan,
+  validateRepro,
+  validateVerify,
+} from './src/utils/bugTicketState';
 import { overlayAutoRemaining, planReanalyzeStages, restageBoardFromCatalog, failingAutoWorkLines } from './src/utils/bugTapeReview';
 import { classifyGoldenReds, shouldHoldR2 } from './src/utils/bugAutoFile';
 import { persistAutoFile, tryAutoFileGolden, tryAutoFileJob } from './serverBugAutoFile.js';
 import { planInboxMigration } from './src/utils/bugInboxMigrate';
+import type { NextFunction } from 'express';
+
+/**
+ * A-f5 — write-endpoint token guard (P3: X-Bug-Api-Token).
+ * Allows: (1) matching BUG_API_TOKEN, (2) same-origin browser (Origin/Referer === Host),
+ * (3) loopback when no token is configured (dev/tests). Everything else → 401.
+ */
+export function bugWriteGuard(req: Request, res: Response, next: NextFunction) {
+  const expected = process.env.BUG_API_TOKEN || '';
+  const provided = String(req.headers['x-bug-api-token'] || '');
+  if (expected && provided && provided === expected) return next();
+  const origin = req.headers.origin || req.headers.referer;
+  if (origin) {
+    try {
+      if (new URL(String(origin)).host === String(req.headers.host || '')) return next();
+    } catch {
+      /* fall through */
+    }
+  }
+  if (!expected) {
+    const ip = req.ip || (req.socket as any)?.remoteAddress || '';
+    if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+    return res.status(401).json({ error: 'unauthorized: BUG_API_TOKEN not configured' });
+  }
+  return res.status(401).json({ error: 'unauthorized: X-Bug-Api-Token required' });
+}
 
 async function loadJobTape(jobId: string): Promise<{ logText: string; foodLog: any; scout: any }> {
   let logText = '';
@@ -563,7 +597,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
    * Body: { category, tag_id?, new_bug_title?, user_symptom?, shots: dataUrl[],
    *         payload?, logs?, dom?, env?, firebase_uid?, dish_query?, chain_key? }
    */
-  app.post('/api/bugs/snapshot', async (req: Request, res: Response) => {
+  app.post('/api/bugs/snapshot', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const {
         category = 'foodcart',
@@ -1082,8 +1116,10 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   app.get('/api/bugs/next', async (req: Request, res: Response) => {
     try {
       const { d1Query } = await import('./server_d1.js');
+      // A-f1 fix: do NOT pre-slice on created_at before the semantic sort.
+      // fetch a large window; pickQueueTag/sortReadyQueue applies occurrences → severity → oldest.
       const r = await d1Query<any>(
-        `SELECT * FROM issue_tags WHERE status IN ('to_fix', 'in_progress') ORDER BY created_at ASC LIMIT 100`
+        `SELECT * FROM issue_tags WHERE status IN ('to_fix', 'in_progress') ORDER BY updated_at DESC LIMIT 1000`
       );
       if (!r.success) return res.status(500).json({ error: r.error });
       const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
@@ -1128,7 +1164,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   });
 
   /** POST /api/bugs/auto-file — job finalize / golden reds */
-  app.post('/api/bugs/auto-file', async (req: Request, res: Response) => {
+  app.post('/api/bugs/auto-file', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const filed = body.caseId
@@ -1160,7 +1196,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   });
 
   /** POST /api/bugs/migrate-inbox — leftover D1 golden_cases → issue_tags #n. Not Promote. */
-  app.post('/api/bugs/migrate-inbox', async (_req: Request, res: Response) => {
+  app.post('/api/bugs/migrate-inbox', bugWriteGuard, async (_req: Request, res: Response) => {
     try {
       const { d1Query } = await import('./server_d1.js');
       const listed = await d1Query<{
@@ -1234,7 +1270,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   });
 
   /** POST /api/bugs/:tagId/reanalyze — catalog restage, then one skipScout if auto remaining. Same card. */
-  app.post('/api/bugs/:tagId/reanalyze', async (req: Request, res: Response) => {
+  app.post('/api/bugs/:tagId/reanalyze', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'not found' });
@@ -1359,6 +1395,56 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
     }
   });
 
+  /** GET /api/bugs/queue?state=&assignee=&surface= — ready queue + blocked_by.
+   * Registered BEFORE /api/bugs/:tagId so "queue" is not captured as a tagId. */
+  app.get('/api/bugs/queue', async (req: Request, res: Response) => {
+    try {
+      const { d1Query } = await import('./server_d1.js');
+      const r = await d1Query<any>(
+        `SELECT * FROM issue_tags WHERE status IN ('to_fix', 'in_progress') ORDER BY updated_at DESC LIMIT 1000`
+      );
+      if (!r.success) return res.status(500).json({ error: r.error });
+      const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
+      const wantState = req.query.state ? String(req.query.state) : null;
+      const wantAssignee = req.query.assignee ? String(req.query.assignee) : null;
+      const wantSurface = req.query.surface ? String(req.query.surface) : null;
+      const rows = tags
+        .map((t) => {
+          const item = hydrateWorkItem(t);
+          const ticket = bugState(item);
+          return {
+            tag_id: t.id,
+            public_n: item.public_n,
+            title: t.title,
+            bug: item.bug,
+            class: item.class,
+            state: ticket.state,
+            flags: ticket.flags,
+            queue: ticket.queue,
+            assignee: item.assignee,
+            surface: item.surface,
+            occurrences: item.occurrences,
+            blocked_by: item.blocked_by || [],
+            updated_at: t.updated_at,
+            created_at: t.created_at,
+          };
+        })
+        .filter((row) => {
+          if (wantState && row.state !== wantState) return false;
+          if (wantAssignee && row.assignee !== wantAssignee) return false;
+          if (wantSurface && row.surface !== wantSurface) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          if (b.occurrences !== a.occurrences) return b.occurrences - a.occurrences;
+          return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+        });
+      res.json({ queue: rows, count: rows.length, generated_at: new Date().toISOString() });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'queue failed' });
+    }
+  });
+
   /** GET /api/bugs/:tagId — NOW + commits + report manifests */
   app.get('/api/bugs/:tagId', async (req: Request, res: Response) => {
     try {
@@ -1414,7 +1500,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   });
 
   /** POST /api/bugs/:tagId/attempts — required end of every agent loop */
-  app.post('/api/bugs/:tagId/attempts', async (req: Request, res: Response) => {
+  app.post('/api/bugs/:tagId/attempts', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const { d1Query } = await import('./server_d1.js');
       const tag = await findTagByParam(req.params.tagId);
@@ -1437,31 +1523,50 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (body.bug && String(body.bug).trim()) {
         next.bug = String(body.bug).trim();
       }
-      const taped = await refreshTapeRemaining(next);
-      await persistWorkItem(tag.id, taped);
-      if (taped.queue === 'blocked') {
+      if (body.applied === true || body.applied === false) {
+        const commits = next.commits.map((c, i) =>
+          i === next.commits.length - 1 && c.attempt ? { ...c, attempt: { ...c.attempt, applied: body.applied === true } } : c
+        );
+        next.commits = commits;
+      }
+      const projected = projectBugState(next);
+      const taped = await refreshTapeRemaining(projected.item);
+      const finalProjected = projectBugState(taped);
+      await persistWorkItem(tag.id, finalProjected.item);
+      if (finalProjected.ticket.queue === 'blocked') {
         await d1Query(`UPDATE issue_tags SET status = 'to_fix' WHERE id = ?`, [tag.id]);
       }
-      if (taped.queue === 'done') {
+      if (finalProjected.ticket.queue === 'done') {
         await d1Query(`UPDATE issue_tags SET status = 'fixed', resolved_at = ? WHERE id = ?`, [new Date().toISOString(), tag.id]);
       }
-      const start = buildStartPayload({ ...tag, work_item: taped, id: tag.id });
+      const start = buildStartPayload({ ...tag, work_item: finalProjected.item, id: tag.id });
+      const pubN = finalProjected.item.public_n || start?.now?.public_id;
       if (rejected) {
         return res.status(409).json({
           ok: false,
           error: rejected,
           rejected,
+          state: finalProjected.ticket.state,
+          flags: finalProjected.ticket.flags,
+          public_n: finalProjected.item.public_n,
           ...start,
         });
       }
-      res.json({ ok: true, rejected: null, ...start });
+      res.json({
+        ok: true,
+        rejected: null,
+        state: finalProjected.ticket.state,
+        flags: finalProjected.ticket.flags,
+        public_n: finalProjected.item.public_n,
+        ...start,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'attempt failed' });
     }
   });
 
   /** PATCH /api/bugs/:tagId — update Bug field, class, remaining, or unblock */
-  app.patch('/api/bugs/:tagId', async (req: Request, res: Response) => {
+  app.patch('/api/bugs/:tagId', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const { d1Query } = await import('./server_d1.js');
       const tag = await findTagByParam(req.params.tagId);
@@ -1480,25 +1585,63 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
           item.parked = [];
         }
         if (item.queue === 'blocked') item.queue = 'ready';
+        delete item.blocked_reason;
       }
       if (Array.isArray(req.body?.remaining)) item.remaining = req.body.remaining.map(String);
       if (Array.isArray(req.body?.done)) item.done = req.body.done.map(String);
       if (Array.isArray(req.body?.parked)) item.parked = req.body.parked.map(String);
       if (Array.isArray(req.body?.checks)) item.checks = req.body.checks;
-      await persistWorkItem(tag.id, item);
-      if (item.queue === 'done') {
+      // V-30.1 field updates (never a state setter — state stays derived)
+      if (req.body?.assignee !== undefined) {
+        if (req.body.assignee === null || req.body.assignee === '') delete item.assignee;
+        else item.assignee = req.body.assignee;
+      }
+      if (req.body?.surface !== undefined) {
+        if (req.body.surface === null || req.body.surface === '') delete item.surface;
+        else item.surface = req.body.surface;
+      }
+      if (req.body?.source !== undefined) {
+        if (req.body.source === null || req.body.source === '') delete item.source;
+        else item.source = req.body.source;
+      }
+      if (req.body?.blocked_reason !== undefined) {
+        if (req.body.blocked_reason === null || req.body.blocked_reason === '') delete item.blocked_reason;
+        else item.blocked_reason = String(req.body.blocked_reason);
+      }
+      if (req.body?.blocked_by !== undefined) {
+        if (Array.isArray(req.body.blocked_by)) item.blocked_by = req.body.blocked_by.map(String);
+        else if (req.body.blocked_by === null) delete item.blocked_by;
+      }
+      if (req.body?.duplicate_of !== undefined) {
+        if (req.body.duplicate_of === null || req.body.duplicate_of === '') delete item.duplicate_of;
+        else item.duplicate_of = String(req.body.duplicate_of);
+      }
+      if (req.body?.reply_to !== undefined && req.body.reply_to && typeof req.body.reply_to === 'object') {
+        item.reply_to = req.body.reply_to;
+      }
+      if (req.body?.idem_key !== undefined) {
+        if (req.body.idem_key === null || req.body.idem_key === '') delete item.idem_key;
+        else item.idem_key = String(req.body.idem_key);
+      }
+      const projected = projectBugState(item);
+      await persistWorkItem(tag.id, projected.item);
+      if (projected.ticket.queue === 'done') {
         await d1Query(`UPDATE issue_tags SET status = 'fixed', resolved_at = ? WHERE id = ?`, [new Date().toISOString(), tag.id]);
       } else {
         await d1Query(`UPDATE issue_tags SET status = 'to_fix' WHERE id = ?`, [tag.id]);
       }
-      res.json(buildStartPayload({ ...tag, work_item: item, id: tag.id }));
+      res.json({
+        ...buildStartPayload({ ...tag, work_item: projected.item, id: tag.id }),
+        state: projected.ticket.state,
+        flags: projected.ticket.flags,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'patch failed' });
     }
   });
 
   /** POST /api/bugs/:tagId/attach — Flag / Snap Open #n (auto-match failed) */
-  app.post('/api/bugs/:tagId/attach', async (req: Request, res: Response) => {
+  app.post('/api/bugs/:tagId/attach', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const { d1Query } = await import('./server_d1.js');
       const { d1GetJob } = await import('./server_db_d1.js');
@@ -1598,7 +1741,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   });
 
   /** POST /api/bugs/:tagId/triage — digest agent → identified_problems (+ summary.md) */
-  app.post('/api/bugs/:tagId/triage', async (req: Request, res: Response) => {
+  app.post('/api/bugs/:tagId/triage', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const tagId = req.params.tagId;
       const modelId = String(req.body?.modelId || req.body?.model || 'gemini-3.5-flash-lite');
@@ -1658,7 +1801,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   });
 
   /** POST /api/bugs/:tagId/reports/:issueId/prune — mark obsolete + delete R2 keys */
-  app.post('/api/bugs/:tagId/reports/:issueId/prune', async (req: Request, res: Response) => {
+  app.post('/api/bugs/:tagId/reports/:issueId/prune', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const { tagId, issueId } = req.params;
       const { d1Query } = await import('./server_d1.js');
@@ -1725,7 +1868,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   });
 
   /** POST /api/bugs/:tagId/make-golden — 1-click Bug to Golden Case Ingest */
-  app.post('/api/bugs/:tagId/make-golden', async (req: Request, res: Response) => {
+  app.post('/api/bugs/:tagId/make-golden', bugWriteGuard, async (req: Request, res: Response) => {
     try {
       const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'tag not found' });
@@ -1796,6 +1939,261 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'make-golden failed' });
+    }
+  });
+
+  // ─── V-30.1 ticket store: create + artifacts + queue + packet ─────────────
+  // State is ALWAYS derived via bugState() — there is no agent-settable state route.
+
+  async function applyAndRespond(req: Request, res: Response, mutate: (item: ReturnType<typeof hydrateWorkItem>) => void | Promise<void>) {
+    const tag = await findTagByParam(req.params.tagId || String(req.body?.tag_id || ''));
+    if (!tag) return res.status(404).json({ error: 'not found' });
+    const item = hydrateWorkItem(tag);
+    await mutate(item);
+    const projected = projectBugState(item);
+    await persistWorkItem(tag.id, projected.item);
+    const { d1Query } = await import('./server_d1.js');
+    if (projected.ticket.legacy_status === 'fixed') {
+      await d1Query(`UPDATE issue_tags SET status = 'fixed', resolved_at = ? WHERE id = ?`, [
+        new Date().toISOString(),
+        tag.id,
+      ]);
+    } else {
+      await d1Query(`UPDATE issue_tags SET status = 'to_fix' WHERE id = ?`, [tag.id]);
+    }
+    return res.json({
+      ok: true,
+      tag_id: tag.id,
+      public_n: projected.item.public_n,
+      state: projected.ticket.state,
+      flags: projected.ticket.flags,
+      queue: projected.ticket.queue,
+      legacy_status: projected.ticket.legacy_status,
+      work_item: projected.item,
+    });
+  }
+
+  /** POST /api/bugs — create a raw card (state=new until a defect is posted). */
+  app.post('/api/bugs', bugWriteGuard, async (req: Request, res: Response) => {
+    try {
+      const { d1Query } = await import('./server_d1.js');
+      const body = req.body || {};
+      const title = String(body.title || body.bug || '').trim();
+      if (!title) return res.status(400).json({ error: 'title (or bug) required' });
+      const category = String(body.category || 'foodcart');
+      const title_key = normalizeTagKey(title) || title.toLowerCase().slice(0, 160);
+      const existing = await d1Query<any>(`SELECT id, title FROM issue_tags WHERE title_key = ? LIMIT 1`, [title_key]);
+      if (existing.success && existing.results?.[0]?.id) {
+        const tag = existing.results[0];
+        const item = hydrateWorkItem(tag);
+        const projected = projectBugState(item);
+        return res.status(200).json({
+          ok: true,
+          existing: true,
+          tag_id: tag.id,
+          public_n: projected.item.public_n,
+          state: projected.ticket.state,
+          flags: projected.ticket.flags,
+          work_item: projected.item,
+        });
+      }
+      const freshId = `tag_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const ins = await d1Query(
+        `INSERT INTO issue_tags (id, title, title_key, category, status, comments) VALUES (?, ?, ?, ?, 'to_fix', '[]')`,
+        [freshId, title.slice(0, 200), title_key, category]
+      );
+      if (!ins.success) return res.status(500).json({ error: ins.error || 'create failed' });
+      const created = await findTagByParam(freshId);
+      let item = hydrateWorkItem(created);
+      item.bug = title;
+      if (body.surface) item.surface = body.surface;
+      if (body.source) item.source = body.source;
+      if (body.assignee) item.assignee = body.assignee;
+      if (body.class) item.class = String(body.class);
+      if (body.idem_key) item.idem_key = String(body.idem_key);
+      if (body.reply_to && typeof body.reply_to === 'object') item.reply_to = body.reply_to;
+      // assign public_n from existing max
+      const all = await d1Query<any>(`SELECT work_item FROM issue_tags`);
+      const used = ((all.results || []) as any[]).map((r) => {
+        try {
+          return Number(JSON.parse(r.work_item || '{}').public_n || 0);
+        } catch {
+          return 0;
+        }
+      });
+      const maxN = used.reduce((m, n) => Math.max(m, n), 0);
+      if (!item.public_n) item.public_n = maxN + 1;
+      const projected = projectBugState(item);
+      await persistWorkItem(freshId, projected.item);
+      res.status(201).json({
+        ok: true,
+        existing: false,
+        tag_id: freshId,
+        public_n: projected.item.public_n,
+        state: projected.ticket.state,
+        flags: projected.ticket.flags,
+        work_item: projected.item,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'create failed' });
+    }
+  });
+
+  /** POST /api/bugs/:tagId/defect — packer posts the atomic defect (→ packed). */
+  app.post('/api/bugs/:tagId/defect', bugWriteGuard, async (req: Request, res: Response) => {
+    try {
+      const v = validateDefect(req.body || {});
+      if (v.ok === false) {
+        return res.status(400).json({ error: v.error });
+      }
+      const defect = v.value;
+      return applyAndRespond(req, res, (item) => {
+        item.defect = defect;
+        if (req.body?.class) item.class = String(req.body.class);
+        if (req.body?.surface) item.surface = req.body.surface;
+        if (req.body?.fingerprint) item.fingerprint = String(req.body.fingerprint);
+        if (req.body?.assignee) item.assignee = req.body.assignee;
+        if (req.body?.source) item.source = req.body.source;
+        if (req.body?.idem_key) item.idem_key = String(req.body.idem_key);
+        if (!item.bug) item.bug = defect.observed;
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'defect failed' });
+    }
+  });
+
+  /** POST /api/bugs/:tagId/repro — QA posts the repro verdict. */
+  app.post('/api/bugs/:tagId/repro', bugWriteGuard, async (req: Request, res: Response) => {
+    try {
+      const v = validateRepro(req.body || {});
+      if (v.ok === false) {
+        return res.status(400).json({ error: v.error });
+      }
+      const repro = v.value;
+      return applyAndRespond(req, res, (item) => {
+        item.repro = repro;
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'repro failed' });
+    }
+  });
+
+  /** POST /api/bugs/:tagId/plan — orchestrator posts the plan block. */
+  app.post('/api/bugs/:tagId/plan', bugWriteGuard, async (req: Request, res: Response) => {
+    try {
+      const v = validatePlan(req.body || {});
+      if (v.ok === false) {
+        return res.status(400).json({ error: v.error });
+      }
+      const plan = v.value;
+      return applyAndRespond(req, res, (item) => {
+        item.plan = plan;
+        if (req.body?.assignee) item.assignee = req.body.assignee;
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'plan failed' });
+    }
+  });
+
+  /** POST /api/bugs/:tagId/verify — verifier posts the named-gate result (green → done). */
+  app.post('/api/bugs/:tagId/verify', bugWriteGuard, async (req: Request, res: Response) => {
+    try {
+      const v = validateVerify(req.body || {});
+      if (v.ok === false) {
+        return res.status(400).json({ error: v.error });
+      }
+      const verify = v.value;
+      return applyAndRespond(req, res, (item) => {
+        item.verify = verify;
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'verify failed' });
+    }
+  });
+
+  /** GET /api/bugs/:tagId/packet?format=json|text — full ticket packet for dispatch. */
+  app.get('/api/bugs/:tagId/packet', async (req: Request, res: Response) => {
+    try {
+      const tag = await findTagByParam(req.params.tagId);
+      if (!tag) return res.status(404).json({ error: 'not found' });
+      const item = hydrateWorkItem(tag);
+      const ticket = bugState(item);
+      const packet = {
+        tag_id: tag.id,
+        public_n: item.public_n,
+        title: tag.title,
+        bug: item.bug,
+        class: item.class,
+        fingerprint: item.fingerprint,
+        surface: item.surface,
+        source: item.source,
+        assignee: item.assignee,
+        state: ticket.state,
+        flags: ticket.flags,
+        queue: ticket.queue,
+        legacy_status: ticket.legacy_status,
+        defect: item.defect || null,
+        repro: item.repro || null,
+        plan: item.plan || null,
+        verify: item.verify || null,
+        remaining: item.remaining,
+        parked: item.parked,
+        done: item.done,
+        burns: item.burns,
+        commits: item.commits,
+        occurrences: item.occurrences,
+        blocked_by: item.blocked_by || [],
+        duplicate_of: item.duplicate_of || null,
+        blocked_reason: item.blocked_reason || null,
+        reply_to: item.reply_to || null,
+        current_evidence: item.current_evidence,
+        created_at: tag.created_at,
+        updated_at: tag.updated_at,
+      };
+      if (String(req.query.format || '').toLowerCase() === 'text') {
+        const lines = [
+          `# Bug ${item.public_n ? `#${item.public_n}` : tag.id}`,
+          `Title: ${tag.title || ''}`,
+          `State: ${ticket.state}${ticket.flags.blocked_reason ? ` (blocked: ${ticket.flags.blocked_reason})` : ''}`,
+          `Class: ${item.class || '—'} · Surface: ${item.surface || '—'} · Assignee: ${item.assignee || '—'}`,
+          item.duplicate_of ? `Duplicate of: ${item.duplicate_of}` : '',
+          '',
+          item.defect
+            ? `## Defect\nComponent: ${item.defect.component}\nObserved: ${item.defect.observed}\nExpected: ${item.defect.expected}\nCriteria: ${item.defect.criteria}`
+            : '## Defect\n(not packed yet)',
+          item.repro ? `\n## Repro (${item.repro.status})\nCommand: ${item.repro.command || '—'}\nExit: ${item.repro.exit_code ?? '—'}\nLog: ${item.repro.run_log ? String(item.repro.run_log).slice(0, 500) : '—'}` : '',
+          item.plan ? `\n## Plan\nHypothesis: ${item.plan.hypothesis}\nFiles: ${item.plan.files.join(', ')}\nGates: ${item.plan.gates.join(', ')}` : '',
+          item.verify ? `\n## Verify (${item.verify.result})\nCommand: ${item.verify.command}\nEvidence: ${item.verify.evidence.join(', ') || '—'}` : '',
+          `\n## Remaining (${item.remaining.length})\n${item.remaining.map((r) => `- [ ] ${r}`).join('\n') || '(none)'}`,
+          `\nBurns: ${item.burns.filter((b) => b.burned).length}/${2}`,
+        ].filter(Boolean);
+        return res.type('text/plain').send(lines.join('\n'));
+      }
+      res.json(packet);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'packet failed' });
+    }
+  });
+
+  /** GET /api/bugs/:tagId/state — read the derived state (never a setter). */
+  app.get('/api/bugs/:tagId/state', async (req: Request, res: Response) => {
+    try {
+      const tag = await findTagByParam(req.params.tagId);
+      if (!tag) return res.status(404).json({ error: 'not found' });
+      const item = hydrateWorkItem(tag);
+      const ticket = bugState(item);
+      res.json({
+        tag_id: tag.id,
+        public_n: item.public_n,
+        state: ticket.state,
+        flags: ticket.flags,
+        queue: ticket.queue,
+        legacy_status: ticket.legacy_status,
+        assignee: item.assignee,
+        surface: item.surface,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'state failed' });
     }
   });
 }

@@ -1162,6 +1162,12 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   /** Hard-delete a shared fix tag from the database (tick / mark fixed). Links cascade. */
   app.delete(['/api/issue-tags/:id', '/api/bugs/:id'], async (req: Request, res: Response) => {
     try {
+      // A-f5: same token guard as other /api/bugs/* writes
+      const { bugWriteGuard } = await import('./serverBugSnapshot.js');
+      await new Promise<void>((resolve, reject) => {
+        bugWriteGuard(req, res, (e?: any) => (e ? reject(e) : resolve()));
+      }).catch(() => undefined);
+      if (res.headersSent) return;
       const existing = await findIssueTag(req.params.id);
       if (!existing) return res.status(404).json({ error: 'tag not found' });
       const id = existing.id;
