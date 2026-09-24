@@ -24,18 +24,17 @@ local ground-truth file list is in §9.
 
 | File | State | Editable during review? |
 |---|---|---|
-| `plan/BUG_TICKET_PIPELINE.md` (this file) | **new, untracked** | ✅ yes — it *is* the proposal |
+| `plan/BUG_TICKET_PIPELINE.md` (this file) | **new, tracked in HEAD** | ✅ yes — it *is* the proposal |
 | `plan/ROADMAP.md` | modified: +36/−1 = Track V Phase 10 (`V-30.0…V-30.5` + `P1–P10`) + one `blocked_human` marker | ✅ yes |
 | everything else (`src/`, `scripts/`, tests, `bots/`, tokens, `AGENTS.md`, `docs/agent/**`) | **untouched — verified zero changes** | ❌ out of scope for review |
 
 **State of the tree (concurrent work, 2026-09-24):** a second session has been committing to
 `plan/ROADMAP.md` in parallel — `17873f2`, `fbe0405`, `c4ed4f5`, `fdbf05d` (Hermes-parity
-BOT-12…17 plus `plan/AGENT_ALIGNMENT.md`). Its commits swept this proposal's **Phase 10 block,
-the `blocked_human` marker and the P4 note into HEAD**, so they are already *committed* but still
-*undecided*. Two later pointer edits (the §6.1 decision-sheet references) remain **uncommitted**
-in the working tree; this proposal file itself is **untracked**. Expect the roadmap to move under
-you — re-read Track V Phase 10 before editing it, and do not treat "already committed" as
-"already decided" for work that has not been explicitly started (`V-30.1` needs a human go).
+BOT-12…17 plus `plan/AGENT_ALIGNMENT.md`). Those commits are in HEAD; this proposal's
+Phase 10 block landed with them. All P1–P10 directions were decided 2026-09-24 (§6.1/§8),
+so "committed" and "decided" now agree — except implementation, which still needs an explicit
+human go (`V-30.1` first). Expect the roadmap to move under you — re-read Track V Phase 10
+before editing it.
 
 **Review order:**
 1. §0 verdict (one screen) → §2 audit (evidence for every gap) → §3 prior art → §4 design →
@@ -797,29 +796,29 @@ active use (BOT-12…18 as of 2026-09-24 and growing), so V-30.x is the stable n
 stays supported, the web UI and `/api/bugs/next` keep working, `bugctl` is a new file. If a
 phase stalls, the old chat → dispatch path still runs.
 
-### 6.1 Decision sheet — pending actions (V-30.0)
+### 6.1 Decision sheet (V-30.0 — DECIDED 2026-09-24)
 
 **This table is the single editable record.** Mirrored in `plan/ROADMAP.md` → **Track V Phase 10
-(V-30.0)** as `PENDING HUMAN`. To decide: fill the **Decision** column (option letter/name, plus
-optional one-line rationale), then update §8 and the ROADMAP status strings. No phase may start
-with its blockers unanswered.
+(V-30.0)** as `DECIDED 2026-09-24`. All rows below are decided; to override one, edit its
+**Decision** cell, mirror the change into §8, and re-sync the roadmap status strings. No phase
+may start before its predecessor phase is done, and V-30.1 starts only on an explicit human go.
 
-| # | Pending action | Options | Recommendation | Blocks | **Decision (fill in)** |
+| # | Pending action | Options | Recommendation | Blocks | **Decision (2026-09-24)** |
 |---|---|---|---|---|---|
-| **P1** | Store / transport | A: D1 `issue_tags` only · B: git ticket files own the state · C: D1 writer + git as the bus · D: A + a git-committed journal (walked end to end in §10) | A + D | V-30.1 | ⬜ _(pending)_ |
-| **P2** | **State vocabulary** | S-C derived, full 11 names (§4.3.4) · S-C-lite, 5 names + flags (§4.3.5) · S-C-lite without `not_reproducible` (folded into `blocked_reason`) | S-C-lite | V-30.1 | ⬜ _(pending)_ |
-| **P3** | Write-endpoint auth | shared `BUG_API_TOKEN` header on `POST/PATCH /api/bugs/*` · VPS-local writes only | token header (required by A and C; this is the A-f5 fix) | V-30.1 | ⬜ _(pending)_ |
-| **P4** | Track numbering | V-30.x (Track V Phase 10) · a BOT-xx range in the bot table | V-30.x — the BOT-xx range is in **active use** by the Hermes-parity program (BOT-12…18 as of 2026-09-24, growing: `17873f2`, `fbe0405`, `fdbf05d`, `971a4cf`), so it must be re-checked at claim time; V-30.x is free and stable | docs only | ⬜ _(pending)_ |
-| **P5** | Owner of `not_reproducible` | packer decides close vs `needs_info` · orchestrator triages | packer | V-30.2 | ⬜ _(pending)_ |
-| **P6** | Repro depth | command + `run.log` + screenshot per card · committed Playwright test per ticket | shallow now; Promote path later | V-30.3 | ⬜ _(pending)_ |
-| **P7** | QA profile wake policy | wake `qa_biomarker` / `qa_onboarding` on the first Health/profile repro · `qa_meal` covers all surfaces for now | on demand — keep them asleep until needed | V-30.3 | ⬜ _(pending)_ |
-| **P8** | Backlog artifact | generated `bug-backlog.md` · `bugctl queue` + `docs/agent/BUG_QUEUE.md` | generated | V-30.5 | ⬜ _(pending)_ |
-| **P9** | Human: create the packer token | BotFather → `HERMES_BUG_TICKET_TOKEN` → master `tokens.env` → `sync-bot-tokens.mjs` | required before the V-30.2 E2E proof | V-30.2 | ⬜ _(pending)_ |
-| **P10** | Channel model | one ticket room with per-surface topics · per-agent chats with `reply_to` routing | ticket room | V-30.2 / V-30.4 | ⬜ _(pending)_ |
+| **P1** | Store / transport | A: D1 `issue_tags` only · B: git ticket files own the state · C: D1 writer + git as the bus · D: A + a git-committed journal (walked end to end in §10) | A + D | V-30.1 | ✅ **A + D** — D1 `issue_tags` is the only store; journal for review; C kept as the documented escape hatch (§10) |
+| **P2** | **State vocabulary** | S-C derived, full 11 names (§4.3.4) · S-C-lite, 5 names + flags (§4.3.5) · S-C-lite without `not_reproducible` (folded into `blocked_reason`) | S-C-lite | V-30.1 | ✅ **S-C-lite** — derived `bugState()`, 5 names + flags; `not_reproducible` kept as its own flag |
+| **P3** | Write-endpoint auth | shared `BUG_API_TOKEN` header on `POST/PATCH /api/bugs/*` · VPS-local writes only | token header (required by A and C; this is the A-f5 fix) | V-30.1 | ✅ **Token header** — `X-Bug-Api-Token` on all `/api/bugs/*` writes (the A-f5 fix) |
+| **P4** | Track numbering | V-30.x (Track V Phase 10) · a BOT-xx range in the bot table | V-30.x — the BOT-xx range is in **active use** by the Hermes-parity program (BOT-12…18 as of 2026-09-24, growing: `17873f2`, `fbe0405`, `fdbf05d`, `971a4cf`), so it must be re-checked at claim time; V-30.x is free and stable | docs only | ✅ **V-30.x** — Track V Phase 10; the BOT-xx range is in active use and must not be claimed |
+| **P5** | Owner of `not_reproducible` | packer decides close vs `needs_info` · orchestrator triages | packer | V-30.2 | ✅ **Packer** — decides close vs `needs_info`; the orchestrator never re-opens the free-text hop |
+| **P6** | Repro depth | command + `run.log` + screenshot per card · committed Playwright test per ticket | shallow now; Promote path later | V-30.3 | ✅ **Shallow now** — command + `run.log` + screenshot; committed Playwright test only via a later Promote |
+| **P7** | QA profile wake policy | wake `qa_biomarker` / `qa_onboarding` on the first Health/profile repro · `qa_meal` covers all surfaces for now | on demand — keep them asleep until needed | V-30.3 | ✅ **On demand** — keep `qa_biomarker`/`qa_onboarding` asleep until the first Health/profile repro needs them |
+| **P8** | Backlog artifact | generated `bug-backlog.md` · `bugctl queue` + `docs/agent/BUG_QUEUE.md` | generated | V-30.5 | ✅ **Generated** — `bug-backlog.md` generated from the store (keeps the human habit) |
+| **P9** | Human: create the packer token | BotFather → `HERMES_BUG_TICKET_TOKEN` → master `tokens.env` → `sync-bot-tokens.mjs` | required before the V-30.2 E2E proof | V-30.2 | ✅ **Approved, human step** — create in V-30.2 via BotFather → `HERMES_BUG_TICKET_TOKEN` → master `tokens.env` → `sync-bot-tokens.mjs` |
+| **P10** | Channel model | one ticket room with per-surface topics · per-agent chats with `reply_to` routing | ticket room | V-30.2 / V-30.4 | ✅ **Ticket room** — one ticket room with per-surface topics; per-card `reply_to` routing |
 
-**Nothing here is executable while a blocker above is open:** no `src/` change, no new bot
-token, no `bug_ticket` profile creation — the plan document is the deliverable until the decisions
-above are filled in.
+**Decided 2026-09-24 — nothing here blocks on a human answer:** no `src/` change, no new bot
+token, no `bug_ticket` profile creation happens until the V-30.x phases run in order on an
+explicit human go — but every row above already has its direction.
 
 ---
 
@@ -839,38 +838,63 @@ above are filled in.
 
 ---
 
-## 8. Decisions (locked so far / still open)
+## 8. Decisions (all made 2026-09-24)
 
-**Locked 2026-09-24:** (1) **QA is reused** — one skill + one state on the existing
-per-surface QA profiles, no new QA bot (§4.4); (2) **the packer is a new Hermes profile
-`bug_ticket`** — one new bot, its own token, no dispatch powers (§4.4 bootstrap table).
+**Decided 2026-09-24 — locked items L1/L2 plus the full P1–P10 sheet in §6.1:**
 
-**Tracked:** the **canonical, editable record is the decision sheet in §6.1** (P1–P10, with a
-`Decision` column). The same rows are mirrored in `plan/ROADMAP.md` → Track V Phase 10
-(**V-30.0** = "decide them", `PENDING HUMAN`). Fill §6.1 first, then mirror the outcome into the
-list below and flip the roadmap statuses (procedure in §R). This section explains the options —
-it is not the fill-in place.
+- **L1 — QA is reused** — one skill (`qa-reproduce`) + one card state on the existing
+  per-surface QA profiles, no new QA bot (§4.4).
+- **L2 — the packer is a new Hermes profile `bug_ticket`** — one new bot, its own token, no
+  dispatch powers (§4.4 bootstrap table → V-30.2).
+- **P1 — store: A + D.** D1 `issue_tags` is the only store; the git journal buys reviewable
+  history without a second store. C stays the documented escape hatch; B is rejected (§10).
+- **P2 — state vocabulary: S-C-lite.** Derived `bugState()` projection, 5 names + flags;
+  `not_reproducible` kept as its own flag (§4.3.5, chosen row in §4.3.2).
+- **P3 — write auth: token header.** `X-Bug-Api-Token` on all `POST/PATCH /api/bugs/*` writes
+  (the A-f5 fix); VPS-local-only rejected.
+- **P4 — numbering: V-30.x (Track V Phase 10).** The BOT-xx range is in active use
+  (BOT-12…18 as of 2026-09-24, growing) and must not be claimed.
+- **P5 — `not_reproducible` owner: the packer.** Decides close vs `needs_info`;
+  the orchestrator never re-opens the free-text hop.
+- **P6 — repro depth: shallow now.** Command + `run.log` + screenshot per card; a committed
+  Playwright test per ticket only via a later Promote step.
+- **P7 — QA wake policy: on demand.** `qa_biomarker`/`qa_onboarding` stay asleep until the
+  first Health/profile repro needs them.
+- **P8 — backlog artifact: generated.** `bug-backlog.md` generated from the store
+  (keeps the human habit); `bugctl queue` is the machine view.
+- **P9 — packer token: approved human step.** Created inside V-30.2 via BotFather →
+  `HERMES_BUG_TICKET_TOKEN` → master `tokens.env` → `sync-bot-tokens.mjs`; the V-30.2 E2E
+  reply through the new token gates `enabled: true`.
+- **P10 — channel model: ticket room.** One ticket room with per-surface topics;
+  per-card `reply_to` routing (also V-30.2 / V-30.4).
 
-**Still open:**
+**Canonical record:** the decision sheet in §6.1 (P1–P10 with decision cells). The rows are
+mirrored in `plan/ROADMAP.md` → Track V Phase 10 (**V-30.0** = `DECIDED 2026-09-24`).
+This section explains the options — §6.1 is the fill-in/override place. To override a
+direction: edit its `Decision` cell in §6.1, mirror the change into the list above, and
+re-sync the roadmap status strings.
 
-1. **Numbering** — V-30.x *(recommended; it is the bot/track lane)* vs BOT-12..16 (registry
-   adjacent). Only affects doc placement.
-2. **Who owns "not reproducible"?** — QA writes the verdict; the **packer** decides
-   close vs `needs_info`; the orchestrator never sees it *(recommended)*. Alternative: the
+**Rejected alternatives (kept for review):**
+
+1. **Numbering (P4 — decided: V-30.x).** Rejected: BOT-12..16 range (registry adjacent —
+   in active use by the Hermes-parity program, BOT-12…18 as of 2026-09-24). Only affects doc placement.
+2. **Owner of "not reproducible" (P5 — decided: packer).** QA writes the verdict; the packer
+   decides close vs `needs_info`; the orchestrator never sees it. Alternative: the
    orchestrator triages; that re-introduces the free-text hop.
-3. **Repro depth** — command + log + screenshot per card *(recommended for V-30.3)*; a
+3. **Repro depth (P6 — decided: shallow now).** Command + log + screenshot per card; a
    committed Playwright test per ticket is the later "Promote" step, not the first version.
-4. **DECIDED 2026-09-24 — (a) new Hermes profile `bug_ticket`.** Rejected: (b) a `/pack` mode
+4. **Packer shape (L2 — decided 2026-09-24: new Hermes profile `bug_ticket`).** Rejected: (b) a `/pack` mode
    of collab/orchestrator (reshapes a documented role, and the orchestrator would pack the
    cards it plans) and (c) no separate packer (human-reported Home/Health bugs land in a QA
    chat, and the surface owner grades its own evidence). Whichever way it runs, the pack step
    is still enforced by `bugctl pack --check`.
-5. **Write-endpoint auth** — shared `BUG_API_TOKEN` header on `/api/bugs/*` writes
-   *(recommended)* vs VPS-local-only writes over a private bridge (nothing public at all).
-6. **Backlog artifact** — generated `bug-backlog.md` *(recommended, keeps the human habit)*
+5. **Write-endpoint auth (P3 — decided: token header).** Shared `BUG_API_TOKEN` header on `/api/bugs/*` writes
+   vs VPS-local-only writes over a private bridge (nothing public at all).
+6. **Backlog artifact (P8 — decided: generated).** Generated `bug-backlog.md` (keeps the human habit)
    vs retire it for `bugctl queue` + a `docs/agent/BUG_QUEUE.md` snapshot.
-7. **States** — **S-C derived projection** (§4.3.4, recommended) vs **S-C-lite** (5 names + flags,
-   §4.3.5) vs declared states (S-A/S-B, rejected with reasons in §4.3.2).
+7. **States (P2 — decided: S-C-lite).** Derived `bugState()` projection with the 5-name vocabulary
+   (§4.3.5); rejected: full 11-name S-C (§4.3.4, kept as the internal mapping) and declared
+   states (S-A/S-B, rejected with reasons in §4.3.2).
 
 **Suggested first commit after your go:** V-30.1 only (store fields + `bugctl` + continuity
 assert). It is the piece that makes every later phase cheap, and it needs no new bot token.
