@@ -21,6 +21,7 @@ import {
   renderFreeLaneTableHtml,
   syncFreeLaneTableFromSession,
   formatCompactAllowanceChat,
+  formatResetIn,
 } from "./free-lane-table.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1999,11 +2000,59 @@ function buildDispatchRoutes(start) {
   return routes;
 }
 
+/**
+ * Was the sticky route skipped (filtered as depleted / otherwise unusable) so
+ * that the first planned route is already a failover? Pure: no side effects.
+ * This is the deplete auto-switch case that used to stay silent at i===0.
+ */
+function stickyRouteSkipped(start, routes) {
+  if (!routes?.length) return false;
+  const first = routes[0];
+  return first.provider !== start.provider || first.model !== start.model;
+}
+
+/** Plan a dispatch: the route list plus whether sticky was skipped as depleted. */
+function buildDispatchPlan(start) {
+  const routes = buildDispatchRoutes(start);
+  return { start, routes, stickySkipped: stickyRouteSkipped(start, routes) };
+}
+
+/**
+ * The exact auto-switch banner. Always names the sticky lane (Was sticky), the
+ * lane now answering (Now), and the lanes tried (Tried).
+ */
+function formatAutoSwitchBanner({ start, route, tried, depleteDriven = false }) {
+  const was = `${PROVIDERS[start.provider]?.label || start.provider} · \`${start.model}\``;
+  const now = `${PROVIDERS[route.provider]?.label || route.provider} · \`${route.model}\``;
+  return (
+    `⚡ Auto-switched free lane${depleteDriven ? " (sticky depleted)" : " after quota/limit"}.\n` +
+    `Was sticky: ${was}\n` +
+    `Now: ${now}\n` +
+    `Tried: ${tried.join(" → ")}\n\n`
+  );
+}
+
+/**
+ * Banner suppression for a greeting-only reply. A deplete-driven sticky skip
+ * must NEVER hide the banner (silent Muse→Cloudflare hops are the bug), so
+ * only a non-deplete failover may swallow it for a greeting-only prompt.
+ */
+function shouldSuppressAutoSwitchBanner({ prompt, body, depleteDriven = false }) {
+  if (depleteDriven) return false;
+  return isGreetingOnly(prompt) && isClineGreetingOnly(body);
+}
+
 async function dispatch(prompt, opts = {}) {
   const onProgress = opts.onProgress;
+  // Test seam: a mocked first-hop dispatcher lets unit tests exercise routing
+  // and the auto-switch banner without a live OpenCode/Cline backend.
+  const doOnce = typeof opts.dispatchOnce === "function" ? opts.dispatchOnce : dispatchOnce;
   const tried = [];
   const start = currentRoute();
   const routes = buildDispatchRoutes(start);
+  // Sticky filtered as depleted (or otherwise skipped): the i===0 route is
+  // already a failover, so it must announce + banner exactly like i>0.
+  const stickySkipped = stickyRouteSkipped(start, routes);
 
   let lastReply = null;
   let lastErr = null;
@@ -2012,46 +2061,46 @@ async function dispatch(prompt, opts = {}) {
   let lastSharedNote = "";
   for (let i = 0; i < routes.length; i++) {
     const route = routes[i];
-    if (i > 0) {
+    // Treat a depleted/skipped sticky as a failover for both messaging + banner.
+    const depleteDriven = i === 0 && stickySkipped;
+    const autoSwitched = i > 0 || depleteDriven;
+    if (autoSwitched) {
       applyRoute(route.provider, route.model);
       if (onProgress) {
-        const base = `Quota/limit on prior free lane — switching to ${PROVIDERS[route.provider]?.label || route.provider}: ${route.model}`;
-        await Promise.resolve(onProgress(lastSharedNote ? `${lastSharedNote}\n${base}` : base));
+        const target = `${PROVIDERS[route.provider]?.label || route.provider}: ${route.model}`;
+        const base = depleteDriven
+          ? `Sticky ${start.provider}/${start.model} depleted — switching to ${target}`
+          : `Quota/limit on prior free lane — switching to ${target}`;
+        await Promise.resolve(onProgress(lastSharedNote && !depleteDriven ? `${lastSharedNote}\n${base}` : base));
       }
     } else if (state.provider !== route.provider || state.models[route.provider] !== route.model) {
       applyRoute(route.provider, route.model);
     }
     tried.push(`${route.provider}/${route.model}`);
     try {
-      const reply = await dispatchOnce(prompt, opts);
+      const reply = await doOnce(prompt, opts);
       lastReply = reply;
       if (!looksLikeHardFailure(reply)) {
-        if (i > 0) {
+        if (autoSwitched) {
           const wasGreetingOnly = isGreetingOnly(prompt) && !state.lastUserText;
-          // C) Re-dispatched reply on the new lane; prefix with banner.
-          // If the user message was only a greeting with no prior task, a
-          // short welcome on the new lane is acceptable — but only then.
           const body = String(reply || "");
-          if (wasGreetingOnly && isClineGreetingOnly(body)) return body;
+          // Deplete auto-switch always shows the banner; a greeting only stays
+          // bare on a non-deplete failover with no prior task.
+          if (shouldSuppressAutoSwitchBanner({ prompt, body, depleteDriven })) return body;
           if (isClineGreetingOnly(body) && !wasGreetingOnly) {
             // New lane answered the real task with just a greeting: surface
             // it with the banner + task echo so the user sees re-dispatch
             // happened instead of a dropped prompt.
-            const note =
-              `⚡ Auto-switched free lane after quota/limit.\n` +
-              `Now: ${PROVIDERS[route.provider]?.label || route.provider} · \`${route.model}\`\n` +
-              `Tried: ${tried.join(" → ")}\n` +
+            return (
+              formatAutoSwitchBanner({ start, route, tried, depleteDriven }) +
               `Re-ran your task on the new lane, but it only returned a greeting — please resend or try /freemodel.\n` +
-              `Your task was: ${(prompt || "").slice(0, 500)}\n\n`;
-            return note + body;
+              `Your task was: ${(prompt || "").slice(0, 500)}\n\n` +
+              body
+            );
           }
-          const note =
-            `⚡ Auto-switched free lane after quota/limit.\n` +
-            `Now: ${PROVIDERS[route.provider]?.label || route.provider} · \`${route.model}\`\n` +
-            `Tried: ${tried.join(" → ")}\n\n`;
           // C) Failover re-dispatch: `reply` IS the same user prompt re-run on
-          // the new lane (dispatchOnce(prompt) above), not a fresh greeting.
-          return note + body;
+          // the new lane (doOnce(prompt) above), not a fresh greeting.
+          return formatAutoSwitchBanner({ start, route, tried, depleteDriven }) + body;
         }
         return reply;
       }
@@ -2424,10 +2473,48 @@ function prettyFreeLabel(providerKey, modelId) {
   return s;
 }
 
-function formatFreeLine(providerKey, modelId, displayName) {
+/**
+ * Depletion info for one /freemodel row. Covers the shared allowance buckets
+ * (opencode-zen-free / tokenharbor-free / cloudflare-neurons) because
+ * quotaRecordKey collapses them to `bucket:<id>`, plus a depleted lane stamped
+ * into free-lane-table.json. Returns null when the route looks available.
+ */
+function freeModelDepletion(providerKey, modelId, now = Date.now()) {
+  const found = [];
+  try {
+    const { key } = quotaRecordKey(providerKey, modelId);
+    const rec = state.quota?.[key];
+    const until = Number(rec?.depletedUntil || 0);
+    if (until > now) found.push({ until, key, hint: rec.countdownHint || "" });
+  } catch {}
+  try {
+    const table = loadFreeLaneTable();
+    const lane = (table?.lanes || []).find((l) => laneMatchesRoute(l, providerKey, modelId));
+    if (lane && String(lane.status || "").toLowerCase() === "depleted") {
+      const until = lane.nextResetAt ? Date.parse(lane.nextResetAt) : NaN;
+      if (Number.isFinite(until) && until > now) {
+        found.push({ until, key: "free-lane-table.json", hint: lane.countdownHint || "" });
+      }
+    }
+  } catch {}
+  if (!found.length) return null;
+  found.sort((a, b) => a.until - b.until);
+  const best = found[0];
+  return {
+    ...best,
+    untilIso: new Date(best.until).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    resetIn: formatResetIn(best.until, now),
+  };
+}
+
+function formatFreeLine(providerKey, modelId, displayName, depletion = null) {
   const label = displayName || prettyFreeLabel(providerKey, modelId);
+  const reset = depletion
+    ? ` — Reset in ${depletion.resetIn} (${depletion.untilIso})`
+    : "";
   // Flush-left: no hanging indent (Telegram doesn't support CSS align).
-  return `${providerKey}: ${label}\n\`${modelId}\``;
+  // ❌ marks a depleted lane; the model id line stays copy-pasteable.
+  return `${depletion ? "❌ " : ""}${providerKey}: ${label}${reset}\n\`${modelId}\``;
 }
 
 async function probeOpenCodeFree() {
@@ -2664,19 +2751,39 @@ function applyFreeModelPick(providerKey, modelId) {
   }
   applyRoute(destProvider, destModel);
   const nice = prettyFreeLabel(providerKey, modelId);
+  // A depleted lane is still selectable (sticky is allowed), but say so up
+  // front: the first message will auto-failover to the next available lane.
+  const dep = freeModelDepletion(destProvider, destModel);
+  const depleteWarn = dep
+    ? `\n\n⚠️ Selected ${PROVIDERS[providerKey].label}: ${nice} (currently depleted - Reset in ${dep.resetIn}).` +
+      `\nFirst message will auto-switch to the next available free lane.`
+    : "";
   return (
     `Selected ${PROVIDERS[providerKey].label}: ${nice}\n\`${destModel}\`` +
     viaNote +
+    depleteWarn +
     `\n\nPlain messages now go here.`
   );
 }
 
+/** Fixed /freemodel header (exported so tests can assert the deplete contract). */
+const FREEMODEL_HEADER = [
+  "Available free models (live check):",
+  "Tap a model to select, or Cancel to keep your current one.",
+  "Token Harbor / Cloudflare taps use OpenCode (tools). Quota auto-fails over to the next free lane.",
+  "Depleted lanes are marked ❌ with a Reset in time — tapping one still switches, but the first message auto-failovers.",
+  "Auto-failover announces switches (sticky depleted → next free lane, even for a greeting).",
+  "Freebuff is terminal-only — not listed as a Telegram tap.",
+];
+
 async function freemodelReply(filterProvider) {
   const packed = await listAvailableFreeModels(filterProvider);
   if (packed.error) return { text: packed.error, keyboard: null };
-  const lines = ["Available free models (live check):", "Tap a model to select, or Cancel to keep your current one.", "Token Harbor / Cloudflare taps use OpenCode (tools). Quota auto-fails over to the next free lane.", "Freebuff is terminal-only — not listed as a Telegram tap.", ""];
+  const now = Date.now();
+  const lines = [...FREEMODEL_HEADER, ""];
   const skipped = [];
   let total = 0;
+  let depletedCount = 0;
   const kb = new InlineKeyboard();
   for (const [key, res] of packed.results) {
     const label = PROVIDERS[key]?.label || key;
@@ -2687,8 +2794,11 @@ async function freemodelReply(filterProvider) {
     lines.push(`${label}`);
     for (const item of res.items) {
       total += 1;
-      lines.push(formatFreeLine(key, item.id, item.label));
-      const btn = `${key}: ${item.label}`.slice(0, 64);
+      const dep = freeModelDepletion(key, item.id, now);
+      if (dep) depletedCount += 1;
+      lines.push(formatFreeLine(key, item.id, item.label, dep));
+      // Buttons stay tappable for depleted lanes, prefixed ❌ so the mark is visible.
+      const btn = `${dep ? "❌ " : ""}${key}: ${item.label}`.slice(0, 64);
       kb.text(btn, freemodelCallbackData(key, item.id)).row();
     }
     lines.push("");
@@ -2696,7 +2806,7 @@ async function freemodelReply(filterProvider) {
   if (!total) {
     lines.push("No free models available right now.");
   } else {
-    lines.push(`Total: ${total}`);
+    lines.push(`Total: ${total}${depletedCount ? ` · ${depletedCount} depleted ❌` : ""}`);
     lines.push("Or: /switch <provider> then /model <id>");
   }
   if (skipped.length) {
@@ -3672,6 +3782,17 @@ export {
   nextFailoverRoutes,
   nextAvailableRoutes,
   buildDispatchRoutes,
+  buildDispatchPlan,
+  stickyRouteSkipped,
+  formatAutoSwitchBanner,
+  shouldSuppressAutoSwitchBanner,
+  dispatch,
+  freeModelDepletion,
+  formatFreeLine,
+  FREEMODEL_HEADER,
+  applyFreeModelPick,
+  freemodelReply,
+  formatResetIn,
   allFreeLanesDepletedMessage,
   isGreetingOnly,
   isQuotaOrLimitError,

@@ -77,9 +77,12 @@ function buildTable({ emptyCf = false } = {}) {
   };
 }
 
+const MUSE_MODEL = "opencode/muse-spark-1.3-contributor-free";
+const CF_QWEN = "cloudflare/@cf/qwen/qwen3.8-27b";
+
 const FIXTURE_SESSION = {
   provider: "opencode",
-  models: { opencode: STICKY_MODEL, cline: "cline-free/muse-spark-1.3-contributor", tokenharbor: "mimo-v2.5:free", freebuff: "deepseek/deepseek-v4.1-flash" },
+  models: { opencode: MUSE_MODEL, cline: "cline-free/muse-spark-1.3-contributor", tokenharbor: "mimo-v2.5:free", freebuff: "deepseek/deepseek-v4.1-flash" },
   quota: {
     "opencode/opencode/mimo-v2.6-flash-free": { depletedUntil: STICKY_UNTIL, countdownParsed: false, scope: "shared", lastError: "Rate limit exceeded" },
     "bucket:opencode-zen-free": { depletedUntil: STICKY_UNTIL, countdownParsed: false, scope: "shared", lastError: "Rate limit exceeded" },
@@ -112,7 +115,22 @@ try {
   console.error("If this is a missing dependency, run: npm install  (inside tools/telegram-provider-router)");
   process.exit(2);
 }
-const { buildDispatchRoutes, nextFailoverRoutes, allFreeLanesDepletedMessage, isQuotaOrLimitError, isGreetingOnly } = mod;
+const {
+  buildDispatchRoutes,
+  buildDispatchPlan,
+  stickyRouteSkipped,
+  formatAutoSwitchBanner,
+  shouldSuppressAutoSwitchBanner,
+  nextFailoverRoutes,
+  allFreeLanesDepletedMessage,
+  isQuotaOrLimitError,
+  isGreetingOnly,
+  freeModelDepletion,
+  formatFreeLine,
+  FREEMODEL_HEADER,
+  applyFreeModelPick,
+  dispatch,
+} = mod;
 const { nextAvailableRoutes, soonestResetAmongDepleted } = flt;
 
 let failed = 0;
@@ -152,6 +170,58 @@ check("S8 sticky 'Sticky OpenCode lane depleted…' counts as a quota error (cat
 // S9) greeting-only prompts still move the sticky (short welcome on the new lane is OK).
 check("S9 greeting-only 'hi' is detected (switch + welcome path)", isGreetingOnly("hi") === true);
 check("S10 a real task is not treated as a greeting", isGreetingOnly("fix the failing test") === false);
+
+// ---- TG-FREEMODEL-DEPLETE-BANNER ----
+
+// F1/F2) shared Zen bucket deplete is visible per-model: Muse marked, CF available.
+const museDep = freeModelDepletion("opencode", MUSE_MODEL);
+check("F1 Muse is marked depleted via the shared Zen bucket (+ a Reset in)", Boolean(museDep) && /\S/.test(museDep.resetIn || ""), JSON.stringify(museDep));
+const cfDep = freeModelDepletion("opencode", CF_QWEN);
+check("F2 CF Qwen stays unmarked (no live CF quota record)", cfDep === null, JSON.stringify(cfDep));
+
+// F3/F4) the /freemodel line formatter shows ❌ + Reset in on depleted only.
+const museLine = formatFreeLine("opencode", MUSE_MODEL, null, museDep);
+const cfLine = formatFreeLine("opencode", CF_QWEN, null, cfDep);
+check("F3 depleted line is prefixed ❌ and shows Reset in", museLine.startsWith("❌ ") && /Reset in /.test(museLine), museLine);
+check("F4 available line has no ❌ mark", !cfLine.startsWith("❌ "), cfLine);
+
+// F5) header tells the user depleted lanes are marked + failover is announced.
+const header = FREEMODEL_HEADER.join("\n");
+check("F5 header says depleted lanes are marked", /Depleted lanes are marked/i.test(header), header);
+check("F6 header says auto-failover announces switches", /auto-failover announces switches/i.test(header), header);
+
+// F7/F8) picking a depleted lane keeps sticky but warns immediately.
+const pickMsg = applyFreeModelPick("opencode", MUSE_MODEL);
+check("F7 applyFreeModelPick on depleted Muse still applies the sticky", /Selected OpenCode/i.test(pickMsg) && /muse-spark-1\.3-contributor-free/.test(pickMsg), pickMsg);
+check("F8 pick reply warns currently depleted + Reset in + auto-switch", /currently depleted/i.test(pickMsg) && /Reset in /.test(pickMsg) && /auto-switch/i.test(pickMsg), pickMsg);
+
+// F9/F10/F11) deplete sticky + CF available: the FIRST dispatch (i===0) must
+// announce the switch and banner the reply, even for a greeting-only "hi".
+const plan = (() => { try { return buildDispatchPlan({ provider: "opencode", model: MUSE_MODEL }); } catch { return null; } })();
+check("F9 plan routes to CF Qwen with stickySkipped=true", plan?.stickySkipped === true && plan?.routes?.[0]?.model === CF_QWEN, JSON.stringify(plan?.routes?.[0]));
+check("F10 stickyRouteSkipped is true when the sticky lane is filtered", stickyRouteSkipped({ provider: "opencode", model: MUSE_MODEL }, plan?.routes || []) === true);
+check("F11 banner always names Was sticky / Now / Tried", (() => {
+  const b = formatAutoSwitchBanner({ start: { provider: "opencode", model: MUSE_MODEL }, route: { provider: "opencode", model: CF_QWEN }, tried: [`opencode/${CF_QWEN}`], depleteDriven: true });
+  return /Was sticky:/.test(b) && /Now:/.test(b) && /Tried:/.test(b);
+})());
+check("F12 greeting 'hi' is NOT allowed to suppress a deplete banner", shouldSuppressAutoSwitchBanner({ prompt: "hi", body: "Hi there! I'm Cline, how can I help?", depleteDriven: true }) === false);
+check("F13 non-deplete failover may still suppress a greeting-only welcome", shouldSuppressAutoSwitchBanner({ prompt: "hi", body: "Hi there! I'm Cline, how can I help?", depleteDriven: false }) === true);
+
+const progress = [];
+let firstReply = "";
+try {
+  firstReply = await dispatch("hi", {
+    onProgress: (m) => progress.push(String(m)),
+    dispatchOnce: async () => "Hi there! I'm Cline, how can I help?",
+  });
+} catch (e) {
+  firstReply = `THREW: ${e.message}`;
+}
+check("F14 first dispatch (hi) on a deplete-skipped sticky includes the auto-switch banner", /⚡ Auto-switched free lane/.test(firstReply), firstReply);
+check("F15 banner includes Was sticky with the Muse lane", /Was sticky:.*muse-spark-1\.3-contributor-free/.test(firstReply), firstReply);
+check("F16 banner includes Now route = CF Qwen", /Now:.*cloudflare\/@cf\/qwen\/qwen3\.8-27b/.test(firstReply), firstReply);
+check("F17 banner includes Tried", /Tried:/.test(firstReply), firstReply);
+check("F18 onProgress announced the deplete auto-switch to CF Qwen", progress.some((m) => /depleted/.test(m) && /switching to OpenCode: cloudflare\/@cf\/qwen\/qwen3\.8-27b/.test(m)), progress.join(" | "));
 
 // S11) every lane depleted -> empty plan + clear message with the soonest Reset in (no hang).
 writeFileSync(TABLE_PATH, JSON.stringify(buildTable({ emptyCf: true }), null, 2));
