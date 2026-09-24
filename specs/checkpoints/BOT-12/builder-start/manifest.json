@@ -1,0 +1,16 @@
+{
+  "slug": "BOT-12",
+  "node": "builder-start",
+  "at": "2026-09-24T10:18:39.127Z",
+  "git": {
+    "head": "8e660b9fa035de201416ce596f16ed63d8b1779d",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/BOT-12.md"
+  ]
+}
