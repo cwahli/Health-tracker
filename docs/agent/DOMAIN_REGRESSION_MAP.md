@@ -133,6 +133,7 @@ Treat silent changes to tombstone / merge semantics as **class X**.
 | Bot souls (`bots/soul*.md`, `scripts/lib/soul-compose.mjs`, `scripts/assert-soul-compose.mjs`) | `node scripts/assert-soul-compose.mjs` · `npx vitest run tests/soul-compose.test.ts` |
 | Bot lane contract (`scripts/lib/lane-contract.mjs`, `scripts/assert-lane-contract.mjs`) | `node scripts/assert-lane-contract.mjs` · `npx vitest run tests/lane-contract.test.ts` |
 | Bot work sessions (`scripts/lib/work-session.mjs`, `scripts/assert-work-session.mjs`) | `node scripts/assert-work-session.mjs` · `npx vitest run tests/work-session.test.ts` |
+| Grok router sessions (`tools/telegram-provider-router/src/chat-sessions.js`, `src/index.js` chat scope) | `npm test --prefix tools/telegram-provider-router` |
 
 ## Bugs / triage tooling
 
