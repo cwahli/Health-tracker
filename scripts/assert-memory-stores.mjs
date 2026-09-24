@@ -124,6 +124,13 @@ check(
   missing.ok === false && missing.receipts.some((r) => r.kind === 'missing'),
 );
 
+// 4. The build turn actually retrieves (dispatch wiring, not just the lib).
+const dispatchSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'run-coding-dispatch.sh'), 'utf8');
+check('dispatch fetches build memory at run start', dispatchSrc.includes('fetch_build_memory'));
+check('dispatch exposes MEMORY_CONTEXT to the prompt', dispatchSrc.includes('MEMORY_CONTEXT'));
+check('build prompt carries retrieved rows', dispatchSrc.includes('[RETRIEVED MEMORY'));
+check('print-plan reports memory rows', dispatchSrc.includes('memory_rows='));
+
 console.log(`\n[BOT-13 Gate Result] ${checksPassed} checks passed, ${failures.length} failures.`);
 
 if (failures.length > 0) {

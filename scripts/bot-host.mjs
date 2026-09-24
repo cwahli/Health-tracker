@@ -8,6 +8,14 @@ import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
 import { chunkForTelegram } from './lib/tg-copy-code.mjs';
 import { formatWorkingHeadline, ctxLimitFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
+import {
+  sessionKey,
+  resolveSession,
+  setTx,
+  statusForTelegram,
+  tmuxSessionFor,
+} from './lib/work-session.mjs';
+import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
 import { recordFailure } from './lib/failure-log.mjs';
 import {
@@ -595,6 +603,43 @@ async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsag
   return formatUsage(raw);
 }
 
+/**
+ * BOT-19 live /tx wiring: shared work-view toggle per (location, chat,
+ * workspace) session. Exported for unit tests; the `tx` command case below
+ * delegates here. Replies are plain text (already secret-scrubbed by
+ * statusForTelegram).
+ */
+export function workLocation() {
+  if (process.env.BOT_LOCATION) return process.env.BOT_LOCATION;
+  return os.homedir() === '/root' ? 'mobile' : 'vps';
+}
+
+export async function handleTxCommand({ api, config, chatId, arg }) {
+  const location = workLocation();
+  const id = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+  const sub = String(arg || '').trim().toLowerCase();
+  if (sub === 'on' || sub === 'off') {
+    resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: config.agent.kind || 'opencode' });
+    setTx(id, sub === 'on');
+  } else if (sub !== '' && sub !== 'status') {
+    await api.sendMessage(chatId, 'Usage: /tx on|off|status — shared work-view for this chat.');
+    return;
+  }
+  const view = statusForTelegram(id);
+  if (!view) {
+    await api.sendMessage(chatId, 'No work session for this chat yet — send a message first, then /tx.');
+    return;
+  }
+  const lines = [
+    `*Shared work view:* ${view.tx ? 'ON 📺' : 'OFF'}`,
+    `Session: \`${view.id}\``,
+    `Lane: \`${view.lane}\` (${view.state})`,
+    `Attach: \`tmux attach -t ${tmuxSessionFor(location)}\``,
+    `Terminal: ${view.probe?.attach ? 'attached' : 'not attached'}`,
+  ];
+  await api.sendMessage(chatId, lines.join('\n'));
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
   const eff = effective(config, prefs, chatId);
 
@@ -852,6 +897,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // already gone
       }
       await api.sendMessage(chatId, 'Aborting the running request...');
+      return;
+    }
+
+    case 'tx': {
+      await handleTxCommand({ api, config, chatId, arg: cmd.args });
       return;
     }
 
@@ -1355,6 +1405,13 @@ async function main() {
 
   const registryPath = resolveRegistryPath(args.registry, REPO_ROOT);
   const registry = loadRegistry(registryPath);
+  // BOT-17 lane contract enforced at startup: a registry that names an
+  // agent/model/process as a bot must never boot a poller. Fail loud.
+  const laneViolations = checkRegistry(registry);
+  if (laneViolations.length) {
+    console.error(`[bot-host] lane-contract violations:\n- ${laneViolations.join('\n- ')}\nRefusing to start.`);
+    process.exit(1);
+  }
   const bot = getBot(registry, args.id);
   const config = normalizeConfig(bot, { defaultWorkspace: REPO_ROOT });
   if (config.runtime !== 'bot-host' && config.runtime !== 'device') {

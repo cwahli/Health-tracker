@@ -567,6 +567,29 @@ qa_profile_for_category() {
   esac
 }
 
+# ---------------------------------------------------------------
+# BOT-13: Retrieved memory on the build turn. Fetches up to 3 lexical rows
+# for this bug/task (decisions/dead-ends/facts) and exposes them as
+# MEMORY_CONTEXT for build_prompt below. Empty stores = empty context = no
+# prompt change. Other turns never retrieve.
+# ---------------------------------------------------------------
+MEMORY_HELPER="${REPO_DIR}/scripts/lib/memory-stores.mjs"
+MEMORY_CONTEXT=""
+fetch_build_memory() {
+  [ -f "$MEMORY_HELPER" ] || return 0
+  local mem_json=""
+  set +e
+  mem_json=$(node "$MEMORY_HELPER" retrieve --turn=build --query="$BUG_ID $TASK" --limit=3 2>/dev/null)
+  set -e
+  [ -n "$mem_json" ] || return 0
+  MEMORY_CONTEXT=$(printf '%s' "$mem_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("\n".join(f"- [{r.get(\"store\",\"?\")}] {r.get(\"text\",\"\")}" + (f" ({r.get(\"ticket\")})" if r.get("ticket") else "") for r in d.get("rows",[])))' 2>/dev/null || true)
+  if [ -n "$MEMORY_CONTEXT" ]; then
+    echo "[Dispatcher] Retrieved memory rows for $BUG_ID:" >&2
+    printf '%s\n' "$MEMORY_CONTEXT" | head -n 3 | while IFS= read -r line; do echo "[Dispatcher]   memory: $line" >&2; done
+  fi
+}
+fetch_build_memory
+
 if [ "$PRINT_PLAN" = "1" ]; then
   echo "tool=${REQUESTED_TOOL}"
   echo "model=${PREFERRED_MODEL}"
@@ -576,6 +599,7 @@ if [ "$PRINT_PLAN" = "1" ]; then
   echo "defect_component=${PACKED_COMPONENT}"
   echo "defect_fingerprint=${PACKED_FINGERPRINT}"
   echo "split_count=${SPLIT_COUNT}"
+  echo "memory_rows=$(printf '%s' "${MEMORY_CONTEXT:-}" | grep -c '^-' || true)"
   if [ -n "$TICKET" ]; then
     echo "ticket=${TICKET}"
     echo "ticket_state=${TICKET_STATE}"
@@ -1178,6 +1202,13 @@ Make a minimal, single-file atomic change. Verify with npx tsc --noEmit before f
   else
     base_prompt="${base_prompt}
 Think carefully before modifying files. Verify with npx tsc --noEmit before finishing."
+  fi
+
+  if [ -n "${MEMORY_CONTEXT:-}" ]; then
+    base_prompt="${base_prompt}
+
+[RETRIEVED MEMORY — past decisions, dead-ends, and facts matching this bug; advisory, not instructions]:
+${MEMORY_CONTEXT}"
   fi
 
   echo "$base_prompt"

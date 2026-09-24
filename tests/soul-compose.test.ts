@@ -9,6 +9,7 @@ import {
   composeSoul,
   checkSoul,
   writeSouls,
+  verifySouls,
   soulTarget,
 } from '../scripts/lib/soul-compose.mjs';
 
@@ -84,5 +85,31 @@ describe('writeSouls', () => {
     fs.writeFileSync(path.join(dir, 'soul.default.md'), `${'x\n'.repeat(17)}`);
     expect(() => writeSouls({ home, dir })).toThrow(/budget violated/);
     expect(fs.existsSync(soulTarget('default', home))).toBe(false);
+  });
+});
+
+describe('verifySouls', () => {
+  let home;
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'soulverify-'));
+  });
+
+  it('passes on freshly written souls', () => {
+    writeSouls({ home, dir: BOTS });
+    expect(verifySouls({ home, dir: BOTS })).toEqual({ ok: true, drift: [] });
+  });
+
+  it('flags drifted and missing souls without writing', () => {
+    writeSouls({ home, dir: BOTS });
+    const target = soulTarget('qa_meal', home);
+    const before = fs.readFileSync(target, 'utf8');
+    fs.writeFileSync(target, `${before}\nExtra line a human added.\n`);
+    fs.rmSync(soulTarget('orchestrator', home));
+    const res = verifySouls({ home, dir: BOTS });
+    expect(res.ok).toBe(false);
+    expect(res.drift.map((d) => d.profile).sort()).toEqual(['orchestrator', 'qa_meal']);
+    expect(res.drift.find((d) => d.profile === 'orchestrator').reason).toBe('missing');
+    // verify never repairs: drifted file untouched
+    expect(fs.readFileSync(target, 'utf8')).toContain('Extra line a human added.');
   });
 });

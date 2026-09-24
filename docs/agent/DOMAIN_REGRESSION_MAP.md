@@ -133,6 +133,7 @@ Treat silent changes to tombstone / merge semantics as **class X**.
 | Bot souls (`bots/soul*.md`, `scripts/lib/soul-compose.mjs`, `scripts/assert-soul-compose.mjs`) | `node scripts/assert-soul-compose.mjs` · `npx vitest run tests/soul-compose.test.ts` |
 | Bot lane contract (`scripts/lib/lane-contract.mjs`, `scripts/assert-lane-contract.mjs`) | `node scripts/assert-lane-contract.mjs` · `npx vitest run tests/lane-contract.test.ts` |
 | Bot work sessions (`scripts/lib/work-session.mjs`, `scripts/assert-work-session.mjs`) | `node scripts/assert-work-session.mjs` · `npx vitest run tests/work-session.test.ts` |
+| Live bot wiring (`/tx` in `bot-host.mjs`, startup lane check, dispatch memory block, soul `verify`) | `node scripts/assert-work-session.mjs` · `node scripts/assert-lane-contract.mjs` · `node scripts/assert-memory-stores.mjs` · `node scripts/assert-soul-compose.mjs` |
 | Grok router sessions (`tools/telegram-provider-router/src/chat-sessions.js`, `src/index.js` chat scope) | `npm test --prefix tools/telegram-provider-router` |
 | TG transport (`scripts/lib/tg-api.mjs`, `scripts/lib/tg-throttle.mjs`, `scripts/collab-bot.mjs` poll loop) | `node scripts/assert-tg-transport.mjs` · `npx vitest run tests/tg-transport.test.ts` |
 
