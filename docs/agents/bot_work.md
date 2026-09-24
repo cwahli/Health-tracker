@@ -18,6 +18,8 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 **BOT-21 is DONE 2026-09-24.** Log `(ticket, agent, tool, args-hash)` in `scripts/lib/coordination-tax.mjs` and `run-coding-dispatch.sh`. The same hash twice on one ticket alerts (`REPEAT_ARGS_HASH`). Two repro verdicts on one card must match or escalate (`repro_verdict_conflict`, `assignee=orchestrator`, `queue=blocked`). Tests: vitest 123/123 + 35/35, assert-coordination-tax 29/29.
 
+**BOT-23 is DONE 2026-09-24.** Journey investigation & pre-dispatch regression gate. Investigated recent broken meal/portion journey; added `scripts/lib/dev-regression.mjs` and `scripts/assert-dev-regression.mjs` (17/17 tests passing); wired pre-dispatch dev regression & blast radius verification into `scripts/run-coding-dispatch.sh` `check_git_and_tsc()`. Rule L1 blast-radius violations reject uncommitted edits immediately; UI edits require `node scripts/assert-shell-smoke.mjs` (Playwright) to pass before commit/push.
+
 **Next code: BOT-14.** The two missing `shared_skills` paths in `bots/registry.json` become links to `scripts/skills/common`.
 
 **BOT-18 is DONE 2026-09-24.** Lease `{chatId, messageId, startedAt, pid}` written on run start and updated on progress create; boot sweep edits orphaned messages to `restarted mid-run — send it again` and appends `crash-pending` row; Telegram 409 conflict exits `process.exit(1)`. Tests: 119/119 green.
