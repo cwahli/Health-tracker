@@ -105,6 +105,29 @@ The checker verifies every done capability's soul line is present in the
 composed soul — editing a feature updates one line, all bots inherit.
 Hermes `SOUL.md` stays the wording source (import, never fork).
 
+**Scaling without spaghetti: namespaced containers.** As the soul grows, free
+text rots — every edit risks touching unrelated instructions. So the composed
+soul is namespaced sections, each owned by exactly one editor:
+
+```
+[shared:identity]      ← bots/soul.md (who the bot is, reply shape)
+[shared:memory]        ← bots/memory/* injection (facts, profile)
+[cap:chat-table]       ← capabilities.json soul lines, one container per cap
+[cap:ui-progress]
+...
+[bot:vm]               ← bots/soul.<id>.md override (location quirks only)
+```
+
+Rules that keep it clean: (1) no raw text outside a container — the composer
+rejects it; (2) a capability edit may touch ONLY its own `[cap:<id>]`
+container; (3) `[bot:<id>]` may narrow but never contradict shared sections
+(checker fails on contradiction markers, e.g. restating a capability rule
+differently); (4) each container carries a line budget (base ≤ 20 lines, each
+cap ≤ 2 lines, override ≤ 10) so growth is visible and reviewable; (5) the
+composer logs the container list per prompt in debug mode, so a bad behavior
+traces to exactly one owner. Complexity scales as sections, never as one
+long prompt nobody dares to edit.
+
 ### 4b. Learning — the missing process, now specified
 
 Existing pieces (verified): `recordFailure` (but opencode-lane only),
@@ -144,6 +167,49 @@ derailment watchdog):
   fix proposes, critic checks, output is a patch or a bug card, and the
   signature's learning artifact closes the loop so it never reproduces.
   Schedule: weekly alongside the failure review, plus manual trigger.
+
+**Playbook A — agent stuck a long time (progress message spinning, no answer).**
+Verified constraint: our runners are single-shot CLI calls, so mid-run
+steering is impossible — every rung below is kill-and-resume shaped, and the
+ladder (nudge → replan → escalate → reset → handoff → abort, cf.
+agentpatterns.ai stuck-loop recovery, LangChain LoopDetectionMiddleware,
+Anthropic progress-file reset) adapts accordingly:
+  1. *Detect:* progress metric flat across N heartbeats while activity
+     continues (same tool+args ×3 = repeater; tool churn with no goal movement
+     = wanderer; A↔B alternation = looper). Activity volume alone never
+     triggers — it rises in stuck loops too.
+  2. *Rung 1 — resume-with-note:* kill child, resume session with one injected
+     line naming the observation ("you edited X 3× without passing tests —
+     try a different approach"). Cheapest perturbation; often suffices.
+  3. *Rung 2 — replan:* kill, resume forcing a structured step (restate goal,
+     list tried, propose new plan) before any tool call.
+  4. *Rung 3 — escalate:* failover lane / stronger model / higher thinking
+     (existing `runWithModelFailover`, now as a recovery move, not just quota).
+  5. *Rung 4 — reset:* `/new` from the compact summary (never raw history),
+     plus git revert of the run's file changes (Anthropic canonical reset).
+  6. *Rung 5/6 — handoff then abort:* terminal message states what was tried
+     and what to send next; failure recorded with the stuck signature.
+  Bounds: max 3 attempts per rung, max 2 recoveries per turn, hard iteration
+  cap as backstop; every rung's hit rate is logged so dead rungs get removed
+  (Boucle: half of automated recovery moves do nothing — measure, don't trust).
+
+**Playbook B — crash shown as "pending" on TG (the ⏳ message that never ends).**
+Traced 2026-09-24: graceful ends (abort/timeout/SIGTERM drain) call
+`renderer.finish()` and close the message; a hard death (crash, SIGKILL, OOM)
+never runs `finish`, so the progress message says "working…" forever and the
+user gets silence. Fix:
+  1. *Run lease:* at run start, write `{chatId, messageId, startedAt, pid}`
+     to the session store; delete on `finish`. A lease without a finish IS the
+     crash detector — no second process needed.
+  2. *Boot sweep:* on startup, each bot lists stale leases (startedAt older
+     than the boot) and edits each orphaned progress message to a terminal
+     state ("the bot restarted mid-run — nothing was computed, send it
+     again"), then clears the lease. Silence becomes a receipt.
+  3. *systemd* (`Restart=always`, 5s) restarts the process; the sweep runs
+     before polling resumes, so recovery lands before new work.
+  4. *Learn:* the sweep writes a `crash-pending` failure row; two of the same
+     signature trigger the L4 repair run (was it OOM? which lane? growing
+     memory?) instead of a third silent restart.
 
 ## 5. Prior art reviewed 2026-09-24 — what the field validates, what to steal
 
