@@ -9,6 +9,7 @@ import { chunkForTelegram } from './lib/tg-copy-code.mjs';
 import { formatWorkingHeadline, ctxLimitFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
+import { recordFailure } from './lib/failure-log.mjs';
 import {
   runOpencode,
   listModels,
@@ -172,6 +173,52 @@ const savePrefs = (id, prefs) => saveMap(id, 'prefs.json', prefs);
 const loadTotals = (id) => loadMap(id, 'totals.json');
 const saveTotals = (id, totals) => saveMap(id, 'totals.json', totals);
 
+export const loadLeases = (id) => loadMap(id, 'leases.json');
+export const saveLeases = (id, leases) => saveMap(id, 'leases.json', leases);
+
+export function recordRunStart(id, { chatId, messageId = null, startedAt = Date.now(), pid = process.pid }) {
+  const leases = loadLeases(id);
+  leases.set(String(chatId), { chatId, messageId, startedAt, pid });
+  saveLeases(id, leases);
+}
+
+export function recordRunFinish(id, chatId) {
+  const leases = loadLeases(id);
+  if (leases.delete(String(chatId))) {
+    saveLeases(id, leases);
+  }
+}
+
+export async function sweepOrphanedLeases({ api, config, bootTime = Date.now() }) {
+  const leases = loadLeases(config.id);
+  if (leases.size === 0) return 0;
+  let swept = 0;
+  for (const [key, lease] of Array.from(leases.entries())) {
+    if (lease.startedAt <= bootTime || lease.pid !== process.pid) {
+      if (lease.messageId != null && api && typeof api.editMessageText === 'function') {
+        try {
+          await api.editMessageText(lease.chatId, lease.messageId, 'restarted mid-run — send it again');
+        } catch (err) {
+          console.warn(`[${config.id}] sweep editMessageText failed for chat ${lease.chatId}: ${err.message}`);
+        }
+      }
+      recordFailure({
+        bot: config.id,
+        lane: config.agent?.model || 'unknown',
+        kind: 'crash-pending',
+        hint: `restarted mid-run for chat ${lease.chatId} (pid ${lease.pid})`,
+      });
+      leases.delete(key);
+      swept += 1;
+    }
+  }
+  if (swept > 0) {
+    saveLeases(config.id, leases);
+    console.log(`[${config.id}] swept ${swept} orphaned run lease(s) to crash-pending`);
+  }
+  return swept;
+}
+
 export function buildQuotedPrompt(text, replyToMessage) {
   const prompt = String(text ?? '');
   const quotedText = String(replyToMessage?.text || replyToMessage?.caption || '').trim();
@@ -255,7 +302,7 @@ async function getFreeModels(caches) {
 }
 
 export class ProgressRenderer {
-  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false, providerLabel = '', modelLabel = '', thinking = '' }) {
+  constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
     this.api = api;
     this.throttle = throttle;
     this.chatId = chatId;
@@ -266,6 +313,7 @@ export class ProgressRenderer {
     this.providerLabel = providerLabel;
     this.modelLabel = modelLabel;
     this.thinkingLevel = thinking;
+    this.onMessageId = onMessageId;
     this.startedAt = null;
     this.usedTokens = null;
     this.messageId = null;
@@ -372,6 +420,9 @@ export class ProgressRenderer {
             const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
             if (result?.message_id != null) {
               this.messageId = result.message_id;
+              if (typeof this.onMessageId === 'function') {
+                try { this.onMessageId(this.messageId); } catch {}
+              }
             } else {
               this.createRetryAt = Date.now() + 5000;
             }
@@ -1014,7 +1065,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }).claimed;
 
   busy.add(chatId);
-  const renderer = new ProgressRenderer({ api, throttle, chatId, ...config.progress });
+  const runStartedAt = Date.now();
+  recordRunStart(config.id, { chatId, messageId: null, startedAt: runStartedAt, pid: process.pid });
+  const renderer = new ProgressRenderer({
+    api,
+    throttle,
+    chatId,
+    ...config.progress,
+    onMessageId: (msgId) => {
+      recordRunStart(config.id, { chatId, messageId: msgId, startedAt: runStartedAt, pid: process.pid });
+    },
+  });
   try {
     await renderer.start();
     const eff = effective(config, prefs, chatId);
@@ -1105,6 +1166,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     running.delete(chatId);
     busy.delete(chatId);
     releaseFiles(claimed, claimId);
+    recordRunFinish(config.id, chatId);
   }
 }
 
@@ -1145,6 +1207,10 @@ async function runLoop({ api, config }) {
       health.errAt = 0;
       health.err = '';
     } catch (err) {
+      if (err instanceof TelegramError && (err.status === 409 || err.isConflict)) {
+        console.error(`[${config.id}] Telegram 409 Conflict: another poller is active for this token. Exiting.`);
+        process.exit(1);
+      }
       if (err instanceof TelegramError && err.isRateLimit) throttle.pause(err.retryAfter);
       console.error(`[${config.id}] getUpdates failed: ${err.message}`);
       health.errAt = Date.now();
@@ -1308,6 +1374,10 @@ async function main() {
       await api.deleteWebhook();
       break;
     } catch (err) {
+      if (err instanceof TelegramError && (err.status === 409 || err.isConflict)) {
+        console.error(`[${config.id}] deleteWebhook hit Telegram 409 Conflict. Exiting.`);
+        process.exit(1);
+      }
       console.error(`[${config.id}] deleteWebhook failed (attempt ${attempt}): ${err.message}`);
       if (attempt === 5) console.error(`[${config.id}] continuing; getUpdates may 409 if a webhook is set`);
       else await sleep(5000);
@@ -1321,6 +1391,7 @@ async function main() {
   } catch (err) {
     console.error(`[${config.id}] setMyCommands failed (non-fatal): ${err.message}`);
   }
+  await sweepOrphanedLeases({ api, config });
   await runLoop({ api, config });
 }
 

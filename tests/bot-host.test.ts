@@ -28,6 +28,7 @@ import {
   chunkText,
   MAX_MESSAGE_CHARS,
   TelegramApi,
+  TelegramError,
   mediaMethod,
   mediaField,
   isSendableMedia,
@@ -77,7 +78,15 @@ import {
   extractMedia,
   extractCodeBlocks,
 } from '../scripts/lib/commands.mjs';
-import { ProgressRenderer, buildQuotedPrompt } from '../scripts/bot-host.mjs';
+import {
+  ProgressRenderer,
+  buildQuotedPrompt,
+  loadLeases,
+  saveLeases,
+  recordRunStart,
+  recordRunFinish,
+  sweepOrphanedLeases,
+} from '../scripts/bot-host.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -1429,3 +1438,121 @@ describe('ProgressRenderer coalescing (VM2 thinking-spam outage)', () => {
     expect(sent[0]).toContain('- 39.3K/131.1K (30%)');
   });
 });
+
+describe('BOT-18 — silence to a receipt and 409 conflict handling', () => {
+  it('detects Telegram 409 Conflict via isConflict', () => {
+    const conflict = new TelegramError('getUpdates', 409, 'Conflict: terminated by other getUpdates request');
+    expect(conflict.isConflict).toBe(true);
+    expect(conflict.isRateLimit).toBe(false);
+
+    const rateLimit = new TelegramError('getUpdates', 429, 'Too Many Requests', { retry_after: 5 });
+    expect(rateLimit.isConflict).toBe(false);
+    expect(rateLimit.isRateLimit).toBe(true);
+
+    const other = new TelegramError('sendMessage', 400, 'Bad Request: message is too long');
+    expect(other.isConflict).toBe(false);
+  });
+
+  it('records run lease at start and deletes on finish', () => {
+    const testBotId = `test-lease-${Date.now()}`;
+    const startedAt = Date.now();
+    recordRunStart(testBotId, { chatId: 4242, messageId: null, startedAt, pid: process.pid });
+
+    let leases = loadLeases(testBotId);
+    expect(leases.get('4242')).toEqual({ chatId: 4242, messageId: null, startedAt, pid: process.pid });
+
+    // Update with messageId once created
+    recordRunStart(testBotId, { chatId: 4242, messageId: 9999, startedAt, pid: process.pid });
+    leases = loadLeases(testBotId);
+    expect(leases.get('4242')).toEqual({ chatId: 4242, messageId: 9999, startedAt, pid: process.pid });
+
+    // Delete on finish
+    recordRunFinish(testBotId, 4242);
+    leases = loadLeases(testBotId);
+    expect(leases.has('4242')).toBe(false);
+  });
+
+  it('ProgressRenderer calls onMessageId when progress message is created', async () => {
+    let capturedId = null;
+    const api = {
+      sendMessage: async () => ({ message_id: 7777 }),
+      editMessageText: async () => ({}),
+    };
+    const throttle = { submit: (fn) => Promise.resolve().then(fn), pause: () => {} };
+    const renderer = new ProgressRenderer({
+      api,
+      throttle,
+      chatId: 5555,
+      onMessageId: (msgId) => {
+        capturedId = msgId;
+      },
+    });
+
+    renderer.onEvent({ kind: 'reasoning', text: 'substantive reasoning exploration for database' });
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(capturedId).toBe(7777);
+  });
+
+  it('sweepOrphanedLeases edits message to terminal receipt and records crash-pending', async () => {
+    const testBotId = `test-sweep-${Date.now()}`;
+    const tmpFailLog = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fail-sweep-')), 'failures.jsonl');
+    const prevLogEnv = process.env.BOT_FAILURE_LOG;
+    process.env.BOT_FAILURE_LOG = tmpFailLog;
+
+    try {
+      // Seed an orphaned lease from an older run
+      const olderTime = Date.now() - 50000;
+      recordRunStart(testBotId, {
+        chatId: 8888,
+        messageId: 3333,
+        startedAt: olderTime,
+        pid: process.pid - 1,
+      });
+
+      const edited = [];
+      const mockApi = {
+        editMessageText: async (chatId, messageId, text) => {
+          edited.push({ chatId, messageId, text });
+          return {};
+        },
+      };
+
+      const sweptCount = await sweepOrphanedLeases({
+        api: mockApi,
+        config: { id: testBotId, agent: { model: 'opencode/test-model' } },
+        bootTime: Date.now(),
+      });
+
+      expect(sweptCount).toBe(1);
+      expect(edited).toHaveLength(1);
+      expect(edited[0]).toEqual({
+        chatId: 8888,
+        messageId: 3333,
+        text: 'restarted mid-run — send it again',
+      });
+
+      // Lease should be cleared
+      const leases = loadLeases(testBotId);
+      expect(leases.has('8888')).toBe(false);
+
+      // crash-pending failure row should be recorded
+      const failures = fs
+        .readFileSync(tmpFailLog, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l));
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({
+        bot: testBotId,
+        lane: 'opencode/test-model',
+        kind: 'crash-pending',
+      });
+      expect(failures[0].hint).toContain('chat 8888');
+    } finally {
+      process.env.BOT_FAILURE_LOG = prevLogEnv;
+      fs.rmSync(path.dirname(tmpFailLog), { recursive: true, force: true });
+    }
+  });
+});
+
