@@ -130,6 +130,7 @@ Treat silent changes to tombstone / merge semantics as **class X**.
 | Sync/biomarker/food regression foundation files | Same smoke suites as domain sections above |
 | Bot memory stores (`scripts/lib/memory-stores.mjs`, `scripts/assert-memory-stores.mjs`) | `node scripts/assert-memory-stores.mjs` · `npx vitest run tests/memory-stores.test.ts` |
 | Bot run ledger (`scripts/lib/run-ledger.mjs`, `scripts/assert-run-ledger.mjs`, `run-coding-dispatch.sh` ledger hooks) | `node scripts/assert-run-ledger.mjs` · `npx vitest run tests/run-ledger.test.ts` |
+| Bot souls (`bots/soul*.md`, `scripts/lib/soul-compose.mjs`, `scripts/assert-soul-compose.mjs`) | `node scripts/assert-soul-compose.mjs` · `npx vitest run tests/soul-compose.test.ts` |
 
 ## Bugs / triage tooling
 
