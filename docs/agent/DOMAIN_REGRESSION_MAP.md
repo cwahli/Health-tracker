@@ -141,6 +141,7 @@ Treat silent changes to tombstone / merge semantics as **class X**.
 | If you touch… | Run |
 |---------------|-----|
 | Bug snapshot / domain packs | `npx vitest run src/utils/bug*.test.ts` (or relevant tests) |
+| Bot failure learning loop (`scripts/lib/failure-log.mjs`, `scripts/review-failures.mjs`) | `npx vitest run tests/failure-log.test.ts` |
 
 ---
 
