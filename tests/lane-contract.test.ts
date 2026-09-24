@@ -11,7 +11,7 @@ import {
 
 describe('laneFor', () => {
   it('describes every dispatch backend', () => {
-    for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'human']) {
+    for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'freebuff', 'human']) {
       expect(laneFor(backend).backend).toBe(backend);
     }
   });
@@ -33,6 +33,13 @@ describe('degraded markings', () => {
     expect(gemini.apiOnly).toBe(true);
     expect(gemini.tools).toBe(false);
     expect(gemini.session).toBe(false);
+  });
+
+  it('marks freebuff API-only with no tools or session', () => {
+    const freebuff = laneFor('freebuff');
+    expect(freebuff.apiOnly).toBe(true);
+    expect(freebuff.tools).toBe(false);
+    expect(freebuff.session).toBe(false);
   });
 
   it('keeps opencode and human clean', () => {
@@ -62,7 +69,7 @@ describe('checkBotRow / checkRegistry', () => {
   });
 
   it('rejects agent, model, and process names as ids', () => {
-    for (const id of ['dev', 'dispatch', 'coder', 'cline', 'gemini', 'agy']) {
+    for (const id of ['dev', 'dispatch', 'coder', 'cline', 'gemini', 'agy', 'freebuff']) {
       expect(checkBotRow({ id, runtime: 'bot-host' }).length).toBeGreaterThan(0);
     }
   });

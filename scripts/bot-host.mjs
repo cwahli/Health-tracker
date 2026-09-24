@@ -31,6 +31,7 @@ import {
 } from './lib/agent-opencode.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
+import { runFreebuff } from './lib/agent-freebuff.mjs';
 import {
   parseModelRef,
   buildFreeModelList,
@@ -38,6 +39,7 @@ import {
   formatFreeLabel,
   CLINE_FREE_MODELS,
   GEMINI_MODELS,
+  FREEBUFF_MODELS,
   toModelRef,
 } from './lib/freemodels.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
@@ -738,7 +740,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, 'Could not read the model list from opencode.');
           return;
         }
-        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists free models from opencode + cline + gemini.`, {
+        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists free models from opencode + cline + gemini + freebuff.`, {
           reply_markup: modelKeyboard(models),
         });
         return;
@@ -771,6 +773,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           return;
         }
         const stored = toModelRef('gemini', ref.id);
+        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
+        return;
+      }
+      if (ref.surface === 'freebuff') {
+        if (!FREEBUFF_MODELS.includes(ref.id)) {
+          await api.sendMessage(chatId, `Unknown freebuff model: ${ref.id}\nUse /freemodel to pick from the free list.`);
+          return;
+        }
+        const stored = toModelRef('freebuff', ref.id);
         prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
@@ -855,7 +868,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const ref = parseModelRef(eff.model);
       // Gemini is single-shot: no variants, no opencode verbose lookup.
       const variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' || ref.surface === 'freebuff' ? [] : await getVariants(config, caches, eff.model);
       if (!cmd.args) {
         if (!variants.length) {
           await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
@@ -1029,11 +1042,11 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       // Cline models expose fixed thinking levels, not opencode model variants.
       // Gemini exposes none (single-shot lane).
       let variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' || ref.surface === 'freebuff' ? [] : await getVariants(config, caches, eff.model);
       // New buttons carry the name (`v:high`); old keyboards carry an index
       // (`v:0`). Support both so already-shown keyboards keep working.
       let variant = variants.includes(value) ? value : variants[Number(value)];
-      if (!variant && ref.surface !== 'cline' && ref.surface !== 'gemini') {
+      if (!variant && ref.surface !== 'cline' && ref.surface !== 'gemini' && ref.surface !== 'freebuff') {
         caches.verbose = null;
         variants = await getVariants(config, caches, eff.model);
         variant = variants.includes(value) ? value : variants[Number(value)];
@@ -1161,9 +1174,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const eff = effective(config, prefs, chatId);
     // One shared working headline (provider + model + elapsed + usage) for
     // every bot-host agent — same line shape as the Grok TG router.
+    const ref = parseModelRef(eff.model);
     const kind = config.agent.kind || 'opencode';
     renderer.setHeadline({
-      providerLabel: kind === 'cline' ? 'Cline' : kind === 'gemini' ? 'Gemini' : 'OpenCode',
+      providerLabel: ref.surface === 'cline' ? 'Cline' : ref.surface === 'gemini' ? 'Gemini' : ref.surface === 'freebuff' ? 'Freebuff' : kind === 'cline' ? 'Cline' : kind === 'gemini' ? 'Gemini' : 'OpenCode',
       modelLabel: eff.model || '',
     });
     const handoff = prefs.get(chatId)?.handoff || '';
@@ -1184,7 +1198,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const media = await collectInboundMedia(api, message, config);
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
-    const ref = parseModelRef(eff.model);
     // Gemini is a keyed single-shot lane (no tools/session/plan/agent): same
     // prompt and renderer, no workspace wiring.
     const result =
@@ -1208,7 +1221,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
               onSpawn: (child) => running.set(chatId, { child, aborted: false }),
               env: chatEnv(api, chatId),
             })
-          : await runOpencodeWithFailover({
+          : ref.surface === 'freebuff'
+            ? await runFreebuff({
+                prompt: promptWithMedia,
+                model: ref.id,
+                timeoutMs: config.agent.timeoutMs,
+                env: { ...process.env, ...opencodeEnv(config), ...chatEnv(api, chatId) },
+              })
+            : await runOpencodeWithFailover({
             api,
             chatId,
             prompt: promptWithMedia,
@@ -1381,7 +1401,14 @@ async function dryRun(config, args) {
             onEvent: (event) => renderer.onEvent(event),
             env: opencodeEnv(config),
           })
-        : await runOpencode({
+        : ref.surface === 'freebuff'
+          ? await runFreebuff({
+              prompt,
+              model: ref.id,
+              timeoutMs: config.agent.timeoutMs,
+              env: { ...process.env, ...opencodeEnv(config) },
+            })
+          : await runOpencode({
           prompt,
           model: config.agent.model,
           variant: config.agent.variant,

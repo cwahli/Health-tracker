@@ -53,6 +53,12 @@ export const LANES = {
     degradedReason: 'Single-shot answers only — no tools, no session resume, no plan mode, no variants.',
     roles: [...ROLES],
   },
+  freebuff: {
+    kind: 'api', apiOnly: true, tools: false, session: false,
+    degraded: ['resume', 'tools', 'plan'],
+    degradedReason: 'Single-shot Freebuff API answers only — no tools, no session resume, no plan mode, no variants.',
+    roles: [...ROLES],
+  },
   human: {
     kind: 'person', apiOnly: false, tools: true, session: true,
     degraded: [], roles: [...ROLES],
@@ -62,7 +68,7 @@ export const LANES = {
 /** Bot ids that would mistake an agent, model, or process for a place. */
 export const FORBIDDEN_BOT_IDS = [
   'dev', 'dispatch', 'coder', 'agent',
-  'cline', 'gemini', 'opencode', 'grok', 'antigravity', 'agy',
+  'cline', 'gemini', 'opencode', 'grok', 'antigravity', 'agy', 'freebuff',
 ];
 
 /**

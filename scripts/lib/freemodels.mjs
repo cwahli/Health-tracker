@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { FREEBUFF_AGENT_ID, FREEBUFF_CHAT_MODEL } from './agent-freebuff.mjs';
 
 export const CLINE_FREE_MODELS = [
   'cline-free/deepseek-v4.1-flash',
@@ -36,10 +37,17 @@ export const GEMINI_MODEL_NOTES = {
   'gemini/gemini-3.5-flash-lite': 'keyed API lane (GEMINI_API_KEY); cheapest/fastest of the four',
 };
 
+export const FREEBUFF_MODELS = [FREEBUFF_AGENT_ID];
+
+export const FREEBUFF_MODEL_NOTES = {
+  [FREEBUFF_AGENT_ID]: `verified Freebuff lane (${FREEBUFF_CHAT_MODEL}); one-hour admission, single-shot, no tools/session`,
+};
+
 export function parseModelRef(raw) {
   const value = String(raw ?? '').trim();
   if (value.startsWith('cline:')) return { surface: 'cline', id: value.slice('cline:'.length), raw: value };
   if (value.startsWith('gemini:')) return { surface: 'gemini', id: value.slice('gemini:'.length), raw: value };
+  if (value.startsWith('freebuff:')) return { surface: 'freebuff', id: value.slice('freebuff:'.length), raw: value };
   if (value.startsWith('opencode:')) return { surface: 'opencode', id: value.slice('opencode:'.length), raw: value };
   return { surface: 'opencode', id: value, raw: value };
 }
@@ -47,6 +55,7 @@ export function parseModelRef(raw) {
 export function toModelRef(surface, id) {
   if (surface === 'cline') return `cline:${id}`;
   if (surface === 'gemini') return `gemini:${id}`;
+  if (surface === 'freebuff') return `freebuff:${id}`;
   return id;
 }
 
@@ -60,6 +69,10 @@ export function formatFreeLabel(ref) {
     // Keyed lane, not zero-cost: label says (api) so the picker is honest.
     const pretty = id.replace(/^gemini\//, '');
     return `gemini:${pretty} (api)`;
+  }
+  if (surface === 'freebuff') {
+    const pretty = id.replace(/-/g, ' ');
+    return `freebuff:${pretty} (free)`;
   }
   return `${id.replace('/', ':')} (free)`;
 }
@@ -111,23 +124,29 @@ export function buildFreeModelList(opts = {}) {
     const ref = toModelRef('gemini', id);
     return { ref, label: formatFreeLabel(ref), surface: 'gemini' };
   });
+  const freebuff = FREEBUFF_MODELS.map((id) => {
+    const ref = toModelRef('freebuff', id);
+    return { ref, label: formatFreeLabel(ref), surface: 'freebuff' };
+  });
   const opencode = listFreeOpenCode(opts).map((ref) => ({
     ref,
     label: formatFreeLabel(ref),
     surface: 'opencode',
   }));
-  return [...cline, ...gemini, ...opencode];
+  return [...cline, ...gemini, ...freebuff, ...opencode];
 }
 
 export function formatFreeModelText(entries, { current } = {}) {
   const clineCount = entries.filter((entry) => entry.surface === 'cline').length;
   const geminiCount = entries.filter((entry) => entry.surface === 'gemini').length;
-  const opencodeCount = entries.length - clineCount - geminiCount;
+  const freebuffCount = entries.filter((entry) => entry.surface === 'freebuff').length;
+  const opencodeCount = entries.length - clineCount - geminiCount - freebuffCount;
   const lines = [
-    `Free models: ${entries.length} (${clineCount} cline, ${geminiCount} gemini, ${opencodeCount} opencode) · current: ${current || '(unknown)'}`,
+    `Free models: ${entries.length} (${clineCount} cline, ${geminiCount} gemini, ${freebuffCount} freebuff, ${opencodeCount} opencode) · current: ${current || '(unknown)'}`,
     'Tap a model below to switch this chat.',
     'Cline DeepSeek has a daily free cap (~22h cooldown when hit); cline runs do not carry session context.',
     'Gemini lanes use the shared GEMINI_API_KEY lane (single-shot answers, no tools/session).',
+    'Freebuff GLM 5.3 Flash is single-shot, releases its one-hour admission after each run, and has no tools/session.',
   ];
   const notes = entries
     .filter((entry) => entry.surface === 'cline' && CLINE_FREE_NOTES[entry.ref.replace(/^cline:/, '')])
@@ -137,5 +156,9 @@ export function formatFreeModelText(entries, { current } = {}) {
     .filter((entry) => entry.surface === 'gemini' && GEMINI_MODEL_NOTES[entry.ref.replace(/^gemini:/, '')])
     .map((entry) => `• ${entry.label}: ${GEMINI_MODEL_NOTES[entry.ref.replace(/^gemini:/, '')]}`);
   if (geminiNotes.length) lines.push('', ...geminiNotes);
+  const freebuffNotes = entries
+    .filter((entry) => entry.surface === 'freebuff' && FREEBUFF_MODEL_NOTES[entry.ref.replace(/^freebuff:/, '')])
+    .map((entry) => `• ${entry.label}: ${FREEBUFF_MODEL_NOTES[entry.ref.replace(/^freebuff:/, '')]}`);
+  if (freebuffNotes.length) lines.push('', ...freebuffNotes);
   return lines.join('\n');
 }

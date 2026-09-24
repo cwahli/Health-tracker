@@ -51,6 +51,7 @@ import {
   formatFreeModelText,
   CLINE_FREE_MODELS,
   GEMINI_MODELS,
+  FREEBUFF_MODELS,
 } from '../scripts/lib/freemodels.mjs';
 import {
   runGemini,
@@ -58,6 +59,13 @@ import {
   geminiModelId,
   mapGeminiError,
 } from '../scripts/lib/agent-gemini.mjs';
+import {
+  runFreebuff,
+  mapFreebuffError,
+  freebuffSseText,
+  FREEBUFF_AGENT_ID,
+  FREEBUFF_CHAT_MODEL,
+} from '../scripts/lib/agent-freebuff.mjs';
 import {
   buildClineArgs,
   mapClineEvent,
@@ -842,6 +850,13 @@ describe('freemodels', () => {
       'cline:muse spark 1.3 contributor (free)',
     );
     expect(formatFreeLabel('opencode/big-pickle')).toBe('opencode:big-pickle (free)');
+    expect(parseModelRef('freebuff:base3-free-glm-5-3-flash')).toEqual({
+      surface: 'freebuff',
+      id: 'base3-free-glm-5-3-flash',
+      raw: 'freebuff:base3-free-glm-5-3-flash',
+    });
+    expect(toModelRef('freebuff', 'base3-free-glm-5-3-flash')).toBe('freebuff:base3-free-glm-5-3-flash');
+    expect(formatFreeLabel('freebuff:base3-free-glm-5-3-flash')).toBe('freebuff:base3 free glm 5 3 flash (free)');
   });
 
   it('filters zero-cost authorized opencode models from the cache', () => {
@@ -873,13 +888,14 @@ describe('freemodels', () => {
       authPath: '/missing-auth.json',
       readJson: () => null,
     });
-    expect(entries).toHaveLength(CLINE_FREE_MODELS.length + GEMINI_MODELS.length);
+    expect(entries).toHaveLength(CLINE_FREE_MODELS.length + GEMINI_MODELS.length + FREEBUFF_MODELS.length);
     expect(entries[0].surface).toBe('cline');
     expect(entries[0].ref).toBe('cline:cline-free/deepseek-v4.1-flash');
     const text = formatFreeModelText(entries, { current: 'opencode/big-pickle' });
     expect(text).toContain('opencode/big-pickle');
     expect(text).toContain('daily free cap');
-    expect(text).toContain('4 cline, 4 gemini, 0 opencode');
+    expect(text).toContain('4 cline, 4 gemini, 1 freebuff, 0 opencode');
+    expect(text).toContain('Freebuff GLM 5.3 Flash');
   });
 
   it('parses gemini: refs and formats api labels', () => {
@@ -1041,6 +1057,65 @@ describe('agent-gemini', () => {
     });
     expect(result.finalText).toBe('');
     expect(result.lastError).toMatch(/quota or rate limit/i);
+  });
+});
+
+describe('agent-freebuff', () => {
+  it('parses Freebuff SSE and maps provider errors', () => {
+    expect(freebuffSseText(': connected\ndata: {"choices":[{"delta":{"reasoning_content":"think"}}]}\ndata: {"choices":[{"delta":{"content":"OK"}}],"usage":{"total_tokens":7}}\ndata: [DONE]').text).toBe('OK');
+    expect(mapFreebuffError({ status: 401, body: 'invalid auth' })).toMatch(/auth failed/i);
+    expect(mapFreebuffError({ status: 402, body: 'Payment Required' })).toMatch(/allowance/i);
+    expect(mapFreebuffError({ status: 409, body: 'session takeover' })).toMatch(/already active/i);
+  });
+
+  it('runs admission, agent start, streaming completion, and release', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freebuff-bot-host-'));
+    const credentialsPath = path.join(dir, 'credentials.json');
+    fs.writeFileSync(credentialsPath, JSON.stringify({ default: { id: 'freebuff-user', authToken: 'freebuff-token' } }));
+    const calls: any[] = [];
+    const responses = [
+      { status: 200, body: JSON.stringify({ status: 'active', instanceId: 'instance-1' }) },
+      { status: 200, body: JSON.stringify({ runId: 'run-1' }) },
+      { status: 200, body: 'data: {"choices":[{"delta":{"content":"OK"}}],"usage":{"total_tokens":7}}\ndata: [DONE]' },
+      { status: 200, body: JSON.stringify({ status: 'ended' }) },
+    ];
+    const fetchImpl = async (url: string, options: any) => {
+      calls.push({ url, options });
+      const next = responses.shift();
+      return { ok: next.status < 400, status: next.status, text: async () => next.body };
+    };
+    const result = await runFreebuff({
+      prompt: 'Reply with exactly: OK',
+      model: FREEBUFF_AGENT_ID,
+      env: {},
+      credentialsPath,
+      fetchImpl,
+    });
+    const completionBody = JSON.parse(calls[2].options.body);
+    expect(result).toMatchObject({ code: 0, finalText: 'OK', lastError: null, sessionID: null });
+    expect(result.usage.tokens).toEqual({ total: 7 });
+    expect(calls.map((call) => call.url)).toEqual([
+      'https://www.codebuff.com/api/v1/freebuff/session/admission',
+      'https://www.codebuff.com/api/v1/agent-runs',
+      'https://www.codebuff.com/api/v1/chat/completions',
+      'https://www.codebuff.com/api/v1/freebuff/session',
+    ]);
+    expect(JSON.parse(calls[1].options.body)).toEqual({ action: 'START', agentId: FREEBUFF_AGENT_ID, ancestorRunIds: [] });
+    expect(completionBody.model).toBe(FREEBUFF_CHAT_MODEL);
+    expect(completionBody.codebuff_metadata).toMatchObject({ freebuff_instance_id: 'instance-1', run_id: 'run-1', cost_mode: 'free' });
+    expect(calls[3].options.headers['x-freebuff-instance-id']).toBe('instance-1');
+  });
+
+  it('does not call the provider when credentials are missing', async () => {
+    const result = await runFreebuff({
+      prompt: 'hi',
+      env: { FREEBUFF_CREDENTIALS_PATH: '/missing/freebuff-credentials.json' },
+      fetchImpl: async () => {
+        throw new Error('must not call fetch');
+      },
+    });
+    expect(result.finalText).toBe('');
+    expect(result.lastError).toMatch(/credentials/i);
   });
 });
 

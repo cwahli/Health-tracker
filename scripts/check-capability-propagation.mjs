@@ -33,7 +33,7 @@ const LIB_DIR = path.join(ROOT, 'scripts', 'lib');
 // excludes collab-session.mjs (collab-runtime glue, §14.7 Case F bot-specific).
 const ORPHAN_LIBS = [
   'tg-copy-code.mjs', 'tg-copy-code.test.mjs', 'tg-api.mjs', 'tg-throttle.mjs',
-  'inbound-media.mjs', 'agent-opencode.mjs', 'agent-cline.mjs', 'agent-gemini.mjs', 'freemodels.mjs',
+  'inbound-media.mjs', 'agent-opencode.mjs', 'agent-cline.mjs', 'agent-gemini.mjs', 'agent-freebuff.mjs', 'freemodels.mjs',
   'reasoning-compress.mjs', 'bot-commands.mjs', 'bot-status.mjs', 'commands.mjs',
   'file-locks.mjs', 'registry.mjs', 'failure-log.mjs',
 ];

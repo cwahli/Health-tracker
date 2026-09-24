@@ -389,6 +389,7 @@
         "scripts/lib/freemodels.mjs",
         "scripts/lib/agent-cline.mjs",
         "scripts/lib/agent-gemini.mjs",
+        "scripts/lib/agent-freebuff.mjs",
         "scripts/lib/agent-opencode.mjs",
         "golden/scorecard/current/FREE_MODEL_TOOL_PICKER.md",
         "golden/scorecard/current/FREE_CODING_TOOLS_CATALOG.md",
@@ -402,7 +403,7 @@
         "grok_tg": "adapter",
         "collab": "adapter"
       },
-      "notes": "Learnings land in the picker/catalog once; all agents inherit. Cline Free deepseek is wallet-independent of OpenCode."
+      "notes": "Learnings land in the picker/catalog once; all agents inherit. Cline Free deepseek is wallet-independent of OpenCode. Freebuff GLM 5.3 Flash is an API-only single-shot lane with no tools or session."
     },
     {
       "id": "tool-thinking",

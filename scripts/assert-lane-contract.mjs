@@ -55,7 +55,7 @@ const {
 } = await import(new URL(`file://${path.join(ROOT, 'scripts/lib/lane-contract.mjs').replace(/\\/g, '/')}`).href);
 
 // 1. Every dispatch backend declared.
-for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'human']) {
+for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'freebuff', 'human']) {
   let lane = null;
   try {
     lane = laneFor(backend);
@@ -71,10 +71,15 @@ check('gemini declares no tools', laneFor('gemini').tools === false);
 check('gemini declares no session', laneFor('gemini').session === false);
 check('gemini degraded for resume/tools/plan',
   isDegraded('gemini', 'resume') && isDegraded('gemini', 'tools') && isDegraded('gemini', 'plan'));
+check('freebuff is API-only', laneFor('freebuff').apiOnly === true);
+check('freebuff declares no tools', laneFor('freebuff').tools === false);
+check('freebuff declares no session', laneFor('freebuff').session === false);
+check('freebuff degraded for resume/tools/plan',
+  isDegraded('freebuff', 'resume') && isDegraded('freebuff', 'tools') && isDegraded('freebuff', 'plan'));
 check('opencode not degraded', laneFor('opencode').degraded.length === 0);
 
 // 3. Any backend may fill any role.
-for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'human']) {
+for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'freebuff', 'human']) {
   check(`${backend} may specify/implement/verify`,
     canFill(backend, 'specify') && canFill(backend, 'implement') && canFill(backend, 'verify'));
 }
@@ -95,6 +100,8 @@ check('a "dev" row would be rejected',
   checkBotRow({ id: 'dev', runtime: 'bot-host' }).length > 0);
 check('a "cline" row would be rejected',
   checkBotRow({ id: 'cline', runtime: 'bot-host' }).length > 0);
+check('a "freebuff" row would be rejected',
+  checkBotRow({ id: 'freebuff', runtime: 'bot-host' }).length > 0);
 
 // 5. CLI passes on the real registry.
 try {
