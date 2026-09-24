@@ -165,6 +165,16 @@ describe('tmux work view', () => {
     expect(tmux.calls.flat().some((arg) => /kill-window|kill-session|send-keys|respawn-pane/.test(String(arg)))).toBe(false);
   });
 
+  it('matches the outer quotes tmux adds to pane_start_command', () => {
+    const session = resolveSession({ ...loc, lane: 'opencode' }, store);
+    const tmux = fakeTmux();
+    const view = ensureTmuxWorkView(session, { tmux: tmux.run });
+    const pane = [...tmux.panes.values()].find((entry) => entry.id === view.observerPane);
+    const quotedTmux = (args) => args[0] === 'list-panes' ? `${pane.id}\t"${pane.command}"` : tmux.run(args);
+    expect(debugProbe('opencode', { session, tmux: quotedTmux }).observerLive).toBe(true);
+    expect(disableTmuxObserver(session, { tmux: quotedTmux })).toMatchObject({ ok: true, stopped: true, pane: pane.id });
+  });
+
   it('never invokes tmux for an API-only lane', () => {
     const session = resolveSession({ ...loc, lane: 'gemini' }, store);
     const tmux = fakeTmux();

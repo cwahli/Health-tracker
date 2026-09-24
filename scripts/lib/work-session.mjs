@@ -281,6 +281,12 @@ function observerCommand(logPath) {
   return `/usr/bin/tail -n 40 -F -- ${shellQuote(logPath)}`;
 }
 
+function normalizeObserverCommand(command) {
+  const value = String(command ?? '').trim();
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
+  return value;
+}
+
 function parseObserverPanes(output) {
   if (typeof output !== 'string') return [];
   return output.split(/\r?\n/).filter(Boolean).map((line) => {
@@ -292,7 +298,7 @@ function parseObserverPanes(output) {
 function observerPaneFor(target, logPath, tmux) {
   const expected = observerCommand(logPath);
   const panes = parseObserverPanes(tmux(['list-panes', '-t', target, '-F', '#{pane_id}\t#{pane_start_command}']));
-  return panes.find((pane) => pane.command === expected) || null;
+  return panes.find((pane) => normalizeObserverCommand(pane.command) === expected) || null;
 }
 
 export function disableTmuxObserver(session, { tmux = defaultTmuxRunner } = {}) {
