@@ -143,6 +143,7 @@ Treat silent changes to tombstone / merge semantics as **class X**.
 | Bug snapshot / domain packs | `npx vitest run src/utils/bug*.test.ts` (or relevant tests) |
 | Bot failure learning loop (`scripts/lib/failure-log.mjs`, `scripts/review-failures.mjs`) | `npx vitest run tests/failure-log.test.ts` |
 | Bug ticket offline queue (`scripts/bugctl.mjs` queue/flush) | `npx vitest run tests/bugctl-queue.test.ts` |
+| Bot-host model failover (`scripts/bot-host.mjs` message path, `runWithModelFailover`) | `node scripts/assert-model-failover.mjs` · `npx vitest run tests/bot-host.test.ts -t 'BOT-9'` |
 
 ---
 
