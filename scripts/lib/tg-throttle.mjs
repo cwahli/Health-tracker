@@ -21,6 +21,26 @@ export class Throttle {
     return until;
   }
 
+  /**
+   * Proactive slowdown from response headers (BOT-9 transport hardening).
+   * Telegram rarely emits X-RateLimit headers; when any sender surfaces
+   * x-ratelimit-remaining: 0 (with an optional retry-after hint), pause
+   * instead of hammering into a 429. Never shortens an existing pause.
+   * Accepts a Fetch Headers-like ({ get }) or a plain object. Returns the
+   * pause end timestamp, or 0 when nothing applied.
+   */
+  noteHeaders(headers) {
+    if (!headers) return 0;
+    const get = typeof headers.get === 'function'
+      ? (k) => headers.get(k)
+      : (k) => headers[k] ?? headers[k.toLowerCase()] ?? null;
+    const remaining = get('x-ratelimit-remaining');
+    if (remaining === null || remaining === undefined || Number(remaining) > 0) return 0;
+    const retryAfter = get('retry-after');
+    this.pause(Math.min(Math.max(Number(retryAfter) || 5, 1), 60));
+    return this.pausedUntil;
+  }
+
   submit(fn) {
     const run = this._chain.then(async () => {
       const readyAt =
