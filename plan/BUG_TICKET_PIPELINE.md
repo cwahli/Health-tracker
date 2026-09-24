@@ -1,13 +1,13 @@
 # Bug ticket pipeline for TG agentic development — audit + plan (proposal)
 
-**Status:** **V-30.1 DONE 2026-09-24** (store + CLI + A-f1/A-f5); **V-30.2 DONE 2026-09-24** (packer + fixtures + P9 token + one live Telegram E2E reply + `enabled: true` + `@Bug_ticket_bot`; fixture traceability + packer-only boundary closed in the same change); **V-30.3 DONE 2026-09-24** (`qa-reproduce` skill, `qa-runner --ticket`, `bugctl repro --check`, §4.6 R2 bundle, `svc-repro` done, gate `assert-bug-repro` 57/0, and a live verdict posted on card #2: `failed` → `not_reproducible` with R2 evidence keys — card #2 was already fixed by `00b8cb1`, proving the known-good path end to end); **V-30.4 CODE-DONE 2026-09-24** (human go received; packet-driven `run-coding-dispatch.sh --ticket=#n`, `scripts/lib/bug-dispatch.mjs` idempotency guard, plan-before-dispatch, attempt start/end rows, failure → `bugctl block --reason`, verifier separation, scratch fixture `src/utils/bugDispatchFlow.test.ts`, gate `assert-bug-dispatch` 49/0; bugctl reads never enter the offline queue; live scratch-card proof to follow post-merge); **V-30.5 NOT STARTED** and still requires its explicit human go. V-30.0 decisions all recorded (§6.1/§8). The executable handoff is §6.2.
+**Status:** **V-30.1 DONE 2026-09-24** (store + CLI + A-f1/A-f5); **V-30.2 DONE 2026-09-24** (packer + fixtures + P9 token + one live Telegram E2E reply + `enabled: true` + `@Bug_ticket_bot`; fixture traceability + packer-only boundary closed in the same change); **V-30.3 DONE 2026-09-24** (`qa-reproduce` skill, `qa-runner --ticket`, `bugctl repro --check`, §4.6 R2 bundle, `svc-repro` done, gate `assert-bug-repro` 57/0, and a live verdict posted on card #2: `failed` → `not_reproducible` with R2 evidence keys — card #2 was already fixed by `00b8cb1`, proving the known-good path end to end); **V-30.4 DONE 2026-09-24** (human go received; packet-driven `run-coding-dispatch.sh --ticket=#n`, `scripts/lib/bug-dispatch.mjs` idempotency guard, plan-before-dispatch, attempt start/end rows, failure → `bugctl block --reason`, verifier separation, scratch fixture `src/utils/bugDispatchFlow.test.ts`, gate `assert-bug-dispatch` 49/0 (50/0 on VPS); bugctl reads never enter the offline queue; **live proof complete**: card #3 `new→packed→in_fix→verifying→done` with PR #101 + named_test verify by a non-author + exit-3 double-dispatch refusal; card #4 failure → `blocked_reason` + guard refusal; three hardening fixes from the proof — #98 stop/heartbeat zombie, #102/#103 journal drops); **V-30.5 NOT STARTED** and still requires its explicit human go. V-30.0 decisions all recorded (§6.1/§8). The executable handoff is §6.2.
 **Drafted / last updated:** 2026-09-24
 **Scope:** make one durable bug-ticket store the working memory for the Telegram (TG) agent
 fleet, so a chat agent can never lose a bug between answers.
 **Roadmap entry:** `plan/ROADMAP.md` → *Track V Phase 10* — `V-30.0` **DECIDED 2026-09-24**;
 `V-30.1` **DONE 2026-09-24**; `V-30.2` **DONE 2026-09-24** (P9 + E2E closed);
 `V-30.3` **DONE 2026-09-24** (human go received; live verdict posted on card #2);
-`V-30.4` **CODE-DONE 2026-09-24** (human go received; gate `assert-bug-dispatch` 49/0; live scratch proof pending);
+`V-30.4` **DONE 2026-09-24** (human go received; gate `assert-bug-dispatch` 49/0; live proof: card #3 full lifecycle → `done`, card #4 → `blocked_reason`, stop/heartbeat + journal fixes #98/#102/#103);
 `V-30.5` **NOT STARTED**, requiring its explicit human go.
 
 **This is not a fifth pillar.** It sits beside `plan/BOT_ROLES.md` and
@@ -29,7 +29,7 @@ local ground-truth file list is in §9.
 |---|---|---|
 | `plan/BUG_TICKET_PIPELINE.md` (this file) | **new, tracked in HEAD** | ✅ yes — it *is* the proposal |
 | `plan/ROADMAP.md` | Track V Phase 10 status + executable handoff pointer + decision mirror | ✅ yes |
-| implementation files listed in §5.2 (`src/`, `scripts/`, `bots/`, tests) | **V-30.1–V-30.4 code-done; V-30.5 still open** | follow the phase gates; do not re-open completed rows |
+| implementation files listed in §5.2 (`src/`, `scripts/`, `bots/`, tests) | **V-30.1–V-30.4 done; V-30.5 still open** | follow the phase gates; do not re-open completed rows |
 
 **State of the tree (2026-09-24, updated after V-30.2 closure + V-30.3):** V-30.1 is merged and
 V-30.2 is **closed**: `HERMES_BUG_TICKET_TOKEN` present on the host, one live E2E reply recorded
@@ -41,8 +41,8 @@ and the live run on card #2 posted `repro.status=failed` (exit 1 — the `7.7000
 artifact no longer reproduces; fixed by `00b8cb1` on 2026-09-22), deriving
 `not_reproducible` with R2 keys `bugs/tag_mufs4t96_wj02x7/1790272128947-*` and
 `svc-repro` → `done`. The `confirmed` (known-bad) path is gate-proven and awaits the
-next genuinely-reproducing card. V-30.4 is code-done (gate `assert-bug-dispatch` 49/0;
-live scratch-card proof pending); V-30.5 has no implementation. Re-read §6.2
+next genuinely-reproducing card. V-30.4 is done with a live VPS proof (card #3 → `done`,
+card #4 → `blocked_reason`, gate `assert-bug-dispatch` 50/0 on VPS); V-30.5 has no implementation. Re-read §6.2
 before starting any later phase; the dependency graph is intentional.
 
 **Review order:**
@@ -56,8 +56,8 @@ before starting any later phase; the dependency graph is intentional.
 
 **Historical review note (before implementation):** the proposal required an explicit human go
 before each phase. V-30.1 and V-30.2 have since landed and closed (P9 + E2E recorded 2026-09-24);
-V-30.3 received its human go and is code-done; V-30.4 received its human go and is code-done
-(gate green, live scratch proof pending). V-30.5 still follows the same gate rule.
+V-30.3 received its human go and is code-done; V-30.4 received its human go and is done
+(gate green + live VPS proof). V-30.5 still follows the same gate rule.
 Do not treat this document's review as a new authorization for token creation or protected-doc edits.
 
 **Do not, as part of a review:** edit protected docs (`AGENTS.md`, `docs/agent/**`,
@@ -814,7 +814,7 @@ active use (BOT-12…18 as of 2026-09-24 and growing), so V-30.x is the stable n
 | **V-30.1** store + CLI | schema fields + `bugState()` + `bugctl` + artifact endpoints + **A-f1/A-f5** fixes | `npx vitest run src/utils/bugTicketState.test.ts` · `node scripts/assert-bug-ticket-continuity.mjs` · `npm run lint`; scripted `new→packed→in_fix→done` via `bugctl` | scripted session and continuity assert | **DONE 2026-09-24** — PR #62 / `86e8495` |
 | **V-30.2** packer | code: `bug-pack.mjs`, `bugctl pack --check`/`--split`, Hermes profile/skill, registry entry, three capability rows. **Closed 2026-09-24:** traceable fixture (`scripts/fixtures/bug-8449.json`, checked against `bug-backlog.md` at gate time) + packer-only boundary doc/test, P9 token, `@Bug_ticket_bot` handle, one live E2E reply (session `20260924_162828_f191298f`, packed card #2), `enabled: true` | `node scripts/assert-bug-pack.mjs` + `npx vitest run src/utils/bugPackFixtures.test.ts`; then live E2E: intake → one card or needs_repro/duplicate → Telegram reply with `#n` | fixture transcript/card ids, token-sync output, Telegram message/reply id, final `enabled: true` | **DONE 2026-09-24** — PRs #66/#67; closure in AI_HANDOVER.md |
 | **V-30.3** reproducer | `qa-reproduce` skill; `qa-runner.mjs --ticket=<#n>`; `bugctl repro --check`; one QA write path using existing profiles/tokens | known-good card posts `repro.status=failed` with `run.log` → derived flag `not_reproducible`; known-bad card posts `status=confirmed` with `command`, `exit_code`, `run.log`, and portable `before.png` key; both verdicts persist on card | both fixture transcripts, artifact keys, and derived flags | **DONE 2026-09-24** — skill/runner/`repro --check`/§4.6 keys/`svc-repro` done/gate `assert-bug-repro` 57/0; **live verdict on card #2**: `failed` → `not_reproducible` (defect fixed by `00b8cb1`, so the known-good path is the one that proved live), R2 keys `bugs/tag_mufs4t96_wj02x7/1790272128947-*`; `confirmed` path gate-proven, awaits a genuinely-bad card; do not use `not_needed` as a synonym for `not_reproducible` |
-| **V-30.4** orchestrator | packet-driven `run-coding-dispatch.sh --ticket=#21`; plan block; start/end attempt rows; `bugctl block --reason`; idempotent in-flight guard; verifier cannot be fixer | scratch dev-only card reaches `done` only after named gate green; failed dispatch leaves `blocked_reason`; no direct main push or chat-only claim | card timeline, attempt rows, commit/PR, named-gate output, verify artifact | **CODE-DONE 2026-09-24** — human go received; `--ticket=#n` + `bug-dispatch.mjs` guard + plan/attempt/block rows + verifier separation + `orchestrator-dispatcher` v2.1.0 + TEMPLATE anti-patch sections; scratch fixture `src/utils/bugDispatchFlow.test.ts` (walk + failure + refusal); gate `assert-bug-dispatch` 49/0, all sibling gates green, `tsc` 0; **live scratch-card proof pending post-merge** (acceptance timeline/attempt/verify evidence) |
+| **V-30.4** orchestrator | packet-driven `run-coding-dispatch.sh --ticket=#21`; plan block; start/end attempt rows; `bugctl block --reason`; idempotent in-flight guard; verifier cannot be fixer | scratch dev-only card reaches `done` only after named gate green; failed dispatch leaves `blocked_reason`; no direct main push or chat-only claim | card timeline, attempt rows, commit/PR, named-gate output, verify artifact | **DONE 2026-09-24 — code + live VPS proof.** Code: `--ticket=#n` + `bug-dispatch.mjs` guard + plan/attempt/block rows + verifier separation + `orchestrator-dispatcher` v2.1.0 + TEMPLATE anti-patch sections + scratch fixture `bugDispatchFlow` (12 tests) + gate `assert-bug-dispatch` 49/0. **Live:** card #3 `new→packed→in_fix→verifying→done` (journal `specs/bug-journal/3.jsonl`, PR #101, named_test verify by non-author, exit-3 double-dispatch refusal); card #4 failure → `attempt failed:` + `blocked_reason` + guard refusal exit 3; offline write queued during API restart → `flush` replayed; hardening fixes landed from the proof: #98 (stop/heartbeat zombie) + #102/#103 (journal drops) |
 | **V-30.5** memory + ratchet | generated `bug-backlog.mjs`; `/resume`; `svc-repro`; status transitions; CI gates; `docs/agent/BUG_PIPELINE.md`; `telegram_work.md`; BUG-8449 retro-audit | `review-failures.mjs` has no repeated fixture signature; `check-capability-propagation.mjs --strict` exits 0; continuity + pack gates run in CI; retro-audit answers §4.10 questions 1–6 from disk/API only | generated backlog, resume transcript, CI output, retro-audit answers | **NOT STARTED** — after V-30.4 and explicit human go; do not delete hand-compiled backlog before fixture parity |
 
 ### 6.2 Executable handoff (audit 2026-09-24)
@@ -987,8 +987,15 @@ Start only after V-30.3's two verdict fixtures and named gate are green.
   - Queue contract: bugctl reads never queue (`WRITE_OPS` gate) — writes still do
     (proven by `tests/bugctl-queue.test.ts`, 5/5).
   - Scratch fixture committed at `src/utils/bugDispatchFlow.test.ts` (12 tests).
-  - **Pending:** the live scratch-card acceptance run (card timeline / attempt rows /
-    named-gate verify artifact) after merge.
+  - **LIVE PROOF 2026-09-24 (VPS):** card #3 walked `new → packed → in_fix →
+    verifying → done` end to end (plan row, attempt start/committed, PR #101
+    auto-merged, exit-3 refusal on re-dispatch, `named_test` verify by a
+    non-author with gate 50/0); card #4 exercised the failure path
+    (`attempt failed:` + `blocked_reason` + guard refusal). The proof itself
+    found and fixed three defects: #98 (heartbeat TERM trap + stop SIGKILL
+    race left an `in_fix` zombie), #102/#103 (block/unblock journal rows
+    dropped on the legacy response shape). Ops notes: opencode zen balance
+    depleted — dispatch with `--model=opencode-go/deepseek-v4.1-flash`.
 
 #### V-30.5 — memory, CI, and ratchet packet
 
@@ -1021,7 +1028,7 @@ Start only after V-30.4's end-to-end fixture is green.
 - [ ] P9 token exists only on host env files; registry has the real handle and `enabled:true`.
 - [ ] One live Telegram E2E message/reply is recorded with a public card id.
 - [ ] V-30.3 proves both derived repro flags with portable artifact keys.
-- [ ] V-30.4 proves plan → attempt → verify and blocked failure without direct main push.
+- [x] V-30.4 proves plan → attempt → verify and blocked failure without direct main push. (live 2026-09-24: card #3/#4, PR #101, refusals exit 3)
 - [ ] V-30.5 proves generated backlog, `/resume`, CI gates, strict capability status, docs, and
       the BUG-8449 retro-audit.
 - [ ] No phase is marked DONE from a chat claim, synthetic fixture, or tokenless test alone.
