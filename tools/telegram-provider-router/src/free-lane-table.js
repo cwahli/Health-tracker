@@ -330,7 +330,10 @@ export function soonestResetAmongDepleted(table, session, { now = Date.now(), la
 
 export function buildFreeLaneTableModel(table, session, { now = Date.now(), labelFn = defaultResetLabel } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });
-  const lanes = [...(t.lanes || [])].sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  // Display-only TH dedupe so the HTML grid shows one row per Token Harbor model.
+  const lanes = dedupeTokenHarborLanes(
+    [...(t.lanes || [])].sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0))
+  );
   const advice = activeRouteAdvice(t, session, { now, labelFn });
   const activePref = advice.active?.pref ?? null;
   const laneRows = lanes.map((l) => [
@@ -540,7 +543,7 @@ export function formatResetIn(isoOrMs, now = Date.now()) {
   return `${m}m`;
 }
 
-/** Short plan code: CF / CL / OC / OC-TH / TH / FB. */
+/** Short plan code: CF / CL / OC / TH / FB. */
 export function planCodeForLane(lane) {
   const provider = String(lane?.provider || "").toLowerCase();
   const model = String(lane?.model || "").toLowerCase();
@@ -548,10 +551,59 @@ export function planCodeForLane(lane) {
   if (provider === "cloudflare" || model.includes("cloudflare/") || bucket.includes("cloudflare")) return "CF";
   if (provider === "cline" || model.startsWith("cline")) return "CL";
   if (provider === "freebuff" || bucket.includes("freebuff")) return "FB";
+  // Token Harbor free bar = TH for both paths: the OpenCode `tokenharbor/…`
+  // tools lane and the chat-only `provider: tokenharbor` lane are the same
+  // shared `tokenharbor-free` bucket, so they share one public plan code.
   if (provider === "tokenharbor") return "TH";
-  if (provider === "opencode" && (model.includes("tokenharbor/") || bucket.includes("tokenharbor"))) return "OC-TH";
+  if (provider === "opencode" && (model.includes("tokenharbor/") || bucket.includes("tokenharbor"))) return "TH";
   if (provider === "opencode") return "OC";
   return (provider || "?").slice(0, 6).toUpperCase();
+}
+
+/** Does this lane belong to the shared `tokenharbor-free` bar? */
+function isTokenHarborLane(lane) {
+  const provider = String(lane?.provider || "").toLowerCase();
+  const model = String(lane?.model || "").toLowerCase();
+  const bucket = String(lane?.bucket || "").toLowerCase();
+  return provider === "tokenharbor" || model.startsWith("tokenharbor/") || bucket.includes("tokenharbor");
+}
+
+/** Provider-agnostic display key for a Token Harbor lane (strip prefix + lowercase). */
+function tokenHarborDisplayKey(lane) {
+  return String(lane?.model || "").toLowerCase().replace(/^tokenharbor\//, "");
+}
+
+/** The OpenCode + `tokenharbor/…` lane (tools) is preferred over the chat-only lane. */
+function lanePrefersTools(lane) {
+  return String(lane?.provider || "").toLowerCase() === "opencode"
+    || String(lane?.model || "").toLowerCase().startsWith("tokenharbor/");
+}
+
+/**
+ * Display-only dedupe: TH and OC-TH are the same free bar, so render ONE `TH`
+ * row per model. Prefers the OpenCode + `tokenharbor/…` lane (tools) when both
+ * exist. The ledger keeps chat-only lanes for failover; this only changes what
+ * `/allowance` shows.
+ */
+export function dedupeTokenHarborLanes(lanes) {
+  const out = [];
+  const byKey = new Map();
+  for (const lane of lanes || []) {
+    if (!isTokenHarborLane(lane)) {
+      out.push(lane);
+      continue;
+    }
+    const key = tokenHarborDisplayKey(lane);
+    const kept = byKey.get(key);
+    if (!kept) {
+      byKey.set(key, lane);
+      out.push(lane);
+    } else if (lanePrefersTools(lane) && !lanePrefersTools(kept)) {
+      out[out.indexOf(kept)] = lane;
+      byKey.set(key, lane);
+    }
+  }
+  return out;
 }
 
 /** Compact model title for the chat table (no provider prefix). */
@@ -668,7 +720,8 @@ function laneResetAt(lane, table) {
  */
 export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });
-  const lanes = [...(t.lanes || [])].filter(laneInAllowanceTable);
+  // TH + OC-TH are one row (display-only); failover still uses both lanes.
+  const lanes = dedupeTokenHarborLanes([...(t.lanes || [])].filter(laneInAllowanceTable));
   const usable = lanes
     .filter(laneIsUsable)
     .sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));

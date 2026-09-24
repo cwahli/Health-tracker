@@ -120,7 +120,16 @@ try {
   process.exit(2);
 }
 const { isQuotaOrLimitError, looksLikeHelpOrStatusDoc, wantsAllowanceTable, markDepleted, allowanceTableReply, FREE_LANE_TABLE_PATH, STATE_PATH } = mod;
-const { buildFreeLaneTableModel, renderFreeLaneTableHtml, syncFreeLaneTableFromSession, activeRouteAdvice, readJson } = flt;
+const {
+  buildFreeLaneTableModel,
+  renderFreeLaneTableHtml,
+  syncFreeLaneTableFromSession,
+  activeRouteAdvice,
+  formatCompactAllowanceChat,
+  dedupeTokenHarborLanes,
+  planCodeForLane,
+  readJson,
+} = flt;
 
 // ---- tiny harness ----
 let passed = 0;
@@ -278,6 +287,56 @@ t("W13 doc-noise session record keeps the ledger's depleted truth (no healthy pr
   eq(a.live, null, "polluted session record skipped");
   eq(isoZ(a.until), UNTIL_ISO, "until comes from the ledger file, not the polluted session record");
   if (a.lines.some((l) => /available \(no live quota record\)/.test(l))) throw new Error("pretended the depleted route was healthy");
+});
+
+// ---- HT-ALLOWANCE-TH-DEDUPE: TH + OC-TH are the same free bar ----
+const EMPTY_SESSION = { provider: "", models: {}, quota: {} };
+// Two lanes for the SAME model: OpenCode+tools path and chat-only Token Harbor.
+const TH_TOOLS_LANE = lane(8, "deepseek-v4.1-flash", "opencode", "tokenharbor/deepseek-v4.1-flash:free", "OpenCode Token Harbor DeepSeek V4.1 Flash free", "tokenharbor-free");
+const TH_CHAT_LANE = lane(9, "deepseek-v4.1-flash", "tokenharbor", "deepseek-v4.1-flash:free", "Token Harbor chat DeepSeek V4.1 Flash free", "tokenharbor-free");
+const TH_ONLY_TABLE = {
+  version: 3,
+  updatedAt: "2026-09-24T12:16:39.752Z",
+  failover: "same-family first (skip depleted), then next available by pref #",
+  buckets: { "tokenharbor-free": { scope: "shared", resetRule: "rolling ~7-day value bar", nextResetAt: null, nextResetLabel: "unknown" } },
+  lanes: [TH_TOOLS_LANE, TH_CHAT_LANE],
+};
+
+t("W14 planCodeForLane maps BOTH Token Harbor paths to TH (no OC-TH)", () => {
+  eq(planCodeForLane(TH_TOOLS_LANE), "TH", "opencode tokenharbor lane");
+  eq(planCodeForLane(TH_CHAT_LANE), "TH", "chat-only tokenharbor lane");
+  ok(!/OC-TH/.test(formatCompactAllowanceChat(TH_ONLY_TABLE, EMPTY_SESSION)), "compact text still says OC-TH");
+});
+
+t("W15 dedupeTokenHarborLanes keeps one row and prefers the OpenCode tools lane", () => {
+  const a = dedupeTokenHarborLanes(TH_ONLY_TABLE.lanes);
+  eq(a.length, 1, "one TH row");
+  eq(a[0].provider, "opencode", "kept provider");
+  eq(a[0].model, "tokenharbor/deepseek-v4.1-flash:free", "kept model");
+  eq(a[0].pref, 8, "kept pref");
+  // Order-independent: chat-only first must still be replaced by the tools lane.
+  const b = dedupeTokenHarborLanes([TH_CHAT_LANE, TH_TOOLS_LANE]);
+  eq(b.length, 1, "one TH row (reversed)");
+  eq(b[0].provider, "opencode", "reversed order still keeps the tools lane");
+});
+
+t("W16 compact /allowance shows DeepSeek V4.1 once as TH (no OC-TH)", () => {
+  const text = formatCompactAllowanceChat(TH_ONLY_TABLE, EMPTY_SESSION);
+  ok(!/OC-TH/.test(text), `OC-TH present:\n${text}`);
+  // Count table rows only (the "Next up:" summary may repeat the name).
+  const rows = text.split("\n").filter((l) => /^[✅❌] <code>/.test(l));
+  const thRows = rows.filter((l) => /DeepSeek V4\.1/.test(l));
+  eq(thRows.length, 1, `DeepSeek V4.1 table rows = ${JSON.stringify(thRows)}`);
+  ok(/DeepSeek V4\.1\s+TH\s/.test(thRows[0] || ""), `row not labeled TH: ${thRows[0]}`);
+});
+
+t("W17 HTML allowance model also lists Token Harbor once (display-only dedupe)", () => {
+  const m = buildFreeLaneTableModel(TH_ONLY_TABLE, EMPTY_SESSION);
+  const dsRows = m.tables[0].rows.filter((r) => /DeepSeek V4\.1/.test(r[1]));
+  eq(dsRows.length, 1, `HTML lane rows for DeepSeek V4.1 = ${JSON.stringify(dsRows)}`);
+  eq(dsRows[0][2], "opencode", "kept the OpenCode tools lane in HTML");
+  // Ledger itself is untouched: both lanes still exist for failover.
+  eq(TH_ONLY_TABLE.lanes.length, 2, "failover lanes preserved");
 });
 
 // ---- summary ----
