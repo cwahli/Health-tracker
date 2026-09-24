@@ -1965,10 +1965,13 @@ async function dispatchOnce(prompt, opts = {}) {
   return `Unknown provider: ${p}`;
 }
 
-async function dispatch(prompt, opts = {}) {
-  const onProgress = opts.onProgress;
-  const tried = [];
-  const start = currentRoute();
+/**
+ * Ordered failover route list for a dispatch start. Sticky first, then the
+ * preference-table walk (same family → pref #), skipping lanes already known
+ * depleted. Never re-sticks to a still-depleted lane while another ✅ exists.
+ * Throws the clear all-depleted message when nothing is left (no hang).
+ */
+function buildDispatchRoutes(start) {
   let routes = [{ provider: start.provider, model: start.model }, ...nextFailoverRoutes(start.provider, start.model)];
   // De-dupe
   const seen = new Set();
@@ -1993,6 +1996,14 @@ async function dispatch(prompt, opts = {}) {
   if (!routes.length) {
     throw new Error(allFreeLanesDepletedMessage(start.provider, start.model));
   }
+  return routes;
+}
+
+async function dispatch(prompt, opts = {}) {
+  const onProgress = opts.onProgress;
+  const tried = [];
+  const start = currentRoute();
+  const routes = buildDispatchRoutes(start);
 
   let lastReply = null;
   let lastErr = null;
@@ -2064,7 +2075,18 @@ async function dispatch(prompt, opts = {}) {
       // else try next
     }
   }
-  if (lastReply != null) return lastReply;
+  // Every route failed. Quota/limit is the only reason the loop keeps going, so
+  // surface the clear all-depleted message with the soonest Reset in — never the
+  // raw vendor text and never an infinite hang.
+  if (lastReply != null) {
+    if (isQuotaOrLimitError(lastReply)) {
+      throw new Error(allFreeLanesDepletedMessage(start.provider, start.model));
+    }
+    return lastReply;
+  }
+  if (lastErr && isQuotaOrLimitError(lastErr)) {
+    throw new Error(allFreeLanesDepletedMessage(start.provider, start.model));
+  }
   throw new Error(lastErr || "All free-lane failover routes failed");
 }
 
@@ -3649,6 +3671,9 @@ export {
   allowanceText,
   nextFailoverRoutes,
   nextAvailableRoutes,
+  buildDispatchRoutes,
+  allFreeLanesDepletedMessage,
+  isGreetingOnly,
   isQuotaOrLimitError,
   looksLikeHelpOrStatusDoc,
   looksLikeMarkdownTable,
