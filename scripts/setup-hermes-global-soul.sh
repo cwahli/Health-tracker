@@ -32,7 +32,23 @@ If they ask to fix a bug, tell them to send it to the Meal, Biomarker, or Onboar
 SOUL_EOF
 echo "  ✓ ~/.hermes/SOUL.md written"
 
-mkdir -p "${PROFILES_DIR}/qa_meal" "${PROFILES_DIR}/orchestrator" "${PROFILES_DIR}/qa_biomarker" "${PROFILES_DIR}/qa_onboarding" "${PROFILES_DIR}/meal_audit"
+mkdir -p "${PROFILES_DIR}/qa_meal" "${PROFILES_DIR}/orchestrator" "${PROFILES_DIR}/qa_biomarker" "${PROFILES_DIR}/qa_onboarding" "${PROFILES_DIR}/meal_audit" "${PROFILES_DIR}/bug_ticket"
+
+cat > "${PROFILES_DIR}/bug_ticket/SOUL.md" << 'BUG_TICKET_EOF'
+# Bug Ticket Bot (packer)
+
+You are the Health-tracker Bug Ticket Agent (the packer). Intake + pack only.
+Load the bug-ticket skill and follow it exactly.
+
+You may: search queue for duplicates, create cards, pack one defect, post repro needed, merge duplicates — then reply with the contract form and STOP.
+You may never: edit the repository; run run-coding-dispatch.sh or link orchestrator-dispatcher; set state or mark done/verify; bundle more than one discrepancy on a card.
+
+Three laws:
+1. If it is not on a card, it does not exist.
+2. Chat may never be the only place a decision lives.
+3. A state is never declared — it is derived from the posted artifact.
+BUG_TICKET_EOF
+echo "  ✓ ~/.hermes/profiles/bug_ticket/SOUL.md written"
 
 cat > "${PROFILES_DIR}/meal_audit/SOUL.md" << 'MEAL_AUDIT_EOF'
 # Meal Audit Bot
@@ -111,10 +127,20 @@ mkdir -p "${HERMES_DIR}/memories"
 echo "$USER_CONTENT" > "${HERMES_DIR}/memories/USER.md"
 echo "$MEMORY_CONTENT" > "${HERMES_DIR}/memories/MEMORY.md"
 
-for prof in qa_meal orchestrator qa_biomarker qa_onboarding meal_audit; do
+for prof in qa_meal orchestrator qa_biomarker qa_onboarding meal_audit bug_ticket; do
   mkdir -p "${PROFILES_DIR}/${prof}/memories"
   echo "$USER_CONTENT" > "${PROFILES_DIR}/${prof}/memories/USER.md"
 done
+
+cat > "${PROFILES_DIR}/bug_ticket/memories/MEMORY.md" << 'BUG_TICKET_MEM_EOF'
+Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
+The only binary is scripts/bugctl.mjs (pack --check before pack POST). State is derived from artifacts — never set it.
+Multi-item reports (e.g. BUG-8449's 7 Home discrepancies): ONE card + a split list, never a bundled ticket.
+Vague report → card + repro status=needed (needs_repro). Fingerprint = class|canonical_key|iso-week.
+Token HERMES_BUG_TICKET_TOKEN may be unset until the human BotFather step; never invent a successful reply.
+Packer never dispatches coders; triage handoff is a separate phase after packed.
+BUG_TICKET_MEM_EOF
+echo "  ✓ USER.md synced across profiles; bug_ticket MEMORY.md written"
 
 cat > "${PROFILES_DIR}/qa_meal/memories/MEMORY.md" << 'QA_MEM_EOF'
 Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
@@ -177,6 +203,16 @@ agent:
   preload_skills:
     - meal-audit-engine
 MEAL_AUDIT_CFG
+
+cat > "${PROFILES_DIR}/bug_ticket/config.yaml" << BUG_TICKET_CFG
+model:
+  default: ${DEFAULT_FREE_MODEL}
+  provider: ${DEFAULT_PROVIDER}
+agent:
+  max_turns: 4
+  preload_skills:
+    - bug-ticket
+BUG_TICKET_CFG
 echo "  ✓ Profile config.yaml files updated (preloads and max_turns)"
 
 # ---------------------------------------------------------------
@@ -251,7 +287,7 @@ if [ -d "${PROFILES_DIR}" ]; then
   # Validate dedicated profile tokens
   echo ""
   echo " Profile Telegram Bot Token Status:"
-  for prof_name in "orchestrator" "qa_meal" "meal_audit"; do
+  for prof_name in "orchestrator" "qa_meal" "meal_audit" "bug_ticket"; do
     prof_env="${PROFILES_DIR}/${prof_name}/.env"
     if [ -f "$prof_env" ] && grep -q '^TELEGRAM_BOT_TOKEN=' "$prof_env"; then
       echo "  ✓ Profile '${prof_name}' has dedicated TELEGRAM_BOT_TOKEN"
