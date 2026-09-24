@@ -1,8 +1,8 @@
 # Bot roles and dev agents — V-28 execute contract
 
-**Status:** OPEN. The agent who picks up V-28 executes this file. Do not redo V-19…V-26. Do not execute V-27 in the same turn (that is the phone path).
+**Status:** V-28 and V-29 are COMPLETE. This file is the role contract. Bot code loads `docs/agents/bot_work.md` (BOT-18 first). Do not re-execute V-19…V-29. V-30.2 operational closure is the human P9 token in `plan/BUG_TICKET_PIPELINE.md` §6.2.
 
-**Updated:** 2026-09-22
+**Updated:** 2026-09-24
 
 One person talks to a few bots. One script runs the coders. The coders do not talk, except through that script.
 
@@ -14,9 +14,9 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 - Hermes home: `/home/ubuntu/.hermes`. Gateway cwd is `~/.hermes`, so the repo `AGENTS.md` is not injected into Telegram turns. Leave that cwd alone.
 - Profiles do not inherit memory. Missing `memories/USER.md` or `memories/MEMORY.md` means that agent has a blank user and a blank notebook.
 - Caps: `USER.md` 1,375 characters. `MEMORY.md` 2,200 characters. A save is on disk immediately and enters the prompt on the next session.
-- Default `~/.hermes/memories/MEMORY.md` **still** over cap / stale (Render, “no Orchestrator bot”) as of 2026-09-22 — **BOT-7 open**. Replace, do not append.
+- **BOT-7 is DONE (2026-09-22).** The over-cap MEMORY measurement from that date is closed. Do not reopen it. Whole-file MEMORY injection is retired by BOT-13 (`docs/agents/bot_work.md`).
 - `qa_meal` memory exists and is partly stale (git-config requirement, exit 124). Orchestrator, `qa_biomarker`, and `qa_onboarding` memory directories are empty.
-- Global `~/.hermes/SOUL.md` / QA souls / `system_prompt_suffix` placeholders — **BOT-7 open** (V-28 leftovers). Skill is the only procedure; delete placeholder commands from soul + suffix.
+- Global souls and `system_prompt_suffix` placeholders were cleaned when BOT-7 closed. Do not treat that cleanup as open work.
 - `qa_biomarker` and `qa_onboarding` preload `qa-meal-journey` and `qa-telegram-journey`. They have no Telegram token. Do not wake them.
 - `scripts/sync-hermes-skills.sh` symlinks every repo skill into profiles; it **excludes** `orchestrator-dispatcher` from `qa_*` and `meal_audit` (unlink on run). OpenCode master shares the same `scripts/skills/common/` via registry `sharedSkills` and runs meal-audit itself (model A) — it does not message @Meal_audit_bot.
 - Dispatch script `scripts/run-coding-dispatch.sh` (commit `28486b1`) already detaches, calls `opencode run --auto -m opencode/muse-spark-1.3`, reverts only files that attempt changed, and on a meal/biomarker/onboarding push runs `qa-runner` and posts to that QA profile, with one extra OpenCode attempt if validation fails.
@@ -96,8 +96,9 @@ If they ask to fix a bug, tell them to send it to the Meal, Biomarker, or Onboar
 # Meal QA
 
 You look at the meal journey and report what is on screen.
-Write four lines: page, observed, expected, screenshot path.
-Start scripts/run-coding-dispatch.sh once, in the background, with the user's actual words and --category=meal.
+Write four fields, one defect: page, observed, expected, screenshot path.
+Start scripts/run-coding-dispatch.sh once, in the background, with those fields and --category=meal.
+The script packs them with `scripts/lib/bug-pack.mjs`. Several defects become one card plus a split list. Do not send a bundle.
 Then stop. Do not read source. Do not pick a coder. Do not wait for the result.
 The Orchestrator posts the result back into this chat.
 ```
@@ -108,10 +109,10 @@ The Orchestrator posts the result back into this chat.
 # Orchestrator
 
 You are the status log for coding runs.
-Do not edit the repo. Do not start OpenCode, Cline, Grok, or Antigravity yourself.
-Do not message the OpenCode Telegram bot.
+Do not edit the repo. Do not start a coder yourself. Do not pick a vendor.
+Do not message the interactive Telegram door.
 When asked to fix a bug, start scripts/run-coding-dispatch.sh once and stop when it prints "Background pid".
-The script posts progress here and sends validation to the QA bot.
+The script posts progress here. A green journey does not close the card. The card's named_test verify does.
 ```
 
 `qa_biomarker` and `qa_onboarding` souls: same shape as meal, with that journey name, plus “This bot has no Telegram token yet. Do not send messages.”
@@ -150,7 +151,7 @@ Confirm `qa-meal-journey` dispatches the user's actual report, category meal, no
 
 Keep the `28486b1` behavior (detach, own the lock, snapshot revert, QA hand-back).
 
-Add: on `Insufficient account funds`, one OpenCode retry with `-m opencode/deepseek-v4.1-flash`, then Cline, then Grok. Skip `agy` when `~/.hermes/tool_allowances.json` says `unavailable`. Set that status in `scripts/tool-allowance.mjs` defaults because Antigravity is location-blocked. A coder with no new files is a failed attempt; the Telegram line must include the real error (funds, abort, or location), not only “0 code changes.”
+Add: on `Insufficient account funds`, one retry on the same surface with `-m opencode/deepseek-v4.1-flash`, then stop and post the real error. Do not hop to another vendor. Skip `agy` when `~/.hermes/tool_allowances.json` says `unavailable`. Antigravity is location-blocked. A coder with no new files is a failed attempt. The Telegram line must include the real error (funds, abort, or location), not only “0 code changes.”
 
 ### 3f. Orchestrator Health Probing, Investigation Mode & Dual-Sync Memory
 
@@ -169,9 +170,9 @@ To prevent 36-minute stall ladders (where broken tools loop or timeout before to
        - **Prompt Bloat / Over-Analysis**: if a model times out reading a 6-part task, split into atomic single-concern micro-tasks and dispatch sequentially.
        - **Geo-block / Environment Failure**: immediately mark tool `unavailable` and escalate to next healthy tool in pool.
 
-3. **Dual-Sync Storage (JSON + MEMORY.md)**:
-   - **Machine State**: `~/.hermes/tool_allowances.json` remains the deterministic, typed source of truth parsed by `tool-allowance.mjs` and `run-coding-dispatch.sh`.
-   - **Cognitive Context**: When a tool status changes (e.g. model depleted, region blocked), `tool-allowance.mjs` syncs a concise 2-line note into `~/.hermes/memories/MEMORY.md` so the LLM Orchestrator system prompt is aware of environment realities without running shell commands.
+3. **Allowance file, not a memory dump**:
+   - `~/.hermes/tool_allowances.json` is the typed source of truth for `tool-allowance.mjs` and `run-coding-dispatch.sh`.
+   - Do not copy tool status into `MEMORY.md` for prompt injection. BOT-15's outcome row is the record a later run reads. Whole-file memory injection is retired (BOT-13).
 
 
 ## 4. Done when
@@ -232,6 +233,6 @@ A live bug run is not required to close V-28.
       - `Test / Invariant Conflict`: "Aborted: changing #nav-tab-health breaks existing Playwright tests in prototype/."
       - `Stall / Timeout`: "Halted: overthinking loop after 6m without generating code changes."
       - `Typecheck Failure`: "npx tsc failed on TS2322 in src/..."
-    - **Action Taken**: Next step executed by the Orchestrator (e.g. `Failing over to Cline with scoped atomic prompt`).
+    - **Action Taken**: Next step the script took (e.g. `One retry on the same surface, then stop`). The Orchestrator does not fail over to a vendor.
 
 

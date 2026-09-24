@@ -920,10 +920,11 @@ physical location → work session → execution surface → provider/model
        VM             VM/VM1          OpenCode          Gemini
 ```
 
-A bot names a location, not a model. An execution surface (OpenCode, Cline, or
-another runner) is selected per request. Gemini, Token Harbor, and similar APIs
-are provider/model backends behind that runner; they are not independent bots or
-terminal tools.
+A bot names a location, not a model, and not a vendor. The runner for that
+request is an execution surface. There is no Cline agent. Gemini, Token Harbor,
+and similar APIs are provider/model backends behind the runner. A surface that
+cannot resume or attach is declared degraded (the Cline CLI adapter is degraded
+for headless resume). It is not promoted into an identity.
 
 **Generic commands (all bots, all backends):**
 
@@ -990,18 +991,18 @@ honest structured debug view; handoff and abort preserve state; `/status` and
 | **P4 — Registry glue** | `bots/registry.json` `tg_provider_router` stays separate **token**; coding bots list common skills; Grok pack `registry.json` **links** repo paths | One registry story in AGENT_HANDOFF |
 | **P5 — Grok TG agent (optional)** | Pattern A (route inside provider-router) or B (new bot token + Channels); consume common skills | User can talk to Grok on TG with matrix + photos without forking stacks |
 
-### 14.4 Preferred free model for implementation
+### 14.4 Model notes (historical bake-off, not an agent)
 
-From `golden/scorecard/current/FREE_MODEL_TOOL_PICKER.md` + bake-off:
+The picker file records past pass rates. It does not name the coder. Dispatch selects a surface (BOT-17) and writes an outcome row (BOT-15). A fixed "Cline implements this" chain is retired.
 
-| Role | Model | Why |
-|------|-------|-----|
-| **Default implementer** | **Cline Free `deepseek-v4.1-flash` (high thinking)** | Best surgical PASS rate on tracker waves; independent of OpenCode Muse wallet |
-| Concurrent / Muse-shaped | OpenCode or Cline **Muse Spark 1.3 Contributor free** | Second wallet; good for docs+wiring when DeepSeek capped |
-| Fallback | Token Harbor `deepseek-v4.1-flash:free` | When Cline free depleted |
-| Avoid for this | Freebuff (burn Freebucks), DeepSeek V4, Grok Task/executor | Cost / policy / thin-PM |
+| Past observation | What to do with it |
+|------|-----|
+| `deepseek-v4.1-flash` had the best surgical pass rate on tracker waves, on more than one runner | Eligible backend when the outcome log does not mark it depleted |
+| Muse Spark 1.3 free is a second wallet | Do not retry it on the same bug after `insufficient funds` |
+| Token Harbor `deepseek-v4.1-flash:free` | Another backend for the same model, not a separate agent |
+| Freebuff, DeepSeek V4, Grok Task/executor | Avoid for this alignment work (cost / policy) |
 
-**Orchestration:** Health-tracker thin PM writes ticket → Cline DeepSeek implements P1–P3 → second free CLI checks. Docs/roadmap edits (this §) are PM-local.
+**Orchestration:** the thin PM writes the `work_item` (BOT-20). One surface implements. A second pass checks. Docs edits stay local. The implementer is not a Cline identity.
 
 ### 14.5 Reliability §10 gate (this change)
 
