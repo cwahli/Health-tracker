@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
  * bug-pack.mjs — V-30.2 packer gate helpers (pure, no HTTP).
  *
  * packCheck: schema + single-defect + criteria + fingerprint (bugctl pack --check).
+ * reproCheck: verdict vocabulary + artifact fields (bugctl repro --check, V-30.3).
  * splitMultiItemReport: BUG-8449 rule — one card + a split list, never a bundle.
  * fingerprint / isoWeekKey: mirror of src/utils/bugWorkItem.ts (bugctl is pure mjs).
  * packForDispatch: validate and pack inbound defect reports for run-coding-dispatch.sh (BOT-20).
@@ -82,6 +83,51 @@ export function packCheck(body) {
   if (surface) value.surface = surface;
   value.fingerprint = fp;
   value.idem_key = String(body?.idem_key || body?.['idem-key'] || fp);
+  return { ok: true, value, issues: [] };
+}
+
+/** Status vocabulary of validateRepro (src/utils/bugTicketState.ts) — never extend it here. */
+export const REPRO_STATUSES = ['not_needed', 'needed', 'confirmed', 'failed', 'ambiguous'];
+
+/**
+ * Validate a repro verdict before POST /api/bugs/:id/repro (bugctl repro --check).
+ * Mirrors validateRepro exactly: same status vocabulary, same artifact fields
+ * (confirmed → command + exit_code; failed/ambiguous → run_log). `not_needed`
+ * means no repro was required and is NOT a synonym for not_reproducible.
+ * Returns { ok: true, value } or { ok: false, error, issues[] }.
+ */
+export function reproCheck(body) {
+  const issues = [];
+  const status = String(body?.status || '').trim();
+  if (!status) issues.push('status required');
+  else if (!REPRO_STATUSES.includes(status)) {
+    issues.push(`repro.status must be one of ${REPRO_STATUSES.join(', ')}`);
+  }
+
+  const value = { status };
+  const str = (v) => String(v);
+  if (body?.command !== undefined && body?.command !== null && str(body.command) !== '') value.command = str(body.command);
+  if (body?.params !== undefined && body?.params !== null) value.params = body.params;
+  if (body?.run_log !== undefined && body?.run_log !== null && str(body.run_log) !== '') value.run_log = str(body.run_log);
+  if (body?.before !== undefined && body?.before !== null && str(body.before) !== '') value.before = str(body.before);
+  if (body?.after !== undefined && body?.after !== null && str(body.after) !== '') value.after = str(body.after);
+  if (body?.expected !== undefined && body?.expected !== null) value.expected = str(body.expected);
+  if (body?.actual !== undefined && body?.actual !== null) value.actual = str(body.actual);
+  if (body?.exit_code !== undefined && body?.exit_code !== null && str(body.exit_code) !== '') {
+    const n = Number(body.exit_code);
+    if (Number.isNaN(n)) issues.push('exit_code must be a number');
+    else value.exit_code = n;
+  }
+  if (body?.by !== undefined && body?.by !== null && str(body.by) !== '') value.by = str(body.by);
+
+  if (status === 'confirmed' && (!value.command || value.exit_code === undefined)) {
+    issues.push('confirmed repro requires command and exit_code');
+  }
+  if ((status === 'failed' || status === 'ambiguous') && !value.run_log) {
+    issues.push(`${status} repro requires run_log`);
+  }
+
+  if (issues.length) return { ok: false, error: issues.join('; '), issues };
   return { ok: true, value, issues: [] };
 }
 
