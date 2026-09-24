@@ -532,8 +532,8 @@
       "id": "svc-repro",
       "test": "T2",
       "scope": "common",
-      "status": "partial",
-      "prove": "unit: scripts/assert-bug-repro.mjs (both verdicts + derived flags via reproCheck + bugState walk); live pending: qa-runner --ticket evidence keys on a real card",
+      "status": "done",
+      "prove": "unit: scripts/assert-bug-repro.mjs (both verdicts + derived flags via reproCheck + bugState walk); live: qa-runner --ticket=2 posted repro.status=failed with run.log/before.png R2 keys (bugs/tag_mufs4t96_wj02x7/1790272128947-*, by qa_meal) and derived flag not_reproducible",
       "expect": [
         "scripts/qa-runner.mjs",
         "scripts/bugctl.mjs",
