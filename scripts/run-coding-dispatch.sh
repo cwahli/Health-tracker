@@ -161,7 +161,7 @@ stop_cmd() {
     esac
   done
   local stopped=0
-  local f pid bug_id tool worktree
+  local f pid bug_id tool worktree ticket
   for f in "$DISPATCH_LOCK_DIR"/*.json "$DISPATCH_ACTIVE_DIR"/*.json; do
     [ -f "$f" ] || continue
     bug_id=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("bug_id",""))' "$f" 2>/dev/null || true)
@@ -171,11 +171,19 @@ stop_cmd() {
     pid=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$f" 2>/dev/null || true)
     tool=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("tool",""))' "$f" 2>/dev/null || true)
     worktree=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("worktree",""))' "$f" 2>/dev/null || true)
+    ticket=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("ticket",""))' "$f" 2>/dev/null || true)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       echo "[Dispatcher] Terminating agent '${tool:-?}' (PID $pid) for ${bug_id:-?}..."
       kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
       pkill -P "$pid" 2>/dev/null || true
-      sleep 1.5
+      # Give the cleanup trap time to close an open ticket attempt (failed
+      # row + block) before SIGKILL. The old fixed `sleep 1.5` raced the trap
+      # mid-bugctl-call and left a silent in_fix zombie.
+      local g=0
+      while kill -0 "$pid" 2>/dev/null && [ "$g" -lt 12 ]; do
+        sleep 0.5
+        g=$((g + 1))
+      done
       if kill -0 "$pid" 2>/dev/null; then
         kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
         pkill -9 -P "$pid" 2>/dev/null || true
@@ -188,6 +196,27 @@ stop_cmd() {
     node "$FILE_LOCKS_CLI" release-bug "--bug-id=${bug_id:-?}" >/dev/null 2>&1 || true
     rm -f "$f" 2>/dev/null || true
     stopped=$((stopped + 1))
+    # V-30.4 zombie guarantee: the cleanup trap may have been SIGKILLed
+    # mid-bugctl-call (or never ran). If a ticket run's card is still
+    # in_fix (queue in_progress) after the process is dead, close the
+    # attempt and block here so no silent in_fix zombie survives `stop`.
+    if [ -n "${ticket:-}" ]; then
+      local bugctl_local="${REPO_DIR}/scripts/bugctl.mjs"
+      local zqueue=""
+      zqueue=$(node "$bugctl_local" packet --id "$ticket" --json 2>/dev/null | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("queue") or "")
+except Exception: print("")' 2>/dev/null || true)
+      if [ "$zqueue" = "in_progress" ]; then
+        node "$bugctl_local" attempt --id "$ticket" --actor orchestrator \
+          --hyp "stopped" --file "" --test "" \
+          --result "failed: stopped by operator" \
+          --note "stop closed the attempt (cleanup trap was killed or raced)" \
+          --burned=false --json >/dev/null 2>&1 || true
+        node "$bugctl_local" block --id "$ticket" --reason "dispatch stopped by operator" --json >/dev/null 2>&1 || \
+          echo "[Dispatcher] WARN: stop could not post block for $ticket" >&2
+        echo "[Dispatcher] ticket $ticket: stop closed the open attempt and blocked the card."
+      fi
+    fi
     if [ -n "$tool" ] && [ -n "$bug_id" ]; then
       bash "$TELEGRAM_SCRIPT" --profile="${HERMES_PROFILE:-orchestrator}" \
         --text="🛑 *[Orchestrator]* Stopped agent '*$tool*' on \`$bug_id\`.
@@ -615,6 +644,13 @@ fi
 stop_heartbeat() {
   if [ -n "${HEARTBEAT_PID:-}" ]; then
     kill "$HEARTBEAT_PID" 2>/dev/null || true
+    # Bounded wait: never hang the dispatch if the heartbeat ignores TERM.
+    local hb_i=0
+    while kill -0 "$HEARTBEAT_PID" 2>/dev/null && [ "$hb_i" -lt 6 ]; do
+      sleep 0.5
+      hb_i=$((hb_i + 1))
+    done
+    kill -9 "$HEARTBEAT_PID" 2>/dev/null || true
     wait "$HEARTBEAT_PID" 2>/dev/null || true
     HEARTBEAT_PID=""
   fi
@@ -711,6 +747,7 @@ cat <<JSON > "$RUN_LOCK_FILE"
 {
   "pid": $$,
   "bug_id": "${BUG_ID}",
+  "ticket": $(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "${TICKET:-}"),
   "category": "${CATEGORY}",
   "tool": "${REQUESTED_TOOL}",
   "model": "${PREFERRED_MODEL}",
@@ -835,8 +872,12 @@ start_heartbeat() {
         sleep 4
       done
     ) &
-    local TYPING_PID=$!
-    trap "kill $TYPING_PID 2>/dev/null || true" EXIT INT TERM
+      local TYPING_PID=$!
+      # EXIT cleans the typing loop; INT/TERM must EXIT this subshell — the
+      # old handler only killed typing and kept looping, so stop_heartbeat's
+      # `wait` never returned and the dispatch stalled after every run.
+      trap "kill $TYPING_PID 2>/dev/null || true" EXIT
+      trap "exit 0" INT TERM
 
     while true; do
       sleep "$interval_secs"
