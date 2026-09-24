@@ -4,7 +4,9 @@ Read this, then stop. Do not load `plan/ROADMAP.md`, `plan/BOT_ROLES.md`, `plan/
 
 ## Next code (no token)
 
-**BOT-18.** On run start write `{chatId, messageId, startedAt, pid}`. On boot, edit every orphaned Telegram progress line to `restarted mid-run — send it again` and append a `crash-pending` row. On Telegram 409, `process.exit(1)`. systemd `Restart=always` is already done. Do not build the later recovery rungs.
+**BOT-20 — pack, then reject.** `run-coding-dispatch.sh` calls the existing `scripts/lib/bug-pack.mjs` (`packCheck` / `splitMultiItemReport`). Input is a versioned `work_item` or the four fields `page`, `observed`, `expected`, `screenshot`. Several defects become one card plus a split list. Nothing that fails `packCheck` is passed through as `--task`. Do not write a second packer.
+
+**BOT-18 is DONE 2026-09-24.** Lease `{chatId, messageId, startedAt, pid}` written on run start and updated on progress create; boot sweep edits orphaned messages to `restarted mid-run — send it again` and appends `crash-pending` row; Telegram 409 conflict exits `process.exit(1)`. Tests: 119/119 green.
 
 ## Human, in parallel
 
@@ -12,8 +14,7 @@ Read this, then stop. Do not load `plan/ROADMAP.md`, `plan/BOT_ROLES.md`, `plan/
 
 ## Then, in order
 
-1. **BOT-20 — pack, then reject.** `run-coding-dispatch.sh` calls the existing `scripts/lib/bug-pack.mjs` (`packCheck` / `splitMultiItemReport`). Input is a versioned `work_item` or the four fields `page`, `observed`, `expected`, `screenshot`. Several defects become one card plus a split list. Nothing that fails `packCheck` is passed through as `--task`. Do not write a second packer.
-2. **BOT-21.** Log `(ticket, agent, tool, args-hash)`. The same hash twice on one ticket alerts. Two repro verdicts on one card must match or escalate.
+1. **BOT-21.** Log `(ticket, agent, tool, args-hash)`. The same hash twice on one ticket alerts. Two repro verdicts on one card must match or escalate.
 3. **BOT-14.** The two missing `shared_skills` paths in `bots/registry.json` become links to `scripts/skills/common`.
 4. **BOT-13.** Stores: `decisions/`, `dead-ends/`, `facts/`, plus shared `USER.md` (caps 1,375 / 2,200). Retrieve on a build, investigate, or decide turn only. Do not inject a whole memory file. Do not append a `/compact` summary. Missing, over-cap, or stale → a receipt. Count false-fires.
 5. **BOT-15.** One outcome row per dispatch: ticket, surface, provider/model, defect class, tokens, wall-clock, outcome. The pre-action gate reads it in code, beside the file locks. The second identical signature writes one test or rule the same day.

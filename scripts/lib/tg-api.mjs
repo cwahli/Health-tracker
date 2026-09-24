@@ -45,6 +45,10 @@ export class TelegramError extends Error {
   get isRateLimit() {
     return this.status === 429;
   }
+
+  get isConflict() {
+    return this.status === 409;
+  }
 }
 
 export function clamp(text, limit = MAX_MESSAGE_CHARS) {
