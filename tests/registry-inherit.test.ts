@@ -272,4 +272,29 @@ describe("runtime isolation", () => {
     expect(cfg.runtime).toBe("hermes");
     expect(cfg.hermes).toEqual({ profile: "qa_meal" });
   });
+
+  it("BOT-14: real bots/registry.json has no dead shared_skills paths", () => {
+    const raw = fs.readFileSync(path.join(__dirname, "../bots/registry.json"), "utf8");
+    const reg = JSON.parse(raw);
+    const forbidden = [
+      "social-media/telegram-media-delivery",
+      "autonomous-ai-agents/opencode",
+    ];
+
+    for (const bot of reg.bots || []) {
+      if (bot.agent?.sharedSkills) {
+        for (const skill of bot.agent.sharedSkills) {
+          for (const dead of forbidden) {
+            expect(skill).not.toContain(dead);
+          }
+          if (skill.includes("Health-tracker/") || skill.includes("bot-host/")) {
+            const rel = skill.includes("Health-tracker/")
+              ? skill.split("Health-tracker/")[1]
+              : skill.split("bot-host/")[1];
+            expect(fs.existsSync(path.join(__dirname, "..", rel))).toBe(true);
+          }
+        }
+      }
+    }
+  });
 });
