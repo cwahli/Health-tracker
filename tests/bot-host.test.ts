@@ -42,7 +42,14 @@ import {
   buildFreeModelList,
   formatFreeModelText,
   CLINE_FREE_MODELS,
+  GEMINI_MODELS,
 } from '../scripts/lib/freemodels.mjs';
+import {
+  runGemini,
+  resolveGeminiKey,
+  geminiModelId,
+  mapGeminiError,
+} from '../scripts/lib/agent-gemini.mjs';
 import {
   buildClineArgs,
   mapClineEvent,
@@ -830,13 +837,112 @@ describe('freemodels', () => {
       authPath: '/missing-auth.json',
       readJson: () => null,
     });
-    expect(entries).toHaveLength(CLINE_FREE_MODELS.length);
+    expect(entries).toHaveLength(CLINE_FREE_MODELS.length + GEMINI_MODELS.length);
     expect(entries[0].surface).toBe('cline');
     expect(entries[0].ref).toBe('cline:cline-free/deepseek-v4.1-flash');
     const text = formatFreeModelText(entries, { current: 'opencode/big-pickle' });
     expect(text).toContain('opencode/big-pickle');
     expect(text).toContain('daily free cap');
-    expect(text).toContain('4 cline, 0 opencode');
+    expect(text).toContain('4 cline, 4 gemini, 0 opencode');
+  });
+
+  it('parses gemini: refs and formats api labels', () => {
+    expect(parseModelRef('gemini:gemini/gemini-3.8-flash')).toEqual({
+      surface: 'gemini',
+      id: 'gemini/gemini-3.8-flash',
+      raw: 'gemini:gemini/gemini-3.8-flash',
+    });
+    expect(toModelRef('gemini', 'gemini/gemini-3.1-pro')).toBe('gemini:gemini/gemini-3.1-pro');
+    expect(formatFreeLabel('gemini:gemini/gemini-3.5-flash-lite')).toBe(
+      'gemini:gemini-3.5-flash-lite (api)',
+    );
+    expect(GEMINI_MODELS).toHaveLength(4);
+  });
+
+  it('lists curated gemini models even without opencode cache', () => {
+    const entries = buildFreeModelList({
+      modelsCachePath: '/missing-models.json',
+      authPath: '/missing-auth.json',
+      readJson: () => null,
+    });
+    expect(entries.slice(0, CLINE_FREE_MODELS.length).every((e) => e.surface === 'cline')).toBe(true);
+    const gemini = entries.filter((e) => e.surface === 'gemini');
+    expect(gemini.map((e) => e.ref)).toEqual(GEMINI_MODELS.map((id) => `gemini:${id}`));
+    const text = formatFreeModelText(entries, { current: 'gemini:gemini/gemini-3.7-flash' });
+    expect(text).toContain('gemini:gemini-3.7-flash (api)');
+    expect(text).toContain('GEMINI_API_KEY');
+  });
+});
+
+describe('agent-gemini', () => {
+  it('resolves the key from opts env or process env', () => {
+    expect(resolveGeminiKey({ GEMINI_API_KEY: ' k ' })).toBe('k');
+    expect(resolveGeminiKey({})).toBe(process.env.GEMINI_API_KEY?.trim() || '');
+  });
+
+  it('validates refs against the catalog', () => {
+    expect(geminiModelId('gemini:gemini/gemini-3.7-flash')).toBe('gemini-3.7-flash');
+    expect(geminiModelId('gemini/gemini-3.1-pro')).toBe('gemini-3.1-pro');
+    expect(geminiModelId('gemini:gemini/nope')).toBeNull();
+    expect(geminiModelId('opencode/big-pickle')).toBeNull();
+  });
+
+  it('maps auth/quota/not-found provider errors', () => {
+    expect(mapGeminiError({ status: 401, body: 'invalid api key' })).toMatch(/auth failed/i);
+    expect(mapGeminiError({ status: 429, body: 'quota exceeded' })).toMatch(/quota or rate limit/i);
+    expect(mapGeminiError({ status: 404, body: 'model not found' })).toMatch(/not found/i);
+  });
+
+  it('fails closed without a key and never calls fetch', async () => {
+    const saved = process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    try {
+      const result = await runGemini({
+        prompt: 'hi',
+        model: 'gemini/gemini-3.7-flash',
+        env: {},
+        fetchImpl: async () => {
+          throw new Error('must not call fetch');
+        },
+      });
+      expect(result.finalText).toBe('');
+      expect(result.sessionID).toBeNull();
+      expect(result.lastError).toMatch(/GEMINI_API_KEY/);
+    } finally {
+      if (saved !== undefined) process.env.GEMINI_API_KEY = saved;
+    }
+  });
+
+  it('returns text and usage on success', async () => {
+    const fetchImpl = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: 'PONG' } }], usage: { total_tokens: 42 } }),
+    });
+    const result = await runGemini({
+      prompt: 'hi',
+      model: 'gemini:gemini/gemini-3.8-flash',
+      env: { GEMINI_API_KEY: 'k' },
+      fetchImpl,
+    });
+    expect(result).toMatchObject({ code: 0, finalText: 'PONG', lastError: null, sessionID: null });
+    expect(result.usage.tokens).toEqual({ total: 42 });
+  });
+
+  it('classifies provider 429 as quota without throwing', async () => {
+    const fetchImpl = async () => ({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { message: 'quota exceeded' } }),
+    });
+    const result = await runGemini({
+      prompt: 'hi',
+      model: 'gemini/gemini-3.1-pro',
+      env: { GEMINI_API_KEY: 'k' },
+      fetchImpl,
+    });
+    expect(result.finalText).toBe('');
+    expect(result.lastError).toMatch(/quota or rate limit/i);
   });
 });
 

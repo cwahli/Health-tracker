@@ -18,12 +18,14 @@ import {
   isTimeoutError,
 } from './lib/agent-opencode.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
+import { runGemini } from './lib/agent-gemini.mjs';
 import {
   parseModelRef,
   buildFreeModelList,
   formatFreeModelText,
   formatFreeLabel,
   CLINE_FREE_MODELS,
+  GEMINI_MODELS,
   toModelRef,
 } from './lib/freemodels.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
@@ -584,7 +586,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, 'Could not read the model list from opencode.');
           return;
         }
-        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists free models from opencode + cline.`, {
+        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists free models from opencode + cline + gemini.`, {
           reply_markup: modelKeyboard(models),
         });
         return;
@@ -606,6 +608,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           return;
         }
         const stored = toModelRef('cline', ref.id);
+        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
+        return;
+      }
+      if (ref.surface === 'gemini') {
+        if (!GEMINI_MODELS.includes(ref.id)) {
+          await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /freemodel to pick from the free list.`);
+          return;
+        }
+        const stored = toModelRef('gemini', ref.id);
         prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
@@ -688,8 +701,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'thinking': {
       const ref = parseModelRef(eff.model);
+      // Gemini is single-shot: no variants, no opencode verbose lookup.
       const variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
       if (!cmd.args) {
         if (!variants.length) {
           await api.sendMessage(chatId, `No thinking levels exposed for ${eff.model}.`);
@@ -856,12 +870,13 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       const eff = effective(config, prefs, chatId);
       const ref = parseModelRef(eff.model);
       // Cline models expose fixed thinking levels, not opencode model variants.
+      // Gemini exposes none (single-shot lane).
       let variants =
-        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : await getVariants(config, caches, eff.model);
+        ref.surface === 'cline' ? CLINE_THINKING_LEVELS : ref.surface === 'gemini' ? [] : await getVariants(config, caches, eff.model);
       // New buttons carry the name (`v:high`); old keyboards carry an index
       // (`v:0`). Support both so already-shown keyboards keep working.
       let variant = variants.includes(value) ? value : variants[Number(value)];
-      if (!variant && ref.surface !== 'cline') {
+      if (!variant && ref.surface !== 'cline' && ref.surface !== 'gemini') {
         caches.verbose = null;
         variants = await getVariants(config, caches, eff.model);
         variant = variants.includes(value) ? value : variants[Number(value)];
@@ -967,21 +982,30 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
     const ref = parseModelRef(eff.model);
+    // Gemini is a keyed single-shot lane (no tools/session/plan/agent): same
+    // prompt and renderer, no workspace wiring.
     const result =
-      ref.surface === 'cline'
-        ? await runCline({
+      ref.surface === 'gemini'
+        ? await runGemini({
             prompt: promptWithMedia,
             model: ref.id,
-            variant: eff.variant,
-            plan: eff.agent === 'plan',
-            workspace: config.agent.workspace,
             timeoutMs: config.agent.timeoutMs,
-            clineBin: config.agent.clineBin,
-            onEvent: (event) => renderer.onEvent(event),
-            onSpawn: (child) => running.set(chatId, { child, aborted: false }),
-            env: chatEnv(api, chatId),
+            env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
           })
-        : await runOpencode({
+        : ref.surface === 'cline'
+          ? await runCline({
+              prompt: promptWithMedia,
+              model: ref.id,
+              variant: eff.variant,
+              plan: eff.agent === 'plan',
+              workspace: config.agent.workspace,
+              timeoutMs: config.agent.timeoutMs,
+              clineBin: config.agent.clineBin,
+              onEvent: (event) => renderer.onEvent(event),
+              onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+              env: chatEnv(api, chatId),
+            })
+          : await runOpencode({
             prompt: promptWithMedia,
             model: eff.model,
             variant: eff.variant,
@@ -1129,18 +1153,25 @@ async function dryRun(config, args) {
   await renderer.start();
   const ref = parseModelRef(config.agent.model);
   const result =
-    ref.surface === 'cline'
-      ? await runCline({
+    ref.surface === 'gemini'
+      ? await runGemini({
           prompt,
           model: ref.id,
-          variant: config.agent.variant,
-          workspace: config.agent.workspace,
           timeoutMs: config.agent.timeoutMs,
-          clineBin: config.agent.clineBin,
-          onEvent: (event) => renderer.onEvent(event),
           env: opencodeEnv(config),
         })
-      : await runOpencode({
+      : ref.surface === 'cline'
+        ? await runCline({
+            prompt,
+            model: ref.id,
+            variant: config.agent.variant,
+            workspace: config.agent.workspace,
+            timeoutMs: config.agent.timeoutMs,
+            clineBin: config.agent.clineBin,
+            onEvent: (event) => renderer.onEvent(event),
+            env: opencodeEnv(config),
+          })
+        : await runOpencode({
           prompt,
           model: config.agent.model,
           variant: config.agent.variant,
