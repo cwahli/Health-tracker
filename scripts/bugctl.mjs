@@ -132,6 +132,16 @@ function appendJournal(publicN, op) {
   fs.appendFileSync(file, JSON.stringify(row) + '\n');
 }
 
+// V-30.4 live proof: block/unblock (and other PATCH ops) return the legacy
+// work_item shape without top-level public_n — deriving it from now.public_id
+// keeps their journal rows from being silently dropped.
+function journalPub(r) {
+  if (r?.public_n != null) return r.public_n;
+  const pid = r?.now?.public_id;
+  if (pid != null && String(pid).startsWith('#')) return Number(String(pid).slice(1)) || undefined;
+  return undefined;
+}
+
 // V-30.4: only WRITES queue when the API is unavailable. A queued read
 // (packet/queue/next/list/show/state) can never be replayed by `flush` — it
 // would keep `bugctl flush` red forever. Reads fail loud instead.
@@ -315,7 +325,7 @@ async function main() {
       };
       const r = await withFallback({ op: 'attempt', id, ...body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/attempts`, body));
       if (r.ok && r.state) {
-        const pub = r.public_n || (r.now?.public_id ? Number(String(r.now.public_id).replace('#', '')) : undefined);
+        const pub = journalPub(r);
         appendJournal(pub, { op: 'attempt', tag_id: r.tag_id || id, state: r.state, flags: r.flags, hyp: body.hyp, result: body.result });
       }
       out(r, args);
@@ -335,7 +345,7 @@ async function main() {
         by: args.by,
       };
       const r = await withFallback({ op: 'verify', id, ...body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/verify`, body));
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'verify', tag_id: r.tag_id, state: r.state, flags: r.flags, result: body.result });
+      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'verify', tag_id: r.tag_id, state: r.state, flags: r.flags, result: body.result });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -348,7 +358,7 @@ async function main() {
       const r = await withFallback({ op: 'claim', id, assignee: args.assignee }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { assignee: args.assignee })
       );
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'claim', tag_id: r.tag_id, state: r.state, assignee: args.assignee });
+      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'claim', tag_id: r.tag_id, state: r.state, assignee: args.assignee });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -362,7 +372,7 @@ async function main() {
       const r = await withFallback({ op: 'duplicate', id, of }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { duplicate_of: of })
       );
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'duplicate', tag_id: r.tag_id, state: r.state, flags: r.flags, of });
+      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'duplicate', tag_id: r.tag_id, state: r.state, flags: r.flags, of });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -377,7 +387,7 @@ async function main() {
           reset_burns: args['reset-burns'] === true || args['reset-burns'] === 'true',
         })
       );
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'unblock', tag_id: r.tag_id, state: r.state, flags: r.flags });
+      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'unblock', tag_id: r.tag_id, state: r.state, flags: r.flags });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -390,7 +400,7 @@ async function main() {
       const r = await withFallback({ op: 'block', id, reason }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { blocked_reason: reason, queue: 'blocked' })
       );
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'block', tag_id: r.tag_id, state: r.state, flags: r.flags, reason });
+      if (r.ok && r.state) appendJournal(journalPub(r), { op: 'block', tag_id: r.tag_id, state: r.state, flags: r.flags, reason });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
