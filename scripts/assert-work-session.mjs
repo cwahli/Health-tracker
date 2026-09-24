@@ -103,7 +103,7 @@ const lifecycleTmux = (args) => {
     return true;
   }
   if (args[0] === 'list-panes') {
-    return [...lifecyclePanes.values()].filter((pane) => pane.target === lifecycleTarget(args[2])).map((pane) => `${pane.id}\t${pane.command}`).join('\n');
+    return [...lifecyclePanes.values()].filter((pane) => pane.target === lifecycleTarget(args[2])).map((pane) => `${pane.id}\t"${pane.command}"`).join('\n');
   }
   if (args[0] === 'split-window') return addLifecyclePane(args[3], args.at(-1));
   if (args[0] === 'select-pane' || args[0] === 'kill-pane') {
