@@ -1,11 +1,11 @@
 # Bug ticket pipeline for TG agentic development — audit + plan (proposal)
 
-**Status:** PROPOSAL — **direction decided 2026-09-24** (all 12 decisions: L1/L2 + P1–P10, recorded in §6.1/§8). No code, no tokens, no protected-doc edits. Implementation starts only on an explicit human go — V-30.1 first.
+**Status:** **V-30.1 IMPLEMENTED 2026-09-24** (store + CLI + A-f1/A-f5 on `agent/v-30.1`); V-30.0 decisions all recorded (§6.1/§8). V-30.2…V-30.5 start only on an explicit human go — phases run in order.
 **Drafted / last updated:** 2026-09-24
 **Scope:** make one durable bug-ticket store the working memory for the Telegram (TG) agent
 fleet, so a chat agent can never lose a bug between answers.
 **Roadmap entry:** `plan/ROADMAP.md` → *Track V Phase 10* — `V-30.0` **DECIDED 2026-09-24**;
-`V-30.1…V-30.5` ready in sequence, each gated on an explicit human go.
+`V-30.1` **DONE 2026-09-24**; `V-30.2…V-30.5` ready in sequence, each gated on an explicit human go.
 
 **This is not a fifth pillar.** It sits beside `plan/BOT_ROLES.md` and
 `docs/agents/telegram_work.md` and proposes a new **track** (see §6). It borrows the
@@ -32,8 +32,8 @@ local ground-truth file list is in §9.
 `plan/ROADMAP.md` in parallel — `17873f2`, `fbe0405`, `c4ed4f5`, `fdbf05d` (Hermes-parity
 BOT-12…17 plus `plan/AGENT_ALIGNMENT.md`). Those commits are in HEAD; this proposal's
 Phase 10 block landed with them. All P1–P10 directions were decided 2026-09-24 (§6.1/§8),
-so "committed" and "decided" now agree — except implementation, which still needs an explicit
-human go (`V-30.1` first). Expect the roadmap to move under you — re-read Track V Phase 10
+so "committed" and "decided" now agree — V-30.1 landed 2026-09-24 (store + CLI); V-30.2…V-30.5 still need
+an explicit human go each. Expect the roadmap to move under you — re-read Track V Phase 10
 before editing it.
 
 **Review order:**
@@ -786,7 +786,7 @@ active use (BOT-12…18 as of 2026-09-24 and growing), so V-30.x is the stable n
 
 | Phase | Deliverable | Gate (must exit 0) | Evidence artifact | Status |
 |---|---|---|---|---|
-| **V-30.1** store + CLI | schema fields + the `bugState()` projection (§4.3.4) + `bugctl` + artifact endpoints + **A-f1/A-f5** fixes | `npx vitest run src/utils/bugTicketState.test.ts` · `node scripts/assert-bug-ticket-continuity.mjs` · `npm run lint` | a scripted session that creates, packs, attempts and closes a card **only** through `bugctl`, with every state change provably derived from the artifact posted | **READY** — unblocked by V-30.0; start only on an explicit human go |
+| **V-30.1** store + CLI | schema fields + the `bugState()` projection (§4.3.4) + `bugctl` + artifact endpoints + **A-f1/A-f5** fixes | `npx vitest run src/utils/bugTicketState.test.ts` · `node scripts/assert-bug-ticket-continuity.mjs` · `npm run lint` | a scripted session that creates, packs, attempts and closes a card **only** through `bugctl`, with every state change provably derived from the artifact posted | **DONE 2026-09-24** — all gates green; V-30.2 next on human go |
 | **V-30.2** packer | `bug_ticket` Hermes profile (bootstrap table in §4.4: BotFather token → master `tokens.env` → `sync-bot-tokens.mjs` → registry entry → profile + short soul) + `bug-ticket` skill + `bugctl pack --check` | pack fixtures: (a) BUG-8449's 7-item report → must yield **1 card + a split list**, never a bundled ticket; (b) vague report → `needs_repro`; (c) duplicate → merged — **plus** one E2E reply through the new token before `enabled: true` | the three fixture transcripts + card ids + the E2E reply | after V-30.1 (P9 token = the human ops step) |
 | **V-30.3** reproducer | `qa-runner --ticket` + `qa-reproduce` skill + verdicts | one **known-good** card must be `not_reproducible`; one **known-bad** card must be `reproduced` with `run.log` + `before.png` | both verdicts with artifact keys | after V-30.2 (P7: QA profiles wake on demand) |
 | **V-30.4** orchestrator | dispatch `--ticket` + plan block + verify + blocked-on-failure | end-to-end on a scratch fixture bug in a dev-only surface → card `done`, named gate green, no chat claim | ticket timeline (commits[] rows) for the fixture | after V-30.3 |
@@ -801,7 +801,8 @@ phase stalls, the old chat → dispatch path still runs.
 **This table is the single editable record.** Mirrored in `plan/ROADMAP.md` → **Track V Phase 10
 (V-30.0)** as `DECIDED 2026-09-24`. All rows below are decided; to override one, edit its
 **Decision** cell, mirror the change into §8, and re-sync the roadmap status strings. No phase
-may start before its predecessor phase is done, and V-30.1 starts only on an explicit human go.
+may start before its predecessor phase is done, and V-30.2…V-30.5 each start only on an explicit human go
+(V-30.1 landed 2026-09-24).
 
 | # | Pending action | Options | Recommendation | Blocks | **Decision (2026-09-24)** |
 |---|---|---|---|---|---|

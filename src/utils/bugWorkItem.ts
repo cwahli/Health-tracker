@@ -21,6 +21,8 @@ export type BugAttempt = {
   note?: string;
   /** Exact remaining-line text this attempt was for. */
   line?: string;
+  /** Fix committed + deployed (moves card to verifying when no verify yet). */
+  applied?: boolean;
 };
 
 export type RemainingLinePhoto = {
@@ -57,6 +59,65 @@ export type BugCommit = {
   attempt?: BugAttempt | null;
 };
 
+export type BugSurface = 'food' | 'home' | 'health' | 'other';
+export type BugSource = 'web_snap' | 'tg_qa' | 'auto_file' | 'golden_red' | 'human';
+export type BugAssignee =
+  | 'bug_ticket'
+  | 'qa_meal'
+  | 'qa_biomarker'
+  | 'qa_onboarding'
+  | 'orchestrator'
+  | 'human';
+
+export type BugDefect = {
+  component: string;
+  observed: string;
+  expected: string;
+  criteria: string;
+};
+
+export type BugReproStatus = 'not_needed' | 'needed' | 'confirmed' | 'failed' | 'ambiguous';
+
+export type BugRepro = {
+  status: BugReproStatus;
+  command?: string;
+  params?: Record<string, unknown>;
+  run_log?: string;
+  before?: string;
+  after?: string;
+  expected?: string;
+  actual?: string;
+  exit_code?: number;
+  by?: string;
+  at?: string;
+};
+
+export type BugPlan = {
+  hypothesis: string;
+  files: string[];
+  approach?: string;
+  gates: string[];
+  risks?: string[];
+  blocked_by?: string[];
+  by?: string;
+  at?: string;
+};
+
+export type BugVerify = {
+  method: 'named_test' | 'journey' | 'manual';
+  command: string;
+  result: 'green' | 'red';
+  evidence: string[];
+  by?: string;
+  at?: string;
+};
+
+export type BugReplyTo = {
+  chat_id?: string | number;
+  thread_id?: string | number;
+  profile?: string;
+};
+
 export type BugWorkItem = {
   public_n: number;
   bug: string;
@@ -74,6 +135,21 @@ export type BugWorkItem = {
   unmatched?: boolean;
   /** Stable Checks roster for this card. Replay only flips pass/fail. */
   checks?: PinnedTapeCheck[];
+  /** V-30.1 ticket fields — all optional so old cards hydrate unchanged. */
+  surface?: BugSurface;
+  source?: BugSource;
+  idem_key?: string;
+  defect?: BugDefect;
+  repro?: BugRepro;
+  plan?: BugPlan;
+  verify?: BugVerify;
+  assignee?: BugAssignee;
+  reply_to?: BugReplyTo;
+  blocked_by?: string[];
+  duplicate_of?: string;
+  blocked_reason?: string;
+  /** Derived S-C-lite state (projected by bugState(); never agent-set). */
+  state?: string;
 };
 
 export type PinnedTapeCheck = {
@@ -186,7 +262,8 @@ export function hydrateWorkItem(tag: any): BugWorkItem {
   });
 }
 
-function mapLegacyStatus(legacy?: string, queue?: BugQueueStatus): BugQueueStatus {
+/** Legacy queue projection — input to bugState() (V-30.1: exported, not replaced). */
+export function mapLegacyStatus(legacy?: string, queue?: BugQueueStatus): BugQueueStatus {
   // Green tick writes status=fixed. That wins over a stale work_item.queue of ready.
   if (legacy === 'fixed' || legacy === 'ignored') return 'done';
   if (queue === 'blocked' || queue === 'done' || queue === 'in_progress' || queue === 'ready') return queue;
