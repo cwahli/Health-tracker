@@ -172,6 +172,13 @@ const savePrefs = (id, prefs) => saveMap(id, 'prefs.json', prefs);
 const loadTotals = (id) => loadMap(id, 'totals.json');
 const saveTotals = (id, totals) => saveMap(id, 'totals.json', totals);
 
+export function buildQuotedPrompt(text, replyToMessage) {
+  const prompt = String(text ?? '');
+  const quotedText = String(replyToMessage?.text || replyToMessage?.caption || '').trim();
+  if (!quotedText) return prompt;
+  return `[Quoted Telegram message]\n${quotedText}\n\n[New message]\n${prompt}`;
+}
+
 function loadOffset(id) {
   return Number(readJson(path.join(stateDir(id), 'offset.json'), { offset: 0 }).offset) || 0;
 }
@@ -1019,7 +1026,8 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       modelLabel: eff.model || '',
     });
     const handoff = prefs.get(chatId)?.handoff || '';
-    const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${text}` : text;
+    const quotedPrompt = buildQuotedPrompt(text, message.reply_to_message);
+    const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${quotedPrompt}` : quotedPrompt;
     const blocked = liveClaims()
       .filter((c) => c.bugId !== claimId && !claimed.includes(c.file))
       .map((c) => c.file);

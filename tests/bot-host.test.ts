@@ -17,7 +17,6 @@ import {
   isQuotaOrLimitError,
   runWithModelFailover,
 } from '../scripts/lib/agent-opencode.mjs';
-import { buildClineArgs } from '../scripts/lib/agent-cline.mjs';
 import {
   buildFailure,
   recordFailure,
@@ -78,7 +77,7 @@ import {
   extractMedia,
   extractCodeBlocks,
 } from '../scripts/lib/commands.mjs';
-import { ProgressRenderer } from '../scripts/bot-host.mjs';
+import { ProgressRenderer, buildQuotedPrompt } from '../scripts/bot-host.mjs';
 import {
   buildStatusSnapshot,
   formatStatusPlain,
@@ -86,6 +85,26 @@ import {
   formatAgo,
   COMPACT_SUMMARY_PROMPT,
 } from '../scripts/lib/bot-status.mjs';
+
+describe('telegram reply quote prompt', () => {
+  it('prepends a direct text reply while preserving the new request', () => {
+    expect(buildQuotedPrompt('What does it mean?', { text: '  Explain this phrase.  ' })).toBe(
+      '[Quoted Telegram message]\nExplain this phrase.\n\n[New message]\nWhat does it mean?',
+    );
+  });
+
+  it('uses a direct caption quote when text is absent', () => {
+    expect(buildQuotedPrompt('Translate it', { caption: 'Bonjour' })).toContain('[Quoted Telegram message]\nBonjour');
+  });
+
+  it('returns the original request when there is no quote', () => {
+    expect(buildQuotedPrompt('Continue', undefined)).toBe('Continue');
+  });
+
+  it('ignores media-only quoted messages', () => {
+    expect(buildQuotedPrompt('Continue', { photo: [{ file_id: 'photo' }] })).toBe('Continue');
+  });
+});
 
 describe('reasoning-compress', () => {
   it('strips code fences and markdown noise', () => {
