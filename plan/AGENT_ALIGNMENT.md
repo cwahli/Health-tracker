@@ -42,6 +42,16 @@ tools/telegram-provider-router/src/*.vendor.mjs ← mirrors, never hand-edited
 
 Rules:
 
+0. **Bot = location, lane = tool.** A bot id names a *place* (vm = VPS,
+   mobile = phone, collab = Colab, hermes_* = gateway). The lane
+   (`opencode` CLI with tools+session, `cline` CLI with tools+thinking,
+   `gemini` keyed API single-shot) is a per-message tool choice via
+   `/model` + `/freemodel` (`parseModelRef`), not an identity. Every lane
+   honors the same contracts — session, memory, headline, commands,
+   skills. Where a lane *cannot* (gemini: no tools/session by
+   construction), the picker must say so instead of silently degrading.
+   Lane-parity gaps are tracked as BOT-12…17, never as per-bot exceptions.
+
 1. **Memory files are repo-owned, agent-written.** `bots/memory/<id>.md`
    (+ shared `USER.md`) load into every bot-host prompt like today's handoff
    brief, and grow via `/remember <fact>` + auto-append of the `/compact`
