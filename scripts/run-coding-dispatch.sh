@@ -575,6 +575,43 @@ tg_qa() {
 }
 
 # ---------------------------------------------------------------
+# BOT-15: Outcome-ledger pre-action gate + outcome recording.
+# The gate reads the run ledger in code, beside the file locks, before any
+# edit (a prompt footer is not the gate). A repeated signature never blocks
+# the run — it warns that the repeat must yield one test or rule that day.
+# One outcome row per dispatch is recorded at the terminal points below.
+# ---------------------------------------------------------------
+LEDGER_HELPER="${REPO_DIR}/scripts/lib/run-ledger.mjs"
+LEDGER_DEFECT_CLASS="${PACKED_FINGERPRINT:-$CATEGORY}"
+check_run_ledger() {
+  [ -f "$LEDGER_HELPER" ] || return 0
+  local ledger_res="" ledger_status=0
+  set +e
+  ledger_res=$(node "$LEDGER_HELPER" check --ticket="$BUG_ID" --surface="${DISPATCH_PROFILE:-orchestrator}" --provider="$REQUESTED_TOOL" --model="${PREFERRED_MODEL:-default}" --defect-class="$LEDGER_DEFECT_CLASS" 2>&1)
+  ledger_status=$?
+  set -e
+  if [ "$ledger_status" -eq 2 ] || printf '%s' "$ledger_res" | grep -q '"duplicate": *true'; then
+    local ledger_sig
+    ledger_sig=$(printf '%s' "$ledger_res" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("signature",""))' 2>/dev/null || echo "")
+    echo "[Dispatcher] WARNING: BOT-15 duplicate dispatch signature on $BUG_ID (sig=$ledger_sig). This repeat must yield one test or rule today." >&2
+    tg_msg "⚠️ *[RunLedger]* Second identical dispatch signature on \`$BUG_ID\` (sig \`$ledger_sig\`). This repeat must produce one test or rule today — not a third debug." || true
+  fi
+}
+record_run_outcome() {
+  local outcome="$1" provider="${2:-$REQUESTED_TOOL}" model="${3:-${PREFERRED_MODEL:-default}}"
+  [ -f "$LEDGER_HELPER" ] || return 0
+  node "$LEDGER_HELPER" record \
+    --ticket="$BUG_ID" \
+    --surface="${DISPATCH_PROFILE:-orchestrator}" \
+    --provider="$provider" \
+    --model="$model" \
+    --defect-class="$LEDGER_DEFECT_CLASS" \
+    --wall-clock=$(( ($(date +%s) - START_TIME) * 1000 )) \
+    --outcome="$outcome" >/dev/null 2>&1 || true
+}
+check_run_ledger
+
+# ---------------------------------------------------------------
 # Cross-platform timeout
 # ---------------------------------------------------------------
 run_with_timeout() {
@@ -766,6 +803,7 @@ Reverting this attempt's uncommitted changes..."
     tg_msg "🚀 *[Orchestrator]* Fix committed and pushed to \`$run_branch\` (\`$commit_hash\`). Merges sequentially; claim-guard blocks same-file overlap."
     node "${REPO_DIR}/scripts/tool-allowance.mjs" report-result --tool="$tool_name" --status="success" --bug-id="$BUG_ID" --category="$CATEGORY" --duration=$(( $(date +%s) - START_TIME )) || true
     record_audit "$tool_name" "$model_desc" "resolved" "deployed_pending_qa"
+    record_run_outcome "committed" "$tool_name" "$model_desc"
     snapshot_workspace
     return 0
   else
@@ -1331,6 +1369,7 @@ done
 # Result handling
 if [ "$CASCADE" -eq 1 ]; then
   record_audit "none" "none" "human" "escalated_human"
+  record_run_outcome "escalated" "none" "none"
   tg_msg "🚨 *[Orchestrator]* All automated cascade agents exhausted for \`$BUG_ID\`.
 *Agents tried:* ${TOOL_SEQUENCE[*]}
 *Bug:* $TASK
@@ -1338,6 +1377,7 @@ if [ "$CASCADE" -eq 1 ]; then
 Human intervention required. Please review the bug and assign manually."
   exit 1
 else
+  record_run_outcome "unresolved" "${TOOL_SEQUENCE[0]}" "${PREFERRED_MODEL:-default}"
   tg_msg "⚠️ *[Orchestrator]* Agent *${TOOL_SEQUENCE[0]}* did not resolve \`$BUG_ID\`.
 Orchestrator awaiting next action or alternate model selection."
   exit 1

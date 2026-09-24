@@ -20,7 +20,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 **BOT-23 is DONE 2026-09-24.** Journey investigation & pre-dispatch regression gate. Investigated recent broken meal/portion journey; added `scripts/lib/dev-regression.mjs` and `scripts/assert-dev-regression.mjs` (17/17 tests passing); wired pre-dispatch dev regression & blast radius verification into `scripts/run-coding-dispatch.sh` `check_git_and_tsc()`. Rule L1 blast-radius violations reject uncommitted edits immediately; UI edits require `node scripts/assert-shell-smoke.mjs` (Playwright) to pass before commit/push.
 
-**Next code: BOT-14.** The two missing `shared_skills` paths in `bots/registry.json` become links to `scripts/skills/common`.
+**Next code: BOT-15.** One outcome row per dispatch (ticket, surface, provider/model, defect class, tokens, wall-clock, outcome) with a pre-action duplicate-signature gate.
 
 **BOT-18 is DONE 2026-09-24.** Lease `{chatId, messageId, startedAt, pid}` written on run start and updated on progress create; boot sweep edits orphaned messages to `restarted mid-run — send it again` and appends `crash-pending` row; Telegram 409 conflict exits `process.exit(1)`. Tests: 119/119 green.
 
@@ -30,7 +30,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 ## Then, in order
 
-1. **BOT-14.** The two missing `shared_skills` paths in `bots/registry.json` become links to `scripts/skills/common`.
+1. **BOT-15.** One outcome row per dispatch: ticket, surface, provider/model, defect class, tokens, wall-clock, outcome. The pre-action gate reads it in code, beside the file locks, before the edit. The second identical signature writes one test or rule the same day.
 4. **BOT-13.** Stores: `decisions/`, `dead-ends/`, `facts/`, plus shared `USER.md` (caps 1,375 / 2,200). Retrieve on a build, investigate, or decide turn only. Do not inject a whole memory file. Do not append a `/compact` summary. Missing, over-cap, or stale → a receipt. Count false-fires.
 5. **BOT-15.** One outcome row per dispatch: ticket, surface, provider/model, defect class, tokens, wall-clock, outcome. The pre-action gate reads it in code, beside the file locks. The second identical signature writes one test or rule the same day.
 6. **BOT-16.** Composed soul, line budgets. The three laws below live in that soul, because the Hermes gateway cwd is `~/.hermes` and a Telegram turn does not load `AGENTS.md`.
