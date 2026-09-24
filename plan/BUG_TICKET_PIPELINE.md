@@ -1,11 +1,11 @@
 # Bug ticket pipeline for TG agentic development — audit + plan (proposal)
 
-**Status:** PROPOSAL — review-ready. No code written, no tokens created, no protected docs edited.
+**Status:** PROPOSAL — **direction decided 2026-09-24** (all 12 decisions: L1/L2 + P1–P10, recorded in §6.1/§8). No code, no tokens, no protected-doc edits. Implementation starts only on an explicit human go — V-30.1 first.
 **Drafted / last updated:** 2026-09-24
 **Scope:** make one durable bug-ticket store the working memory for the Telegram (TG) agent
 fleet, so a chat agent can never lose a bug between answers.
-**Roadmap entry:** `plan/ROADMAP.md` → *Track V Phase 10* (`V-30.0` … `V-30.5`), marked
-`PENDING HUMAN` and listed under **Still `blocked_human`**.
+**Roadmap entry:** `plan/ROADMAP.md` → *Track V Phase 10* — `V-30.0` **DECIDED 2026-09-24**;
+`V-30.1…V-30.5` ready in sequence, each gated on an explicit human go.
 
 **This is not a fifth pillar.** It sits beside `plan/BOT_ROLES.md` and
 `docs/agents/telegram_work.md` and proposes a new **track** (see §6). It borrows the
@@ -35,32 +35,33 @@ the `blocked_human` marker and the P4 note into HEAD**, so they are already *com
 *undecided*. Two later pointer edits (the §6.1 decision-sheet references) remain **uncommitted**
 in the working tree; this proposal file itself is **untracked**. Expect the roadmap to move under
 you — re-read Track V Phase 10 before editing it, and do not treat "already committed" as
-"already decided" (`V-30.0` is still `PENDING HUMAN`).
+"already decided" for work that has not been explicitly started (`V-30.1` needs a human go).
 
 **Review order:**
 1. §0 verdict (one screen) → §2 audit (evidence for every gap) → §3 prior art → §4 design →
    §5 change list → §6 rollout + **§6.1 decision sheet** → §7 risks → §10 (store options A–D
    walked end to end on one bug).
-2. Check §8: two decisions are already **locked (L1, L2)** — reopen only with a stated reason.
-3. Fill the **Decision** column of **§6.1** (P1–P10). Recommendations are pre-filled; override
-   where you disagree and leave a one-line rationale.
+2. Check §8: **all decisions are made** (L1, L2 + P1–P10, 2026-09-24). Your review is to test
+   the choices against §2's evidence and the rejected alternatives, not to fill blanks.
+3. To **override** a direction: edit its `Decision` cell in **§6.1**, mirror the change into §8,
+   and re-sync the roadmap status strings. The sheet is the canonical record.
 
-**After deciding (still documentation only):** mirror the outcome in §8, then flip the roadmap
-statuses — `V-30.0 PENDING HUMAN` → `DECIDED`, each `BLOCKED on V-30.0` → `READY` (or leave
-blocked if you declined), and drop `V-30.0` from **Still `blocked_human`**. Only then does
-V-30.1 become startable, as a **separate** task with its own gates (§6). Reviewing this document
-never authorises code.
+**Decided — but still no code.** Implementation begins only with an explicit human go, one
+phase at a time (§6: V-30.1 → V-30.5, each with its own gate). Reviewing or agreeing with this
+document never authorises code, tokens, or protected-doc edits.
 
 **Do not, as part of a review:** edit protected docs (`AGENTS.md`, `docs/agent/**`,
 `scripts/assert-*.mjs` — AGENTS.md §3 requires an explicit before→after), create the
 `bug_ticket` profile or any token, touch `bots/registry.json`, or write `src/`/`scripts/` code.
 Those are V-30.x work items, listed in §5.2.
 
-**Locked already (reopen only with a reason):**
+**Decided (2026-09-24) — all twelve, with rationale in §8:**
 - **L1 — QA is reused:** no new QA agent; one skill (`qa-reproduce`) + one card state on the
   existing per-surface profiles (§4.4).
 - **L2 — the packer is a new Hermes profile `bug_ticket`** — one new bot, its own token, no
   dispatch powers (§4.4 bootstrap table → V-30.2).
+- **P1–P10:** store, state vocabulary, auth, numbering, `not_reproducible` owner, repro depth,
+  QA wake policy, backlog artifact, token creation, channel model — see the sheet in §6.1.
 
 ---
 
@@ -375,9 +376,8 @@ opinion — which is exactly how `journey-guard.mjs` already protects code.
    `repro`, `plan`, an attempt, `verify`) and the server projects the state from it (§4.3.4).
    Prose in chat cannot move a card; only the artifact can.
 
-*The store/transport is still open — **A** (D1 only), **B** (git ticket files), **C** (D1 +
-git bus) and **D** (A + a git-committed journal) are walked end to end in **§10**, with
-A + D recommended.*
+*Decided (P1): **A + D** — D1 `issue_tags` as the only store, plus the git journal; C is the
+documented escape hatch; B is rejected (§10).*
 
 ### 4.2 Ticket schema v2 (extend `work_item`; no new store)
 
@@ -430,7 +430,7 @@ projection of `queue` — not an independent truth.
 |---|---|---|---|
 | **S-A** — declared, 11 states (as first drafted) | a new `state` field the roles set via a transition endpoint | a **fourth** vocabulary plus a new authority (`assertTransition`) that can disagree with `mapLegacyStatus` | rejected |
 | **S-B** — declared but lean (6) | `new/packed/reproduced/in_fix/verifying/done` + flags | still a fourth vocabulary, just smaller | rejected |
-| **S-C** — **derived projection** *(recommended)* | roles never set a state; they post **artifacts** (`defect`, `repro`, `plan`, attempts, `verify`); one pure function projects the state server-side and denormalizes it into `status` | one new pure module + unit test; `mapLegacyStatus` is extended, not replaced | **recommended** |
+| **S-C** — **derived projection** *(chosen — in lean form, §4.3.5)* | roles never set a state; they post **artifacts** (`defect`, `repro`, `plan`, attempts, `verify`); one pure function projects the state server-side and denormalizes it into `status` | one new pure module + unit test; `mapLegacyStatus` is extended, not replaced | **chosen (P2)** |
 | **S-D** — existing vocabulary only | keep `ready/in_progress/blocked/done`; store repro/plan/verify as inert data | zero migration, but the queue cannot tell "QA's turn" from "orchestrator's turn" | rejected (fails the R3/R4 routing) |
 
 **Why derived wins:** an agent cannot *declare* a state, so illegal states are impossible by
@@ -488,7 +488,7 @@ Rules that come with it:
 - **The modal's 7 filters are derived from the same projection** (one mapping table), so this
   *removes* the third vocabulary instead of adding a fourth.
 
-#### 4.3.5 Lean variant (S-C-lite) — the 5-state version
+#### 4.3.5 Lean variant (S-C-lite) — the chosen vocabulary (P2)
 
 Because `assignee` carries routing, `needs_repro` and `planned` are *reporting* states rather than
 routing ones. Collapse them:
@@ -782,16 +782,16 @@ checker · `failure-log.mjs` + `review-failures.mjs` · `standing.json` /
 
 ## 6. Rollout (each phase has a gate and an artifact; nothing is big-bang)
 
-Proposed track IDs — **V-30.1 … V-30.5** (Track V is the bot/track lane; BOT-12..16 would
-also fit — see §8 item 1). Numbering is a decision, not a design.
+Track IDs — **V-30.1 … V-30.5** (*decided, P4*): Track V Phase 10. The BOT-xx range is in
+active use (BOT-12…18 as of 2026-09-24 and growing), so V-30.x is the stable numbering.
 
-| Phase | Deliverable | Gate (must exit 0) | Evidence artifact |
-|---|---|---|---|
-| **V-30.1** store + CLI | schema fields + the `bugState()` projection (§4.3.4) + `bugctl` + artifact endpoints + **A-f1/A-f5** fixes | `npx vitest run src/utils/bugTicketState.test.ts` · `node scripts/assert-bug-ticket-continuity.mjs` · `npm run lint` | a scripted session that creates, packs, attempts and closes a card **only** through `bugctl`, with every state change provably derived from the artifact posted |
-| **V-30.2** packer | `bug_ticket` Hermes profile (bootstrap table in §4.4: BotFather token → master `tokens.env` → `sync-bot-tokens.mjs` → registry entry → profile + short soul) + `bug-ticket` skill + `bugctl pack --check` | pack fixtures: (a) BUG-8449's 7-item report → must yield **1 card + a split list**, never a bundled ticket; (b) vague report → `needs_repro`; (c) duplicate → merged — **plus** one E2E reply through the new token before `enabled: true` | the three fixture transcripts + card ids + the E2E reply |
-| **V-30.3** reproducer | `qa-runner --ticket` + `qa-reproduce` skill + verdicts | one **known-good** card must be `not_reproducible`; one **known-bad** card must be `reproduced` with `run.log` + `before.png` | both verdicts with artifact keys |
-| **V-30.4** orchestrator | dispatch `--ticket` + plan block + verify + blocked-on-failure | end-to-end on a scratch fixture bug in a dev-only surface → card `done`, named gate green, no chat claim | ticket timeline (commits[] rows) for the fixture |
-| **V-30.5** memory + ratchet | generated backlog, `/resume`, capability rows, CI gate, retro-audit | `review-failures.mjs` has no new repeated signature for the fixture; capability checker `--strict` green | **retro-audit**: re-open BUG-8449 in the new store and prove the record answers 1–6 of §4.10 |
+| Phase | Deliverable | Gate (must exit 0) | Evidence artifact | Status |
+|---|---|---|---|---|
+| **V-30.1** store + CLI | schema fields + the `bugState()` projection (§4.3.4) + `bugctl` + artifact endpoints + **A-f1/A-f5** fixes | `npx vitest run src/utils/bugTicketState.test.ts` · `node scripts/assert-bug-ticket-continuity.mjs` · `npm run lint` | a scripted session that creates, packs, attempts and closes a card **only** through `bugctl`, with every state change provably derived from the artifact posted | **READY** — unblocked by V-30.0; start only on an explicit human go |
+| **V-30.2** packer | `bug_ticket` Hermes profile (bootstrap table in §4.4: BotFather token → master `tokens.env` → `sync-bot-tokens.mjs` → registry entry → profile + short soul) + `bug-ticket` skill + `bugctl pack --check` | pack fixtures: (a) BUG-8449's 7-item report → must yield **1 card + a split list**, never a bundled ticket; (b) vague report → `needs_repro`; (c) duplicate → merged — **plus** one E2E reply through the new token before `enabled: true` | the three fixture transcripts + card ids + the E2E reply | after V-30.1 (P9 token = the human ops step) |
+| **V-30.3** reproducer | `qa-runner --ticket` + `qa-reproduce` skill + verdicts | one **known-good** card must be `not_reproducible`; one **known-bad** card must be `reproduced` with `run.log` + `before.png` | both verdicts with artifact keys | after V-30.2 (P7: QA profiles wake on demand) |
+| **V-30.4** orchestrator | dispatch `--ticket` + plan block + verify + blocked-on-failure | end-to-end on a scratch fixture bug in a dev-only surface → card `done`, named gate green, no chat claim | ticket timeline (commits[] rows) for the fixture | after V-30.3 |
+| **V-30.5** memory + ratchet | generated backlog, `/resume`, capability rows, CI gate, retro-audit | `review-failures.mjs` has no new repeated signature for the fixture; capability checker `--strict` green | **retro-audit**: re-open BUG-8449 in the new store and prove the record answers 1–6 of §4.10 | after V-30.4 |
 
 **Rollback story:** every phase is additive — new `work_item` fields are optional, `--task=`
 stays supported, the web UI and `/api/bugs/next` keep working, `bugctl` is a new file. If a
@@ -1004,13 +1004,13 @@ Same store, same transport, same endpoint surface as **A** — plus one extra bo
 | Migration cost | zero | export every existing tag + mirror | one script + a `rev` field | zero |
 | Matches §5.4 non-goals | ✅ | ❌ second store to keep in sync | ⚠️ one extra daemon | ✅ |
 
-**Recommendation: A + D for V-30.1** — A's store (no migration, no daemon, live web modal) plus
-the append-only journal so the ticket's life is reviewable in git and readable offline. Keep
-**C** as the escape hatch: it reuses A's store, so if the HTTP dependency or the shared write
-token ever bites, only the transport changes. **B** is the most elegant to read, but it puts a
-second store next to `issue_tags` — the split that caused BUG-8449 in the first place.
+**Decision (P1): A + D** — A's store (no migration, no daemon, live web modal) plus the
+append-only journal so the ticket's life is reviewable in git and readable offline. **C** stays
+the documented escape hatch (it reuses A's store, so only the transport would change if the
+HTTP dependency or the shared write token ever bites). **B** is rejected: a second store next to
+`issue_tags` is the split that caused BUG-8449.
 
-**What actually decides it** (worth answering before choosing):
+**Why A + D wins (the deciding considerations):**
 
 1. Do you want the web bug modal and the TG lane to be the *same* rows at all times? → A, C or D.
 2. Is a shared write token acceptable on the phone/Colab lanes? → if no, C. (Note
