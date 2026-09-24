@@ -14,6 +14,8 @@
  * Commands:
  *   create  --title T [--surface S] [--class C] [--assignee A] [--source S]
  *   pack    --id N --component C --observed O --expected E --criteria R [--class ...]
+ *           --check          validate payload only (schema + single-defect + criteria + fingerprint); no HTTP
+ *           --split <file>   multi-item report JSON → { ok, card, split[] } (one card + split list)
  *   repro   --id N --status S [--command CMD] [--exit-code N] [--run-log L]
  *   plan    --id N --hyp H --files a.ts,b.ts --gates g1,g2
  *   attempt --id N --hyp H --file F --test T --result R [--line L] [--applied]
@@ -32,6 +34,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { packCheck, splitMultiItemReport, isVagueReport, fingerprint } from './lib/bug-pack.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -182,6 +185,34 @@ async function main() {
 
     case 'pack':
     case 'defect': {
+      if (args.check) {
+        const body = {
+          component: args.component,
+          observed: args.observed,
+          expected: args.expected,
+          criteria: args.criteria,
+          class: args.class,
+          surface: args.surface,
+          fingerprint: args.fingerprint,
+          idem_key: args['idem-key'] || args.idem_key,
+        };
+        const chk = packCheck(body);
+        out(chk.ok ? { ok: true, check: 'pack', value: chk.value } : chk, args);
+        if (!chk.ok) process.exit(1);
+        break;
+      }
+      if (args.split) {
+        let raw;
+        try {
+          raw = JSON.parse(fs.readFileSync(String(args.split), 'utf8'));
+        } catch (e) {
+          fail(`--split file unreadable: ${e.message}`, args);
+        }
+        const sp = splitMultiItemReport(raw);
+        out(sp, args);
+        if (!sp.ok) process.exit(1);
+        break;
+      }
       const id = resolveId(args);
       if (!id) fail('--id required', args);
       const body = {
@@ -196,8 +227,15 @@ async function main() {
         source: args.source,
         idem_key: args['idem-key'] || args.idem_key,
       };
-      const r = await withFallback({ op: 'pack', id, ...body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/defect`, body));
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'pack', tag_id: r.tag_id, state: r.state, flags: r.flags, defect: body });
+      const chk = packCheck(body);
+      if (!chk.ok) {
+        out({ ...chk, hint: 'bugctl pack --check failed — fix payload before POST' }, args);
+        process.exit(1);
+      }
+      const r = await withFallback({ op: 'pack', id, ...chk.value }, args, () =>
+        api('POST', `/api/bugs/${encodeURIComponent(id)}/defect`, chk.value)
+      );
+      if (r.ok && r.state) appendJournal(r.public_n, { op: 'pack', tag_id: r.tag_id, state: r.state, flags: r.flags, defect: chk.value });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;

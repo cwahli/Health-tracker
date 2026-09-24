@@ -1,11 +1,12 @@
 # Bug ticket pipeline for TG agentic development — audit + plan (proposal)
 
-**Status:** **V-30.1 IMPLEMENTED 2026-09-24** (store + CLI + A-f1/A-f5 on `agent/v-30.1`); V-30.0 decisions all recorded (§6.1/§8). V-30.2…V-30.5 start only on an explicit human go — phases run in order.
+**Status:** **V-30.1 DONE 2026-09-24** (store + CLI + A-f1/A-f5); **V-30.2 CODE DONE 2026-09-24** (packer + fixtures green; P9 token E2E still human before `enabled: true`); V-30.0 decisions all recorded (§6.1/§8). V-30.3…V-30.5 start only on an explicit human go — phases run in order.
 **Drafted / last updated:** 2026-09-24
 **Scope:** make one durable bug-ticket store the working memory for the Telegram (TG) agent
 fleet, so a chat agent can never lose a bug between answers.
 **Roadmap entry:** `plan/ROADMAP.md` → *Track V Phase 10* — `V-30.0` **DECIDED 2026-09-24**;
-`V-30.1` **DONE 2026-09-24**; `V-30.2…V-30.5` ready in sequence, each gated on an explicit human go.
+`V-30.1` **DONE 2026-09-24**; `V-30.2` **CODE DONE 2026-09-24** (token E2E pending human P9);
+`V-30.3…V-30.5` ready in sequence, each gated on an explicit human go.
 
 **This is not a fifth pillar.** It sits beside `plan/BOT_ROLES.md` and
 `docs/agents/telegram_work.md` and proposes a new **track** (see §6). It borrows the
@@ -787,7 +788,7 @@ active use (BOT-12…18 as of 2026-09-24 and growing), so V-30.x is the stable n
 | Phase | Deliverable | Gate (must exit 0) | Evidence artifact | Status |
 |---|---|---|---|---|
 | **V-30.1** store + CLI | schema fields + the `bugState()` projection (§4.3.4) + `bugctl` + artifact endpoints + **A-f1/A-f5** fixes | `npx vitest run src/utils/bugTicketState.test.ts` · `node scripts/assert-bug-ticket-continuity.mjs` · `npm run lint` | a scripted session that creates, packs, attempts and closes a card **only** through `bugctl`, with every state change provably derived from the artifact posted | **DONE 2026-09-24** — all gates green; V-30.2 next on human go |
-| **V-30.2** packer | `bug_ticket` Hermes profile (bootstrap table in §4.4: BotFather token → master `tokens.env` → `sync-bot-tokens.mjs` → registry entry → profile + short soul) + `bug-ticket` skill + `bugctl pack --check` | pack fixtures: (a) BUG-8449's 7-item report → must yield **1 card + a split list**, never a bundled ticket; (b) vague report → `needs_repro`; (c) duplicate → merged — **plus** one E2E reply through the new token before `enabled: true` | the three fixture transcripts + card ids + the E2E reply | after V-30.1 (P9 token = the human ops step) |
+| **V-30.2** packer | `bug_ticket` Hermes profile (bootstrap table in §4.4: BotFather token → master `tokens.env` → `sync-bot-tokens.mjs` → registry entry → profile + short soul) + `scripts/skills/common/bug-ticket/SKILL.md` + `bugctl pack --check` + capability rows `svc-bug-ticket`/`proc-ticket-state`/`sess-ticket-resume` | pack fixtures: (a) BUG-8449's 7-item report → must yield **1 card + a split list**, never a bundled ticket; (b) vague report → `needs_repro`; (c) duplicate → merged — **plus** one E2E reply through the new token before `enabled: true` | fixture gate `node scripts/assert-bug-pack.mjs` (31 checks) + vitest `bugPackFixtures` 35; **E2E reply still pending human P9 token** | **CODE DONE 2026-09-24** — fixtures green; `hermes_bug_ticket` `enabled: false` until token + one E2E reply |
 | **V-30.3** reproducer | `qa-runner --ticket` + `qa-reproduce` skill + verdicts | one **known-good** card must be `not_reproducible`; one **known-bad** card must be `reproduced` with `run.log` + `before.png` | both verdicts with artifact keys | after V-30.2 (P7: QA profiles wake on demand) |
 | **V-30.4** orchestrator | dispatch `--ticket` + plan block + verify + blocked-on-failure | end-to-end on a scratch fixture bug in a dev-only surface → card `done`, named gate green, no chat claim | ticket timeline (commits[] rows) for the fixture | after V-30.3 |
 | **V-30.5** memory + ratchet | generated backlog, `/resume`, capability rows, CI gate, retro-audit | `review-failures.mjs` has no new repeated signature for the fixture; capability checker `--strict` green | **retro-audit**: re-open BUG-8449 in the new store and prove the record answers 1–6 of §4.10 | after V-30.4 |

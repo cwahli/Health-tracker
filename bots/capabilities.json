@@ -8,12 +8,12 @@
     "collab"
   ],
   "tests": {
-    "T1": "Chat capability — what the agent can do inside chat answers",
-    "T2": "Service usage — services the agent can discover and call out to",
-    "T3": "UI capability — Telegram client-facing surfaces",
-    "T4": "Process management — pipeline, concurrency, quota recovery",
-    "T5": "Tool management — per-tool rules shared across agents",
-    "T6": "Session continuity — sessions, context, crash-safe resume"
+    "T1": "Chat capability \u2014 what the agent can do inside chat answers",
+    "T2": "Service usage \u2014 services the agent can discover and call out to",
+    "T3": "UI capability \u2014 Telegram client-facing surfaces",
+    "T4": "Process management \u2014 pipeline, concurrency, quota recovery",
+    "T5": "Tool management \u2014 per-tool rules shared across agents",
+    "T6": "Session continuity \u2014 sessions, context, crash-safe resume"
   },
   "classValues": {
     "true": "works on this class",
@@ -64,7 +64,7 @@
         "grok_tg": true,
         "collab": "adapter"
       },
-      "notes": "Matrix table standardised. Generic agent-emitted JSON→table pipeline still open: one shared convention, no second format per bot. Collab replies link-only. Delivery guarantee (auto-align to <pre>) lives in chunkForTelegram/sendCopyable: covers bot-host family + collab router. Grok TG router sends plain text (no parse_mode), so its path is the MEDIA: pipeline, not pre-blocks; Hermes gateway is a separate stack."
+      "notes": "Matrix table standardised. Generic agent-emitted JSON\u2192table pipeline still open: one shared convention, no second format per bot. Collab replies link-only. Delivery guarantee (auto-align to <pre>) lives in chunkForTelegram/sendCopyable: covers bot-host family + collab router. Grok TG router sends plain text (no parse_mode), so its path is the MEDIA: pipeline, not pre-blocks; Hermes gateway is a separate stack."
     },
     {
       "id": "chat-chunk",
@@ -104,7 +104,7 @@
         "grok_tg": false,
         "collab": false
       },
-      "notes": "Bug → orchestrator so the agent doesn't fix it itself. status/stop/cancel/list-models per bug (V-29). Box lanes have their own dispatch."
+      "notes": "Bug \u2192 orchestrator so the agent doesn't fix it itself. status/stop/cancel/list-models per bug (V-29). Box lanes have their own dispatch."
     },
     {
       "id": "svc-meal-audit",
@@ -172,32 +172,32 @@
       },
       "notes": "Single BOT_COMMANDS source published via setMyCommands (bot-host + provider-router). Collab exposes /help text instead of a registered menu."
     },
-  {
-   "id": "ui-progress",
-   "test": "T3",
-   "scope": "transport",
-   "status": "done",
-   "prove": "unit test scripts/lib/tg-progress.test.mjs + renderer headline test tests/bot-host.test.ts + vendor-drift gate in scripts/check-capability-propagation.mjs",
-   "expect": [
-    "scripts/lib/tg-progress.mjs",
-    "scripts/lib/tg-progress.test.mjs",
-    "scripts/bot-host.mjs",
-    "scripts/sync-router-vendor.mjs",
-    "tools/telegram-provider-router/src/tg-progress.vendor.mjs",
-    "tools/telegram-provider-router/src/index.js"
-   ],
-   "skills": [],
-   "classes": {
-    "hermes": false,
-    "vps": true,
-    "mobile": true,
-    "grok_tg": true,
-    "collab": "adapter"
-   },
-   "notes": "Single-source working headline (provider + model + thinking + elapsed + usage %, 60/75% warnings). Canonical: scripts/lib/tg-progress.mjs, imported by bot-host (vm/opencode/vm2/mobile). Grok TG router imports the vendored mirror; the checker fails on any drift, so a format change lands everywhere via one edit + sync. Box redeploy (sync-from-repo + deploy-to-live) still needed to activate router-side. Collab sends single thinking notes; Hermes gateway is a separate stack."
-  },
-  {
-   "id": "ui-typing",
+    {
+      "id": "ui-progress",
+      "test": "T3",
+      "scope": "transport",
+      "status": "done",
+      "prove": "unit test scripts/lib/tg-progress.test.mjs + renderer headline test tests/bot-host.test.ts + vendor-drift gate in scripts/check-capability-propagation.mjs",
+      "expect": [
+        "scripts/lib/tg-progress.mjs",
+        "scripts/lib/tg-progress.test.mjs",
+        "scripts/bot-host.mjs",
+        "scripts/sync-router-vendor.mjs",
+        "tools/telegram-provider-router/src/tg-progress.vendor.mjs",
+        "tools/telegram-provider-router/src/index.js"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": false,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": true,
+        "collab": "adapter"
+      },
+      "notes": "Single-source working headline (provider + model + thinking + elapsed + usage %, 60/75% warnings). Canonical: scripts/lib/tg-progress.mjs, imported by bot-host (vm/opencode/vm2/mobile). Grok TG router imports the vendored mirror; the checker fails on any drift, so a format change lands everywhere via one edit + sync. Box redeploy (sync-from-repo + deploy-to-live) still needed to activate router-side. Collab sends single thinking notes; Hermes gateway is a separate stack."
+    },
+    {
+      "id": "ui-typing",
       "test": "T3",
       "scope": "transport",
       "status": "done",
@@ -255,14 +255,14 @@
         "grok_tg": "adapter",
         "collab": false
       },
-      "notes": "Outbound MEDIA: convention (§14.7 Case B). Grok TG uploads if the host can, else links."
+      "notes": "Outbound MEDIA: convention (\u00a714.7 Case B). Grok TG uploads if the host can, else links."
     },
     {
       "id": "ui-media-in",
       "test": "T3",
       "scope": "runtime-adapter",
       "status": "partial",
-      "prove": "live smoke: photo → absolute path in prompt, per class",
+      "prove": "live smoke: photo \u2192 absolute path in prompt, per class",
       "expect": [
         "scripts/lib/inbound-media.mjs"
       ],
@@ -276,14 +276,14 @@
         "grok_tg": "adapter",
         "collab": false
       },
-      "notes": "One downloader (§14.7 Case C). Grok TG import/mirror into the router still pending; Hermes profile wiring per-profile."
+      "notes": "One downloader (\u00a714.7 Case C). Grok TG import/mirror into the router still pending; Hermes profile wiring per-profile."
     },
     {
       "id": "proc-failover",
       "test": "T4",
       "scope": "runtime-adapter",
       "status": "partial",
-      "prove": "live smoke: depleted lane → same prompt completes on next lane with switch line",
+      "prove": "live smoke: depleted lane \u2192 same prompt completes on next lane with switch line",
       "expect": [
         "tools/telegram-provider-router/src/index.js",
         "scripts/lib/agent-opencode.mjs"
@@ -388,7 +388,7 @@
       "expect": [
         "scripts/lib/freemodels.mjs",
         "scripts/lib/agent-cline.mjs",
-      "scripts/lib/agent-gemini.mjs",
+        "scripts/lib/agent-gemini.mjs",
         "scripts/lib/agent-opencode.mjs",
         "golden/scorecard/current/FREE_MODEL_TOOL_PICKER.md",
         "golden/scorecard/current/FREE_CODING_TOOLS_CATALOG.md",
@@ -441,7 +441,7 @@
         "grok_tg": "adapter",
         "collab": false
       },
-      "notes": "Learning loop: opencode failures auto-record (lane/kind/hint, best-effort, BOT_FAILURE_LOG=0 disables); review-failures.mjs groups by signature — 2nd occurrence without a linked sensor/learning must produce one (ratchet). Grok TG keeps its ticket reports; Hermes stack separate."
+      "notes": "Learning loop: opencode failures auto-record (lane/kind/hint, best-effort, BOT_FAILURE_LOG=0 disables); review-failures.mjs groups by signature \u2014 2nd occurrence without a linked sensor/learning must produce one (ratchet). Grok TG keeps its ticket reports; Hermes stack separate."
     },
     {
       "id": "session-continuity",
@@ -461,7 +461,72 @@
         "grok_tg": "adapter",
         "collab": "adapter"
       },
-      "notes": "Per-chat opencode sessions (disk-persisted sessions.json, --session resume, /new /compact /abort) verified on bot-host. AUDITED GAPS (2026-09-24): (1) cline lane is stateless — runCline hardcodes sessionID:null and never passes --id, so any bot on a cline model (e.g. VM2 via /freemodel) starts fresh every message; CLI supports --id resume. (2) TG reply-quoting dropped on all bot-host lanes — prompt uses message.text/caption only, reply_to_message content never included. CB-8 cross-turn memory still open; that's the remaining partial."
+      "notes": "Per-chat opencode sessions (disk-persisted sessions.json, --session resume, /new /compact /abort) verified on bot-host. AUDITED GAPS (2026-09-24): (1) cline lane is stateless \u2014 runCline hardcodes sessionID:null and never passes --id, so any bot on a cline model (e.g. VM2 via /freemodel) starts fresh every message; CLI supports --id resume. (2) TG reply-quoting dropped on all bot-host lanes \u2014 prompt uses message.text/caption only, reply_to_message content never included. CB-8 cross-turn memory still open; that's the remaining partial."
+    },
+    {
+      "id": "svc-bug-ticket",
+      "test": "T2",
+      "scope": "common",
+      "status": "open",
+      "prove": "unit: scripts/lib/bug-pack.mjs fixtures; live: packer replies via bugctl",
+      "expect": [
+        "scripts/bugctl.mjs",
+        "scripts/lib/bug-pack.mjs",
+        "scripts/skills/common/bug-ticket/SKILL.md"
+      ],
+      "skills": [
+        "bug-ticket"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": "adapter",
+        "mobile": false,
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "V-30.2 packer service \u2014 bugctl is the one binary; hermes profile bug_ticket owns intake. E2E blocked on HERMES_BUG_TICKET_TOKEN."
+    },
+    {
+      "id": "proc-ticket-state",
+      "test": "T4",
+      "scope": "common",
+      "status": "done",
+      "prove": "unit: bugState projection in src/utils/bugTicketState.test.ts; gate: assert-bug-ticket-continuity",
+      "expect": [
+        "src/utils/bugTicketState.ts",
+        "scripts/assert-bug-ticket-continuity.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": true,
+        "vps": true,
+        "mobile": true,
+        "grok_tg": true,
+        "collab": true
+      },
+      "notes": "State is always derived (no agent-settable route). S-C-lite 5 names + flags."
+    },
+    {
+      "id": "sess-ticket-resume",
+      "test": "T6",
+      "scope": "common",
+      "status": "open",
+      "prove": "offline queue: bugctl flush replays .bugctl-queue.jsonl after API downtime",
+      "expect": [
+        "scripts/bugctl.mjs",
+        "scripts/lib/bug-pack.mjs"
+      ],
+      "skills": [
+        "bug-ticket"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": true,
+        "mobile": "adapter",
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "Offline JSONL queue is the durability path for pack ops when API is unreachable (A-f5/offline)."
     }
   ]
 }

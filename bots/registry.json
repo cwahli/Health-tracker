@@ -7,7 +7,7 @@
       "runtime": "tg-provider-router",
       "enabled": true,
       "path": "tools/telegram-provider-router",
-      "notes": "Unified Telegram long-poller → OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
+      "notes": "Unified Telegram long-poller \u2192 OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
       "telegram": {
         "tokenEnv": "TELEGRAM_BOT_TOKEN",
         "onePollerOnly": true
@@ -232,6 +232,26 @@
       },
       "hermes": {
         "profile": "qa_onboarding",
+        "username": null
+      },
+      "agent": {
+        "kind": "hermes"
+      }
+    },
+    {
+      "id": "hermes_bug_ticket",
+      "name": "Bug Ticket Bot",
+      "runtime": "hermes",
+      "enabled": false,
+      "notes": "V-30.2 packer. Start enabled:false until one E2E reply via HERMES_BUG_TICKET_TOKEN. Never links orchestrator-dispatcher.",
+      "telegram": {
+        "tokenEnv": "HERMES_BUG_TICKET_TOKEN",
+        "allowedUserIds": [
+          6218257274
+        ]
+      },
+      "hermes": {
+        "profile": "bug_ticket",
         "username": null
       },
       "agent": {
