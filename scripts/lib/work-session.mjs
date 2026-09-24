@@ -16,6 +16,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,8 +43,10 @@ export function tmuxSessionFor(location) {
 }
 
 export function tmuxWindowFor(sessionId) {
-  const slug = String(sessionId ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-  return `ws-${slug || 'run'}`;
+  const raw = String(sessionId ?? '');
+  const slug = raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 28) || 'run';
+  const digest = createHash('sha256').update(raw).digest('hex').slice(0, 8);
+  return `ws-${slug}-${digest}`;
 }
 
 function loadStore(storePath = sessionsPath()) {
@@ -141,11 +144,45 @@ export function abortSession(id, { transcriptRef = null } = {}, storePath = sess
 /** Default tmux runner. Injected (fake) in tests. */
 export function defaultTmuxRunner(args) {
   try {
-    execFileSync('tmux', args, { stdio: 'pipe' });
-    return true;
+    return execFileSync('tmux', args, { stdio: 'pipe', encoding: 'utf8' }).trim() || true;
   } catch {
     return false;
   }
+}
+
+function tmuxWindowExists(tmuxSession, tmuxWindow, tmux) {
+  const output = tmux(['list-windows', '-t', tmuxSession, '-F', '#{window_name}']);
+  if (typeof output !== 'string') return Boolean(output);
+  return output.split(/\r?\n/).includes(tmuxWindow);
+}
+
+export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
+  const lane = laneFor(session?.lane);
+  const tmuxSession = tmuxSessionFor(session?.location);
+  const tmuxWindow = tmuxWindowFor(session?.id);
+  const target = `${tmuxSession}:${tmuxWindow}`;
+  if (lane.kind !== 'cli') {
+    return { ok: true, created: false, surface: 'api', tmuxSession: null, tmuxWindow: null, target: null };
+  }
+
+  let created = false;
+  if (!tmux(['has-session', '-t', tmuxSession])) {
+    tmux(['new-session', '-d', '-s', tmuxSession, '-n', tmuxWindow, '-c', session.workspace]);
+    if (!tmux(['has-session', '-t', tmuxSession])) {
+      return { ok: false, created, surface: 'terminal', tmuxSession, tmuxWindow, target };
+    }
+    created = true;
+  }
+
+  if (!tmuxWindowExists(tmuxSession, tmuxWindow, tmux)) {
+    tmux(['new-window', '-d', '-t', `${tmuxSession}:`, '-n', tmuxWindow, '-c', session.workspace]);
+    if (!tmuxWindowExists(tmuxSession, tmuxWindow, tmux)) {
+      return { ok: false, created, surface: 'terminal', tmuxSession, tmuxWindow, target };
+    }
+    created = true;
+  }
+
+  return { ok: true, created, surface: 'terminal', tmuxSession, tmuxWindow, target };
 }
 
 /**
@@ -157,18 +194,20 @@ export function debugProbe(backend, { session = null, tmux = defaultTmuxRunner }
   const lane = laneFor(backend);
   if (lane.kind === 'cli') {
     const tmuxSession = session ? tmuxSessionFor(session.location) : null;
-    const attached = tmuxSession ? tmux(['has-session', '-t', tmuxSession]) : false;
+    const tmuxWindow = session ? tmuxWindowFor(session.id) : null;
+    const target = tmuxSession && tmuxWindow ? `${tmuxSession}:${tmuxWindow}` : null;
+    const attached = target ? tmuxWindowExists(tmuxSession, tmuxWindow, tmux) : false;
     return {
       backend: lane.backend, surface: 'terminal', attach: attached,
-      events: true, tmuxSession,
+      events: true, tmuxSession, tmuxWindow, target,
       note: attached
-        ? `attach: tmux attach -t ${tmuxSession}`
-        : 'no live tmux session on this host — start one to observe',
+        ? `attach: tmux attach -t ${target}`
+        : 'no live tmux work view on this host — use /tx on to create one',
     };
   }
   return {
     backend: lane.backend, surface: 'api', attach: false,
-    events: true, tmuxSession: null,
+    events: true, tmuxSession: null, tmuxWindow: null, target: null,
     note: 'API-only lane: structured events/transcripts only; live attach unavailable',
   };
 }

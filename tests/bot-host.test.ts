@@ -1773,38 +1773,80 @@ describe('BOT-19 /tx wiring', () => {
     try { fs.unlinkSync(wsFile); } catch {}
   });
 
-  const fakeCfg = () => ({ agent: { workspace: '/ws', kind: 'opencode' } });
+  const fakeCfg = (kind = 'opencode') => ({ agent: { workspace: '/ws', kind } });
   const fakeApi = (sent) => ({ sendMessage: async (chatId, text) => { sent.push(text); return {}; } });
+  const fakeTxTmux = () => {
+    const sessions = new Map();
+    const calls = [];
+    const run = (args) => {
+      calls.push(args);
+      if (args[0] === 'has-session') return sessions.has(args[2]);
+      if (args[0] === 'list-windows') {
+        return [...(sessions.get(args[2]) || [])].join('\n');
+      }
+      if (args[0] === 'new-session') {
+        sessions.set(args[3], new Set([args[5]]));
+        return true;
+      }
+      if (args[0] === 'new-window') {
+        const session = args[3].replace(/:$/, '');
+        sessions.get(session).add(args[5]);
+        return true;
+      }
+      return false;
+    };
+    return { calls, run, sessions };
+  };
 
-  it('/tx on enables and reports the attach line', async () => {
+  it('/tx on creates and reports the exact workstream target', async () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on' });
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
     expect(sent.length).toBe(1);
     expect(sent[0]).toContain('ON');
-    expect(sent[0]).toContain('tmux attach -t work-testbox');
+    expect(sent[0]).toMatch(/tmux attach -t work-testbox:ws-/);
     expect(sent[0]).toContain('testbox|9|/ws');
+    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'new-session', 'has-session', 'list-windows', 'list-windows']);
+    expect(tmux.calls.flat().some((arg) => /kill|respawn|send-keys/.test(String(arg)))).toBe(false);
   });
 
   it('/tx off disables without stopping', async () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on' });
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'off' });
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'off', tmux: tmux.run });
     expect(sent[1]).toContain('OFF');
+    expect(tmux.sessions.get('work-testbox').size).toBe(1);
   });
 
-  it('/tx status reports without a prior toggle', async () => {
+  it('/tx status reports without creating a session', async () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: '' });
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: '', tmux: tmux.run });
     expect(sent[0]).toContain('No work session');
+    expect(tmux.calls).toEqual([]);
+  });
+
+  it('/tx on reports no tmux target for an API-only lane', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg('gemini'), chatId: 9, arg: 'on', tmux: tmux.run });
+    expect(sent[0]).toContain('ON');
+    expect(sent[0]).toContain('Live attach: unavailable');
+    expect(sent[0]).not.toContain('tmux attach');
+    expect(tmux.calls).toEqual([]);
   });
 
   it('/tx usage on unknown subcommand', async () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'nope' });
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'nope', tmux: tmux.run });
     expect(sent[0]).toContain('Usage: /tx on|off|status');
+    expect(tmux.calls).toEqual([]);
   });
 });
