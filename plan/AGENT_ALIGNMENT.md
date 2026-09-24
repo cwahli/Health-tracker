@@ -67,6 +67,9 @@ Rules:
   not a new top-level tmux session. `/status` reports work-session, execution
   surface/provider, controller, and debug capability. Shared observation is the
   default; input is serialized so bot and human do not interleave PTY writes.
+  For headless bot-host runs, tmux is a read-only observer over an allowlisted
+  projection of the existing normalized event stream; it must not launch a second
+  agent or expose raw prompts, reasoning, tool payloads, errors, or stderr.
   BOT-18 consumes this contract for watchdog/recovery.
 - **P2 — memory:** BOT-13 retrieved stores. Same prompt path for every surface. No per-vendor memory file.
 - **P3 — skills bridge:** restore `shared_skills` paths + parity gate.

@@ -956,6 +956,7 @@ runner session ID. The bot resolves the active work session from its state.
 - One physical location maps to one persistent tmux session when a live terminal is useful; each bot/workstream maps to a window, not a new top-level tmux session.
 - tmux is an adapter for TTY-capable execution surfaces and human attach/continuation. It is not the transcript database or the product identity.
 - API-only runners expose structured request/response events, timing, errors, and sanitized transcript/debug data. They report `live attach: unavailable` rather than pretending to provide a terminal.
+- A terminal window existing is not proof of shared visibility. For headless bot-host execution, the tmux adapter tails a private allowlisted projection of the existing normalized event stream (thinking category, tool name/status, usage totals, terminal outcome) while the original runner remains the sole process owner. Prompts, reasoning text, tool input/output, raw errors, stderr, and environment values are never persisted. A second agent invocation is forbidden.
 - Provider/model changes remain inside the same logical work session. A lane change writes a handoff before starting the next surface; it never blindly replays an incompatible full transcript.
 
 **Shared co-work rule:**
