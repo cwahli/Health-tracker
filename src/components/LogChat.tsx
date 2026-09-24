@@ -1234,6 +1234,11 @@ ${logsText}`);
               assistantClarifyMsg = mealMsg;
             }
           }
+          // Carry the finalized meal ledger onto the clarify bubble. Without it
+          // the PortionClarifyCard confirm has no activeMeal to edit and silently
+          // no-ops (fresh scan: no meal card in the thread to hang the picker on).
+          const clarifyFoodLog = resolvePendingFoodLog(job);
+          const clarifyLogWith = clarifyFoodLog ? { ...clarifyFoodLog, portionClarify } : undefined;
           if (!assistantClarifyMsg && shouldInjectPortionClarifyMessage(dedupedBaseMsgs, clarifyAnswered)) {
             assistantClarifyMsg = {
               id: `msg_assistant_clarify_${activeJobId}`,
@@ -1242,9 +1247,11 @@ ${logsText}`);
               timestamp: job.updatedAt || new Date().toISOString(),
               isLive: false,
               agentType: type as any,
+              pendingFoodLog: clarifyLogWith,
               data: {
                 needsPortionClarify: true,
                 portionClarify,
+                pendingFoodLog: clarifyLogWith,
                 scoutItems,
                 photoUrl: job.photoUrl || rawResult.photoUrl,
                 debugUrl: job.debugUrl || rawResult.debugUrl,
@@ -1258,6 +1265,8 @@ ${logsText}`);
             };
             dedupedBaseMsgs.push(assistantClarifyMsg);
           } else if (assistantClarifyMsg.data) {
+            assistantClarifyMsg.pendingFoodLog = assistantClarifyMsg.pendingFoodLog || clarifyLogWith;
+            assistantClarifyMsg.data.pendingFoodLog = assistantClarifyMsg.data.pendingFoodLog || clarifyLogWith;
             assistantClarifyMsg.data.portionClarify = assistantClarifyMsg.data.portionClarify || portionClarify;
             assistantClarifyMsg.data.needsPortionClarify = true;
             assistantClarifyMsg.data.scoutItems = assistantClarifyMsg.data.scoutItems?.length ? assistantClarifyMsg.data.scoutItems : scoutItems;
@@ -2562,7 +2571,8 @@ ${logsText}`);
           ? newestSucceededFoodJob(JobStore.getAllJobs(), currentJobId)
           : null;
         const sessionPriorMeal = sessionPriorJob ? pendingMealOfJob(sessionPriorJob) : null;
-        const lastFoodLogForJob = job?.result?.pendingFoodLog || 
+        const lastFoodLogForJob = extraOptions?.activeMeal ||
+          job?.result?.pendingFoodLog || 
           job?.result?.data || 
           [...existingMsgs].reverse().find(m => m.data?.pendingFoodLog || m.pendingFoodLog)?.data?.pendingFoodLog || 
           [...existingMsgs].reverse().find(m => m.data?.pendingFoodLog || m.pendingFoodLog)?.pendingFoodLog ||
@@ -5831,8 +5841,9 @@ ${logsText}`);
                               portionClarify={clarifyData}
                               language={profile?.language || "en"}
                               onConfirm={(choices: any) => {
-                                const activeMeal = msg.data?.pendingFoodLog || msg.pendingFoodLog || [...messages].reverse().find(m => m.data?.pendingFoodLog)?.data?.pendingFoodLog || [...messages].reverse().find(m => m.pendingFoodLog)?.pendingFoodLog;
+                                const activeMeal = msg.data?.pendingFoodLog || msg.pendingFoodLog || [...messages].reverse().find(m => m.data?.pendingFoodLog)?.data?.pendingFoodLog || [...messages].reverse().find(m => m.pendingFoodLog)?.pendingFoodLog || (jobId ? resolvePendingFoodLog(JobStore.getJob(jobId)) : null);
                                 if (!activeMeal) {
+                                  console.warn('[PortionClarify] Confirm aborted — no active meal in messages or job result', { jobId, msgId: msg.id });
                                   return;
                                 }
 

@@ -448,4 +448,40 @@ describe('JobStore', () => {
     expect(job?.messages?.[0].imageUrls).toEqual([r2Url]);
     expect(job?.messages?.[0].imageUrl).not.toBe('Image reference preserved');
   });
+
+  it('PORTION_CONFIRM: awaiting_user clarify message carries the meal ledger so Confirm can resolve activeMeal', () => {
+    JobStore.clearForTests();
+    processJobRows([
+      {
+        id: 'job_clarify_meal_1',
+        kind: 'food_log',
+        status: 'awaiting_user',
+        status_message: 'Please confirm portion size',
+        clean_result: {
+          message: 'How much of "Packaged Snack" did you eat?',
+          needsPortionClarify: true,
+          portionClarify: {
+            promptMessage: 'How much of "Packaged Snack" did you eat?',
+            items: [{ scoutIndex: 0, name: 'Packaged Snack', estimatedWeightGrams: 25, labelServingGrams: 100, options: [] }],
+            scoutItems: [{ scoutIndex: 0, name: 'Packaged Snack', estimatedWeightGrams: 25 }],
+          },
+          scoutItems: [{ scoutIndex: 0, name: 'Packaged Snack', estimatedWeightGrams: 25 }],
+          pendingFoodLog: {
+            name: 'Packaged Snack',
+            itemsBreakdown: [{ scoutIndex: 0, name: 'Packaged Snack', weightGrams: 25 }],
+            nutrients: { calories: 100 },
+          },
+        },
+      },
+    ]);
+
+    const job = JobStore.getJob('job_clarify_meal_1');
+    const clarifyMsg = job?.messages?.find((m: any) => m.data?.needsPortionClarify);
+    expect(clarifyMsg).toBeDefined();
+    // PortionClarifyCard.onConfirm reads activeMeal off the message; without the
+    // ledger it silently returns and the Confirm button appears dead.
+    expect(clarifyMsg?.pendingFoodLog?.name).toBe('Packaged Snack');
+    expect(clarifyMsg?.data?.pendingFoodLog?.name).toBe('Packaged Snack');
+    expect(job?.result?.pendingFoodLog?.name).toBe('Packaged Snack');
+  });
 });
