@@ -144,6 +144,18 @@ describe('bugState — S-C-lite projection', () => {
     expect(s.legacy_status).toBe('fixed');
   });
 
+  it('journey green does not close the card', () => {
+    const item = base({
+      defect: { component: 'a', observed: 'b', expected: 'c', criteria: 'd' },
+      verify: { method: 'journey', command: 'node scripts/qa-runner.mjs --journey=meal', result: 'green', evidence: [] },
+      queue: 'in_progress',
+    });
+    const s = bugState(item);
+    expect(s.state).toBe('verifying');
+    expect(s.queue).not.toBe('done');
+    expect(s.legacy_status).toBe('to_fix');
+  });
+
   it('verify red does not close', () => {
     const item = base({
       defect: { component: 'a', observed: 'b', expected: 'c', criteria: 'd' },

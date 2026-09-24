@@ -76,6 +76,13 @@ check('bugWriteGuard on defect', /app\.post\('\/api\/bugs\/:tagId\/defect',\s*bu
 check('A-f1: next no longer LIMIT 100 on created_at ASC', !/status IN \('to_fix', 'in_progress'\) ORDER BY created_at ASC LIMIT 100/.test(serverSrc));
 check('A-f1: next uses large window', /ORDER BY updated_at DESC LIMIT 1000/.test(serverSrc));
 check('projects bugState on writes', /projectBugState\(/.test(serverSrc));
+const stateSrc = read('src/utils/bugTicketState.ts');
+check(
+  'journey green does not close',
+  /JOURNEY_GREEN_DOES_NOT_CLOSE/.test(stateSrc) &&
+    /verifyMethod === 'journey'/.test(stateSrc) &&
+    /state = 'verifying'/.test(stateSrc),
+);
 
 // 7. bugctl
 const ctlPath = path.join(ROOT, 'scripts/bugctl.mjs');
@@ -136,6 +143,12 @@ describe('continuity walk: create→pack→attempt→verify', () => {
     expect(p.ticket.state).toBe('done');
     expect(p.ticket.legacy_status).toBe('fixed');
     expect(p.ticket.queue).toBe('done');
+
+    const journeyOnly = {
+      ...item,
+      verify: { method: 'journey', command: 'node scripts/qa-runner.mjs --journey=meal', result: 'green', evidence: [] },
+    };
+    expect(bugState(journeyOnly).state).not.toBe('done');
   });
 });
 `

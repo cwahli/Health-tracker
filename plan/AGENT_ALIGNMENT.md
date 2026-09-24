@@ -11,7 +11,7 @@ Legend: ✅ has · ❌ missing · ⚠️ partial/diverged · (design) = intentio
 | # | Capability | Hermes (Mac gateway) | VPS bot-host (vm/opencode/vm2) | Mobile | Grok TG router | Collab |
 |---|---|---|---|---|---|---|
 | 1 | Per-chat conversation history | ✅ SQLite sessions + messages, runtime `conversation_history` | ✅ opencode lane only (`--session`, disk `sessions.json`); ❌ cline lane (`sessionID:null` hardcoded); ❌ gemini lane | ✅ same code as VPS | ⚠️ ONE global session shared by all chats (bleed) | ❌ (design: GPU tunnels) |
-| 2 | TG reply-quote in prompt | ? (dispatcher unconfirmed) | ❌ `reply_to_message` never read | ❌ same code | ❌ | ❌ |
+| 2 | TG reply-quote in prompt | ? (dispatcher unconfirmed) | ✅ text/caption via `buildQuotedPrompt` (2026-09-24); media-only quotes ignored | ✅ same code | ❌ | ❌ |
 | 3 | Own long-term memory file | ✅ `~/.hermes/memories/MEMORY.md`, agent-writable via memory tools + write gates | ❌ no memory file; only manual `/new` handoff brief | ❌ | ❌ | ❌ |
 | 4 | User profile | ✅ `USER.md` | ❌ | ❌ | ❌ | ❌ |
 | 5 | Soul / reply style | ✅ `SOUL.md` (direct, no filler) | ❌ no persona; verbosity unbounded | ❌ | ❌ | ❌ |
@@ -23,9 +23,7 @@ Legend: ✅ has · ❌ missing · ⚠️ partial/diverged · (design) = intentio
 | 11 | Cost/usage visibility | ✅ `account_usage.py` | ✅ totals + headline usage | ✅ same | ✅ headline + status cmd | ❌ |
 | 12 | Media in/out | ✅ (skill path — but see #7, path broken) | ✅ inbound-media + photo-out | ✅ same | ✅ `extractMedia` + MEDIA: | ⚠️ link-only |
 
-Headline result: the highest-value gaps are #1 (cline lane), #2 (reply-quote),
-#3 (memory file), #5 (soul), #7 (skills bridge — actively broken, not just
-missing), #6 (two learning loops that never meet).
+Headline result (revised 2026-09-24): quote text on bot-host is done. The highest-value gaps are #1 session resume on every surface (a surface that cannot resume is degraded; there is no Cline lane to finish), #3 memory retrieval, #5 soul, #7 skills bridge (paths missing on disk), #6 the two learning loops. Next code is the crash receipt, not a vendor resume flag.
 
 ## 2. Target architecture — fix once, everywhere
 
@@ -42,22 +40,11 @@ tools/telegram-provider-router/src/*.vendor.mjs ← mirrors, never hand-edited
 
 Rules:
 
-0. **Bot = location, execution lane = tool, provider/model = backend.** A bot id names a *place* (vm = VPS, mobile = phone, collab = Colab, hermes_* = gateway). The execution lane is a per-message tool choice via `/model` + `/freemodel` (`parseModelRef`), not an identity. Gemini, Token Harbor, and other APIs are provider/model backends behind the selected runner; they do not create separate bot identities. Every execution surface honors the same contracts — session, memory, headline, commands, skills — where supported. API-only backends declare no live tools/session instead of silently pretending to provide a terminal. Lane/provider parity gaps are tracked as BOT-12…17 and the shared work-session/debug contract as BOT-19, never as per-bot exceptions.
+0. **Bot = location, execution surface = runner, provider/model = backend.** A bot id names a *place* (vm = VPS, mobile = phone, collab = Colab, hermes_* = gateway). The runner is a per-message choice via `/model` + `/freemodel` (`parseModelRef`), not an identity. There is no Cline agent and no Gemini agent. Gemini, Token Harbor, and other APIs are backends behind the selected runner. A surface that cannot honor session, memory, the typed ticket, or the crash receipt is marked degraded. The optional Cline adapter is degraded for resume (CLI 3.0.65). API-only backends declare no live tools and no session. Gaps are BOT-12…21, never a new bot per vendor.
 
-1. **Memory files are repo-owned, agent-written.** `bots/memory/<id>.md`
-   (+ shared `USER.md`) load into every bot-host prompt like today's handoff
-   brief, and grow via `/remember <fact>` + auto-append of the `/compact`
-   summary. Hermes keeps its own store but READS the same `USER.md` so the
-   profile can't fork. Cline/gemini lanes get the same injection (prompt-level,
-   no runner changes needed).
-2. **Sessions behind one contract.** `sessions.json` per chat stays; cline
-   adopts `--id` resume into the same file; router moves global→per-chat when
-   scheduled. The contract (per-chat id, disk-persisted, `/new` resets) is
-   identical even though runners differ.
-3. **One learning loop.** Repo `failure-log.mjs` is the writer; Hermes
-   `bot-failures.jsonl` becomes a reader (or vice versa — decide once).
-   `review-failures.mjs` output goes somewhere every agent's prompt can see
-   (memory file footer is the cheap option).
+1. **Memory is retrieved, not dumped.** Stores are `decisions/`, `dead-ends/`, and `facts/`, plus shared `USER.md` under the existing caps. A build, investigate, or decide turn retrieves matching rows. Other turns inject nothing. Do not auto-append a `/compact` summary. Hermes reads the same `USER.md`. Boot health gate: missing, over-cap, or stale produces a receipt (BOT-13).
+2. **Sessions behind one contract.** `sessions.json` per chat stays. Every supported surface writes a resumable id and continues from the compact handoff. A surface that cannot is degraded. The router moves from one global session to per-chat when that work is scheduled. `/new` resets the chat id. It does not erase the three stores.
+3. **One learning loop.** Repo `failure-log.mjs` is the writer on every surface. Each dispatch adds one outcome row (ticket, surface, provider/model, defect class, tokens, wall-clock, outcome). The pre-action gate reads it in code. Hermes `bot-failures.jsonl` is a reader. A prompt footer is not the gate (BOT-15).
 4. **Skills sync both directions with a gate.** Fix the two dead
    `shared_skills` paths (symlink to repo skills or copy + check). Extend the
    checker (or a small `check-hermes-parity` step on the Mac) to fail when a
@@ -68,8 +55,7 @@ Rules:
 
 ## 3. Phased plan (each phase = one shared change, all agents inherit)
 
-- **P1 — history:** cline `--id` resume + `reply_to_message` inclusion
-  (both `scripts/lib`, all bot-host agents inherit; router per-chat later).
+- **P1 — history:** quote text shipped. Session resume is the shared contract above. Do not probe a vendor `--id` as the next task.
 - **P1.5 — `/tx` work sessions:** one on-demand work session per active
   location/chat/workspace, shared by every execution surface. `tx on` enables
   shared visibility, `tx off` hides it without stopping work, and `tx status` /
@@ -82,15 +68,12 @@ Rules:
   surface/provider, controller, and debug capability. Shared observation is the
   default; input is serialized so bot and human do not interleave PTY writes.
   BOT-18 consumes this contract for watchdog/recovery.
-- **P2 — memory:** `bots/memory/` + prompt injection + `/remember` (prompt-level:
-  works on opencode/cline/gemini lanes with zero runner changes).
+- **P2 — memory:** BOT-13 retrieved stores. Same prompt path for every surface. No per-vendor memory file.
 - **P3 — skills bridge:** restore `shared_skills` paths + parity gate.
-- **P4 — learning:** unify failure logs; review output → memory footer.
+- **P4 — learning:** BOT-15 outcome row + code gate. The weekly job archives logs.
 - **P5 — soul:** `bots/soul.md` + injection.
 
-P1 is proposed next (needs one live probe to find the cline session id).
-P2–P5 are recorded here so they get built on these rails, not as five
-one-agent patches.
+Next code is BOT-18 (receipt + 409 exit), then BOT-20 (typed `work_item`). P2–P5 follow the roadmap order. One shared change per step.
 
 ## 4. The three systems (reviewed 2026-09-24 + literature)
 
@@ -287,4 +270,20 @@ platform constraint, not just our choice).
 - *Abandoned-task nudge:* industry UX practice; only Hermes (cron) could do it —
   repo bots are reactive-only. Hermes-side item.
 - *Defensive AI parsing:* validate nested fields of every CLI JSON event
-  before reading (`mapClineEvent` does some; audit the rest).
+  before reading. Audit every surface adapter, not one vendor parser.
+
+**Adopted 2026-09-24 (literature review, written into `plan/ROADMAP.md` Bot side):**
+
+Keep: script orchestrates; one writer; one defect per card; selective handoff; artifact keys on the card.
+
+Add, in execute order:
+
+1. **BOT-20 typed `work_item`.** Free-text `--task` is not a dispatch payload. Tech10 (Mar 2026): an untyped handoff is the cascading-failure surface. Anthropic's multi-agent note (Jun 2025): objective, format, boundaries, and tool guidance travel as fields.
+2. **BOT-21 coordination tax.** Log `(ticket, agent, tool, args-hash)`. Same hash twice on one ticket alerts. Two repro verdicts must match or escalate. ProveAI (May 2026).
+3. **BOT-13 retrieval.** Decisions, dead-ends, facts. Precision-gated injection. Boot health gate. False-fire count. Helwig arXiv:2609.05510 (78,933 hooks; 84 of 85 failures in the first three weeks; zero false-fires on the ten-day precision instrument). Do not inject the whole memory file. Do not stand up a second vector service in this ID; lexical retrieve-by-ticket is enough until a measured miss says otherwise.
+4. **BOT-18 first code.** Lease, boot sweep to a receipt, `process.exit(1)` on 409. Before any new capability.
+5. **V-30.3 verify rule, binding now.** The card's `verify` check closes it. Journey green does not.
+6. **BOT-15 outcome row.** The gate reads surface, provider, defect class, tokens, wall-clock, outcome. That is the cost brain. It replaces a fixed vendor chain.
+7. **Executable surface.** Handover top + this order + one packet. History stays in the long files and is not loaded whole.
+
+Anthropic, *Building Effective Agents* (Dec 2024): this workload is a workflow (pack → repro → plan → code → verify). An LLM orchestrator would add coordination tax on a depth-first queue. The Jun 2025 multi-agent result (90.2% over single-agent) was a breadth-first research task. It is not a reason to add coordinating models here.

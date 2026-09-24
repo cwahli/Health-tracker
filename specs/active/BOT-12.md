@@ -34,7 +34,9 @@ gate:
 
 # Packet: BOT-12 Telegram history parity
 
-Human replies: **go** | **stop** | one comment. Locked for the approved quote-parity node; Cline resume nodes remain blocked on the upstream CLI contract.
+Human replies: **go** | **stop** | one comment. Quote-parity (node 1) is done.
+
+**Framing superseded 2026-09-24.** There is no Cline agent. Nodes 2–4 stay as probe evidence: CLI 3.0.65 cannot headless-resume, so that surface is degraded. Do not implement a Cline `--id` path from this packet. The session contract for every surface is `plan/ROADMAP.md` BOT-12. The next bot code is BOT-18.
 
 ## Findings (do not redo)
 

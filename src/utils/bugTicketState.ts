@@ -80,8 +80,14 @@ export function bugState(item: BugWorkItem): BugTicketState {
   const hasAgentAttempt = item.commits.some((c: BugCommit) => !!c.attempt);
 
   let state: BugStateName;
-  if (item.verify?.result === 'green') {
+  const verifyMethod = item.verify?.method;
+  const verifyGreen = item.verify?.result === 'green';
+  // JOURNEY_GREEN_DOES_NOT_CLOSE — a green qa-runner journey stays verifying.
+  // done requires the card's own named_test, or a manual human check.
+  if (verifyGreen && (verifyMethod === 'named_test' || verifyMethod === 'manual')) {
     state = 'done';
+  } else if (verifyGreen && verifyMethod === 'journey') {
+    state = 'verifying';
   } else if (legacy === 'done') {
     // Legacy fixed/ignored without a verify artifact still reads as done.
     state = 'done';
