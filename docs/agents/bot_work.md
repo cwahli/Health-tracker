@@ -2,9 +2,21 @@
 
 Read this, then stop. Do not load `plan/ROADMAP.md`, `plan/BOT_ROLES.md`, `plan/RELIABILITY.md`, `plan/BUG_TICKET_PIPELINE.md` past §6.2, or `AI_HANDOVER.md` past its first heading.
 
+## Ticket flow (roles, not bots)
+
+**packer** (`bug_ticket`, Solar-free, card only: `queue --json` → `create` → `pack --check` → reply → STOP; never specs, never dispatch, never `src/`)
+→ **QA** reproduces (`qa-runner.mjs --ticket`, posts `repro{status,command,run_log,before.png}`; never fixes)
+→ **orchestrator** specifies (strong model with packet + repro on the card; writes `specs/active/<card>.md` from `specs/TEMPLATE.md` with Understanding + Layer + Forbidden patch + two fixtures)
+→ **you** lock (`go`)
+→ **script** dispatches one healthy backend (`run-coding-dispatch.sh --ticket`; dev is a transient process, never a bot)
+→ **verifier** (didn't author it) closes on `named_test` green.
+Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` turn plumbing) in `plan/ROADMAP.md` Track V Phase 10, V-30.4 row.
+
 ## Next code (no token)
 
-**BOT-20 — pack, then reject.** `run-coding-dispatch.sh` calls the existing `scripts/lib/bug-pack.mjs` (`packCheck` / `splitMultiItemReport`). Input is a versioned `work_item` or the four fields `page`, `observed`, `expected`, `screenshot`. Several defects become one card plus a split list. Nothing that fails `packCheck` is passed through as `--task`. Do not write a second packer.
+**BOT-20 is DONE 2026-09-24.** `run-coding-dispatch.sh` calls `scripts/lib/bug-pack.mjs` (`packForDispatch` calling `packCheck` / `splitMultiItemReport`). Input is a versioned `work_item` or the four fields (`page`, `observed`, `expected`, `screenshot`). Multi-item reports are split to 1 card + split list. Any payload failing `packCheck` is rejected with exit code 1 and never passed through as `--task`. Tests: `src/utils/bugPackFixtures.test.ts` (17/17 green), `scripts/assert-bug-pack.mjs` (31/31 green).
+
+**Next code: BOT-21.** Log `(ticket, agent, tool, args-hash)`. The same hash twice on one ticket alerts. Two repro verdicts on one card must match or escalate.
 
 **BOT-18 is DONE 2026-09-24.** Lease `{chatId, messageId, startedAt, pid}` written on run start and updated on progress create; boot sweep edits orphaned messages to `restarted mid-run — send it again` and appends `crash-pending` row; Telegram 409 conflict exits `process.exit(1)`. Tests: 119/119 green.
 

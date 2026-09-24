@@ -254,10 +254,19 @@ PREFER_VERIFY="auto"
 FOREGROUND=0
 PRINT_PLAN=0
 
+WORK_ITEM=""
+PAGE=""
+COMPONENT=""
+OBSERVED=""
+EXPECTED=""
+CRITERIA=""
+CLASS=""
+SURFACE=""
+
 for arg in "$@"; do
   case $arg in
     --help|-h)
-      echo "Usage: $0 --task='description' [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--screenshot='/path/to/img.png'] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
+      echo "Usage: $0 [--work-item=JSON|FILE] [--page=...] [--observed=...] [--expected=...] [--screenshot=...] [--criteria=...] [--bug-id='...'] [--category='...'] [--tool=auto|opencode|cline|grok|agy] [--model=...] [--thinking=high|low|none|auto] [--cascade] [--verify=true|false|auto] [--profile=orchestrator] [--area=name] [--files=a,b] [--foreground] [--print-plan]"
       echo ""
       echo "Subcommands:"
       echo "  $0 status                     List all running agents (parallel-safe)"
@@ -266,31 +275,76 @@ for arg in "$@"; do
       echo "  $0 prune-locks                Drop stale per-file claims"
       exit 0
       ;;
-    --task=*)       TASK="${arg#*=}" ;;
-    --bug-id=*)     BUG_ID="${arg#*=}" ;;
-    --category=*)   CATEGORY="${arg#*=}" ;;
-    --tool=*)       REQUESTED_TOOL="${arg#*=}" ;;
-    --model=*)      PREFERRED_MODEL="${arg#*=}" ;;
-    --thinking=*)   THINKING="${arg#*=}" ;;
-    --screenshot=*) SCREENSHOT="${arg#*=}" ;;
-    --cascade)      CASCADE=1 ;;
-    --verify=*)     PREFER_VERIFY="${arg#*=}" ;;
-    --profile=*)    DISPATCH_PROFILE="${arg#*=}" ;;
-    --area=*)       DISPATCH_AREA="${arg#*=}" ;;
-    --files=*)      DISPATCH_FILES="${arg#*=}" ;;
-    --worktree=*)   DISPATCH_WORKTREE="${arg#*=}" ;; # advanced: reuse an existing checkout
-    --foreground)   FOREGROUND=1 ;;
-    --print-plan)   PRINT_PLAN=1 ;;
+    --work-item=*|--work_item=*) WORK_ITEM="${arg#*=}" ;;
+    --page=*)                    PAGE="${arg#*=}" ;;
+    --component=*)               COMPONENT="${arg#*=}" ;;
+    --observed=*)                OBSERVED="${arg#*=}" ;;
+    --expected=*)                EXPECTED="${arg#*=}" ;;
+    --criteria=*)                CRITERIA="${arg#*=}" ;;
+    --class=*)                   CLASS="${arg#*=}" ;;
+    --surface=*)                 SURFACE="${arg#*=}" ;;
+    --task=*)                    TASK="${arg#*=}" ;;
+    --bug-id=*)                  BUG_ID="${arg#*=}" ;;
+    --category=*)                CATEGORY="${arg#*=}" ;;
+    --tool=*)                    REQUESTED_TOOL="${arg#*=}" ;;
+    --model=*)                   PREFERRED_MODEL="${arg#*=}" ;;
+    --thinking=*)                THINKING="${arg#*=}" ;;
+    --screenshot=*)              SCREENSHOT="${arg#*=}" ;;
+    --cascade)                   CASCADE=1 ;;
+    --verify=*)                  PREFER_VERIFY="${arg#*=}" ;;
+    --profile=*)                 DISPATCH_PROFILE="${arg#*=}" ;;
+    --area=*)                    DISPATCH_AREA="${arg#*=}" ;;
+    --files=*)                   DISPATCH_FILES="${arg#*=}" ;;
+    --worktree=*)                DISPATCH_WORKTREE="${arg#*=}" ;; # advanced: reuse an existing checkout
+    --foreground)                FOREGROUND=1 ;;
+    --print-plan)                PRINT_PLAN=1 ;;
     *)
       if [ -z "$TASK" ]; then TASK="$arg"; fi
       ;;
   esac
 done
 
-if [ -z "$TASK" ]; then
-  echo "Error: No task provided. Usage: $0 --task='description' [--bug-id='...'] [--category='...']"
+# ---------------------------------------------------------------
+# BOT-20: Pack, then reject via scripts/lib/bug-pack.mjs
+# Input is a versioned work_item or the four fields (page, observed, expected, screenshot).
+# Several defects become one card plus a split list.
+# Nothing that fails packCheck is passed through as --task.
+# ---------------------------------------------------------------
+PACK_HELPER="${REPO_DIR}/scripts/lib/bug-pack.mjs"
+PACK_RAW=$(node "$PACK_HELPER" dispatch "$@" 2>&1) || {
+  echo "[Dispatcher] Rejected: inbound defect report failed packCheck:" >&2
+  echo "$PACK_RAW" >&2
+  if [ -f "$TELEGRAM_SCRIPT" ]; then
+    bash "$TELEGRAM_SCRIPT" --profile="$DISPATCH_PROFILE" \
+      --text="❌ *[Orchestrator]* Dispatch rejected for \`$BUG_ID\`: payload failed packCheck:
+\`\`\`
+$(echo "$PACK_RAW" | head -n 6)
+\`\`\`" 2>/dev/null || true
+  fi
   exit 1
+}
+
+PACKED_COMPONENT=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("card",{}).get("component",""))' "$PACK_RAW")
+PACKED_OBSERVED=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("card",{}).get("observed",""))' "$PACK_RAW")
+PACKED_EXPECTED=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("card",{}).get("expected",""))' "$PACK_RAW")
+PACKED_CRITERIA=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("card",{}).get("criteria",""))' "$PACK_RAW")
+PACKED_FINGERPRINT=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("card",{}).get("fingerprint",""))' "$PACK_RAW")
+PACKED_SCREENSHOT=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("screenshot",""))' "$PACK_RAW")
+SPLIT_COUNT=$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1]).get("split",[])))' "$PACK_RAW")
+SPLIT_LIST_TEXT=""
+if [ "$SPLIT_COUNT" -gt 0 ]; then
+  SPLIT_LIST_TEXT=$(python3 -c '
+import json, sys
+data = json.loads(sys.argv[1]).get("split", [])
+print("\n".join("- #" + str(it.get("n", "?")) + ": " + str(it.get("issue") or it.get("observed")) for it in data))
+' "$PACK_RAW")
 fi
+
+if [ -n "$PACKED_SCREENSHOT" ] && [ -z "$SCREENSHOT" ]; then
+  SCREENSHOT="$PACKED_SCREENSHOT"
+fi
+
+TASK="Fix ${PACKED_COMPONENT}: ${PACKED_OBSERVED} -> expected ${PACKED_EXPECTED} (${PACKED_CRITERIA})"
 
 # Dynamic Thinking Tuning (V-29): atomic UI/text fixes use low thinking to avoid overthinking loops
 if [ "$THINKING" = "auto" ] || [ -z "$THINKING" ]; then
@@ -324,6 +378,9 @@ if [ "$PRINT_PLAN" = "1" ]; then
   echo "thinking=${THINKING}"
   echo "cascade=${CASCADE}"
   echo "qa_profile=$(qa_profile_for_category)"
+  echo "defect_component=${PACKED_COMPONENT}"
+  echo "defect_fingerprint=${PACKED_FINGERPRINT}"
+  echo "split_count=${SPLIT_COUNT}"
   if [ "$REQUESTED_TOOL" = "opencode" ] || [ "$REQUESTED_TOOL" = "auto" ]; then
     echo "opencode_argv=opencode run --auto --dir ${REPO_DIR} -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>"
   fi
@@ -446,6 +503,8 @@ cat <<JSON > "$RUN_LOCK_FILE"
   "log_file": "${CURRENT_LOG}",
   "area": "${DISPATCH_AREA}",
   "worktree": "${CODER_DIR}",
+  "defect_component": $(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$PACKED_COMPONENT"),
+  "defect_fingerprint": $(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$PACKED_FINGERPRINT"),
   "lock_files": ${LOCKED_FILES_ARR},
   "task": $(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$TASK")
 }
@@ -689,7 +748,22 @@ clean_workspace() {
 # Build full task prompt including screenshot reference & hints
 # ---------------------------------------------------------------
 build_prompt() {
-  local base_prompt="Task for $BUG_ID ($CATEGORY): $TASK"
+  local base_prompt="Task for $BUG_ID ($CATEGORY): $TASK
+
+[DEFECT CARD (V-30.2 single defect)]:
+- Component: $PACKED_COMPONENT
+- Observed: $PACKED_OBSERVED
+- Expected: $PACKED_EXPECTED
+- Acceptance Criteria: $PACKED_CRITERIA
+- Fingerprint: $PACKED_FINGERPRINT"
+
+  if [ -n "$SPLIT_LIST_TEXT" ]; then
+    base_prompt="${base_prompt}
+
+[SPLIT DEFECTS - OUT OF SCOPE]:
+Other discrepancies were split from this report into separate cards. Do NOT fix them in this run:
+$SPLIT_LIST_TEXT"
+  fi
 
   # Filter screenshot for pure text/numeric formatting tasks to prevent visual over-analysis loops
   local is_text_or_format=0
