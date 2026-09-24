@@ -135,6 +135,9 @@ test.describe('saved-meal lineage', () => {
     await gotoHistory(page);
     const card = page.locator(`#food-log-item-${child.id}`);
     await expect(card).toBeVisible({ timeout: 15000 });
+    // The Saved meal tag now lives on the small composition thumbnail, so the
+    // card must be expanded before the tag is present.
+    await card.locator('h3').click();
     await expect(card.getByRole('button', { name: /saved meal/i })).toBeVisible({ timeout: 15000 });
   });
 
@@ -166,6 +169,8 @@ test.describe('saved-meal lineage', () => {
     await gotoHistory(page);
     const childCard = page.locator(`#food-log-item-${child.id}`);
     await expect(childCard).toBeVisible({ timeout: 15000 });
+    // Tag sits on the small composition thumbnail; expand the card first.
+    await childCard.locator('h3').click();
     await childCard.getByRole('button', { name: /saved meal/i }).click();
     const masterCard = page.locator(`#food-log-item-${master.id}`);
     await expect(masterCard).toHaveClass(/ring-2/, { timeout: 15000 });

@@ -1428,8 +1428,6 @@ export default function FoodHistoryTab({
                 log
               );
             const hasPreview = resolvedImgs.length > 0 || Boolean(resolvedImg);
-            const hasCompositionThumbs = (Array.isArray(effectiveScoutItems) && effectiveScoutItems.length > 0) ||
-              (Array.isArray(effectiveItemsBreakdown) && effectiveItemsBreakdown.length > 0);
             const savedMealSourceId = String((log as any)?.sourceMealId || (log as any)?.source_meal_id || '').trim();
             const savedMealMaster = savedMealSourceId ? masterByChildId.get(String(log.id)) : undefined;
             const savedMealOpenable = Boolean(savedMealMaster && savedMealMaster.id !== log.id &&
@@ -1848,7 +1846,6 @@ export default function FoodHistoryTab({
                             <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
                               {formatLogDateTime(log.date, (log as any).updated_at, profile?.timezone)}
                             </span>
-                            {!(isExpanded && hasCompositionThumbs) ? renderSavedMealTag() : null}
                             {(() => {
                               const v = resolveMealVerdict(log, profile?.language);
                               if (!v?.label) return null;
