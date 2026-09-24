@@ -428,7 +428,7 @@
       "test": "T4",
       "scope": "common",
       "status": "partial",
-      "prove": "unit test failure-log roundtrip/grouping; review flags repeats at threshold",
+      "prove": "unit test tests/failure-log.test.ts (roundtrip/grouping, repeat threshold); review flags repeats at threshold",
       "expect": [
         "scripts/lib/failure-log.mjs",
         "scripts/review-failures.mjs"
