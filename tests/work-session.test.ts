@@ -11,6 +11,7 @@ import {
   setTx,
   handoffSession,
   abortSession,
+  ensureTmuxWorkView,
   debugProbe,
   sessionStatus,
   scrubSecrets,
@@ -20,6 +21,31 @@ import {
 let store;
 const noTmux = () => false;
 const yesTmux = () => true;
+
+function fakeTmux(initial = {}) {
+  const sessions = new Map(Object.entries(initial).map(([name, windows]) => [name, new Set(windows)]));
+  const calls = [];
+  const run = (args) => {
+    calls.push(args);
+    if (args[0] === 'has-session') return sessions.has(args[2]);
+    if (args[0] === 'list-windows') {
+      return [...(sessions.get(args[2]) || [])].join('\n');
+    }
+    if (args[0] === 'new-session') {
+      sessions.set(args[3], new Set([args[5]]));
+      return true;
+    }
+    if (args[0] === 'new-window') {
+      const session = args[3].replace(/:$/, '');
+      const windows = sessions.get(session) || new Set();
+      windows.add(args[5]);
+      sessions.set(session, windows);
+      return true;
+    }
+    return false;
+  };
+  return { calls, run, sessions };
+}
 
 beforeEach(() => {
   store = path.join(os.tmpdir(), `ws_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
@@ -62,6 +88,54 @@ describe('tx', () => {
   });
 });
 
+describe('tmux work view', () => {
+  it('creates a session and workstream window once', () => {
+    const session = resolveSession({ ...loc, lane: 'opencode' }, store);
+    const tmux = fakeTmux();
+    const first = ensureTmuxWorkView(session, { tmux: tmux.run });
+    const count = tmux.calls.length;
+    const second = ensureTmuxWorkView(session, { tmux: tmux.run });
+
+    expect(first).toMatchObject({ ok: true, created: true, surface: 'terminal', tmuxSession: 'work-vps' });
+    expect(first.target).toBe(`work-vps:${tmuxWindowFor(session.id)}`);
+    expect(tmux.calls).toContainEqual(['new-session', '-d', '-s', 'work-vps', '-n', tmuxWindowFor(session.id), '-c', session.workspace]);
+    expect(second).toMatchObject({ ok: true, created: false });
+    expect(tmux.calls).toHaveLength(count + 2);
+  });
+
+  it('adds only a missing window to an existing session', () => {
+    const session = resolveSession({ ...loc, lane: 'opencode' }, store);
+    const tmux = fakeTmux({ 'work-vps': ['other'] });
+    const result = ensureTmuxWorkView(session, { tmux: tmux.run });
+    expect(result.ok).toBe(true);
+    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'list-windows', 'new-window', 'list-windows']);
+    expect(tmux.sessions.get('work-vps')).toEqual(new Set(['other', tmuxWindowFor(session.id)]));
+  });
+
+  it('reuses an existing workstream without creating or killing anything', () => {
+    const session = resolveSession({ ...loc, lane: 'opencode' }, store);
+    const window = tmuxWindowFor(session.id);
+    const tmux = fakeTmux({ 'work-vps': [window] });
+    const result = ensureTmuxWorkView(session, { tmux: tmux.run });
+    expect(result).toMatchObject({ ok: true, created: false });
+    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'list-windows']);
+    expect(tmux.calls.flat().some((arg) => /kill|respawn|send-keys/.test(String(arg)))).toBe(false);
+  });
+
+  it('never invokes tmux for an API-only lane', () => {
+    const session = resolveSession({ ...loc, lane: 'gemini' }, store);
+    const tmux = fakeTmux();
+    const result = ensureTmuxWorkView(session, { tmux: tmux.run });
+    expect(result).toMatchObject({ ok: true, created: false, surface: 'api', target: null });
+    expect(tmux.calls).toEqual([]);
+  });
+
+  it('uses a stable collision-resistant workstream name', () => {
+    const prefix = 'vps|chat|/a/very/long/workspace/path/that/keeps/going';
+    expect(tmuxWindowFor(`${prefix}/one`)).not.toBe(tmuxWindowFor(`${prefix}/two`));
+  });
+});
+
 describe('debugProbe', () => {
   it('keeps one shape across all backends', () => {
     const keys = new Set();
@@ -76,6 +150,7 @@ describe('debugProbe', () => {
     const s = resolveSession(loc, store);
     const p = debugProbe('opencode', { session: s, tmux: yesTmux });
     expect(p).toMatchObject({ surface: 'terminal', attach: true, tmuxSession: 'work-vps' });
+    expect(p.target).toBe(`work-vps:${tmuxWindowFor(s.id)}`);
   });
 
   it('API lanes never claim attach', () => {
