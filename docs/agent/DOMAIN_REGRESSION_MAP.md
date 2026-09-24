@@ -132,6 +132,7 @@ Treat silent changes to tombstone / merge semantics as **class X**.
 | Bot run ledger (`scripts/lib/run-ledger.mjs`, `scripts/assert-run-ledger.mjs`, `run-coding-dispatch.sh` ledger hooks) | `node scripts/assert-run-ledger.mjs` · `npx vitest run tests/run-ledger.test.ts` |
 | Bot souls (`bots/soul*.md`, `scripts/lib/soul-compose.mjs`, `scripts/assert-soul-compose.mjs`) | `node scripts/assert-soul-compose.mjs` · `npx vitest run tests/soul-compose.test.ts` |
 | Bot lane contract (`scripts/lib/lane-contract.mjs`, `scripts/assert-lane-contract.mjs`) | `node scripts/assert-lane-contract.mjs` · `npx vitest run tests/lane-contract.test.ts` |
+| Bot work sessions (`scripts/lib/work-session.mjs`, `scripts/assert-work-session.mjs`) | `node scripts/assert-work-session.mjs` · `npx vitest run tests/work-session.test.ts` |
 
 ## Bugs / triage tooling
 
