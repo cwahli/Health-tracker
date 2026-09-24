@@ -511,7 +511,7 @@
       "test": "T6",
       "scope": "common",
       "status": "open",
-      "prove": "offline queue: bugctl flush replays .bugctl-queue.jsonl after API downtime",
+      "prove": "unit test tests/bugctl-queue.test.ts (offline queue on dead API, flush replay + empty, un-sendable rows kept, corrupt lines dropped, missing queue empty)",
       "expect": [
         "scripts/bugctl.mjs",
         "scripts/lib/bug-pack.mjs"
