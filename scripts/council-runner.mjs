@@ -33,6 +33,12 @@ import { runGemini } from './lib/agent-gemini.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 
+// Must be an id in GEMINI_MODELS (scripts/lib/freemodels.mjs). The previous
+// hardcoded 'gemini-2.0-flash' was not on that list, so every run resolved to
+// "Unknown gemini model" and the synthesised fallback wrote the document
+// instead. COUNCIL_MODEL is the injection point for the card 2 live proof.
+const COUNCIL_MODEL = process.env.COUNCIL_MODEL || 'gemini/gemini-3.7-flash';
+
 export const COUNCIL_PHASES = [
   { id: 'accuracy_review', title: 'Phase 1: Accuracy & Forensic Audit', file: '01_accuracy_audit.md' },
   { id: 'case_review', title: 'Phase 2: Case Defense & Blocker Context', file: '02_defense_rebuttal.md' },
@@ -122,114 +128,27 @@ ${contextText}
 User Input / Request:
 ${prompt}`;
 
-  // Try Gemini API first (low latency, structured)
+  // A failed or empty model call is a failed stage. It must never produce a
+  // document: a synthesised dossier is indistinguishable from a real one to
+  // the reader and invents case facts nobody supplied.
+  let res;
   try {
-    const res = await runGemini({
+    res = await runGemini({
       prompt: fullPrompt,
-      model: 'gemini-2.0-flash',
+      model: COUNCIL_MODEL,
       timeoutMs: 120000,
     });
-    if (res && res.finalText) {
-      return res.finalText;
-    }
   } catch (err) {
-    // If API unavailable or unconfigured, return structured synthesized output
-    console.warn(`[council-runner] API call fell back to local synthesis: ${err.message}`);
+    throw new Error(`model call failed for role ${roleId}: ${err.message}`);
   }
-
-  // Structured synthesis fallback
-  return generateStructuredFallback(roleId, prompt, contextText);
+  const text = String(res?.finalText || '').trim();
+  if (!text) {
+    const reason = String(res?.lastError || 'model returned no text').trim();
+    throw new Error(`model call failed for role ${roleId}: ${reason}`);
+  }
+  return text;
 }
 
-function generateStructuredFallback(roleId, prompt, contextText) {
-  const timestamp = new Date().toISOString().split('T')[0];
-  switch (roleId) {
-    case 'accuracy_review':
-      return `# Forensic Audit & Accuracy Review (${timestamp})
-
-## Executive Summary
-Audited raw input documents and chronological timeline against verified delivery records.
-
-| Claim ID | Manager Allegation | Factual Reality | Evidence Receipt | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| CLM-01 | "Pace of delivery fell below team standard" | Sprint 14 deliverable completed within 48h of dependency unblock | Slack thread #sec-review-s14 | Verified (Contextual delay) |
-| CLM-02 | "Did not communicate project risks early" | 3 status alerts dispatched to stakeholder channel across 2 weeks | Email screenshot receipt_01.png | Disputed (Timely notice given) |
-| CLM-03 | "Negative impact on sprint throughput" | Zero P0 incidents introduced; 42 PRs merged | GitHub metrics export | Disputed (High quality delivery) |
-
-## Omissions Identified in Manager Review:
-1. Unannounced mid-sprint requirement pivot by external product partner.
-2. Manager was on PTO during critical blocker escalation window.
-`;
-
-    case 'case_review':
-      return `# Case Defense & Contextual Rebuttal (${timestamp})
-
-## Strategic Framing
-Ground the response in objective engineering realities: de-escalate emotional pushback while establishing an undeniable record of technical delivery and external blockers.
-
-| Evaluated Issue | Manager Criticism | Operational Reality | Evidence / Deliverables | Recommended Stance |
-| :--- | :--- | :--- | :--- | :--- |
-| Velocity | "Slow turnaround on feature" | Upstream security review took 8 business days | Incident #SEC-402 | Firm factual correction |
-| Communication | "Infrequent updates" | Weekly asynchronous summaries published | Team Slack logs | Reaffirm alignment |
-| Ownership | "Lacks initiative" | Stepped up to lead database schema cleanup | PR #114 to #122 | Highlight initiative |
-
-## Proposed Rebuttal Narrative:
-"While our final release shifted, the schedule deviation was strictly driven by third-party security verification required by compliance. During that window, engineering velocity remained high, resulting in 42 merged PRs and zero regressions."
-`;
-
-    case 'manager_simulation':
-      return `# Manager Red-Team & Adversarial Critique (${timestamp})
-
-## Manager Perspective Analysis
-The manager will likely focus on "ownership" rather than technical excuses. If you simply point fingers at the security team, the manager will counter: *"As a senior engineer, you owned the delivery date regardless of dependencies."*
-
-## Vulnerability Scores & Counter-Attacks:
-- **Point 1 (Blaming Security Team)**: Vulnerability Score: 8/10 (High Risk).
-  - *Predicted Manager Attack*: "Why didn't you escalate to me on Day 2 of the security delay instead of waiting for Day 8?"
-  - *Required Pivot*: Rephrase as proactive risk management: *"We escalated on Day 2 in channel X; in hindsight, I will also schedule a direct sync to expedite."*
-- **Point 2 (Highlighting PR Count)**: Vulnerability Score: 4/10 (Moderate).
-  - *Predicted Manager Attack*: "PR count is a vanity metric; I care about shipped customer value."
-  - *Required Pivot*: Tie PRs directly to business value: *"Those 42 PRs unblocked the customer onboarding funnel."*
-`;
-
-    case 'legal_policy':
-      return `# Legal & Policy Compliance Memo (${timestamp})
-
-## Procedural Fairness Audit
-1. **Notice Standards**: Company performance guidelines require documented verbal and written warnings prior to a 'Needs Development' rating. (Status: Violated if this review was the first notice).
-2. **SMART Criteria Defect**: Criticisms such as "lack of urgency" fail the objective measurability requirement mandated in standard employee handbooks.
-3. **Protected Status & Retaliation Check**: Ensure no recent protected medical leave, bereavement, or compliance reporting correlates with the timing of this rating.
-
-## Negotiation Leverage:
-- **Rating**: Medium to High.
-- **Recommended Signature Caveat**: If presented with a document: *"Acknowledging receipt only on ${timestamp}; detailed contextual clarification submitted for personnel file."*
-- **Severance Option**: If the manager remains hostile, current procedural gaps provide leverage for a 2-4 month mutual separation agreement.
-`;
-
-    case 'arbitrator':
-      return `# Strategic Arbitration Ruling (${timestamp})
-
-## Binding Strategic Directive
-The council rules unanimously to adopt **Path A (Collaborative Alignment & De-escalation)** for the primary manager 1:1, while maintaining **Path B (Firm Record Preservation)** in writing for HR.
-
-1. **Strike Aggressive Arguments**: Remove all direct accusations against the manager's oversight or team members.
-2. **Anchor on Measurable 30/60/90 Day Plan**: Pivot the meeting within 5 minutes to the forward-looking alignment agreement.
-3. **Preserve Receipts Off-System**: Ensure all Slack, Jira, and email screenshots are stored securely in Google Drive outside company hardware.
-`;
-
-    case 'final_case_builder':
-      return `# Final Executive Dossier Summary (${timestamp})
-
-All materials have been compiled and published to the project workspace:
-1. \`A_Executive_1-on-1_Talking_Points.md\` (Ready for 1:1 sync).
-2. \`B_Formal_Performance_Rating_Rebuttal.md\` (Formal HR addendum).
-3. \`C_30_60_90_Performance_Alignment_Plan.md\` (SMART agreement).
-`;
-
-    default:
-      return `Completed analysis for role: ${roleId}\nPrompt: ${prompt}`;
-  }
-}
 
 export async function runFullCouncil(projectId = 'external-1', onProgress = console.log) {
   const proj = KNOWN_PROJECTS[projectId];
@@ -373,7 +292,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const stageArg = args.find((a) => a.startsWith('--stage='));
     if (stageArg) {
       const stage = stageArg.split('=')[1];
-      runCouncilStage(projectId, stage, console.log)
+      runCouncilStage(stage, projectId, console.log)
         .then((res) => {
           console.log(`🎉 Stage ${stage} finished successfully!`);
           process.exit(0);
