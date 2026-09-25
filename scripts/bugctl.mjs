@@ -112,11 +112,12 @@ async function api(method, pathname, body) {
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  const text = await res.text();
   let json;
   try {
-    json = await res.json();
+    json = JSON.parse(text);
   } catch {
-    json = { error: `HTTP ${res.status}` };
+    json = res.ok && text ? text : { error: `HTTP ${res.status}` };
   }
   return { status: res.status, ok: res.ok, json };
 }

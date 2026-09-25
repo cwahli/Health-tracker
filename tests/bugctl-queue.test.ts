@@ -149,7 +149,7 @@ describe('offline queue (sess-ticket-resume)', () => {
       const r = await runBugctl(['list', '--json'], { BUG_API_BASE: `http://127.0.0.1:${port}` });
       expect(r.code).toBe(0);
       expect(JSON.parse(r.stdout)).toMatchObject({ source: 'canonical-bug-list', count: 1 });
-      expect(seen[0].url).toBe('/api/bugs/list?');
+      expect(seen[0].url).toMatch(/^\/api\/bugs\/list\??$/);
     } finally {
       srv.close();
     }
@@ -170,6 +170,36 @@ describe('offline queue (sess-ticket-resume)', () => {
       const handoff = await runBugctl(['handoff', '--id', '7', '--expected-revision', '2', '--reason', 'ready for orchestrator', '--json'], { BUG_API_BASE: `http://127.0.0.1:${port}` });
       expect(handoff.code).toBe(0);
       expect(JSON.parse(seen[1].body)).toMatchObject({ op: 'handoff', assignee: 'orchestrator', expected_revision: 2 });
+    } finally {
+      srv.close();
+    }
+  });
+
+  it('prints text packet bodies and preserves JSON packet output', async () => {
+    const seen = [];
+    const srv = http.createServer((req, res) => {
+      seen.push(req.url);
+      if (req.url?.includes('format=text')) {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end('# Bug 8\nTitle: Text packet');
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ public_n: 8, title: 'JSON packet' }));
+    });
+    const port = await new Promise((resolve) => {
+      srv.listen(0, '127.0.0.1', () => resolve(srv.address().port));
+    });
+    try {
+      const env = { BUG_API_BASE: `http://127.0.0.1:${port}` };
+      const text = await runBugctl(['packet', '--id', '8', '--format', 'text'], env);
+      expect(text.code).toBe(0);
+      expect(text.stdout.split('\n')[0]).toBe('# Bug 8');
+      expect(text.stdout).not.toContain('HTTP 200');
+      const json = await runBugctl(['packet', '--id', '8', '--json'], env);
+      expect(json.code).toBe(0);
+      expect(JSON.parse(json.stdout)).toEqual({ public_n: 8, title: 'JSON packet' });
+      expect(seen).toEqual(['/api/bugs/8/packet?format=text', '/api/bugs/8/packet']);
     } finally {
       srv.close();
     }
