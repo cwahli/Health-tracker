@@ -77,7 +77,11 @@ The second time the same signature is recorded, append one dead-end line. The ne
 
 ## Tmux
 
-`/tx on` stays on across `/location` and `/project`. Neither command kills the session. One host has one tmux server, so the phone and the VM do not share a session name. The live view is `work-<host>` from `tmuxSessionFor` on the host that is running the turn, and the window for this chat is reused rather than replaced by a new one. `tmux capture-pane` on that window shows the TUI of the tool that is actually running (the OpenCode attach screen, or the Cline screen when that surface was selected). A log tail, a blank pane, or the previous tool left on screen is a failure. The reply names the session and the host so the check looks at the right machine.
+`/tx on` stays on across `/location` and `/project`. Neither command kills the session you are watching.
+
+A project change stays on the same machine. The same tmux window is reused, and the TUI on screen is the tool now running in the new workspace.
+
+A location change runs the tool on the other machine. That process cannot live inside the VM's tmux. The workaround is one stable session on the VM, `work-view`, which is the only session you attach to. When the location changes, that same pane is pointed at a live relay of the tool's TUI, carried over the worker's existing outbound connection. You do not open a second session and you do not SSH to the phone. `tmux capture-pane -t work-view` on the VM shows the OpenCode screen, or the Cline screen when that tool was selected, including after `/location mobile`. A log tail, a blank pane, or the previous tool left on screen is a failure. The reply still names the host that is running the turn.
 
 ## External project boundary
 

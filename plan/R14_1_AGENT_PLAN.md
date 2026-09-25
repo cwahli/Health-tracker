@@ -166,9 +166,9 @@ The location change inside step 5 must also cover a host that has no allowance l
 
 ### Card 6c — Location and project keep the tool TUI
 
-**Change.** `/tx on` stays on across `/location` and `/project`. Neither command runs `kill-session`. The phone and the VM do not share one tmux server. The live view is `work-<host>` on the host that is running the turn, and this chat's window is reused. `tmux capture-pane` shows the TUI of the tool that is running.
+**Change.** `/tx on` stays on across `/location` and `/project`. Neither command runs `kill-session` on `work-view`. A project change reuses that window and shows the tool's TUI in the new workspace. A location change runs the tool on the other machine. The VM pane `work-view` stays the session you attach to and is retargeted to a live relay of that tool's TUI over the worker's existing outbound connection. No second session and no SSH to the phone.
 
-**Live proof.** `/tx on`, then one turn. `tmux capture-pane -t work-<host>` shows the OpenCode TUI (or the Cline screen if that surface was selected), not a log tail. Then `/project external 2` and one turn. The same session still exists, the window was not replaced, and capture-pane shows that tool's TUI on the external workspace. Then `/location` to a connected host and one turn. Capture-pane on that host's `work-<host>` shows the TUI of the tool that ran there. The previous host's session was not killed. Paste the session name, the host, and the capture for each step. A blank pane or the previous tool left on screen is a fail.
+**Live proof.** On the VM, `/tx on`, then one turn. `tmux capture-pane -t work-view` shows the OpenCode TUI, or the Cline screen if that surface was selected. Then `/project external 2` and one turn. `tmux has-session -t work-view` still succeeds, the window was not replaced, and capture-pane shows that tool's TUI. Then `/location` to a connected host and one turn. Capture-pane of the same `work-view` on the VM shows the TUI of the tool running on that host. Paste the session name, the host, and the capture for each step. A blank pane, a log tail, or the previous tool left on screen is a fail.
 
 ### Card 7 — Project 3 is empty of project 2
 
