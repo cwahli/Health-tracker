@@ -228,6 +228,8 @@ export function resolveSession({ location = '', chat = '', workspace = '', lane 
       lane: String(lane),
       laneHistory: [String(lane)],
       tx: false,
+      viewMode: 'observer',
+      viewCommand: null,
       state: 'active',
       transcriptRef: null,
       createdAt: now,
@@ -255,6 +257,10 @@ function updateSession(id, patch, storePath = sessionsPath()) {
 /** tx on/off: shared observation without stopping work. */
 export function setTx(id, on, storePath = sessionsPath()) {
   return updateSession(id, { tx: Boolean(on) }, storePath);
+}
+
+export function setWorkView(id, patch, storePath = sessionsPath()) {
+  return updateSession(id, patch, storePath);
 }
 
 /**
@@ -309,6 +315,10 @@ function observerCommand(logPath) {
   return `/usr/bin/tail -n 40 -F -- ${shellQuote(logPath)}`;
 }
 
+function workViewCommand(session, logPath = observerLogPath(session)) {
+  return session?.viewCommand || observerCommand(logPath);
+}
+
 /**
  * Real tmux renders `pane_start_command` as a shell-style quoted word
  * ("cmd 'arg'") while fake runners in tests pass it through unquoted. An
@@ -336,10 +346,10 @@ function parseObserverPanes(output) {
   });
 }
 
-function observerPaneFor(target, logPath, tmux) {
-  const expected = observerCommand(logPath);
+function observerPaneFor(target, logPath, tmux, expected = observerCommand(logPath)) {
   const panes = parseObserverPanes(tmux(['list-panes', '-t', target, '-F', '#{pane_id}\t#{pane_start_command}']));
-  return panes.find((pane) => pane.command === expected) || null;
+  const normalized = unquoteTmuxValue(expected);
+  return panes.find((pane) => pane.command === expected || pane.command === normalized) || null;
 }
 
 export function disableTmuxObserver(session, { tmux = defaultTmuxRunner } = {}) {
@@ -350,7 +360,7 @@ export function disableTmuxObserver(session, { tmux = defaultTmuxRunner } = {}) 
   const tmuxWindow = tmuxWindowFor(session.id);
   const target = `${tmuxSession}:${tmuxWindow}`;
   const logPath = observerLogPath(session);
-  const pane = observerPaneFor(target, logPath, tmux);
+  const pane = observerPaneFor(target, logPath, tmux, workViewCommand(session, logPath));
   if (!pane) return { ok: true, stopped: false, pane: null };
   const stopped = Boolean(tmux(['kill-pane', '-t', pane.id]));
   return { ok: stopped, stopped, pane: pane.id };
@@ -368,7 +378,7 @@ export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
   if (!ensureObserverFile(logPath)) {
     return { ok: false, created: false, migrated: false, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: null, observerLog: logPath };
   }
-  const command = observerCommand(logPath);
+  const command = workViewCommand(session, logPath);
   let created = false;
   if (!tmux(['has-session', '-t', tmuxSession])) {
     tmux(['new-session', '-d', '-s', tmuxSession, '-n', tmuxWindow, '-c', session.workspace, command]);
@@ -386,7 +396,7 @@ export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
     created = true;
   }
 
-  let pane = observerPaneFor(target, logPath, tmux);
+  let pane = observerPaneFor(target, logPath, tmux, command);
   let migrated = false;
   if (!pane) {
     const paneId = tmux(['split-window', '-h', '-t', target, '-c', session.workspace, '-P', '-F', '#{pane_id}', command]);
@@ -411,7 +421,7 @@ export function debugProbe(backend, { session = null, tmux = defaultTmuxRunner }
   const tmuxWindow = session ? tmuxWindowFor(session.id) : null;
   const target = tmuxSession && tmuxWindow ? `${tmuxSession}:${tmuxWindow}` : null;
   const observerLog = session && lane.kind === 'cli' ? observerLogPath(session) : null;
-  const observer = lane.kind === 'cli' && target ? observerPaneFor(target, observerLog, tmux) : null;
+  const observer = lane.kind === 'cli' && target ? observerPaneFor(target, observerLog, tmux, workViewCommand(session, observerLog)) : null;
   const observerLive = Boolean(observer);
   return {
     backend: lane.backend,
