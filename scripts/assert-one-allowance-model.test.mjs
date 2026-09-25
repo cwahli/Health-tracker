@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { projectLanes, annotateFreemodelEntries, buildAllowanceTextForBots, ensureBotLedger, stampDepleted, withCatalogLanes, entriesFromLanes, planCodeForLane } from './lib/free-lanes.mjs';
+import { projectLanes, annotateFreemodelEntries, buildAllowanceTextForBots, ensureBotLedger, stampDepleted, withCatalogLanes, entriesFromLanes, planCodeForLane, canonicalAllowanceLanes } from './lib/free-lanes.mjs';
 import { selectTurnLanes } from './bot-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -319,9 +319,11 @@ try {
   // /allowance listed 52 rows and /freemodel counted 51: the same Token Harbor model
   // on two paths is one shared bar, and only one of the two surfaces was collapsing
   // it. The router's grid has always collapsed it for display.
-  check('/allowance applies the router\'s Token Harbor display dedupe', /dedupeTokenHarborLanes\(ordered\)/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
+  check('/allowance renders the same canonical list, not its own walk of the table',
+    /for \(const l of canonicalAllowanceLanes\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
   const fmSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
-  check('/freemodel counts one entry per model', /const seenModel = new Set\(\)/.test(fmSrc) && /seenModel\.has\(k\)/.test(fmSrc));
+  check('/freemodel has no dedupe of its own any more', !/seenModel/.test(fmSrc), 'a second notion of "same model" is how the two drifted apart');
+  check('and takes the shared list instead', /canonical = null/.test(fmSrc) && /canonical: canonicalAllowanceLanes\(/.test(fmSrc));
   // Provider AND model: keying on the model name alone merged Cline's
   // `deepseek-v4.1-flash` with Freebuff's — same last segment, different accounts —
   // and one of them vanished from the list.
@@ -330,8 +332,8 @@ try {
   // the Gemini lanes `google`, the catalog calls them `gemini`, and
   // `opencode-go/space-bunny-free` is the same model as `opencode/space-bunny-free`,
   // so each of those was counted twice.
-  check('and the identity is the plan code, not the raw provider',
-    /const tag = v\.lane \? planCodeForLane\(v\.lane\)/.test(fmSrc) && /`\$\{tag\}\|\$\{model\}`/.test(fmSrc));
+  check('and the identity is the plan code, in the shared helper',
+    /`\$\{planCodeForLane\(lane\)\}\|\$\{model\}`/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
   // Called, not grepped: the ledger spells the Gemini lanes `google/…` and the
   // catalog spells them `gemini`, and only the plan code folds the two together.
   check('the plan code folds the google/gemini spelling together',
@@ -349,9 +351,38 @@ try {
   const twinRows = twinText.split('\n').filter((l) => /^(✅|❌)/.test(l) && /DeepSeek V4\.1/.test(l));
   check('and /allowance lists that model once, not twice', twinRows.length === 1, twinText);
 
+  // 6g. The parity that matters, asserted on one table holding every awkward shape:
+  // the row list /allowance renders and the row list /freemodel renders are the same
+  // array, so the two commands report the same number by construction rather than by
+  // two dedupes agreeing.
+  const shared = { version: 3, buckets: {}, lanes: [
+    { pref: 1, provider: 'opencode', model: 'opencode/zen', status: 'available', tg: true, label: 'Zen' },
+    { pref: 2, provider: 'opencode', model: 'tokenharbor/deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'OpenCode Token Harbor DeepSeek free' },
+    { pref: 3, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'Token Harbor chat DeepSeek free' },
+    { pref: 4, provider: 'opencode', model: 'google/gemini-3.8-flash', status: 'available', tg: true, label: 'gemini 3.8 flash' },
+    { pref: 5, provider: 'opencode', model: 'opencode/space-bunny-free', status: 'available', tg: true, label: 'Space Bunny' },
+    { pref: 6, provider: 'opencode-go', model: 'opencode-go/space-bunny-free', status: 'available', tg: true, label: 'space-bunny-free' },
+    { pref: 7, provider: 'freebuff', model: 'deepseek/deepseek-v4.1-flash', status: 'available', tg: false, label: 'Freebuff DeepSeek' },
+  ] };
+  const canon = canonicalAllowanceLanes({ table: shared, session: {}, readiness: null });
+  const canonKeys = canon.map((r) => `${r.plan}|${String(r.model).toLowerCase().split('/').filter(Boolean).pop()}`);
+  check('the Token Harbor pair is one row', canonKeys.filter((k) => k.startsWith('TH|')).length === 1, JSON.stringify(canonKeys));
+  check('a vendor twin is one row', canonKeys.filter((k) => /space-bunny/.test(k)).length === 1, JSON.stringify(canonKeys));
+  check('the google/gemini lane is one GM row', canonKeys.filter((k) => k.startsWith('GM|')).length === 1, JSON.stringify(canonKeys));
+  check('every row is unique', new Set(canonKeys).size === canonKeys.length, JSON.stringify(canonKeys));
+  check('and /allowance renders exactly that many rows', (() => {
+    const d = ensureBotLedger('vm').dir;
+    fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(shared, null, 2));
+    const text = buildAllowanceTextForBots({ stateDir: d });
+    const rows = text.split('\n').filter((l) => /^(✅|❌)/.test(l));
+    return rows.length === canonKeys.length;
+  })(), `allowance rows vs canonical rows`);
+  check('a terminal-only row is in the list and marked not selectable',
+    canon.find((r) => /Freebuff/.test(String(r.label)))?.selectable === false);
+
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
-  check('/freemodel renders the annotated rows, not the raw catalog', /verdictOf\(e\)/.test(botSrc) && /const rows = \[\];/.test(botSrc));
+  check('/freemodel renders the canonical list, not the raw catalog', /const rows = canonical \|\| \[\];/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
     /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));

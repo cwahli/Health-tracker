@@ -1036,15 +1036,13 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const lines = [
     "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
   ];
-  // The router's grid shows one row per Token Harbor model — the OpenCode tools
-  // path and the chat-only path are the same shared `tokenharbor-free` bar, so two
-  // rows for one bar is a double entry. The text table was not doing that, which is
-  // why /allowance listed 52 rows while /freemodel, collapsing them the way the
-  // router does, counted 51: the two commands were counting the same bar twice and
-  // once. Same dedupe, same count.
+  // The rows are canonicalAllowanceLanes() — the same list /freemodel renders. This
+  // loop used to walk the ordered table with only the Token Harbor pair collapsed,
+  // so a vendor twin (`opencode/space-bunny-free` and `opencode-go/space-bunny-free`
+  // are one model) printed twice here while /freemodel counted it once. One list.
   const blocked = [];
-  for (const l of dedupeTokenHarborLanes(ordered)) {
-    const verdict = rows ? rows.find((r) => laneKey(r.lane) === laneKey(l)) : null;
+  for (const l of canonicalAllowanceLanes({ table: t, lanes: ordered, session, now, labelFn })) {
+    const verdict = rows ? rows.find((r) => laneKey(r.lane) === laneKey(l.lane)) || l : l;
     // A lane whose provider has no credential on this host cannot be counted,
     // so it leaves the table entirely rather than sitting in it as a mystery
     // row. It is listed underneath with the variable it needs.
@@ -1168,6 +1166,44 @@ function modelKey(s) {
   const raw = String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
   const segs = raw.split("/").filter(Boolean);
   return segs.length ? segs[segs.length - 1] : raw;
+}
+
+/**
+ * THE row list. Both /allowance and /freemodel render this, so they cannot
+ * disagree about how many models there are or which ones are usable.
+ *
+ * It did not used to be shared: each command deduplicated on its own — the table
+ * collapsed the Token Harbor pair for display, the catalog side collapsed vendor
+ * twins and the two Gemini spellings — and two hand-rolled notions of "the same
+ * model" drifted by one row for four rounds of fixes. One function, one list.
+ *
+ * The rules, all of them the router's: the Token Harbor tools path and the
+ * chat-only path are one shared `tokenharbor-free` bar and appear once; a lane
+ * whose provider has no credential on this host is not a row here (it is reported
+ * as a gap instead, with the variable it needs); and identity is the plan code, so
+ * `google/gemini-…` and `gemini:gemini-…` are one model, as are `opencode/x` and
+ * `opencode-go/x`.
+ */
+export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "" } = {}) {
+  if (!table || !Array.isArray(table.lanes)) return [];
+  const projection = projectLanes(table, session, { now, location, readiness });
+  const byLane = new Map(projection.map((r) => [laneKey(r.lane), r]));
+  const kept = [];
+  const seen = new Set();
+  // `lanes` lets the caller hand in its own order — /allowance promotes the chat's
+  // own lane to the top before calling, and that promotion has to survive the
+  // filtering and the dedupe, or the current lane stops being row one.
+  const source = Array.isArray(lanes) && lanes.length ? lanes : table.lanes;
+  for (const lane of dedupeTokenHarborLanes(source.filter((l) => l && l.provider && l.model))) {
+    const verdict = byLane.get(laneKey(lane));
+    if (verdict && verdict.needsSetup) continue;
+    const model = modelKey(lane.model);
+    const key = model ? `${planCodeForLane(lane)}|${model}` : `${laneKey(lane)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(verdict || { lane, ref: toModelRefShim(lane.provider, lane.model), provider: lane.provider, model: lane.model, label: lane.label || lane.model, plan: planCodeForLane(lane), selectable: true, depleted: false, ended: false, terminalOnly: lane.tg === false });
+  }
+  return kept;
 }
 
 /**

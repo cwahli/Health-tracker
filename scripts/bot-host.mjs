@@ -72,6 +72,7 @@ import {
   entriesFromLanes,
   effectiveProviderOf,
   planCodeForLane,
+  canonicalAllowanceLanes,
   renderFreeLaneTableHtml,
   ensureBotLedger,
   stampDepleted,
@@ -732,36 +733,24 @@ async function sendHtml(api, chatId, html) {
  * `returns.buttons` is the keyboard, built from the same projection /allowance
  * renders, so the two commands cannot disagree about a row.
  */
-function formatFreemodelWithDepletion(entries, annotated, { current, location } = {}) {
+function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
     const a = byRef.get(e?.ref);
     if (a) return a;
     return { ...e, selectable: e?.selectable !== false, depleted: false, ended: false, terminalOnly: false, inLedger: false, reason: 'not in this ledger' };
   };
-  // One entry per model. The ledger carries the same Token Harbor model on two paths
-  // (the OpenCode tools lane and the chat-only lane) because they are one shared bar,
-  // and the catalog can carry a vendor-prefix twin of an OpenCode row; the router
-  // collapses those, and /allowance now applies the same dedupe. Counting entries
-  // instead of models is how "Total: 51" came out over 50 buttons.
-  const seenModel = new Set();
-  const rows = [];
+  // The rows are canonicalAllowanceLanes() — the same list /allowance renders, with
+  // the same Token Harbor collapse and the same no-credential exclusion. This
+  // command used to run its own dedupe over the catalog, and two notions of "the
+  // same model" drifted by one row for four rounds. One list, one count.
+  const rows = canonical || [];
+  // A catalogued model with no lane row at all is still reported, never dropped.
+  const inList = new Set(rows.map((r) => String(r.model || r.ref || '').toLowerCase().split('/').filter(Boolean).pop()));
   for (const e of entries || []) {
     const v = verdictOf(e);
-    // The plan code is the identity, because it is the one name both commands
-    // already agree on: /allowance prints it in its Plan column. Keying on the
-    // model name alone merged Cline's `deepseek-v4.1-flash` with Freebuff's; keying
-    // on the raw provider failed the other way, counting the same model twice under
-    // two spellings — the ledger calls the Gemini lanes `google`, the catalog calls
-    // them `gemini`, and the vendor twin `opencode-go/space-bunny-free` is the same
-    // model as `opencode/space-bunny-free`. planCodeForLane already folds all three
-    // into GM and OC, which is what "one list, one vocabulary" means here.
-    const tag = v.lane ? planCodeForLane(v.lane) : String(v.provider || '').toLowerCase();
-    const model = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
-    const k = model ? `${tag}|${model}` : '';
-    if (k && seenModel.has(k)) continue;
-    if (k) seenModel.add(k);
-    rows.push(v);
+    const m = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
+    if (m && !inList.has(m)) rows.push(v);
   }
   const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
   const usable = rows.filter((r) => !unusableOf(r));
@@ -807,7 +796,7 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location } 
   const buttons = [];
   for (const r of rows) {
     const label = r.laneLabel || r.label;
-    const tag = r.lane ? planCodeForLane(r.lane) : '';
+    const tag = r.plan || (r.lane ? planCodeForLane(r.lane) : '');
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1494,7 +1483,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // the router keeps a depleted lane tappable so the tap can answer with what
       // to use instead. Filtering them out of the keyboard is what made /freemodel
       // and /allowance list different things.
-      const body = formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() });
+      const { table: fmTable, session: fmSession } = getLedger(config.id);
+      const body = formatFreemodelWithDepletion(entries, annotated, {
+        current: eff.model,
+        location: workLocation(),
+        canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
+      });
       // One keyboard with every model, no paging, and the router's cancel row.
       await api.sendMessage(chatId, body.text, {
         reply_markup: modelKeyboard(body.buttons, {
