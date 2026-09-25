@@ -168,6 +168,20 @@ Dump R2 key: none
 Follow-up: D-1 stays parked; retry on next quota window. Do not pay.
 ```
 
+```text
+Date probed: 2026-09-25 (VPS-2, scripts/d1-supabase-recovery.mjs — the D-1 runner)
+REST status: HTTP 200 — 402 LIFTED (quota reset; no payment made)
+Diffs (Supabase → D1, by PK): food_logs 316→193 (missing 172) · biomarker_logs 28→40 (missing 13) ·
+  profiles 8→30 (missing 5) · agent_jobs 7→35 (missing 7) · food_items 453→127 (missing 453, inserted 422)
+Inserted (missing-only, INSERT OR IGNORE, idempotent): 197 rows · verified stillMissing/unaccounted = 0 on re-run
+By-design key skips: 31 food_items whose food_key already exists in D1 under canonical_* ids (D1 dedup) —
+  skipped is CORRECT: all 453 Supabase food_items rows have nutrients_per_100g = "[object Object]" (legacy
+  writer bug) and 409/453 lowercase display_name; D1's canonical rows carry real JSON macros. No data lost.
+Dump R2 key: backlogs/supabase-recovery-2026-09-25/{food_logs,biomarker_logs,profiles,agent_jobs,food_items,summary}.json
+Follow-up: D-1 recovery COMPLETE (insert-missing-only per packet; no payments, no updates/deletes, project kept).
+  Sensor: scripts/d1-supabase-recovery.test.mjs (8 tests). Non-diffable dump-only cols: food_items.parent_id/locked.
+```
+
 ## Decision (empty until D-6)
 
 ```text
