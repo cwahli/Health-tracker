@@ -280,10 +280,13 @@ describe('agent-opencode event mapping', () => {
     });
   });
 
-  it('maps tool, step_finish and error', () => {
+  it('maps tool, tool_use, step_finish and error', () => {
     expect(
       mapOpencodeEvent({ type: 'tool', part: { tool: 'bash', state: { status: 'completed' } } }),
     ).toMatchObject({ kind: 'tool', tool: 'bash', status: 'completed' });
+    expect(
+      mapOpencodeEvent({ type: 'tool_use', part: { tool: 'read', state: { status: 'running', input: { path: 'README.md' } } } }),
+    ).toMatchObject({ kind: 'tool', tool: 'read', status: 'running', input: { path: 'README.md' } });
     expect(mapOpencodeEvent({ type: 'step_finish', part: { cost: 0.01 } })).toMatchObject({
       kind: 'step_finish',
     });
