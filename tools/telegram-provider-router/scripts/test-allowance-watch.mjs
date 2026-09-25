@@ -14,6 +14,9 @@ import { createRequire } from "module";
 import fs from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { spawnSync } from "child_process";
+
+const ROUTER_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL_DIR = join(HERE, "..");
@@ -90,6 +93,24 @@ t("C3 probeCli maps vendor output to available/depleted/uncertain", () => {
 
   const silent = () => ({ status: 0, stdout: "", stderr: "" });
   eq(core.probeCli(silent, "opencode", [], 1000).status, "uncertain", "no output → uncertain");
+});
+
+// The wrapper is what actually runs, and for 11 hours on 2026-09-25 it did not: the
+// nearest package.json declares "type": "module", the wrapper was CommonJS, and the
+// service crash-looped on "require is not defined in ES module scope" — so nothing
+// was probing or re-stamping any lane. The unit tests below cover the shared core
+// (.cjs) and never loaded the wrapper, which is why it rotted unnoticed. A syntax
+// check is enough to catch that class: it resolves the module type the same way
+// node does at startup.
+t("C0 the wrapper is loadable as the module type node will use", () => {
+  const wrapper = join(ROUTER_DIR, "bin", "ht-allowance-watch");
+  const src = fs.readFileSync(wrapper, "utf8");
+  ok(!/^const .* = require\(/m.test(src), "no bare require() left in the wrapper");
+  ok(/createRequire\(import\.meta\.url\)/.test(src), "the CommonJS core is loaded through createRequire");
+  const check = spawnSync("node", ["--check", wrapper], { encoding: "utf8" });
+  eq(check.status, 0, `node --check on the wrapper: ${(check.stderr || "").trim().split("\n")[0] || "ok"}`);
+  const pkg = JSON.parse(fs.readFileSync(join(ROUTER_DIR, "package.json"), "utf8"));
+  ok(pkg.type === "module", `package.json declares type: ${pkg.type}`);
 });
 
 // A lane with no probe kind can never be detected as spent or seen to renew, so a
