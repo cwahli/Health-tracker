@@ -76,7 +76,7 @@ Fixed across 5 layers: (1) `src/utils/syncUtils.ts` awaits `authStateReady()` an
 **BUG-2 — Gemini 503 on food analysis (peak demand mitigation, COMPLETE 2026-09-24).**  
 Enhanced `server_food_scout_source.ts` with emergency safety net: (1) increased backoff delay for 503/UNAVAILABLE to 2500ms; (2) `runScoutRetryLoop` now hops to `gemini-2.5-flash` if both `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` return 503/UNAVAILABLE during peak demand on the flash-lite infrastructure. Verified via `sync-regression` + `food-calc`, `tsc` 0.
 
-**Still `blocked_human`:** **L-5** (name a locale first — do not invent `fr`/`zh` copy), **Track D D-1** (unpaid Supabase probe ~24 Sep — [DATA_PLANE.md](./DATA_PLANE.md)), **D-3 / D-5…D-6 / D-10**. **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest, Cloud Run go-live, deleting Render before soak PASS, **VPS SQLite as production**, dual-write D1+SQLite, **paying to unpause Supabase**, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
+**Still `blocked_human`:** **L-5** (name a locale first — do not invent `fr`/`zh` copy), **D-3 / D-5…D-6 / D-10** (**D-1 is DONE 2026-09-25** — Supabase 402 lifted, 197 rows backfilled, see [DATA_PLANE.md](./DATA_PLANE.md)). **Do not start:** USDA, curator-on-Analyze, Q-9 rewrite binge, LogChat/FoodCard/Dictionary splits (need their own packets), ConfirmBar as a side quest, Cloud Run go-live, deleting Render before soak PASS, **VPS SQLite as production**, dual-write D1+SQLite, **paying to unpause Supabase**, **R2 bulk-delete from `R2_DELETE_CANDIDATES.json`**. **Do not stub** auth/sync to hit a line budget (`a14abea` / `7d94def`).
 
 **Gate:** `npx tsc --noEmit` · `node scripts/assert-biomarker-lifecycle-m31.mjs` · `npm run scorecard:debug` (sealed ALL GREEN 744/0/0 at `5615f1e`, `golden/scorecard/result_summary/LATEST.md`).
 
@@ -173,7 +173,7 @@ Contact model is **A**: OpenCode master **self-serves** meal-audit via shared sk
 
 **Do not** dual-poll one Telegram token (VPS + phone, or Hermes + bot-host). **Do not** restart `hermes-gateway` from this track unless a named V-28/V-29 task says so. **Do not** run `bot-host@android` on the VPS. Restart phone bot: `setsid nohup ~/start-mobile-opencode-bot.sh </dev/null >/dev/null 2>&1 &` (android: `~/start-android-opencode-bot.sh`, legacy).
 
-Do **not** start: putting curator back on Analyze, reopening FDC, **R-13.4** Worker rewrite, god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, **paying to unpause Supabase**, **R2 photo deletes before D-1**. **R-5** is superseded by Track D (D1 is already primary). **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is LIVE on VPS-2 since 2026-09-20. **Track D D-1** waits for unpaid 402 lift (~24 Sep). **Track D D-5** is `blocked_human` until V-16. **L-5** stays human until a locale is named.  
+Do **not** start: putting curator back on Analyze, reopening FDC, **R-13.4** Worker rewrite, god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, **paying to unpause Supabase**, **R2 photo deletes before D-1**. **R-5** is superseded by Track D (D1 is already primary). **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is LIVE on VPS-2 since 2026-09-20. **Track D D-1** is DONE 2026-09-25 (unpaid; 402 lifted; dated log in DATA_PLANE.md). **Track D D-5** is `blocked_human` until V-16. **L-5** stays human until a locale is named.  
 F-10 lives here + [FOOD.md](./FOOD.md) Process. Track V lives here + [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Track D lives here + [DATA_PLANE.md](./DATA_PLANE.md).
 
 ---
@@ -601,7 +601,7 @@ Canonical plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 is superseded** (D1 is a
 | ID | Phase | Status | Done when |
 |---|---|---|---|
 | **D-0** | Record SoT: Firebase Auth + D1 + R2; index Muse audit | **This plan** | Agents follow DATA_PLANE.md, not “stay on Supabase” |
-| **D-1** | Unpaid recovery when 402 lifts (~**2026-09-24**): dump + diff vs D1; insert missing only | `blocked_human` until REST ≠ 402 | Dated recovery log in DATA_PLANE.md (0 gaps is OK). **No extra bill.** |
+| **D-1** | Unpaid recovery when 402 lifts (~**2026-09-24**): dump + diff vs D1; insert missing only | **DONE 2026-09-25** — 402 lifted (HTTP 200); 197 missing rows backfilled (food_logs +172, biomarker_logs +13, profiles +5, agent_jobs +7, food_items +422); 31 food_items = by-design `canonical_*` key skips (Supabase rows carry the `[object Object]` nutrients corruption); dumps at `backlogs/supabase-recovery-2026-09-25/`; dated log in DATA_PLANE.md; sensor `scripts/d1-supabase-recovery.test.mjs` 8/8 | Dated recovery log in DATA_PLANE.md (0 gaps is OK). **No extra bill.** |
 | **D-2** | Drain dead Supabase **code**; keep the remote project until D-1 | **DONE 2026-09-24** (`specs/done/d-2-supabase-code-drain.md`) — all ledger rows DONE; verified clean-tree `tsc` 0, 60/60 packet vitest, `journey-guard D-2` PASS; residual `golden_cases` has no D1 table (skipped by design) | D1 is the only production SQL path; project still exists |
 | **D-3** | Workers Paid ~$5 before ~100 users | `blocked_human` | Free D1 daily cap cannot hard-stop the app |
 | **D-4** | Named D1 timing script; record wall vs SQL ms | Mac **2026-09-20** done; VPS pending | Dated Mac + VPS-dev + VPS-prod rows in DATA_PLANE.md |
@@ -610,7 +610,7 @@ Canonical plan: [DATA_PLANE.md](./DATA_PLANE.md). **R-5 is superseded** (D1 is a
 | **D-7** | SQLite WAL + Litestream → R2; freeze D1 | **Not scheduled** (only if D-6 = cut over) | One SQL writer on disk; restore drill PASS |
 | **D-8** | Keep D1; delete any SQLite adapter | **Not scheduled** (only if D-6 = keep D1) | No `better-sqlite3` in prod |
 | **D-9** | Stop R2 photo **regrowth** (hash reuse; no `_0` twin). Muse audit. No deletes. | **DONE** (`cf19075`) | New uploads do not mint duplicate keys |
-| **D-10** | After D-1: apply [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json), sweeper, debug/logs retention | `blocked_human` until **D-1** | Audit re-run; no keys still referenced |
+| **D-10** | After D-1: apply [R2_DELETE_CANDIDATES.json](./R2_DELETE_CANDIDATES.json), sweeper, debug/logs retention | gate satisfied — **D-1 DONE 2026-09-25**; still `blocked_human` until an explicit human go | Audit re-run; no keys still referenced |
 
 **D-5 / D-6 decision rule:** user-visible sync extra wait **≤ ~100 ms p50** from the VPS → keep D1. **Consistently 500 ms–1 s** on sync/open-app → SQLite is in play. Meal analyze (~8 s Gemini) is not the yardstick. Do not dual-write. Do not keep D1 as a live spare.
 
