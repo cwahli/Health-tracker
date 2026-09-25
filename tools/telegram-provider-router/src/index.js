@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, openSyn
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn, execSync } from "child_process";
+import { homedir } from "os";
 // F) Free-lane allowance table: authoritative model + telegram-tables HTML grid
 // (JSON -> qa-evidence/build-table.py -> HTML -> MEDIA:). Never tool-allowance.mjs.
 import {
@@ -602,8 +603,12 @@ function acquireSinglePollerLock() {
   const me = process.pid;
   let holderPid = null;
   try {
+    // The holder must NOT inherit this pipe. execSync waits for EOF on stdout,
+    // and a backgrounded child that keeps the write end open makes it wait for
+    // the full 100000000s sleep: the router hung here and never polled. Probe
+    // for a live holder on a timer instead of after execSync returns.
     const out = execSync(
-      `setsid flock -n "${LOCK_PATH}" sleep 100000000 & echo $!`,
+      `setsid flock -n "${LOCK_PATH}" sleep 100000000 >/dev/null 2>&1 & echo $!`,
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
     );
     { const n = Number(String(out || "").trim().split(/\s+/)[0]); holderPid = (Number.isFinite(n) && n > 0) ? n : null; }
@@ -2596,7 +2601,10 @@ async function probeOpenCodeFree() {
       });
     }
     // Cloudflare Workers AI free models (10k neurons/day) — no "free" tag in ids.
-    const cf = providers.find((p) => p.id === "cloudflare");
+    // The live provider id is "cloudflare-workers-ai" (27 models), not
+    // "cloudflare". Looking for the wrong id reported 0 models and made a
+    // working provider look empty. Accept any id that starts with cloudflare.
+    const cf = providers.find((p) => /^cloudflare/.test(String(p.id || "")) && p.models);
     if (cf?.models) {
       for (const [mid, meta] of Object.entries(cf.models)) {
         const name = (meta && meta.name) || mid;
@@ -2757,7 +2765,12 @@ async function probeTokenHarborFree() {
 }
 
 /** Freebuff CLI credentials on this box (test seam: pass a temp path). */
-const FREEBUFF_CREDS_PATH = "/home/box/.config/manicode/credentials.json";
+// FREEBUFF_CREDS wins; otherwise resolve against THIS host's home. The old
+// value was pinned to another machine's home directory, so the Freebuff check
+// could never be true here and a signed-in box was reported as "not signed in".
+const FREEBUFF_CREDS_PATH =
+  process.env.FREEBUFF_CREDS ||
+  join(homedir(), ".config", "manicode", "credentials.json");
 /**
  * Freebuff model ids, corrected 2026-09-25 from the published price list
  * (`GET /api/v1/freebuff/session` → freebucks.prices), which is what the TUI
@@ -3304,7 +3317,7 @@ async function allowanceText() {
       const th = providers.find((p) => p.id === "tokenharbor");
       const n = th?.models ? Object.keys(th.models).length : 0;
       lines.push(`OpenCode←TokenHarbor models: ${n}`);
-      const cf = providers.find((p) => p.id === "cloudflare");
+      const cf = providers.find((p) => /^cloudflare/.test(String(p.id || "")) && p.models);
       const ncf = cf?.models ? Object.keys(cf.models).length : 0;
       lines.push(`OpenCode←Cloudflare models: ${ncf}`);
     }

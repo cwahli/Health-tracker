@@ -28,6 +28,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkS
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
+import { laneSetup } from './setup-gaps.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /**
@@ -112,6 +113,35 @@ export function bucketKeyFor(lane) {
   if (!b || /per-model/i.test(b)) return null;
   return `bucket:${b}`;
 }
+
+/**
+ * A transport failure, not a quota decision. These say nothing about whether
+ * the provider will accept the next request, so they get their own short
+ * cooldown instead of the 6h quota default. Same ENOTFOUND/ECONNREFUSED
+ * vocabulary the Node fetch and CLI layers produce.
+ */
+/**
+ * Transport failure, not a quota decision.
+ *
+ * Two vocabularies, because two surfaces report this differently and the live
+ * proof on 2026-09-25 showed the gap: the Cline CLI said
+ * "Cannot connect to API: Unable to connect ... (ConnectionRefused)" and the
+ * OpenCode CLI said "HttpClientError: Transport error (GET https://...)".
+ * Neither contains an errno, and a cooldown keyed only on errnos never fired.
+ * So: the errno set, plus the human wording those CLIs actually emit.
+ */
+const CONNECTION_ERRNO_RE =
+  /econnrefused|econnreset|etimedout|eai_again|enotfound|epipe|ehostunreach|enetunreach|ePROTO|econnaborted/i;
+const CONNECTION_WORDING_RE =
+  /connection\s?refused|connection\s?reset|connection\s?timed\s?out|unable to connect|cannot connect|transport error|socket hang up|fetch failed|network error|network request failed|getaddrinfo|temporary failure in name resolution|proxy|tunnel|ssl|wrong version number/i;
+
+export function isConnectionFailure(msg) {
+  const text = String(msg || "");
+  return CONNECTION_ERRNO_RE.test(text) || CONNECTION_WORDING_RE.test(text);
+}
+
+/** How long a connection failure keeps a lane out of the walk. */
+export const CONNECTION_FAILED_COOLDOWN_MS = 10 * 60 * 1000;
 
 /** Quota keys to stamp for a lane: route key always, plus shared bucket key. */
 export function quotaKeysForLane(lane) {
@@ -347,6 +377,114 @@ export function nextAvailableRoutes(table, session, {
     out.push({ provider, model, pref: l.pref, family: l.family || null, label: l.label || model });
   }
   return out;
+}
+
+/**
+ * The one projection every allowance surface reads.
+ *
+ * /allowance, /freemodel and the turn's lane choice used to answer three
+ * different questions from the same ledger: /allowance listed table rows,
+ * /freemodel listed discovered catalog models, and the turn walked a filtered
+ * copy. A route could therefore be ❌ in one surface and selectable in another,
+ * which is what the two bots' /allowance output showed. One projection, one
+ * verdict per lane:
+ *
+ *   selectable  - a Telegram turn may use it right now
+ *   terminalOnly- visible, never selectable (Freebuff and friends)
+ *   ended       - a promotion finished; never offered again
+ *   depleted    - stamped until resetAt
+ *   reason      - human wording, so a surface never invents its own
+ *
+ * Quota stays per worker: the caller passes its own session. The lane CATALOG
+ * is shared, the stamps are not.
+ */
+export function projectLanes(table, session, { now = Date.now(), labelFn = defaultResetLabel, location = "", readiness = null } = {}) {
+  const t = overlayLiveQuota(table || {}, session || {}, { now, labelFn });
+  // An ended lane stays VISIBLE with a verdict. Dropping it made a model the
+  // user still remembers simply vanish from /allowance, and left /freemodel
+  // with no row to say "this one is over". Every lane with a route is projected;
+  // whether it may be used is the verdict, not its presence.
+  const rows = [...(t.lanes || [])]
+    .filter((l) => l && l.provider && l.model)
+    .sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  return rows.map((lane) => {
+    const provider = String(lane.provider || "");
+    const model = String(lane.model || "");
+    // A lane reached THROUGH opencode still belongs to the provider in its path:
+    // `opencode/tokenharbor/deepseek-v4.1-flash:free` is a Token Harbor lane, not
+    // an OpenCode one. Reading the lane's own provider field made those lanes
+    // inherit opencode's readiness and its plan code, so a missing
+    // TOKEN_HARBOR_API_KEY never blocked them and the table said OP where the
+    // router's table says TH.
+    const effectiveProvider = effectiveProviderOf(lane);
+    const ref = toModelRefShim(provider, model);
+    const status = String(lane.status || "").toLowerCase();
+    const live = liveRecForLane(lane, session || {}, now);
+    const until = live?.depletedUntil || (lane.nextResetAt ? Date.parse(lane.nextResetAt) : NaN);
+    const resetAt = Number.isFinite(until) ? until : null;
+    const terminalOnly = lane.tg === false;
+    const ended = status === "ended" || laneIsEnded(lane);
+    const depleted = Boolean(live) || status === "depleted";
+    // A lane whose provider has no credential on this host cannot run, whatever
+    // the table says. Saying "available" there is how seven lanes sat in the
+    // table looking usable when none of them could be.
+    const setup = readiness ? laneSetup(effectiveProvider, readiness) : { needsSetup: false, unknown: true, reason: null };
+    let reason = "";
+    if (ended) reason = "promotion ended, never offered again";
+    else if (depleted) reason = `depleted until ${resetAt ? labelFn(resetAt, live?.countdownHint || lane.countdownHint) : "reset"}`;
+    else if (setup.needsSetup) reason = setup.reason || 'provider not set up on this host';
+    else if (terminalOnly) reason = "terminal only, not selectable from chat";
+    else reason = "available";
+    return {
+      ref,
+      lane,
+      provider,
+      model,
+      pref: lane.pref,
+      family: lane.family || null,
+      bucket: lane.bucket || null,
+      label: lane.label || model,
+      plan: planCodeForLane(lane),
+      effectiveProvider,
+      location,
+      ended,
+      depleted,
+      terminalOnly,
+      needsSetup: Boolean(setup.needsSetup),
+      setupUnknown: Boolean(setup.unknown),
+      selectable: !ended && !depleted && !terminalOnly && !setup.needsSetup,
+      resetAt,
+      resetLabel: depleted && resetAt ? labelFn(resetAt, live?.countdownHint || lane.countdownHint) : null,
+      reason,
+    };
+  });
+}
+
+// Only the providers setup-gaps knows about. A wider set here invented owners:
+// a Freebuff lane whose model path contains `deepseek/` resolved to deepseek and
+// rendered as plan code "DE".
+const PROVIDER_ALIASES = new Set([
+  'tokenharbor', 'cloudflare', 'freebuff', 'opencode', 'cline', 'gemini',
+]);
+
+/** The provider that actually serves a lane, from its model path. */
+export function effectiveProviderOf(lane) {
+  const own = String(lane?.provider || "").toLowerCase();
+  const parts = String(lane?.model || "").toLowerCase().split("/");
+  // A leading segment that merely repeats the lane's own provider is a prefix,
+  // not the provider: `opencode/tokenharbor/x` is Token Harbor. Start past it.
+  const start = parts[0] === own ? 1 : 0;
+  for (const seg of parts.slice(start)) {
+    if (PROVIDER_ALIASES.has(seg)) return seg;
+  }
+  return own;
+}
+
+/** toModelRef lives in freemodels; a local shim keeps this module standalone. */
+function toModelRefShim(provider, model) {
+  if (provider === "cline") return `cline:${model}`;
+  if (provider === "gemini") return `gemini:${model}`;
+  return model;
 }
 
 /**
@@ -728,6 +866,9 @@ export function shortModelName(lane) {
 
 function laneIsEnded(lane) {
   const st = String(lane?.status || "").toLowerCase();
+  // status "ended" is how a finished promotion is recorded in the table; without
+  // it here, /allowance kept listing a lane the walk refused to touch.
+  if (st === "ended") return true;
   if (st === "unavailable") return true;
   const blob = `${lane?.note || ""} ${lane?.notes || ""} ${lane?.nextReset || ""} ${lane?.resetRule || ""}`;
   return /promotion\s+ended|ended\s+promotion|no longer free|free promotion ended/i.test(blob);
@@ -808,7 +949,28 @@ function laneResetAt(lane, table) {
  * three text columns stay fixed-width inside HTML <code> (parse_mode HTML).
  * Available first by pref; depleted by soonest reset. No ★. Freebuff included.
  */
-export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel } = {}) {
+/** Stable identity for a lane across clones of the same table. */
+export function laneKey(lane) {
+  return `${String(lane?.provider || "")}/${String(lane?.model || "")}`;
+}
+
+/** The chat's own lane first when it is usable, then preference order. */
+export function orderLikeWalk(lanes, currentModel) {
+  const list = [...(lanes || [])];
+  if (!currentModel) return list;
+  const tail = String(currentModel);
+  const key = (l) => `${String(l?.provider || "")}/${String(l?.model || "")}`;
+  const alt = (l) => String(l?.model || "");
+  // Match on the full route or the bare model id. A looser test (endsWith on
+  // the model) matched the FIRST lane for every input, so the ranking never
+  // moved anything.
+  const at = list.findIndex((l) => key(l) === tail || alt(l) === tail || key(l) === `${l.provider}/${tail}`);
+  if (at <= 0) return list;
+  const [first] = list.splice(at, 1);
+  return [first, ...list];
+}
+
+export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "" } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });
   // TH + OC-TH are one row (display-only); failover still uses both lanes.
   const lanes = dedupeTokenHarborLanes([...(t.lanes || [])].filter(laneInAllowanceTable));
@@ -823,7 +985,13 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
       if (am !== bm) return am - bm;
       return (Number(a.pref) || 0) - (Number(b.pref) || 0);
     });
-  const ordered = [...usable, ...depleted];
+  // Ranking: the same order the turn walks. The chat's current lane first when
+  // it is usable, then preference order — so the first row of the table is the
+  // lane that will actually be used next, and "Next up" cannot disagree with it.
+  const usableOrdered = rows
+    ? orderLikeWalk(usable, currentModel)
+    : usable;
+  const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
   const W_MODEL = 16;
   const W_PLAN = 6;
@@ -834,7 +1002,16 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const lines = [
     "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
   ];
+  const blocked = [];
   for (const l of ordered) {
+    const verdict = rows ? rows.find((r) => laneKey(r.lane) === laneKey(l)) : null;
+    // A lane whose provider has no credential on this host cannot be counted,
+    // so it leaves the table entirely rather than sitting in it as a mystery
+    // row. It is listed underneath with the variable it needs.
+    if (verdict?.needsSetup) {
+      blocked.push(verdict);
+      continue;
+    }
     const ok = laneIsUsable(l);
     const name = shortModelName(l);
     const plan = planCodeForLane(l);
@@ -843,8 +1020,14 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     lines.push((ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>");
   }
   lines.push("");
-  if (usable[0]) {
-    const u = usable[0];
+  // "Next up" must be a lane the walk can actually choose. A terminal-only row
+  // (Freebuff and friends) stays in the table so the user can see it, but it is
+  // never the next lane: offering "Next up: FB (terminal)" sent the user looking
+  // for a turn that can never run on it.
+  const selectableIn = (l) => l.tg !== false && !rows?.find((r) => laneKey(r.lane) === laneKey(l))?.needsSetup;
+  const firstUsable = (rows ? usableOrdered : usable).find(selectableIn) || null;
+  if (firstUsable) {
+    const u = firstUsable;
     const term = u.tg === false ? " (terminal)" : "";
     lines.push(
       "Next up: " + escHtml(shortModelName(u)) + " · " + planCodeForLane(u) + term +
@@ -859,6 +1042,15 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const fb = usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
   if (fb) {
     lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
+  }
+  if (blocked.length) {
+    lines.push("");
+    lines.push("Not counted on this host (no credential — cannot run):");
+    for (const r of blocked.slice(0, 8)) {
+      lines.push("⏸ " + escHtml(shortModelName(r.lane)) + " · " + planCodeForLane(r.lane) + " — " + escHtml(String(r.reason || "provider not set up")));
+    }
+    const vars = [...new Set(blocked.map((r) => String(r.reason || "").replace(/^needs /, "")).filter(Boolean))];
+    if (vars.length) lines.push("Missing: " + escHtml(vars.join(", ")) + " — /setup for the fix.");
   }
   lines.push("Auto-track: empty/rate-limit stamps Reset; refreshes from ledger + OpenCode log.");
   return lines.join(nl);
@@ -1006,20 +1198,38 @@ export function isFreemodelEntryDepleted(entry, table, session, { now = Date.now
 }
 
 /** Annotate bot-host /freemodel entries with { depleted, resetIn, laneLabel }. */
-export function annotateFreemodelEntries(entries, table, session, { now = Date.now() } = {}) {
+export function annotateFreemodelEntries(entries, table, session, { now = Date.now(), location = "", readiness = null } = {}) {
+  // One projection decides the verdict, so /freemodel cannot offer a lane that
+  // /allowance is showing as ended, terminal-only or depleted.
+  const projection = projectLanes(table, session, { now, location, readiness });
+  const byRef = new Map(projection.map((r) => [r.ref, r]));
   return (entries || []).map((e) => {
     const ref = typeof e === "string" ? e : e?.ref || "";
     const lane = routeCandidates(ref)
       .map((route) => table?.lanes?.find((l) => laneMatchesRoute(l, route.provider, route.model)))
       .find(Boolean) || null;
-    const depleted = isFreemodelEntryDepleted(e, table, session, { now });
+    const verdict = byRef.get(ref)
+      || projection.find((r) => r.provider === routeCandidates(ref)[0]?.provider
+        && String(r.model).replace(/^[^/]+\//, '') === String(routeCandidates(ref)[0]?.model || '').replace(/^[^/]+\//, ''));
+    const depleted = verdict ? verdict.depleted : isFreemodelEntryDepleted(e, table, session, { now });
     let resetIn = "-";
     try {
       const routeHit = liveRecForRoutes(routeCandidates(ref), session, now);
       const at = lane?.nextResetAt || lane?.cooldownUntil || routeHit?.rec?.depletedUntil || null;
       resetIn = depleted ? formatResetIn(at, now) : "-";
     } catch {}
-    return { ...e, depleted, resetIn, laneLabel: lane?.label || null };
+    return {
+      ...e,
+      depleted,
+      resetIn,
+      laneLabel: lane?.label || null,
+      // the same three verdicts /allowance renders, on the same rows
+      ended: Boolean(verdict?.ended),
+      terminalOnly: Boolean(verdict?.terminalOnly),
+      inLedger: Boolean(verdict),
+      selectable: verdict ? verdict.selectable : !depleted,
+      reason: verdict?.reason || (verdict ? '' : 'not in this ledger'),
+    };
   });
 }
 
@@ -1030,7 +1240,7 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
  * Pass the chat's effective provider/model so the `Active route` + `Next up`
  * lines are chat-aware (bot-host has no sticky session like the router).
  */
-export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel } = {}) {
+export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null } = {}) {
   const { table, session, source } = loadFreeLaneLedger({ stateDir });
   if (!table) {
     return "Allowance: no shared free-lane ledger found (router state + pref doc missing). Use /freemodel to list free models.";
@@ -1039,7 +1249,19 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
     const sess = provider && model
       ? { ...session, provider, models: { ...(session?.models || {}), [provider]: model } }
       : session;
-    const body = formatCompactAllowanceChat(table, sess, { now, labelFn });
+    // Rendered from the same projection /freemodel and the turn's walk read, so
+    // a lane cannot be ❌ here and selectable there. Rows the projection drops
+    // (ended, or a terminal-only row that is not in the table) are not invented
+    // back here.
+    const projection = projectLanes(table, sess, { now, labelFn, location, readiness });
+    // The same component the Grok router renders with, fed the projection. A
+    // second renderer is how the columns drifted apart in the first place.
+    const body = formatCompactAllowanceChat(table, sess, {
+      now,
+      labelFn,
+      rows: projection.length ? projection : null,
+      currentModel: provider && model ? `${provider}/${model}` : "",
+    });
     const prefix = location ? `Host: ${location} · own provider credentials and quota\n\n` : '';
     return prefix + (source === "pref-doc-fallback"
       ? `${body}\n\n(note: per-bot ledger not yet stamped — pref order only until first quota hit)`
@@ -1057,10 +1279,24 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
 // ~/.local/state/bot-host/<botId>/free-lanes (created + seeded on first use).
 // ---------------------------------------------------------------------------
 
-/** Per-bot ledger dir for a bot-host bot id (created on demand). */
+/**
+ * Per-bot ledger dir for a bot-host bot id (created on demand).
+ *
+ * FREE_LANES_DIR points one process at a different directory. That exists so a
+ * live proof can run against a COPY of the ledger and leave the user's real one
+ * byte-identical, which plan/R14_1_AGENT_PLAN.md card 6 requires ("use a copy of
+ * the ledger for the bot under test; the real user ledger mtime is unchanged
+ * before and after").
+ *
+ * It names ONE directory for this process. It is deliberately not a shared
+ * default across bots: cards 5 and 6 need one ledger per worker, and a
+ * directory that every bot on the host writes to would make a phone run look
+ * like a VM run.
+ */
 export function resolveBotLedgerDir(botId) {
   const home = process.env.HOME || process.env.USERPROFILE || osHomedirFallback();
-  const dir = join(home, ".local", "state", "bot-host", String(botId || "default"), "free-lanes");
+  const override = String(process.env.FREE_LANES_DIR || "").trim();
+  const dir = override || join(home, ".local", "state", "bot-host", String(botId || "default"), "free-lanes");
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -1129,7 +1365,18 @@ function writeJsonAtomic(filePath, obj) {
  * session.quota (route + shared-bucket keys) and overlays the table —
  * pref order untouched. Returns { stamped, keys } or { stamped: false, reason }.
  */
-export function stampDepleted({ stateDir, provider, model, errText, depletedUntil = null, countdownHint = "", now = Date.now() } = {}) {
+export function stampCooldown({ stateDir, provider, model, errText, kind = "connection-failed", ttlMs = CONNECTION_FAILED_COOLDOWN_MS, now = Date.now() } = {}) {
+  return stampDepleted({
+    stateDir,
+    provider,
+    model,
+    errText,
+    kind,
+    depletedUntil: now + Math.max(1000, Number(ttlMs) || CONNECTION_FAILED_COOLDOWN_MS),
+  });
+}
+
+export function stampDepleted({ stateDir, provider, model, errText, depletedUntil = null, countdownHint = "", kind = "limit-unknown", now = Date.now() } = {}) {
   try {
     const err = String(errText || "").slice(0, 300);
     if (!err || isDocLikeQuotaNoise(err)) return { stamped: false, reason: "refused: doc-noise or empty, not a provider limit" };
@@ -1153,7 +1400,7 @@ export function stampDepleted({ stateDir, provider, model, errText, depletedUnti
         scope: key.startsWith("bucket:") ? "shared" : "per-model",
         depletedObservedAt: isoZ(now),
         countdownParsed: Boolean(countdownHint),
-        kind: "limit-unknown",
+        kind,
         ...(countdownHint ? { countdownHint } : {}),
       };
     }

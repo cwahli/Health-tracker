@@ -27,7 +27,8 @@ import {
 } from './lib/work-session.mjs';
 import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
-import { recordFailure } from './lib/failure-log.mjs';
+import { recordFailure, loadFailures } from './lib/failure-log.mjs';
+import { providerReadiness, setupGaps, setServiceUnit } from './lib/setup-gaps.mjs';
 import {
   runOpencode,
   runWithModelFailover,
@@ -42,9 +43,11 @@ import {
   extractLogError,
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
-import { ensureOpencodeTui, abortOpencodeSession } from './lib/opencode-tui.mjs';
-import { KNOWN_HOSTS, workerStatus } from './lib/worker-presence.mjs';
+import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
+import { KNOWN_HOSTS, workerStatus, isLocalHost } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
+import { appendRow, retrieve } from './lib/memory-stores.mjs';
+import { enqueueJob, awaitJob } from './lib/worker-jobs.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -55,6 +58,7 @@ import {
   formatFreeModelText,
   formatFreeLabel,
   CLINE_FREE_MODELS,
+  clineReady,
   GEMINI_MODELS,
   GEMINI_TO_OPENCODE,
   toModelRef,
@@ -69,7 +73,11 @@ import {
   stampDepleted,
   freemodelRefToRoute,
   usableTurnLanes,
+  projectLanes,
   soonestResetAmongDepleted,
+  isConnectionFailure,
+  stampCooldown,
+  CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
@@ -217,6 +225,29 @@ function loadMap(id, file) {
   return new Map(Object.entries(readJson(path.join(stateDir(id), file), {})));
 }
 
+/**
+ * A chat's stored prefs, whichever way the key was written.
+ *
+ * JSON object keys are always strings, so every map rebuilt by loadMap is
+ * keyed "6218257274", while the code looks the row up with the numeric chatId.
+ * Inside one process the numeric key it just wrote still matches; after a
+ * restart it does not, and the chat silently falls back to the bot default
+ * model. That is how @VM_19485_bot ran opencode/nemotron for a chat that had
+ * chosen Cline. Same for the setter, so the next write does not fork the row.
+ */
+function prefFor(prefs, chatId) {
+  if (!prefs) return {};
+  return prefs.get(chatId) || prefs.get(String(chatId)) || {};
+}
+function setPref(prefs, chatId, patch) {
+  const next = { ...prefFor(prefs, chatId), ...patch };
+  for (const key of [...prefs.keys()]) {
+    if (String(key) === String(chatId)) prefs.delete(key);
+  }
+  prefs.set(chatId, next);
+  return next;
+}
+
 function saveMap(id, file, map) {
   writeJson(path.join(stateDir(id), file), Object.fromEntries(map));
 }
@@ -290,7 +321,7 @@ function saveOffset(id, offset) {
 }
 
 function effective(config, prefs, chatId) {
-  const p = prefs.get(chatId) || {};
+  const p = prefFor(prefs, chatId);
   const storedModel = p.model || config.agent.model;
   const legacyGemini = String(storedModel || '').startsWith('gemini:')
     ? GEMINI_TO_OPENCODE[String(storedModel).slice('gemini:'.length)]
@@ -365,7 +396,24 @@ export function formatProviderFailure({ surface, model, lastError, stderr } = {}
 }
 
 function makeCaches() {
-  return { models: null, verbose: null, agents: null, free: null };
+  return { models: null, verbose: null, agents: null, free: null, readiness: null };
+}
+
+/**
+ * Which providers this host can actually use, and what is missing for the rest.
+ * Cached with the model list: credentials do not change between turns, and the
+ * check is local (env var, binary, auth file) so it costs nothing to repeat.
+ */
+export function hostReadiness(caches, botId = 'vm') {
+  // The fix text names the service to restart, so it must name THIS bot's.
+  setServiceUnit(botId);
+  if (caches.readiness) return caches.readiness;
+  caches.readiness = providerReadiness({
+    env: process.env,
+    location: workLocation(),
+    clineReady,
+  });
+  return caches.readiness;
 }
 
 function opencodeEnv(config) {
@@ -451,7 +499,7 @@ function getAnnotatedFreeModels(caches, botId) {
   caches.free = base;
   const { table, session, source } = getLedger(botId);
   if (!table) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
-  return { entries: base, annotated: annotateFreemodelEntries(base, table, session), table, session, source };
+  return { entries: base, annotated: annotateFreemodelEntries(base, table, session, { location: workLocation(), readiness: hostReadiness(caches) }), table, session, source };
 }
 
 /**
@@ -460,6 +508,138 @@ function getAnnotatedFreeModels(caches, botId) {
  * small=true-filtered error so cosmetic title-agent failures never deplete
  * a lane. Best-effort — never throws, never blocks the chat.
  */
+/**
+ * Keep a lane out of the walk for a few minutes after a transport failure.
+ * Never throws: a stamp that fails must not cost the chat its answer.
+ */
+export function stampLaneCooldown({ botId, model, errText, now = Date.now() } = {}) {
+  try {
+    const { provider, model: m } = freemodelRefToRoute(model || '');
+    if (!provider || !m) return null;
+    const { dir } = ensureBotLedger(botId || 'default');
+    const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, now });
+    if (stamped.stamped) {
+      console.log(`[${botId}] connection cooldown on ${provider}/${m} until ${new Date(now + CONNECTION_FAILED_COOLDOWN_MS).toISOString()}`);
+    }
+    return stamped;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why an attempt failed. runOpencode puts provider text in lastError, but a
+ * transport failure from the CLI often only reaches stderr, so both are read.
+ * This is the same order trackRunQuota uses.
+ */
+export function attemptFailureText(result) {
+  const parsed = String(extractLogError(result?.stderr || '') || '').trim();
+  if (parsed) return parsed;
+  const lastError = String(result?.lastError || '').trim();
+  if (lastError) return lastError;
+  // Not every surface logs with level=ERROR. A transport failure that only
+  // shows up as the last stderr line still has to be recognisable, or the
+  // cooldown silently never happens.
+  const lines = String(result?.stderr || '')
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.length ? lines[lines.length - 1] : '';
+}
+
+/**
+ * Run this turn on the host the location names, if that host has a worker
+ * connected. The worker runs the prompt on its own machine and stamps its own
+ * ledger; the VM poller does not call trackRunQuota for it, so the VM's ledger
+ * and the worker's stay separate facts.
+ *
+ * Returns null when the location is this machine or has no live worker, and the
+ * caller runs the turn locally as before.
+ */
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', envMode = 'project', timeoutMs = 900000 } = {}) {
+  const status = workerStatus(host);
+  if (!status.reachable) return null;
+  const job = enqueueJob({ host, prompt, model, project, role, workspace, envMode });
+  console.log(`[${host}] handed ${job.id} to the connected worker`);
+  const done = await awaitJob(job.id, { timeoutMs });
+  if (!done?.result) {
+    return { text: '', code: 1, model, error: `worker ${host} did not answer in time`, remote: true, jobId: job.id };
+  }
+  return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null };
+}
+
+/** Where the "we already hit this" notes are kept, so a note is written once. */
+function deadEndMarkerPath() {
+  return path.join(os.homedir(), '.hermes', 'dead-end-notes.json');
+}
+
+function readDeadEndMarkers() {
+  try {
+    return JSON.parse(fs.readFileSync(deadEndMarkerPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/** A short, stable key for "this lane failed this way". */
+export function failureSignature({ lane = '', errText = '' } = {}) {
+  const err = String(errText || '').toLowerCase();
+  const kind = isQuotaOrLimitError(err)
+    ? 'quota'
+    : isConnectionFailure(err)
+      ? 'connection'
+      : /not found|no such model|unknown model|unknown gemini model/.test(err)
+        ? 'unknown-model'
+        : 'other';
+  const laneId = String(lane || '').trim().toLowerCase() || 'unknown';
+  return `${kind}::${laneId}`;
+}
+
+/**
+ * The second copy of a signature is worth one line. A note is written once per
+ * signature, not once per failure, and the note is text a later turn can read.
+ * The model never rewrites its own instructions; this only records what
+ * happened.
+ */
+export function noteDeadEnd({ lane = '', errText = '', botId = '', home = os.homedir() } = {}) {
+  try {
+    const sig = failureSignature({ lane, errText });
+    const markers = readDeadEndMarkers();
+    if (markers[sig]) return { signature: sig, written: false, reason: 'already noted' };
+    const rows = loadFailures().filter((r) => failureSignature({ lane: r.lane, errText: `${r.kind} ${r.hint}` }) === sig);
+    if (rows.length < 2) return { signature: sig, written: false, reason: `only ${rows.length} sighting(s)` };
+    const text = `${lane || 'unknown lane'}: ${String(errText || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`;
+    appendRow('dead-ends', { ticket: `r14-${botId || 'bot'}`, text }, { home });
+    markers[sig] = new Date().toISOString();
+    fs.mkdirSync(path.dirname(deadEndMarkerPath()), { recursive: true });
+    fs.writeFileSync(deadEndMarkerPath(), `${JSON.stringify(markers, null, 2)}\n`, 'utf8');
+    console.log(`[dead-ends] noted ${sig} after ${rows.length} sightings`);
+    return { signature: sig, written: true, sightings: rows.length };
+  } catch (err) {
+    return { signature: '', written: false, reason: String(err?.message || err).slice(0, 120) };
+  }
+}
+
+/**
+ * Which turn this is, for the gated retrieval. Only build/investigate turns
+ * read notes; anything else is gated to nothing, which is the safe default.
+ */
+export function turnKindFor(text) {
+  const t = String(text || '').toLowerCase();
+  if (/\b(investigate|diagnos|debug|why did|root cause|trace|logs?)\b/.test(t)) return 'investigate';
+  if (/\b(build|implement|fix|add|write|refactor|patch|ship|make)\b/.test(t)) return 'build';
+  return '';
+}
+
+/** Notes for this request, or nothing. */
+export function deadEndNotesFor(text, { home = os.homedir(), limit = 3 } = {}) {
+  const turn = turnKindFor(text);
+  if (!turn) return [];
+  const { rows } = retrieve(text, { turn, stores: ['dead-ends'], limit, home });
+  return rows;
+}
+
 export function trackRunQuota({ botId, modelRef, result }) {
   try {
     if (!result || result.aborted) return null;
@@ -502,15 +682,64 @@ async function sendHtml(api, chatId, html) {
   }
 }
 
+/**
+ * The /freemodel body, from the same projection /allowance renders.
+ *
+ * It used to print the raw catalog and put depletion in a footer, and that
+ * footer computed "blocked" from the already-filtered selectable set, so it
+ * printed "all selectable lanes look available" while the list above it offered
+ * a lane /allowance was showing as ❌. Two surfaces, two answers. Now every
+ * entry carries its verdict: usable rows first, blocked rows after with the
+ * reason, and a model with no lane row is named as such.
+ */
 function formatFreemodelWithDepletion(entries, annotated, { current, location } = {}) {
-  const selectable = annotated.filter((a) => a.selectable !== false);
-  const base = formatFreeModelText(entries, { current, location });
-  const depleted = selectable.filter((a) => a.depleted);
-  if (!depleted.length) return `${base}\n\nAllowance: all selectable lanes look available (per-host ledger). /allowance for Reset in times.`;
-  const lines = depleted.map((d) => `❌ ${d.label} — depleted (reset in ${d.resetIn || 'unknown'})`);
-  const next = selectable.find((a) => !a.depleted);
-  if (next) lines.push(`Next up: ${next.label}`);
-  return `${base}\n\nAllowance (per-host ledger):\n${lines.join('\n')}\n\n/allowance for full table.`;
+  const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
+  const verdictOf = (e) => {
+    const a = byRef.get(e?.ref);
+    if (a) return a;
+    return { ...e, selectable: e?.selectable !== false, depleted: false, ended: false, terminalOnly: false, inLedger: false };
+  };
+  const rows = (entries || []).map(verdictOf);
+  const blockedOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
+  const usable = rows.filter((r) => !blockedOf(r));
+  const blocked = rows.filter(blockedOf);
+  const missing = rows.filter((r) => r.inLedger === false);
+  // The header is written here rather than borrowed from formatFreeModelText:
+  // that one counts the raw catalog, so the same message could claim 42
+  // selectable in the header and 43 in the footer.
+  const pending = String(entries?.length || 0) - rows.length;
+  const location0 = location ? ` at ${location}` : '';
+  const lines = [
+    `Free models${location0}: ${usable.length} selectable (${missingCount(rows)} with no ledger row), ${blocked.length} blocked${pending > 0 ? `, ${pending} pending setup/sign-in` : ''} · current: ${current || 'default'}`,
+    '',
+  ];
+  for (const r of usable) lines.push(`• ${r.label}${r.note ? `: ${r.note}` : ''}`);
+  if (blocked.length) {
+    lines.push('', 'Not selectable right now:');
+    for (const r of blocked) {
+      const why = r.ended
+        ? 'promotion ended'
+        : r.terminalOnly
+          ? 'terminal only, not selectable from chat'
+          : r.depleted
+            ? `depleted${r.resetIn && r.resetIn !== '-' ? ` (reset in ${r.resetIn})` : ''}`
+            : r.reason || 'not available';
+      lines.push(`❌ ${r.label} — ${why}`);
+    }
+  }
+  if (missing.length) {
+    lines.push('', 'Not in this ledger (no quota record):');
+    for (const r of missing.slice(0, 6)) lines.push(`· ${r.label}`);
+  }
+  const next = usable.find((r) => !r.depleted);
+  if (next) lines.push('', `Next up: ${next.label}`);
+  lines.push('', `Allowance (per-host ledger): ${usable.length} selectable, ${blocked.length} blocked. /allowance for the full table.`);
+  return lines.join('\n');
+}
+
+/** Usable rows the ledger has no record for: honest, not hidden. */
+function missingCount(rows) {
+  return rows.filter((r) => r.inLedger === false).length;
 }
 
 export class ProgressRenderer {
@@ -1006,7 +1235,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         capabilities: { compact: true, costTracking: true, backends: false },
         effective: eff,
         session: sessions.get(chatId) ? { id: sessions.get(chatId) } : null,
-        handoff: Boolean((prefs.get(chatId) || {}).handoff),
+        handoff: Boolean((prefFor(prefs, chatId)).handoff),
         usage: lastUsage?.get(chatId) || null,
         totals: totals?.get(chatId) || null,
         runtime: {
@@ -1030,7 +1259,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'build':
     case 'plan':
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), agent: cmd.name });
+      setPref(prefs, chatId, { agent: cmd.name });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Agent set to ${cmd.name} for this chat.`);
       return;
@@ -1077,7 +1306,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, `Compact failed (${result.lastError || `exit ${result.code}`}) — session kept as-is.`);
         } else {
           const brief = result.finalText.trim().slice(0, 2000);
-          prefs.set(chatId, { ...(prefs.get(chatId) || {}), handoff: brief });
+          setPref(prefs, chatId, { handoff: brief });
           savePrefs(config.id, prefs);
           sessions.delete(chatId);
           saveSessions(config.id, sessions);
@@ -1108,11 +1337,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       if (cmd.args === 'reset') {
-        const current = prefs.get(chatId) || {};
+        const current = prefFor(prefs, chatId);
         delete current.model;
         delete current.variant;
-        if (Object.keys(current).length) prefs.set(chatId, current);
-        else prefs.delete(chatId);
+        setPref(prefs, chatId, current);
+        if (Object.keys(prefFor(prefs, chatId)).length === 0) prefs.delete(chatId);
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model reset to ${config.agent.model}.`);
         return;
@@ -1124,7 +1353,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           return;
         }
         const stored = toModelRef('cline', ref.id);
-        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
+        setPref(prefs, chatId, { model: stored });
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
         return;
@@ -1135,7 +1364,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /freemodel to pick a locally available model.`);
           return;
         }
-        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: migrated });
+        setPref(prefs, chatId, { model: migrated });
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model set to ${formatFreeLabel(migrated)} for this chat.`);
         return;
@@ -1150,7 +1379,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, `Unknown model: ${cmd.args}\nUse /model to pick from the list or /freemodel for free models.`);
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: target });
+      setPref(prefs, chatId, { model: target });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Model set to ${target} for this chat.`);
       return;
@@ -1208,14 +1437,39 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           return;
         } catch (e) {
           const route2 = freemodelRefToRoute(eff.model || '');
-          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model, location: workLocation() }));
+          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model, location: workLocation(), readiness: hostReadiness(caches) }));
           return;
         }
       }
       // Router parity: raw HTML grid text (screenshot), NOT the markdown converter.
       await sendHtml(api, chatId, buildAllowanceTextForBots({
         stateDir: getLedger(config.id).dir, provider: route.provider, model: route.model, location: workLocation(),
+        readiness: hostReadiness(caches),
       }));
+      return;
+    }
+
+    case 'setup': {
+      // The allowance surfaces now say a lane "needs TOKEN_HARBOR_API_KEY".
+      // This is where that turns into the command that fixes it.
+      caches.readiness = null;
+      const readiness = hostReadiness(caches, config.id);
+      const gaps = setupGaps(readiness);
+      const host = workLocation();
+      if (!gaps.length) {
+        await api.sendMessage(chatId, `✅ Every provider this bot uses is ready on ${host}. Nothing to set up.`);
+        return;
+      }
+      const lines = [`*Setup gaps on ${host}* — ${gaps.length} provider(s) cannot run here:`, ''];
+      for (const g of gaps) {
+        lines.push(`• *${g.provider}* — needs ${g.needs}`);
+        if (g.fix) lines.push(`  fix: ${g.fix}`);
+        if (g.command) lines.push(`  or ask me: ${g.command}`);
+        if (g.note) lines.push(`  (${g.note})`);
+        lines.push('');
+      }
+      lines.push('Lanes for these providers are shown as ⏸ in /allowance and are not offered in /freemodel until the credential is present.');
+      await api.sendMessage(chatId, lines.join('\n'));
       return;
     }
 
@@ -1236,7 +1490,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, `Unknown agent: ${target}\nUse /agent to pick from the list.`);
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), agent: target });
+      setPref(prefs, chatId, { agent: target });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Agent set to ${target} for this chat.`);
       return;
@@ -1262,7 +1516,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, `Unknown level: ${target}\nUse /thinking to pick from the list.`);
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), variant: target });
+      setPref(prefs, chatId, { variant: target });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Thinking level set to ${target}.`);
       return;
@@ -1590,7 +1844,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /model again' });
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), model });
+      setPref(prefs, chatId, { model });
       savePrefs(config.id, prefs);
       const variants = await getVariants(config, caches, model);
       if (variants.length) {
@@ -1635,10 +1889,10 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         const next = annotated.find((a) => a.selectable !== false && !a.depleted);
         await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${hit?.resetIn || 'unknown'}) — pick ${next?.label || 'another lane'}` });
         const route = freemodelRefToRoute(entry.ref);
-        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation() })}`);
+        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation(), readiness: hostReadiness(caches) })}`);
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: entry.ref });
+      setPref(prefs, chatId, { model: entry.ref });
       savePrefs(config.id, prefs);
       if (entry.surface === 'opencode') {
         const variants = await getVariants(config, caches, entry.ref);
@@ -1670,7 +1924,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /agent again' });
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), agent: agent.name });
+      setPref(prefs, chatId, { agent: agent.name });
       savePrefs(config.id, prefs);
       await api.editMessageText(chatId, messageId, `Agent set to ${agent.name}.`, {
         reply_markup: CLEAR_KEYBOARD,
@@ -1697,7 +1951,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /thinking again' });
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), variant });
+      setPref(prefs, chatId, { variant });
       savePrefs(config.id, prefs);
       await api.editMessageText(chatId, messageId, `Thinking level set to ${variant} for ${eff.model}.`, {
         reply_markup: CLEAR_KEYBOARD,
@@ -1744,7 +1998,7 @@ async function collectInboundMedia(api, message, config) {
  * the old one was skipped. A host with no ledger yet keeps the old two-entry
  * chain, so a fresh install behaves exactly as before.
  */
-export function selectTurnLanes({ botId, model, fallback, now = Date.now() } = {}) {
+export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null } = {}) {
   const legacy = failoverModels(model, fallback);
   let ledger;
   try {
@@ -1756,7 +2010,18 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now() } = {
   if (!table || !Array.isArray(table.lanes) || !table.lanes.length) {
     return { models: legacy, skipped: [], fromLedger: false };
   }
-  const { lanes, skipped } = usableTurnLanes(table, ledger.session || {}, { now });
+  // The same projection /allowance and /freemodel read, so the walk can only
+  // offer what those two surfaces call selectable.
+  const projection = projectLanes(table, ledger.session || {}, { now, location: botId, readiness });
+  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label }));
+  const skipped = projection.filter((r) => !r.selectable).map((r) => ({
+    provider: r.provider,
+    model: r.model,
+    label: r.label,
+    why: r.reason,
+    until: r.resetAt,
+    resetLabel: r.resetLabel,
+  }));
 
   // The registry owns what to run; the ledger owns what may be tried next. A
   // configured model the ledger has never heard of is still the first choice —
@@ -1815,7 +2080,7 @@ export function fanoutProgressEvent({ renderer, observer, event, context = {} })
   try { observer?.onEvent(event, context); } catch {}
 }
 
-export async function runOpencodeWithFailover({ api, chatId, prompt, models, runModel = null, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, ...runArgs }) {
+export async function runOpencodeWithFailover({ api, config, chatId, prompt, models, runModel = null, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, onCooldown = null, ...runArgs }) {
   let attempt = 0;
   const { result } = await runWithModelFailover({
     models,
@@ -1824,14 +2089,47 @@ export async function runOpencodeWithFailover({ api, chatId, prompt, models, run
       if (typeof onAttemptStart === 'function') {
         try { onAttemptStart({ model, attempt }); } catch {}
       }
+      const runOnce = async () => (runModel
+        ? await runModel(model)
+        : await runOpencode({ prompt, model, ...runArgs }));
       // runModel lets one failover chain span surfaces (cline quota-hit ->
       // opencode fallback and back). Without it every candidate runs through
       // the OpenCode CLI, exactly as before.
-      const attemptResult = runModel
-        ? await runModel(model)
-        : await runOpencode({ prompt, model, ...runArgs });
+      let attemptResult = await runOnce();
+      // One retry, and only for a transport failure. A quota answer is final
+      // for that lane and the ledger stamp already says so. Two ECONNREFUSEDs
+      // in a row is not a blip, so the lane gets a short cooldown and the walk
+      // moves on; without this the next message tried the same dead lane again.
+      let connectionRetries = 0;
+      while (
+        connectionRetries < 1 &&
+        !String(attemptResult?.finalText || '').trim() &&
+        isConnectionFailure(attemptFailureText(attemptResult)) &&
+        !isAborted()
+      ) {
+        connectionRetries += 1;
+        attempt += 1;
+        attemptResult = await runOnce();
+        if (typeof onAttemptStart === 'function') {
+          try { onAttemptStart({ model, attempt, retry: connectionRetries }); } catch {}
+        }
+      }
+      if (
+        !String(attemptResult?.finalText || '').trim() &&
+        isConnectionFailure(attemptFailureText(attemptResult)) &&
+        !isAborted()
+      ) {
+        const errText = attemptFailureText(attemptResult);
+        const stamp = stampLaneCooldown({ botId: config?.id, model, errText });
+        if (typeof onCooldown === 'function') {
+          try { onCooldown({ model, errText, stamp }); } catch {}
+        }
+      }
       if (typeof onAttemptComplete === 'function') {
         try { onAttemptComplete({ model, attempt, result: attemptResult, aborted: Boolean(isAborted()) }); } catch {}
+      }
+      if (!String(attemptResult?.finalText || '').trim() && attemptFailureText(attemptResult)) {
+        noteDeadEnd({ lane: model, errText: attemptFailureText(attemptResult), botId: config?.id });
       }
       return attemptResult;
     },
@@ -1937,7 +2235,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       providerLabel: providerLabelForModel(eff.model),
       modelLabel: eff.model || '',
     });
-    const handoff = prefs.get(chatId)?.handoff || '';
+    const handoff = prefFor(prefs, chatId).handoff || '';
     const quotedPrompt = buildQuotedPrompt(text, message.reply_to_message);
     const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${quotedPrompt}` : quotedPrompt;
     const blocked = liveClaims()
@@ -1963,7 +2261,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // Every project composes through the same path: an assigned role is
     // prepended for project 1 too, and composeExternalPrompt returns the
     // prompt untouched when the chat has no role.
-    const finalPrompt = composeExternalPrompt({ chatId, prompt: promptWithMedia, activeProject, activeRole });
+    let finalPrompt = composeExternalPrompt({ chatId, prompt: promptWithMedia, activeProject, activeRole });
+    // Notes this turn should read: one line each, above the request, and only
+    // for build/investigate turns. Gated retrieval returns nothing otherwise.
+    const deadEnds = deadEndNotesFor(text);
+    if (deadEnds.length) {
+      finalPrompt = `[KNOWN DEAD ENDS — do not repeat these]\n${deadEnds.map((r) => `- ${r.text}`).join('\n')}\n\n${finalPrompt}`;
+      console.log(`[${config.id}] injected ${deadEnds.length} dead-end note(s) into a ${turnKindFor(text)} turn`);
+    }
 
     const ref = parseModelRef(eff.model);
     const location = workLocation();
@@ -1971,6 +2276,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
     let workSession = resolveSession({ location, chat: String(chatId), workspace: effectiveWorkspace, lane: workLane });
     if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
+    // A recorded TUI server can die while the session row lives on. Attaching
+    // to it makes every turn fail in about two seconds with "Session not
+    // found", which is what happened to @VM_19485_bot all afternoon on
+    // 2026-09-25: one stale row from 11:14, thousands of nothing. Ask the
+    // server first, and drop the dead view instead of attaching to it.
+    if (workSession.viewMode === 'tui' && workSession.serverUrl) {
+      const live = await opencodeServerHealthy(workSession.serverUrl);
+      if (!live) {
+        console.log(`[${config.id}] tui server ${workSession.serverUrl} is not answering; dropping the stale view`);
+        workSession = setWorkView(workSession.id, { viewMode: 'headless', serverUrl: null, state: 'stale' }) || workSession;
+      }
+    }
     // A `/freemodel` switch after `/tx on` must move the live view with the
     // lane: stale OpenCode TUI panes are dropped for Cline/Gemini and the TUI
     // is re-ensured when the lane comes back to OpenCode.
@@ -2058,11 +2375,38 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         : laneChoice.displaced.why;
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
     }
+    // A location that names another machine runs there, on that machine's
+    // allowance. This VM does not stamp for it.
+    const remoteStatus = workerStatus(location);
+    if (!isLocalHost(location) && remoteStatus.reachable) {
+      const handed = await runOnWorker({
+        host: location,
+        prompt: finalPrompt,
+        model: eff.model,
+        project: isExternalTurn ? activeProject.id : 'health-tracker',
+        role: activeRole || '',
+        workspace: effectiveWorkspace,
+        envMode: turnEnvMode,
+      });
+      if (handed) {
+        console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'})`);
+        await renderer.finish(
+          { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
+          { footer: `host: ${location}` }
+        ).catch(() => {});
+        return;
+      }
+    }
+
     const result = await runOpencodeWithFailover({
       api,
+      config,
       chatId,
       prompt: finalPrompt,
       models: laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model),
+      onCooldown: ({ model, errText }) => {
+        console.log(`[${config.id}] ${model} connection-failed twice; cooling it down instead of retrying it next message`);
+      },
       runModel: runSurfaceModel,
       onAttemptStart: ({ model, attempt }) => {
         lastAttemptModel = model;
@@ -2082,7 +2426,23 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       },
       isAborted: () => Boolean(running.get(chatId)?.aborted),
     });
-    if (workLane !== 'opencode') writeObserverTerminal(result);
+    // The OpenCode surface already reports through onAttemptComplete. Other
+    // surfaces (Cline, Gemini) report nothing, so their terminal state is
+    // written here. The old call was writeObserverTerminal(result), which does
+    // not exist in this file: every Cline turn ended in
+    // "Error: writeObserverTerminal is not defined" and the chat never saw the
+    // model's answer, which is the lane @VM_19485_bot is pinned to.
+    if (workLane !== 'opencode' && observer) {
+      try {
+        observer.write(
+          running.get(chatId)?.aborted ? 'aborted' : String(result?.finalText || '').trim() ? 'run_complete' : 'failed',
+          result || {},
+          observerContext || {}
+        );
+      } catch {
+        // an observer hiccup must never cost the chat its answer
+      }
+    }
 
     if (result.sessionID) {
       sessions.set(chatId, result.sessionID);
@@ -2130,9 +2490,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     } else {
       const usageText = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
       if (handoff) {
-        const kept = prefs.get(chatId) || {};
+        const kept = prefFor(prefs, chatId);
         delete kept.handoff;
-        prefs.set(chatId, kept);
+        setPref(prefs, chatId, kept);
         savePrefs(config.id, prefs);
       }
       await renderer.finish(displayResult, { footer: usageText });
