@@ -1,6 +1,6 @@
 # Location-Agnostic Bot Architecture, Universal Role System & Web Dev Pipeline
 
-**Status:** REVISED & UNIFIED (2026-09-25)  
+**Status:** DRAFT, not the spec (2026-09-25). Execute `plan/R14_1_AGENT_PLAN.md`. Product shape: `plan/LOCATION_AGNOSTIC_AGENTS.md`. Do not install Antigravity. Do not fall back to another cloud lane when a host is offline. Do not treat the registry asserts as live proof. R-14.1 is open.  
 **Applies to:** ALL Agents across the fleet — Hermes Profiles (`~/.hermes/profiles/`), Telegram Bot Fleet (`bot-host.mjs`), Antigravity CLI (`agy`), OpenCode, Cline, Grok, Mobile Termux & Cloud VPS  
 **Index:** [plan/ROADMAP.md](./ROADMAP.md) **Track P / R-14.1** (Location-Agnostic Role & Project Council)  
 **Parent Invariants:** [plan/BUG_TICKET_PIPELINE.md](./BUG_TICKET_PIPELINE.md) (V-30.1–V-30.5) & [plan/BOT_ROLES.md](./BOT_ROLES.md)  

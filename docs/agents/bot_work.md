@@ -20,32 +20,20 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 **BOT-23 is DONE 2026-09-24.** Journey investigation & pre-dispatch regression gate. Investigated recent broken meal/portion journey; added `scripts/lib/dev-regression.mjs` and `scripts/assert-dev-regression.mjs` (17/17 tests passing); wired pre-dispatch dev regression & blast radius verification into `scripts/run-coding-dispatch.sh` `check_git_and_tsc()`. Rule L1 blast-radius violations reject uncommitted edits immediately; UI edits require `node scripts/assert-shell-smoke.mjs` (Playwright) to pass before commit/push.
 
-**Next code: none open.** BOT-19 is DONE 2026-09-24 — live acceptance passed after fixing the real-tmux quoted `pane_start_command` matcher defect (`unquoteTmuxValue` + sensors); observer binding is proven end to end on the VPS (see ROADMAP BOT-19 pickup). BOT-15/16/17/18/20/21/22/23 are DONE. Residuals: BOT-9 propagation/smoke + Grok mirror, BOT-11 T-matrix rows. V-30.5 needs an explicit human go.
+**Next code is R-14.1, one card at a time, in `plan/R14_1_AGENT_PLAN.md`.** BOT-13, BOT-15, BOT-16, BOT-17, BOT-18, BOT-19, BOT-20, BOT-21, BOT-22, and BOT-23 are DONE. Do not start them again. V-30.1–V-30.5 are DONE. Do not reopen them. Residuals that are not this work: BOT-9 propagation/smoke, BOT-11 T-matrix rows. They wait until the R-14.1 live cards are closed.
 
 **BOT-18 is DONE 2026-09-24.** Lease `{chatId, messageId, startedAt, pid}` written on run start and updated on progress create; boot sweep edits orphaned messages to `restarted mid-run — send it again` and appends `crash-pending` row; Telegram 409 conflict exits `process.exit(1)`. Tests: 119/119 green.
 
-## Human, in parallel
-
-**V-30.2 operations.** Packer code is merged. It is not live until the P9 token, profile env, registry handle, and one Telegram reply exist. Runbook: `plan/BUG_TICKET_PIPELINE.md` §6.2. Do not start V-30.3 until that closure and an explicit human go.
-
-## Then, in order
-
-1. **BOT-15.** One outcome row per dispatch: ticket, surface, provider/model, defect class, tokens, wall-clock, outcome. The pre-action gate reads it in code, beside the file locks, before the edit. The second identical signature writes one test or rule the same day.
-4. **BOT-13.** Stores: `decisions/`, `dead-ends/`, `facts/`, plus shared `USER.md` (caps 1,375 / 2,200). Retrieve on a build, investigate, or decide turn only. Do not inject a whole memory file. Do not append a `/compact` summary. Missing, over-cap, or stale → a receipt. Count false-fires.
-5. **BOT-15.** One outcome row per dispatch: ticket, surface, provider/model, defect class, tokens, wall-clock, outcome. The pre-action gate reads it in code, beside the file locks. The second identical signature writes one test or rule the same day.
-6. **BOT-16.** Composed soul, line budgets. The three laws below live in that soul, because the Hermes gateway cwd is `~/.hermes` and a Telegram turn does not load `AGENTS.md`.
-7. **BOT-22.** The Grok Telegram router uses one session for every chat. Split it per chat. Not before BOT-16.
-
 ## Laws
 
-- A bot is a place. The runner is a surface. A model is a backend. There is no Cline agent. The Cline CLI adapter is degraded for session resume (3.0.65). Do not start there.
-- `/freemodel` is location-scoped: a VM, phone/proot, and Collab host each see only their locally installed/authenticated tools, models, and quota. Cline, Token Harbor, Freebuff, and Gemini-through-OpenCode are omitted when unusable on that host; Freebuff is terminal-only and Gemini is never a new standalone picker surface.
-- One checkout, one coder, `dispatch_lock`. On insufficient funds, one retry with `opencode/deepseek-v4.1-flash` on the same surface, then stop and post the real error.
+- The poller is a place and owns one token. `/location` chooses a connected worker for the next turn. Setting `BOT_LOCATION` on the VM is not that choice. Do not move the poller. Do not add a bot per role, per project, or per vendor. Antigravity is not a location. Do not reopen BOT-17 to restate this.
+- `/freemodel` and `/allowance` belong to the worker that is running the turn. Each host sees only its own tools and quota. A depleted lane takes the next equivalent lane on that same worker. Location changes only when that list is empty. Freebuff is terminal-only. Gemini is not a new picker. The Cline CLI adapter stays degraded for session resume. Do not start there.
+- Website coding stays one checkout, one coder, `dispatch_lock`. On insufficient funds inside that dispatch, one retry with `opencode/deepseek-v4.1-flash` on the same surface, then stop and post the real error. That retry is not `/location`. Do not rebuild the dispatch path for external projects.
 - One defect per card. The script starts the coder. The Orchestrator profile only posts status.
 - The card closes when `verify.method` is `named_test` or `manual` and `verify.result` is `green`. A green journey stays `verifying`. `bugState` enforces this (`JOURNEY_GREEN_DOES_NOT_CLOSE`).
 - Do not push the coder's commit onto `origin/main`. Open a PR from `agent/<area>`.
-- BOT-1 through BOT-8 are history.
+- BOT-1 through BOT-23 are history. V-30.1 through V-30.5 are history. CB-6 as written (push to `origin/main`) is superseded. Do not resume CB-7 or CB-8.
 
 ## Do not
 
-Do not dual-poll a token. Do not restart `hermes-gateway`. Do not run `bot-host@android` on the VPS. Do not add a bot per vendor. Do not autonomous-commit.
+Do not dual-poll a token. Do not restart `hermes-gateway`. Do not run `bot-host@android` on the VPS. Do not add a bot per vendor, role, or project. Do not autonomous-commit. Do not blank `bots/soul.md`. Do not mark R-14.1 done from `assert-external-projects.test.mjs`. Do not implement the Antigravity install or the silent cloud fallback in `plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md`.
