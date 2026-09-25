@@ -483,6 +483,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | **R-12** | One-line stall/503 count (free-tier hang rate) | After F-8.13 JSON tree has `latency_ms` / error on dispatches. A number in `AI_HANDOVER.md`, **not** a metrics product. RELIABILITY.md §11.12 **H** | LangSmith; Grafana; inner-loop Gemini |
 | **R-13** | VPS-2 go-live + AI Studio parity | Packet **locked**. R-13.0 agent preflight **PASS**. R-13.1 = Track V Phase 4, `blocked_human` until V-0. Not R-2. Not Cloud Run. |
 | **R-14** | **Telegram shared-capability alignment** — one rail for bot-host skills + provider-router + Grok agents (photos, matrix, allowance, self-heal) **+ propagation flow across Hermes / VPS / Mobile / Grok TG / Collab** (§14.7 cases). Plan in [RELIABILITY.md](./RELIABILITY.md) **§14**. | Dual stacks / missing photo-view / matrix not visible to all agents; uneven skill fan-out; after R-13.1 live. Owner: thin PM + free CLI. |
+| **R-14.1** | **Location-Agnostic Bot Architecture & Multi-Agent Project Council** — agnostic execution across mobile/VPS/Colab (`/location`), project switching (`/project 1` vs `/project 2`), clean soul override with preserved non-website skills, Google Drive headless bridge, and 6-agent PIP defense council. Plan in [LOCATION_AGNOSTIC_PROJECT_COUNCIL.md](./LOCATION_AGNOSTIC_PROJECT_COUNCIL.md). | **COMPLETE 2026-09-25** — `assert-external-projects.test.mjs` 34/34 passing; 6-agent council and staged deliverables verified. |
 
 ### R-13 sub-IDs (one at a time after lock)
 

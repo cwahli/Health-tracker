@@ -45,6 +45,13 @@ export const DEFAULT_SESSION = {
       branch: 'main',
       dir: '/root/Health-tracker',
     },
+    'external-1': {
+      name: 'PIP Defense & Rating Review Council',
+      type: 'external',
+      dir: path.join(HOME, 'projects', 'external-1'),
+      gdriveFolder: '[External-1-PIP-Defense]',
+      branch: 'main',
+    },
   },
   collab: {
     tunnelUrl: null,
@@ -103,6 +110,9 @@ export function switchBackend(backendKey, customModel = null) {
 export function switchProject(projectNameOrUrl, options = {}) {
   const session = loadSession();
   let key = projectNameOrUrl.toLowerCase().trim();
+  if (key === 'external 1' || key === '1' || key === 'pip' || key === 'pip-case') {
+    key = 'external-1';
+  }
 
   // If URL passed (e.g. https://github.com/user/my-project.git)
   if (key.startsWith('http') || key.includes('/')) {

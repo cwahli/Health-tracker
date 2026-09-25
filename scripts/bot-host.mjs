@@ -98,6 +98,21 @@ import {
   buildInboundPrompt,
 } from './lib/inbound-media.mjs';
 import { claimFiles, releaseFiles, listLocks, extractFiles } from './lib/file-locks.mjs';
+import {
+  KNOWN_PROJECTS,
+  getChatProject,
+  getChatRole,
+  switchChatProject,
+  switchChatRole,
+  resetChatRole,
+  checkRoleDetails,
+  getProjectRoles,
+  addProjectRole,
+  removeProjectRole,
+  composeExternalPrompt,
+  formatProjectsSummary,
+} from './lib/project-registry.mjs';
+import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-runner.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -1318,6 +1333,195 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'project': {
+      if (!cmd.args) {
+        await api.sendMessage(chatId, formatProjectsSummary(chatId), { parse_mode: 'Markdown' });
+        return;
+      }
+      try {
+        const proj = switchChatProject(chatId, cmd.args);
+        sessions.delete(chatId);
+        saveSessions(config.id, sessions);
+        const roleInfo =
+          proj.type === 'external'
+            ? '\n• *Council:* Use `/role <name>` (e.g. `/role legal`) or `/council run` for full council review.'
+            : '';
+        await api.sendMessage(
+          chatId,
+          `✅ *Switched to Project:* \`${proj.name}\`\n• *Type:* ${proj.type === 'external' ? '🌐 External Workspace' : '💻 Health-Tracker'}\n• *Workspace:* \`${proj.workspace}\`${proj.gdriveFolder ? `\n• *Google Drive:* \`${proj.gdriveFolder}\`` : ''}${roleInfo}`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (err) {
+        await api.sendMessage(chatId, `❌ Project error: ${err.message}`);
+      }
+      return;
+    }
+
+    case 'council': {
+      const activeProj = getChatProject(chatId);
+      if (activeProj.type !== 'external') {
+        await api.sendMessage(chatId, 'The Multi-Agent Council is designed for external projects. First switch via `/project external 1`.');
+        return;
+      }
+      const sub = (cmd.args || '').trim().toLowerCase();
+      if (sub === 'audit' || sub === 'defense' || sub === 'finalize') {
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please /abort it first.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          `⚖️ *Running Council Stage: ${sub.toUpperCase()}...*`,
+          { parse_mode: 'Markdown' }
+        );
+        try {
+          const res = await runCouncilStage(sub, activeProj.id);
+          await api.sendMessage(chatId, res.nextStepMsg || 'Stage completed.', { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Council stage failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'run') {
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please /abort it first.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          `⚖️ *Initiating Multi-Agent Council for "${activeProj.name}"...*\nRunning 6-phase review: Accuracy ➔ Defense ➔ Red-Team ➔ Legal ➔ Arbitrator ➔ Final Dossier.`,
+          { parse_mode: 'Markdown' }
+        );
+        try {
+          const res = await runFullCouncil(activeProj.id);
+          const reply = `✅ *Council Review Completed!*\n• *Workspace:* \`${res.workspace}\`\n• *Artifacts Generated:* 6 phases\n• *Executive Deliverables:* Ready in Google Drive mirror.\n\nType \`/role builder\` to inspect the final talking points or \`/status\` to review.`;
+          await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Council run failed: ${err.message}`);
+        }
+        return;
+      }
+
+      const status = getCouncilStatus(activeProj.id);
+      const phasesText = (status.phases || []).map((p) => `• ${p.title}: ${p.completed ? '✅ Done' : '⏳ Pending'}`).join('\n');
+      const reply = `🏛️ *[Council Status — ${status.name}]*\n• *Workspace:* \`${status.workspace}\`\n• *Google Drive:* \`${status.gdriveFolder}\`\n• *Evidence Ledger:* ${status.hasEvidenceLedger ? '✅ Attached' : '⚠️ Missing'}\n\n*Review Phases:*\n${phasesText}\n\n*Staged Checkpoints (Human-in-the-Loop):*\n• \`/council audit\` — Phase 1: Audit facts & flag missing receipts\n• \`/council defense\` — Phases 2 & 3: Defense arguments & Manager simulation\n• \`/council finalize\` — Phases 4-6: Legal review, arbitrator ruling & final dossier\n• \`/council run\` — Unattended full pipeline`;
+      await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
+      return;
+    }
+
+    case 'role': {
+      const activeProj = getChatProject(chatId);
+      const currentRoles = getProjectRoles(activeProj.id);
+      if (!cmd.args) {
+        const rolesList = (currentRoles || []).map((r) => `• \`/role ${r.id.split('_')[0]}\` — *${r.name}*`).join('\n');
+        await api.sendMessage(
+          chatId,
+          `👥 *[Active Project Roles — ${activeProj.name}]*\n\n${rolesList || '• None declared.'}\n\n• \`/role check <name>\` — Inspect role mandate & instructions\n• \`/role add <id> <name> : <instructions>\` — Add a new dynamic role\n• \`/role remove <id>\` — Delete a role\n• \`/role reset\` — Return to general collaborative mode`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+      if (cmd.args === 'reset') {
+        resetChatRole(chatId);
+        await api.sendMessage(chatId, `Role reset. Operating in general collaborative mode for \`${activeProj.name}\`.`);
+        return;
+      }
+      if (cmd.args.startsWith('add ')) {
+        const payload = cmd.args.replace(/^add\s+/, '').trim();
+        const parts = payload.split(':');
+        const header = parts[0].trim().split(/\s+/);
+        const roleId = header[0];
+        const roleName = header.slice(1).join(' ') || roleId;
+        const instructions = parts[1] ? parts.slice(1).join(':').trim() : `You are the ${roleName}. Follow project guidelines.`;
+        try {
+          const added = addProjectRole(activeProj.id, { id: roleId, name: roleName, instructions });
+          await api.sendMessage(
+            chatId,
+            `✅ *Role Added to ${activeProj.name}:* \`${added.name}\` (\`${added.id}\`)\nInstructions saved to \`roles/${added.id}.md\`. Type \`/role ${added.id}\` to activate it.`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Failed to add role: ${err.message}`);
+        }
+        return;
+      }
+      if (cmd.args.startsWith('remove ') || cmd.args.startsWith('delete ')) {
+        const targetRole = cmd.args.replace(/^(remove|delete)\s+/, '').trim();
+        try {
+          const ok = removeProjectRole(activeProj.id, targetRole);
+          if (ok) {
+            await api.sendMessage(chatId, `🗑️ *Role Removed:* \`${targetRole}\` has been removed from ${activeProj.name}.`);
+          } else {
+            await api.sendMessage(chatId, `⚠️ Role "${targetRole}" was not found or could not be removed.`);
+          }
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Failed to remove role: ${err.message}`);
+        }
+        return;
+      }
+      if (cmd.args.startsWith('check ') || cmd.args.startsWith('inspect ')) {
+        const targetRole = cmd.args.replace(/^(check|inspect)\s+/, '').trim();
+        const details = checkRoleDetails(activeProj.id, targetRole);
+        if (!details) {
+          await api.sendMessage(chatId, `❌ Role "${targetRole}" not found in ${activeProj.name}.`);
+          return;
+        }
+        const checkMsg = [
+          `🔍 *[Role Inspection: ${details.name}]*`,
+          `• *Project:* \`${details.projectName}\``,
+          `• *Role ID:* \`${details.roleId}\``,
+          `• *Description:* ${details.description}`,
+          `\n📜 *Assigned Instructions:*`,
+          `\`\`\`\n${(details.instructions || 'Standard operating instructions.').trim()}\n\`\`\``,
+          `\nType \`/role ${details.roleId.split('_')[0]}\` to assign this role to the active agent.`,
+        ].join('\n');
+        await api.sendMessage(chatId, checkMsg, { parse_mode: 'Markdown' });
+        return;
+      }
+      try {
+        const role = switchChatRole(chatId, cmd.args);
+        await api.sendMessage(
+          chatId,
+          `🎭 *Assumed Role:* \`${role.name}\`\nRelevant instructions for this role have been loaded and assigned. Future requests in this chat will execute under this persona.\nType \`/role reset\` to return to general mode.`
+        );
+      } catch (err) {
+        await api.sendMessage(chatId, `❌ Role error: ${err.message}`);
+      }
+      return;
+    }
+
+    case 'location': {
+      const loc = workLocation();
+      if (!cmd.args) {
+        const poolMsg = [
+          '🌐 *[Compute Location & Quota Pool]*',
+          `• *Host Location:* \`${loc}\` (${loc === 'mobile' ? '📱 Mobile Termux' : '🖥️ Cloud VPS'})`,
+          `• *Active Model Lane:* \`${eff.model}\``,
+          `• *Provider:* \`${parseModelRef(eff.model).surface}\``,
+          '\n*Available Compute & Allowance Pools:*',
+          '• `vps` / `mobile` — switch execution host profile',
+          '• `zen` — OpenCode Zen Free tier (Nemotron, Muse, Ling)',
+          '• `tokenharbor` — Token Harbor rolling free allowance',
+          '• `cloudflare` — Cloudflare Workers AI free neurons',
+          '• `gemini` — Google Gemini 2.0 Flash API',
+          '• `colab` — Google Colab GPU tunnel',
+          '\n*Commands:*',
+          '• `/location mobile` or `/location vps`',
+          '• `/allowance` — inspect live free lane table',
+        ].join('\n');
+        await api.sendMessage(chatId, poolMsg, { parse_mode: 'Markdown' });
+        return;
+      }
+      const target = cmd.args.trim().toLowerCase();
+      if (target === 'mobile' || target === 'vps') {
+        process.env.BOT_LOCATION = target;
+        await api.sendMessage(chatId, `✅ *Compute location set to:* \`${target}\`\nRequests will execute against the ${target} environment profile.`);
+        return;
+      }
+      await api.sendMessage(chatId, `ℹ️ Use \`/location\` to view pools or \`/switch <backend>\` to route compute.`);
+      return;
+    }
+
     default:
       await api.sendMessage(chatId, `Unknown command: /${cmd.name}\n\n${helpText(config, eff)}`);
   }
@@ -1638,11 +1842,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const media = await collectInboundMedia(api, message, config);
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
+    const activeProject = getChatProject(chatId);
+    const activeRole = getChatRole(chatId);
+    const effectiveWorkspace = activeProject.type === 'external' ? activeProject.workspace : config.agent.workspace;
+    const finalPrompt = activeProject.type === 'external'
+      ? composeExternalPrompt({ chatId, prompt: promptWithMedia, activeProject, activeRole })
+      : promptWithMedia;
+
     const ref = parseModelRef(eff.model);
     const location = workLocation();
-    const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+    const workId = sessionKey({ location, chat: String(chatId), workspace: effectiveWorkspace });
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
-    let workSession = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: workLane });
+    let workSession = resolveSession({ location, chat: String(chatId), workspace: effectiveWorkspace, lane: workLane });
     if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
     // A `/freemodel` switch after `/tx on` must move the live view with the
     // lane: stale OpenCode TUI panes are dropped for Cline/Gemini and the TUI
@@ -1670,11 +1881,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       const candidate = parseModelRef(model);
       if (candidate.surface === 'cline') {
         return runCline({
-          prompt: promptWithMedia,
+          prompt: finalPrompt,
           model: candidate.id,
           variant: eff.variant,
           plan: eff.agent === 'plan',
-          workspace: config.agent.workspace,
+          workspace: effectiveWorkspace,
           timeoutMs: config.agent.timeoutMs,
           clineBin: config.agent.clineBin,
           onEvent: onObserverEvent,
@@ -1684,17 +1895,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       }
       if (candidate.surface === 'gemini') {
         return runGemini({
-          prompt: promptWithMedia,
+          prompt: finalPrompt,
           model: candidate.id,
           timeoutMs: config.agent.timeoutMs,
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
         });
       }
       return runOpencode({
-        prompt: promptWithMedia,
+        prompt: finalPrompt,
         model,
         variant: eff.variant,
-        workspace: config.agent.workspace,
+        workspace: effectiveWorkspace,
         thinking: config.agent.thinking,
         timeoutMs: config.agent.timeoutMs,
         opencodeBin: config.agent.opencodeBin,
@@ -1711,7 +1922,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const result = await runOpencodeWithFailover({
       api,
       chatId,
-      prompt: promptWithMedia,
+      prompt: finalPrompt,
       models: failoverModels(eff.model, config.agent.model),
       runModel: runSurfaceModel,
       onAttemptStart: ({ model, attempt }) => {
@@ -1732,6 +1943,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       },
       isAborted: () => Boolean(running.get(chatId)?.aborted),
     });
+    if (workLane !== 'opencode') writeObserverTerminal(result);
 
     if (result.sessionID) {
       sessions.set(chatId, result.sessionID);

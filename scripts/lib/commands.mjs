@@ -28,6 +28,10 @@ export const BOT_COMMANDS = [
   { command: 'handoff', description: 'Checkpoint this work session for continuation' },
   { command: 'resume', description: 'Print the current bug-ticket packet' },
   { command: 'tx', description: 'Shared work view on|off|status|debug for this chat' },
+  { command: 'project', description: 'View or switch project (e.g. /project external 1)' },
+  { command: 'council', description: 'Run multi-agent council (/council run or /council status)' },
+  { command: 'role', description: 'Switch active agent role (/role legal, /role sim, etc.)' },
+  { command: 'location', description: 'Show or switch active compute location / pool' },
 ];
 
 /** Names handled by bot-host.mjs handleCommand (kept in sync). */
@@ -202,6 +206,10 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/handoff          checkpoint this work session for continuation',
     '/resume [n]       print the current bug-ticket packet (n = card #)',
     '/tx [on|off|status|debug] shared work view for this chat',
+    '/project [name]   view or switch project (/project external 1)',
+    '/council [stage]  run council stage (audit, defense, finalize, run)',
+    '/role [name]      switch role within project (/role legal, /role sim)',
+    '/location [name]  show or switch compute location / quota pool',
     '/abort            cancel the running request',
     '/help             this message',
   ].join('\n');
