@@ -60,7 +60,7 @@ if (fs.existsSync(statePath)) {
 // 2. mapLegacyStatus exported
 const workSrc = read('src/utils/bugWorkItem.ts');
 check('mapLegacyStatus exported from bugWorkItem', /export function mapLegacyStatus\b/.test(workSrc));
-check('BugWorkItem has V-30.1 fields', ['defect', 'repro', 'plan', 'verify', 'surface', 'assignee', 'idem_key', 'reply_to', 'blocked_by', 'duplicate_of'].every((f) => workSrc.includes(f)));
+check('BugWorkItem has V-30.1 fields', ['defect', 'repro', 'plan', 'verify', 'surface', 'assignee', 'idem_key', 'reply_to', 'blocked_by', 'duplicate_of', 'revision', 'curation_events', 'handoff'].every((f) => workSrc.includes(f)));
 
 // 3–6. server routes
 const serverSrc = read('serverBugSnapshot.ts');
@@ -68,6 +68,8 @@ check('POST defect endpoint', /app\.post\('\/api\/bugs\/:tagId\/defect'/.test(se
 check('POST repro endpoint', /app\.post\('\/api\/bugs\/:tagId\/repro'/.test(serverSrc));
 check('POST plan endpoint', /app\.post\('\/api\/bugs\/:tagId\/plan'/.test(serverSrc));
 check('POST verify endpoint', /app\.post\('\/api\/bugs\/:tagId\/verify'/.test(serverSrc));
+check('GET canonical list endpoint', /app\.get\('\/api\/bugs\/list'/.test(serverSrc));
+check('POST steward curation endpoint', /app\.post\('\/api\/bugs\/:tagId\/curation'/.test(serverSrc));
 check('NO agent-settable state route', !/app\.(post|patch|put)\(\s*['"`][^'"`]*\/state['"`]/.test(serverSrc));
 check('bugWriteGuard defined (A-f5)', /function bugWriteGuard\b/.test(serverSrc));
 check('bugWriteGuard on attempts', /app\.post\('\/api\/bugs\/:tagId\/attempts',\s*bugWriteGuard/.test(serverSrc));
@@ -95,11 +97,14 @@ if (fs.existsSync(ctlPath)) {
     check('bugctl.mjs syntax valid', false, String(e.stderr || e.message).slice(0, 200));
   }
   const ctl = read('scripts/bugctl.mjs');
-  for (const c of ['create', 'pack', 'repro', 'plan', 'attempt', 'verify', 'queue', 'flush']) {
+  for (const c of ['create', 'pack', 'repro', 'plan', 'attempt', 'verify', 'queue', 'flush', 'list', 'curate', 'handoff']) {
     check(`bugctl has ${c}`, new RegExp(`case '${c}'`).test(ctl) || ctl.includes(`case '${c}'`));
   }
   check('bugctl writes journal', ctl.includes('bug-journal'));
   check('bugctl offline queue', ctl.includes('.bugctl-queue.jsonl') || ctl.includes('BUGCTL_QUEUE'));
+  const skill = read('scripts/skills/common/bug-ticket/SKILL.md');
+  check('steward skill uses canonical list', skill.includes('bugctl.mjs list --json'));
+  check('steward skill forbids dispatch', skill.includes('orchestrator-dispatcher') && /never/i.test(skill));
 }
 
 // 8. journal dir path

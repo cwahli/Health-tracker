@@ -49,7 +49,7 @@ function queueRows() {
 }
 
 /** Stub bug API that records requests and answers { ok: true }. */
-function stubApi() {
+function stubApi(response = { ok: true }) {
   const seen = [];
   const srv = http.createServer((req, res) => {
     let body = '';
@@ -57,7 +57,7 @@ function stubApi() {
     req.on('end', () => {
       seen.push({ method: req.method, url: req.url, body });
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(JSON.stringify(response));
     });
   });
   return new Promise((resolve) => {
@@ -128,5 +128,50 @@ describe('offline queue (sess-ticket-resume)', () => {
     const r = await runBugctl(['flush', '--json']);
     expect(r.code).toBe(0);
     expect(JSON.parse(r.stdout).message).toBe('queue empty');
+  });
+
+  it('queues steward curation without flattening its operation payload', async () => {
+    const dead = await closedPort();
+    const r = await runBugctl(['curate', '--id', '7', '--op', 'edit', '--expected-revision', '0', '--reason', 'clarify', '--json'], { BUG_API_BASE: `http://127.0.0.1:${dead}` });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).queued).toBe(true);
+    expect(queueRows()[0]).toMatchObject({ op: 'curate', id: '7', payload: { op: 'edit', expected_revision: 0, reason: 'clarify' } });
+  });
+
+  it('list reads the canonical all-card endpoint', async () => {
+    const { srv, seen, port } = await stubApi({
+      ok: true,
+      source: 'canonical-bug-list',
+      count: 1,
+      rows: [{ public_n: 7, title: 'one card' }],
+    });
+    try {
+      const r = await runBugctl(['list', '--json'], { BUG_API_BASE: `http://127.0.0.1:${port}` });
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.stdout)).toMatchObject({ source: 'canonical-bug-list', count: 1 });
+      expect(seen[0].url).toBe('/api/bugs/list?');
+    } finally {
+      srv.close();
+    }
+  });
+
+  it('curate and handoff send revisioned steward operations', async () => {
+    const { srv, seen, port } = await stubApi({
+      ok: true,
+      tag_id: 'tag_7',
+      state: 'packed',
+      receipt: { op: 'handoff', from_revision: 1, to_revision: 2 },
+      work_item: { revision: 2 },
+    });
+    try {
+      const edit = await runBugctl(['curate', '--id', '7', '--op', 'edit', '--expected-revision', '1', '--reason', 'clarify scope', '--json'], { BUG_API_BASE: `http://127.0.0.1:${port}` });
+      expect(edit.code).toBe(0);
+      expect(JSON.parse(seen[0].body)).toMatchObject({ op: 'edit', expected_revision: 1, reason: 'clarify scope' });
+      const handoff = await runBugctl(['handoff', '--id', '7', '--expected-revision', '2', '--reason', 'ready for orchestrator', '--json'], { BUG_API_BASE: `http://127.0.0.1:${port}` });
+      expect(handoff.code).toBe(0);
+      expect(JSON.parse(seen[1].body)).toMatchObject({ op: 'handoff', assignee: 'orchestrator', expected_revision: 2 });
+    } finally {
+      srv.close();
+    }
   });
 });

@@ -577,7 +577,7 @@ Canonical steps: [COLLAB_BOT_MOBILE_WORKFLOW.md](./COLLAB_BOT_MOBILE_WORKFLOW.md
 | **P5** | Owner of `not_reproducible` | packer decides close vs `blocked_reason=needs_info` · orchestrator triages it | packer (orchestrator must not re-open the free-text hop) | V-30.2 |
 | **P6** | Repro depth | command + `run.log` + screenshot per card · a committed Playwright test per ticket | shallow now; Promote path later | V-30.3 |
 | **P7** | QA profile wake policy | wake `qa_biomarker` / `qa_onboarding` on the first Health/profile repro (token + memory init + right skills) · `qa_meal` covers all surfaces for now | on demand — keep them asleep until needed | V-30.3 |
-| **P8** | Backlog artifact | generated `bug-backlog.md` (keeps the human habit) · `bugctl queue` + `docs/agent/BUG_QUEUE.md` | generated | V-30.5 |
+| **P8** | Backlog artifact | generated `bug-backlog.md` (keeps the human habit) · `bugctl list` + `docs/agent/BUG_QUEUE.md` | generated | V-30.5 |
 | **P9** | Human: create the packer token | BotFather → `HERMES_BUG_TICKET_TOKEN` → master `tokens.env` → `sync-bot-tokens.mjs` | approved human step inside V-30.2, required before the E2E proof | V-30.2 |
 | **P10** | Channel model | one ticket room with per-surface topics · per-agent chats with `reply_to` routing | ticket room | V-30.2 / V-30.4 |
 
