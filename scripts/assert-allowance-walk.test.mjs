@@ -97,6 +97,21 @@ try {
   check('an exhausted host selects nothing', empty.models.length === 0);
   check('an exhausted host is reported as exhausted', empty.exhausted === true);
 
+  // 5b. The configured model the ledger has never heard of is still run first.
+  // Regression: the first version of this dropped it and ran the ledger's top
+  // lane, which broke a live turn on the VM at 18:31Z.
+  const unlisted = selectTurnLanes({ botId: 'vm', model: 'opencode/nemotron-3.5-lightning-free', fallback: 'zen/muse' });
+  check('an unlisted configured model still runs first', unlisted.models[0] === 'opencode/nemotron-3.5-lightning-free');
+  check('it is not displaced', unlisted.displaced === null);
+  check('the ledger lanes follow it as fallbacks', unlisted.models.length > 1);
+  check('the first fallback is the ledger preference order', !unlisted.models.slice(1).includes('opencode/nemotron-3.5-lightning-free'));
+
+  // 5c. A configured model the ledger says is depleted is dropped, with a reason.
+  const depletedChoice = selectTurnLanes({ botId: 'vm', model: 'opencode:zen/nemotron', fallback: 'zen/muse' });
+  check('a stamped configured model is dropped', !depletedChoice.models.includes('opencode:zen/nemotron'));
+  check('and the chat is told why', /depleted/.test(String(depletedChoice.displaced?.why)));
+  check('and it moves to a lane that is open', depletedChoice.models.length > 0);
+
   // 6. A host with no ledger keeps the old chain, so a fresh install is unchanged.
   const bare = selectTurnLanes({ botId: 'brand-new-bot', model: 'zen/muse', fallback: 'zen/nemotron' });
   check('a fresh bot still gets a usable chain', bare.models.length > 0);

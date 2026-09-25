@@ -1757,29 +1757,49 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now() } = {
     return { models: legacy, skipped: [], fromLedger: false };
   }
   const { lanes, skipped } = usableTurnLanes(table, ledger.session || {}, { now });
-  if (!lanes.length) {
+
+  // The registry owns what to run; the ledger owns what may be tried next. A
+  // configured model the ledger has never heard of is still the first choice —
+  // an earlier version dropped it and silently ran the ledger's top lane
+  // instead, which broke a live turn on 2026-09-25. The ledger only removes the
+  // current lane when it says that lane is depleted or ended.
+  const current = freemodelRefToRoute(model || '');
+  const sameRoute = (row) => {
+    if (!current.provider || !current.model) return false;
+    const tail = (v) => String(v || '').replace(/^[^/]+\//, '').replace(/:free$/i, '');
+    return row.model === current.model || (row.provider === current.provider && tail(row.model) === tail(current.model));
+  };
+  const currentSkipped = skipped.find(sameRoute);
+  const fallbackLanes = lanes.filter((l) => !sameRoute(l));
+
+  if (!model && !fallbackLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
     return { models: [], skipped, fromLedger: true, exhausted: true, displaced: null, chose: null, soonest };
   }
-  const current = freemodelRefToRoute(model || '');
-  const refOf = (lane) => toModelRef(lane.provider, lane.model);
-  const currentLane = current.provider && current.model
-    ? lanes.find((l) => l.provider === current.provider && l.model === current.model)
-    : null;
-  const rest = lanes.filter((l) => l !== currentLane);
-  const models = [
-    toModelRef((currentLane || lanes[0]).provider, (currentLane || lanes[0]).model),
-    ...(currentLane ? rest : rest).map(refOf),
-  ];
+  if (model && currentSkipped && !fallbackLanes.length) {
+    const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
+    return {
+      models: [],
+      skipped,
+      fromLedger: true,
+      exhausted: true,
+      displaced: currentSkipped,
+      chose: null,
+      soonest,
+    };
+  }
+
+  const models = [];
+  if (model && !currentSkipped) models.push(model);
+  for (const lane of fallbackLanes) models.push(toModelRef(lane.provider, lane.model));
+  if (!models.length) models.push(fallback);
   return {
-    models: [...new Set(models)],
+    models: [...new Set(models.filter(Boolean))],
     skipped,
     fromLedger: true,
     exhausted: false,
-    displaced: currentLane
-      ? null
-      : skipped.find((row) => row.provider === current.provider && row.model === current.model) || null,
-    chose: toModelRef(lanes[0].provider, lanes[0].model),
+    displaced: currentSkipped || null,
+    chose: models[0] || null,
   };
 }
 
