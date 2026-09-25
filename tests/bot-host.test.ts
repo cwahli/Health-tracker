@@ -1959,11 +1959,11 @@ describe('BOT-19 /tx wiring', () => {
     expect(sent[0]).toContain('ON');
     expect(sent[0]).toMatch(/tmux attach -t work-testbox:ws-/);
     expect(sent[0]).toContain('testbox|9|/ws');
-    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'new-session', 'has-session', 'list-windows', 'list-panes', 'select-pane', 'list-panes']);
+    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'new-session', 'has-session', 'list-windows', 'list-panes', 'select-pane', 'list-panes', 'list-panes']);
     expect(tmux.calls.flat().some((arg) => /kill|respawn|send-keys/.test(String(arg)))).toBe(false);
   });
 
-  it('/tx on migrates a legacy blank workstream window without destructive tmux actions', async () => {
+  it('/tx on migrates a legacy blank workstream window and removes its extra pane', async () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
     const legacyWindow = tmuxWindowFor(sessionKey({ location: 'testbox', chat: '9', workspace: '/ws' }));
@@ -1971,6 +1971,7 @@ describe('BOT-19 /tx wiring', () => {
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(tmux.sessions.get('work-testbox')).toEqual(new Set([legacyWindow]));
     expect(tmux.calls.map((args) => args[0])).toContain('split-window');
+    expect(tmux.calls.map((args) => args[0])).toContain('kill-pane');
     expect(tmux.calls.flat().some((arg) => /kill-window|kill-session|respawn-pane|send-keys/.test(String(arg)))).toBe(false);
   });
 
