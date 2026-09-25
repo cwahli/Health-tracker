@@ -43,6 +43,8 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession } from './lib/opencode-tui.mjs';
+import { KNOWN_HOSTS, workerStatus } from './lib/worker-presence.mjs';
+import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -1519,12 +1521,27 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       const target = cmd.args.trim().toLowerCase();
-      if (target === 'mobile' || target === 'vps') {
-        process.env.BOT_LOCATION = target;
-        await api.sendMessage(chatId, `✅ *Compute location set to:* \`${target}\`\nRequests will execute against the ${target} environment profile.`);
+      if (KNOWN_HOSTS.includes(target)) {
+        // A location is a host with a connected worker, not a variable. Setting
+        // BOT_LOCATION is not a connection: the turn would still run here.
+        const status = workerStatus(target);
+        if (status.reachable) {
+          process.env.BOT_LOCATION = target;
+          clearBlockedLocation(chatId);
+          await api.sendMessage(
+            chatId,
+            `✅ *Compute location set to:* \`${target}\`\n${status.reason}. The next turn runs on ${target}.`
+          );
+          return;
+        }
+        setBlockedLocation(chatId, target, status.reason);
+        await api.sendMessage(
+          chatId,
+          `⚠️ *Host \`${target}\` is unreachable:* ${status.reason}.\nThe location was **not** changed and the turn was **not** run. The next message will not start work on this machine either — send \`/location vps\` to run here, or retry once the ${target} worker connects.`
+        );
         return;
       }
-      await api.sendMessage(chatId, `ℹ️ Use \`/location\` to view pools or \`/switch <backend>\` to route compute.`);
+      await api.sendMessage(chatId, `ℹ️ Known hosts: ${KNOWN_HOSTS.map((h) => `\`${h}\``).join(', ')}. Use \`/location <host>\` or \`/switch <backend>\`.`);
       return;
     }
 
@@ -1790,6 +1807,23 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   if (busy.has(chatId)) {
     await api.sendMessage(chatId, 'Still working on the previous request. Send /abort to cancel or /new to reset.');
     return;
+  }
+
+  // A location request that no worker answered holds the turn instead of
+  // quietly running it here. No lane is chosen, so no ledger is touched.
+  const heldLocation = getBlockedLocation(chatId);
+  if (heldLocation) {
+    const status = workerStatus(heldLocation.requested);
+    if (status.reachable) {
+      process.env.BOT_LOCATION = status.host;
+      clearBlockedLocation(chatId);
+    } else {
+      await api.sendMessage(
+        chatId,
+        `⏸ Held: you asked for \`${heldLocation.requested}\` and it is still unreachable (${status.reason}). Nothing was run and no allowance was spent. Send \`/location vps\` to run here, or retry when the worker connects.`
+      );
+      return;
+    }
   }
 
   // Parallel by design: chat never waits on another agent. Advisory per-file
