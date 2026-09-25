@@ -142,6 +142,8 @@ The worker connects outward to the VM. The VM does not dial the phone or the not
 
 The walk is the one the Grok router already has: `markDepleted`, `isDepleted`, and `nextFailoverRoutes` in `tools/telegram-provider-router/src/index.js`. Bot-host records the same fact with `stampDepleted`. A provider quota or rate-limit error writes `depletedUntil` in that process before the reply. A shared OpenCode Zen bucket marks every model in the bucket. A help page or a status table does not mark anything. The next message uses the next selectable row on that same worker. Freebuff is never the row that is chosen. Only an empty selectable list moves the turn to the next connected worker, with the project, the role, and the short log. If every connected worker is empty, the reply says so and does not run.
 
+**Specimen already seen.** On 2026-09-25 at 12:29Z the VM bot was on `cline-free/muse-spark-1.3-contributor`. The provider returned `429` and `Try again in 22h 46m`. The chat was sent the raw `INFERENCE_CAP_ERROR` JSON. No `depletedUntil` was written and no next lane was selected. That reply is a fail for this card.
+
 **Live proof.** Use a copy of the ledger for the bot under test. The real user ledger mtime is unchanged before and after. Do this twice: once to `@VM_19485_bot`, once to the Grok router bot. Same order both times.
 
 1. `/allowance` and paste the preference order.
