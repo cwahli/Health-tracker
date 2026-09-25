@@ -28,6 +28,9 @@ LOGOUT="$LIVE/run/router.out.log"
 TICKET="${1:-}"
 [ -n "$TICKET" ] || { echo "usage: ht-ship <ticket-dir>"; exit 1; }
 [ -f "$TICKET/REPORT.md" ] || { echo "ABORT: $TICKET/REPORT.md missing — write the report before shipping"; exit 1; }
+# Absolute early: step 3 cds into the live router, after which a relative
+# ticket path would no longer resolve (SHIPPED.txt append failed silently).
+TICKET="$(cd "$TICKET" && pwd)" || { echo "ABORT: cannot resolve $TICKET"; exit 1; }
 [ -d "$TOOL" ] && [ -d "$LIVE" ] || { echo "ABORT: repo tool or live router dir missing"; exit 1; }
 
 echo "[ht-ship] 1/4 npm test in tools/telegram-provider-router ..."
