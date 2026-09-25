@@ -380,6 +380,18 @@ try {
   check('a terminal-only row is in the list and marked not selectable',
     canon.find((r) => /Freebuff/.test(String(r.label)))?.selectable === false);
 
+  // 6h. A depleted row must show its reset, not just the mark. The reset of a
+  // per-worker stamp lives in that worker's session record, not in the table, so a
+  // row read from the host's catalogue had to take the time from the projection or
+  // it printed "❌" beside "Reset in —".
+  const stamped = { version: 3, buckets: {}, lanes: [
+    { pref: 1, provider: 'cline', model: 'cline-free/muse-spark-1.3-contributor', status: 'depleted', tg: true, label: 'Muse 1.3' },
+  ] };
+  const until = Date.now() + 13 * 3600 * 1000;
+  const sess = { quota: { 'cline/cline-free/muse-spark-1.3-contributor': { depletedUntil: until, lastError: 'Error 429: Daily free limit reached' } } };
+  const stampedText = buildAllowanceTextForBots({ stateDir: (() => { const d = ensureBotLedger('vm').dir; fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(stamped, null, 2)); fs.writeFileSync(path.join(d, 'session.json'), JSON.stringify(sess, null, 2)); return d; })() });
+  check('a depleted row shows its reset time from the session record', /Muse 1\.3[^\n]*\d+h/.test(stampedText), stampedText.split('\n').filter((l)=>/Muse/.test(l)).join(' | '));
+
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel renders the canonical list, not the raw catalog', /const rows = canonical \|\| \[\];/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));

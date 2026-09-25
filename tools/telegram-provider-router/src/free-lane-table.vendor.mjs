@@ -1058,7 +1058,11 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     const ok = verdict ? verdict.selectable : laneIsUsable(l);
     const name = shortModelName(l);
     const plan = planCodeForLane(l);
-    const resetIn = formatResetIn(laneResetAt(l, t), now);
+    // The reset comes from the projection when there is one. laneResetAt() only
+    // reads the table, and a per-worker stamp's reset lives in that worker's session
+    // record — so a depleted row showed "❌" with "Reset in —", the mark without the
+    // time, once the catalogue moved to the host's table.
+    const resetIn = formatResetIn(verdict?.resetAt ?? laneResetAt(l, t), now);
     const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${resetIn}`;
     lines.push((ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>");
   }

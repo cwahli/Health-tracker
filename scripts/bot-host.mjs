@@ -73,6 +73,7 @@ import {
   effectiveProviderOf,
   planCodeForLane,
   canonicalAllowanceLanes,
+  formatResetIn,
   renderFreeLaneTableHtml,
   ensureBotLedger,
   stampDepleted,
@@ -762,7 +763,7 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     : r.terminalOnly
       ? 'terminal only'
       : r.depleted
-        ? `depleted${r.resetIn && r.resetIn !== '-' ? ` (reset in ${r.resetIn})` : ''}`
+        ? `depleted${(() => { const at = r.resetIn && r.resetIn !== '-' ? r.resetIn : (r.resetLabel || (r.resetAt ? formatResetIn(r.resetAt, Date.now()) : '')); return at && at !== '-' ? ` (reset in ${at})` : ''; })()}`
         : r.reason || 'not available');
   const lines = [
     `Free models${location0} — tap a button below (❌ = not usable right now; the first message auto-fails over to the next free lane).`,
