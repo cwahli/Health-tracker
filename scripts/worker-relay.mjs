@@ -83,6 +83,22 @@ function exportSession(id, res) {
   });
 }
 
+/**
+ * Is that conversation here — without shipping it? `opencode session list` is
+ * a local read, so the preflight can answer before a job exists rather than
+ * after a worker has claimed it. 404 means "not on this host", 503 means
+ * "cannot tell" (opencode missing or its own listing failed).
+ */
+function checkSession(id, res) {
+  execFile('opencode', ['session', 'list'], { timeout: 20000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
+    if (err && err.code === 'ENOENT') return send(res, 503, { error: 'opencode is not installed on this host' });
+    if (err) return send(res, 503, { error: 'session list failed' });
+    const found = String(stdout || '').split('\n').some((line) => line.includes(id));
+    if (!found) return send(res, 404, { ok: false, error: 'session not found' });
+    return send(res, 200, { ok: true, id });
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const route = `${req.method} ${url.pathname}`;
@@ -105,6 +121,7 @@ const server = http.createServer(async (req, res) => {
       host,
       pid: Number(body.pid) || null,
       detail: String(body.detail || '').slice(0, 200),
+      cwd: String(body.cwd || '').slice(0, 400),
     });
     console.log(`[relay] worker connected: ${host}${row.detail ? ` (${row.detail})` : ''}`);
     return send(res, 200, { ok: true, worker: row });
@@ -114,7 +131,7 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const host = String(body.host || '').trim().toLowerCase();
     if (!host) return send(res, 400, { error: 'host is required' });
-    const row = recordWorkerConnected({ host, pid: Number(body.pid) || null, detail: body.detail || '' });
+    const row = recordWorkerConnected({ host, pid: Number(body.pid) || null, detail: body.detail || '', cwd: String(body.cwd || '').slice(0, 400) });
     return send(res, 200, { ok: true, lastSeen: row.lastSeen });
   }
 
@@ -142,8 +159,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (route.startsWith('GET /sessions/')) {
-    const id = decodeURIComponent(url.pathname.slice('/sessions/'.length)).replace(/\/export$/, '');
+    const rest = decodeURIComponent(url.pathname.slice('/sessions/'.length));
+    const wantsCheck = rest.endsWith('/check');
+    const id = rest.replace(/\/(check|export)$/, '');
     if (!/^ses_[A-Za-z0-9]{4,80}$/.test(id)) return send(res, 400, { error: 'bad session id' });
+    if (wantsCheck) return checkSession(id, res);
     return exportSession(id, res);
   }
 
