@@ -758,12 +758,21 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   const unusable = rows.filter(unusableOf);
   const noCredential = rows.filter((r) => r.inLedger === false);
   const location0 = location ? ` at ${location}` : '';
+  // The same compact reset /allowance prints ("reset in 12h 34"), not the long
+  // label. The projection's resetLabel spells out the vendor countdown and an
+  // absolute timestamp with a timezone, which is a paragraph inside a one-line
+  // footer.
+  const now = Date.now();
   const why = (r) => (r.ended
     ? 'promotion ended'
     : r.terminalOnly
       ? 'terminal only'
       : r.depleted
-        ? `depleted${(() => { const at = r.resetIn && r.resetIn !== '-' ? r.resetIn : (r.resetLabel || (r.resetAt ? formatResetIn(r.resetAt, Date.now()) : '')); return at && at !== '-' ? ` (reset in ${at})` : ''; })()}`
+        ? `depleted${(() => {
+            const compact = r.resetAt ? formatResetIn(r.resetAt, now) : '';
+            const at = compact && compact !== '-' ? compact : (r.resetIn && r.resetIn !== '-' ? r.resetIn : '');
+            return at ? ` (reset in ${at})` : '';
+          })()}`
         : r.reason || 'not available');
   const lines = [
     `Free models${location0} — tap a button below (❌ = not usable right now; the first message auto-fails over to the next free lane).`,
