@@ -158,6 +158,7 @@ async function main() {
 
   const lines = [];
   let changed = 0;
+  let labelFixed = 0;
   for (const cand of candidates) {
     const raw = cand.id;
     const id = normalizeClineModelId(raw);
@@ -181,6 +182,16 @@ async function main() {
     const created = plan.action === "new";
     const target = created ? plan.lane : tbl.lanes[plan.index];
     const desc = created ? `NEW pref ${plan.lane.pref}` : `UPDATE pref ${target.pref}`;
+    // Normalize the label on every enrollment, not just new lanes: older rows
+    // carried router-era text ("Cline Muse Spark 1.3 contributor free") while
+    // freshly enrolled rows used the short form — /allowance then showed two
+    // different naming styles for the same provider.
+    const niceLabel = cand.name && !/free/i.test(cand.name) ? `${cand.name} free` : prettifyClineLabel(id);
+    if (target.label !== niceLabel) {
+      target.label = niceLabel;
+      labelFixed++;
+      changed++;
+    }
     if (res.status === "available") {
       Object.assign(target, {
         status: "available",
@@ -198,10 +209,7 @@ async function main() {
     }
     // depleted: one policy via the shared core (countdown honoured, else TTLs)
     const dep = core.depletionUntilFromText(res.output);
-    if (created) {
-      target.label = target.label || prettifyClineLabel(id);
-      tbl.lanes.push(target);
-    }
+    if (created) tbl.lanes.push(target);
     core.stampDepleted(tbl, session, [target], null, {
       until: dep.until,
       hint: dep.hint || core.parseCountdownHint(res.output).hint,
@@ -234,7 +242,9 @@ async function main() {
   tbl.updatedAt = nowIso;
   writeAtomic(tablePath, tbl);
   writeAtomic(sessionPath, session);
-  console.log(`\napplied ${changed} lane change(s). Backups: .bak-${stamp}`);
+  console.log(
+    `\napplied ${changed} lane change(s)${labelFixed ? ` (${labelFixed} label normalized)` : ""}. Backups: .bak-${stamp}`
+  );
 }
 
 main().catch((e) => {
