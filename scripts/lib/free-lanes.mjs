@@ -1033,8 +1033,14 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const lines = [
     "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
   ];
+  // The router's grid shows one row per Token Harbor model — the OpenCode tools
+  // path and the chat-only path are the same shared `tokenharbor-free` bar, so two
+  // rows for one bar is a double entry. The text table was not doing that, which is
+  // why /allowance listed 52 rows while /freemodel, collapsing them the way the
+  // router does, counted 51: the two commands were counting the same bar twice and
+  // once. Same dedupe, same count.
   const blocked = [];
-  for (const l of ordered) {
+  for (const l of dedupeTokenHarborLanes(ordered)) {
     const verdict = rows ? rows.find((r) => laneKey(r.lane) === laneKey(l)) : null;
     // A lane whose provider has no credential on this host cannot be counted,
     // so it leaves the table entirely rather than sitting in it as a mystery

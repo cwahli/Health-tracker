@@ -739,7 +739,20 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location } 
     if (a) return a;
     return { ...e, selectable: e?.selectable !== false, depleted: false, ended: false, terminalOnly: false, inLedger: false, reason: 'not in this ledger' };
   };
-  const rows = (entries || []).map(verdictOf);
+  // One entry per model. The ledger carries the same Token Harbor model on two paths
+  // (the OpenCode tools lane and the chat-only lane) because they are one shared bar,
+  // and the catalog can carry a vendor-prefix twin of an OpenCode row; the router
+  // collapses those, and /allowance now applies the same dedupe. Counting entries
+  // instead of models is how "Total: 51" came out over 50 buttons.
+  const seenModel = new Set();
+  const rows = [];
+  for (const e of entries || []) {
+    const v = verdictOf(e);
+    const k = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
+    if (k && seenModel.has(k)) continue;
+    if (k) seenModel.add(k);
+    rows.push(v);
+  }
   const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
   const usable = rows.filter((r) => !unusableOf(r));
   const unusable = rows.filter(unusableOf);

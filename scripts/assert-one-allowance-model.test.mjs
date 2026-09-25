@@ -315,9 +315,25 @@ try {
   check('a terminal-only lane is not usable in either surface',
     parityAnn.find((a) => /freebuff/.test(a.ref))?.selectable === false && parityProj.find((r) => r.terminalOnly)?.selectable === false);
 
+  // 6f. The two commands must agree on the COUNT, not only on each row's verdict.
+  // /allowance listed 52 rows and /freemodel counted 51: the same Token Harbor model
+  // on two paths is one shared bar, and only one of the two surfaces was collapsing
+  // it. The router's grid has always collapsed it for display.
+  check('/allowance applies the router\'s Token Harbor display dedupe', /dedupeTokenHarborLanes\(ordered\)/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
+  const fmSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
+  check('/freemodel counts one entry per model', /const seenModel = new Set\(\)/.test(fmSrc) && /seenModel\.has\(k\)/.test(fmSrc));
+  const twinLanes = { version: 3, buckets: {}, lanes: [
+    { pref: 5, provider: 'opencode', model: 'tokenharbor/deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'OpenCode Token Harbor DeepSeek V4.1 Flash free' },
+    { pref: 7, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'Token Harbor chat DeepSeek V4.1 Flash free' },
+  ] };
+  const twinText = buildAllowanceTextForBots({ stateDir: (() => { const d = ensureBotLedger('vm').dir; fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(twinLanes, null, 2)); return d; })() });
+  // Counted over the table rows only: the "Next up" line names the same model too.
+  const twinRows = twinText.split('\n').filter((l) => /^(✅|❌)/.test(l) && /DeepSeek V4\.1/.test(l));
+  check('and /allowance lists that model once, not twice', twinRows.length === 1, twinText);
+
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
-  check('/freemodel renders the annotated rows, not the raw catalog', /const rows = \(entries \|\| \[\]\)\.map\(verdictOf\)/.test(botSrc));
+  check('/freemodel renders the annotated rows, not the raw catalog', /verdictOf\(e\)/.test(botSrc) && /const rows = \[\];/.test(botSrc));
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
     /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));
