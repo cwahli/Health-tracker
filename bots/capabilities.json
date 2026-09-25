@@ -301,6 +301,32 @@
       "notes": "Grok-built buckets/deplete-tracking/failover vendored; bot-host has vocabulary + runWithModelFailover but live auto-failover wiring is still open. Collab quota is compute units, not Muse buckets."
     },
     {
+      "id": "proc-allowance-watch",
+      "test": "T4",
+      "scope": "runtime-adapter",
+      "status": "partial",
+      "prove": "unit: npm test in tools/telegram-provider-router (test-allowance-watch.mjs); live: ht-allowance-watch --once sweep + ht-watch QUOTA matrices in tmp/ht-allowance-watch/REPORT.md",
+      "expect": [
+        "tools/telegram-provider-router/bin/ht-allowance-watch",
+        "tools/telegram-provider-router/bin/ht-run",
+        "tools/telegram-provider-router/bin/ht-watch",
+        "tools/telegram-provider-router/bin/ht-ship",
+        "tools/telegram-provider-router/src/allowance-watch-core.cjs",
+        "tools/telegram-provider-router/scripts/test-allowance-watch.mjs"
+      ],
+      "skills": [
+        "telegram-allowance-watch"
+      ],
+      "classes": {
+        "hermes": false,
+        "vps": "adapter",
+        "mobile": "adapter",
+        "grok_tg": true,
+        "collab": false
+      },
+      "notes": "Zero-quota watcher/launcher layer over the free-lane ledger (HT_ROUTER_DIR is the one ledger path). Per-class propagation/smoke (distribute matrix, Grok-side import/mirror) still open under BOT-9/R-14; Collab quota is compute units."
+    },
+    {
       "id": "proc-failfast",
       "test": "T4",
       "scope": "common",
