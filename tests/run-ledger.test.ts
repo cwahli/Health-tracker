@@ -13,12 +13,15 @@ import {
 
 let ledger;
 let failures;
+let errorLog;
 
 beforeEach(() => {
   ledger = path.join(os.tmpdir(), `runledger_${Date.now()}_${Math.random().toString(36).slice(2)}.jsonl`);
   failures = path.join(os.tmpdir(), `runledger_fail_${Date.now()}_${Math.random().toString(36).slice(2)}.jsonl`);
+  errorLog = path.join(os.tmpdir(), `runledger_errors_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
   process.env.RUN_LEDGER = ledger;
   process.env.BOT_FAILURE_LOG = failures;
+  process.env.BOT_ERROR_LOG = errorLog;
 });
 
 const base = {
@@ -96,6 +99,24 @@ describe('recordOutcome / checkDuplicate', () => {
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe('dispatch:escalated');
     expect(rows[0].hint).toContain('BUG-15');
+  });
+
+  it('failure outcomes open error-log records; later success auto-closes', async () => {
+    const { listErrors } = await import('../scripts/lib/error-log.mjs');
+    recordOutcome({ ...base, outcome: 'escalated' });
+    let open = listErrors({ status: 'open' });
+    expect(open.length).toBe(1);
+    expect(open[0].kind).toBe('dispatch:escalated');
+    recordOutcome({ ...base, outcome: 'escalated' });
+    open = listErrors({ status: 'open' });
+    expect(open.length).toBe(1);
+    expect(open[0].count).toBe(2);
+    recordOutcome({ ...base, outcome: 'committed' });
+    open = listErrors({ status: 'open' });
+    expect(open).toEqual([]);
+    const closed = listErrors({ status: 'closed' });
+    expect(closed.length).toBe(1);
+    expect(closed[0].closedBy).toBe('auto:clean-run');
   });
 
   it('disabled ledger never writes and never throws', () => {
