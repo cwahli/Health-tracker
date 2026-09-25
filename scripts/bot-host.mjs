@@ -2117,7 +2117,23 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       },
       isAborted: () => Boolean(running.get(chatId)?.aborted),
     });
-    if (workLane !== 'opencode') writeObserverTerminal(result);
+    // The OpenCode surface already reports through onAttemptComplete. Other
+    // surfaces (Cline, Gemini) report nothing, so their terminal state is
+    // written here. The old call was writeObserverTerminal(result), which does
+    // not exist in this file: every Cline turn ended in
+    // "Error: writeObserverTerminal is not defined" and the chat never saw the
+    // model's answer, which is the lane @VM_19485_bot is pinned to.
+    if (workLane !== 'opencode' && observer) {
+      try {
+        observer.write(
+          running.get(chatId)?.aborted ? 'aborted' : String(result?.finalText || '').trim() ? 'run_complete' : 'failed',
+          result || {},
+          observerContext || {}
+        );
+      } catch {
+        // an observer hiccup must never cost the chat its answer
+      }
+    }
 
     if (result.sessionID) {
       sessions.set(chatId, result.sessionID);

@@ -41,5 +41,12 @@ check('the attach still only happens for a tui view', /attachUrl: workSession\.v
 const attaches = (src.match(/--attach|attachUrl:/g) || []).length;
 check(`attach sites are few enough to audit (${attaches})`, attaches <= 4);
 
+// 4. No call to a function that does not exist. writeObserverTerminal was
+// called on every non-OpenCode surface and was never defined, so every Cline
+// turn died with a ReferenceError and the chat never saw the answer.
+const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+check('no call to the undefined writeObserverTerminal', !/writeObserverTerminal\(/.test(code));
+check('other surfaces still record a terminal state', /workLane !== 'opencode' && observer/.test(src) && /observer\.write\(/.test(src));
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
