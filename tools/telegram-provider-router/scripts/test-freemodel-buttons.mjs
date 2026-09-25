@@ -34,9 +34,13 @@ const SRC = join(TOOL_DIR, "src", "index.js");
 const MIN = 60 * 1000;
 const now = Date.now();
 const isoZ = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
-const FB_MODEL = "deepseek/deepseek-v4.1-flash";
+// Real published Freebuff ids (GET /api/v1/freebuff/session -> freebucks.prices).
+// xiaomi/mimo-v2.6-flash and deepseek-v4.1-flash are NOT published — they were
+// fixtures from before the catalog existed.
+const FB_MODEL = "deepseek/deepseek-v4-flash";
 const FB_GLM = "z-ai/glm-5.3-flash";
-const FB_MIMO = "xiaomi/mimo-v2.6-flash";
+const FB_MIMO = "mimo/mimo-v2.5";
+const FB_BUNNY = "stealth/space-bunny-alpha";
 const ZEN_UNTIL = now + 45 * MIN;
 
 const lane = (pref, family, provider, model, label, bucket, extra = {}) => ({
@@ -72,7 +76,7 @@ function buildTable({ freebuffDepleted = false, clineGlmUnavailable = false } = 
       lane(15, "glm-5.3-flash", "cline", "cline-free/glm-5.3-flash", "Cline GLM 5.3 Flash free", "cline-per-model", {
         ...(clineGlmUnavailable ? { status: "unavailable", notes: "GLM 5.3 free promo ended" } : {}),
       }),
-      lane(17, "deepseek-v4.1-flash", "freebuff", FB_MODEL, "Freebuff DeepSeek V4.1 Flash", "freebuff-freebucks", {
+      lane(17, "deepseek-v4-flash", "freebuff", FB_MODEL, "Freebuff DeepSeek v4 Flash", "freebuff-freebucks", {
         tg: false,
         notes: "terminal-only",
         ...(freebuffDepleted
@@ -171,9 +175,10 @@ const results = () => [
     { id: "deepseek-v4.1-flash:free", label: "deepseek v4.1 flash free" },
   ] }],
   ["freebuff", { ok: true, reason: "", items: [
-    { id: FB_GLM, label: "GLM 5.3 Flash (0/hr)" },
-    { id: FB_MIMO, label: "MiMo 2.6 Flash (0/hr)" },
-    { id: FB_MODEL, label: "DeepSeek V4.1 Flash (5/hr)" },
+    { id: FB_BUNNY, label: "Space bunny alpha · free · 0 FB" },
+    { id: FB_GLM, label: "Glm 5.3 flash · 5 FB" },
+    { id: FB_MIMO, label: "Mimo 2.5 · 10 FB" },
+    { id: FB_MODEL, label: "Deepseek v4 flash · 15 FB" },
   ] }],
   ["commandcode", { ok: false, reason: "Command Code signed in but out of credits", items: [] }],
 ];
@@ -195,7 +200,11 @@ check("D4 distinct TH models are NOT collapsed", thRoutes.some((r) => r.id === "
 const reply = buildFreemodelReply(results(), now);
 const buttons = flatten(reply.keyboard);
 const bodyLines = reply.text.split("\n");
-check("B1 total counts deduped buttons (5 OC + 1 TH + 3 Freebuff)", reply.total === 9, String(reply.total));
+// Derived, not hardcoded: the Freebuff tap count follows the ledger/catalog,
+// which changes as Cline/Freebuff publish models. Pin the invariant (every
+// deduped lane is counted once) instead of a magic number.
+const EXPECTED_LANES = results().reduce((n, [, res]) => n + (res?.ok ? res.items.length : 0), 0) - 1; // -1: TH twin deduped
+check("B1 total counts every deduped lane exactly once", reply.total === EXPECTED_LANES, `total=${reply.total} expected=${EXPECTED_LANES}`);
 check("B2 body has no per-model text lines (no backticked model ids)", !reply.text.includes("`"), reply.text);
 check("B3 body has no per-model dump (no muse/mimo/deepseek id text)", !/muse-spark|mimo-v2\.6|deepseek-v4/i.test(reply.text), reply.text);
 check("B4 body has a single Total line", bodyLines.filter((l) => /^Total: /.test(l)).length === 1, reply.text);
@@ -204,16 +213,17 @@ check("B6 'Not available' is one footer line for Cline + Command Code", bodyLine
 check("B7 no provider section headers remain in the body", !bodyLines.some((l) => /^(OpenCode|Cline|Token Harbor|Freebuff)$/.test(l.trim())), reply.text);
 
 // ---- K) buttons -------------------------------------------------------------
-check("K1 one button per deduped lane plus Cancel", buttons.length === 10, String(buttons.length));
+check("K1 one button per deduped lane plus Cancel", buttons.length === EXPECTED_LANES + 1, `${buttons.length} vs ${EXPECTED_LANES + 1}`);
 check("K2 every label is unique (no TH twin duplicate)", new Set(buttons.map((b) => b.text)).size === buttons.length, JSON.stringify(buttons.map((b) => b.text)));
 check("K3 labels are NOT space-padded", buttons.every((b) => b.text === b.text.trimEnd()), JSON.stringify(buttons.map((b) => JSON.stringify(b.text))));
-check("K4 the three Freebuff taps are visible in 0/hr-first order", (() => {
+check("K4 Freebuff taps are price-ordered, cheapest (0 FB) first", (() => {
   const fb = buttons.map((b) => b.text.trimEnd()).filter((l) => l.startsWith("Freebuff: "));
-  return JSON.stringify(fb) === JSON.stringify(["Freebuff: GLM 5.3 Flash (0/hr)", "Freebuff: MiMo 2.6 Flash (0/hr)", "Freebuff: DeepSeek V4.1 Flash (5/hr)"]);
+  const expected = results().find(([k]) => k === "freebuff")[1].items.map((i) => `Freebuff: ${i.label}`);
+  return JSON.stringify(fb) === JSON.stringify(expected) && /free · 0 FB/.test(fb[0] || "");
 })(), JSON.stringify(buttons.map((b) => b.text.trimEnd())));
 check("K5 the surviving TH button is tagged as the tools path", buttons.some((b) => /^TH tools: /.test(b.text.trimEnd())), JSON.stringify(buttons.map((b) => b.text.trimEnd())));
 check("K6 Cancel is present", buttons.some((b) => /^Cancel/.test(b.text.trimEnd())), JSON.stringify(buttons.map((b) => b.text.trimEnd())));
-check("K7 freebuff callbacks are wired to the walk map", zenButtonsFree(buttons) === 3, String(zenButtonsFree(buttons)));
+check("K7 every Freebuff tap has a walk-map callback", zenButtonsFree(buttons) === results().find(([k]) => k === "freebuff")[1].items.length, String(zenButtonsFree(buttons)));
 check("K8 Space Bunny appears in the /freemodel button list", buttons.some((b) => b.text.trimEnd() === "OpenCode: Space Bunny"), JSON.stringify(buttons.map((b) => b.text.trimEnd())));
 function zenButtonsFree(bs) {
   return bs.filter((b) => b.text.trimEnd().startsWith("Freebuff: ") && /^fm/.test(b.data)).length;
@@ -231,14 +241,14 @@ writeFileSync(TABLE_PATH, JSON.stringify(buildTable({ freebuffDepleted: true }),
 const depReply = buildFreemodelReply(results(), now);
 const depButtons = flatten(depReply.keyboard).map((b) => b.text.trimEnd());
 check("X2 a depleted Freebuff lane is marked ❌ and stays tappable", depButtons.some((l) => /^❌ Freebuff: /.test(l)), JSON.stringify(depButtons));
-check("X3 depletion is reflected in the Total line", /Total: 9 · 1 depleted ❌/.test(depReply.text), depReply.text);
+check("X3 depletion is reflected in the Total line", new RegExp(`Total: ${EXPECTED_LANES} · 1 depleted ❌`).test(depReply.text), depReply.text);
 writeFileSync(TABLE_PATH, JSON.stringify(buildTable(), null, 2));
 
 // ---- S) selection: Freebuff = terminal-only reply, never a hard error -------
 for (const [tag, mid, nameRe] of [
-  ["GLM", FB_GLM, /GLM 5\.3 Flash/i],
-  ["MiMo", FB_MIMO, /MiMo 2\.6 Flash/i],
-  ["DeepSeek", FB_MODEL, /DeepSeek V4\.1 Flash/i],
+  ["GLM", FB_GLM, /Glm 5\.3 flash/i],
+  ["MiMo", FB_MIMO, /Mimo v?2\.5/i],
+  ["DeepSeek", FB_MODEL, /Deepseek v4 flash/i],
 ]) {
   let pickMsg = "";
   let pickErr = null;
@@ -259,8 +269,9 @@ const credsDir = mkdtempSync(join(tmpdir(), "ht-freebuff-creds-"));
 const goodCreds = join(credsDir, "credentials.json");
 writeFileSync(goodCreds, JSON.stringify({ default: { authToken: "test-not-a-real-secret" } }, null, 2));
 const signedProbe = await probeFreebuffFree(goodCreds);
-check("P1 signed-in probe returns three items, 0/hr first", signedProbe.ok === true && signedProbe.items.length === 3 && signedProbe.items[0].id === FB_GLM && signedProbe.items[1].id === FB_MIMO && signedProbe.items[2].id === FB_MODEL, JSON.stringify(signedProbe));
-check("P2 labels carry the 0/hr vs 5/hr honesty", signedProbe.items[0].label.includes("(0/hr)") && signedProbe.items[1].label.includes("(0/hr)") && signedProbe.items[2].label.includes("(5/hr)"), JSON.stringify(signedProbe.items.map((i) => i.label)));
+check("P1 signed-in probe offers catalog lanes, cheapest (0 FB) first", signedProbe.ok === true && signedProbe.items.length >= 3 && signedProbe.items[0].id === FB_BUNNY, JSON.stringify(signedProbe));
+check("P1b no unpublished Freebuff id is offered", !signedProbe.items.some((i) => /xiaomi\//.test(i.id) || /v4\.1-flash/.test(i.id)), JSON.stringify(signedProbe.items.map((i) => i.id)));
+check("P2 labels carry true Freebucks prices (no 0/hr lies)", signedProbe.items[0].label.includes("free · 0 FB") && signedProbe.items.some((i) => /· 5 FB$/.test(i.label)) && !signedProbe.items.some((i) => /0\/hr/.test(i.label)), JSON.stringify(signedProbe.items.map((i) => i.label)));
 const unsignedProbe = await probeFreebuffFree(join(credsDir, "missing.json"));
 check("P3 unsigned probe returns ok:false with a sign-in reason (footer line)", unsignedProbe.ok === false && unsignedProbe.items.length === 0 && /sign/i.test(unsignedProbe.reason), JSON.stringify(unsignedProbe));
 
@@ -268,13 +279,37 @@ check("P3 unsigned probe returns ok:false with a sign-in reason (footer line)", 
 const stopMsg = allFreeLanesDepletedMessage("opencode", "opencode/mimo-v2.6-flash-free");
 const fbSignedIn = mod.freebuffCredsOk();
 check("C1 the all-depleted Stop says Telegram chat lanes are empty", /All free Telegram chat lanes are depleted/i.test(stopMsg), stopMsg);
-check("C2 the Stop offers Freebuff terminal work (signed-in variant names the three models)",
+check("C2 the Stop offers Freebuff terminal work (signed-in variant names real, priced models)",
   fbSignedIn
-    ? /Freebuff is still usable in the terminal/i.test(stopMsg) && /GLM 5\.3 Flash \(0\/hr\)/.test(stopMsg) && /MiMo 2\.6 Flash \(0\/hr\)/.test(stopMsg) && /DeepSeek V4\.1 Flash \(5\/hr\)/.test(stopMsg)
+    ? /Freebuff is still usable in the terminal/i.test(stopMsg)
+      && /free · 0 FB/.test(stopMsg)                       // cheapest lane named, priced
+      && /· [0-9]+ FB/.test(stopMsg)                        // real Freebucks prices
+      && !/0\/hr/.test(stopMsg)                             // no stale "0/hr" claim
+      && !/xiaomi\//.test(stopMsg) && !/v4\.1-flash/.test(stopMsg) // no unpublished ids
     : /Freebuff.*terminal/i.test(stopMsg) && /not signed in/i.test(stopMsg),
   stopMsg);
 check("C3 the Stop does not claim everything is dead", !/everything is dead/i.test(stopMsg), stopMsg);
 check("C4 the Stop keeps the reset hint contract (soonest reset or /allowance)", /Soonest Reset in:|Check \/allowance/.test(stopMsg), stopMsg);
+
+// ---- B7) Freebuff taps come from the ledger with TRUE prices -----------------
+// Live corrections 2026-09-25: only stealth/space-bunny-alpha is 0 Freebucks
+// (GLM 5.3 is 5), and xiaomi/mimo-v2.6-flash / deepseek-v4.1-flash are not in
+// the published catalog at all. The old hardcoded 3 taps lied about all of it.
+const fbTable = { lanes: [
+  { pref: 21, provider: "freebuff", model: "stealth/space-bunny-alpha", bucket: "freebuff-freebucks", status: "available", priceFreebucks: 0 },
+  { pref: 24, provider: "freebuff", model: "z-ai/glm-5.3-flash", bucket: "freebuff-freebucks", status: "available", priceFreebucks: 5 },
+  { pref: 27, provider: "freebuff", model: "deepseek/deepseek-v4-flash", bucket: "freebuff-freebucks", status: "available", priceFreebucks: 15 },
+  { pref: 30, provider: "freebuff", model: "openai/gpt-6-luna", bucket: "freebuff-freebucks", status: "available", priceFreebucks: 20, planRequired: true },
+  { pref: 17, provider: "freebuff", model: "deepseek/deepseek-v4.1-flash", bucket: "freebuff-freebucks", status: "unavailable" },
+] };
+const fbLanes = mod.availableFreebuffLanes(fbTable);
+check("B7 ledger Freebuff lanes are offered", fbLanes.some((k) => k.id === "stealth/space-bunny-alpha") && fbLanes.some((k) => k.id === "z-ai/glm-5.3-flash"), JSON.stringify(fbLanes.map((k) => k.id)));
+check("B7b 0-FB lane sorts first and is labelled free", fbLanes[0].id === "stealth/space-bunny-alpha" && /free · 0 FB/.test(fbLanes[0].label), JSON.stringify(fbLanes[0]));
+check("B7c price is in the label, no 0/hr claim", fbLanes.find((k) => k.id === "z-ai/glm-5.3-flash").label === "Glm 5.3 flash · 5 FB", JSON.stringify(fbLanes.find((k) => k.id === "z-ai/glm-5.3-flash").label));
+check("B7d plan-required model never offered", !fbLanes.some((k) => k.id === "openai/gpt-6-luna"), "plan-required leaked");
+check("B7e unpublished/unavailable id not offered", !fbLanes.some((k) => k.id === "deepseek/deepseek-v4.1-flash"), "stale id leaked");
+check("B7f no xiaomi/mimo-v2.6-flash (never published)", !fbLanes.some((k) => /xiaomi/.test(k.id)), "phantom mimo offered");
+check("B7g default freebuff model is the 0-FB lane", mod.FREEBUFF_DEFAULT_MODEL === "stealth/space-bunny-alpha", mod.FREEBUFF_DEFAULT_MODEL);
 
 // ---- E) unavailable Cline GLM never looks healthy ---------------------------
 writeFileSync(TABLE_PATH, JSON.stringify(buildTable({ clineGlmUnavailable: true }), null, 2));
@@ -333,7 +368,8 @@ check("Z2 the Zen cool-off marks the OpenCode mimo button ❌ (the tapped lane)"
 check("Z3 the Zen cool-off marks the OpenCode Space Bunny button ❌", zenMarked.some((b) => /Space Bunny$/.test(b.label)), JSON.stringify(zenButtons.map((b) => b.label)));
 check("Z4 freeModelDepletion resolves Space Bunny to the shared bucket", Boolean(freeModelDepletion("opencode", "opencode/space-bunny-free", now + 1000)), JSON.stringify(freeModelDepletion("opencode", "opencode/space-bunny-free", now + 1000)));
 check("Z5 non-Zen lanes are not marked by the Zen bucket (TH tools mimo stays clean)", !zenButtons.some((b) => /^❌ .*(qwen|TH tools|Token Harbor|Freebuff)/.test(b.label)), JSON.stringify(zenButtons.map((b) => b.label)));
-check("Z6 the Total line counts the Zen-depleted buttons", /Total: 9 · 3 depleted ❌/.test(zenReply.text), zenReply.text);
+// Derived: total follows the deduped lane count, depleted follows the Zen bucket.
+check("Z6 the Total line counts the Zen-depleted buttons", new RegExp(`Total: ${EXPECTED_LANES} · 3 depleted ❌`).test(zenReply.text), zenReply.text);
 
 mkdirSync(stateDir, { recursive: true });
 if (failed) {
