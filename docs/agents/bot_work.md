@@ -36,4 +36,4 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 ## Do not
 
-Do not dual-poll a token. Do not restart `hermes-gateway`. Do not run `bot-host@android` on the VPS. Do not add a bot per vendor, role, or project. Do not autonomous-commit. Do not blank `bots/soul.md`. Do not mark R-14.1 done from `assert-external-projects.test.mjs`. Do not implement the Antigravity install or the silent cloud fallback in `plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md`.
+Do not dual-poll a token. Do not restart `hermes-gateway`. Do not run `bot-host@android` on the VPS. Do not add a bot per vendor, role, or project. Do not autonomous-commit. Do not blank `bots/soul.md`. Do not mark R-14.1 done from `assert-external-projects.test.mjs`. `plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md` is retired and empty. Do not reconstruct that draft.

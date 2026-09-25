@@ -42,7 +42,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 - CB-1–CB-5 are done. **CB-6 as written is superseded** (it required a git push to `origin/main`). Do not start CB-7 or CB-8.
 - BOT-24's landed allowance list stays. R-14.1 card 6 reads that list. Do not restart BOT-24 from packet 1.
 - Shipped site tracks (S, F, B, D, Q, L landed rows) stay shipped. This plan does not reopen them.
-- Do not add a bot per role, per project, or per place. Do not install Antigravity. Do not blank `bots/soul.md`. Do not move a Telegram poller between machines. Do not implement the silent cloud fallback in [LOCATION_AGNOSTIC_PROJECT_COUNCIL.md](./LOCATION_AGNOSTIC_PROJECT_COUNCIL.md). That file is a draft. The agent plan replaces it.
+- Do not add a bot per role, per project, or per place. Do not install Antigravity. Do not blank `bots/soul.md`. Do not move a Telegram poller between machines. `plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md` is retired and empty. Do not reconstruct it.
 
 BOT-14, BOT-19, BOT-21, and BOT-23 stay DONE.
 
@@ -495,7 +495,7 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 | **R-12** | One-line stall/503 count (free-tier hang rate) | After F-8.13 JSON tree has `latency_ms` / error on dispatches. A number in `AI_HANDOVER.md`, **not** a metrics product. RELIABILITY.md §11.12 **H** | LangSmith; Grafana; inner-loop Gemini |
 | **R-13** | VPS-2 go-live + AI Studio parity | Packet **locked**. R-13.0 agent preflight **PASS**. R-13.1 = Track V Phase 4, `blocked_human` until V-0. Not R-2. Not Cloud Run. |
 | **R-14** | **Telegram shared-capability alignment** — one rail for bot-host skills + provider-router + Grok agents (photos, matrix, allowance, self-heal) **+ propagation flow across Hermes / VPS / Mobile / Grok TG / Collab** (§14.7 cases). Plan in [RELIABILITY.md](./RELIABILITY.md) **§14**. | Dual stacks / missing photo-view / matrix not visible to all agents; uneven skill fan-out; after R-13.1 live. Owner: thin PM + free CLI. |
-| **R-14.1** | **Location, project, and role.** One poller. `/location` runs the next turn on a connected worker and spends that worker's allowance. `/project 1` is the website. `/project external <n>` is a separate folder that cannot commit or deploy the website. `/role` loads one instruction file. Execute [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md). Product shape: [LOCATION_AGNOSTIC_AGENTS.md](./LOCATION_AGNOSTIC_AGENTS.md). The council draft [LOCATION_AGNOSTIC_PROJECT_COUNCIL.md](./LOCATION_AGNOSTIC_PROJECT_COUNCIL.md) is not the spec. | **OPEN.** Registry asserts 55/55 do not close it. `/location mobile` only sets `BOT_LOCATION` on the VM. Live cards 1–9 are the bar. Drive waits until the user names the Google account. |
+| **R-14.1** | **Location, project, and role.** One poller. `/location` runs the next turn on a connected worker and spends that worker's allowance. `/project 1` is the website. `/project external <n>` is a separate folder that cannot commit or deploy the website. `/role` loads one instruction file. Execute [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md). Product shape: [LOCATION_AGNOSTIC_AGENTS.md](./LOCATION_AGNOSTIC_AGENTS.md). `LOCATION_AGNOSTIC_PROJECT_COUNCIL.md` is retired and has no plan left in it. | **OPEN.** Registry asserts 55/55 do not close it. `/location mobile` only sets `BOT_LOCATION` on the VM. Live cards 1–9 are the bar. Drive waits until the user names the Google account. |
 
 ### R-13 sub-IDs (one at a time after lock)
 

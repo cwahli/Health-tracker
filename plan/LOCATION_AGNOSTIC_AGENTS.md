@@ -1,6 +1,6 @@
 # Final plan: location, project, and role
 
-**Status:** merged 2026-09-25 from the landed GitHub plan (`plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md`, commit `0d67dbd`) and the decisions already made in this chat.
+**Status:** the plan an agent executes. The old council draft has been removed from `plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md`. Do not look for it.
 **Registry tests:** `node scripts/assert-external-projects.test.mjs` — 55 pass, 0 fail. Those tests cover names, role files, and prompt text. They are not the live done gate.
 
 ## What is already on GitHub

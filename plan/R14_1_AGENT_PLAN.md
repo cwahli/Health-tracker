@@ -1,6 +1,6 @@
 # R-14.1 agent plan
 
-Any agent can pick up the next open card. Read this file and stop. Do not read the long design draft.
+Any agent can pick up the next open card. Read this file, then `plan/LOCATION_AGNOSTIC_AGENTS.md`, then stop. `plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md` is retired and empty. Do not reconstruct it.
 
 **Product plan:** `plan/LOCATION_AGNOSTIC_AGENTS.md`
 **Landed code:** commit `0d67dbd` on `main`
