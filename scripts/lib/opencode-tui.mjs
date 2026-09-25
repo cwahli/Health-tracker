@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 
 import { resolveOpencodeBin } from './agent-opencode.mjs';
+import { buildChildEnv } from './child-env.mjs';
 
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
@@ -48,11 +49,11 @@ export async function opencodeServerHealthy(serverUrl, { fetchImpl = fetch, time
   }
 }
 
-export async function startOpencodeServer({ workspace, env = {}, opencodeBin, port, spawnImpl = spawn, fetchImpl = fetch } = {}) {
+export async function startOpencodeServer({ workspace, env = {}, envMode = 'inherit', opencodeBin, port, spawnImpl = spawn, fetchImpl = fetch } = {}) {
   const chosenPort = port || await freePort();
   const child = spawnImpl(resolveOpencodeBin(opencodeBin), ['serve', '--hostname', '127.0.0.1', '--port', String(chosenPort)], {
     cwd: workspace,
-    env: { ...process.env, ...env },
+    env: buildChildEnv({ extraEnv: env, mode: envMode }),
     stdio: 'ignore',
   });
   const url = `http://127.0.0.1:${chosenPort}`;

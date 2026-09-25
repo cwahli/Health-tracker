@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { recordFailure } from './failure-log.mjs';
+import { buildChildEnv } from './child-env.mjs';
 
 const HOME = os.homedir();
 
@@ -111,7 +112,7 @@ export function mapOpencodeEvent(raw) {
   }
 }
 
-export function execOpencode(args, { opencodeBin, spawnImpl = spawn, timeoutMs = 30000, env } = {}) {
+export function execOpencode(args, { opencodeBin, spawnImpl = spawn, timeoutMs = 30000, env, envMode = 'inherit' } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const done = (value) => {
@@ -122,7 +123,7 @@ export function execOpencode(args, { opencodeBin, spawnImpl = spawn, timeoutMs =
     let child;
     try {
       child = spawnImpl(resolveOpencodeBin(opencodeBin), args, {
-        env: { ...process.env, ...(env || {}) },
+        env: buildChildEnv({ extraEnv: env, mode: envMode }),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch {
@@ -387,13 +388,14 @@ export function runOpencode({
   onAbort,
   extraArgs = [],
   env,
+  envMode = 'inherit',
   spawnImpl = spawn,
 }) {
   return new Promise((resolve) => {
     const args = buildOpencodeArgs({ prompt, model, variant, thinking, attachUrl, sessionId, extraArgs });
     const child = spawnImpl(resolveOpencodeBin(opencodeBin), args, {
       cwd: workspace,
-      env: { ...process.env, ...(env || {}) },
+      env: buildChildEnv({ extraEnv: env, mode: envMode }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

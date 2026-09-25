@@ -173,12 +173,32 @@ export function initExternalProject(rawIdOrNum, customName = null) {
 
   fs.mkdirSync(workspace, { recursive: true });
 
-  // If template directory doesn't exist, create it and seed basic soul and roles
+  // A new number gets a BLANK charter. Copying external-2 wholesale handed the
+  // new project the rating case: its charter, its soul, and deliverable
+  // templates whose tables were already filled with invented claims. Only the
+  // role instruction files are shared; the case documents are written empty.
   if (!fs.existsSync(templateDir)) {
     fs.mkdirSync(templateDir, { recursive: true });
     const srcTmpl = path.join(REPO_ROOT, 'projects', 'external-2');
-    if (fs.existsSync(srcTmpl)) {
-      copyDirRecursive(srcTmpl, templateDir);
+    const srcRoles = path.join(srcTmpl, 'roles');
+    if (fs.existsSync(srcRoles)) {
+      copyDirRecursive(srcRoles, path.join(templateDir, 'roles'));
+    }
+    fs.writeFileSync(path.join(templateDir, 'charter.md'), blankCharter(pid, name, gdriveFolder), 'utf8');
+    fs.writeFileSync(path.join(templateDir, 'soul.md'), blankSoul(pid, name), 'utf8');
+    const srcTemplates = path.join(srcTmpl, 'templates');
+    if (fs.existsSync(srcTemplates)) {
+      const destTemplates = path.join(templateDir, 'templates');
+      fs.mkdirSync(destTemplates, { recursive: true });
+      for (const file of fs.readdirSync(srcTemplates)) {
+        const dest = path.join(destTemplates, file);
+        if (!fs.existsSync(dest)) fs.copyFileSync(path.join(srcTemplates, file), dest);
+      }
+      for (const file of fs.readdirSync(destTemplates)) {
+        if (file.startsWith('0') || file.startsWith('A_') || file.startsWith('B_') || file.startsWith('C_')) {
+          fs.writeFileSync(path.join(destTemplates, file), blankTemplate(file), 'utf8');
+        }
+      }
     }
   }
 
@@ -220,6 +240,65 @@ function copyDirRecursive(src, dest) {
       }
     }
   }
+}
+
+
+/** Header-only case documents for a new external project. No invented rows. */
+function blankTemplate(file) {
+  if (file.startsWith('01_')) {
+    return `# Case Facts & Timeline\n\n> One row per event. Leave a row empty rather than guessing; an accuracy strike removes a row, it never invents one.\n\n| Date | Event or interaction | What was said | What actually happened | Receipt or artifact | Follow-up |\n| :--- | :--- | :--- | :--- | :--- | :--- |\n\n## Open questions\n1. \n`;
+  }
+  if (file.startsWith('02_')) {
+    return `# Evidence & Metric Ledger\n\n> One row per claim under review. An empty ledger is correct until a receipt exists.\n\n| Claim ID | Area | Statement under review | Objective metric or deliverable | Evidence receipt | Context or blocker | Status |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+  }
+  if (file.startsWith('A_')) {
+    return `# Talking Points\n\n> Filled from the ledger. Every line traces to a receipt.\n\n## Goal\n\n## Points\n1. \n\n## If the rating is disputed\n`;
+  }
+  if (file.startsWith('B_')) {
+    return `# Formal Response\n\n**Date:**\n**To:**\n**From:**\n**Subject:**\n\n## Summary\n\n## Points under clarification\n\n## Evidence relied on\n\n## Acknowledgment\n`;
+  }
+  if (file.startsWith('C_')) {
+    return `# 30/60/90 Alignment Plan\n\n**Period:**\n**Cadence:**\n\n## Principles\n1. Every objective is measurable and time-bound.\n2. Success is judged by a verified artifact, not an opinion.\n\n## Days 1-30\n| ID | Objective | Success criteria | Target date | Dependency |\n| :--- | :--- | :--- | :--- | :--- |\n\n## Days 31-60\n| ID | Objective | Success criteria | Target date | Dependency |\n| :--- | :--- | :--- | :--- | :--- | :--- |\n\n## Days 61-90\n| ID | Objective | Success criteria | Target date | Dependency |\n| :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+  }
+  return `# ${file}\n`;
+}
+
+function blankCharter(pid, name, gdriveFolder) {
+  return `# Project Charter: ${pid} — ${name}
+
+> Blank charter. The mission, the objectives and the case are the user's to
+> write. Nothing here is filled in on their behalf.
+
+## Mission & Purpose
+_TODO: one paragraph. What is this project for, in the user's own words._
+
+## Objectives
+1. _TODO_
+2. _TODO_
+
+## Ground rules
+1. Receipts over rhetoric. Cite a date, a metric, or a record.
+2. The charter and the evidence change only when the user changes them, or when accuracy appends a strike.
+3. A contradiction stays as two dated lines. It is not resolved by deleting one.
+4. Total website isolation. Never modify, commit, or push anything in the Health-tracker website repository.
+
+## Operational boundary
+- **Workspace**: ~/projects/${pid}
+- **Drive folder**: ${gdriveFolder} (local mirror until an account is named)
+- **Website repository**: off limits for writes, commits, and deploys.
+`;
+}
+
+function blankSoul(pid, name) {
+  return `# ${pid} shared soul: ${name}
+
+Three laws every role obeys:
+1. Receipts over rhetoric. Never dispute an opinion with another opinion; cite what exists.
+2. Write only your own file. The charter and the evidence change only by the user or an accuracy strike.
+3. Total website isolation. Never modify, commit, or push anything in the Health-tracker website repository.
+
+Say when the documents are not enough. An empty ledger is a finding, not a gap to fill with a guess.
+`;
 }
 
 /**
@@ -371,6 +450,11 @@ export function seedProjectWorkspace(projectId) {
   if (!proj || !proj.templateDir || !proj.workspace) return;
   const tmplDir = path.join(proj.templateDir, 'templates');
   if (!fs.existsSync(tmplDir)) return;
+
+  // The workspace may not exist yet: a project created on a fresh host has a
+  // template dir but no folder. Copying into a missing directory threw ENOENT
+  // and the whole council stage died before any model call.
+  fs.mkdirSync(proj.workspace, { recursive: true });
 
   const files = fs.readdirSync(tmplDir);
   for (const f of files) {

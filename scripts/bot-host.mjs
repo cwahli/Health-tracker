@@ -43,6 +43,8 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession } from './lib/opencode-tui.mjs';
+import { KNOWN_HOSTS, workerStatus } from './lib/worker-presence.mjs';
+import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -66,6 +68,8 @@ import {
   ensureBotLedger,
   stampDepleted,
   freemodelRefToRoute,
+  usableTurnLanes,
+  soonestResetAmongDepleted,
 } from './lib/free-lanes.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
@@ -1049,17 +1053,23 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       await api.sendMessage(chatId, 'Compacting — summarizing this session, then starting fresh…');
       try {
+        // Compact the session the chat is actually on. On an external project
+        // that is the external folder, with the same restricted child env as
+        // a normal turn, not the website checkout.
+        const compactProject = getChatProject(chatId);
+        const compactExternal = compactProject.type === 'external';
         const result = await runOpencode({
           prompt: COMPACT_SUMMARY_PROMPT,
           model: eff.model,
           variant: eff.variant,
-          workspace: config.agent.workspace,
+          workspace: compactExternal ? compactProject.workspace : config.agent.workspace,
           thinking: config.agent.thinking,
           timeoutMs: config.agent.timeoutMs,
           opencodeBin: config.agent.opencodeBin,
           onSpawn: (child) => running.set(chatId, { child, aborted: false }),
           extraArgs: ['--session', compactSessionId],
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+          envMode: compactExternal ? 'project' : 'inherit',
         });
         if (running.get(chatId)?.aborted) {
           await api.sendMessage(chatId, 'Aborted — session kept as-is.');
@@ -1513,12 +1523,27 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       const target = cmd.args.trim().toLowerCase();
-      if (target === 'mobile' || target === 'vps') {
-        process.env.BOT_LOCATION = target;
-        await api.sendMessage(chatId, `✅ *Compute location set to:* \`${target}\`\nRequests will execute against the ${target} environment profile.`);
+      if (KNOWN_HOSTS.includes(target)) {
+        // A location is a host with a connected worker, not a variable. Setting
+        // BOT_LOCATION is not a connection: the turn would still run here.
+        const status = workerStatus(target);
+        if (status.reachable) {
+          process.env.BOT_LOCATION = target;
+          clearBlockedLocation(chatId);
+          await api.sendMessage(
+            chatId,
+            `✅ *Compute location set to:* \`${target}\`\n${status.reason}. The next turn runs on ${target}.`
+          );
+          return;
+        }
+        setBlockedLocation(chatId, target, status.reason);
+        await api.sendMessage(
+          chatId,
+          `⚠️ *Host \`${target}\` is unreachable:* ${status.reason}.\nThe location was **not** changed and the turn was **not** run. The next message will not start work on this machine either — send \`/location vps\` to run here, or retry once the ${target} worker connects.`
+        );
         return;
       }
-      await api.sendMessage(chatId, `ℹ️ Use \`/location\` to view pools or \`/switch <backend>\` to route compute.`);
+      await api.sendMessage(chatId, `ℹ️ Known hosts: ${KNOWN_HOSTS.map((h) => `\`${h}\``).join(', ')}. Use \`/location <host>\` or \`/switch <backend>\`.`);
       return;
     }
 
@@ -1710,6 +1735,75 @@ async function collectInboundMedia(api, message, config) {
 }
 
 /**
+ * The lanes this turn may use, in order, from this host's own ledger.
+ *
+ * The old chain was [chat model, bot default]: two fixed entries, so a lane the
+ * ledger already knew was spent got retried, and a lane that had ended could
+ * still be offered. Now the ledger decides. The chat's model still goes first
+ * when it is usable; otherwise the caller is told which lane it moved to and why
+ * the old one was skipped. A host with no ledger yet keeps the old two-entry
+ * chain, so a fresh install behaves exactly as before.
+ */
+export function selectTurnLanes({ botId, model, fallback, now = Date.now() } = {}) {
+  const legacy = failoverModels(model, fallback);
+  let ledger;
+  try {
+    ledger = loadFreeLaneLedger({ stateDir: ensureBotLedger(botId || 'default').dir });
+  } catch {
+    return { models: legacy, skipped: [], fromLedger: false };
+  }
+  const table = ledger?.table;
+  if (!table || !Array.isArray(table.lanes) || !table.lanes.length) {
+    return { models: legacy, skipped: [], fromLedger: false };
+  }
+  const { lanes, skipped } = usableTurnLanes(table, ledger.session || {}, { now });
+
+  // The registry owns what to run; the ledger owns what may be tried next. A
+  // configured model the ledger has never heard of is still the first choice —
+  // an earlier version dropped it and silently ran the ledger's top lane
+  // instead, which broke a live turn on 2026-09-25. The ledger only removes the
+  // current lane when it says that lane is depleted or ended.
+  const current = freemodelRefToRoute(model || '');
+  const sameRoute = (row) => {
+    if (!current.provider || !current.model) return false;
+    const tail = (v) => String(v || '').replace(/^[^/]+\//, '').replace(/:free$/i, '');
+    return row.model === current.model || (row.provider === current.provider && tail(row.model) === tail(current.model));
+  };
+  const currentSkipped = skipped.find(sameRoute);
+  const fallbackLanes = lanes.filter((l) => !sameRoute(l));
+
+  if (!model && !fallbackLanes.length) {
+    const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
+    return { models: [], skipped, fromLedger: true, exhausted: true, displaced: null, chose: null, soonest };
+  }
+  if (model && currentSkipped && !fallbackLanes.length) {
+    const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
+    return {
+      models: [],
+      skipped,
+      fromLedger: true,
+      exhausted: true,
+      displaced: currentSkipped,
+      chose: null,
+      soonest,
+    };
+  }
+
+  const models = [];
+  if (model && !currentSkipped) models.push(model);
+  for (const lane of fallbackLanes) models.push(toModelRef(lane.provider, lane.model));
+  if (!models.length) models.push(fallback);
+  return {
+    models: [...new Set(models.filter(Boolean))],
+    skipped,
+    fromLedger: true,
+    exhausted: false,
+    displaced: currentSkipped || null,
+    chose: models[0] || null,
+  };
+}
+
+/**
  * BOT-9 live failover wiring for the main message path: run the prompt on
  * the chat's effective model, falling back to the bot default on retryable
  * failures (quota/unfunded/5xx — never timeout/abort, per defaultIsRetryable).
@@ -1786,6 +1880,23 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     return;
   }
 
+  // A location request that no worker answered holds the turn instead of
+  // quietly running it here. No lane is chosen, so no ledger is touched.
+  const heldLocation = getBlockedLocation(chatId);
+  if (heldLocation) {
+    const status = workerStatus(heldLocation.requested);
+    if (status.reachable) {
+      process.env.BOT_LOCATION = status.host;
+      clearBlockedLocation(chatId);
+    } else {
+      await api.sendMessage(
+        chatId,
+        `⏸ Held: you asked for \`${heldLocation.requested}\` and it is still unreachable (${status.reason}). Nothing was run and no allowance was spent. Send \`/location vps\` to run here, or retry when the worker connects.`
+      );
+      return;
+    }
+  }
+
   // Parallel by design: chat never waits on another agent. Advisory per-file
   // claims warn when the request names a file someone else is editing.
   const warn = claimWarning(text);
@@ -1844,7 +1955,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
 
     const activeProject = getChatProject(chatId);
     const activeRole = getChatRole(chatId);
-    const effectiveWorkspace = activeProject.type === 'external' ? activeProject.workspace : config.agent.workspace;
+    const isExternalTurn = activeProject.type === 'external';
+    const effectiveWorkspace = isExternalTurn ? activeProject.workspace : config.agent.workspace;
+    // An external folder's child is built from a list, so it never holds the
+    // website's git or deploy credentials. Project 1 keeps inheriting them.
+    const turnEnvMode = isExternalTurn ? 'project' : 'inherit';
     // Every project composes through the same path: an assigned role is
     // prepended for project 1 too, and composeExternalPrompt returns the
     // prompt untouched when the chat has no role.
@@ -1892,6 +2007,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           onEvent: onObserverEvent,
           onSpawn: (child) => running.set(chatId, { child, aborted: false }),
           env: chatEnv(api, chatId),
+          envMode: turnEnvMode,
         });
       }
       if (candidate.surface === 'gemini') {
@@ -1917,14 +2033,36 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         onAbort: () => abortOpencodeSession({ serverUrl: workSession.serverUrl, sessionId: workSession.opencodeSessionId }).catch(() => false),
         extraArgs,
         env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+        envMode: turnEnvMode,
       });
     };
 
+    // The ledger picks the walk. A lane it already stamped is not retried, an
+    // ended lane is never offered, and a terminal-only row is never chosen.
+    const laneChoice = selectTurnLanes({
+      botId: config.id,
+      model: eff.model,
+      fallback: config.agent.model,
+    });
+    if (laneChoice.exhausted) {
+      const when = laneChoice.soonest?.label ? ` Soonest reset: ${laneChoice.soonest.label}.` : '';
+      await api.sendMessage(
+        chatId,
+        `🛑 No lane on ${location} has allowance right now.${when}\nNothing was run and nothing was spent. Send \`/allowance\` for the ledger.`
+      ).catch(() => {});
+      return;
+    }
+    if (laneChoice.displaced) {
+      const why = laneChoice.displaced.resetLabel
+        ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
+        : laneChoice.displaced.why;
+      console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
+    }
     const result = await runOpencodeWithFailover({
       api,
       chatId,
       prompt: finalPrompt,
-      models: failoverModels(eff.model, config.agent.model),
+      models: laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model),
       runModel: runSurfaceModel,
       onAttemptStart: ({ model, attempt }) => {
         lastAttemptModel = model;
