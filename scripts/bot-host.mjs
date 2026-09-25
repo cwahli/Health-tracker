@@ -27,7 +27,7 @@ import {
 } from './lib/work-session.mjs';
 import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
-import { recordFailure } from './lib/failure-log.mjs';
+import { recordFailure, loadFailures } from './lib/failure-log.mjs';
 import {
   runOpencode,
   runWithModelFailover,
@@ -45,6 +45,7 @@ import {
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
 import { KNOWN_HOSTS, workerStatus } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
+import { appendRow, retrieve } from './lib/memory-stores.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -70,6 +71,9 @@ import {
   freemodelRefToRoute,
   usableTurnLanes,
   soonestResetAmongDepleted,
+  isConnectionFailure,
+  stampCooldown,
+  CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
@@ -483,6 +487,117 @@ function getAnnotatedFreeModels(caches, botId) {
  * small=true-filtered error so cosmetic title-agent failures never deplete
  * a lane. Best-effort — never throws, never blocks the chat.
  */
+/**
+ * Keep a lane out of the walk for a few minutes after a transport failure.
+ * Never throws: a stamp that fails must not cost the chat its answer.
+ */
+export function stampLaneCooldown({ botId, model, errText, now = Date.now() } = {}) {
+  try {
+    const { provider, model: m } = freemodelRefToRoute(model || '');
+    if (!provider || !m) return null;
+    const { dir } = ensureBotLedger(botId || 'default');
+    const stamped = stampCooldown({ stateDir: dir, provider, model: m, errText, now });
+    if (stamped.stamped) {
+      console.log(`[${botId}] connection cooldown on ${provider}/${m} until ${new Date(now + CONNECTION_FAILED_COOLDOWN_MS).toISOString()}`);
+    }
+    return stamped;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why an attempt failed. runOpencode puts provider text in lastError, but a
+ * transport failure from the CLI often only reaches stderr, so both are read.
+ * This is the same order trackRunQuota uses.
+ */
+export function attemptFailureText(result) {
+  const parsed = String(extractLogError(result?.stderr || '') || '').trim();
+  if (parsed) return parsed;
+  const lastError = String(result?.lastError || '').trim();
+  if (lastError) return lastError;
+  // Not every surface logs with level=ERROR. A transport failure that only
+  // shows up as the last stderr line still has to be recognisable, or the
+  // cooldown silently never happens.
+  const lines = String(result?.stderr || '')
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.length ? lines[lines.length - 1] : '';
+}
+
+/** Where the "we already hit this" notes are kept, so a note is written once. */
+function deadEndMarkerPath() {
+  return path.join(os.homedir(), '.hermes', 'dead-end-notes.json');
+}
+
+function readDeadEndMarkers() {
+  try {
+    return JSON.parse(fs.readFileSync(deadEndMarkerPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/** A short, stable key for "this lane failed this way". */
+export function failureSignature({ lane = '', errText = '' } = {}) {
+  const err = String(errText || '').toLowerCase();
+  const kind = isQuotaOrLimitError(err)
+    ? 'quota'
+    : isConnectionFailure(err)
+      ? 'connection'
+      : /not found|no such model|unknown model|unknown gemini model/.test(err)
+        ? 'unknown-model'
+        : 'other';
+  const laneId = String(lane || '').trim().toLowerCase() || 'unknown';
+  return `${kind}::${laneId}`;
+}
+
+/**
+ * The second copy of a signature is worth one line. A note is written once per
+ * signature, not once per failure, and the note is text a later turn can read.
+ * The model never rewrites its own instructions; this only records what
+ * happened.
+ */
+export function noteDeadEnd({ lane = '', errText = '', botId = '', home = os.homedir() } = {}) {
+  try {
+    const sig = failureSignature({ lane, errText });
+    const markers = readDeadEndMarkers();
+    if (markers[sig]) return { signature: sig, written: false, reason: 'already noted' };
+    const rows = loadFailures().filter((r) => failureSignature({ lane: r.lane, errText: `${r.kind} ${r.hint}` }) === sig);
+    if (rows.length < 2) return { signature: sig, written: false, reason: `only ${rows.length} sighting(s)` };
+    const text = `${lane || 'unknown lane'}: ${String(errText || '').replace(/\s+/g, ' ').trim().slice(0, 200)}`;
+    appendRow('dead-ends', { ticket: `r14-${botId || 'bot'}`, text }, { home });
+    markers[sig] = new Date().toISOString();
+    fs.mkdirSync(path.dirname(deadEndMarkerPath()), { recursive: true });
+    fs.writeFileSync(deadEndMarkerPath(), `${JSON.stringify(markers, null, 2)}\n`, 'utf8');
+    console.log(`[dead-ends] noted ${sig} after ${rows.length} sightings`);
+    return { signature: sig, written: true, sightings: rows.length };
+  } catch (err) {
+    return { signature: '', written: false, reason: String(err?.message || err).slice(0, 120) };
+  }
+}
+
+/**
+ * Which turn this is, for the gated retrieval. Only build/investigate turns
+ * read notes; anything else is gated to nothing, which is the safe default.
+ */
+export function turnKindFor(text) {
+  const t = String(text || '').toLowerCase();
+  if (/\b(investigate|diagnos|debug|why did|root cause|trace|logs?)\b/.test(t)) return 'investigate';
+  if (/\b(build|implement|fix|add|write|refactor|patch|ship|make)\b/.test(t)) return 'build';
+  return '';
+}
+
+/** Notes for this request, or nothing. */
+export function deadEndNotesFor(text, { home = os.homedir(), limit = 3 } = {}) {
+  const turn = turnKindFor(text);
+  if (!turn) return [];
+  const { rows } = retrieve(text, { turn, stores: ['dead-ends'], limit, home });
+  return rows;
+}
+
 export function trackRunQuota({ botId, modelRef, result }) {
   try {
     if (!result || result.aborted) return null;
@@ -1838,7 +1953,7 @@ export function fanoutProgressEvent({ renderer, observer, event, context = {} })
   try { observer?.onEvent(event, context); } catch {}
 }
 
-export async function runOpencodeWithFailover({ api, chatId, prompt, models, runModel = null, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, ...runArgs }) {
+export async function runOpencodeWithFailover({ api, config, chatId, prompt, models, runModel = null, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, onCooldown = null, ...runArgs }) {
   let attempt = 0;
   const { result } = await runWithModelFailover({
     models,
@@ -1847,14 +1962,47 @@ export async function runOpencodeWithFailover({ api, chatId, prompt, models, run
       if (typeof onAttemptStart === 'function') {
         try { onAttemptStart({ model, attempt }); } catch {}
       }
+      const runOnce = async () => (runModel
+        ? await runModel(model)
+        : await runOpencode({ prompt, model, ...runArgs }));
       // runModel lets one failover chain span surfaces (cline quota-hit ->
       // opencode fallback and back). Without it every candidate runs through
       // the OpenCode CLI, exactly as before.
-      const attemptResult = runModel
-        ? await runModel(model)
-        : await runOpencode({ prompt, model, ...runArgs });
+      let attemptResult = await runOnce();
+      // One retry, and only for a transport failure. A quota answer is final
+      // for that lane and the ledger stamp already says so. Two ECONNREFUSEDs
+      // in a row is not a blip, so the lane gets a short cooldown and the walk
+      // moves on; without this the next message tried the same dead lane again.
+      let connectionRetries = 0;
+      while (
+        connectionRetries < 1 &&
+        !String(attemptResult?.finalText || '').trim() &&
+        isConnectionFailure(attemptFailureText(attemptResult)) &&
+        !isAborted()
+      ) {
+        connectionRetries += 1;
+        attempt += 1;
+        attemptResult = await runOnce();
+        if (typeof onAttemptStart === 'function') {
+          try { onAttemptStart({ model, attempt, retry: connectionRetries }); } catch {}
+        }
+      }
+      if (
+        !String(attemptResult?.finalText || '').trim() &&
+        isConnectionFailure(attemptFailureText(attemptResult)) &&
+        !isAborted()
+      ) {
+        const errText = attemptFailureText(attemptResult);
+        const stamp = stampLaneCooldown({ botId: config?.id, model, errText });
+        if (typeof onCooldown === 'function') {
+          try { onCooldown({ model, errText, stamp }); } catch {}
+        }
+      }
       if (typeof onAttemptComplete === 'function') {
         try { onAttemptComplete({ model, attempt, result: attemptResult, aborted: Boolean(isAborted()) }); } catch {}
+      }
+      if (!String(attemptResult?.finalText || '').trim() && attemptFailureText(attemptResult)) {
+        noteDeadEnd({ lane: model, errText: attemptFailureText(attemptResult), botId: config?.id });
       }
       return attemptResult;
     },
@@ -1986,7 +2134,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // Every project composes through the same path: an assigned role is
     // prepended for project 1 too, and composeExternalPrompt returns the
     // prompt untouched when the chat has no role.
-    const finalPrompt = composeExternalPrompt({ chatId, prompt: promptWithMedia, activeProject, activeRole });
+    let finalPrompt = composeExternalPrompt({ chatId, prompt: promptWithMedia, activeProject, activeRole });
+    // Notes this turn should read: one line each, above the request, and only
+    // for build/investigate turns. Gated retrieval returns nothing otherwise.
+    const deadEnds = deadEndNotesFor(text);
+    if (deadEnds.length) {
+      finalPrompt = `[KNOWN DEAD ENDS — do not repeat these]\n${deadEnds.map((r) => `- ${r.text}`).join('\n')}\n\n${finalPrompt}`;
+      console.log(`[${config.id}] injected ${deadEnds.length} dead-end note(s) into a ${turnKindFor(text)} turn`);
+    }
 
     const ref = parseModelRef(eff.model);
     const location = workLocation();
@@ -2095,9 +2250,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
     const result = await runOpencodeWithFailover({
       api,
+      config,
       chatId,
       prompt: finalPrompt,
       models: laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model),
+      onCooldown: ({ model, errText }) => {
+        console.log(`[${config.id}] ${model} connection-failed twice; cooling it down instead of retrying it next message`);
+      },
       runModel: runSurfaceModel,
       onAttemptStart: ({ model, attempt }) => {
         lastAttemptModel = model;

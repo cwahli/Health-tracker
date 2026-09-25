@@ -113,6 +113,22 @@ export function bucketKeyFor(lane) {
   return `bucket:${b}`;
 }
 
+/**
+ * A transport failure, not a quota decision. These say nothing about whether
+ * the provider will accept the next request, so they get their own short
+ * cooldown instead of the 6h quota default. Same ENOTFOUND/ECONNREFUSED
+ * vocabulary the Node fetch and CLI layers produce.
+ */
+const CONNECTION_FAILURE_RE =
+  /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|EHOSTUNREACH|ENETUNREACH|socket hang up|fetch failed|network error|getaddrinfo|network request failed|proxy/i;
+
+export function isConnectionFailure(msg) {
+  return CONNECTION_FAILURE_RE.test(String(msg || ""));
+}
+
+/** How long a connection failure keeps a lane out of the walk. */
+export const CONNECTION_FAILED_COOLDOWN_MS = 10 * 60 * 1000;
+
 /** Quota keys to stamp for a lane: route key always, plus shared bucket key. */
 export function quotaKeysForLane(lane) {
   const keys = [];
@@ -1143,7 +1159,18 @@ function writeJsonAtomic(filePath, obj) {
  * session.quota (route + shared-bucket keys) and overlays the table —
  * pref order untouched. Returns { stamped, keys } or { stamped: false, reason }.
  */
-export function stampDepleted({ stateDir, provider, model, errText, depletedUntil = null, countdownHint = "", now = Date.now() } = {}) {
+export function stampCooldown({ stateDir, provider, model, errText, kind = "connection-failed", ttlMs = CONNECTION_FAILED_COOLDOWN_MS, now = Date.now() } = {}) {
+  return stampDepleted({
+    stateDir,
+    provider,
+    model,
+    errText,
+    kind,
+    depletedUntil: now + Math.max(1000, Number(ttlMs) || CONNECTION_FAILED_COOLDOWN_MS),
+  });
+}
+
+export function stampDepleted({ stateDir, provider, model, errText, depletedUntil = null, countdownHint = "", kind = "limit-unknown", now = Date.now() } = {}) {
   try {
     const err = String(errText || "").slice(0, 300);
     if (!err || isDocLikeQuotaNoise(err)) return { stamped: false, reason: "refused: doc-noise or empty, not a provider limit" };
@@ -1167,7 +1194,7 @@ export function stampDepleted({ stateDir, provider, model, errText, depletedUnti
         scope: key.startsWith("bucket:") ? "shared" : "per-model",
         depletedObservedAt: isoZ(now),
         countdownParsed: Boolean(countdownHint),
-        kind: "limit-unknown",
+        kind,
         ...(countdownHint ? { countdownHint } : {}),
       };
     }
