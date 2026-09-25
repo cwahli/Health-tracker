@@ -1438,7 +1438,6 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
           };
         })
         .filter((row) => {
-          if (row.archived_at) return false;
           if (wantState && row.state !== wantState) return false;
           if (wantAssignee && row.assignee !== wantAssignee) return false;
           if (wantSurface && row.surface !== wantSurface) return false;
