@@ -190,6 +190,17 @@ try {
   check('the relay exposes the session check the preflight asks for', /\/check/.test(relay) && /function checkSession\(/.test(relay));
   check('the relay stores the worker directory on connect', /cwd: String\(body\.cwd/.test(relay));
   check('the job store can requeue', /export function requeueJob/.test(jobs));
+
+  // 10. Guard 11 (card 6c): the view follows the conversation, on one
+  // stable tmux session, and the product — not just the library — says so.
+  const workSession = fs.readFileSync(path.join(HERE, 'lib', 'work-session.mjs'), 'utf8');
+  check('the product creates the view on the stable session', /ensureTmuxWorkView\([^)]*\{[^}]*sessionName: WORK_VIEW_SESSION/.test(bot));
+  check('the product disables and reports the same stable session', /disableTmuxObserver\([^)]*sessionName: WORK_VIEW_SESSION/.test(bot) && /statusForTelegram\([^)]*sessionName: WORK_VIEW_SESSION/.test(bot));
+  check('an already-live view is rebound, not returned as-is', /return rebindWorkView\(session/.test(bot) && /repointWorkView\(\{ target: workViewTarget\(/.test(bot));
+  check('a turn that ran elsewhere records the thread it ran', /setWorkView\(workSession\.id, \{ opencodeSessionId: handed\.sessionID \}\)/.test(bot));
+  check('the view is re-pointed straight after a swapped turn', /setWorkView\(workSession\.id, \{ opencodeSessionId: handed\.sessionID \}\)[\s\S]{0,600}reconcileWorkViewForLane\(/.test(bot));
+  check('the status probe can be told which session to look in', /function sessionStatus\(id, \{ tmux = defaultTmuxRunner, sessionName \}/.test(workSession));
+  check('the library default stays location-named for its own tests', /sessionName = session \? tmuxSessionFor\(session\.location\) : null/.test(workSession));
 } finally {
   fs.rmSync(home, { recursive: true, force: true });
 }
