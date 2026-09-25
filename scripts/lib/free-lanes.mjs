@@ -1276,7 +1276,7 @@ export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionP
       // including models the table predates. Without this the two lists disagree
       // and a catalogued model has no row for the watcher to stamp.
       const merged = catalogEntries ? withCatalogLanes(table, catalogEntries).table : table;
-      return { table: merged, session: readJson(sPath) || {}, tablePath: tPath, sessionPath: sPath, source: "live-state" };
+      return { table: merged, session: readSessionWithSharedQuota(dir), tablePath: tPath, sessionPath: sPath, source: "live-state" };
     }
   }
   // Fallback: repo pref doc → all-available table so /allowance still shows order.
@@ -1529,6 +1529,81 @@ export function stampCooldown({ stateDir, provider, model, errText, kind = "conn
   });
 }
 
+/**
+ * Providers whose quota belongs to the host's account, not to one bot.
+ *
+ * Cline, Gemini, Token Harbor and Cloudflare are all reached with one key for
+ * this host — the same key for every bot-host bot — so their daily caps and rate
+ * limits are host-wide. A depletion one bot hits is true for all of them. Live on
+ * 2026-09-25: vm recorded Cline's real "Daily free limit reached" 429 and showed
+ * the model ❌ with a reset, while vm2, on the same account and the same host,
+ * showed it ✅ and would have walked into the same 429.
+ *
+ * OpenCode is deliberately NOT here. Its free lanes are per-chat stickies and its
+ * per-model counters are what a bot earns by using them, so those stamps stay
+ * per-bot. Freebuff is terminal-only and never walked.
+ */
+const HOST_ACCOUNT_PROVIDERS = new Set(["cline", "gemini", "tokenharbor", "cloudflare"]);
+
+/** True when this route's quota is the host account's, shared by every bot. */
+export function isHostAccountRoute(provider, model = "") {
+  const p = String(provider || "").toLowerCase();
+  if (HOST_ACCOUNT_PROVIDERS.has(p)) return true;
+  if (p === "opencode") {
+    const m = String(model || "").toLowerCase();
+    return m.includes("tokenharbor/") || m.includes("cloudflare/") || m.includes("gemini");
+  }
+  return false;
+}
+
+/**
+ * Host-shared quota dir, beside the per-bot ones.
+ *
+ * FREE_LANES_SHARED_DIR overrides it, for the same reason FREE_LANES_DIR exists:
+ * a live proof must be able to run against copies and leave the real ledgers
+ * byte-identical, and a test must never write to the host's shared state.
+ */
+export function resolveSharedLedgerDir() {
+  const override = String(process.env.FREE_LANES_SHARED_DIR || "").trim();
+  if (override) {
+    mkdirSync(override, { recursive: true });
+    return override;
+  }
+  const home = process.env.HOME || process.env.USERPROFILE || osHomedirFallback();
+  const dir = join(home, ".local", "state", "bot-host", "shared-free-lanes");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * The session a bot should read: its own, plus the host account's stamps.
+ *
+ * The per-bot file stays the record of what that bot did; the shared file is the
+ * record of what the account has left. A host-account key is taken from the shared
+ * file when it is there, because that is the wider truth, and the bot's own copy is
+ * kept for its own history.
+ */
+export function readSessionWithSharedQuota(stateDir) {
+  const own = stateDir ? readJson(join(stateDir, "session.json")) || {} : {};
+  if (!stateDir) return own;
+  let shared = {};
+  try {
+    shared = readJson(join(resolveSharedLedgerDir(), "session.json")) || {};
+  } catch {}
+  const ownQuota = { ...(own.quota || {}) };
+  const sharedQuota = shared.quota || {};
+  if (!Object.keys(sharedQuota).length) return own;
+  const quota = { ...ownQuota };
+  for (const [key, rec] of Object.entries(sharedQuota)) {
+    const route = routeCandidates(key.replace(/^bucket:/, ""))[0] || {};
+    if (!isHostAccountRoute(route.provider, route.model)) continue;
+    // The shared record is authoritative for a host account: it was written by
+    // whichever bot actually hit the limit, and it describes all of them.
+    quota[key] = { ...rec, sharedFrom: "host-account" };
+  }
+  return { ...own, quota };
+}
+
 export function stampDepleted({ stateDir, provider, model, errText, depletedUntil = null, countdownHint = "", kind = "limit-unknown", now = Date.now() } = {}) {
   try {
     const err = String(errText || "").slice(0, 300);
@@ -1558,8 +1633,23 @@ export function stampDepleted({ stateDir, provider, model, errText, depletedUnti
       };
     }
     writeJsonAtomic(sessionPath, session);
+    // A host account's limit is every bot's limit, so the stamp also goes to the
+    // shared file. Without this the bot that did not hit the 429 keeps offering the
+    // model, and the two lists disagree about a cap that is objectively the same.
+    let shared = false;
+    if (isHostAccountRoute(provider, model)) {
+      try {
+        const sharedDir = resolveSharedLedgerDir();
+        const sharedPath = join(sharedDir, "session.json");
+        const sharedSession = readJson(sharedPath) || {};
+        sharedSession.quota = sharedSession.quota || {};
+        for (const key of keys) sharedSession.quota[key] = session.quota[key];
+        writeJsonAtomic(sharedPath, sharedSession);
+        shared = true;
+      } catch {}
+    }
     const sync = syncFreeLaneTableFromSession({ tablePath, session, now });
-    return { stamped: true, keys, tableChanges: sync.changes || [] };
+    return { stamped: true, keys, shared, tableChanges: sync.changes || [] };
   } catch (e) {
     return { stamped: false, reason: String(e?.message || e).slice(0, 160) };
   }

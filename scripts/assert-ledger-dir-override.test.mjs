@@ -72,10 +72,27 @@ try {
   check('the real ledger still says it is available', realView.lanes.some((l) => l.model === 'zen/muse'));
 
   // 5. The knob is narrow: no shared-default shape.
+  //
+  // Changed 2026-09-25, deliberately. This used to assert that the string
+  // "shared-free-lanes" appeared nowhere in the file, which was a proxy for "no
+  // shared default ledger" — the rule from the pre-card1 work that was never
+  // landed. A host-account quota store was added since: Cline, Gemini, Token
+  // Harbor and Cloudflare are reached with ONE key for this host, so their daily
+  // caps are the same for vm and vm2, and vm was showing a lane as spent while vm2
+  // offered it. The store holds host-account routes only.
+  //
+  // So the invariant is now stated directly instead of by substring: the per-bot
+  // ledger is still the default and still per-bot, and the shared store cannot
+  // carry an opencode lane — that is what would turn it into a shared ledger.
   const src = fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8');
-  check('there is no shared-free-lanes default', !/shared-free-lanes/.test(src));
+  check('the per-bot ledger is still the default, one dir per bot id', /bot-host", String\(botId \|\| "default"\)/.test(src));
   check('the override is documented as a single directory', /names ONE directory for this process/.test(src));
-  check('the bot ids still differ by default', /bot-host", String\(botId \|\| "default"\)/.test(src));
+  const shared = (src.match(/HOST_ACCOUNT_PROVIDERS = new Set\(\[([^\]]*)\]\)/) || [])[1] || '';
+  check('the host-account set is cline, gemini, tokenharbor and cloudflare',
+    /cline/.test(shared) && /gemini/.test(shared) && /tokenharbor/.test(shared) && /cloudflare/.test(shared) && !/opencode/.test(shared), shared);
+  check('opencode is excluded from the shared store by an explicit test', /HOST_ACCOUNT_PROVIDERS\.has\(p\)/.test(src) && /return false;/.test(src));
+  check('a shared stamp is only written for a host-account route', /if \(isHostAccountRoute\(provider, model\)\)/.test(src));
+  check('the shared dir is overridable so a proof cannot touch real state', /FREE_LANES_SHARED_DIR/.test(src));
 } finally {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
   if (oldOverride === undefined) delete process.env.FREE_LANES_DIR; else process.env.FREE_LANES_DIR = oldOverride;

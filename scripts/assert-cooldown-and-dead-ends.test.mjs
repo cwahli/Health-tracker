@@ -143,7 +143,44 @@ try {
   check('the note names the lane', notes.some((n) => n.text.includes('m-x')));
   check('a chat turn still gets nothing', deadEndNotesFor('thanks', { home }).length === 0);
 
-  // 9. The instruction files are not rewritten by any of this.
+  // 9. A host account's limit is every bot's limit. Cline, Gemini, Token Harbor and
+  // Cloudflare are reached with one key for this host, so the cap is the same for
+  // vm and vm2 — live on 2026-09-25 vm recorded Cline's real 429 and vm2 went on
+  // offering the model. OpenCode's free lanes are per-chat and stay per-bot.
+  const { ensureBotLedger, loadFreeLaneLedger, projectLanes, stampDepleted: stamp, isHostAccountRoute } =
+    await import('./lib/free-lanes.mjs');
+  check('a cline route is the host account\'s', isHostAccountRoute('cline', 'cline-free/x') === true);
+  check('a gemini route is too', isHostAccountRoute('gemini', 'gemini-3.8-flash') === true);
+  check('tokenharbor and cloudflare are too', isHostAccountRoute('tokenharbor', 'x') === true && isHostAccountRoute('opencode', 'cloudflare/@cf/qwen/x') === true);
+  check('an opencode free lane is NOT the host account\'s', isHostAccountRoute('opencode', 'opencode/space-bunny-free') === false);
+  check('freebuff is not either', isHostAccountRoute('freebuff', 'deepseek/deepseek-v4.1-flash') === false);
+
+  const seedTable = { version: 3, failover: 'same-family-then-pref', buckets: [], lanes: [
+    { pref: 1, provider: 'cline', model: 'cline-free/muse-spark-1.3-contributor', status: 'available', tg: true, label: 'Muse 1.3' },
+    { pref: 2, provider: 'opencode', model: 'opencode/space-bunny-free', status: 'available', tg: true, label: 'Space Bunny' },
+  ] };
+  const dirA = ensureBotLedger('vm').dir;
+  const dirB = ensureBotLedger('vm2').dir;
+  for (const d of [dirA, dirB]) fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(seedTable, null, 2));
+
+  const clineStamp = stamp({ stateDir: dirA, provider: 'cline', model: 'cline-free/muse-spark-1.3-contributor', errText: 'Error 429: Daily free limit reached. Try again in 13h 50m.', countdownHint: '13h 50m' });
+  check('a cline depletion is stamped', clineStamp.stamped === true, JSON.stringify(clineStamp));
+  check('and it is written to the shared host-account file too', clineStamp.shared === true);
+  const seenByB = loadFreeLaneLedger({ stateDir: dirB });
+  const clineRowB = projectLanes(seenByB.table, seenByB.session, { now: Date.now() }).find((r) => r.model === 'cline-free/muse-spark-1.3-contributor');
+  check('the other bot sees that cline model as depleted', clineRowB?.depleted === true);
+  check('and will not offer it', clineRowB?.selectable === false, JSON.stringify(clineRowB?.reason));
+
+  const ocStamp = stamp({ stateDir: dirA, provider: 'opencode', model: 'opencode/space-bunny-free', errText: 'Rate limit exceeded. Try again in 20m.', countdownHint: '20m' });
+  check('an opencode depletion is stamped', ocStamp.stamped === true);
+  check('but stays out of the shared file', ocStamp.shared === false);
+  const seenByB2 = loadFreeLaneLedger({ stateDir: dirB });
+  const ocRowB = projectLanes(seenByB2.table, seenByB2.session, { now: Date.now() }).find((r) => r.model === 'opencode/space-bunny-free');
+  check('the other bot still sees its own opencode lane as available', ocRowB?.selectable === true, JSON.stringify(ocRowB?.reason));
+  const seenByA = loadFreeLaneLedger({ stateDir: dirA });
+  check('while the bot that hit it does not', projectLanes(seenByA.table, seenByA.session, { now: Date.now() }).find((r) => r.model === 'opencode/space-bunny-free')?.selectable === false);
+
+  // 10. The instruction files are not rewritten by any of this.
   const roleFile = path.join(HERE, '..', 'projects', 'external-2', 'roles', 'legal_policy.md');
   check('the role file is still the policy reader', /qualified adviser/.test(fs.readFileSync(roleFile, 'utf8')));
 } finally {
