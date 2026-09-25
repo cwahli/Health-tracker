@@ -1,8 +1,9 @@
 /**
  * Shared work sessions for BOT-19.
  *
- * A work session is created on demand per active (location, chat, workspace)
- * — never permanently per bot. `tx on` enables the shared work view; `tx
+ * A work session is created on demand per active (chat, project) — never
+ * permanently per bot, and never per machine: the chat moves between locations
+ * and has to find the same row there. `tx on` enables the shared work view; `tx
  * off` hides it without stopping work. Generic debug/handoff/abort work for
  * every bot and backend.
  *

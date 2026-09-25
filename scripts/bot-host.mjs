@@ -555,14 +555,18 @@ export function attemptFailureText(result) {
  * ledger; the VM poller does not call trackRunQuota for it, so the VM's ledger
  * and the worker's stay separate facts.
  *
+ * The job carries the conversation (sessionId) and the workspace as a project
+ * id, because the worker resolves both on its own machine. A turn handed to a
+ * notebook continues the thread the VM started instead of answering blank.
+ *
  * Returns null when the location is this machine or has no live worker, and the
  * caller runs the turn locally as before.
  */
-export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', envMode = 'project', timeoutMs = 900000 } = {}) {
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000 } = {}) {
   const status = workerStatus(host);
   if (!status.reachable) return null;
-  const job = enqueueJob({ host, prompt, model, project, role, workspace, envMode });
-  console.log(`[${host}] handed ${job.id} to the connected worker`);
+  const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode });
+  console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}`);
   const done = await awaitJob(job.id, { timeoutMs });
   if (!done?.result) {
     return { text: '', code: 1, model, error: `worker ${host} did not answer in time`, remote: true, jobId: job.id };
@@ -2387,10 +2391,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         project: isExternalTurn ? activeProject.id : 'health-tracker',
         role: activeRole || '',
         workspace: effectiveWorkspace,
+        sessionId: sessions.get(chatId) || '',
         envMode: turnEnvMode,
       });
       if (handed) {
-        console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'})`);
+        // The thread id the worker ran is now ours too, so the next turn —
+        // here or there — resumes the same conversation.
+        if (handed.sessionID) sessions.set(chatId, handed.sessionID);
+        console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
         await renderer.finish(
           { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
           { footer: `host: ${location}` }

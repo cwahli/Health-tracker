@@ -6,20 +6,24 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let passed = 0;
 let failed = 0;
-function check(name, cond) {
-  if (cond) { console.log(`  PASS  ${name}`); passed++; } else { console.error(`  FAIL  ${name}`); failed++; }
+function check(name, cond, detail = '') {
+  if (cond) { console.log(`  PASS  ${name}${detail ? ` — ${detail}` : ''}`); passed++; } else { console.error(`  FAIL  ${name}${detail ? ` — ${detail}` : ''}`); failed++; }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 console.log('assert-worker-relay:');
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+// The device gets its own HOME. The relay runs the VM's store, the worker runs
+// its own — that is the real topology, and it is what makes a conversation
+// hand-over testable instead of both sides reading the same file.
+const device = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-device-'));
 const port = 8900 + Math.floor(Math.random() * 80);
 const relay = spawn(process.execPath, [path.join(HERE, 'worker-relay.mjs'), `--port=${port}`], {
   env: { ...process.env, HOME: home },
@@ -65,15 +69,15 @@ try {
   // 3. A job handed to a worker comes back with text, and the worker stamped
   //    its own ledger rather than the VM's.
   const w = spawn(process.execPath, [path.join(HERE, 'worker-agent.mjs'), `--host=mobile`, `--relay=http://127.0.0.1:${port}`], {
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, HOME: device },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   workers.push(w);
   w.stderr.on('data', (d) => process.stderr.write(`[worker] ${d}`));
   await sleep(1500);
 
-  // The relay and the worker both run with HOME=home, so the test addresses the
-  // same store explicitly rather than through its own HOME.
+  // The relay holds the VM's store (home); the worker holds its own (device).
+  // The test addresses the VM's store explicitly rather than through HOME.
   const { enqueueJob, getJob } = await import('./lib/worker-jobs.mjs');
   const job = enqueueJob({ host: 'mobile', prompt: 'reply with the word ok', model: 'grok/grok-4.7', workspace: home, envMode: 'project' }, { home });
   let done = null;
@@ -95,6 +99,82 @@ try {
   check('the job was claimed exactly once', typeof done?.claimedAt === 'string');
   check('the job store lives on the VM, not the device', fs.existsSync(path.join(home, '.hermes', 'worker-jobs')));
 
+  // 3b. What a job carries across the wire: a workspace id and the
+  //     conversation to resume. /home/ubuntu/src/Health-tracker is this
+  //     machine's checkout and means nothing on a notebook.
+  const shaped = enqueueJob({
+    host: 'grok',
+    prompt: 'shape probe',
+    model: 'opencode/definitely-not-a-model',
+    project: 'health-tracker',
+    role: 'frontend_ui',
+    workspace: '/home/ubuntu/src/Health-tracker',
+    sessionId: 'ses_probe_shape_01',
+    envMode: 'project',
+  }, { home });
+  check('the job carries a workspace id, not a machine path', shaped.workspace === 'health-tracker', shaped.workspace);
+  check('the job carries the conversation to resume', shaped.sessionId === 'ses_probe_shape_01');
+  const opaque = enqueueJob({ host: 'grok', prompt: 'x', workspace: home }, { home });
+  check('a workspace nobody knows is passed through, not guessed at', opaque.workspace === home, opaque.workspace);
+
+  // 3c. Continuity. The conversation is imported into the relay's HOME only,
+  //     so the device cannot read it off disk — it has to arrive over the
+  //     relay, which is exactly what a move between machines requires.
+  const fixtureId = 'ses_fixtureRelay01';
+  const fixturePath = path.join(home, 'session-fixture.json');
+  fs.writeFileSync(fixturePath, `${JSON.stringify({
+    info: {
+      id: fixtureId,
+      slug: 'relay-fixture',
+      projectID: 'global',
+      directory: home,
+      path: home,
+      title: 'conversation the device has not got',
+      agent: 'build',
+      model: { id: 'muse-spark-1.3-contributor-free', providerID: 'opencode', variant: 'default' },
+      version: '1.18.32',
+      summary: { additions: 0, deletions: 0, files: 0 },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: Date.now(), updated: Date.now() },
+    },
+    messages: [],
+  }, null, 2)}\n`);
+  const imported = await new Promise((resolve) => {
+    execFile('opencode', ['import', fixturePath], { env: { ...process.env, HOME: home }, timeout: 60000 },
+      (err, stdout, stderr) => resolve({ ok: !err, out: `${stdout || ''}${stderr || ''}${err ? err.message : ''}` }));
+  });
+  check('the VM-side conversation exists for the test', imported.ok, imported.out.replace(/\s+/g, ' ').slice(0, 200));
+
+  const exportRes = await fetch(`http://127.0.0.1:${port}/sessions/${fixtureId}/export`);
+  const exportBody = exportRes.ok ? await exportRes.json().catch(() => null) : null;
+  check('the relay exports that conversation to a worker', exportRes.ok && exportBody?.info?.id === fixtureId, `status ${exportRes.status}`);
+
+  const job2 = enqueueJob({
+    host: 'mobile',
+    prompt: 'carry the conversation over',
+    model: 'opencode/definitely-not-a-model',
+    project: 'health-tracker',
+    role: '',
+    workspace: '/home/ubuntu/src/Health-tracker',
+    sessionId: fixtureId,
+    envMode: 'project',
+  }, { home });
+  let done2 = null;
+  for (let i = 0; i < 120 && !done2; i++) {
+    const row = getJob(job2.id, { home });
+    if (row?.doneAt) { done2 = row; break; }
+    await sleep(1000);
+  }
+  check('the device answered the job that carried a conversation', Boolean(done2?.doneAt), String(done2?.result?.error || ''));
+  check('the device ran in a workspace of its own, not the VM path', Boolean(done2?.result?.workspace) && done2.result.workspace !== '/home/ubuntu/src/Health-tracker', String(done2?.result?.workspace));
+  check('the device pulled the conversation from the relay', done2?.result?.resumedFrom === 'relay', `resumedFrom=${done2?.result?.resumedFrom} error=${String(done2?.result?.error || '')}`);
+
+  const missing = await fetch(`http://127.0.0.1:${port}/sessions/ses_not_here_at_all/export`);
+  check('the relay refuses a conversation it does not have', missing.status >= 400, `status ${missing.status}`);
+  const malformed = await fetch(`http://127.0.0.1:${port}/sessions/not-a-session-id/export`);
+  check('the relay refuses a malformed session id', malformed.status === 400, `status ${malformed.status}`);
+
   // 4. A claim is a claim: the same job is not handed to a second worker.
   const claimRes = await fetch(`http://127.0.0.1:${port}/jobs/next?host=mobile&wait=0`);
   const claimAgain = claimRes.status === 204 ? {} : await claimRes.json();
@@ -112,6 +192,7 @@ try {
   try { relay.kill('SIGKILL'); } catch {}
   await sleep(200);
   fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(device, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);

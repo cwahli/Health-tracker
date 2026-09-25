@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadRegistry, resolveRegistryPath } from './registry.mjs';
+import { projectIdForWorkspace } from './work-session.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -91,6 +93,53 @@ export const KNOWN_PROJECTS = {
     roles: COUNCIL_ROLES,
   },
 };
+
+/**
+ * The directory a worker should run in, for the workspace id a job carries.
+ *
+ * A job travels with an id, not a path: `/home/ubuntu/src/Health-tracker` is
+ * this machine's checkout and means nothing on the notebook that claims the
+ * job. The id is resolved here on the machine that will do the work, so each
+ * host lands in its own checkout for the same project.
+ *
+ * Candidates, in order: this host's registry entry (what its own bot would
+ * use), the project's path on this machine (external-N lives under
+ * ~/projects), then the id itself when it is already an absolute path — a
+ * workspace nothing knows about is passed through rather than guessed at.
+ * The first candidate that exists wins; null means "nothing here matches",
+ * and the caller runs in its own directory instead of spawning into a
+ * missing one.
+ */
+export function workspaceForId(id, { host = '' } = {}) {
+  const key = String(id || '').trim();
+  if (!key) return null;
+  const candidates = [];
+  if (host) {
+    try {
+      const registry = loadRegistry(resolveRegistryPath(null, REPO_ROOT));
+      const bot = (registry.bots || []).find((b) => b.id === host);
+      const ws = bot?.agent?.workspace;
+      // The registry's workspace is that bot's checkout; it answers for this
+      // id only when it is the same project, or a notebook's website path
+      // would be handed an external job.
+      if (ws && projectIdForWorkspace(ws) === key) candidates.push(ws);
+    } catch {
+      // no registry on this host: fall through to the project's own path
+    }
+  }
+  const known = KNOWN_PROJECTS[key]?.workspace;
+  if (known) candidates.push(known);
+  if (path.isAbsolute(key)) candidates.push(key);
+  return (
+    candidates.find((p) => {
+      try {
+        return Boolean(p) && fs.existsSync(p);
+      } catch {
+        return false;
+      }
+    }) || null
+  );
+}
 
 export const ROLE_ALIASES = {
   // Project 1 Core Engineering Roles

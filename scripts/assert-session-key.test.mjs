@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const { sessionKey, projectIdForWorkspace, resolveSession, getSession } =
   await import(path.join(HERE, 'lib', 'work-session.mjs'));
+const { workspaceForId } = await import(path.join(HERE, 'lib', 'project-registry.mjs'));
 
 let pass = 0;
 let fail = 0;
@@ -81,6 +82,19 @@ check('re-resolving does not fork the row',
 const readBack = getSession(onVm, store);
 check('the stored key is the new shape', Boolean(readBack) && readBack.id === onVm);
 check('an unknown key still reads null', getSession('nope|nope', store) === null);
+
+// 5. The job travels with an id; the directory is resolved on the machine that
+//    does the work. A path from here would be a path that does not exist there.
+const hereCheckout = workspaceForId('health-tracker', { host: 'vm' });
+check('health-tracker resolves to a checkout that exists on this host', Boolean(hereCheckout) && fs.existsSync(hereCheckout), String(hereCheckout));
+check('and the id survives the round trip', projectIdForWorkspace(String(hereCheckout)) === 'health-tracker', String(hereCheckout));
+const otherCheckout = workspaceForId('health-tracker', { host: 'collab' });
+check('a host with no checkout here falls back to one that exists', Boolean(otherCheckout) && fs.existsSync(otherCheckout), String(otherCheckout));
+const external = workspaceForId('external-2', { host: 'vm' });
+check('an external project resolves to its own folder, not the website', Boolean(external) && external !== hereCheckout && /external-2$/.test(external), String(external));
+check('an unknown workspace resolves to nothing rather than a guess', workspaceForId('scratch-volume', { host: 'vm' }) === null);
+check('a legacy absolute path still resolves', workspaceForId(WS_VM, {}) === WS_VM);
+check('an empty id resolves to nothing', workspaceForId('', {}) === null);
 
 console.log(`\n${pass} pass, ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);
