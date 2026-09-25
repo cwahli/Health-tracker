@@ -141,17 +141,123 @@ export async function readFreebucksBalance({ fetchFn = globalThis.fetch, credsPa
  * A live human CLI session owns the account (single instance per account).
  * Owner file: {instanceId, pid}. pidAlive defaults to signal-0 probe.
  */
-export function humanSessionActive({ ownerPath, env = process.env, pidAlive } = {}) {
+export function humanSessionPid({ ownerPath, env = process.env, pidAlive } = {}) {
   const rec = readJsonFile(ownerPath || defaultOwnerPath(env));
   const pid = Number(rec?.pid || 0);
-  if (!Number.isFinite(pid) || pid <= 0) return false;
+  if (!Number.isFinite(pid) || pid <= 0) return 0;
   try {
-    if (pidAlive) return Boolean(pidAlive(pid));
+    if (pidAlive) return pidAlive(pid) ? pid : 0;
     process.kill(pid, 0);
-    return true;
+    return pid;
   } catch {
-    return false;
+    return 0;
   }
+}
+
+export function humanSessionActive(opts = {}) {
+  return humanSessionPid(opts) > 0;
+}
+
+/**
+ * Takeover policy. The account allows ONE Freebuff instance, so a Telegram run
+ * either waits or closes the terminal session first.
+ *   off  (default) — never close; yield to the human session.
+ *   idle           — close the terminal session ONLY when it looks idle
+ *                    (no working/Thinking marker, pane unchanged across the
+ *                    sample window), then run. "Looks idle" is a bounded
+ *                    heuristic, not proof: keep `off` while a long job runs.
+ */
+export function takeoverMode(env = process.env) {
+  const m = String(env?.FREEBUFF_TG_TAKEOVER || "off").toLowerCase();
+  return m === "idle" ? "idle" : "off";
+}
+
+// Active-work markers only. Deliberately NOT "coding": the Freebuff prompt
+// screen always reads "Enter a coding task", so matching that word marked every
+// idle session busy (caught by the takeover tests) and takeover never ran.
+const BUSY_MARKER = /\bworking\b|\bThinking\b|\bApplying\b|\bReviewing\b|\bPlanning\b|\bStreaming\b/i;
+
+/** tmux session that owns a pid, via the pane's tty. "" when not found. */
+async function tmuxSessionForPid(exec, pid) {
+  const tty = (await exec(["ps", "-o", "tty=", "-p", String(pid)])).stdout.trim();
+  if (!tty) return "";
+  const rows = (await exec(["tmux", "list-panes", "-a", "-F", "#{session_name}\t#{pane_tty}"])).stdout || "";
+  for (const line of rows.split(/\r?\n/)) {
+    const [session, paneTty] = line.split("\t");
+    if (paneTty && paneTty.replace(/^\/dev\//, "") === tty.replace(/^\/dev\//, "")) return String(session || "");
+  }
+  return "";
+}
+
+/**
+ * Is the human session busy? Two samples across `windowMs`: a pane that shows
+ * work (or changes) is treated as in-use and is never closed.
+ */
+export async function assessHumanSession({ exec, sleep, pid, windowMs = 30000, pollMs = 5000 }) {
+  const session = await tmuxSessionForPid(exec, pid);
+  if (!session) return { session: "", busy: true, stable: false, reason: "session not in tmux (cannot prove idle)" };
+  const first = (await exec(["tmux", "capture-pane", "-p", "-t", session])).stdout || "";
+  if (BUSY_MARKER.test(first)) return { session, busy: true, stable: false, reason: "pane shows active work" };
+  let waited = 0;
+  while (waited < windowMs) {
+    await sleep(pollMs);
+    waited += pollMs;
+    const next = (await exec(["tmux", "capture-pane", "-p", "-t", session])).stdout || "";
+    if (next !== first) return { session, busy: true, stable: false, reason: "pane changed while sampling" };
+  }
+  return { session, busy: false, stable: true, reason: "pane idle" };
+}
+
+/**
+ * Close the human session gracefully, then for real. Escape + Ctrl-C first so
+ * the TUI can exit cleanly; SIGTERM, then SIGKILL as a last resort. Returns
+ * what happened so the caller can report honestly.
+ */
+export async function closeHumanSession({ exec, sleep, pid, session, timeoutMs = 30000 }) {
+  const out = { graceful: false, signalled: false, forced: false, closed: false };
+  if (session) {
+    try {
+      await exec(["tmux", "send-keys", "-t", session, "Escape"]);
+      await sleep(500);
+      await exec(["tmux", "send-keys", "-t", session, "C-c"]);
+      out.graceful = true;
+    } catch {}
+  }
+  const alive = async () => {
+    try {
+      const r = await exec(["kill", "-0", String(pid)]);
+      return Boolean(r) && r.code === 0;
+    } catch {
+      return false;
+    }
+  };
+  const waitGone = async (ms) => {
+    let waited = 0;
+    while (waited < ms) {
+      if (!(await alive())) return true;
+      await sleep(1000);
+      waited += 1000;
+    }
+    return !(await alive());
+  };
+  if (await waitGone(5000)) {
+    out.closed = true;
+    return out;
+  }
+  try {
+    await exec(["kill", "-TERM", String(pid)]);
+    out.signalled = true;
+  } catch {}
+  if (await waitGone(Math.max(5000, timeoutMs - 10000))) {
+    out.closed = true;
+    return out;
+  }
+  try {
+    await exec(["kill", "-KILL", String(pid)]);
+    out.forced = true;
+  } catch {}
+  out.closed = await waitGone(5000);
+  return out;
 }
 
 // ---- single-flight mutex (one poller process) ----
@@ -254,6 +360,8 @@ export async function runFreebuffLane({
     totalMs: timeouts.totalMs || 600000,
     pollMs: timeouts.pollMs || 2000,
     quietMs: timeouts.quietMs || 15000,
+    takeoverIdleMs: timeouts.takeoverIdleMs ?? Number(env?.FREEBUFF_TG_TAKEOVER_IDLE_MS || 30000),
+    takeoverPollMs: timeouts.takeoverPollMs ?? Number(env?.FREEBUFF_TG_TAKEOVER_POLL_MS || 5000),
   };
   const fail = (text) => ({ ok: false, text });
   if (!freebuffLaneEnabled(env)) return fail("Freebuff Telegram lane is off (FREEBUFF_TG_LANE=1 to enable).");
@@ -271,8 +379,35 @@ export async function runFreebuffLane({
   }
   let started = false;
   try {
-    if (humanSessionActive({ ownerPath, env })) {
-      return fail("Your terminal Freebuff session is active — Telegram yields to it (one session per account). Close it or wait, then ask again.");
+    const humanPid = humanSessionPid({ ownerPath, env });
+    if (humanPid) {
+      if (takeoverMode(env) !== "idle") {
+        return fail(
+          "Your terminal Freebuff session is active — Telegram yields to it (one session per account). " +
+            "Close it, or set FREEBUFF_TG_TAKEOVER=idle to let Telegram close an IDLE session automatically."
+        );
+      }
+      // takeover=idle: prove it looks idle before touching someone's session.
+      const assess = await assessHumanSession({
+        exec,
+        sleep,
+        pid: humanPid,
+        windowMs: T.takeoverIdleMs,
+        pollMs: T.takeoverPollMs,
+      });
+      if (assess.busy) {
+        return fail(
+          `Your terminal Freebuff session looks busy (${assess.reason}) — not closing it. ` +
+            "Wait for it to go idle, or set FREEBUFF_TG_TAKEOVER=off to never close it."
+        );
+      }
+      const closed = await closeHumanSession({ exec, sleep, pid: humanPid, session: assess.session, timeoutMs: 30000 });
+      if (!closed.closed) {
+        return fail("Could not close the idle terminal Freebuff session — not starting a second one. Close it and retry.");
+      }
+      progress(
+        `Closed the idle terminal Freebuff session (${closed.forced ? "forced" : "graceful"}) to run your request.`
+      );
     }
     const bal = await readFreebucksBalance({ fetchFn, credsPath, env });
     if (bal.error && bal.error !== "not signed in") {
