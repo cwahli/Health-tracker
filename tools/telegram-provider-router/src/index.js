@@ -395,9 +395,15 @@ function allFreeLanesDepletedMessage(fromProvider, fromModel) {
   const sticky = `${fromProvider}/${fromModel}`;
   // Never claim "everything is dead": Freebuff stays usable in the terminal
   // while the Telegram chat lanes are empty (Freebuff is not a TG lane).
+  // Names/prices come from the ledger (synced from the published catalog) so
+  // the Stop never repeats a stale or invented model.
   const fbSignedIn = freebuffCredsOk();
+  const fbTop = availableFreebuffLanes(table)
+    .slice(0, 3)
+    .map((m) => m.label)
+    .join(", ");
   const fbOffer = fbSignedIn
-    ? `Freebuff is still usable in the terminal on this box: GLM 5.3 Flash (0/hr), MiMo 2.6 Flash (0/hr), DeepSeek V4.1 Flash (5/hr) — open a terminal and run ` +
+    ? `Freebuff is still usable in the terminal on this box${fbTop ? `: ${fbTop}` : ""} — open a terminal and run ` +
       "`freebuff`, or use the Freebuff taps in /freemodel."
     : "Freebuff would also be usable in the terminal, but this box is not signed in — run `freebuff` in a terminal to sign in.";
   const reset =
@@ -2743,19 +2749,58 @@ async function probeTokenHarborFree() {
 
 /** Freebuff CLI credentials on this box (test seam: pass a temp path). */
 const FREEBUFF_CREDS_PATH = "/home/box/.config/manicode/credentials.json";
-/** Freebuff ledger id for DeepSeek V4.1 Flash (docs/free-lane-preference.json pref 17). */
-const FREEBUFF_DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
-/** Freebuff picker ids for the 0 Freebucks/hr models (bakeoff + live config). */
+/**
+ * Freebuff model ids, corrected 2026-09-25 from the published price list
+ * (`GET /api/v1/freebuff/session` → freebucks.prices), which is what the TUI
+ * picker renders:
+ *   - ONLY `stealth/space-bunny-alpha` is 0 Freebucks. The old "0/hr" claims
+ *     for GLM 5.3 Flash (5 FB) and MiMo 2.6 Flash (not published at all) were
+ *     wrong and are gone.
+ *   - `deepseek/deepseek-v4.1-flash` is NOT in the catalog; the real id is
+ *     `deepseek/deepseek-v4-flash` (15 FB, 10 FB off-peak 22:00–06:00 UTC).
+ * Default = the 0-FB lane so a plain run never burns the daily pool.
+ */
+const FREEBUFF_DEFAULT_MODEL = "stealth/space-bunny-alpha";
 const FREEBUFF_GLM_MODEL = "z-ai/glm-5.3-flash";
-const FREEBUFF_MIMO_MODEL = "xiaomi/mimo-v2.6-flash";
-/** Button/pick labels for the three Freebuff taps. 0/hr = does not burn
- * Freebucks while running (not "unlimited forever"): still needs sign-in,
- * and Freebuff can change pricing/availability. */
-const FREEBUFF_MODEL_LABELS = {
-  [FREEBUFF_GLM_MODEL]: "GLM 5.3 Flash (0/hr)",
-  [FREEBUFF_MIMO_MODEL]: "MiMo 2.6 Flash (0/hr)",
-  [FREEBUFF_DEFAULT_MODEL]: "DeepSeek V4.1 Flash (5/hr)",
+const FREEBUFF_SOLAR_MINI_MODEL = "upstage/solar-mini4";
+const FREEBUFF_KIMI_MODEL = "crof/kimi-k3-eco";
+const FREEBUFF_MIMO_MODEL = "mimo/mimo-v2.5";
+const FREEBUFF_SOLAR_PRO_MODEL = "upstage/solar-pro4";
+const FREEBUFF_DEEPSEEK_MODEL = "deepseek/deepseek-v4-flash";
+/** Bootstrap taps (used when the ledger has no Freebuff rows yet). */
+const FREEBUFF_BOOTSTRAP_MODELS = [
+  FREEBUFF_DEFAULT_MODEL,
+  FREEBUFF_GLM_MODEL,
+  FREEBUFF_SOLAR_MINI_MODEL,
+  FREEBUFF_KIMI_MODEL,
+  FREEBUFF_MIMO_MODEL,
+  FREEBUFF_SOLAR_PRO_MODEL,
+  FREEBUFF_DEEPSEEK_MODEL,
+];
+/** Freebucks cost per run, for labels when the ledger has no price yet. */
+const FREEBUFF_MODEL_PRICES = {
+  [FREEBUFF_DEFAULT_MODEL]: 0,
+  [FREEBUFF_GLM_MODEL]: 5,
+  [FREEBUFF_SOLAR_MINI_MODEL]: 5,
+  [FREEBUFF_KIMI_MODEL]: 5,
+  [FREEBUFF_MIMO_MODEL]: 10,
+  [FREEBUFF_SOLAR_PRO_MODEL]: 10,
+  [FREEBUFF_DEEPSEEK_MODEL]: 15,
 };
+const FREEBUFF_MODEL_LABELS = {}; // derived from the ledger/bootstrap below
+
+/** "GLM 5.3 Flash · 5 FB" — price in the label, 0 reads as free. */
+function prettifyFreebuffLaneLabel(modelId, price) {
+  const name = String(modelId || "")
+    .replace(/^[^/]+\//, "")
+    .replace(/-/g, " ")
+    .replace(/\bv(\d)/gi, "v$1")
+    .trim();
+  const pretty = name.charAt(0).toUpperCase() + name.slice(1);
+  const p = Number.isFinite(Number(price)) ? Number(price) : FREEBUFF_MODEL_PRICES[modelId];
+  if (!Number.isFinite(p)) return pretty;
+  return p === 0 ? `${pretty} · free · 0 FB` : `${pretty} · ${p} FB`;
+}
 
 function freebuffCredsOk(credsPath = FREEBUFF_CREDS_PATH) {
   try {
@@ -2769,8 +2814,42 @@ function freebuffCredsOk(credsPath = FREEBUFF_CREDS_PATH) {
 }
 
 /**
- * Freebuff is terminal-only for *chat*, but it still gets a /freemodel tap so
- * it is discoverable: selecting it replies with terminal-only instructions
+ * Freebuff taps derived from the LEDGER (enrolled by
+ * `scripts/sync-freebuff-models.mjs --catalog`) unioned with the bootstrap ids,
+ * so a new/renamed model shows up without a code change. Order: price ascending
+ * (the 0-FB lane first), then ledger pref. Plan-required and unavailable lanes
+ * are excluded. Exported pure for tests.
+ */
+function availableFreebuffLanes(table = loadFreeLaneTable()) {
+  const rows = Array.isArray(table?.lanes) ? table.lanes : [];
+  const fbRows = rows.filter((l) => String(l?.provider || "").toLowerCase() === "freebuff");
+  const byId = new Map();
+  for (const id of FREEBUFF_BOOTSTRAP_MODELS) {
+    byId.set(id, { id, pref: Number.MAX_SAFE_INTEGER, price: FREEBUFF_MODEL_PRICES[id] });
+  }
+  for (const l of fbRows) {
+    const id = String(l.model || "");
+    if (!id) continue;
+    const prev = byId.get(id);
+    const price = Number.isFinite(Number(l.priceFreebucks)) ? Number(l.priceFreebucks) : prev?.price;
+    byId.set(id, {
+      id,
+      pref: Number.isFinite(prev?.pref) ? Math.min(prev.pref, Number(l.pref) || 0) : Number(l.pref) || 0,
+      price,
+      planRequired: Boolean(l.planRequired),
+      catalogStale: Boolean(l.catalogStale),
+      status: String(l.status || "").toLowerCase(),
+    });
+  }
+  return [...byId.values()]
+    .filter((m) => !m.planRequired && !m.catalogStale && m.status !== "unavailable" && m.status !== "ended")
+    .sort((a, b) => (a.price ?? 99) - (b.price ?? 99) || a.pref - b.pref || a.id.localeCompare(b.id))
+    .map((m) => ({ id: m.id, label: prettifyFreebuffLaneLabel(m.id, m.price) }));
+}
+
+/**
+ * Freebuff is terminal-only for *chat*, but it still gets /freemodel taps so it
+ * is discoverable: selecting one replies with terminal-only instructions
  * instead of a hard error. Returns ok:false (→ "Not available" footer) when
  * this box is not signed in.
  */
@@ -2782,16 +2861,11 @@ async function probeFreebuffFree(credsPath = FREEBUFF_CREDS_PATH) {
       items: [],
     };
   }
-  return {
-    ok: true,
-    reason: "",
-    // 0 Freebucks/hr first: GLM 5.3 Flash, MiMo 2.6 Flash, then DeepSeek (5/hr).
-    items: [
-      { id: FREEBUFF_GLM_MODEL, label: FREEBUFF_MODEL_LABELS[FREEBUFF_GLM_MODEL] },
-      { id: FREEBUFF_MIMO_MODEL, label: FREEBUFF_MODEL_LABELS[FREEBUFF_MIMO_MODEL] },
-      { id: FREEBUFF_DEFAULT_MODEL, label: FREEBUFF_MODEL_LABELS[FREEBUFF_DEFAULT_MODEL] },
-    ],
-  };
+  const items = availableFreebuffLanes();
+  if (!items.length) {
+    return { ok: false, reason: "no Freebuff lanes enrolled/available", items: [] };
+  }
+  return { ok: true, reason: "", items };
 }
 
 async function probeCommandCodeFree() {
@@ -2861,7 +2935,10 @@ function applyFreeModelPick(providerKey, modelId) {
     const mid = String(modelId || state.models.freebuff || FREEBUFF_DEFAULT_MODEL);
     state.models.freebuff = mid;
     saveState(state);
-    const name = FREEBUFF_MODEL_LABELS[mid] || prettyFreeLabel(providerKey, mid);
+    const lane = loadFreeLaneTable()?.lanes?.find(
+      (l) => String(l?.provider || "").toLowerCase() === "freebuff" && String(l.model) === mid
+    );
+    const name = prettifyFreebuffLaneLabel(mid, lane?.priceFreebucks);
     if (freebuffLaneEnabled(process.env)) {
       state.provider = "freebuff";
       saveState(state);
@@ -2869,7 +2946,7 @@ function applyFreeModelPick(providerKey, modelId) {
         `Switched to Freebuff (EXPERIMENTAL Telegram lane) — \`${mid}\` (${name}).\n\n` +
         "Requirements, enforced per message: your terminal Freebuff session must be idle " +
         "(Telegram yields while it is live — one session per account), one request at a time, " +
-        "and funded balance except on 0/hr models.\n\n" +
+        "and enough Freebucks in the daily pool (0-FB models like Space Bunny Alpha always run).\n\n" +
         "Send a message to try it. Anything the lane refuses explains why; " +
         "nothing ever starts a second session behind your back."
       );
@@ -2879,8 +2956,9 @@ function applyFreeModelPick(providerKey, modelId) {
       `Model: \`${mid}\` (${name})\n\n` +
       "Use it on this box:\n" +
       "• Open a terminal (tmux) on the host and run `freebuff`.\n" +
-      `• Pick ${name.replace(/ \(.*\)$/, "")} in the Freebuff picker.\n` +
-      "• 0/hr = does not burn Freebucks while running (DeepSeek is 5/hr); still needs Freebuff signed in and Freebuff can change pricing.\n\n" +
+      `• Pick ${name.split(" · ")[0]} in the Freebuff picker.\n` +
+      "• Price is Freebucks per run from the published catalog: only Space Bunny Alpha is 0, " +
+      "the rest cost 5–80 and draw from the shared daily pool (25/day).\n\n" +
       `Telegram messages still go to ${PROVIDERS[state.provider]?.label || state.provider}. Nothing was switched.`
     );
   }
@@ -4043,7 +4121,10 @@ export {
   dedupeFreemodelItems,
   FREEBUFF_GLM_MODEL,
   FREEBUFF_MIMO_MODEL,
+  FREEBUFF_DEEPSEEK_MODEL,
   FREEBUFF_MODEL_LABELS,
+  availableFreebuffLanes,
+  prettifyFreebuffLaneLabel,
   availableClineKnownLanes,
   prettifyClineLaneLabel,
   buildFreemodelReply,

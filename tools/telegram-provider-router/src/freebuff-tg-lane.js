@@ -5,8 +5,13 @@
  * Ticket: TG-CLINE-FREEBUFF-LONGTERM follow-up — "Freebuff is terminal-only"
  * today because the CLI (0.0.195) is TUI/`login` only: no `chat -m` one-shot,
  * and the HTTP `POST /api/v1/chat/completions` answers "No runId found".
- * HTTP agent-runs START was not attempted: Freebucks balance is 0 until
- * 2026-10-16, and burning an empty pool proves nothing.
+ *
+ * Correction 2026-09-25: the Freebucks pool is NOT 0. The earlier "0 until
+ * 2026-10-16" came from `/api/v1/usage`, which is the WALLET/subscription
+ * balance in account credit — a different currency. The pool the picker
+ * spends lives at `/api/v1/freebuff/session` (10 of 25 left that day, resets
+ * 17:00 Asia/Jakarta). This lane now reads the pool, and only
+ * `stealth/space-bunny-alpha` is 0 FB.
  *
  * What this module does: drive ONE Freebuff CLI session in tmux per Telegram
  * request (same mechanics as ht-run/ht-watch, but owned by the router
@@ -45,7 +50,14 @@ import { homedir } from "os";
 
 export const FREEBUFF_TG_LANE_ENV = "FREEBUFF_TG_LANE";
 export const FREEBUFF_OWNER_FILE = "freebuff-instance-owner.json";
-export const ZERO_HR_HINTS = [/glm/i, /5\.3.*flash/i, /mimo/i, /2\.6.*flash/i];
+export const FREEBUFF_SESSION_URL = "https://www.codebuff.com/api/v1/freebuff/session";
+/**
+ * 0-cost picker entries. Corrected 2026-09-25 from the published price list
+ * (`GET /api/v1/freebuff/session` → freebucks.prices): only
+ * `stealth/space-bunny-alpha` is 0 FB. GLM 5.3 Flash costs 5 and MiMo 2.6 is
+ * not even published — the old list called both "0/hr", which was wrong.
+ */
+export const ZERO_HR_HINTS = [/space-?bunny/i, /0\s*(fb|\/hr)/i];
 
 /** Gate: explicit opt-in only. Default off preserves terminal-only behaviour. */
 export function freebuffLaneEnabled(env = process.env) {
@@ -63,8 +75,8 @@ export function defaultOwnerPath(env = process.env) {
 /** 0/hr picker entries bill nothing while running (balance-0 may proceed). */
 export function isZeroHrModel(model) {
   const m = String(model || "");
-  if (/0\s*\/\s*hr/.test(m)) return true;
-  return /glm-5\.3-flash|mimo-v2\.6-flash/i.test(m);
+  if (/0\s*(fb|\/hr)/i.test(m)) return true;
+  return ZERO_HR_HINTS.some((re) => re.test(m));
 }
 
 function redact(err) {
@@ -81,26 +93,45 @@ function readJsonFile(p) {
   }
 }
 
-/** Balance probe: read-only usage call. Returns {balance, resetAt} or {error}. */
+/**
+ * Freebucks pool probe — READ-ONLY, from the same endpoint the TUI picker
+ * renders (`/api/v1/freebuff/session`).
+ *
+ * Corrected 2026-09-25: this used to read `/api/v1/usage`, which reports the
+ * WALLET/subscription balance in account credit (0 here, "resets 2026-10-16").
+ * That is a different currency from the Freebucks the picker spends — the pool
+ * was 10/25 the same day. Reading the wrong endpoint made the lane refuse
+ * every model as "balance 0". There is deliberately NO fallback to /usage: on
+ * an uncertain pool the lane refuses (never burns blindly).
+ *
+ * Returns {balance, resetAt, walletBalance} or {error}.
+ */
 export async function readFreebucksBalance({ fetchFn = globalThis.fetch, credsPath, env = process.env } = {}) {
   const creds = readJsonFile(credsPath || defaultCredsPath(env));
   const inner = (creds && (creds.default || creds)) || {};
   const token = inner.authToken || inner.token || inner.accessToken || "";
-  const fingerprintId = inner.fingerprintId || "";
   if (!token) return { error: "not signed in" };
   try {
     // Single authed call. The token is used here and never logged, echoed,
     // or interpolated into any user-facing string (see redact()).
-    const authed = await fetchFn("https://www.codebuff.com/api/v1/usage", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ fingerprintId }),
+    const authed = await fetchFn(FREEBUFF_SESSION_URL, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
       signal: AbortSignal.timeout(20000),
     });
+    if (!authed.ok) return { error: `session HTTP ${authed.status}` };
     const d = await authed.json().catch(() => ({}));
-    const bal = Number(d?.remainingBalance ?? NaN);
-    if (!Number.isFinite(bal)) return { error: `usage HTTP ${authed.status}` };
-    return { balance: bal, resetAt: d?.next_quota_reset || null };
+    const fb = d?.freebucks || {};
+    const daily = fb.daily || {};
+    const bal = Number(daily.remaining ?? fb.balance ?? NaN);
+    if (!Number.isFinite(bal)) return { error: "session payload has no Freebucks pool" };
+    return {
+      balance: bal,
+      resetAt: daily.resetAt || null,
+      dailyLimit: Number(daily.limit) || 0,
+      walletBalance: Number(fb.wallet?.balance) || 0,
+      accessTier: String(d?.accessTier || "unknown"),
+    };
   } catch (e) {
     return { error: redact(e) };
   }
@@ -159,20 +190,33 @@ export function stripChrome(text) {
     .filter((l) => l && !CHROME_LINE.test(l));
 }
 
-/** Numbered picker entry ("2) GLM 5.3 Flash (0/hr)") matching a model family. */
+/**
+ * Numbered picker entry ("2) GLM 5.3 Flash (0/hr)") matching a model.
+ *
+ * Menu entries carry display names, not ids, so match on words from the model's
+ * tail and require the best label to share at least TWO of them — a single
+ * shared word ("Muse") would happily select the wrong model, and defaulting to
+ * plain Enter is safer than typing a wrong digit. Returns "" when nothing
+ * matches confidently (the caller then accepts the default model).
+ */
 export function pickerChoiceFor(lines, model) {
-  const m = String(model || "").toLowerCase();
-  const want = [];
-  if (/glm/.test(m)) want.push(/glm/i);
-  if (/mimo/.test(m)) want.push(/mimo/i);
-  if (/deepseek/.test(m)) want.push(/deepseek/i);
-  if (!want.length) return "";
+  const tokens = [...new Set(
+    String(model || "")
+      .replace(/^[^/]+\//, "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 3)
+  )];
+  if (tokens.length < 2) return "";
+  let best = { num: "", score: 0 };
   for (const raw of lines) {
     const mt = String(raw || "").match(/^[ \t]*(\d{1,2})[.)][ \t]+(.+)$/);
     if (!mt) continue;
-    if (want.some((re) => re.test(mt[2]))) return mt[1];
+    const label = mt[2].toLowerCase();
+    const score = tokens.filter((t) => label.includes(t)).length;
+    if (score > best.score) best = { num: mt[1], score };
   }
-  return "";
+  return best.score >= 2 ? best.num : "";
 }
 
 async function waitFor(pollFn, { timeoutMs, pollMs, exec, sleep }) {
@@ -236,8 +280,8 @@ export async function runFreebuffLane({
     }
     if (!bal.error && !(bal.balance > 0) && !isZeroHrModel(model)) {
       return fail(
-        `Freebucks balance is 0${bal.resetAt ? ` (resets ${bal.resetAt})` : ""} — not starting a paid session from Telegram. ` +
-          `Pick a 0/hr model (GLM 5.3 Flash / MiMo 2.6 Flash) or run \`freebuff\` in a terminal.`
+        `Freebucks pool is empty${bal.resetAt ? ` (resets ${bal.resetAt})` : ""} — not starting a paid session from Telegram. ` +
+          `Space Bunny Alpha is the only 0 FB model, or run \`freebuff\` in a terminal.`
       );
     }
 
