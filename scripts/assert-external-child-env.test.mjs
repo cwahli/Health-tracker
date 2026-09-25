@@ -127,5 +127,27 @@ check('external spawn still receives PATH', Boolean(captured[0].env.PATH));
 check('website spawn keeps GITHUB_TOKEN', captured[1].env.GITHUB_TOKEN === 'ghp_from_real_parent_env');
 check('the spawn cwd is the workspace it was given', captured[0].cwd === '/tmp/ext');
 
+// Gemini must run INSIDE OpenCode, not by calling Google's API from a bot. That
+// works because buildOpencodeEnv aliases GEMINI_API_KEY to the variable OpenCode's
+// google provider actually reads (GOOGLE_GENERATIVE_AI_API_KEY) — the alias was
+// already there, and it is the only reason the Gemini rows in /allowance and
+// /freemodel are real. Verified live on 2026-09-25: all three google/gemini models
+// answer through the CLI with the env this module builds.
+//
+// Three ways this can silently stop working, all asserted here: the alias going
+// away, the alias being overwritten by a bad value, and the filtered "project" env
+// dropping the key so the CLI comes back with "API key is missing".
+const { buildOpencodeEnv } = await import('./lib/agent-opencode.mjs');
+const geminiAlias = buildOpencodeEnv({ runtimeEnv: { GEMINI_API_KEY: 'AIza_test_key' } });
+check('GEMINI_API_KEY is aliased to the variable opencode actually reads',
+  geminiAlias.GOOGLE_GENERATIVE_AI_API_KEY === 'AIza_test_key', JSON.stringify(geminiAlias));
+check('an explicit GOOGLE_GENERATIVE_AI_API_KEY is never overwritten',
+  buildOpencodeEnv({ runtimeEnv: { GEMINI_API_KEY: 'AIza_old', GOOGLE_GENERATIVE_AI_API_KEY: 'AIza_explicit' } }).GOOGLE_GENERATIVE_AI_API_KEY === 'AIza_explicit');
+check('no gemini key means no alias is invented', !('GOOGLE_GENERATIVE_AI_API_KEY' in buildOpencodeEnv({ runtimeEnv: {} })));
+check('the alias reaches a filtered project-mode child', buildChildEnv({ parentEnv: {}, extraEnv: geminiAlias, mode: 'project' }).GOOGLE_GENERATIVE_AI_API_KEY === 'AIza_test_key');
+check('and an inherit-mode child', buildChildEnv({ parentEnv: {}, extraEnv: geminiAlias, mode: 'inherit' }).GOOGLE_GENERATIVE_AI_API_KEY === 'AIza_test_key');
+check('the gemini key is not on the project passthrough allowlist (it must arrive as an explicit credential)',
+  !PROJECT_ENV_PASSTHROUGH.includes('GOOGLE_GENERATIVE_AI_API_KEY') && !PROJECT_ENV_PASSTHROUGH.includes('GEMINI_API_KEY'));
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
