@@ -3,7 +3,9 @@
 Any agent can pick up the next open card. Read this file, then `plan/LOCATION_AGNOSTIC_AGENTS.md`, then stop. `plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md` is retired and empty. Do not reconstruct it.
 
 **Product plan:** `plan/LOCATION_AGNOSTIC_AGENTS.md`
-**Landed code:** commit `0d67dbd` on `main`
+**Landed code:** the website checkout on `main`. No R-14.1 card is closed. One piece of card 6 is already there: `stampDepleted` in `scripts/lib/free-lanes.mjs` (around line 1076), called from `trackRunQuota` in `scripts/bot-host.mjs` (around line 473, and again on the message path around lines 1941 and 1954). It stores the vendor retry hint and refuses doc-like noise. It does not choose the next lane. `markDepleted`, `isDepleted`, and `nextFailoverRoutes` are not referenced from `bot-host.mjs`.
+
+**Do not land** the uncommitted `~/bot-host` change that defaults the ledger to `~/.local/state/shared-free-lanes` unless `FREE_LANES_PER_BOT=1`. Cards 5 and 6 need one ledger per worker. That shared default is not part of this work.
 **Roadmap row R-14.1 is OPEN.** `assert-external-projects.test.mjs` (55 pass) never sends a Telegram command and never checks where the process runs. Do not mark R-14.1 done. Do not edit the roadmap row to COMPLETE.
 
 ## Rules for every card
@@ -140,9 +142,9 @@ The worker connects outward to the VM. The VM does not dial the phone or the not
 
 **Change.** VM, VM2, mobile, Collab, and the Grok router keep their own pollers. Each one accepts `/location`, `/project`, `/role`, and the allowance walk. Do not delete a bot to make this true.
 
-The walk is the one the Grok router already has: `markDepleted`, `isDepleted`, and `nextFailoverRoutes` in `tools/telegram-provider-router/src/index.js`. Bot-host records the same fact with `stampDepleted`. A provider quota or rate-limit error writes `depletedUntil` in that process before the reply. A shared OpenCode Zen bucket marks every model in the bucket. A help page or a status table does not mark anything. The next message uses the next selectable row on that same worker. Freebuff is never the row that is chosen. Only an empty selectable list moves the turn to the next connected worker, with the project, the role, and the short log. If every connected worker is empty, the reply says so and does not run.
+The stamp is already on `main` (`stampDepleted` via `trackRunQuota`). Do not write a second stamper. What is missing is the walk. After the stamp, the next message must use the next selectable row on that same worker, the way `nextFailoverRoutes` does on the Grok router. Wire bot-host to that behavior. Do not copy those three router function names in unless the call is real. A shared OpenCode Zen bucket marks every model in the bucket. A help page or a status table does not mark anything. Freebuff is never the row that is chosen. A lane with status `ended` is dropped. Only an empty selectable list moves the turn to the next connected worker, with the project, the role, and the short log. If every connected worker is empty, the reply says so and does not run.
 
-**Specimen already seen.** On 2026-09-25 at 12:29Z the VM bot was on `cline-free/muse-spark-1.3-contributor`. The provider returned `429` and `Try again in 22h 46m`. The chat was sent the raw `INFERENCE_CAP_ERROR` JSON. No `depletedUntil` was written and no next lane was selected. That reply is a fail for this card.
+**Specimen already seen.** On 2026-09-25 at 12:29Z the VM bot was on `cline-free/muse-spark-1.3-contributor`. The provider returned `429` and `Try again in 22h 46m`. The chat was sent the raw `INFERENCE_CAP_ERROR` JSON. The next lane was not selected. That reply is a fail for this card even if a stamp was written.
 
 **Live proof.** Use a copy of the ledger for the bot under test. The real user ledger mtime is unchanged before and after. Do this twice: once to `@VM_19485_bot`, once to the Grok router bot. Same order both times.
 
@@ -193,6 +195,6 @@ The location change inside step 5 must also cover a host that has no allowance l
 
 Run cards 1 through 8, including 6b and 6c, again in order on one restarted `bot-host@vm`, and paste one evidence block per card. The author of any of those patches does not run this pass. Card 6's router half is part of this pass. A missing 6b or 6c block means the feature is not ready.
 
-The feature is ready for the user only when all nine evidence blocks are in the ticket and every negative check passed. Until then the user-facing status is: not ready to test.
+The feature is ready for the user only when these eleven blocks are in the ticket and every negative check passed: cards 1, 2, 3, 4, 5, 6, 6b, 6c, 7, 8, and the card 9 rerun. Until then the user-facing status is: not ready to test.
 
 Drive stays the local folder until the user names the Google account. Do not open that work in these cards.
