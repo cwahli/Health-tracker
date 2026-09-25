@@ -51,6 +51,7 @@ import { appendRow, retrieve } from './lib/memory-stores.mjs';
 import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
 import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary } from './lib/swap-guards.mjs';
 import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCanaryResult } from './lib/worker-routing.mjs';
+import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -1940,6 +1941,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
             const route = armRoute(target, { previous: loc });
             console.log(`[${config.id}] route to ${target} armed (${route.state})`);
           }
+          // The lease follows the location it is held for, so the next
+          // starter sees which host the poller is currently on.
+          renewPollerLease({ key: config.id, host: target, pid: process.pid });
           await api.sendMessage(
             chatId,
             `✅ *Compute location set to:* \`${target}\`\n${status.reason}. The next turn runs on ${target}${isLocalHost(target) ? '' : ' — its first turn is a canary (checked, then confirmed as active)'}.`
@@ -2918,6 +2922,26 @@ async function main() {
     await dryRun(config, args);
     return;
   }
+
+  // Guard 10: one live poller per bot id. A second process with the same id —
+  // exactly what a move creates while the old host is still up — is refused
+  // by name instead of both answering the same chat. The move is drain (the
+  // old poller stops claiming), release (SIGTERM gives the lease back), start
+  // (the new host acquires it).
+  const lease = acquirePollerLease({ key: config.id, host: workLocation(), pid: process.pid });
+  if (!lease.ok) {
+    console.error(`[bot-host] refusing to start: ${lease.reason}`);
+    process.exit(1);
+  }
+  if (lease.row?.takenOverFrom) {
+    console.log(`[${config.id}] took the poller lease from pid ${lease.row.takenOverFrom.pid} (no longer running)`);
+  }
+  const giveLeaseBack = () => {
+    releasePollerLease({ key: config.id, pid: process.pid });
+  };
+  process.once('SIGTERM', giveLeaseBack);
+  process.once('SIGINT', giveLeaseBack);
+  setInterval(() => renewPollerLease({ key: config.id, host: workLocation(), pid: process.pid }), 60_000).unref();
 
   const token = resolveToken(bot);
   const api = new TelegramApi(token);
