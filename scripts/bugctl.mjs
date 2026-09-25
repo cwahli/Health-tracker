@@ -25,7 +25,10 @@
  *   duplicate --id N --of TAG
  *   unblock --id N [--reason R]
  *   evidence --id N --summary S [--job-id J]
- *   next | list | show --id N | packet --id N [--format text] | state --id N | queue [--state S]
+ *   next | list [--state S] | show --id N | packet --id N [--format text] | state --id N | queue [--state S]
+ *   curate --id N --expected-revision R --reason WHY [--title T] [--class C] [--surface S] [--component C --expected E --criteria R]
+ *   handoff --id N --expected-revision R --reason WHY
+
  *   flush          replay the offline queue
  *   help
  *
@@ -147,7 +150,7 @@ function journalPub(r) {
 // would keep `bugctl flush` red forever. Reads fail loud instead.
 const WRITE_OPS = new Set([
   'create', 'pack', 'defect', 'repro', 'plan', 'attempt', 'verify', 'close',
-  'claim', 'duplicate', 'unblock', 'block', 'evidence',
+  'claim', 'duplicate', 'unblock', 'block', 'evidence', 'curate', 'handoff',
 ]);
 
 async function withFallback(op, args, fn) {
@@ -424,6 +427,46 @@ async function main() {
       break;
     }
 
+    case 'curate':
+    case 'edit':
+    case 'rewrite': {
+      const id = resolveId(args);
+      if (!id) fail('--id required', args);
+      const body = {
+        op: cmd === 'rewrite' ? 'rewrite' : cmd === 'edit' ? 'edit' : String(args.op || 'review'),
+        expected_revision: Number(args['expected-revision'] ?? args.expected_revision),
+        reason: args.reason,
+        title: args.title,
+        class: args.class,
+        surface: args.surface,
+        assignee: args.assignee,
+        component: args.component,
+        expected: args.expected,
+        criteria: args.criteria,
+      };
+      const r = await withFallback({ op: 'curate', id, payload: body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/curation`, body));
+      if (r.receipt) appendJournal(journalPub(r), { op: body.op, tag_id: r.tag_id || id, state: r.state, receipt: r.receipt });
+      out(r, args);
+      if (r.error && !r.queued) process.exit(1);
+      break;
+    }
+
+    case 'handoff': {
+      const id = resolveId(args);
+      if (!id) fail('--id required', args);
+      const body = {
+        op: 'handoff',
+        expected_revision: Number(args['expected-revision'] ?? args.expected_revision),
+        reason: args.reason,
+        assignee: 'orchestrator',
+      };
+      const r = await withFallback({ op: 'handoff', id, payload: body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/curation`, body));
+      if (r.receipt) appendJournal(journalPub(r), { op: 'handoff', tag_id: r.tag_id || id, state: r.state, receipt: r.receipt });
+      out(r, args);
+      if (r.error && !r.queued) process.exit(1);
+      break;
+    }
+
     case 'next': {
       const r = await withFallback({ op: 'next' }, args, () => api('GET', `/api/bugs/next?mode=${encodeURIComponent(args.mode || '')}${args.n ? `&n=${args.n}` : ''}`));
       out(r, args);
@@ -435,9 +478,9 @@ async function main() {
       if (args.state) qs.set('state', args.state);
       if (args.assignee) qs.set('assignee', args.assignee);
       if (args.surface) qs.set('surface', args.surface);
-      const r = await withFallback({ op: 'list', ...Object.fromEntries(qs) }, args, () => api('GET', `/api/bugs/queue?${qs}`));
-      if (r.queue) {
-        out({ count: r.queue.length, rows: r.queue.map((q) => ({ n: q.public_n, state: q.state, title: q.title, assignee: q.assignee, surface: q.surface })) }, args);
+      const r = await withFallback({ op: 'list', ...Object.fromEntries(qs) }, args, () => api('GET', `/api/bugs/list?${qs}`));
+      if (r.rows) {
+        out({ source: r.source, count: r.count ?? r.rows.length, generated_at: r.generated_at, rows: r.rows }, args);
       } else out(r, args);
       break;
     }
@@ -507,7 +550,8 @@ async function main() {
           else if (op === 'duplicate') res = await api('PATCH', `/api/bugs/${encodeURIComponent(rest.id)}`, { duplicate_of: rest.of });
           else if (op === 'unblock') res = await api('PATCH', `/api/bugs/${encodeURIComponent(rest.id)}`, { blocked_reason: null });
           else if (op === 'block') res = await api('PATCH', `/api/bugs/${encodeURIComponent(rest.id)}`, { blocked_reason: rest.reason, queue: 'blocked' });
-          else if (op === 'evidence') res = await api('POST', `/api/bugs/${encodeURIComponent(rest.id)}/attach`, rest);
+           else if (op === 'evidence') res = await api('POST', `/api/bugs/${encodeURIComponent(rest.id)}/attach`, rest);
+           else if (op === 'curate' || op === 'handoff') res = await api('POST', `/api/bugs/${encodeURIComponent(rest.id)}/curation`, rest.payload || rest);
           else {
             failed++;
             remaining.push(line);

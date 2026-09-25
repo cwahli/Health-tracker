@@ -476,12 +476,14 @@
       "id": "svc-bug-ticket",
       "test": "T2",
       "scope": "common",
-      "status": "done",
+      "status": "partial",
       "prove": "unit: scripts/lib/bug-pack.mjs fixtures; live: packer reply via bugctl E2E (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2)",
       "expect": [
         "scripts/bugctl.mjs",
         "scripts/lib/bug-pack.mjs",
-        "scripts/skills/common/bug-ticket/SKILL.md"
+        "scripts/skills/common/bug-ticket/SKILL.md",
+        "src/utils/bugTicketState.ts",
+        "serverBugSnapshot.ts"
       ],
       "skills": [
         "bug-ticket"
