@@ -103,7 +103,8 @@ try {
   const r2 = providerReadiness({ env, home, location: 'vps', clineReady: () => true });
   check('a vm2 gap says restart bot-host@vm2', /bot-host@vm2/.test(String(r2.cloudflare.fix)));
   setServiceUnit('vm');
-  check('a vm gap says restart bot-host@vm', /bot-host@vm[^2]/.test(String(r2.cloudflare.fix)));
+  const vmFix = String(providerReadiness({ env, home, location: 'vps', clineReady: () => true }).cloudflare.fix);
+  check('a vm gap says restart bot-host@vm and not vm2', /bot-host@vm(?!2)/.test(vmFix) && !vmFix.includes('vm2'));
 } finally {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
   fs.rmSync(home, { recursive: true, force: true });
