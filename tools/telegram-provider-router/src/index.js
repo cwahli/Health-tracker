@@ -2631,24 +2631,52 @@ function clineAuthOk() {
   }
 }
 /**
- * E) Cline known free lanes, filtered by the ledger: a lane marked
- * unavailable/ended (e.g. the GLM 5.3 free promo that ended) must never be
- * offered as a healthy button. Exported pure so tests exercise the exact
- * filter probeClineFree uses. Unknown status (no lane row) = keep.
+ * Cline free lanes for /freemodel, derived from the LEDGER (not a hardcoded
+ * list) so models enrolled by `scripts/sync-cline-models.mjs` appear without a
+ * code change. Rules:
+ * - Candidate set = ledger lanes whose provider is cline, unioned with the
+ *   three bootstrap ids (kept so a fresh/empty table still lists the known
+ *   working lanes).
+ * - A lane marked unavailable/ended (e.g. the GLM 5.3 promo that ended) is
+ *   never offered as a healthy button; unknown status (no row) = keep.
+ * - Sorted by ledger pref, then id, so the order is stable across restarts.
+ * Exported pure so tests exercise the exact filter probeClineFree uses.
  */
+const CLINE_BOOTSTRAP_LANES = [
+  "cline-free/muse-spark-1.3-contributor",
+  "cline-free/deepseek-v4.1-flash",
+  // Used successfully on this box as free lane; kept only if the ledger does
+  // not say unavailable/ended.
+  "cline-free/glm-5.3-flash",
+];
 function availableClineKnownLanes(table = loadFreeLaneTable()) {
-  const known = [
-    { id: "cline-free/muse-spark-1.3-contributor", label: "muse spark 1.3 free" },
-    { id: "cline-free/deepseek-v4.1-flash", label: "deepseek v4.1 flash free" },
-    // Used successfully on this box as free lane; keep only if the ledger does
-    // not say unavailable/ended.
-    { id: "cline-free/glm-5.3-flash", label: "glm 5.3 flash free" },
-  ];
-  return known.filter((k) => {
-    const lane = table?.lanes?.find((l) => laneMatchesRoute(l, "cline", k.id));
-    const st = String(lane?.status || "").toLowerCase();
-    return st !== "unavailable" && st !== "ended";
-  });
+  const rows = Array.isArray(table?.lanes) ? table.lanes : [];
+  const byId = new Map();
+  for (const id of CLINE_BOOTSTRAP_LANES) byId.set(id, { id, pref: Number.MAX_SAFE_INTEGER });
+  for (const l of rows) {
+    if (String(l?.provider || "").toLowerCase() !== "cline") continue;
+    const id = String(l.model || "");
+    if (!id) continue;
+    const prev = byId.get(id);
+    byId.set(id, { id, pref: Number.isFinite(prev?.pref) ? Math.min(prev.pref, Number(l.pref) || 0) : Number(l.pref) || 0 });
+  }
+  return [...byId.values()]
+    .filter(({ id }) => {
+      const lane = rows.find((l) => laneMatchesRoute(l, "cline", id));
+      const st = String(lane?.status || "").toLowerCase();
+      return st !== "unavailable" && st !== "ended";
+    })
+    .sort((a, b) => a.pref - b.pref || a.id.localeCompare(b.id))
+    .map(({ id }) => ({ id, label: prettifyClineLaneLabel(id) }));
+}
+function prettifyClineLaneLabel(id) {
+  return String(id)
+    .replace(/^cline-free\//, "")
+    .replace(/-contributor$/i, "")
+    .replace(/-free$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .concat(" free");
 }
 
 async function probeClineFree() {
