@@ -1,26 +1,4 @@
 # Bug Backlog — Health-tracker QA
-**Generated:** 2026-09-25T09:30:30.779Z  ·  **Generator:** `node scripts/bug-backlog.mjs`
-**Store source:** store api (forced)  ·  **Legacy evidence:** `bug-backlog.legacy.md` (preserved, embedded verbatim below)
-
----
-
-## Ticket store (7 cards)
-
-| # | Tag | Title | State | Flags | Assignee | Attempts | Last event |
-|---|-----|-------|-------|-------|----------|----------|------------|
-| 7 | `tag_mugrcdko_bm9cn4` | BUG-20260921-8449 re-open: home dashboard vs reference (V-30.5 retro-audit) | packed |  | — | 0 | 2026-09-25 09:28:04 |
-| 6 | `tag_mugpteuh_hd1bjy` | STEWARD E2E disposable archive fixture (reviewed) | packed |  | orchestrator | 0 | 2026-09-25 08:52:46 |
-| 5 | `tag_mugok23j_bep4fr` | Stray v305-free-model-proof.md at repository root | done |  | — | 4 | 2026-09-25 08:44:14 |
-| 1 | `tag_mufm81ca_fbnn9j` | Failed to process your request (Error: Vision Scout Failed: Gemini unavailable (503). Retry shortly. (Details: {"error":{"message":"{\n \"error\": {\n \"code\": 503,\n \"message\": \"This model | new |  | — | 0 | 2026-09-25 08:24:49 |
-| 2 | `tag_mufs4t96_wj02x7` | Home: omega-3 weekly shows 7.700000000000001g | done | not_reproducible | — | 0 | 2026-09-24 23:13:57 |
-| 4 | `tag_mufyefwn_gbrzgj` | V-30.4 proof card B: dispatch failure must block (funds-depleted path) | packed | blocked_reason: dispatch failed: opencode did not resolve (no fix committed) | — | 2 | 2026-09-24 20:06:22 |
-| 3 | `tag_mufwnjox_00lex7` | Stray v304-scratch.md at repository root | done |  | — | 3 | 2026-09-24 19:53:55 |
-
----
-
-## Legacy evidence (preserved hand-compiled — do not edit)
-
-# Bug Backlog — Health-tracker QA
 **Compiled:** 2026-09-22  
 **Source:** QA runner output, dispatch audit log, dispatch logs, on-disk screenshots  
 

@@ -16,8 +16,14 @@
  * stay manual per the §14.7 distribute matrix — this script is the gate BEFORE
  * that step: a new capability with undeclared classes/adapters fails here.
  *
- * Usage: node scripts/check-capability-propagation.mjs [--strict]
+ * Usage: node scripts/check-capability-propagation.mjs [--strict] [--ids=a,b,c]
  *   --strict: also fail on `partial`/`open` capabilities (for release gates).
+ *   --ids:    scope the --strict status rule to these capability ids (the
+ *             ticket rows). Structural checks (schema, orphans, vendor drift,
+ *             core files) still run over EVERY row either way — --ids only
+ *             narrows which statuses must be `done` (V-30.5 ticket-scoped
+ *             strict; the 5 pre-existing foreign partials stay owned by their
+ *             owning work and are never marked done here).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -66,6 +72,12 @@ const VENDOR_MIRRORS = [
 ];
 
 const strict = process.argv.includes('--strict');
+const idsArg = process.argv.find((a) => a.startsWith('--ids='));
+const strictIds = idsArg ? new Set(idsArg.slice(6).split(',').map((s) => s.trim()).filter(Boolean)) : null;
+if (strict && idsArg && !strictIds.size) {
+  console.error('FATAL: --ids= given but empty');
+  process.exit(2);
+}
 const failures = [];
 const warnings = [];
 let checked = 0;
@@ -146,7 +158,15 @@ for (const cap of reg.capabilities || []) {
     if (!skillToCap.has(s)) skillToCap.set(s, []);
     skillToCap.get(s).push(cap.id);
   }
-  if (strict && cap.status !== 'done') fail(`${tag}: status "${cap.status}" (strict mode requires done)`);
+  if (strict && (!strictIds || strictIds.has(cap.id)) && cap.status !== 'done') {
+    fail(`${tag}: status "${cap.status}" (strict mode${strictIds ? ` for --ids=${[...strictIds].join(',')}` : ''} requires done)`);
+  }
+  if (strictIds) strictIds.delete(cap.id);
+}
+
+// A scoped --strict must not silently pass on typo'd ids.
+if (strictIds && strictIds.size) {
+  for (const missing of strictIds) fail(`--ids="${missing}" matches no capability`);
 }
 
 // Orphan scan A: every common skill must be mapped.

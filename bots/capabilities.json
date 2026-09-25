@@ -262,7 +262,7 @@
       "test": "T3",
       "scope": "runtime-adapter",
       "status": "partial",
-      "prove": "unit: tools/telegram-provider-router/scripts/test-inbound-media.mjs; live smoke: photo → absolute path in prompt, per class",
+      "prove": "unit: tools/telegram-provider-router/scripts/test-inbound-media.mjs; live smoke: photo \u2192 absolute path in prompt, per class",
       "expect": [
         "scripts/lib/inbound-media.mjs",
         "tools/telegram-provider-router/src/inbound-media.vendor.mjs",
@@ -280,14 +280,14 @@
         "grok_tg": "adapter",
         "collab": false
       },
-      "notes": "One downloader (§14.7 Case C). Grok TG router adapter and vendor mirror are wired; live photo smoke remains pending. Hermes profile wiring stays per-profile."
+      "notes": "One downloader (\u00a714.7 Case C). Grok TG router adapter and vendor mirror are wired; live photo smoke remains pending. Hermes profile wiring stays per-profile."
     },
     {
       "id": "proc-failover",
       "test": "T4",
       "scope": "runtime-adapter",
       "status": "partial",
-      "prove": "live smoke: depleted lane → same prompt completes on next lane with switch line; gate: scripts/check-capability-propagation.mjs vendor-drift + unit tests for free-lanes",
+      "prove": "live smoke: depleted lane \u2192 same prompt completes on next lane with switch line; gate: scripts/check-capability-propagation.mjs vendor-drift + unit tests for free-lanes",
       "expect": [
         "tools/telegram-provider-router/src/index.js",
         "scripts/lib/agent-opencode.mjs",
@@ -476,7 +476,7 @@
       "id": "svc-bug-ticket",
       "test": "T2",
       "scope": "common",
-      "status": "partial",
+      "status": "done",
       "prove": "unit: scripts/lib/bug-pack.mjs fixtures; live: packer reply via bugctl E2E (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2)",
       "expect": [
         "scripts/bugctl.mjs",
@@ -495,7 +495,7 @@
         "grok_tg": false,
         "collab": false
       },
-      "notes": "V-30.2 packer service — bugctl is the one binary; hermes profile bug_ticket owns intake. E2E proven 2026-09-24 via HERMES_BUG_TICKET_TOKEN (@Bug_ticket_bot); registry enabled:true."
+      "notes": "V-30.2 packer service \u2014 bugctl is the one binary; hermes profile bug_ticket owns intake. E2E proven 2026-09-24 via HERMES_BUG_TICKET_TOKEN (@Bug_ticket_bot); registry enabled:true. Status done from that proof (V-30.5 transition)."
     },
     {
       "id": "proc-ticket-state",
@@ -521,8 +521,8 @@
       "id": "sess-ticket-resume",
       "test": "T6",
       "scope": "common",
-      "status": "open",
-      "prove": "unit test tests/bugctl-queue.test.ts (offline queue on dead API, flush replay + empty, un-sendable rows kept, corrupt lines dropped, missing queue empty)",
+      "status": "done",
+      "prove": "unit: tests/bugctl-queue.test.ts (offline queue on dead API, flush replay + empty, un-sendable rows kept, corrupt lines dropped, missing queue empty); /resume command surface: tests/bot-host.test.ts \"advertises /resume with a handler, help line, and telegram payload\" (queue\u2192packet read path, no second store)",
       "expect": [
         "scripts/bugctl.mjs",
         "scripts/lib/bug-pack.mjs"
@@ -537,7 +537,7 @@
         "grok_tg": false,
         "collab": false
       },
-      "notes": "Offline JSONL queue is the durability path for pack ops when API is unreachable (A-f5/offline)."
+      "notes": "Offline JSONL queue is the durability path for pack ops when API is unreachable (A-f5/offline). /resume (V-30.5) prints the current ticket packet read-only via bugctl queue + packet; live TG tap on @Bug_ticket_bot still on the needs-human list."
     },
     {
       "id": "svc-repro",
@@ -561,7 +561,7 @@
         "grok_tg": false,
         "collab": false
       },
-      "notes": "V-30.3 reproducer — reuses the existing qa_meal profile (preload qa-reproduce), no new QA bot/token. Verdicts via bugctl repro --check (validateRepro vocabulary); evidence is R2 keys under bugs/<tag_id>/<ts>-<kind>.<ext>."
+      "notes": "V-30.3 reproducer \u2014 reuses the existing qa_meal profile (preload qa-reproduce), no new QA bot/token. Verdicts via bugctl repro --check (validateRepro vocabulary); evidence is R2 keys under bugs/<tag_id>/<ts>-<kind>.<ext>."
     }
   ]
 }

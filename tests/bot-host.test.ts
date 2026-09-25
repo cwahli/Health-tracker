@@ -633,10 +633,27 @@ describe('commands', () => {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
     };
     const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
-    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/abort', '/help']) {
+    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/abort', '/help', '/resume']) {
       expect(text).toContain(cmd);
     }
     expect(text).toContain('opencode-go/muse-spark-1.3');
+  });
+
+  it('advertises /resume with a handler, help line, and telegram payload (V-30.5)', async () => {
+    expect(COMMAND_NAMES).toContain('resume');
+    const entry = BOT_COMMANDS.find((c) => c.command === 'resume');
+    expect(entry?.description.length).toBeGreaterThan(0);
+    expect(toTelegramCommands().find((c) => c.command === 'resume')?.description).toBe(entry?.description);
+    expect(helpText({ name: 'b', agent: {} }, {})).toContain('/resume [n]');
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
+    );
+    // handler exists and is read-only (queue/packet reads, no second store).
+    expect(src).toContain("case 'resume'");
+    expect(src).toContain('resumePacketText');
+    expect(src).toMatch(/runBugctl\(\['queue', '--json'\]\)/);
+    expect(src).toMatch(/runBugctl\(\['packet', `--id=#\$\{id\}`, '--format=text'\]\)/);
+    expect(parseCommand('/resume 5')).toEqual({ name: 'resume', args: '5', raw: '/resume 5' });
   });
 
   it('shows the effective model in status', () => {

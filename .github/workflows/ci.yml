@@ -45,3 +45,33 @@ jobs:
 
       - name: Sync regression
         run: npm run test:sync
+
+      # V-30.5 bug-ticket lane gates (plan/BUG_TICKET_PIPELINE.md §6.2).
+      # ticket-state: derived S-C-lite projection stays pure.
+      - name: Ticket state gate (bugTicketState)
+        run: npx vitest run src/utils/bugTicketState.test.ts
+
+      # pack-fixture: BUG-8449 fixture traceability + packer rules. Host-profile
+      # bootstrap uses the committed fixture HOME on clean runners (CI-safe).
+      - name: Bug pack fixture gate (assert-bug-pack)
+        run: node scripts/assert-bug-pack.mjs
+
+      # continuity: §4.10 route-shape + offline projection walk (no chat).
+      - name: Bug ticket continuity gate (assert-bug-ticket-continuity)
+        run: node scripts/assert-bug-ticket-continuity.mjs
+
+      # capability: structural checks on every row, then the V-30.5 ticket-scoped
+      # strict (the 5 foreign partials stay owned by BOT-11, never marked done).
+      - name: Capability propagation gate (strict, ticket-scoped)
+        run: |
+          node scripts/check-capability-propagation.mjs
+          node scripts/check-capability-propagation.mjs --strict --ids=svc-bug-ticket,proc-ticket-state,sess-ticket-resume,svc-repro
+
+      # §4.10: the amnesia gate belongs in CI — answers from disk alone.
+      - name: Bug retro-audit gate (§4.10 answers from disk)
+        run: node scripts/assert-bug-retro-audit.mjs
+
+      # ratchet: review-failures "dispatch:unresolved" repeat (hint=#5) → sensor
+      # — the dispatcher must keep reading self-committed diffs as the fix.
+      - name: Dispatch self-commit sensor (dispatch:unresolved ratchet)
+        run: npx vitest run tests/dispatch-selfcommit.test.ts

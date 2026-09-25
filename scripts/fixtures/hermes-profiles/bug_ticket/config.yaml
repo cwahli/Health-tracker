@@ -1,0 +1,7 @@
+model:
+  default: upstage/solar-pro4:free
+  provider: nous
+agent:
+  max_turns: 12
+  preload_skills:
+    - bug-ticket
