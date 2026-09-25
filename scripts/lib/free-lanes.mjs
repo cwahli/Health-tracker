@@ -410,6 +410,13 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
   return rows.map((lane) => {
     const provider = String(lane.provider || "");
     const model = String(lane.model || "");
+    // A lane reached THROUGH opencode still belongs to the provider in its path:
+    // `opencode/tokenharbor/deepseek-v4.1-flash:free` is a Token Harbor lane, not
+    // an OpenCode one. Reading the lane's own provider field made those lanes
+    // inherit opencode's readiness and its plan code, so a missing
+    // TOKEN_HARBOR_API_KEY never blocked them and the table said OP where the
+    // router's table says TH.
+    const effectiveProvider = effectiveProviderOf(lane);
     const ref = toModelRefShim(provider, model);
     const status = String(lane.status || "").toLowerCase();
     const live = liveRecForLane(lane, session || {}, now);
@@ -421,7 +428,7 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
     // A lane whose provider has no credential on this host cannot run, whatever
     // the table says. Saying "available" there is how seven lanes sat in the
     // table looking usable when none of them could be.
-    const setup = readiness ? laneSetup(provider, readiness) : { needsSetup: false, unknown: true, reason: null };
+    const setup = readiness ? laneSetup(effectiveProvider, readiness) : { needsSetup: false, unknown: true, reason: null };
     let reason = "";
     if (ended) reason = "promotion ended, never offered again";
     else if (depleted) reason = `depleted until ${resetAt ? labelFn(resetAt, live?.countdownHint || lane.countdownHint) : "reset"}`;
@@ -436,7 +443,8 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
       family: lane.family || null,
       bucket: lane.bucket || null,
       label: lane.label || model,
-      plan: String(provider || "").slice(0, 2).toUpperCase(),
+      plan: String(effectiveProvider || "").slice(0, 2).toUpperCase(),
+      effectiveProvider,
       location,
       ended,
       depleted,
@@ -449,6 +457,24 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
       reason,
     };
   });
+}
+
+const PROVIDER_ALIASES = new Set([
+  'tokenharbor', 'cloudflare', 'google', 'openai', 'deepseek', 'openrouter',
+  'freebuff', 'opencode', 'cline', 'gemini', 'tinfoil', 'meta', 'zhipuai',
+]);
+
+/** The provider that actually serves a lane, from its model path. */
+export function effectiveProviderOf(lane) {
+  const own = String(lane?.provider || "").toLowerCase();
+  const parts = String(lane?.model || "").toLowerCase().split("/");
+  // A leading segment that merely repeats the lane's own provider is a prefix,
+  // not the provider: `opencode/tokenharbor/x` is Token Harbor. Start past it.
+  const start = parts[0] === own ? 1 : 0;
+  for (const seg of parts.slice(start)) {
+    if (PROVIDER_ALIASES.has(seg)) return seg;
+  }
+  return own;
 }
 
 /** toModelRef lives in freemodels; a local shim keeps this module standalone. */

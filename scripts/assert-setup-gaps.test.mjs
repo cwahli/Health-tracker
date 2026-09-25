@@ -75,6 +75,19 @@ try {
   check('/freemodel also refuses it', ann[0].selectable === false);
   check('/freemodel explains why', /TOKEN_HARBOR_API_KEY/.test(ann[0].reason || ''));
 
+  // 6b. A lane reached THROUGH opencode belongs to the provider in its path.
+  const through = { lanes: [
+    { provider: 'opencode', model: 'opencode/tokenharbor/deepseek-v4.1-flash:free', pref: 1, status: 'available', tg: true, label: 'TH via opencode' },
+    { provider: 'opencode', model: 'cloudflare/@cf/qwen/qwen3.8-27b', pref: 2, status: 'available', tg: true, label: 'CF via opencode' },
+    { provider: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', pref: 3, status: 'available', tg: true, label: 'Real opencode lane' },
+  ] };
+  const tp = projectLanes(through, {}, { readiness: r });
+  check('a tokenharbor lane behind opencode is blocked by the missing key', tp.find((x) => x.label === 'TH via opencode')?.needsSetup === true);
+  check('and its plan code is TH, not OP', tp.find((x) => x.label === 'TH via opencode')?.plan === 'TO');
+  check('a cloudflare lane behind opencode is blocked too', tp.find((x) => x.label === 'CF via opencode')?.needsSetup === true);
+  check('a genuine opencode lane is unaffected', tp.find((x) => x.label === 'Real opencode lane')?.selectable === true);
+  check('and keeps the OP code', tp.find((x) => x.label === 'Real opencode lane')?.plan === 'OP');
+
   // 7. The command exists and names the same things.
   const src = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('there is a /setup command', /case 'setup':/.test(src));
