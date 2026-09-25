@@ -1049,17 +1049,23 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       await api.sendMessage(chatId, 'Compacting — summarizing this session, then starting fresh…');
       try {
+        // Compact the session the chat is actually on. On an external project
+        // that is the external folder, with the same restricted child env as
+        // a normal turn, not the website checkout.
+        const compactProject = getChatProject(chatId);
+        const compactExternal = compactProject.type === 'external';
         const result = await runOpencode({
           prompt: COMPACT_SUMMARY_PROMPT,
           model: eff.model,
           variant: eff.variant,
-          workspace: config.agent.workspace,
+          workspace: compactExternal ? compactProject.workspace : config.agent.workspace,
           thinking: config.agent.thinking,
           timeoutMs: config.agent.timeoutMs,
           opencodeBin: config.agent.opencodeBin,
           onSpawn: (child) => running.set(chatId, { child, aborted: false }),
           extraArgs: ['--session', compactSessionId],
           env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+          envMode: compactExternal ? 'project' : 'inherit',
         });
         if (running.get(chatId)?.aborted) {
           await api.sendMessage(chatId, 'Aborted — session kept as-is.');
@@ -1844,7 +1850,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
 
     const activeProject = getChatProject(chatId);
     const activeRole = getChatRole(chatId);
-    const effectiveWorkspace = activeProject.type === 'external' ? activeProject.workspace : config.agent.workspace;
+    const isExternalTurn = activeProject.type === 'external';
+    const effectiveWorkspace = isExternalTurn ? activeProject.workspace : config.agent.workspace;
+    // An external folder's child is built from a list, so it never holds the
+    // website's git or deploy credentials. Project 1 keeps inheriting them.
+    const turnEnvMode = isExternalTurn ? 'project' : 'inherit';
     // Every project composes through the same path: an assigned role is
     // prepended for project 1 too, and composeExternalPrompt returns the
     // prompt untouched when the chat has no role.
@@ -1892,6 +1902,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           onEvent: onObserverEvent,
           onSpawn: (child) => running.set(chatId, { child, aborted: false }),
           env: chatEnv(api, chatId),
+          envMode: turnEnvMode,
         });
       }
       if (candidate.surface === 'gemini') {
@@ -1917,6 +1928,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         onAbort: () => abortOpencodeSession({ serverUrl: workSession.serverUrl, sessionId: workSession.opencodeSessionId }).catch(() => false),
         extraArgs,
         env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+        envMode: turnEnvMode,
       });
     };
 
