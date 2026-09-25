@@ -1350,16 +1350,29 @@ export function tableFromPreferenceDoc(prefDoc) {
  */
 export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionPath = null, catalogEntries = null } = {}) {
   const dirs = candidateRouterStateDirs(stateDir);
-  for (const dir of dirs) {
+  // The lane CATALOGUE is the host's, not a worker's. It is one table, owned by the
+  // router state and stamped by the allowance watcher, and every bot on the host must
+  // read that one — otherwise the bots drift apart and each shows a different list.
+  // Live on 2026-09-25: vm's private copy had decayed to a 7-lane stub with no
+  // updatedAt while vm2's still had 17, so the same command answered 43 rows on one
+  // bot and 50 on the other.
+  //
+  // What IS per-worker is the quota session: which lanes this worker has spent. So
+  // the table comes from the first host-wide directory that has one, and the session
+  // always comes from the directory the caller named. A FREE_LANES_DIR proof still
+  // works, because a stamp in the copy is read from the copy.
+  const hostFirst = tablePath ? dirs : [...dirs.filter((d) => d !== stateDir), ...(stateDir ? [stateDir] : [])];
+  for (const dir of hostFirst) {
     const tPath = tablePath || join(dir, "free-lane-table.json");
-    const sPath = sessionPath || join(dir, "session.json");
     const table = readJson(tPath);
     if (table && Array.isArray(table.lanes)) {
       // Fold the catalog in so /allowance shows the same rows /freemodel offers,
       // including models the table predates. Without this the two lists disagree
       // and a catalogued model has no row for the watcher to stamp.
       const merged = catalogEntries ? withCatalogLanes(table, catalogEntries).table : table;
-      return { table: merged, session: readSessionWithSharedQuota(dir), tablePath: tPath, sessionPath: sPath, source: "live-state" };
+      const sDir = stateDir || dir;
+      const sPath = sessionPath || join(sDir, "session.json");
+      return { table: merged, session: readSessionWithSharedQuota(sDir), tablePath: tPath, sessionPath: sPath, source: "live-state" };
     }
   }
   // Fallback: repo pref doc → all-available table so /allowance still shows order.

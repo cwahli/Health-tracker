@@ -71,6 +71,22 @@ try {
   const realView = usableTurnLanes(realTable, {}, { now });
   check('the real ledger still says it is available', realView.lanes.some((l) => l.model === 'zen/muse'));
 
+  // 4b. The lane CATALOGUE is the HOST's; only the quota session is a worker's.
+  // Each bot used to read its own private copy of free-lane-table.json, and those
+  // copies drift: live on 2026-09-25 vm's had decayed to a 7-lane stub with no
+  // updatedAt while vm2's still had 17, so one command answered 43 rows on one bot
+  // and 50 on the other. The table now comes from the router's state, the session
+  // from the directory the caller named.
+  const { loadFreeLaneLedger: loadLedger, candidateRouterStateDirs } = await import('./lib/free-lanes.mjs');
+  const hostDir = candidateRouterStateDirs(dir).find((d) => d !== dir);
+  const loaded = loadLedger({ stateDir: dir });
+  if (hostDir && fs.existsSync(path.join(hostDir, 'free-lane-table.json'))) {
+    check('the lane table comes from the host, not a private copy', loaded.tablePath === path.join(hostDir, 'free-lane-table.json'), loaded.tablePath);
+  } else {
+    check('no host table on this host, so a private copy is the only table (a proof host)', true);
+  }
+  check('the quota session is still the caller\'s own directory', loaded.sessionPath === path.join(dir, 'session.json'), loaded.sessionPath);
+
   // 5. The knob is narrow: no shared-default shape.
   //
   // Changed 2026-09-25, deliberately. This used to assert that the string
