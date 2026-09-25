@@ -142,6 +142,22 @@ export function liveRecForLane(lane, session, now = Date.now()) {
   return null;
 }
 
+/**
+ * Live session quota record for a /freemodel entry's own route candidates —
+ * no table lane row required. A freshly stamped route (e.g. a catalog model
+ * the pref-doc table never listed) must still read as depleted with its reset
+ * clock instead of silently showing available.
+ */
+export function liveRecForRoutes(candidates, session, now = Date.now()) {
+  for (const route of candidates || []) {
+    const key = route?.provider && route?.model ? `${route.provider}/${route.model}` : null;
+    if (!key) continue;
+    const rec = session?.quota?.[key];
+    if (liveQuotaRec(rec, now) && recIsAuthoritative(rec)) return { key, rec };
+  }
+  return null;
+}
+
 /** Human reset label (UTC ISO + Jakarta clock), mirrors src/index.js resetHumanLabel. */
 export function defaultResetLabel(untilMs, hint) {
   const iso = isoZ(untilMs);
@@ -334,6 +350,62 @@ export function nextAvailableRoutes(table, session, {
     out.push({ provider, model, pref: l.pref, family: l.family || null, label: l.label || model });
   }
   return out;
+}
+
+/**
+ * Every lane a turn may actually use on this host, in preference order.
+ *
+ * The turn path used to walk a fixed two-entry list (the chat's model, then
+ * the bot default) and retry a lane the ledger already knew was spent. This is
+ * the list the walk should use: Telegram-selectable rows that are not
+ * depleted, not ended, not unavailable, and not inside a live quota window.
+ * Terminal-only rows (Freebuff) are never in it.
+ *
+ * @returns {{lanes: Array, skipped: Array}} skipped rows carry why, for the chat.
+ */
+export function usableTurnLanes(table, session, { now = Date.now(), labelFn = defaultResetLabel } = {}) {
+  const t = overlayLiveQuota(table || {}, session || {}, { now, labelFn });
+  const all = [...(t.lanes || [])].sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  const lanes = [];
+  const skipped = [];
+  for (const lane of all) {
+    if (!lane) continue;
+    const id = { provider: String(lane.provider || ""), model: String(lane.model || "") };
+    const label = lane.label || id.model;
+    if (lane.tg === false) {
+      skipped.push({ ...id, label, why: "terminal-only, not selectable from chat" });
+      continue;
+    }
+    if (String(lane.status || "").toLowerCase() === "ended") {
+      skipped.push({ ...id, label, why: "lane ended, never offered again" });
+      continue;
+    }
+    if (!laneIsUsable(lane)) {
+      const until = lane.nextResetAt ? Date.parse(lane.nextResetAt) : NaN;
+      skipped.push({
+        ...id,
+        label,
+        why: lane.status === "depleted" ? "depleted" : `status ${lane.status}`,
+        until: Number.isFinite(until) ? until : null,
+        resetLabel: Number.isFinite(until) ? labelFn(until, lane.countdownHint) : null,
+      });
+      continue;
+    }
+    const live = liveRecForLane(lane, session || {}, now);
+    if (live) {
+      skipped.push({
+        ...id,
+        label,
+        why: "depleted",
+        until: live.depletedUntil || null,
+        resetLabel: live.nextResetAt || (live.depletedUntil ? labelFn(live.depletedUntil, live.countdownHint) : null),
+      });
+      continue;
+    }
+    if (!id.provider || !id.model) continue;
+    lanes.push({ ...id, pref: lane.pref, family: lane.family || null, label });
+  }
+  return { lanes, skipped };
 }
 
 /** Soonest Reset-in among depleted TG lanes (for all-depleted Stop message). */
@@ -924,6 +996,8 @@ export function isFreemodelEntryDepleted(entry, table, session, { now = Date.now
     const ref = typeof entry === "string" ? entry : entry?.ref || entry?.model || "";
     const candidates = routeCandidates(ref);
     if (!candidates.length || candidates.some((route) => route.provider === "gemini")) return false;
+    // A stamped route with no table lane row still counts (route-key fallback).
+    if (liveRecForRoutes(candidates, session, now)) return true;
     const lane = candidates.map((route) => table.lanes.find((l) => laneMatchesRoute(l, route.provider, route.model))).find(Boolean);
     if (!lane) return false;
     if (liveRecForLane(lane, session, now)) return true;
@@ -944,7 +1018,8 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
     const depleted = isFreemodelEntryDepleted(e, table, session, { now });
     let resetIn = "-";
     try {
-      const at = lane?.nextResetAt || lane?.cooldownUntil || null;
+      const routeHit = liveRecForRoutes(routeCandidates(ref), session, now);
+      const at = lane?.nextResetAt || lane?.cooldownUntil || routeHit?.rec?.depletedUntil || null;
       resetIn = depleted ? formatResetIn(at, now) : "-";
     } catch {}
     return { ...e, depleted, resetIn, laneLabel: lane?.label || null };
