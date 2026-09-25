@@ -2006,7 +2006,7 @@ describe('BOT-19 /tx wiring', () => {
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(sent.length).toBe(1);
     expect(sent[0]).toContain('ON');
-    expect(sent[0]).toMatch(/tmux attach -t work-testbox:ws-/);
+    expect(sent[0]).toMatch(/tmux attach -t work-view:ws-/);
     expect(sent[0]).toContain('9|/ws');
     expect(sent[0]).not.toContain('testbox|9|');
     expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'new-session', 'has-session', 'list-windows', 'list-panes', 'select-pane', 'list-panes', 'list-panes']);
@@ -2017,9 +2017,9 @@ describe('BOT-19 /tx wiring', () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
     const legacyWindow = tmuxWindowFor(sessionKey({ location: 'testbox', chat: '9', workspace: '/ws' }));
-    const tmux = fakeTxTmux({ 'work-testbox': [legacyWindow] });
+    const tmux = fakeTxTmux({ 'work-view': [legacyWindow] });
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
-    expect(tmux.sessions.get('work-testbox')).toEqual(new Set([legacyWindow]));
+    expect(tmux.sessions.get('work-view')).toEqual(new Set([legacyWindow]));
     expect(tmux.calls.map((args) => args[0])).toContain('split-window');
     expect(tmux.calls.map((args) => args[0])).toContain('kill-pane');
     expect(tmux.calls.flat().some((arg) => /kill-window|kill-session|respawn-pane|send-keys/.test(String(arg)))).toBe(false);
@@ -2032,7 +2032,7 @@ describe('BOT-19 /tx wiring', () => {
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'off', tmux: tmux.run });
     expect(sent[1]).toContain('OFF');
-    expect(tmux.sessions.get('work-testbox').size).toBe(1);
+    expect(tmux.sessions.get('work-view').size).toBe(1);
   });
 
   it('/tx status reports without creating a session', async () => {

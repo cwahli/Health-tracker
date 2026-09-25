@@ -543,10 +543,12 @@ export function debugProbe(backend, { session = null, tmux = defaultTmuxRunner, 
 }
 
 /** Full status view for a session, including its debug probe. */
-export function sessionStatus(id, { tmux = defaultTmuxRunner } = {}, storePath = sessionsPath()) {
+export function sessionStatus(id, { tmux = defaultTmuxRunner, sessionName } = {}, storePath = sessionsPath()) {
   const session = getSession(id, storePath);
   if (!session) return null;
-  return { ...session, probe: debugProbe(session.lane, { session, tmux }) };
+  // The product reports the stable swap view; callers that want the
+  // location-named session (tests, the library default) simply omit it.
+  return { ...session, probe: debugProbe(session.lane, { session, tmux, ...(sessionName ? { sessionName } : {}) }) };
 }
 
 /** Patterns that must never reach Telegram. */
