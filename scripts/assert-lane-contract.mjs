@@ -4,9 +4,9 @@
  *
  * Proves the agnostic lane contract in code, not prose:
  *  1. scripts/lib/lane-contract.mjs declares every dispatch backend
- *     (opencode/cline/grok/agy/gemini/human) with tools/session/degraded.
+ *     (opencode/cline/grok/agy/freebuff/gemini/human) with tools/session/degraded.
  *  2. Cline is marked degraded for resume; Gemini is API-only with no
- *     tools and no session.
+ *     tools and no session; Freebuff is terminal-only (no resume, not headless).
  *  3. Every backend may fill specify/implement/verify.
  *  4. The real bots/registry.json has no agent/model/process id and no
  *     non-surface runtime — the dev process is never a registry row.
@@ -48,6 +48,7 @@ const {
   LANES,
   laneFor,
   isDegraded,
+  laneSupports,
   canFill,
   checkBotRow,
   checkRegistry,
@@ -55,7 +56,7 @@ const {
 } = await import(new URL(`file://${path.join(ROOT, 'scripts/lib/lane-contract.mjs').replace(/\\/g, '/')}`).href);
 
 // 1. Every dispatch backend declared.
-for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'human']) {
+for (const backend of ['opencode', 'cline', 'grok', 'agy', 'freebuff', 'gemini', 'human']) {
   let lane = null;
   try {
     lane = laneFor(backend);
@@ -72,9 +73,15 @@ check('gemini declares no session', laneFor('gemini').session === false);
 check('gemini degraded for resume/tools/plan',
   isDegraded('gemini', 'resume') && isDegraded('gemini', 'tools') && isDegraded('gemini', 'plan'));
 check('opencode not degraded', laneFor('opencode').degraded.length === 0);
+check('freebuff terminal-only: degraded for resume + headless',
+  isDegraded('freebuff', 'resume') && isDegraded('freebuff', 'headless'));
+check('freebuff keeps tools', laneFor('freebuff').tools === true);
+check('freebuff headless probe answers no today', laneSupports('freebuff', 'headless') === false);
+check('freebuff graduates by shrinking its degraded list, not a version pin',
+  !JSON.stringify(LANES.freebuff.degradedReason).includes('0.0.197'));
 
 // 3. Any backend may fill any role.
-for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'human']) {
+for (const backend of ['opencode', 'cline', 'grok', 'agy', 'freebuff', 'gemini', 'human']) {
   check(`${backend} may specify/implement/verify`,
     canFill(backend, 'specify') && canFill(backend, 'implement') && canFill(backend, 'verify'));
 }
