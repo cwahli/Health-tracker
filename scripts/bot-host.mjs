@@ -48,7 +48,9 @@ import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from '
 import { KNOWN_HOSTS, workerStatus, isLocalHost } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
-import { enqueueJob, awaitJob } from './lib/worker-jobs.mjs';
+import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
+import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary } from './lib/swap-guards.mjs';
+import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCanaryResult } from './lib/worker-routing.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -592,19 +594,59 @@ export function attemptFailureText(result) {
  * id, because the worker resolves both on its own machine. A turn handed to a
  * notebook continues the thread the VM started instead of answering blank.
  *
- * Returns null when the location is this machine or has no live worker, and the
- * caller runs the turn locally as before.
+ * Runs the turn on that machine and returns its result — or a named failure.
+ * It never falls back to running locally: the caller decides whether to hold
+ * the turn (guard 5) rather than silently spending this machine's allowance.
  */
-export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000 } = {}) {
-  const status = workerStatus(host);
-  if (!status.reachable) return null;
-  const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode });
-  console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}`);
-  const done = await awaitJob(job.id, { timeoutMs });
-  if (!done?.result) {
-    return { text: '', code: 1, model, error: `worker ${host} did not answer in time`, remote: true, jobId: job.id };
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3 } = {}) {
+  // Guard 4: presence → relay → workspace → session, each named, first failure
+  // wins, so a bad target is caught before a job exists — not after a worker
+  // has claimed it.
+  const preflight = await preflightWorkerTurn({ host, workspace, sessionId, relay, full: preflightFull });
+  if (!preflight.ok) {
+    console.log(`[${host}] preflight failed at ${preflight.failed}: ${preflight.reason}`);
+    return { text: '', code: 1, model, error: `preflight failed (${preflight.failed}): ${preflight.reason}`, remote: true, preflight, failed: preflight.failed };
   }
-  return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null };
+  const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode, canary });
+  console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}${canary ? ' (canary)' : ''}`);
+  const deadline = Date.now() + timeoutMs;
+  const budget = Math.max(1000, Math.ceil(timeoutMs / Math.max(1, attempts)));
+  let lastError = `worker ${host} did not answer in time`;
+  let lastFailed = 'timeout';
+  for (let attempt = 1; attempt <= Math.max(1, attempts); attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const done = await awaitJob(job.id, { timeoutMs: Math.min(budget, remaining) });
+    if (done?.result) {
+      return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null, attempts: attempt };
+    }
+    // No result by the deadline. Classify it: only a transient failure may be
+    // retried, and only while the worker is still alive and its claim is not
+    // somebody else's work in progress.
+    const cls = classifyWorkerFailure(lastError);
+    lastFailed = cls.code;
+    const presence = workerStatus(host);
+    const row = getJob(job.id);
+    const claimedAt = row?.claimedAt ? Date.parse(row.claimedAt) : 0;
+    const claimFresh = claimedAt > 0 && Date.now() - claimedAt < DEFAULT_LEASE_MS;
+    const canRetry = cls.retryable && presence.reachable && !claimFresh && attempt < Math.max(1, attempts) && deadline - Date.now() > 1000;
+    if (!canRetry) {
+      const failed = !presence.reachable ? 'presence' : claimFresh ? 'timeout' : cls.code;
+      const why = !presence.reachable
+        ? `worker ${host} is gone (${presence.reason})`
+        : claimFresh
+          ? `worker ${host} is still working on ${job.id}`
+          : cls.code === 'timeout'
+            ? `worker ${host} did not answer in time`
+            : cls.code;
+      return { text: '', code: 1, model, error: why, remote: true, jobId: job.id, failed };
+    }
+    // Guard 8: same job id, bounded by the overall deadline, backoff between.
+    requeueJob(job.id, { reason: cls.code });
+    console.log(`[${host}] transient ${cls.code} on ${job.id}; requeued (attempt ${attempt + 1}/${attempts})`);
+    await new Promise((r) => setTimeout(r, retryDelayMs(attempt)));
+  }
+  return { text: '', code: 1, model, error: lastError, remote: true, jobId: job.id, failed: lastFailed };
 }
 
 /** Where the "we already hit this" notes are kept, so a note is written once. */
@@ -1890,9 +1932,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         if (status.reachable) {
           process.env.BOT_LOCATION = target;
           clearBlockedLocation(chatId);
+          // Arm the route: the first turn on a host is a canary (guard 6) and
+          // gets the full preflight, so a swap onto a machine that cannot hold
+          // this conversation fails before the job exists. Re-arming on every
+          // request keeps that true for repeat switches back to a host.
+          if (!isLocalHost(target)) {
+            const route = armRoute(target, { previous: loc });
+            console.log(`[${config.id}] route to ${target} armed (${route.state})`);
+          }
           await api.sendMessage(
             chatId,
-            `✅ *Compute location set to:* \`${target}\`\n${status.reason}. The next turn runs on ${target}.`
+            `✅ *Compute location set to:* \`${target}\`\n${status.reason}. The next turn runs on ${target}${isLocalHost(target) ? '' : ' — its first turn is a canary (checked, then confirmed as active)'}.`
           );
           return;
         }
@@ -2494,7 +2544,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // A location that names another machine runs there, on that machine's
     // allowance. This VM does not stamp for it.
     const remoteStatus = workerStatus(location);
-    if (!isLocalHost(location) && remoteStatus.reachable) {
+    if (!isLocalHost(location)) {
+      const route = routeState(location);
+      // Guard 5: hold, never fall through to this machine. A held turn is
+      // recorded so the user sees why nothing ran, and no allowance is spent.
+      if (!remoteStatus.reachable) {
+        setBlockedLocation(chatId, location, remoteStatus.reason);
+        await api.sendMessage(
+          chatId,
+          `⏸ *Held:* \`${location}\` is unreachable (${remoteStatus.reason}).\nNothing ran and no allowance was sent. Send \`/location vps\` to run here, or wait for the ${location} worker to connect.`
+        );
+        return;
+      }
+      if (route === 'failed') {
+        const row = routeFor(location);
+        await api.sendMessage(
+          chatId,
+          `⏸ *Held:* the route to \`${location}\` was rolled back after a failed canary (${row?.failedReason || 'unknown reason'}).\nNothing ran here either. Send \`/location ${location}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
+        );
+        return;
+      }
+      const wantCanary = route !== 'active';
       const handed = await runOnWorker({
         host: location,
         prompt: finalPrompt,
@@ -2504,18 +2574,43 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         workspace: effectiveWorkspace,
         sessionId: sessions.get(chatId) || '',
         envMode: turnEnvMode,
+        canary: wantCanary,
+        preflightFull: wantCanary,
       });
-      if (handed) {
-        // The thread id the worker ran is now ours too, so the next turn —
-        // here or there — resumes the same conversation.
-        if (handed.sessionID) sessions.set(chatId, handed.sessionID);
-        console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
-        await renderer.finish(
-          { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
-          { footer: `host: ${location}` }
-        ).catch(() => {});
+      if (handed?.preflight) {
+        setBlockedLocation(chatId, location, `${handed.preflight.failed}: ${handed.preflight.reason}`);
+        await api.sendMessage(
+          chatId,
+          `⏸ *Held:* preflight failed for \`${location}\` — \`${handed.preflight.failed}\`: ${handed.preflight.reason}\n${preflightSummary(handed.preflight.checks)}\nNothing ran and no allowance was sent.`
+        );
         return;
       }
+      if (wantCanary) {
+        // Guard 6: one turn decides whether the route becomes active. The
+        // session row is never touched until it passes, so a bad canary costs
+        // nothing but the canary.
+        const verdict = validateCanaryResult({ host: location, requestedSessionId: sessions.get(chatId) || '', result: handed });
+        if (!verdict.ok) {
+          const row = rollbackRoute(location, { jobId: handed.jobId || '', reason: verdict.reasons.join('; ') });
+          const back = row?.previous || 'vps';
+          await api.sendMessage(
+            chatId,
+            `⚠️ *Canary failed on \`${location}\`:* ${verdict.reasons.join('; ')}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
+          );
+          return;
+        }
+        confirmRoute(location, { jobId: handed.jobId || '' });
+        console.log(`[${config.id}] canary passed on ${location} (job ${handed.jobId}); route active`);
+      }
+      // The thread id the worker ran is now ours too, so the next turn —
+      // here or there — resumes the same conversation.
+      if (handed.sessionID) sessions.set(chatId, handed.sessionID);
+      console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
+      await renderer.finish(
+        { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
+        { footer: `host: ${location}${wantCanary ? ' (canary)' : ''}` }
+      ).catch(() => {});
+      return;
     }
 
     const result = await runOpencodeWithFailover({

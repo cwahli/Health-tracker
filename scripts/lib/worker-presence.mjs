@@ -62,13 +62,17 @@ function readJson(file) {
 }
 
 /** Called by the relay that accepted a worker's outbound connection. */
-export function recordWorkerConnected({ host, pid = null, detail = '', home = os.homedir(), now = Date.now() } = {}) {
+export function recordWorkerConnected({ host, pid = null, detail = '', cwd = '', home = os.homedir(), now = Date.now() } = {}) {
   const file = presencePath(host, home);
   const prev = readJson(file) || {};
   const row = {
     host: String(host || '').trim().toLowerCase(),
     pid: pid ?? null,
     detail: String(detail || '').slice(0, 200),
+    // Where the worker actually runs. The preflight uses it to answer "does
+    // this project have a directory here?" for a machine whose paths are not
+    // this machine's.
+    cwd: String(cwd || prev.cwd || '').slice(0, 400),
     connectedAt: prev.connectedAt || new Date(now).toISOString(),
     lastSeen: new Date(now).toISOString(),
   };
@@ -115,6 +119,12 @@ export function workerStatus(host, { home = os.homedir(), now = Date.now(), ttlM
     return { host: h, reachable: false, reason: `worker pid ${row.pid} is gone`, lastSeen: row.lastSeen, ageMs };
   }
   return { host: h, reachable: true, reason: 'worker connected', lastSeen: row.lastSeen, ageMs };
+}
+
+/** The directory the worker reported when it connected; '' if it never did. */
+export function workerCwd(host, { home = os.homedir() } = {}) {
+  const row = readJson(presencePath(String(host || '').trim().toLowerCase(), home));
+  return row?.cwd || '';
 }
 
 export function isReachable(host, opts = {}) {
