@@ -121,7 +121,18 @@ export function providerReadiness({ env = process.env, home = os.homedir(), loca
   }
 
   if (hasEnv(env, 'TOKEN_HARBOR_API_KEY')) {
-    out.tokenharbor = { ready: true, needs: null, fix: null, command: null, note: 'quota is dashboard-only' };
+    // The key being present does not mean a turn can run. Token Harbor exposes no
+    // balance or quota endpoint (every /v1 billing path 404s) and a spent account
+    // answers a real completion with 402, so "ready" here means "the key is wired
+    // up", not "a turn will succeed". Say so, or /setup claims a working lane the
+    // walk will hit and fail on.
+    out.tokenharbor = {
+      ready: true,
+      needs: null,
+      fix: null,
+      command: null,
+      note: 'key accepted, but balance is not API-visible — a $0 account fails every turn with 402; check tokenharbor.ai/dashboard',
+    };
   } else {
     out.tokenharbor = {
       ready: false,

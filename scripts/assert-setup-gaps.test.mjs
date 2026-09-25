@@ -30,6 +30,16 @@ try {
   check('a provider with its key is ready', r.tokenharbor.ready === false || r.gemini.ready === true);
   check('gemini is ready with a key', r.gemini.ready === true);
   check('tokenharbor names the exact variable', r.tokenharbor.needs === 'TOKEN_HARBOR_API_KEY');
+  // 1b. A present Token Harbor key is not a promise that a turn runs. Found live
+  // on 2026-09-25: the key was correct and authenticating, the account had $0, and
+  // every completion came back 402 while /setup said "ready". Token Harbor exposes
+  // no balance endpoint (all /v1 billing paths 404), so the note has to say so —
+  // the walk records the 402, but /setup must not promise a working lane.
+  const thKeyed = providerReadiness({ env: { PATH: process.env.PATH, GEMINI_API_KEY: 'k', TOKEN_HARBOR_API_KEY: 'thk_live_test' }, home, location: 'vps', clineReady: () => true });
+  check('a keyed tokenharbor reads ready', thKeyed.tokenharbor.ready === true);
+  check('but is not reported as a gap', !setupGaps(thKeyed).some((g) => g.provider === 'tokenharbor'));
+  check('its note says the balance is not API-visible', /balance is not API-visible/.test(String(thKeyed.tokenharbor.note || '')));
+  check('and points at the dashboard to top up', /tokenharbor\.ai\/dashboard/.test(String(thKeyed.tokenharbor.note || '')));
   check('cloudflare names the exact variable', r.cloudflare.needs === 'CLOUDFLARE_WORKERS_AI_TOKEN');
   check('the fix is copy-pasteable and says where', /common\.env/.test(String(r.cloudflare.fix)) && /systemctl restart/.test(String(r.cloudflare.fix)));
   check('freebuff points at its own command', r.freebuff.command === '/unlock');
