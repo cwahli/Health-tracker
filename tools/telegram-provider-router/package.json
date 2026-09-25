@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node scripts/test-quota-parse.mjs && node scripts/test-allowance-table.mjs && node scripts/test-sticky-failover.mjs && node scripts/test-freemodel-buttons.mjs",
+    "test": "node scripts/test-quota-parse.mjs && node scripts/test-allowance-watch.mjs && node scripts/test-allowance-table.mjs && node scripts/test-sticky-failover.mjs && node scripts/test-freemodel-buttons.mjs",
     "allowance:table": "node scripts/render-free-lane-table.mjs --sync --print-media"
   },
   "engines": {
