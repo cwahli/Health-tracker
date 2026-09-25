@@ -116,6 +116,8 @@ try {
   const codeOnly = botSrc.split('\n').filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//')).join('\n');
   check('/freemodel no longer claims everything is available', !/all selectable lanes look available/.test(codeOnly));
   check('/freemodel counts selectable and blocked', /\$\{usable\.length\} selectable, \$\{blocked\.length\} blocked/.test(botSrc));
+  check('/freemodel writes its own header, not the raw catalog count', /const header = formatFreeModelText/ .test(botSrc) === false);
+  check('the header counts rows with no ledger row separately', /with no ledger row/.test(botSrc));
   check('the tappable keyboard only offers usable rows', /const keyboardEntries = available\.length \? available : selectable;/.test(botSrc));
 } finally {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;

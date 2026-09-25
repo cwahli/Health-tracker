@@ -684,8 +684,16 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location } 
   const blockedOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
   const usable = rows.filter((r) => !blockedOf(r));
   const blocked = rows.filter(blockedOf);
-  const header = formatFreeModelText(entries, { current, location }).split('\n')[0];
-  const lines = [header, ''];
+  const missing = rows.filter((r) => r.inLedger === false);
+  // The header is written here rather than borrowed from formatFreeModelText:
+  // that one counts the raw catalog, so the same message could claim 42
+  // selectable in the header and 43 in the footer.
+  const pending = String(entries?.length || 0) - rows.length;
+  const location0 = location ? ` at ${location}` : '';
+  const lines = [
+    `Free models${location0}: ${usable.length} selectable (${missingCount(rows)} with no ledger row), ${blocked.length} blocked${pending > 0 ? `, ${pending} pending setup/sign-in` : ''} · current: ${current || 'default'}`,
+    '',
+  ];
   for (const r of usable) lines.push(`• ${r.label}${r.note ? `: ${r.note}` : ''}`);
   if (blocked.length) {
     lines.push('', 'Not selectable right now:');
@@ -700,7 +708,6 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location } 
       lines.push(`❌ ${r.label} — ${why}`);
     }
   }
-  const missing = rows.filter((r) => r.inLedger === false);
   if (missing.length) {
     lines.push('', 'Not in this ledger (no quota record):');
     for (const r of missing.slice(0, 6)) lines.push(`· ${r.label}`);
@@ -709,6 +716,11 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location } 
   if (next) lines.push('', `Next up: ${next.label}`);
   lines.push('', `Allowance (per-host ledger): ${usable.length} selectable, ${blocked.length} blocked. /allowance for the full table.`);
   return lines.join('\n');
+}
+
+/** Usable rows the ledger has no record for: honest, not hidden. */
+function missingCount(rows) {
+  return rows.filter((r) => r.inLedger === false).length;
 }
 
 export class ProgressRenderer {
