@@ -68,6 +68,8 @@ import {
   ensureBotLedger,
   stampDepleted,
   freemodelRefToRoute,
+  usableTurnLanes,
+  soonestResetAmongDepleted,
 } from './lib/free-lanes.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
@@ -1733,6 +1735,55 @@ async function collectInboundMedia(api, message, config) {
 }
 
 /**
+ * The lanes this turn may use, in order, from this host's own ledger.
+ *
+ * The old chain was [chat model, bot default]: two fixed entries, so a lane the
+ * ledger already knew was spent got retried, and a lane that had ended could
+ * still be offered. Now the ledger decides. The chat's model still goes first
+ * when it is usable; otherwise the caller is told which lane it moved to and why
+ * the old one was skipped. A host with no ledger yet keeps the old two-entry
+ * chain, so a fresh install behaves exactly as before.
+ */
+export function selectTurnLanes({ botId, model, fallback, now = Date.now() } = {}) {
+  const legacy = failoverModels(model, fallback);
+  let ledger;
+  try {
+    ledger = loadFreeLaneLedger({ stateDir: ensureBotLedger(botId || 'default').dir });
+  } catch {
+    return { models: legacy, skipped: [], fromLedger: false };
+  }
+  const table = ledger?.table;
+  if (!table || !Array.isArray(table.lanes) || !table.lanes.length) {
+    return { models: legacy, skipped: [], fromLedger: false };
+  }
+  const { lanes, skipped } = usableTurnLanes(table, ledger.session || {}, { now });
+  if (!lanes.length) {
+    const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
+    return { models: [], skipped, fromLedger: true, exhausted: true, displaced: null, chose: null, soonest };
+  }
+  const current = freemodelRefToRoute(model || '');
+  const refOf = (lane) => toModelRef(lane.provider, lane.model);
+  const currentLane = current.provider && current.model
+    ? lanes.find((l) => l.provider === current.provider && l.model === current.model)
+    : null;
+  const rest = lanes.filter((l) => l !== currentLane);
+  const models = [
+    toModelRef((currentLane || lanes[0]).provider, (currentLane || lanes[0]).model),
+    ...(currentLane ? rest : rest).map(refOf),
+  ];
+  return {
+    models: [...new Set(models)],
+    skipped,
+    fromLedger: true,
+    exhausted: false,
+    displaced: currentLane
+      ? null
+      : skipped.find((row) => row.provider === current.provider && row.model === current.model) || null,
+    chose: toModelRef(lanes[0].provider, lanes[0].model),
+  };
+}
+
+/**
  * BOT-9 live failover wiring for the main message path: run the prompt on
  * the chat's effective model, falling back to the bot default on retryable
  * failures (quota/unfunded/5xx — never timeout/abort, per defaultIsRetryable).
@@ -1966,11 +2017,32 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       });
     };
 
+    // The ledger picks the walk. A lane it already stamped is not retried, an
+    // ended lane is never offered, and a terminal-only row is never chosen.
+    const laneChoice = selectTurnLanes({
+      botId: config.id,
+      model: eff.model,
+      fallback: config.agent.model,
+    });
+    if (laneChoice.exhausted) {
+      const when = laneChoice.soonest?.label ? ` Soonest reset: ${laneChoice.soonest.label}.` : '';
+      await api.sendMessage(
+        chatId,
+        `🛑 No lane on ${location} has allowance right now.${when}\nNothing was run and nothing was spent. Send \`/allowance\` for the ledger.`
+      ).catch(() => {});
+      return;
+    }
+    if (laneChoice.displaced) {
+      const why = laneChoice.displaced.resetLabel
+        ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
+        : laneChoice.displaced.why;
+      console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
+    }
     const result = await runOpencodeWithFailover({
       api,
       chatId,
       prompt: finalPrompt,
-      models: failoverModels(eff.model, config.agent.model),
+      models: laneChoice.models.length ? laneChoice.models : failoverModels(eff.model, config.agent.model),
       runModel: runSurfaceModel,
       onAttemptStart: ({ model, attempt }) => {
         lastAttemptModel = model;
