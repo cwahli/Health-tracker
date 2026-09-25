@@ -1091,6 +1091,22 @@ Reverting this attempt's uncommitted changes..."
       tg_msg "⚠️ *[Orchestrator]* Fix coded by *$tool_name* on \`$run_branch\`, but \`git push\` failed. Check GitHub credentials on VPS (SSH key or PAT)."
       return 1
     fi
+    # SHEPHERD journey/<slug> checkpoint branches are local history only —
+    # auto-pr, ci, claim-guard and auto-merge all watch `agent/**` (2026-09-25
+    # card #8 stranded on journey/card-8 with zero runs). Mirror the same HEAD
+    # onto agent/dispatch-<area> so the GitHub pipeline actually lands the fix.
+    case "$run_branch" in
+      agent/*) ;;
+      *)
+        local pr_branch="agent/dispatch-${DISPATCH_AREA}"
+        if git -C "$CODER_DIR" push origin "HEAD:refs/heads/${pr_branch}"; then
+          run_branch="$pr_branch"
+        else
+          echo "[Dispatcher] Warning: mirror push to ${pr_branch} failed — the fix may not reach a PR."
+          tg_msg "⚠️ *[Orchestrator]* \`$run_branch\` is outside the \`agent/**\` PR pipeline and the mirror push to \`${pr_branch}\` failed — open a PR manually for \`$BUG_ID\`."
+        fi
+        ;;
+    esac
     local commit_hash
     commit_hash=$(git -C "$CODER_DIR" rev-parse --short HEAD)
     tg_msg "🚀 *[Orchestrator]* Fix committed and pushed to \`$run_branch\` (\`$commit_hash\`). Merges sequentially; claim-guard blocks same-file overlap."

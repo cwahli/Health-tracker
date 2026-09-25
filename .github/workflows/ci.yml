@@ -80,3 +80,8 @@ jobs:
       # must pin the one canonical list read, fail loud, quote generated_at.
       - name: Ticket-list source sensor (cross-agent consistency)
         run: npx vitest run tests/soul-ticket-source.test.ts
+
+      # 2026-09-25 card #8 stranded on journey/card-8 (pipeline is agent/**) →
+      # dispatcher must mirror non-agent coder branches onto agent/dispatch-*.
+      - name: Dispatch branch-scope sensor (journey/* → agent/** mirror)
+        run: npx vitest run tests/dispatch-branch-scope.test.ts
