@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { buildChildEnv } from './child-env.mjs';
 
 const HOME = os.homedir();
 
@@ -84,13 +85,14 @@ export function runCline({
   onEvent,
   onSpawn,
   env,
+  envMode = 'inherit',
   spawnImpl = spawn,
 }) {
   return new Promise((resolve) => {
     const args = buildClineArgs({ prompt, model, variant, plan, timeoutMs, workspace });
     const child = spawnImpl(resolveClineBin(clineBin), args, {
       cwd: workspace,
-      env: { ...process.env, ...(env || {}) },
+      env: buildChildEnv({ extraEnv: env, mode: envMode }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
