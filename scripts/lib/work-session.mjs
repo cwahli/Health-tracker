@@ -366,7 +366,17 @@ export function disableTmuxObserver(session, { tmux = defaultTmuxRunner } = {}) 
   return { ok: stopped, stopped, pane: pane.id };
 }
 
-export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
+function keepOnlyTmuxPane(target, keepPaneId, tmux) {
+  const panes = parseObserverPanes(tmux(['list-panes', '-t', target, '-F', '#{pane_id}\t#{pane_start_command}']));
+  const removed = [];
+  for (const pane of panes) {
+    if (pane.id === keepPaneId) continue;
+    if (tmux(['kill-pane', '-t', pane.id])) removed.push(pane.id);
+  }
+  return removed;
+}
+
+export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner, solo = false } = {}) {
   const lane = laneFor(session?.lane);
   const tmuxSession = tmuxSessionFor(session?.location);
   const tmuxWindow = tmuxWindowFor(session?.id);
@@ -407,7 +417,8 @@ export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
     migrated = true;
   }
   if (pane.id) tmux(['select-pane', '-t', pane.id]);
-  return { ok: true, created, migrated, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: pane.id, observerLog: logPath };
+  const removedPanes = solo ? keepOnlyTmuxPane(target, pane.id, tmux) : [];
+  return { ok: true, created, migrated, solo, removedPanes, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: pane.id, observerLog: logPath };
 }
 
 /**

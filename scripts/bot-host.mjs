@@ -755,7 +755,7 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
     } else {
       session = setWorkView(id, { tx: true, viewMode: 'observer', viewCommand: null });
     }
-    const created = ensureTmuxWorkView(session, { tmux });
+    const created = ensureTmuxWorkView(session, { tmux, solo: lane === 'opencode' });
     if (!created.ok) {
       await api.sendMessage(chatId, `Interactive work view unavailable: could not create \`${created.target}\` without replacing an existing tmux session.`);
       return;

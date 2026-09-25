@@ -163,9 +163,12 @@ check('terminal lane reports verified observer liveness',
   termProbe.surface === 'terminal' && termProbe.attach === true && termProbe.observerLive === true && termProbe.tmuxSession === 'work-vps');
 const tuiCommand = "'opencode' attach 'http://127.0.0.1:4096' --dir '/home/ubuntu/src/Health-tracker' --session 'ses_test'";
 const tuiSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-tui', viewMode: 'tui', viewCommand: tuiCommand };
-const tuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux });
+const tuiTarget = `work-vps:${tmuxWindowFor(tuiSession.id)}`;
+const initialTuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux });
+addLifecyclePane(tuiTarget, 'bash');
+const tuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux, solo: true });
 check('stored interactive TUI command owns the exact workstream pane',
-  tuiView.ok === true && tuiView.observerPane && lifecycleCalls.some((args) => args[0] === 'new-window' && args.at(-1) === tuiCommand));
+  initialTuiView.ok === true && tuiView.ok === true && tuiView.observerPane && tuiView.removedPanes.length === 1 && lifecycleCalls.some((args) => args[0] === 'new-window' && args.at(-1) === tuiCommand));
 const migrationSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-migrate' };
 const migrationWindow = tmuxWindowFor(migrationSession.id);
 lifecycleSessions.get('work-vps').add(migrationWindow);

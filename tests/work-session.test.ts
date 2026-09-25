@@ -218,14 +218,15 @@ describe('tmux work view', () => {
     expect(tmux.sessions.get('work-vps')).toEqual(new Set(['other', tmuxWindowFor(session.id)]));
   });
 
-  it('migrates a legacy blank window with a non-destructive observer pane', () => {
+  it('migrates a legacy blank window and solos the requested TUI pane', () => {
     const session = resolveSession({ ...loc, lane: 'opencode' }, store);
     const window = tmuxWindowFor(session.id);
     const tmux = fakeTmux({ 'work-vps': [window] });
-    const result = ensureTmuxWorkView(session, { tmux: tmux.run });
-    expect(result).toMatchObject({ ok: true, created: false, migrated: true });
-    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'list-windows', 'list-panes', 'split-window', 'select-pane']);
-    expect(tmux.calls.flat().some((arg) => /send-keys|respawn-pane|kill-window|kill-session/.test(String(arg)))).toBe(false);
+    const result = ensureTmuxWorkView(session, { tmux: tmux.run, solo: true });
+    expect(result).toMatchObject({ ok: true, created: false, migrated: true, solo: true });
+    expect(result.removedPanes).toHaveLength(1);
+    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'list-windows', 'list-panes', 'split-window', 'select-pane', 'list-panes', 'kill-pane']);
+    expect(tmux.calls.flat().some((arg) => /kill-window|kill-session|respawn-pane|send-keys/.test(String(arg)))).toBe(false);
     expect(debugProbe('opencode', { session, tmux: tmux.run }).observerLive).toBe(true);
   });
 
