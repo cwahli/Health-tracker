@@ -281,11 +281,30 @@ function observerCommand(logPath) {
   return `/usr/bin/tail -n 40 -F -- ${shellQuote(logPath)}`;
 }
 
+/**
+ * Real tmux renders `pane_start_command` as a shell-style quoted word
+ * ("cmd 'arg'") while fake runners in tests pass it through unquoted. An
+ * exact-equality observer matcher must see both shapes as the same command
+ * or it never recognizes the pane it created (live defect found 2026-09-24:
+ * probe reported observerLive:false on a live tail pane, /tx on would spawn
+ * duplicate panes forever, /tx off could never kill one).
+ */
+export function unquoteTmuxValue(value) {
+  const raw = String(value ?? '');
+  for (const quote of ['"', "'"]) {
+    if (raw.length >= 2 && raw.startsWith(quote) && raw.endsWith(quote)) {
+      return raw.slice(1, -1).replaceAll(`\\${quote}`, quote);
+    }
+  }
+  return raw;
+}
+
 function parseObserverPanes(output) {
   if (typeof output !== 'string') return [];
   return output.split(/\r?\n/).filter(Boolean).map((line) => {
     const tab = line.indexOf('\t');
-    return { id: tab >= 0 ? line.slice(0, tab) : line, command: tab >= 0 ? line.slice(tab + 1) : '' };
+    const command = tab >= 0 ? line.slice(tab + 1) : '';
+    return { id: tab >= 0 ? line.slice(0, tab) : line, command: unquoteTmuxValue(command) };
   });
 }
 

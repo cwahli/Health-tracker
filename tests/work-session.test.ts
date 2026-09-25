@@ -21,6 +21,7 @@ import {
   createObserver,
   formatObserverRecord,
   writeObserverRecord,
+  unquoteTmuxValue,
 } from '../scripts/lib/work-session.mjs';
 
 let store;
@@ -82,6 +83,67 @@ beforeEach(() => {
 });
 
 const loc = { location: 'vps', chat: 'qa_meal', workspace: '/home/ubuntu/src/Health-tracker' };
+
+/** Regression sensor (live defect 2026-09-24, BOT-19): real tmux renders
+ * pane_start_command as a shell-quoted word, so an exact-equality observer
+ * matcher never recognized the pane it created — /tx on spawned duplicate
+ * panes, /tx off could never kill one, and the probe stayed observerLive:false. */
+describe('real-tmux quoted start commands', () => {
+  it('unquoteTmuxValue strips one shell-quote layer and unescapes', () => {
+    expect(unquoteTmuxValue('"tail -F x\'"')).toBe("tail -F x'");
+    expect(unquoteTmuxValue("'tail -F \"x\"'")).toBe('tail -F "x"');
+    expect(unquoteTmuxValue('bash')).toBe('bash');
+    expect(unquoteTmuxValue(null)).toBe('');
+  });
+
+  function seedRealTmuxPane(t, fake, logPath) {
+    // Exactly what real tmux reports for the observer pane.
+    const quoted = `\"/usr/bin/tail -n 40 -F -- '${logPath}'\"`;
+    fake.panes.set(`${t}\t%99`, { target: t, id: '%99', command: quoted });
+    return '%99';
+  }
+
+  it('debugProbe reports observerLive for a real-tmux quoted tail pane', () => {
+    const session = resolveSession({ ...loc, lane: 'opencode' }, store);
+    const t = `${tmuxSessionFor(session.location)}:${tmuxWindowFor(session.id)}`;
+    const fake = fakeTmux({ [tmuxSessionFor(session.location)]: [tmuxWindowFor(session.id)] });
+    const logPath = observerLogPath(session);
+    seedRealTmuxPane(t, fake, logPath);
+    const probe = debugProbe('opencode', { session, tmux: fake.run });
+    expect(probe.observerLive).toBe(true);
+    expect(probe.observerPane).toBe('%99');
+    expect(probe.attach).toBe(true);
+  });
+
+  it('ensureTmuxWorkView reuses the quoted pane instead of spawning a duplicate', () => {
+    const session = resolveSession({ ...loc, lane: 'opencode' }, store);
+    const tmuxS = tmuxSessionFor(session.location);
+    const tmuxW = tmuxWindowFor(session.id);
+    const t = `${tmuxS}:${tmuxW}`;
+    const fake = fakeTmux({ [tmuxS]: [tmuxW] });
+    const logPath = observerLogPath(session);
+    seedRealTmuxPane(t, fake, logPath);
+    const r = ensureTmuxWorkView(session, { tmux: fake.run });
+    expect(r.ok).toBe(true);
+    expect(r.migrated).toBe(false);
+    expect(r.observerPane).toBe('%99');
+    expect(fake.calls.filter((c) => c[0] === 'split-window')).toHaveLength(0);
+  });
+
+  it('disableTmuxObserver kills exactly the quoted observer pane', () => {
+    const session = resolveSession({ ...loc, lane: 'opencode' }, store);
+    const tmuxS = tmuxSessionFor(session.location);
+    const tmuxW = tmuxWindowFor(session.id);
+    const t = `${tmuxS}:${tmuxW}`;
+    const fake = fakeTmux({ [tmuxS]: [tmuxW] });
+    const logPath = observerLogPath(session);
+    const paneId = seedRealTmuxPane(t, fake, logPath);
+    const r = disableTmuxObserver(session, { tmux: fake.run });
+    expect(r.ok).toBe(true);
+    expect(r.stopped).toBe(true);
+    expect(r.pane).toBe(paneId);
+  });
+});
 
 describe('session identity', () => {
   it('keys sessions without any bot id', () => {

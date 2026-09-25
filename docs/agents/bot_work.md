@@ -20,7 +20,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 **BOT-23 is DONE 2026-09-24.** Journey investigation & pre-dispatch regression gate. Investigated recent broken meal/portion journey; added `scripts/lib/dev-regression.mjs` and `scripts/assert-dev-regression.mjs` (17/17 tests passing); wired pre-dispatch dev regression & blast radius verification into `scripts/run-coding-dispatch.sh` `check_git_and_tsc()`. Rule L1 blast-radius violations reject uncommitted edits immediately; UI edits require `node scripts/assert-shell-smoke.mjs` (Playwright) to pass before commit/push.
 
-**Next code: BOT-15.** One outcome row per dispatch (ticket, surface, provider/model, defect class, tokens, wall-clock, outcome) with a pre-action duplicate-signature gate.
+**Next code: none open.** BOT-19 is DONE 2026-09-24 — live acceptance passed after fixing the real-tmux quoted `pane_start_command` matcher defect (`unquoteTmuxValue` + sensors); observer binding is proven end to end on the VPS (see ROADMAP BOT-19 pickup). BOT-15/16/17/18/20/21/22/23 are DONE. Residuals: BOT-9 propagation/smoke + Grok mirror, BOT-11 T-matrix rows. V-30.5 needs an explicit human go.
 
 **BOT-18 is DONE 2026-09-24.** Lease `{chatId, messageId, startedAt, pid}` written on run start and updated on progress create; boot sweep edits orphaned messages to `restarted mid-run — send it again` and appends `crash-pending` row; Telegram 409 conflict exits `process.exit(1)`. Tests: 119/119 green.
 
