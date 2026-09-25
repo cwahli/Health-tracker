@@ -21,6 +21,11 @@ const MIRRORS = [
     dest: join(ROOT, 'tools', 'telegram-provider-router', 'src', 'free-lane-table.vendor.mjs'),
     marker: '// === VENDORED FROM scripts/lib/free-lanes.mjs — DO NOT EDIT ===',
   },
+  {
+    src: join(ROOT, 'scripts', 'lib', 'inbound-media.mjs'),
+    dest: join(ROOT, 'tools', 'telegram-provider-router', 'src', 'inbound-media.vendor.mjs'),
+    marker: '// === VENDORED FROM scripts/lib/inbound-media.mjs — DO NOT EDIT ===',
+  },
 ];
 
 for (const { src, dest, marker } of MIRRORS) {

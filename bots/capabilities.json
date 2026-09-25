@@ -262,9 +262,13 @@
       "test": "T3",
       "scope": "runtime-adapter",
       "status": "partial",
-      "prove": "live smoke: photo \u2192 absolute path in prompt, per class",
+      "prove": "unit: tools/telegram-provider-router/scripts/test-inbound-media.mjs; live smoke: photo → absolute path in prompt, per class",
       "expect": [
-        "scripts/lib/inbound-media.mjs"
+        "scripts/lib/inbound-media.mjs",
+        "tools/telegram-provider-router/src/inbound-media.vendor.mjs",
+        "tools/telegram-provider-router/src/inbound-media-adapter.mjs",
+        "tools/telegram-provider-router/src/index.js",
+        "tools/telegram-provider-router/scripts/test-inbound-media.mjs"
       ],
       "skills": [
         "telegram-inbound-media"
@@ -276,7 +280,7 @@
         "grok_tg": "adapter",
         "collab": false
       },
-      "notes": "One downloader (\u00a714.7 Case C). Grok TG import/mirror into the router still pending; Hermes profile wiring per-profile."
+      "notes": "One downloader (§14.7 Case C). Grok TG router adapter and vendor mirror are wired; live photo smoke remains pending. Hermes profile wiring stays per-profile."
     },
     {
       "id": "proc-failover",

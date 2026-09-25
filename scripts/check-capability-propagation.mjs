@@ -58,6 +58,11 @@ const VENDOR_MIRRORS = [
     'tools/telegram-provider-router/src/free-lane-table.vendor.mjs',
     '// === VENDORED FROM scripts/lib/free-lanes.mjs — DO NOT EDIT ===',
   ],
+  [
+    'scripts/lib/inbound-media.mjs',
+    'tools/telegram-provider-router/src/inbound-media.vendor.mjs',
+    '// === VENDORED FROM scripts/lib/inbound-media.mjs — DO NOT EDIT ===',
+  ],
 ];
 
 const strict = process.argv.includes('--strict');
