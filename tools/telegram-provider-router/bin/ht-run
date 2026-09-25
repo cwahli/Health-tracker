@@ -1,0 +1,122 @@
+#!/bin/bash
+# ht-run <tool:freebuff|opencode|cline> <session> <prompt-file> [model]
+# Part 2 of tmp/ht-allowance-watch/TICKET.md: ONE launcher for ALL free tools.
+# Part of tmp/ht-freebuff-autocontinue/TICKET.md: the .meta sidecar also carries
+# continue_count (0 on launch) so ht-watch can enforce the 12-continue cap, and
+# the freebuff resume prompt is assembled from the prompt file's directory.
+# Repo copy: tools/telegram-provider-router/bin/ht-run (live: $HT_BIN_DIR/ht-run).
+#
+# - Always runs inside tmux session <session> and opens a visible desktop
+#   terminal attached (reuses ht-show). Logs the pane to <logs>/<session>.log.
+# - freebuff: current ht-freebuff logic (default model, wait "Enter a coding
+#   task", type prompt with tmux send-keys -l, Enter).
+# - opencode: opencode run -m <model> "<prompt>"   (non-interactive)
+# - cline:    cline -m <model> -c <workspace> "<prompt>" (non-interactive, auto-approve)
+# - If [model] omitted, pick the best available lane from
+#   <router>/state/free-lane-table.json for that tool
+#   (skip depleted / live-quota'd lanes; HT_ROUTER_DIR overrides for tests).
+# - Writes <logs>/<session>.meta (tool/model/prompt/continue_count)
+#   which ht-watch reads for per-tool detection + freebuff auto-continue.
+#
+# Env: HT_WORKSPACE (repo checkout), HT_BIN_DIR (sibling scripts),
+#      HT_ROUTER_DIR (router dir), HT_AC_LOGS_DIR / HT_LOG_DIR (log dir).
+set -u
+WORKSPACE="${HT_WORKSPACE:-/workspace/biomarker-and-nutrient-tracker}"
+BIN_DIR="${HT_BIN_DIR:-/home/box/bin}"
+tool="${1:-}"; session="${2:-}"; prompt_file="${3:-}"; model="${4:-}"
+
+usage() { echo "usage: ht-run <tool:freebuff|opencode|cline> <session> <prompt-file> [model]" >&2; exit 1; }
+[ -n "$tool" ] && [ -n "$session" ] && [ -n "$prompt_file" ] && [ -f "$prompt_file" ] || usage
+case "$tool" in freebuff|opencode|cline) ;; *) usage ;; esac
+
+LOGS_DIR="${HT_AC_LOGS_DIR:-${HT_LOG_DIR:-/workspace/logs}}"
+LOG="$LOGS_DIR/$session.log"
+META="$LOGS_DIR/$session.meta"
+mkdir -p "$LOGS_DIR"
+
+# POSIX single-quote escaping for sh -c payload
+sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+# ---- lane picker: best available lane for the tool (skip depleted / live quota) ----
+pick_model() {
+  node - "$1" <<'NODE'
+const fs = require("fs"), path = require("path"), os = require("os");
+const dir = process.env.HT_ROUTER_DIR || path.join(os.homedir(), ".config", "telegram-opencode", "router");
+const rj = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
+const t = rj(path.join(dir, "state", "free-lane-table.json"));
+if (!t) process.exit(0);
+const s = rj(path.join(dir, "state", "session.json")) || {};
+const now = Date.now();
+const q = s.quota || {};
+const liveQuota = (l) => {
+  const keys = [];
+  if (l.provider && l.model) keys.push(`${l.provider}/${l.model}`);
+  const bid = String(l.bucket || "");
+  if (bid && !/per-model/i.test(bid)) keys.push(`bucket:${bid}`);
+  for (const k of keys) { const r = q[k]; if (r && Number(r.depletedUntil || 0) > now) return true; }
+  return false;
+};
+const tool = String(process.argv[2] || "").toLowerCase();
+const usable = (t.lanes || [])
+  .filter((l) => String(l.provider || "").toLowerCase() === tool)
+  .filter((l) => {
+    const st = String(l.status || "").toLowerCase();
+    if (st === "unavailable" || st === "ended") return false;
+    if (st === "depleted") {
+      const at = Date.parse(l.nextResetAt || "");
+      if (!(Number.isFinite(at) && at <= now)) return false; // still cooling down
+    }
+    if (liveQuota(l)) return false; // live session quota says depleted
+    return true;
+  })
+  .sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));
+if (usable[0]) console.log(usable[0].model);
+NODE
+}
+
+prompt=$(tr '\n' ' ' < "$prompt_file")
+
+if [ -z "$model" ] && [ "$tool" != "freebuff" ]; then
+  model=$(pick_model "$tool")
+  if [ -z "$model" ]; then
+    echo "FAIL: no available $tool lane (all depleted) — pass an explicit model or wait for reset"
+    exit 3
+  fi
+fi
+
+# ---- sidecar meta for ht-watch (tool/model/prompt provenance + continue cap) ----
+# continue_count is a LAUNCH: a fresh job starts at 0 (ht-watch keeps counting
+# freebuff auto-continues in <session>.cont; 12 => CONTINUE_CAP).
+TOOL="$tool" MODEL="$model" PF="$prompt_file" node -e '
+console.log(JSON.stringify({tool:process.env.TOOL,model:process.env.MODEL,prompt_file:process.env.PF,continue_count:0,startedAt:new Date().toISOString()},null,1));' > "$META"
+
+tmux kill-session -t "$session" 2>/dev/null && sleep 1
+echo "==== ht-run $tool session=$session model=${model:-default} $(date -u +%FT%TZ) ====" >> "$LOG"
+
+if [ "$tool" = "freebuff" ]; then
+  # Current ht-freebuff behaviour, kept verbatim (+ pane logging + meta).
+  tmux new-session -d -s "$session" -x 200 -y 50 "cd $WORKSPACE && freebuff --trust-agents; exec bash"
+  sleep 0.3
+  tmux pipe-pane -t "$session" -o "cat >> $LOG"
+  "$BIN_DIR/ht-show" "$session"
+  for i in $(seq 1 30); do tmux capture-pane -p -t "$session" 2>/dev/null | grep -q 'Freebucks' && break; sleep 1; done
+  sleep 1; tmux send-keys -t "$session" Enter            # accept default model
+  for i in $(seq 1 30); do tmux capture-pane -p -t "$session" 2>/dev/null | grep -q 'Enter a coding task' && break; sleep 1; done
+  sleep 2; tmux send-keys -t "$session" -l "$prompt"; sleep 2; tmux send-keys -t "$session" Enter
+  sleep 8
+  tmux capture-pane -p -t "$session" 2>/dev/null | grep -q 'working' && echo "OK: Freebuff working (model=default)" || echo "CHECK: prompt may not have been accepted"
+  echo "OK: freebuff session=$session model=default log=$LOG"
+  exit 0
+fi
+
+case "$tool" in
+  opencode) cmd="opencode run -m $(sq "$model") $(sq "$prompt")" ;;
+  cline)    cmd="cline -m $(sq "$model") -c $(sq "$WORKSPACE") $(sq "$prompt ")" ;;  # trailing space: CLI rejects single-token prompts
+esac
+
+inner="cd $WORKSPACE && $cmd; rc=\$?; echo; echo \"=== $session finished (exit \$rc) ===\"; exec bash"
+tmux new-session -d -s "$session" -x 200 -y 50 "bash -lc $(sq "$inner")"
+sleep 0.3
+tmux pipe-pane -t "$session" -o "cat >> $LOG"
+"$BIN_DIR/ht-show" "$session"
+echo "OK: $tool session=$session model=$model log=$LOG"

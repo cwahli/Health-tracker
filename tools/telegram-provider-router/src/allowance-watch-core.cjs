@@ -52,6 +52,47 @@ function parseCountdownHint(text) {
   return { until: 0, hint: "", countdownParsed: false };
 }
 
+/** Next 00:00 UTC strictly after `now` (the daily free-allowance reset used by
+ *  Cloudflare Workers AI neurons and most per-day free tiers). */
+function nextMidnightUtc(now = Date.now()) {
+  const d = new Date(Number(now));
+  if (!Number.isFinite(d.getTime())) return NaN;
+  d.setUTCHours(0, 0, 0, 0);
+  return d.getTime() + 86400000;
+}
+
+/**
+ * Cloudflare Workers AI error 4006 = the DAILY neurons allowance is fully used
+ * ("you have used up your daily free allocation of 10,000 neurons", seen in
+ * /workspace/logs 2026-09-25). It resets at the next 00:00 UTC — NOT the 45 m
+ * rate-limit TTL the watcher kept re-stamping (ADDENDUM 2026-09-25 #4).
+ */
+function isCloudflareDailyExhausted(text) {
+  const s = String(text || "");
+  return /code"?\s*[:=]?\s*4006|daily\s+free\s+allocation|daily\s+neurons?\s+allowance/i.test(s);
+}
+
+/**
+ * Depletion until-time + kind from vendor limit text (one policy for every
+ * stamper — ht-allowance-watch probe output, ht-watch pane/log capture):
+ *   - Cloudflare 4006 daily exhaustion        → next 00:00 UTC (allowance-empty)
+ *   - vendor countdown (ISO or "in Xh Ym")    → that time (rate-limit only when
+ *     it is a short RPM burst, not a period countdown)
+ *   - rate-limit text without a countdown     → now + RATE_LIMIT_TTL_MS (45 m)
+ *   - anything else                           → now + QUOTA_TTL_MS (6 h)
+ */
+function depletionUntilFromText(text, now = Date.now()) {
+  const s = String(text || "");
+  if (isCloudflareDailyExhausted(s)) return { until: nextMidnightUtc(now), kind: "allowance-empty", hint: "" };
+  const cd = parseCountdownHint(s);
+  if (cd.countdownParsed && cd.until > now) {
+    const rl = isRateLimitText(s) && !/try\s+again\s+in\s+\d/i.test(s);
+    return { until: cd.until, kind: rl ? "rate-limit" : "allowance-empty", hint: cd.hint };
+  }
+  const rl = isRateLimitText(s);
+  return { until: now + (rl ? RATE_LIMIT_TTL_MS : QUOTA_TTL_MS), kind: rl ? "rate-limit" : "limit-unknown", hint: "" };
+}
+
 /** Short-window rate limit (re-probe soon) vs period/allowance empty (long TTL). */
 function isRateLimitText(s) {
   const t = String(s || "");
@@ -247,6 +288,23 @@ function opencodeLogQuota(lines, now = Date.now(), { silenceMs = 90000, maxAgeMs
 }
 
 /**
+ * OpenCode Zen (Space Bunny / Muse, bucket opencode-zen-free) hangs SILENTLY on
+ * a rate limit — no error line, no step, just no output (ADDENDUM 2026-09-25
+ * #5/#8). For those models "no output for 3 min" IS the rate-limit signal;
+ * Cloudflare-backed lanes keep the shorter 90 s log rule (they do log 429s).
+ */
+const OPENCODE_ZEN_SILENCE_MS = 3 * 60 * 1000;
+
+function isOpenCodeZenModel(model) {
+  return /muse|mimo|zen|space-?bunny/i.test(String(model || ""));
+}
+
+/** Silence window before an OpenCode lane reads as rate-limited. */
+function opencodeSilenceMsForModel(model, { defaultMs = 90000, zenMs = OPENCODE_ZEN_SILENCE_MS } = {}) {
+  return isOpenCodeZenModel(model) ? Number(zenMs) : Number(defaultMs);
+}
+
+/**
  * Cline quota line from this run's output. A line qualifies only when it is a
  * plain status line: no leading prompt/code-quote chars, no `=`, `(`, `->`,
  * `{` (code being read/pasted), and it matches a vendor quota phrase.
@@ -270,6 +328,106 @@ function matchFreebuffQuotaLine(lines) {
   const phrase = /out of (free)?bucks|no freebucks left| 0 freebucks left|freebucks exhausted/i;
   const arr = Array.isArray(lines) ? lines : String(lines || "").split(/\r?\n/);
   return arr.filter((l) => !exclude.test(l) && phrase.test(l)).slice(-2).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Freebuff auto-continue (ticket tmp/ht-freebuff-autocontinue/TICKET.md).
+// The session-end box is a TUI status box, so the same status-line discipline
+// applies: quoted source text (this ticket's own wording, code, prompt files)
+// must never read as an active session-end box.
+// ---------------------------------------------------------------------------
+
+const FREEBUFF_AUTOCONTINUE_CAP = 12;   // max auto-continues per job, then CONTINUE_CAP
+const FREEBUFF_CONTINUE_MAX_FAILS = 3;  // consecutive failed continues, then SESSION_LOST
+const FREEBUFF_ENTER_WAIT_MS = 10 * 60 * 1000; // "wrapping up" → "Press Enter" grace
+const FREEBUFF_PROMPT_WAIT_MS = 60 * 1000;     // Enter pressed → "Enter a coding task"
+const FREEBUFF_TYPED_WAIT_MS = 3 * 60 * 1000;  // resume prompt typed → "working..."
+
+const FREEBUFF_STATUS_LINE_EXCLUDE = /^[ \t]*[>#$-]|\(|\);|->|\{|=/;
+
+/**
+ * Freebuff session-end state from pane lines. Booleans + Freebucks count
+ * ("Session ended · N Freebucks left"). Pass the VISIBLE screen only (not
+ * scrollback), so a stale box that already scrolled away cannot re-trigger.
+ * Status-line discipline: prompt/code punctuation never matches.
+ */
+function freebuffSessionEndState(lines) {
+  const arr = Array.isArray(lines) ? lines : String(lines || "").split(/\r?\n/);
+  const st = {
+    sessionEnded: false,
+    pressEnter: false,
+    wrappingUp: false,
+    tookOver: false,
+    taskPrompt: false,
+    freebucksLeft: null,
+  };
+  for (const raw of arr) {
+    if (!raw || !raw.trim()) continue;
+    if (FREEBUFF_STATUS_LINE_EXCLUDE.test(raw)) continue;
+    if (/another\s+freebuff\s+instance\s+took\s+over/i.test(raw)) st.tookOver = true;
+    if (/session\s+ended/i.test(raw)) st.sessionEnded = true;
+    if (/press\s+enter\s+to\s+continue/i.test(raw)) st.pressEnter = true;
+    if (/wrapping\s+up/i.test(raw)) st.wrappingUp = true;
+    if (/enter\s+a\s+coding\s+task/i.test(raw)) st.taskPrompt = true;
+    const fb = raw.match(/(\d+)\s+freebucks\s+left/i);
+    if (fb) st.freebucksLeft = Number(fb[1]);
+  }
+  return st;
+}
+
+/**
+ * The resume prompt typed into the fresh session. ticketDir comes from the
+ * session's .meta sidecar prompt file directory.
+ */
+function buildFreebuffResumePrompt(ticketDir) {
+  const dir = String(ticketDir || "").replace(/\/+$/, "");
+  if (!dir) return "";
+  return "Continue the previous task: re-read " + dir + "/TICKET.md and resume from " + dir
+    + "/PROGRESS.md. Write REPORT.md only when done, ending with VERIFIED: yes or no.";
+}
+
+/** A numbered model-picker menu line ("1) GLM 5.3 Flash (0/hr)"). */
+const FREEBUFF_MENU_LINE = /^[ \t]*(\d{1,2})[.)][ \t]+(.+)$/;
+
+function freebuffMenuVisible(lines) {
+  const arr = Array.isArray(lines) ? lines : String(lines || "").split(/\r?\n/);
+  return arr.some((l) => FREEBUFF_MENU_LINE.test(l));
+}
+
+/**
+ * Model-picker choice for a continued session when Freebucks are 0: pick the
+ * GLM 5.3 Flash entry (0/hr) by its menu number. Non-zero Freebucks → "" (the
+ * default model is already GLM 5.3 Flash at 0/hr — plain Enter accepts it).
+ * Menu lines are structurally distinct from code (anchored "N)"), so the
+ * status-line exclude does not apply here.
+ */
+function freebuffModelPickerChoice(lines, { freebucksLeft = null } = {}) {
+  if (freebucksLeft !== 0) return { keys: "", model: "" };
+  const arr = Array.isArray(lines) ? lines : String(lines || "").split(/\r?\n/);
+  for (const raw of arr) {
+    if (!raw || !raw.trim()) continue;
+    const m = raw.match(FREEBUFF_MENU_LINE);
+    if (!m) continue;
+    const label = m[2];
+    if (/glm/i.test(label) && /5\.3/.test(label) && /flash/i.test(label)) {
+      return { keys: m[1], model: label.trim().slice(0, 60) };
+    }
+  }
+  return { keys: "", model: "" };
+}
+
+/**
+ * Enter-wait policy: keep polling for "Press Enter to continue" while the
+ * session-end box (or the older "wrapping up" variant) is pending and the
+ * grace window (10 min) has not elapsed. state.pressEnter=true means proceed
+ * now; a took-over screen is handled by the caller (never auto-continue).
+ */
+function shouldKeepWaitingForEnter(state, elapsedMs, { maxWaitMs = FREEBUFF_ENTER_WAIT_MS } = {}) {
+  if (!state || typeof state !== "object") return false;
+  if (state.pressEnter) return true;
+  if (state.tookOver) return false;
+  if (!state.sessionEnded && !state.wrappingUp) return false;
+  return Number(elapsedMs) < Number(maxWaitMs);
 }
 
 const familyOf = (lane) => {
@@ -361,6 +519,12 @@ module.exports = {
   parseMs,
   isoZ,
   parseCountdownHint,
+  nextMidnightUtc,
+  isCloudflareDailyExhausted,
+  depletionUntilFromText,
+  OPENCODE_ZEN_SILENCE_MS,
+  isOpenCodeZenModel,
+  opencodeSilenceMsForModel,
   isRateLimitText,
   isQuotaText,
   sharedBucketIdFor,
@@ -375,4 +539,14 @@ module.exports = {
   matchFreebuffQuotaLine,
   pickModelForTool,
   nextLane,
+  FREEBUFF_AUTOCONTINUE_CAP,
+  FREEBUFF_CONTINUE_MAX_FAILS,
+  FREEBUFF_ENTER_WAIT_MS,
+  FREEBUFF_PROMPT_WAIT_MS,
+  FREEBUFF_TYPED_WAIT_MS,
+  freebuffSessionEndState,
+  buildFreebuffResumePrompt,
+  freebuffMenuVisible,
+  freebuffModelPickerChoice,
+  shouldKeepWaitingForEnter,
 };
