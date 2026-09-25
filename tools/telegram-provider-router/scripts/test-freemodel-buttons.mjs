@@ -286,6 +286,24 @@ endedTable.lanes.find((l) => l.model === "cline-free/glm-5.3-flash").status = "e
 check("E3 'ended' is treated like 'unavailable'", !mod.availableClineKnownLanes(endedTable).some((k) => k.id === "cline-free/glm-5.3-flash"), JSON.stringify(mod.availableClineKnownLanes(endedTable)));
 writeFileSync(TABLE_PATH, JSON.stringify(buildTable(), null, 2));
 
+// ---- E4) button labels never leak the modelType prefix -----------------------
+// Live defect 2026-09-25: the Cline free lane `stealth/space-bunny-alpha`
+// rendered as "stealth/space bunny alpha free" because the label helper only
+// stripped `cline-free/`. Free ids are not all cline-free typed.
+check("E4 label strips cline-free/ prefix", mod.prettifyClineLaneLabel("cline-free/deepseek-v4.1-flash") === "deepseek v4.1 flash free", mod.prettifyClineLaneLabel("cline-free/deepseek-v4.1-flash"));
+check("E4b label strips a NON-cline-free modelType (stealth/)", mod.prettifyClineLaneLabel("stealth/space-bunny-alpha") === "space bunny alpha free", mod.prettifyClineLaneLabel("stealth/space-bunny-alpha"));
+check("E4c no label ever contains a slash", ["stealth/space-bunny-alpha", "cline-free/muse-spark-1.3-contributor", "cline-free/gemini-3.8-flash"].every((id) => !mod.prettifyClineLaneLabel(id).includes("/")), "slash leaked");
+check("E4d contributor suffix trimmed", mod.prettifyClineLaneLabel("cline-free/muse-spark-1.3-contributor") === "muse spark 1.3 free", mod.prettifyClineLaneLabel("cline-free/muse-spark-1.3-contributor"));
+
+// ---- E5) a ledger-enrolled Cline lane (any type) becomes a /freemodel button --
+const enrolled = buildTable();
+enrolled.lanes.push({ pref: 18, provider: "cline", model: "stealth/space-bunny-alpha", bucket: "cline-per-model", status: "available" });
+const enrolledItems = mod.availableClineKnownLanes(enrolled);
+check("E5 enrolled stealth/ lane appears as a candidate", enrolledItems.some((k) => k.id === "stealth/space-bunny-alpha"), JSON.stringify(enrolledItems.map((k) => k.id)));
+check("E5b its label has no modelType leak", enrolledItems.find((k) => k.id === "stealth/space-bunny-alpha").label === "space bunny alpha free", JSON.stringify(enrolledItems.find((k) => k.id === "stealth/space-bunny-alpha")));
+enrolled.lanes.find((l) => l.model === "stealth/space-bunny-alpha").status = "unavailable";
+check("E5c an enrolled lane marked unavailable is dropped", !mod.availableClineKnownLanes(enrolled).some((k) => k.id === "stealth/space-bunny-alpha"), "unavailable lane still offered");
+
 // ---- F) freemodelReply imported end-to-end uses the injected probes ---------
 const e2e = await mod.freemodelReply(null, {
   probes: {

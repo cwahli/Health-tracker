@@ -2671,7 +2671,10 @@ function availableClineKnownLanes(table = loadFreeLaneTable()) {
 }
 function prettifyClineLaneLabel(id) {
   return String(id)
-    .replace(/^cline-free\//, "")
+    // Strip ANY modelType prefix, not just cline-free/: free ids legitimately
+    // use other types (stealth/space-bunny-alpha), and the type is noise in a
+    // button label. Tail-last segment only — model ids never contain a 2nd "/".
+    .replace(/^[^/]+\//, "")
     .replace(/-contributor$/i, "")
     .replace(/-free$/i, "")
     .replace(/[-_]+/g, " ")
@@ -4042,6 +4045,7 @@ export {
   FREEBUFF_MIMO_MODEL,
   FREEBUFF_MODEL_LABELS,
   availableClineKnownLanes,
+  prettifyClineLaneLabel,
   buildFreemodelReply,
   applyFreeModelPick,
   freemodelReply,
