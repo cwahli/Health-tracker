@@ -411,7 +411,7 @@
         "grok_tg": "adapter",
         "collab": "adapter"
       },
-      "notes": "Learnings land in the picker/catalog once; all agents inherit. Cline Free deepseek is wallet-independent of OpenCode."
+      "notes": "Learnings land in the picker/catalog once; all agents inherit. `/freemodel` is location-scoped: each host lists only locally installed/authenticated tools, provider catalog entries, and its own quota. Cline Free deepseek is wallet-independent of OpenCode. Gemini is exposed through OpenCode, not as a standalone picker surface."
     },
     {
       "id": "tool-thinking",

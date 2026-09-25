@@ -76,9 +76,8 @@ function newCandidates() {
   const known = prefModels();
   const out = [];
   for (const e of entries) {
-    if (e.surface !== 'opencode') continue;
-    const ref = String(e.ref.replace(/^opencode:/, ''));
-    if (!known.has(normCore(ref))) out.push(e.ref);
+    if (e.selectable === false) continue;
+    if (!known.has(normCore(e.ref))) out.push(e.ref);
   }
   return out;
 }
@@ -86,7 +85,8 @@ function newCandidates() {
 if (args.has('--new-candidates') || (!BURN && !LANE)) {
   const fresh = newCandidates();
   console.log(`ledger source: ${source} (${tablePath})`);
-  console.log(`freemodel today: ${entries.length} (cline ${entries.filter((e) => e.surface === 'cline').length}, gemini ${entries.filter((e) => e.surface === 'gemini').length}, opencode ${entries.filter((e) => e.surface === 'opencode').length})`);
+  console.log(`location: ${entries[0]?.location || 'unknown'}`);
+  console.log(`freemodel today: ${entries.length} (cline ${entries.filter((e) => e.provider === 'cline' && e.selectable !== false).length}, tokenharbor ${entries.filter((e) => e.provider === 'tokenharbor' && e.selectable !== false).length}, gemini-through-opencode ${entries.filter((e) => /^opencode\/gemini-/i.test(e.ref)).length}, opencode ${entries.filter((e) => e.tool === 'opencode' && e.provider !== 'tokenharbor' && !/^opencode\/gemini-/i.test(e.ref) && e.selectable !== false).length}, pending ${entries.filter((e) => e.status === 'pending-signin').length}, terminal-only ${entries.filter((e) => e.selectable === false && e.status !== 'pending-signin').length})`);
   console.log(`pref lanes: ${(table.lanes || []).length}, depleted now: ${annotated.filter((a) => a.depleted).length}`);
   for (const a of annotated.filter((x) => x.depleted)) {
     console.log(`  ❌ ${a.ref} — reset in ${a.resetIn}`);

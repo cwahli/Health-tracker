@@ -39,6 +39,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 ## Laws
 
 - A bot is a place. The runner is a surface. A model is a backend. There is no Cline agent. The Cline CLI adapter is degraded for session resume (3.0.65). Do not start there.
+- `/freemodel` is location-scoped: a VM, phone/proot, and Collab host each see only their locally installed/authenticated tools, models, and quota. Cline, Token Harbor, Freebuff, and Gemini-through-OpenCode are omitted when unusable on that host; Freebuff is terminal-only and Gemini is never a new standalone picker surface.
 - One checkout, one coder, `dispatch_lock`. On insufficient funds, one retry with `opencode/deepseek-v4.1-flash` on the same surface, then stop and post the real error.
 - One defect per card. The script starts the coder. The Orchestrator profile only posts status.
 - The card closes when `verify.method` is `named_test` or `manual` and `verify.result` is `green`. A green journey stays `verifying`. `bugState` enforces this (`JOURNEY_GREEN_DOES_NOT_CLOSE`).

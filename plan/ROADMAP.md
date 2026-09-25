@@ -33,7 +33,7 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ## Current work — bot rail, then blocked product IDs (2026-09-24)
 
-**Next code is BOT-19 — DONE 2026-09-24 (live acceptance passed, see below).** No bot-code ID is open; remaining bot residuals are BOT-9 propagation/smoke + Grok mirror and BOT-11 T-matrix rows. V-30.5 stays gated on its explicit human go.
+**Next code is BOT-24.** Load [docs/agents/bot_work.md](../docs/agents/bot_work.md) and the BOT-24 section below, then stop. BOT-14, BOT-19, BOT-21, and BOT-23 are DONE.
 
 **Ticket flow (the agreed shape — roles, not bots):** packer (`bug_ticket`, Solar-free, card only) → QA reproduces (`qa_meal --ticket`, V-30.3) → orchestrator specifies (strong model, locked spec) → you lock (`go`) → script dispatches one healthy backend → verifier (didn't author it) closes on `named_test` green. Packer never writes specs, never dispatches, never edits `src/`. Full role contract: `plan/BUG_TICKET_PIPELINE.md` §4.4. Worked transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` turn plumbing) in §6.2. The dev is a transient process, not a bot — no registry row, no token, no memory.
 
@@ -44,6 +44,20 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are **shipped**. Do not restart them.
 
 **Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (340 KB / 6,474 lines, under its 6,500 ceiling after extraction).
+
+## BOT-24 — location-scoped `/freemodel` + allowance (OPEN)
+
+**Rule:** `/freemodel` is a property of the current host and bot, never a global catalog. Each VM, phone/proot, and Collab host has its own installed tools, credentials, provider catalog, and quota. The list may show Cline, Token Harbor, Freebuff, Gemini-through-OpenCode, or omit them when that host cannot run or authenticate them. Never infer availability from another host's list or shared pref document.
+
+1. **Location detection and filtering** — `scripts/lib/freemodels.mjs` detects `BOT_LOCATION`/Termux/host, checks local OpenCode, Cline CLI + auth, OpenCode provider catalog, Token Harbor credentials/catalog, and Freebuff binary + credentials. VM and mobile must produce different lists when their local capabilities differ. Each bot's `/freemodel` must read its own host state.
+2. **Cline** — list Cline models only when the local Cline executable works and its auth is present. Mobile ARM64 Cline is omitted until the CLI is actually supported and installed; do not advertise a static Cline list that cannot run.
+3. **Token Harbor** — list its free models only when the local OpenCode catalog exposes the Token Harbor provider and this host has its credential. Keep shared Token Harbor quota in the per-bot allowance ledger; do not copy another bot's depletion stamp.
+4. **Freebuff** — show the lane for visibility when locally available, marked terminal-only and never rendered as a selectable Telegram button. Do not claim a Telegram execution path that does not exist.
+5. **Gemini API** — expose keyed Gemini through a tool surface, preferably `opencode/gemini-*`; do not add new standalone `gemini:` picker entries. Migrate legacy stored `gemini:` preferences to their OpenCode-hosted id. Gemini availability and API quota remain host-specific.
+6. **Allowance consistency** — `/freemodel` and `/allowance` must use the same per-bot ledger. Depleted lanes show reset times; selecting a depleted lane must not hang and must name the next usable lane.
+7. **Live testing (required before DONE)** — on one VM bot and one mobile bot separately, with no dual poller: send `/freemodel`, verify the displayed providers match that host's local tools; send `/allowance`, verify the location line and reset board; tap one available and one depleted lane; run one real request and confirm the per-host ledger stamps the result. Capture the host, bot id, command, timestamp, and reply in the ticket. A Cline/Token Harbor/Freebuff lane is not live-proven until it is actually available on that host.
+
+**Gate:** `node scripts/check-capability-propagation.mjs`; `node scripts/probe-free-lanes.mjs` for zero-burn location output; then the VM + mobile live checklist above. Do not mark BOT-24 DONE from static inspection alone.
 
 **Do this, in order. Packets are locked = go (`auto_go: true`).**
 

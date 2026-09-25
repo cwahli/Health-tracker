@@ -47,6 +47,7 @@ import {
   formatFreeLabel,
   CLINE_FREE_MODELS,
   GEMINI_MODELS,
+  GEMINI_TO_OPENCODE,
   toModelRef,
 } from './lib/freemodels.mjs';
 import {
@@ -65,7 +66,6 @@ import {
   BOT_COMMANDS,
   toTelegramCommands,
   assertValidCommands,
-  isFreeModel,
   parseAgentList,
   parseModelsVerbose,
   modelKeyboard,
@@ -265,8 +265,12 @@ function saveOffset(id, offset) {
 
 function effective(config, prefs, chatId) {
   const p = prefs.get(chatId) || {};
+  const storedModel = p.model || config.agent.model;
+  const legacyGemini = String(storedModel || '').startsWith('gemini:')
+    ? GEMINI_TO_OPENCODE[String(storedModel).slice('gemini:'.length)]
+    : null;
   return {
-    model: p.model || config.agent.model,
+    model: legacyGemini || storedModel,
     agent: p.agent || config.agent.defaultAgent,
     variant: p.variant || config.agent.variant,
   };
@@ -323,9 +327,16 @@ async function getAgents(config, caches) {
   return caches.agents;
 }
 
-async function getFreeModels(caches) {
-  if (!caches.free) {
-    caches.free = buildFreeModelList();
+async function getFreeModels(caches, config) {
+  const location = workLocation();
+  if (!caches.free || caches.freeLocation !== location) {
+    caches.free = buildFreeModelList({
+      location,
+      env: process.env,
+      opencodeBin: config?.agent?.opencodeBin,
+      clineBin: config?.agent?.clineBin,
+    });
+    caches.freeLocation = location;
   }
   return caches.free;
 }
@@ -348,7 +359,7 @@ function getLedger(botId) {
 }
 
 function getAnnotatedFreeModels(caches, botId) {
-  const base = caches.free || buildFreeModelList();
+  const base = caches.free || buildFreeModelList({ location: workLocation() });
   caches.free = base;
   const { table, session, source } = getLedger(botId);
   if (!table) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
@@ -392,14 +403,15 @@ async function sendHtml(api, chatId, html) {
   }
 }
 
-function formatFreemodelWithDepletion(entries, annotated, { current } = {}) {
-  const base = formatFreeModelText(entries, { current });
-  const depleted = annotated.filter((a) => a.depleted);
-  if (!depleted.length) return `${base}\n\nAllowance: all listed lanes look available (shared ledger). /allowance for Reset in times.`;
+function formatFreemodelWithDepletion(entries, annotated, { current, location } = {}) {
+  const selectable = annotated.filter((a) => a.selectable !== false);
+  const base = formatFreeModelText(entries, { current, location });
+  const depleted = selectable.filter((a) => a.depleted);
+  if (!depleted.length) return `${base}\n\nAllowance: all selectable lanes look available (per-host ledger). /allowance for Reset in times.`;
   const lines = depleted.map((d) => `❌ ${d.label} — depleted (reset in ${d.resetIn || 'unknown'})`);
-  const next = annotated.find((a) => !a.depleted);
+  const next = selectable.find((a) => !a.depleted);
   if (next) lines.push(`Next up: ${next.label}`);
-  return `${base}\n\nAllowance (shared ledger):\n${lines.join('\n')}\n\n/allowance for full table.`;
+  return `${base}\n\nAllowance (per-host ledger):\n${lines.join('\n')}\n\n/allowance for full table.`;
 }
 
 export class ProgressRenderer {
@@ -864,7 +876,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, 'Could not read the model list from opencode.');
           return;
         }
-        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists free models from opencode + cline + gemini.`, {
+        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists this host's locally available free models.`, {
           reply_markup: modelKeyboard(models),
         });
         return;
@@ -892,14 +904,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       if (ref.surface === 'gemini') {
-        if (!GEMINI_MODELS.includes(ref.id)) {
-          await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /freemodel to pick from the free list.`);
+        const migrated = GEMINI_TO_OPENCODE[ref.id];
+        if (!GEMINI_MODELS.includes(ref.id) || !migrated) {
+          await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /freemodel to pick a locally available model.`);
           return;
         }
-        const stored = toModelRef('gemini', ref.id);
-        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
+        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: migrated });
         savePrefs(config.id, prefs);
-        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
+        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(migrated)} for this chat.`);
         return;
       }
       const models = await getModels(config, caches);
@@ -919,17 +931,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'free': {
-      const models = await getModels(config, caches);
-      const free = models.filter(isFreeModel);
-      if (!models.length) {
-        await api.sendMessage(chatId, 'Could not read the model list from opencode.');
+      const entries = await getFreeModels(caches, config);
+      if (!entries.length) {
+        await api.sendMessage(chatId, 'No locally available free models found on this host.');
         return;
       }
-      if (!free.length) {
-        await api.sendMessage(chatId, 'No free models found.');
-        return;
-      }
-      await sendChunked(api, chatId, formatModelList(sortModelsFreeFirst(free).slice(0, free.length)));
+      await sendChunked(api, chatId, formatFreeModelText(entries, { current: eff.model, location: workLocation() }));
       return;
     }
 
@@ -940,15 +947,16 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'freemodel': {
-      const entries = await getFreeModels(caches);
+      const entries = await getFreeModels(caches, config);
       if (!entries.length) {
         await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
         return;
       }
       const { annotated } = getAnnotatedFreeModels(caches, config.id);
-      const available = annotated.filter((a) => !a.depleted);
-      const keyboardEntries = available.length ? available : annotated;
-      await api.sendMessage(chatId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model }), {
+      const selectable = annotated.filter((a) => a.selectable !== false);
+      const available = selectable.filter((a) => !a.depleted);
+      const keyboardEntries = available.length ? available : selectable;
+      await api.sendMessage(chatId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() }), {
         reply_markup: modelKeyboard(
           keyboardEntries.map((entry) => entry.label),
           { kind: 'fm' },
@@ -974,13 +982,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           return;
         } catch (e) {
           const route2 = freemodelRefToRoute(eff.model || '');
-          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model }));
+          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model, location: workLocation() }));
           return;
         }
       }
       // Router parity: raw HTML grid text (screenshot), NOT the markdown converter.
       await sendHtml(api, chatId, buildAllowanceTextForBots({
-        stateDir: getLedger(config.id).dir, provider: route.provider, model: route.model,
+        stateDir: getLedger(config.id).dir, provider: route.provider, model: route.model, location: workLocation(),
       }));
       return;
     }
@@ -1158,12 +1166,14 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       return;
     }
     if (kind === 'fmp') {
-      const entries = await getFreeModels(caches);
+      const entries = await getFreeModels(caches, config);
       const eff = effective(config, prefs, chatId);
       const { annotated } = getAnnotatedFreeModels(caches, config.id);
-      await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model }), {
+      const selectable = annotated.filter((a) => a.selectable !== false);
+      const available = selectable.filter((a) => !a.depleted);
+      await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() }), {
         reply_markup: modelKeyboard(
-          (annotated.filter((a) => !a.depleted).length ? annotated.filter((a) => !a.depleted) : annotated).map((entry) => entry.label),
+          (available.length ? available : selectable).map((entry) => entry.label),
           { page: Number(value) || 0, kind: 'fm' },
         ),
       });
@@ -1171,7 +1181,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       return;
     }
     if (kind === 'fm') {
-      const entries = await getFreeModels(caches);
+      const entries = await getFreeModels(caches, config);
       const entry =
         entries.find((e) => e.label === value || e.ref === value) || entries[Number(value)];
       if (!entry) {
@@ -1182,10 +1192,10 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       if (table && isFreemodelEntryDepleted(entry, table, session)) {
         const { annotated } = getAnnotatedFreeModels(caches, config.id);
         const hit = annotated.find((a) => a.ref === entry.ref);
-        const next = annotated.find((a) => !a.depleted);
+        const next = annotated.find((a) => a.selectable !== false && !a.depleted);
         await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${hit?.resetIn || 'unknown'}) — pick ${next?.label || 'another lane'}` });
         const route = freemodelRefToRoute(entry.ref);
-        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model })}`);
+        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation() })}`);
         return;
       }
       prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: entry.ref });

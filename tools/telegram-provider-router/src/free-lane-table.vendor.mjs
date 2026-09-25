@@ -898,18 +898,23 @@ export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionP
   return { table: null, session: {}, tablePath: null, sessionPath: null, source: "empty" };
 }
 
-/** `cline:cline-free/x` / `gemini:gemini/x` / `opencode/y` → { provider, model }. */
-export function freemodelRefToRoute(ref) {
+/** `cline:...` / `gemini:...` / provider-prefixed refs → route candidates. */
+function routeCandidates(ref) {
   const raw = String(ref ?? "").trim();
-  if (!raw) return { provider: "", model: "" };
-  if (raw.startsWith("cline:")) return { provider: "cline", model: raw.slice("cline:".length) };
-  if (raw.startsWith("gemini:")) return { provider: "gemini", model: raw.slice("gemini:".length) };
-  if (raw.startsWith("opencode:")) return { provider: "opencode", model: raw.slice("opencode:".length) };
-  if (raw.includes("/")) {
-    const [p, ...rest] = raw.split("/");
-    return { provider: p, model: raw };
-  }
-  return { provider: "opencode", model: raw };
+  if (!raw) return [];
+  if (raw.startsWith("cline:")) return [{ provider: "cline", model: raw.slice("cline:".length) }];
+  if (raw.startsWith("gemini:")) return [{ provider: "gemini", model: raw.slice("gemini:".length) }];
+  if (raw.startsWith("opencode:")) return [{ provider: "opencode", model: raw.slice("opencode:".length) }];
+  if (!raw.includes("/")) return [{ provider: "opencode", model: raw }];
+  const [provider, ...rest] = raw.split("/");
+  const candidates = [{ provider, model: raw }];
+  if (provider === "tokenharbor" || provider === "cloudflare") candidates.push({ provider: "opencode", model: raw });
+  if (provider === "opencode" && rest[0] === "tokenharbor") candidates.push({ provider: "tokenharbor", model: rest.slice(1).join("/") });
+  return candidates;
+}
+
+export function freemodelRefToRoute(ref) {
+  return routeCandidates(ref)[0] || { provider: "", model: "" };
 }
 
 /** True when this /freemodel entry is currently depleted in the shared ledger. */
@@ -917,10 +922,9 @@ export function isFreemodelEntryDepleted(entry, table, session, { now = Date.now
   try {
     if (!table || !Array.isArray(table.lanes)) return false;
     const ref = typeof entry === "string" ? entry : entry?.ref || entry?.model || "";
-    const { provider, model } = freemodelRefToRoute(ref);
-    if (!provider || !model) return false;
-    if (provider === "gemini") return false; // keyed API lane, not a free bucket
-    const lane = table.lanes.find((l) => laneMatchesRoute(l, provider, model));
+    const candidates = routeCandidates(ref);
+    if (!candidates.length || candidates.some((route) => route.provider === "gemini")) return false;
+    const lane = candidates.map((route) => table.lanes.find((l) => laneMatchesRoute(l, route.provider, route.model))).find(Boolean);
     if (!lane) return false;
     if (liveRecForLane(lane, session, now)) return true;
     if (lane.status === "depleted" && lane.nextResetAt && Date.parse(lane.nextResetAt) > now) return true;
@@ -934,8 +938,9 @@ export function isFreemodelEntryDepleted(entry, table, session, { now = Date.now
 export function annotateFreemodelEntries(entries, table, session, { now = Date.now() } = {}) {
   return (entries || []).map((e) => {
     const ref = typeof e === "string" ? e : e?.ref || "";
-    const { provider, model } = freemodelRefToRoute(ref);
-    const lane = table?.lanes?.find((l) => laneMatchesRoute(l, provider, model)) || null;
+    const lane = routeCandidates(ref)
+      .map((route) => table?.lanes?.find((l) => laneMatchesRoute(l, route.provider, route.model)))
+      .find(Boolean) || null;
     const depleted = isFreemodelEntryDepleted(e, table, session, { now });
     let resetIn = "-";
     try {
@@ -953,7 +958,7 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
  * Pass the chat's effective provider/model so the `Active route` + `Next up`
  * lines are chat-aware (bot-host has no sticky session like the router).
  */
-export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", now = Date.now(), labelFn = defaultResetLabel } = {}) {
+export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel } = {}) {
   const { table, session, source } = loadFreeLaneLedger({ stateDir });
   if (!table) {
     return "Allowance: no shared free-lane ledger found (router state + pref doc missing). Use /freemodel to list free models.";
@@ -963,9 +968,10 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
       ? { ...session, provider, models: { ...(session?.models || {}), [provider]: model } }
       : session;
     const body = formatCompactAllowanceChat(table, sess, { now, labelFn });
-    return source === "pref-doc-fallback"
+    const prefix = location ? `Host: ${location} · own provider credentials and quota\n\n` : '';
+    return prefix + (source === "pref-doc-fallback"
       ? `${body}\n\n(note: per-bot ledger not yet stamped — pref order only until first quota hit)`
-      : body;
+      : body);
   } catch (e) {
     return `Allowance failed: ${String(e?.message || e).slice(0, 200)}`;
   }
