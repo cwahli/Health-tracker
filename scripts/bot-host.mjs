@@ -42,7 +42,7 @@ import {
   extractLogError,
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
-import { ensureOpencodeTui, abortOpencodeSession } from './lib/opencode-tui.mjs';
+import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
 import { KNOWN_HOSTS, workerStatus } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
@@ -1971,6 +1971,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
     let workSession = resolveSession({ location, chat: String(chatId), workspace: effectiveWorkspace, lane: workLane });
     if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
+    // A recorded TUI server can die while the session row lives on. Attaching
+    // to it makes every turn fail in about two seconds with "Session not
+    // found", which is what happened to @VM_19485_bot all afternoon on
+    // 2026-09-25: one stale row from 11:14, thousands of nothing. Ask the
+    // server first, and drop the dead view instead of attaching to it.
+    if (workSession.viewMode === 'tui' && workSession.serverUrl) {
+      const live = await opencodeServerHealthy(workSession.serverUrl);
+      if (!live) {
+        console.log(`[${config.id}] tui server ${workSession.serverUrl} is not answering; dropping the stale view`);
+        workSession = setWorkView(workSession.id, { viewMode: 'headless', serverUrl: null, state: 'stale' }) || workSession;
+      }
+    }
     // A `/freemodel` switch after `/tx on` must move the live view with the
     // lane: stale OpenCode TUI panes are dropped for Cline/Gemini and the TUI
     // is re-ensured when the lane comes back to OpenCode.
