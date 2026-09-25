@@ -150,7 +150,10 @@ function pickProbeKind(lane) {
   // open again. Without a kind here these rows were skipped, so a Gemini
   // depletion could be neither detected nor cleared.
   if (provider === "gemini" || /(^|\/)gemini-|^google\//.test(model)) return { kind: "opencode" };
-  if (provider === "opencode") return { kind: "opencode" };
+  // Vendor-prefixed opencode surfaces (`opencode-go`, …) are the same CLI, so they
+  // probe the same way. Left unprobed they showed a permanent "—" in the Reset
+  // column because nothing was ever going to ask them.
+  if (provider === "opencode" || provider.startsWith("opencode-")) return { kind: "opencode" };
   return { kind: "skip", why: `no probe for provider ${provider || "?"}` };
 }
 

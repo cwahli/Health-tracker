@@ -209,7 +209,10 @@ export function laneSetup(provider, readiness = providerReadiness()) {
   if (!row) return { needsSetup: false, unknown: true, reason: null };
   if (row.ready === true) return { needsSetup: false, unknown: false, reason: null };
   if (row.ready === 'unknown') return { needsSetup: false, unknown: true, reason: null };
-  return { needsSetup: true, unknown: false, reason: `needs ${row.needs}` };
+  // Name the variable when the row knows it, and still say something useful when it
+  // does not. "needs undefined" is what a partial readiness object produced, and it
+  // is the one string that tells the user nothing about what to do.
+  return { needsSetup: true, unknown: false, reason: row.needs ? `needs ${row.needs}` : `${provider || 'provider'} is not set up on this host` };
 }
 
 function providerOf(provider) {

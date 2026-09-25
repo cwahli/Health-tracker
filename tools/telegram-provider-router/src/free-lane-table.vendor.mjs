@@ -792,7 +792,7 @@ export function planCodeForLane(lane) {
   // "OC" hid which provider the row belonged to, the same mistake the tokenharbor
   // rows above had.
   if (provider === "gemini" || model.includes("gemini-") || /^google\//.test(model)) return "GM";
-  if (provider === "opencode") return "OC";
+  if (provider === "opencode" || provider.startsWith("opencode-")) return "OC";
   return (provider || "?").slice(0, 6).toUpperCase();
 }
 
@@ -1138,6 +1138,14 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
   const lanes = [...table.lanes];
   let nextPref = lanes.reduce((m, l) => Math.max(m, Number(l.pref) || 0), 0);
   const added = [];
+  // The same model reaches the catalog under more than one surface prefix:
+  // `opencode/space-bunny-free`, `opencode-go/space-bunny-free` and
+  // `cline:cline-free/kat-coder-pro` all name a model the table may already carry
+  // under its own path. Matching on provider+model therefore folded in a second
+  // row for it and the table showed the same model twice under two plan codes, so
+  // the model id is compared with the vendor prefix and the surface stripped.
+  const modelKey = (s) => String(s || "").toLowerCase().replace(/^[^/]*\//, "").replace(/[^a-z0-9.]/g, "");
+  const known = new Set(lanes.map((l) => modelKey(l.model)).filter(Boolean));
   for (const entry of entries || []) {
     const ref = typeof entry === "string" ? entry : entry?.ref || "";
     if (!ref) continue;
@@ -1145,14 +1153,19 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
     // it is already reported as a gap by /setup.
     if (typeof entry === "object" && entry && (entry.status === "pending-signin" || /^pending:/.test(ref))) continue;
     for (const route of routeCandidates(ref)) {
-      if (lanes.some((l) => laneMatchesRoute(l, route.provider, route.model))) continue;
+      const key = modelKey(route.model);
+      if (!key || known.has(key)) continue;
+      known.add(key);
       nextPref += 1;
       const terminalOnly = typeof entry === "object" && entry ? entry.selectable === false : false;
       const lane = {
         pref: nextPref,
         provider: route.provider,
         model: route.model,
-        label: (typeof entry === "object" && entry?.label) || route.model,
+        // The table's own labels are short names, not raw refs, and the renderer
+        // sizes its columns from them: a folded row labelled `cline:kat coder pro
+        // (free)` pushed the plan code off the edge of the table.
+        label: shortModelName(route.model) || route.model,
         // `available` means "not known to be spent". The projection is what refuses
         // to offer it — a missing credential, a terminal-only tool or a live
         // depletion record each turn the row into its own honest verdict, and a

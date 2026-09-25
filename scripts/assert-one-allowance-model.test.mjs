@@ -64,21 +64,43 @@ try {
   // 1c. The catalog is folded into the table, so /allowance and /freemodel offer
   // the same rows. Live on 2026-09-25: /freemodel listed 43 models of which 38
   // had no ledger row, and /allowance showed no Gemini at all.
+  const baseTable = { version: 3, lanes: [
+    { pref: 1, provider: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', status: 'depleted', nextResetAt: '2030-01-01T00:00:00Z', tg: true, label: 'Muse 1.3' },
+  ] };
   const foldCatalog = [
     { ref: 'opencode/muse-spark-1.3-contributor-free', label: 'Muse 1.3' },
     { ref: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
     { ref: 'gemini:gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+    { ref: 'opencode-go/space-bunny-free', label: 'Space Bunny' },
     { ref: 'pending:tokenharbor', label: 'tokenharbor (pending setup/sign-in)' },
   ];
-  const folded = withCatalogLanes(gemTable, foldCatalog, { now: Date.now() });
-  check('a catalogued model with no lane row gets one', folded.added.length === 2, JSON.stringify(folded.added.map((l) => l.model)));
-  check('the gemini row it added is a real lane', folded.table.lanes.some((l) => l.model === 'google/gemini-3.8-flash'));
+  const folded = withCatalogLanes(baseTable, foldCatalog, { now: Date.now() });
+  check('a catalogued model with no lane row gets one', folded.added.length === 3, JSON.stringify(folded.added.map((l) => l.model)));
+  check('a gemini model reached through opencode gets a row', folded.table.lanes.some((l) => l.model === 'google/gemini-3.8-flash'));
+  check('a gemini: ref gets a row too', folded.table.lanes.some((l) => l.model === 'gemini-3.7-flash'));
   check('a pending-signin placeholder is not turned into a lane', !folded.table.lanes.some((l) => String(l.model).includes('pending:')));
   check('an existing row is not duplicated', folded.table.lanes.filter((l) => l.model === 'opencode/muse-spark-1.3-contributor-free').length === 1);
-  check('appended rows land after the existing ones', Number(folded.added[0].pref) > Number(gemTable.lanes[gemTable.lanes.length - 1].pref));
+  check('appended rows land after the existing ones', folded.added.every((l) => Number(l.pref) > Number(baseTable.lanes[0].pref)));
+  check('an existing stamp survives the fold', folded.table.lanes.find((l) => l.pref === 1)?.status === 'depleted');
   check('folding twice adds nothing', withCatalogLanes(folded.table, foldCatalog).added.length === 0);
-  check('an existing stamp survives the fold', withCatalogLanes({ ...gemTable, lanes: gemTable.lanes.map((l) => (l.pref === 1 ? { ...l, status: 'depleted', nextResetAt: '2030-01-01T00:00:00Z' } : l)) }, foldCatalog).table.lanes.find((l) => l.pref === 1)?.status === 'depleted');
-  check('a folded gemini row projects as selectable', projectLanes(folded.table, {}).find((r) => r.label === 'Gemini 3.8 Flash')?.selectable === true);
+  check('a folded row is labelled like the rest of the table, not as a raw ref',
+    folded.added.every((l) => !/^(cline:|opencode:|google:)/.test(String(l.label || ''))), JSON.stringify(folded.added.map((l) => l.label)));
+  const foldedRows = projectLanes(folded.table, {});
+  check('a folded gemini row is selectable', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.selectable === true);
+  check('a folded gemini row is planned as GM', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.plan === 'GM');
+  check('a vendor-prefixed opencode lane is planned as OC', foldedRows.find((r) => /space-bunny-free$/.test(r.model))?.plan === 'OC');
+  // The same model under two vendor prefixes must not become two rows.
+  const twice = withCatalogLanes({ version: 3, lanes: [] }, [
+    { ref: 'opencode/space-bunny-free' },
+    { ref: 'opencode-go/space-bunny-free' },
+  ]);
+  check('the same model under two vendor prefixes is one row', twice.added.length === 1, JSON.stringify(twice.added.map((l) => l.model)));
+  // A provider with no credential here still gets a row, and the projection is what
+  // refuses it — that is the "X at the bottom", not a missing row.
+  const noKey = projectLanes(withCatalogLanes({ version: 3, lanes: [] }, [{ ref: 'cloudflare/@cf/qwen/qwen3.8-27b' }]).table, {},
+    { readiness: { tokenharbor: { ready: false }, cloudflare: { ready: false }, cline: { ready: true }, opencode: { ready: true }, gemini: { ready: true }, freebuff: { ready: true } } });
+  check('a provider with no credential is listed, not dropped', noKey.length === 1);
+  check('and is not selectable, with a reason that names the fix', noKey[0].selectable === false && /not set up|needs \S/.test(noKey[0].reason) && !/undefined/.test(noKey[0].reason), noKey[0].reason);
 
   // 2. Quota marks a lane, and only for the worker whose session says so.
   const now = Date.now();
