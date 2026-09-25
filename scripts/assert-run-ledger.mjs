@@ -77,8 +77,10 @@ check('dispatch records the unresolved outcome', dispatchSrc.includes('record_ru
 // 3-5. In-memory behavior against an isolated ledger.
 const tmpLedger = path.join(os.tmpdir(), `ledger_gate_${Date.now()}_${Math.random().toString(36).slice(2)}.jsonl`);
 const tmpFailures = path.join(os.tmpdir(), `ledger_fail_${Date.now()}_${Math.random().toString(36).slice(2)}.jsonl`);
+const tmpErrorLog = path.join(os.tmpdir(), `ledger_errors_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
 process.env.RUN_LEDGER = tmpLedger;
 process.env.BOT_FAILURE_LOG = tmpFailures;
+process.env.BOT_ERROR_LOG = tmpErrorLog;
 
 const {
   signatureOf,
@@ -118,7 +120,7 @@ check('escalated outcome feeds bot-failures.jsonl',
 
 // 6. CLI subcommands.
 const cliScript = ledgerPath;
-const cliEnv = { ...process.env, RUN_LEDGER: tmpLedger, BOT_FAILURE_LOG: tmpFailures };
+const cliEnv = { ...process.env, RUN_LEDGER: tmpLedger, BOT_FAILURE_LOG: tmpFailures, BOT_ERROR_LOG: tmpErrorLog };
 const checkClean = execFileSync(process.execPath, [
   cliScript, 'check', '--ticket=NEW-1', '--surface=s', '--provider=p', '--model=m', '--defect-class=d',
 ], { encoding: 'utf8', env: cliEnv });

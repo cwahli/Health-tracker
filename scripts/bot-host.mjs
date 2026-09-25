@@ -46,6 +46,7 @@ import { ensureOpencodeTui, abortOpencodeSession } from './lib/opencode-tui.mjs'
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
+import { recordError, noteHealthy } from './lib/error-log.mjs';
 import {
   parseModelRef,
   buildFreeModelList,
@@ -1752,6 +1753,25 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         stderr: result.stderr,
       });
       displayResult = { ...result, lastError: summary.message, stderr: summary.stderr };
+    }
+    // BOT-25 error log: a terminal lane failure opens (or bumps) a record;
+    // the next clean run on the lane auto-closes it. Operator aborts are
+    // never errors. Best-effort — never breaks the chat.
+    try {
+      if (!running.get(chatId)?.aborted) {
+        if (String(result?.finalText || '').trim()) {
+          noteHealthy({ lane: finalSurface, bot: config.id });
+        } else if (String(result?.lastError || '').trim()) {
+          recordError({
+            lane: finalSurface,
+            bot: config.id,
+            raw: `${result.lastError || ''} ${result.stderr || ''}`,
+            hint: String(displayResult.lastError || '').slice(0, 200),
+          });
+        }
+      }
+    } catch {
+      // error-log writes must never break message delivery
     }
     if (running.get(chatId)?.aborted) {
       renderer.status = 'aborted';

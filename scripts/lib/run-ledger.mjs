@@ -24,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { recordFailure } from './failure-log.mjs';
+import { recordError, noteHealthy } from './error-log.mjs';
 
 /** Outcomes that count as failures for the bot-failures reader. */
 export const FAILED_OUTCOMES = new Set([
@@ -131,6 +132,16 @@ export function recordOutcome(fields, logPath = ledgerPath()) {
         hint: `${row.ticket} ${row.defectClass}`.trim().slice(0, 160),
         bot: row.surface || null,
       });
+      // BOT-25: terminal dispatch failures open an error-log record; a later
+      // success on the lane auto-closes it. Never throws (error-log is wrapped).
+      recordError({
+        lane: row.provider || row.surface || '',
+        bot: row.surface || '',
+        kind: `dispatch:${row.outcome}`,
+        hint: `${row.ticket} ${row.defectClass}`.trim(),
+      });
+    } else {
+      noteHealthy({ lane: row.provider || row.surface || '', bot: row.surface || '' });
     }
     return { written: true, signature, priorCount };
   } catch {
