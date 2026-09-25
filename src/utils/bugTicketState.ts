@@ -252,6 +252,8 @@ export function curationSnapshot(item: BugWorkItem, titleOverride?: string | nul
     class: item.class,
     surface: item.surface,
     assignee: item.assignee,
+    archived_at: item.archived_at,
+    archive_reason: item.archive_reason,
     defect: item.defect || null,
   };
 }
@@ -266,7 +268,7 @@ export function validateCuration(body: any): ValidationResult<any> {
   const unknown = Object.keys(body).find((key) => !CURATION_FIELDS.has(key));
   if (unknown) return { ok: false, error: `curation field not allowed: ${unknown}` };
   const op = String(body.op || 'review');
-  if (!['review', 'edit', 'rewrite', 'handoff'].includes(op)) return { ok: false, error: `unsupported curation op: ${op}` };
+  if (!['review', 'edit', 'rewrite', 'handoff', 'archive'].includes(op)) return { ok: false, error: `unsupported curation op: ${op}` };
   const expectedRevision = Number(body.expected_revision);
   if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return { ok: false, error: 'expected_revision is required' };
   const reason = String(body.reason || '').trim();
@@ -303,7 +305,13 @@ export function applyCuration(item: BugWorkItem, body: any, now = new Date().toI
     if (input.expected !== undefined) next.defect!.expected = input.expected || item.defect.expected;
     if (input.criteria !== undefined) next.defect!.criteria = input.criteria || item.defect.criteria;
   }
-  if (input.op !== 'handoff') delete next.handoff;
+  if (input.op === 'archive') {
+    next.archived_at = now;
+    next.archive_reason = input.reason;
+    delete next.handoff;
+  } else if (input.op !== 'handoff') {
+    delete next.handoff;
+  }
   const afterHash = curationHash(curationSnapshot(next, input.title));
   const event: BugCurationEvent = {
     id: `${now}-${currentRevision + 1}`,

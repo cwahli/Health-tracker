@@ -178,6 +178,10 @@ describe('dispatchGuard — idempotency (double-dispatch refusal)', () => {
     expect(dispatchGuard({ state: 'packed', flags: {} }).ok).toBe(false); // no defect pack
   });
 
+  it('refuses an archived card', () => {
+    expect(dispatchGuard({ ...scratchPacket('packed'), archived_at: '2026-09-25T00:00:00Z' }).reason).toMatch(/archived/);
+  });
+
   it('refuses blocked / not_reproducible / duplicate flags even when packed', () => {
     expect(dispatchGuard(scratchPacket('packed', { blocked_reason: 'burn_budget' })).reason).toMatch(/blocked_reason/);
     expect(dispatchGuard(scratchPacket('packed', { not_reproducible: true })).reason).toMatch(/not_reproducible/);
