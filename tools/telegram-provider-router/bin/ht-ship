@@ -1,0 +1,124 @@
+#!/bin/bash
+# ht-ship <ticket-dir> — ship repo router changes to the live router (one poller).
+# Part 3 of tmp/ht-allowance-watch/TICKET.md.
+# Repo copy: tools/telegram-provider-router/bin/ht-ship (live: $HT_BIN_DIR/ht-ship).
+#
+#   1. Require <ticket-dir>/REPORT.md; run `npm test` in tools/telegram-provider-router;
+#      abort (non-zero, clear message) on failure — no sync, no restart.
+#   2. Sync repo tools/telegram-provider-router/{src,scripts,bin} into the live router
+#      <router>/ — .env, state/, run/, logs/ are never
+#      touched; every replaced file is backed up first (backups/<stamp>/) and
+#      replaced atomically (tmp + mv), never edited in place.
+#   3. Restart the Telegram poller EXACTLY ONCE via the documented single-poller
+#      path (kill the old one first, then `TG_ROUTER_LOCKED=1 flock -n
+#      run/router.lock node src/index.js`). Never starts a second poller: the
+#      start is aborted if the lock is still held.
+#   4. Verify: exactly ONE poller process (cwd = live router), pidfile matches,
+#      and no 409/Conflict in the fresh log slice after 20 s.
+#   5. Print a one-line summary and append to <ticket-dir>/SHIPPED.txt.
+#
+# Env: HT_REPO (repo checkout), HT_ROUTER_DIR (live router dir).
+# Never prints or commits secrets; never reads .env values.
+set -u
+REPO="${HT_REPO:-/workspace/biomarker-and-nutrient-tracker}"
+TOOL="$REPO/tools/telegram-provider-router"
+LIVE="${HT_ROUTER_DIR:-$HOME/.config/telegram-opencode/router}"
+LOGOUT="$LIVE/run/router.out.log"
+
+TICKET="${1:-}"
+[ -n "$TICKET" ] || { echo "usage: ht-ship <ticket-dir>"; exit 1; }
+[ -f "$TICKET/REPORT.md" ] || { echo "ABORT: $TICKET/REPORT.md missing — write the report before shipping"; exit 1; }
+[ -d "$TOOL" ] && [ -d "$LIVE" ] || { echo "ABORT: repo tool or live router dir missing"; exit 1; }
+
+echo "[ht-ship] 1/4 npm test in tools/telegram-provider-router ..."
+if ! ( cd "$TOOL" && npm test ); then
+  echo "ABORT: npm test FAILED — nothing synced, poller NOT restarted"
+  exit 1
+fi
+
+echo "[ht-ship] 2/4 syncing src/ + scripts/ + bin/ -> $LIVE (backups first, atomic mv)"
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+BACKUP="$LIVE/backups/$STAMP"
+mkdir -p "$BACKUP"
+sync_dir() { # <repo-dir> <live-dir> <label>
+  local src="$1" dst="$2" label="$3" f base changed=0
+  [ -d "$dst" ] || mkdir -p "$dst"
+  for f in "$src"/*; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    case "$base" in *.bak*|*.tmp*) continue ;; esac
+    if [ -f "$dst/$base" ] && ! cmp -s "$f" "$dst/$base"; then
+      cp -p "$dst/$base" "$BACKUP/$base" || { echo "ABORT: backup failed for $label/$base"; exit 1; }
+    fi
+    if [ ! -f "$dst/$base" ] || ! cmp -s "$f" "$dst/$base"; then
+      local tmp="$dst/.$base.tmp.$$"
+      cp -p "$f" "$tmp" && chmod --reference="$f" "$tmp" 2>/dev/null; chmod 644 "$tmp" 2>/dev/null
+      mv "$tmp" "$dst/$base"
+      changed=$((changed + 1))
+      echo "  $label/$base: $([ -f "$BACKUP/$base" ] && echo replaced || echo new)"
+    fi
+  done
+  echo "  $label: $changed file(s) changed"
+}
+sync_dir "$TOOL/src" "$LIVE/src" src
+sync_dir "$TOOL/scripts" "$LIVE/scripts" scripts
+sync_dir "$TOOL/bin" "$LIVE/bin" bin
+
+echo "[ht-ship] 3/4 restarting the Telegram poller EXACTLY ONCE (locked path)"
+# Kill the old poller(s): any node src/index.js whose cwd is the live router.
+oldpids=$(pgrep -f "^node src/index.js$" 2>/dev/null || true)
+for p in $oldpids; do
+  if [ "$(readlink -f /proc/$p/cwd 2>/dev/null)" = "$LIVE" ]; then
+    echo "  stopping old poller pid $p"
+    kill "$p" 2>/dev/null || true
+  fi
+done
+for i in $(seq 1 20); do
+  alive=0
+  for p in $oldpids; do kill -0 "$p" 2>/dev/null && alive=1; done
+  [ "$alive" = 0 ] && break
+  sleep 0.5
+done
+for p in $oldpids; do kill -0 "$p" 2>/dev/null && { echo "  force-killing pid $p"; kill -9 "$p" 2>/dev/null || true; }; done
+sleep 2
+# Never start a second poller: the lock must be free first.
+if ! flock -n "$LIVE/run/router.lock" true 2>/dev/null; then
+  echo "ABORT: run/router.lock still held — old poller may still be alive; NOT starting a second one"
+  exit 1
+fi
+OFFSET=$(stat -c %s "$LOGOUT" 2>/dev/null || echo 0)
+: > "$LIVE/run/.ht-ship-restart.stamp"
+cd "$LIVE"
+# setsid detaches the poller from this shell so it outlives ht-ship (a plain
+# `nohup … &` child can be reaped when the ship shell exits).
+TG_ROUTER_LOCKED=1 setsid nohup flock -n run/router.lock node src/index.js >> "$LOGOUT" 2>&1 &
+NEWPID=$!
+sleep 20
+
+echo "[ht-ship] 4/4 verifying (exactly one poller, pidfile, no 409)"
+count=0; pidok=""
+for p in $(pgrep -f "^node src/index.js$" 2>/dev/null); do
+  [ "$(readlink -f /proc/$p/cwd 2>/dev/null)" = "$LIVE" ] && { count=$((count + 1)); pidok="$p"; }
+done
+pidfile=$(cat "$LIVE/run/router.pid" 2>/dev/null || echo "")
+tail -c +$((OFFSET + 1)) "$LOGOUT" > /tmp/.ht-ship-logslice.$$
+if grep -qiE "409|conflict|owns the token" /tmp/.ht-ship-logslice.$$; then
+  echo "ABORT: conflict (409) detected in fresh router log — check $LOGOUT"
+  sed -n '1,20p' /tmp/.ht-ship-logslice.$$
+  rm -f /tmp/.ht-ship-logslice.$$
+  exit 1
+fi
+firstlines=$(grep -aE "starting|allowlist" /tmp/.ht-ship-logslice.$$ | tail -2 | tr '\n' ' ')
+rm -f /tmp/.ht-ship-logslice.$$
+if [ "$count" != 1 ]; then
+  echo "ABORT: expected exactly 1 poller process, found $count — investigate before continuing"
+  exit 1
+fi
+if [ -n "$pidfile" ] && [ "$pidfile" != "$pidok" ]; then
+  echo "NOTE: pidfile ($pidfile) != observed pid ($pidok) — router refreshes it on ready"
+fi
+SUMMARY="ht-ship $STAMP: tests green; src+scripts+bin synced (backups in backups/$STAMP); one poller pid $pidok, no 409"
+echo "[ht-ship] $SUMMARY"
+echo "$SUMMARY" >> "$TICKET/SHIPPED.txt"
+echo "$firstlines" >> "$TICKET/SHIPPED.txt"
+exit 0

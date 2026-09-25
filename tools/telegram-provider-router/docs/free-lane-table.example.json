@@ -1,0 +1,43 @@
+{
+  "_comment": "EXAMPLE ONLY — fake lanes/values. Copy to <router>/state/free-lane-table.json and fill from your ledger. Schema mirrors src/free-lane-table.js + src/index.js markDepleted. Never commit the live file (state/ is gitignored).",
+  "updatedAt": "2026-09-25T00:00:00Z",
+  "buckets": {
+    "opencode-zen-free": { "scope": "shared", "resetRule": "rolling / rate-limit", "nextResetAt": null, "nextResetLabel": "rolling / rate-limit" },
+    "tokenharbor-free": { "scope": "shared", "resetRule": "rolling ~7-day free value bar", "nextResetAt": null, "nextResetLabel": "rolling ~7-day free value bar" },
+    "cloudflare-neurons": { "scope": "shared", "resetRule": "daily 00:00 UTC (10k neurons)", "nextResetAt": null, "nextResetLabel": "daily 00:00 UTC (10k neurons)" },
+    "freebuff-freebucks": { "scope": "shared", "resetRule": "daily Freebucks", "nextResetAt": null, "nextResetLabel": "daily Freebucks" }
+  },
+  "lanes": [
+    {
+      "pref": 1,
+      "provider": "opencode",
+      "model": "opencode/example-model-free",
+      "bucket": "opencode-zen-free",
+      "label": "example model free",
+      "family": "example-model",
+      "status": "available",
+      "nextReset": "rolling / rate-limit",
+      "nextResetAt": null,
+      "cooldownLeft": "-",
+      "cooldownUntil": null,
+      "lastPingAt": "2026-09-25T00:00:00Z",
+      "lastPingNote": "example (not a live record)"
+    },
+    {
+      "pref": 2,
+      "provider": "cline",
+      "model": "cline-free/example-model",
+      "bucket": "cline-per-model",
+      "label": "example model free",
+      "family": "example-model",
+      "status": "depleted",
+      "nextReset": "2026-09-26T00:00:00Z (from vendor countdown Try again in 23h 15m)",
+      "nextResetAt": "2026-09-26T00:00:00Z",
+      "cooldownLeft": "until reset",
+      "cooldownUntil": "2026-09-26T00:00:00Z",
+      "countdownHint": "Try again in 23h 15m",
+      "lastPingAt": "2026-09-25T00:00:00Z",
+      "lastPingNote": "ht-watch auto-capture from vendor limit text"
+    }
+  ]
+}

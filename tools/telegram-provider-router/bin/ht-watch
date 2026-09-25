@@ -1,0 +1,595 @@
+#!/bin/bash
+# ht-watch <session> <report-file> [max-hours] [--auto-failover]
+# Part 2 of tmp/ht-allowance-watch/TICKET.md: generalised watcher with per-tool
+# QUOTA detection, ledger stamping (same shape as the router's auto-capture) and
+# optional --auto-failover (relaunch same prompt on the next available lane).
+# Part of tmp/ht-freebuff-autocontinue/TICKET.md: Freebuff AUTO-CONTINUE.
+# Repo copy: tools/telegram-provider-router/bin/ht-watch (live: $HT_BIN_DIR/ht-watch).
+#
+# Silent while the worker is healthy. Exits (waking the PM) only on:
+#   DONE (report written) · DIED (session gone / process exited w/o report) ·
+#   IDLE (freebuff "working" gone 5 min, no report) · STALLED (screen unchanged
+#   20 min) · QUOTA (per-tool detection below) · TIMEOUT (max-hours) ·
+#   SESSION_LOST (freebuff auto-continue failed 3x in a row, or another freebuff
+#   instance took over this account — never auto-continue that one) ·
+#   CONTINUE_CAP (12 freebuff auto-continues reached for this job).
+# Every terminal exit also writes <logs>/<session>.wake and sends ONE
+# Telegram message (ht-keeper parity, ADDENDUM #6); --detach survives the
+# launching shell; --then "<cmd>" chains the next job after DONE.
+#
+# Freebuff auto-continue (tmp/ht-freebuff-autocontinue/TICKET.md): when the
+# watched pane (VISIBLE screen only, never scrollback) shows the session-ended
+# box, wait for "Press Enter to continue" (if "wrapping up" shows instead, keep
+# polling up to 10 min), press Enter, wait for "Enter a coding task", then type
+# the resume prompt with `tmux send-keys -l` + Enter. The prompt re-reads
+# <ticket>/TICKET.md and resumes from <ticket>/PROGRESS.md; the ticket dir is
+# the directory of the session's .meta prompt_file. Stay SILENT on a successful
+# auto-continue (one log line to <logs>/<session>.log, no PM wake).
+# If Freebucks are 0 the model picker is opened and GLM 5.3 Flash (0/hr) is
+# picked before continuing. Cap: 12 auto-continues per job. The count + the
+# failed-continue streak survive ht-watch restarts in the sidecar
+# <logs>/<session>.cont ({"count":N,"fails":K}).
+#
+# Per-tool QUOTA detection (reads tool status lines/logs, NOT arbitrary pane
+# text, so "429" inside source files cannot false-positive — that FP happened
+# 2026-09-24 and is guarded by tests in scripts/test-allowance-watch.mjs):
+#   opencode : "Rate limit exceeded" in ~/.local/share/opencode/log/opencode.log
+#              for the current run with no later step for 90 s (OpenCode hangs
+#              silently otherwise).
+#   cline    : 429 / quota text in this run's pane/log output — only plain
+#              status lines match; code punctuation (=, (, {, ->, leading
+#              >/#/$/-) never matches.
+#   freebuff : out of Freebucks = QUOTA (same status-line discipline);
+#              "working..." / "Thinking" = alive. The session-end box is
+#              handled by auto-continue above, not as QUOTA.
+# On QUOTA: stamp the lane depleted in the ledger (same JSON shape as the
+# router's markDepleted auto-capture) and print which lane.
+# --auto-failover: on QUOTA (or DIED/STALLED) relaunch the same prompt on the
+#   next available lane (same family first, then next by pref, freebuff last
+#   resort) via ht-run and keep watching; exit only on DONE, all lanes
+#   depleted (FAILOVER_EXHAUSTED), or TIMEOUT.
+#
+# The detection/stamp/lane-choice/auto-continue logic lives in the shared,
+# unit-tested core
+#   tools/telegram-provider-router/src/allowance-watch-core.cjs
+# (covered by tools/telegram-provider-router/scripts/test-allowance-watch.mjs).
+#
+# Env knobs (defaults match the tickets; used by the sandbox tests):
+#   HT_WORKSPACE (repo checkout) HT_BIN_DIR (sibling scripts dir)
+#   HT_WATCH_POLL_SECS (60)      loop interval; idle/stalled counters scale with it
+#   HT_WATCH_IDLE_SECS (300)     freebuff idle threshold
+#   HT_WATCH_STALLED_SECS (1800) unchanged/blank-screen threshold (ADDENDUM: 30 min)
+#   HT_OC_SILENCE_MS (90000)     opencode log silence before QUOTA (non-zen lanes)
+#   HT_OC_ZEN_SILENCE_MS (core 180000) zen-lane silence override (ADDENDUM #8)
+#   HT_OC_LOG_PATH               opencode.log override (tests)
+#   HT_RUN_BIN (ht-run path)     launcher used by --auto-failover
+#   HT_ROUTER_DIR                router dir (ledger) override for tests
+#   HT_AC_LOGS_DIR / HT_LOG_DIR (sidecar/log dir; default /workspace/logs)
+#   HT_WATCH_NO_TG (0)           1 = never send Telegram messages (tests)
+#   --then "<cmd>"               run <cmd> after DONE (chain the next job)
+#   --detach                     setsid nohup self: survive the launching shell
+#   --do-auto-continue           internal: one auto-continue attempt, then exit
+set -u
+WORKSPACE="${HT_WORKSPACE:-/workspace/biomarker-and-nutrient-tracker}"
+ROUTER_DIR="${HT_ROUTER_DIR:-$HOME/.config/telegram-opencode/router}"
+TABLE="$ROUTER_DIR/state/free-lane-table.json"
+SESSION_STATE="$ROUTER_DIR/state/session.json"
+CORE="${HT_CORE_PATH:-$WORKSPACE/tools/telegram-provider-router/src/allowance-watch-core.cjs}"
+[ -f "$CORE" ] || CORE="$ROUTER_DIR/src/allowance-watch-core.cjs"
+[ -f "$CORE" ] || { echo "FATAL: allowance-watch-core.cjs not found"; exit 1; }
+RUN_BIN="${HT_RUN_BIN:-${HT_BIN_DIR:-/home/box/bin}/ht-run}"
+LOGS_DIR="${HT_AC_LOGS_DIR:-${HT_LOG_DIR:-/workspace/logs}}"
+POLL="${HT_WATCH_POLL_SECS:-60}"
+IDLE_MAX="${HT_WATCH_IDLE_SECS:-300}"
+STALLED_MAX="${HT_WATCH_STALLED_SECS:-1800}"   # blank-or-unchanged 30 min = STALLED (ADDENDUM #6)
+OC_SILENCE_MS="${HT_OC_SILENCE_MS:-90000}"
+OC_ZEN_SILENCE_MS="${HT_OC_ZEN_SILENCE_MS:-}"
+
+s=""; r=""; maxh=4; auto=0; acmode=0; detach=0; then_cmd=""; ACV=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --auto-failover) auto=1 ;;
+    --do-auto-continue) acmode=1 ;;
+    --detach) detach=1 ;;
+    --then) then_cmd="${2:-}"; shift ;;
+    *) if [ -z "$s" ]; then s="$1"; elif [ -z "$r" ]; then r="$1"; else maxh="$1"; fi ;;
+  esac
+  shift
+done
+[ -n "$s" ] && [ -n "$r" ] || { echo "usage: ht-watch <session> <report-file> [max-hours] [--auto-failover] [--then \"<cmd>\"] [--detach]"; exit 1; }
+max=$(( maxh * 3600 )); t0=$(date +%s)
+idle=0; last=""; same=0; blank=0; lastTool=""; lastModel=""; lastPromptFile=""
+
+META="$LOGS_DIR/$s.meta"
+CONT="$LOGS_DIR/$s.cont"
+PIDF="$LOGS_DIR/$s.watch-pid"
+
+# ---- --detach: survive the launching shell (the PM's watcher shells died with
+# ---- the PM session overnight — ADDENDUM 2026-09-25 #1). Re-exec self detached
+# ---- via setsid; a live PID file means a watcher is already attached (never a
+# ---- second watcher for the same session).
+if [ "$detach" = 1 ]; then
+  if [ -f "$PIDF" ] && kill -0 "$(cat "$PIDF" 2>/dev/null)" 2>/dev/null; then
+    echo "ht-watch: already watching $s (pid $(cat "$PIDF" 2>/dev/null)) — not starting a second watcher"
+    exit 0
+  fi
+  set -- "$s" "$r" "$maxh"
+  [ "$auto" = 1 ] && set -- "$@" --auto-failover
+  [ -n "$then_cmd" ] && set -- "$@" --then "$then_cmd"
+  exec setsid nohup bash "$0" "$@" > "$LOGS_DIR/$s.watch.log" 2>&1 < /dev/null
+fi
+echo $$ > "$PIDF"
+rm -f "$LOGS_DIR/$s.wake"   # stale wake verdict from a previous run
+
+# ---- terminal exits: verdict → <session>.wake + ONE Telegram message
+# ---- (ADDENDUM #6, parity with ht-keeper). Token/chat come from the router
+# ---- .env (TELEGRAM_BOT_TOKEN + TELEGRAM_ALLOWED_USER_ID) and are NEVER
+# ---- printed. Auto-continue successes stay silent (no exit, one log line).
+tg_notify() { # <text>
+  [ "${HT_WATCH_NO_TG:-0}" = 1 ] && return 0
+  local envf="$ROUTER_DIR/.env" chat token
+  [ -f "$envf" ] || return 0
+  token=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$envf" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+  chat=$(grep -E '^TELEGRAM_ALLOWED_USER_ID=' "$envf" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+  [ -n "$token" ] && [ -n "$chat" ] || return 0
+  curl -s -m 20 -o /dev/null "https://api.telegram.org/bot${token}/sendMessage" \
+    --data-urlencode "chat_id=${chat}" --data-urlencode "text=$1" 2>/dev/null || true
+}
+finish() { # <verdict> — EVERY terminal exit goes through here
+  echo "$1"   # PM-facing verdict (stdout = watch log / terminal)
+  echo "$1" > "$LOGS_DIR/$s.wake"
+  echo "$(date '+%F %T') EXIT $1" >> "$LOGS_DIR/$s.watch.log"
+  rm -f "$PIDF"
+  tg_notify "🤖 worker $s: $1"
+  # --then: chain the next job after DONE (ht-keeper parity, ADDENDUM #6)
+  if [ -n "$then_cmd" ] && [ "${1%%:*}" = DONE ]; then
+    echo "$(date '+%F %T') then: $then_cmd" >> "$LOGS_DIR/$s.watch.log"
+    bash -c "$then_cmd" >> "$LOGS_DIR/$s.watch.log" 2>&1
+  fi
+  exit 0
+}
+
+core_const() { # <FREEBUFF_..._MS | CAP | MAX_FAILS> -> number (fallbacks keep tests honest if core is missing)
+  case "$1" in
+    ENTER)   echo "${HT_AC_ENTER_WAIT_MS:-600000}" ;;
+    PROMPT)  echo "${HT_AC_PROMPT_WAIT_MS:-60000}" ;;
+    TYPED)   echo "${HT_AC_TYPED_WAIT_MS:-180000}" ;;
+    CAP)     echo "${HT_AC_CAP:-12}" ;;
+    FAILS)   echo "${HT_AC_MAX_FAILS:-3}" ;;
+  esac
+}
+
+# ---- which tool/model is running in this session (ht-run .meta sidecar) ----
+read_meta() {
+  lastTool=""; lastModel=""; lastPromptFile=""
+  local mf="$META" out
+  [ -f "$mf" ] || return 0
+  out=$(HT_META="$mf" node -e '
+const m=(()=>{try{return JSON.parse(require("fs").readFileSync(process.env.HT_META,"utf8"))}catch{return{}}})();
+process.stdout.write([m.tool||"",m.model||"",m.prompt_file||""].join("\t"));')
+  lastTool=$(printf '%s' "$out" | awk -F'\t' 'NR==1{print $1}')
+  lastModel=$(printf '%s' "$out" | awk -F'\t' 'NR==1{print $2}')
+  lastPromptFile=$(printf '%s' "$out" | awk -F'\t' 'NR==1{print $3}')
+  return 0
+}
+
+# ---- freebuff auto-continue sidecar: {"count":N,"fails":K} across restarts ----
+ac_count() { HT_AC="$CONT" node -e '
+const m=(()=>{try{return JSON.parse(require("fs").readFileSync(process.env.HT_AC,"utf8"))}catch{return{}}})();
+process.stdout.write(String(Number(m.count||0)));'; }
+ac_fails() { HT_AC="$CONT" node -e '
+const m=(()=>{try{return JSON.parse(require("fs").readFileSync(process.env.HT_AC,"utf8"))}catch{return{}}})();
+process.stdout.write(String(Number(m.fails||0)));'; }
+ac_write() { # <count> <fails>
+  HT_AC="$CONT" AC_C="$1" AC_F="$2" node -e '
+const fs=require("fs"),path=require("path");
+const t=process.env.HT_AC+".tmp."+process.pid;
+try{fs.mkdirSync(path.dirname(process.env.HT_AC),{recursive:true})}catch{}
+fs.writeFileSync(t,JSON.stringify({count:Number(process.env.AC_C),fails:Number(process.env.AC_F),updatedAt:new Date().toISOString()}));
+fs.renameSync(t,process.env.HT_AC);'
+}
+
+# ---- shared node helper: core analysis of a pane snapshot ----
+# stdin: pane text. Env: HT_MODE = state|resumeprompt|pickerchoice
+# HT_FREEBUCKS ("" / "?" = unknown), HT_TICKETDIR (for resumeprompt)
+# stdout: mode state        -> "<tag>|<freebucks>" ; tag = press|ended|wrap|tookover|none
+#         mode menu         -> "menu" | "nomenu"
+#         mode resumeprompt -> the resume prompt text ("" = no ticket dir)
+#         mode pickerchoice -> "<menu#>|<model label>" ("" = keep default)
+ac_analyze() {
+  HT_CORE="$CORE" HT_MODE="$1" HT_FREEBUCKS="${2:-}" HT_TICKETDIR="${3:-}" node -e '
+let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{
+  const core=require(process.env.HT_CORE);
+  const lines=d.split(/\r?\n/);
+  if(process.env.HT_MODE==="resumeprompt"){process.stdout.write(core.buildFreebuffResumePrompt(process.env.HT_TICKETDIR));return;}
+  if(process.env.HT_MODE==="menu"){process.stdout.write(core.freebuffMenuVisible(lines)?"menu":"nomenu");return;}
+  if(process.env.HT_MODE==="pickerchoice"){
+    const fb=(process.env.HT_FREEBUCKS===""||process.env.HT_FREEBUCKS==="?")?null:Number(process.env.HT_FREEBUCKS);
+    const c=core.freebuffModelPickerChoice(lines,{freebucksLeft:fb});
+    process.stdout.write(c.keys+"|"+c.model);return;}
+  const st=core.freebuffSessionEndState(lines);
+  let tag="none";
+  if(st.tookOver)tag="tookover";
+  else if(st.pressEnter)tag="press";
+  else if(st.sessionEnded)tag="ended";
+  else if(st.wrappingUp)tag="wrap";
+  const fb=st.freebucksLeft===null?"?":String(st.freebucksLeft);
+  process.stdout.write(tag+"|"+fb);});'
+}
+
+ac_capture() { tmux capture-pane -p -t "$s" 2>/dev/null; }
+
+ac_read_state() { # <panefile> -> sets AC_TAG / AC_FB
+  AC_TAG=""; AC_FB=""
+  local out
+  out=$(ac_analyze state < "$1" | tr '|' ' ')
+  read -r AC_TAG AC_FB <<EOF
+$out
+EOF
+}
+
+# ---- OpenCode current-run quota (core.opencodeLogQuota on opencode.log) ----
+# If the run already exited (ht-run's "=== <session> finished" marker in the
+# pane/log), pass finished=true so the 90s silence wait is skipped.
+oc_quota_current_run() {
+  local LOGF="${HT_OC_LOG_PATH:-$HOME/.local/share/opencode/log/opencode.log}"
+  [ -f "$LOGF" ] || LOGF="$HOME/.local/share/opencode/logs/opencode.log"
+  [ -f "$LOGF" ] || return 1
+  local finished=0
+  if ac_capture -S -20 2>/dev/null | grep -q "=== $s finished" \
+     || tail -c 4000 "$LOGS_DIR/$s.log" 2>/dev/null | grep -q "=== $s finished"; then
+    finished=1
+  fi
+  # ADDENDUM #8: OpenCode Zen lanes (Space Bunny / Muse) hang SILENTLY on rate
+  # limit — 3 min of no output is the quota signal (90 s elsewhere).
+  HT_CORE="$CORE" TOOL_LOG="$LOGF" HT_OC_MODEL="$lastModel" HT_OC_SILENCE_MS="$OC_SILENCE_MS" HT_OC_ZEN_SILENCE_MS="$OC_ZEN_SILENCE_MS" HT_OC_FINISHED="$finished" node -e '
+const fs=require("fs");const core=require(process.env.HT_CORE);
+let raw;try{raw=fs.readFileSync(process.env.TOOL_LOG);}catch{process.exit(1);}
+const lines=raw.slice(Math.max(0,raw.length-400000)).toString("utf8").split(/\n/);
+const zen=core.isOpenCodeZenModel(process.env.HT_OC_MODEL||"");
+const silenceMs=zen?Number(process.env.HT_OC_ZEN_SILENCE_MS||core.OPENCODE_ZEN_SILENCE_MS):Number(process.env.HT_OC_SILENCE_MS||90000);
+const m=core.opencodeLogQuota(lines,Date.now(),{silenceMs,finished:process.env.HT_OC_FINISHED==="1"});
+if(m===null)process.exit(1);
+process.stdout.write(m||"");'
+}
+
+# ---- quota matchers on this run's final output lines (cline / freebuff) ----
+match_run_quota() { # <tool>  (lines on stdin) -> prints matches or nothing
+  local tool="$1"
+  HT_CORE="$CORE" HT_TOOL="$tool" node -e '
+let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{
+  const core=require(process.env.HT_CORE);
+  const lines=d.split(/\r?\n/);
+  const out=process.env.HT_TOOL==="cline"?core.matchClineQuotaLine(lines):core.matchFreebuffQuotaLine(lines);
+  process.stdout.write(out||"");});'
+}
+
+# ---- lane stamping: same shape as the router's markDepleted auto-capture ----
+# args: <provider> <model> <reason-text>
+stamp_lane_depleted() {
+  local provider="$1" model="$2" reason="$3"
+  HT_CORE="$CORE" ROUTER_TABLE="$TABLE" ROUTER_STATE="$SESSION_STATE" \
+  STAMP_PROVIDER="$provider" STAMP_MODEL="$model" STAMP_REASON="$reason" node -e '
+const fs=require("fs");const core=require(process.env.HT_CORE);
+const rj=(p)=>{try{return JSON.parse(fs.readFileSync(p,"utf8"))}catch{return null}};
+const wj=(p,o)=>{const t=p+".tmp."+process.pid;try{fs.writeFileSync(t,JSON.stringify(o,null,2));fs.renameSync(t,p)}catch{try{fs.writeFileSync(p,JSON.stringify(o,null,2))}catch{}}};
+const tbl=rj(process.env.ROUTER_TABLE), sess=rj(process.env.ROUTER_STATE)||{};
+if(!tbl){console.log("stamp: no free-lane-table.json");process.exit(0)}
+const p=process.env.STAMP_PROVIDER,m=process.env.STAMP_MODEL,reason=process.env.STAMP_REASON;
+const tail=(x)=>String(x).replace(/^[^/]+\//,"").replace(/:free$/i,"");
+const lm=(l)=>{const lp=String(l.provider||""),pp=String(p);if(lp&&pp&&lp!==pp)return false;const lmv=String(l.model||""),mv=String(m);return lmv===mv||tail(lmv)===tail(mv)};
+const lane=(tbl.lanes||[]).find(lm);
+if(!lane){console.log("stamp: no lane matching "+p+"/"+m);process.exit(0)}
+const now=Date.now();
+// ONE policy for every stamper (core): CF 4006 daily exhaustion → next 00:00
+// UTC; vendor countdown honoured; rate-limit 45m; unknown 6h.
+const d=core.depletionUntilFromText(reason,now);
+const until=d.until;
+const kind=d.kind;
+const bid=core.sharedBucketIdFor(lane);
+const lanes=bid?(tbl.lanes||[]).filter((l)=>core.sharedBucketIdFor(l)===bid):[lane];
+core.stampDepleted(tbl,sess,lanes,bid,{until,hint:d.hint,kind,lastError:reason,source:"ht-watch auto-capture from vendor limit text"});
+tbl.updatedAt=core.isoZ(now);
+wj(process.env.ROUTER_TABLE,tbl);wj(process.env.ROUTER_STATE,sess);
+console.log("stamped "+(bid?("bucket:"+bid):(p+"/"+m))+" depleted until "+core.isoZ(until));'
+}
+
+# ---- next available lane for a tool (same family first, then pref; freebuff last) ----
+# args: <tool> <depleted-model> -> prints "<provider>|<model>" or empty
+next_lane() {
+  HT_CORE="$CORE" ROUTER_TABLE="$TABLE" ROUTER_STATE="$SESSION_STATE" \
+  WANT_TOOL="$1" DEPLETED_MODEL="$2" node -e '
+const fs=require("fs");const core=require(process.env.HT_CORE);
+const rj=(p)=>{try{return JSON.parse(fs.readFileSync(p,"utf8"))}catch{return null}};
+const tbl=rj(process.env.ROUTER_TABLE), sess=rj(process.env.ROUTER_STATE)||{};
+const out=core.nextLane(tbl,sess,process.env.WANT_TOOL,process.env.DEPLETED_MODEL);
+if(out)process.stdout.write(out);'
+}
+
+launch() { # <tool> <model-or-empty> <prompt-file> <session>
+  local tool="$1" model="$2" pf="$3" sess="$4"
+  if [ -n "$model" ]; then
+    "$RUN_BIN" "$tool" "$sess" "$pf" "$model" >/dev/null 2>&1
+  else
+    "$RUN_BIN" "$tool" "$sess" "$pf" >/dev/null 2>&1
+  fi
+}
+
+failover() { # returns 0 if relaunched
+  local fromTool="$1" fromModel="$2"
+  [ -n "$lastPromptFile" ] || { echo "FAILOVER_BLOCKED: no prompt file recorded for this session"; return 1; }
+  local nl
+  nl=$(next_lane "$fromTool" "$fromModel")
+  if [ -z "$nl" ]; then echo "FAILOVER_EXHAUSTED: no available lane left"; return 1; fi
+  local ntool="${nl%%|*}" nmodel="${nl#*|}"
+  # freebuff has no model arg; same prompt, same session name
+  launch "$ntool" "$nmodel" "$lastPromptFile" "$s"
+  lastTool="$ntool"; lastModel="$nmodel"
+  echo "FAILOVER: relaunching on $ntool ${nmodel:-(default lane)}"
+  idle=0; same=0; blank=0; last=""
+  return 0
+}
+
+report_done() { finish "DONE: $r written"; }
+
+# ===========================================================================
+# Freebuff auto-continue (ticket tmp/ht-freebuff-autocontinue/TICKET.md)
+# ===========================================================================
+
+# ac_tick <panefile> — one attempt to continue the ended session.
+# Returns 0 = continue done (Enter pressed, resume prompt typed, working seen);
+# 10 = lost (took over / expired / no prompt / bounced); 20 = cap reached.
+# Prints a short machine verdict on stdout (used by tests + ac_run logging).
+ac_tick() { # <panefile>
+  local panefile="$1"
+  local tag="" fb="" pkeys="" prompt="" ticketdir=""
+  local waited=0 pw=0 qw=0 tw=0
+  local enter_max prompt_max typed_max cap
+  enter_max=$(core_const ENTER); prompt_max=$(core_const PROMPT)
+  typed_max=$(core_const TYPED); cap=$(core_const CAP)
+
+  ac_capture > "$panefile"
+  ac_read_state "$panefile"; tag="$AC_TAG"; fb="$AC_FB"
+
+  # ---- took-over: never press Enter, never continue ----
+  if [ "$tag" = "tookover" ]; then echo "tookover"; return 10; fi
+
+  # ---- no session-end box: nothing to continue ----
+  if [ "$tag" = "none" ]; then echo "fresh"; return 0; fi
+
+  # ---- session-end family: wait for "Press Enter to continue" ----
+  # ("wrapping up" variant keeps polling up to 10 min)
+  while [ "$tag" != "press" ]; do
+    sleep 2
+    ac_capture > "$panefile"
+    ac_read_state "$panefile"; tag="$AC_TAG"; fb="$AC_FB"
+    [ "$tag" = "press" ] && break
+    [ "$tag" = "tookover" ] && { echo "tookover"; return 10; }
+    [ "$tag" = "none" ] && { echo "fresh"; return 0; }
+    waited=$((waited+2))
+    if [ "$waited" -ge $(( enter_max / 1000 )) ]; then echo "expired"; return 10; fi
+  done
+
+  # ---- cap check before pressing ----
+  if [ "$(ac_count)" -ge "$cap" ]; then echo "cap"; return 20; fi
+
+  # ---- press Enter (opens the model picker first when Freebucks are 0) ----
+  if [ "$fb" = "0" ]; then
+    tmux send-keys -t "$s" Enter >/dev/null 2>&1
+    # picker wait: wait for the GLM 5.3 Flash menu entry and select it. If no
+    # picker appears within the window (flow skipped it), continue directly.
+    # NB: a stale pre-end "Enter a coding task" line may still be on screen
+    # here — never trust it in this branch (chars would be eaten by the
+    # continue/picker reads); the task-prompt wait below needs a FRESH screen.
+    while true; do
+      sleep 2; pw=$((pw+2))
+      ac_capture > "$panefile"
+      pkeys=$(ac_analyze pickerchoice "$fb" < "$panefile" | cut -d'|' -f1)
+      [ -n "$pkeys" ] && break
+      if [ "$pw" -ge $(( prompt_max / 1000 )) ]; then pkeys=""; break; fi
+    done
+    if [ -n "$pkeys" ]; then
+      tmux send-keys -t "$s" "$pkeys" >/dev/null 2>&1   # select GLM 5.3 Flash
+      sleep 1
+      tmux send-keys -t "$s" Enter >/dev/null 2>&1      # confirm model
+      sleep 2
+      ac_capture > "$panefile"
+    fi
+  else
+    tmux send-keys -t "$s" Enter >/dev/null 2>&1
+    sleep 2
+    ac_capture > "$panefile"
+  fi
+
+  # ---- wait for a FRESH task prompt: end box + picker GONE from the screen,
+  # ---- then "Enter a coding task". (A stale pre-end task prompt line must
+  # ---- never count, or the resume prompt would be eaten by the continue /
+  # ---- picker reads instead of being submitted as the task.)
+  while true; do
+    ac_read_state "$panefile"; tag="$AC_TAG"
+    [ "$tag" = "tookover" ] && { echo "tookover"; return 10; }
+    if [ "$tag" = "none" ]; then
+      menu=$(ac_analyze menu < "$panefile")
+      if [ "$menu" = "nomenu" ] && grep -q 'Enter a coding task' "$panefile"; then break; fi
+    fi
+    sleep 2; qw=$((qw+2))
+    ac_capture > "$panefile"
+    if [ "$qw" -ge $(( prompt_max / 1000 )) ]; then echo "no-task-prompt"; return 10; fi
+  done
+
+  # ---- type the resume prompt (ticket dir from the .meta prompt file) ----
+  ticketdir=$(HT_TICKETDIR_SRC="$lastPromptFile" node -e 'const path=require("path");const v=process.env.HT_TICKETDIR_SRC||"";process.stdout.write(v?path.dirname(v):"")')
+  prompt=$(ac_analyze resumeprompt "" "$ticketdir" < /dev/null)
+  if [ -z "$prompt" ]; then echo "no-ticket-dir"; return 10; fi
+  sleep 1
+  tmux send-keys -t "$s" -l "$prompt" >/dev/null 2>&1
+  sleep 2
+  tmux send-keys -t "$s" Enter >/dev/null 2>&1
+  # ack line the moment the prompt is typed (test evidence + restart safety;
+  # ac_attempt adds the sidecar-bookkeeping line after the confirm loop)
+  echo "[$(date -u +%FT%TZ)] auto-continue ok #$(( $(ac_count) + 1 )): resume prompt typed ($lastPromptFile)" >> "$LOGS_DIR/$s.log"
+
+  # ---- confirm it took (working... / Thinking) and did not bounce ----
+  while true; do
+    sleep 2; tw=$((tw+2))
+    ac_capture > "$panefile"
+    grep -qE 'working\.\.\.|Thinking' "$panefile" && { echo "ok"; return 0; }
+    ac_read_state "$panefile"; tag="$AC_TAG"
+    [ "$tag" != "none" ] && { echo "bounced"; return 10; }
+    if [ "$tw" -ge $(( typed_max / 1000 )) ]; then echo "typed-no-confirm"; return 10; fi
+  done
+}
+
+# ac_run — one attempt + sidecar bookkeeping. Prints AC_OK / AC_CAP / AC_LOST /
+# AC_RETRY(<n>) / AC_<verdict>; exit code mirrors ac_tick (0/10/20).
+ac_run() {
+  local panefile verdict rc count fails
+  panefile=$(mktemp "${TMPDIR:-/tmp}/ht-ac-$s.XXXXXX")
+  verdict=$(ac_tick "$panefile"); rc=$?
+  rm -f "$panefile"
+  count=$(ac_count); fails=$(ac_fails)
+  if [ "$rc" -eq 0 ]; then
+    ac_write "$((count+1))" 0
+    echo "[$(date -u +%FT%TZ)] auto-continue #$((count+1)) succeeded: Enter pressed, resume prompt typed ($lastPromptFile)" >> "$LOGS_DIR/$s.log"
+    echo "AC_OK ($verdict)"
+    return 0
+  fi
+  if [ "$rc" -eq 20 ]; then
+    echo "AC_CAP ($verdict)"
+    return 20
+  fi
+  fails=$((fails+1))
+  ac_write "$count" "$fails"
+  if [ "$fails" -ge "$(core_const FAILS)" ]; then
+    echo "AC_LOST ($verdict)"
+    return 10
+  fi
+  echo "AC_RETRY($fails) ($verdict)"
+  return 1
+}
+
+# ---- single-attempt mode (manual/testing; the watcher loop runs ac_run
+# ---- IN-PROCESS below, so a running watcher never re-reads its script file
+# ---- and an atomic install (mv) can never break it mid-run) ----
+if [ "$acmode" = "1" ]; then
+  read_meta
+  ac_run
+  exit $?
+fi
+
+# ---------- auto-continue driver called from the main loop ----------
+ac_attempt() { # -> 0 keep watching silently, 1 retry next poll, 2 exit now
+  local out
+  out=$(ac_run)
+  case "$out" in
+    AC_OK*)
+      idle=0; same=0; blank=0; last=""
+      return 0 ;;
+    AC_CAP*)
+      echo "CONTINUE_CAP: $(ac_count) auto-continues used for this job (cap $(core_const CAP))"
+      finish "CONTINUE_CAP: $(ac_count) auto-continues used for this job" ;;
+    AC_LOST*)
+      echo "SESSION_LOST: freebuff continue failed $(core_const FAILS) times in a row (or account taken over)"
+      finish "SESSION_LOST: freebuff continue failed $(core_const FAILS) times in a row (or account taken over)" ;;
+    AC_RETRY*|*)
+      echo "[$(date -u +%FT%TZ)] auto-continue attempt failed: $out" >> "$LOGS_DIR/$s.log"
+      return 1 ;;
+  esac
+}
+
+# ---------- main loop ----------
+read_meta
+while true; do
+  [ -f "$r" ] && report_done
+  if ! tmux has-session -t "$s" 2>/dev/null; then
+    [ "$auto" = 1 ] && failover "$lastTool" "$lastModel" && { sleep "$POLL"; read_meta; continue; }
+    finish "DIED: tmux session $s is gone"
+  fi
+  pane=$(ac_capture)
+  logtail=$(tail -c 20000 "$LOGS_DIR/$s.log" 2>/dev/null)
+
+  # ---- freebuff auto-continue (visible screen only; needs .meta prompt file) ----
+  if [ "$lastTool" = "freebuff" ] && [ -n "$lastPromptFile" ]; then
+    ACTAG=$(printf '%s' "$pane" | ac_analyze state | cut -d'|' -f1)
+    if [ "$ACTAG" = "tookover" ]; then
+      finish "SESSION_LOST: another freebuff instance took over this account"
+    fi
+    if [ "$ACTAG" = "press" ] || [ "$ACTAG" = "ended" ] || [ "$ACTAG" = "wrap" ]; then
+      ac_attempt; arc=$?
+      [ "$arc" -eq 0 ] && { sleep "$POLL"; continue; }
+      [ "$arc" -eq 2 ] && exit 0   # ac_attempt already called finish()
+      sleep "$POLL"; continue
+    fi
+  fi
+
+  # ---- per-tool QUOTA detection (status lines/logs only) ----
+  quota=""; ocModel=""
+  case "$lastTool" in
+    opencode)
+      if ocModel=$(oc_quota_current_run); then
+        quota="opencode Rate limit exceeded (log, ${OC_SILENCE_MS}ms no later step)${ocModel:+ model=$ocModel}"
+        [ -z "$ocModel" ] && ocModel="$lastModel"
+      elif [ "$lastTool" = opencode ]; then
+        # ADDENDUM #8: zen lanes hang SILENTLY — no error line at all. No output
+        # for 3 min (same window as the log rule) = rate-limited: stamp the
+        # opencode-zen-free bucket and fail over.
+        quiet=$(OC_QUIET_MS="${HT_OC_ZEN_SILENCE_MS:-$((3 * 60 * 1000))}" OC_QUIET_LOG="$LOGS_DIR/$s.log" node -e '
+const fs=require("fs");
+const ms=Number(process.env.OC_QUIET_MS||180000);
+try{const st=fs.statSync(process.env.OC_QUIET_LOG);process.stdout.write(String(Math.floor(Date.now()-st.mtimeMs)));}catch{process.stdout.write(String(ms+1000));}')
+        if [ -n "$quiet" ] && [ "$quiet" -ge "${HT_OC_ZEN_SILENCE_MS:-180000}" ] 2>/dev/null; then
+          quota="opencode silent ${HT_OC_ZEN_SILENCE_MS:-180000}ms (zen hang = rate-limited, ADDENDUM #8)"
+          ocModel="$lastModel"
+        fi
+      fi
+      ;;
+    cline|freebuff)
+      # Final lines of this run only; the matcher rejects code/prompt-shaped
+      # lines so source text containing "429"/"quota" cannot FP. Freebuff's
+      # session-end box is handled above (auto-continue), not as QUOTA.
+      matchline=$(printf '%s' "$pane$logtail" | tail -n 25 | match_run_quota "$lastTool")
+      [ -n "$matchline" ] && quota="$lastTool quota in run output: $matchline"
+      ;;
+  esac
+  # Sessions without a .meta: no generic pane scan at all — per-tool detection
+  # needs the meta; arbitrary pane text is too noisy (FP hard rule).
+  if [ -n "$quota" ]; then
+    prov="${lastTool:-opencode}"; modl="$lastModel"
+    # Map an OpenCode log modelID (e.g. @cf/qwen/qwen3.8-27b) to the ledger
+    # lane when the meta model is not an exact lane id.
+    if [ -n "$ocModel" ] && [ "$prov" = opencode ]; then
+      cand=$(HT_TABLE="$TABLE" HT_MODEL="$ocModel" node -e 'const fs=require("fs");try{const t=JSON.parse(fs.readFileSync(process.env.HT_TABLE,"utf8"));const id=process.env.HT_MODEL;const norm=(x)=>String(x).replace(/^[^/]+\//,"").replace(/:free$/i,"");const hit=(t.lanes||[]).find(l=>String(l.provider)==="opencode"&&(l.model===id||norm(l.model)===norm(id)));if(hit)console.log(hit.model)}catch{}' 2>/dev/null)
+      [ -n "$cand" ] && modl="$cand"
+    fi
+    [ -n "$modl" ] && stamp_lane_depleted "$prov" "$modl" "$quota" || echo "stamp: no model known — skipped"
+    if [ "$auto" = 1 ]; then
+      failover "$prov" "$modl" || finish "QUOTA ($quota) — no lane left"
+      sleep "$POLL"; continue
+    fi
+    finish "QUOTA ($quota)"
+  fi
+
+  # ---- alive / idle / stalled (ADDENDUM #2: blank-or-unchanged pane = STALLED;
+  # ---- a frozen TUI shows an unchanged screen AND no working... line) ----
+  if [ -z "$(printf '%s' "$pane" | tr -d '[:space:]')" ]; then
+    idle=$((idle+POLL))
+    blank=$((blank+POLL))
+  else
+    blank=0
+    if echo "$pane" | grep -qE 'working\.\.\.|Thinking'; then idle=0; else idle=$((idle+POLL)); fi
+  fi
+  if [ "$lastTool" = "freebuff" ] && [ "$idle" -ge "$IDLE_MAX" ]; then
+    echo "$pane" | grep -v '^\s*$' | tail -8
+    finish "IDLE: no working for $((IDLE_MAX/60)) min, no report"
+  fi
+  h=$(printf '%s' "$pane" | md5sum)
+  if [ "$h" = "$last" ]; then same=$((same+POLL)); else same=0; last="$h"; fi
+  if [ "$same" -ge "$STALLED_MAX" ] || [ "$blank" -ge "$STALLED_MAX" ]; then
+    if [ "$auto" = 1 ] && failover "$lastTool" "$lastModel"; then sleep "$POLL"; continue; fi
+    finish "STALLED: screen unchanged/blank $((STALLED_MAX/60)) min"
+  fi
+  if [ $(( $(date +%s) - t0 )) -ge "$max" ]; then
+    finish "TIMEOUT: still running after ${maxh}h"
+  fi
+  sleep "$POLL"
+done
