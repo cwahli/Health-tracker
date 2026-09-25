@@ -28,7 +28,7 @@ async function waitForServer(url, { fetchImpl = fetch, timeoutMs = 15000, interv
   let lastError = null;
   while (Date.now() < deadline) {
     try {
-      const response = await fetchImpl(`${url}/global/health`);
+      const response = await fetchImpl(`${url}/global/health`, { signal: AbortSignal.timeout(1000) });
       if (response.ok) return await response.json();
       lastError = new Error(`OpenCode server health returned ${response.status}`);
     } catch (error) {
