@@ -78,7 +78,7 @@ try {
 
   // 6. Wiring: the command path checks presence, and the turn path holds.
   const src = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
-  check('the command imports the presence check', /import \{ KNOWN_HOSTS, workerStatus \}/.test(src));
+  check('the command imports the presence check', /import \{[^}]*KNOWN_HOSTS[^}]*workerStatus/.test(src));
   check('/location only sets BOT_LOCATION when a worker answered', /const status = workerStatus\(target\);\s*\n\s*if \(status\.reachable\) \{\s*\n\s*process\.env\.BOT_LOCATION = target;/.test(src));
   check('/location records the refusal', /setBlockedLocation\(chatId, target, status\.reason\)/.test(src));
   check('the refusal says the turn was not run', /the turn was \*\*not\*\* run/.test(src));
@@ -87,6 +87,13 @@ try {
   check('the held turn returns before any lane is chosen', /no allowance was spent[\s\S]{0,400}return;/.test(src));
   check('the hold is released when the worker appears', /if \(status\.reachable\) \{\s*\n\s*process\.env\.BOT_LOCATION = status\.host;\s*\n\s*clearBlockedLocation\(chatId\);/.test(src));
   check('every known host is offered', KNOWN_HOSTS.length >= 4);
+
+  // 7. A reachable remote host hands the turn over instead of running it here.
+  check('the turn path asks whether the host is local', /if \(!isLocalHost\(location\) && remoteStatus\.reachable\)/.test(src));
+  check('a remote turn goes through runOnWorker', /await runOnWorker\(\{/.test(src));
+  check('the remote turn carries the project, role and workspace', /project: isExternalTurn \? activeProject\.id : 'health-tracker'/.test(src) && /role: activeRole \|\| ''/.test(src) && /workspace: effectiveWorkspace/.test(src));
+  check('the reply names the host that ran it', /host: \$\{location\}/.test(src));
+  check('a worker with no live connection falls back to a local run', /workerStatus\(host\)[\s\S]{0,80}if \(!status\.reachable\) return null;/.test(fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8')));
 } finally {
   fs.rmSync(home, { recursive: true, force: true });
 }

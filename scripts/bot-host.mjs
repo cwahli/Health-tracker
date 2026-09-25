@@ -43,9 +43,10 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
-import { KNOWN_HOSTS, workerStatus } from './lib/worker-presence.mjs';
+import { KNOWN_HOSTS, workerStatus, isLocalHost } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
+import { enqueueJob, awaitJob } from './lib/worker-jobs.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -525,6 +526,27 @@ export function attemptFailureText(result) {
     .map((l) => l.trim())
     .filter(Boolean);
   return lines.length ? lines[lines.length - 1] : '';
+}
+
+/**
+ * Run this turn on the host the location names, if that host has a worker
+ * connected. The worker runs the prompt on its own machine and stamps its own
+ * ledger; the VM poller does not call trackRunQuota for it, so the VM's ledger
+ * and the worker's stay separate facts.
+ *
+ * Returns null when the location is this machine or has no live worker, and the
+ * caller runs the turn locally as before.
+ */
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', envMode = 'project', timeoutMs = 900000 } = {}) {
+  const status = workerStatus(host);
+  if (!status.reachable) return null;
+  const job = enqueueJob({ host, prompt, model, project, role, workspace, envMode });
+  console.log(`[${host}] handed ${job.id} to the connected worker`);
+  const done = await awaitJob(job.id, { timeoutMs });
+  if (!done?.result) {
+    return { text: '', code: 1, model, error: `worker ${host} did not answer in time`, remote: true, jobId: job.id };
+  }
+  return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null };
 }
 
 /** Where the "we already hit this" notes are kept, so a note is written once. */
@@ -2248,6 +2270,29 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         : laneChoice.displaced.why;
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
     }
+    // A location that names another machine runs there, on that machine's
+    // allowance. This VM does not stamp for it.
+    const remoteStatus = workerStatus(location);
+    if (!isLocalHost(location) && remoteStatus.reachable) {
+      const handed = await runOnWorker({
+        host: location,
+        prompt: finalPrompt,
+        model: eff.model,
+        project: isExternalTurn ? activeProject.id : 'health-tracker',
+        role: activeRole || '',
+        workspace: effectiveWorkspace,
+        envMode: turnEnvMode,
+      });
+      if (handed) {
+        console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'})`);
+        await renderer.finish(
+          { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
+          { footer: `host: ${location}` }
+        ).catch(() => {});
+        return;
+      }
+    }
+
     const result = await runOpencodeWithFailover({
       api,
       config,
