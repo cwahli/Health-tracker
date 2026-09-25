@@ -13,12 +13,15 @@
  */
 import os from 'node:os';
 import path from 'node:path';
+import fs from 'node:fs';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runOpencode } from './lib/agent-opencode.mjs';
 import { runCline } from './lib/agent-cline.mjs';
 import { buildChildEnv } from './lib/child-env.mjs';
 import { ensureBotLedger, stampDepleted, isConnectionFailure, freemodelRefToRoute } from './lib/free-lanes.mjs';
 import { isQuotaOrLimitError } from './lib/agent-opencode.mjs';
+import { workspaceForId } from './lib/project-registry.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (name, fallback) => {
@@ -64,14 +67,80 @@ function stampHere(modelRef, result) {
   return stamped;
 }
 
+function opencodeBin() {
+  return process.env.OPENCODE_BIN || 'opencode';
+}
+
+function runOpencodeCli(args, { timeoutMs = 60000, maxBuffer = 64 * 1024 * 1024 } = {}) {
+  return new Promise((resolve) => {
+    execFile(opencodeBin(), args, { timeout: timeoutMs, maxBuffer }, (err, stdout, stderr) => {
+      resolve({ ok: !err, out: String(stdout || ''), err: String(stderr || err?.message || '') });
+    });
+  });
+}
+
+/** Does this machine already have that conversation? */
+async function sessionIsHere(sessionId) {
+  const { ok, out } = await runOpencodeCli(['session', 'list'], { maxBuffer: 32 * 1024 * 1024 });
+  return ok && out.split('\n').some((line) => line.includes(sessionId));
+}
+
+/**
+ * Pull the conversation from the VM. `opencode export` on the relay produces
+ * the JSON, and `opencode import` here rebinds it to THIS machine's checkout —
+ * that rebinding is why the job carries a session id and a workspace id, and
+ * not a path from the machine that started it.
+ */
+async function importSessionFromRelay(sessionId) {
+  let res;
+  try {
+    res = await fetch(`${RELAY}/sessions/${encodeURIComponent(sessionId)}/export`);
+  } catch (err) {
+    log(`relay unreachable for ${sessionId}:`, String(err?.message || err).slice(0, 120));
+    return false;
+  }
+  if (!res.ok) return false;
+  const body = await res.text();
+  if (!body.trim().startsWith('{')) return false;
+  const tmp = path.join(os.tmpdir(), `session-${process.pid}-${Date.now()}.json`);
+  try {
+    fs.writeFileSync(tmp, body);
+  } catch {
+    return false;
+  }
+  const { ok } = await runOpencodeCli(['import', tmp]);
+  try {
+    fs.unlinkSync(tmp);
+  } catch {
+    // leave nothing behind if the unlink fails
+  }
+  return ok;
+}
+
+/**
+ * Resume the conversation the job names, or start a fresh one and say so.
+ * Failing closed here would be worse than running blank: a turn that cannot
+ * find its history still has to answer. What must not happen is a *quiet*
+ * wrong history, so the log says which of the three happened.
+ */
+async function resumeSession(sessionId) {
+  if (!sessionId) return { sessionId: '', resumed: false, from: 'none' };
+  if (await sessionIsHere(sessionId)) return { sessionId, resumed: true, from: 'local' };
+  if (await importSessionFromRelay(sessionId)) return { sessionId, resumed: true, from: 'relay' };
+  log(`session ${sessionId} is not here and the relay had no export — running a fresh conversation`);
+  return { sessionId: '', resumed: false, from: 'missing' };
+}
+
 async function runJob(job) {
-  const { model, prompt, workspace, envMode } = job;
+  const { model, prompt, envMode } = job;
+  const workspace = workspaceForId(job.workspace, { host: HOST }) || HERE;
   const env = buildChildEnv({ mode: envMode || 'project' });
-  log(`running ${job.id} on ${model || 'default'} in ${workspace || HERE}`);
+  const resume = await resumeSession(job.sessionId);
+  log(`running ${job.id} on ${model || 'default'} in ${workspace}${resume.sessionId ? ` (session ${resume.sessionId} via ${resume.from})` : ''}`);
   try {
     const result = String(model || '').startsWith('cline:')
-      ? await runCline({ prompt, model: model.slice('cline:'.length), workspace: workspace || HERE, env, envMode })
-      : await runOpencode({ prompt, model, workspace: workspace || HERE, env, envMode, timeoutMs: 900000 });
+      ? await runCline({ prompt, model: model.slice('cline:'.length), workspace, env, envMode })
+      : await runOpencode({ prompt, model, workspace, env, envMode, sessionId: resume.sessionId, timeoutMs: 900000 });
     stampHere(model, result);
     return {
       jobId: job.id,
@@ -80,9 +149,24 @@ async function runJob(job) {
       model,
       error: String(result?.lastError || '').slice(0, 400),
       ledger: LEDGER.dir,
+      // Back to the VM so the next turn on any host resumes the same thread.
+      sessionID: String(result?.sessionID || resume.sessionId || ''),
+      resumedFrom: resume.from,
+      workspace,
     };
   } catch (err) {
-    return { jobId: job.id, text: '', code: 1, model, error: String(err?.message || err).slice(0, 400), ledger: LEDGER.dir };
+    log(`job ${job.id} failed:`, String(err?.stack || err?.message || err).slice(0, 500));
+    return {
+      jobId: job.id,
+      text: '',
+      code: 1,
+      model,
+      error: String(err?.message || err).slice(0, 400),
+      ledger: LEDGER.dir,
+      sessionID: String(resume.sessionId || ''),
+      resumedFrom: resume.from,
+      workspace,
+    };
   }
 }
 

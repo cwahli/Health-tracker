@@ -148,7 +148,13 @@ describe('real-tmux quoted start commands', () => {
 
 describe('session identity', () => {
   it('keys sessions without any bot id', () => {
-    expect(sessionKey(loc)).toBe('vps|qa_meal|/home/ubuntu/src/Health-tracker');
+    expect(sessionKey(loc)).toBe('qa_meal|health-tracker');
+  });
+
+  it('keys one chat and project the same on every machine', () => {
+    expect(sessionKey({ ...loc, location: 'collab', workspace: '/root/Health-tracker' })).toBe(sessionKey(loc));
+    expect(sessionKey({ ...loc, location: 'mobile', workspace: '/root/Health-tracker' })).toBe(sessionKey(loc));
+    expect(sessionKey({ ...loc, location: 'grok' })).toBe(sessionKey(loc));
   });
 
   it('maps one location to one tmux session', () => {

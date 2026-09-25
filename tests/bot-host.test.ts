@@ -2007,7 +2007,8 @@ describe('BOT-19 /tx wiring', () => {
     expect(sent.length).toBe(1);
     expect(sent[0]).toContain('ON');
     expect(sent[0]).toMatch(/tmux attach -t work-testbox:ws-/);
-    expect(sent[0]).toContain('testbox|9|/ws');
+    expect(sent[0]).toContain('9|/ws');
+    expect(sent[0]).not.toContain('testbox|9|');
     expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'new-session', 'has-session', 'list-windows', 'list-panes', 'select-pane', 'list-panes', 'list-panes']);
     expect(tmux.calls.flat().some((arg) => /kill|respawn|send-keys/.test(String(arg)))).toBe(false);
   });

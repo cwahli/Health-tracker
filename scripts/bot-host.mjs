@@ -12,6 +12,7 @@ import { formatWorkingHeadline, ctxLimitFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
 import {
   sessionKey,
+  projectIdForWorkspace,
   resolveSession,
   getSession,
   setTx,
@@ -587,14 +588,18 @@ export function attemptFailureText(result) {
  * ledger; the VM poller does not call trackRunQuota for it, so the VM's ledger
  * and the worker's stay separate facts.
  *
+ * The job carries the conversation (sessionId) and the workspace as a project
+ * id, because the worker resolves both on its own machine. A turn handed to a
+ * notebook continues the thread the VM started instead of answering blank.
+ *
  * Returns null when the location is this machine or has no live worker, and the
  * caller runs the turn locally as before.
  */
-export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', envMode = 'project', timeoutMs = 900000 } = {}) {
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000 } = {}) {
   const status = workerStatus(host);
   if (!status.reachable) return null;
-  const job = enqueueJob({ host, prompt, model, project, role, workspace, envMode });
-  console.log(`[${host}] handed ${job.id} to the connected worker`);
+  const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode });
+  console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}`);
   const done = await awaitJob(job.id, { timeoutMs });
   if (!done?.result) {
     return { text: '', code: 1, model, error: `worker ${host} did not answer in time`, remote: true, jobId: job.id };
@@ -1125,11 +1130,11 @@ export function workLocation() {
 
 export async function handleTxCommand({ api, config, chatId, arg, lane: requestedLane, tmux = defaultTmuxRunner, ensureTui = ensureOpencodeTui }) {
   const location = workLocation();
-  const id = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+  const id = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
   const sub = String(arg || '').trim().toLowerCase();
   if (sub === 'on') {
     const lane = requestedLane || config.agent.kind || 'opencode';
-    let session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane });
+    let session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace), lane });
     if (session.lane !== lane) session = handoffSession(id, lane) || session;
     if (lane === 'opencode') {
       let tui;
@@ -1304,7 +1309,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'status': {
       const location = workLocation();
-      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       const work = statusForTelegram(workId);
       const effSurface = parseModelRef(eff.model).surface;
       const snap = buildStatusSnapshot({
@@ -1644,14 +1649,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // already gone
       }
       await api.sendMessage(chatId, 'Aborting the running request...');
-      const workId = sessionKey({ location: workLocation(), chat: String(chatId), workspace: config.agent.workspace });
+      const workId = sessionKey({ location: workLocation(), chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       abortSession(workId, { transcriptRef: sessions.get(chatId) || null });
       return;
     }
 
     case 'debug': {
       const location = workLocation();
-      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       const view = statusForTelegram(workId);
       if (!view) {
         await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
@@ -1673,8 +1678,8 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       const location = workLocation();
-      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
-      const session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: config.agent.kind || 'opencode' });
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
+      const session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace), lane: config.agent.kind || 'opencode' });
       const checkpoint = checkpointSession(workId, { handoffRef: 'manual' });
       if (!checkpoint) {
         await api.sendMessage(chatId, 'Could not checkpoint the work session.');
@@ -2383,9 +2388,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
 
     const ref = parseModelRef(eff.model);
     const location = workLocation();
-    const workId = sessionKey({ location, chat: String(chatId), workspace: effectiveWorkspace });
+    const workId = sessionKey({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id });
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
-    let workSession = resolveSession({ location, chat: String(chatId), workspace: effectiveWorkspace, lane: workLane });
+    let workSession = resolveSession({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id, lane: workLane });
     if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
     // A recorded TUI server can die while the session row lives on. Attaching
     // to it makes every turn fail in about two seconds with "Session not
@@ -2497,10 +2502,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         project: isExternalTurn ? activeProject.id : 'health-tracker',
         role: activeRole || '',
         workspace: effectiveWorkspace,
+        sessionId: sessions.get(chatId) || '',
         envMode: turnEnvMode,
       });
       if (handed) {
-        console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'})`);
+        // The thread id the worker ran is now ours too, so the next turn —
+        // here or there — resumes the same conversation.
+        if (handed.sessionID) sessions.set(chatId, handed.sessionID);
+        console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
         await renderer.finish(
           { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
           { footer: `host: ${location}` }

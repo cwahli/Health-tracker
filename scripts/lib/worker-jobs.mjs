@@ -7,7 +7,12 @@
  * machine, and posts the result back.
  *
  * Store: ~/.hermes/worker-jobs/<jobId>.json
- *   { id, host, prompt, model, project, role, workspace, createdAt, claimedAt, doneAt, result }
+ *   { id, host, prompt, model, project, role, workspace, sessionId, createdAt, claimedAt, doneAt, result }
+ * `workspace` travels as a project id (health-tracker, external-2), never as a
+ * machine path: /home/ubuntu/src/Health-tracker is this machine's checkout and
+ * means nothing on the notebook that claims the job. `sessionId` is the
+ * conversation to resume — without it the worker starts a blank one and the
+ * turn loses its history on the far side.
  * A job is claimed once. A worker that dies holding a claim does not strand the
  * turn: claimLeaseMs decides when the job may be handed to somebody else.
  */
@@ -15,6 +20,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { projectIdForWorkspace } from './work-session.mjs';
 
 export const DEFAULT_LEASE_MS = 5 * 60 * 1000;
 
@@ -66,7 +72,8 @@ export function enqueueJob(job, { home = os.homedir(), now = Date.now() } = {}) 
     model: String(job.model || ''),
     project: String(job.project || ''),
     role: String(job.role || ''),
-    workspace: String(job.workspace || ''),
+    workspace: String(job.workspaceId || projectIdForWorkspace(job.workspace || '')),
+    sessionId: String(job.sessionId || ''),
     envMode: String(job.envMode || 'project'),
     createdAt: new Date(now).toISOString(),
     claimedAt: null,
@@ -109,6 +116,12 @@ export function completeJob(id, result, { home = os.homedir(), now = Date.now() 
     model: String(result?.model || job.model || ''),
     error: String(result?.error || ''),
     ledger: String(result?.ledger || ''),
+    // Conversation continuity, back to whoever handed the turn over: the
+    // thread the device ran (so the next turn resumes it, here or there),
+    // where it was resumed from, and the directory it actually used.
+    sessionID: String(result?.sessionID || ''),
+    resumedFrom: String(result?.resumedFrom || ''),
+    workspace: String(result?.workspace || ''),
   };
   write(file, job);
   return job;

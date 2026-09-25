@@ -8,8 +8,14 @@
  *   POST /connect        { host, botId, pid, detail }  register, start presence
  *   POST /heartbeat      { host }                      keep presence fresh
  *   GET  /jobs/next?host=<h>&wait=<ms>                long-poll for one job
- *   POST /jobs/result    { jobId, text, code, model, error, ledger }
+ *   POST /jobs/result    { jobId, text, code, model, error, ledger, sessionID }
+ *   GET  /sessions/<id>/export                        that conversation, for a
+ *                                                     worker that has not got it
  *   GET  /health                                       liveness + who is connected
+ *
+ * The session export is a GET on purpose: conversations run 3.6 KB to 4 MB,
+ * and the request-body limit is 256 KB. A worker that cannot fetch one
+ * runs a blank conversation and says so in its log.
  *
  * Binds loopback by default. Put it behind the existing Caddy site to reach it
  * from a phone; the worker still dials out, so the VM opens nothing inbound to
@@ -19,6 +25,7 @@
  */
 import http from 'node:http';
 import os from 'node:os';
+import { execFile } from 'node:child_process';
 import {
   KNOWN_HOSTS,
   recordWorkerConnected,
@@ -55,6 +62,24 @@ function readBody(req) {
         resolve({});
       }
     });
+  });
+}
+
+/**
+ * One conversation, exported for a worker that has not got it. This is the
+ * only route that answers with a body larger than MAX_BODY, and it is a
+ * response, not a request: the limit above guards what a device can POST.
+ */
+function exportSession(id, res) {
+  execFile('opencode', ['export', id], { timeout: 60000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
+    if (err && err.code === 'ENOENT') {
+      return send(res, 503, { error: 'opencode is not installed on this host' });
+    }
+    if (err) return send(res, 404, { error: 'session not found' });
+    const body = String(stdout || '');
+    if (!body.trim().startsWith('{')) return send(res, 502, { error: 'opencode export produced no session' });
+    res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+    res.end(body);
   });
 }
 
@@ -114,6 +139,12 @@ const server = http.createServer(async (req, res) => {
     if (!job) return send(res, 404, { error: 'unknown job' });
     console.log(`[relay] ${job.id} finished on ${job.host} (code ${job.result?.code ?? '?'})`);
     return send(res, 200, { ok: true, jobId: job.id });
+  }
+
+  if (route.startsWith('GET /sessions/')) {
+    const id = decodeURIComponent(url.pathname.slice('/sessions/'.length)).replace(/\/export$/, '');
+    if (!/^ses_[A-Za-z0-9]{4,80}$/.test(id)) return send(res, 400, { error: 'bad session id' });
+    return exportSession(id, res);
   }
 
   return send(res, 404, { error: 'no such route', route });
