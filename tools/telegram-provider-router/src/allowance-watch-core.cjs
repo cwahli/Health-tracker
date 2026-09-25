@@ -83,14 +83,14 @@ function isCloudflareDailyExhausted(text) {
  */
 function depletionUntilFromText(text, now = Date.now()) {
   const s = String(text || "");
-  if (isCloudflareDailyExhausted(s)) return { until: nextMidnightUtc(now), kind: "allowance-empty" };
+  if (isCloudflareDailyExhausted(s)) return { until: nextMidnightUtc(now), kind: "allowance-empty", hint: "" };
   const cd = parseCountdownHint(s);
   if (cd.countdownParsed && cd.until > now) {
     const rl = isRateLimitText(s) && !/try\s+again\s+in\s+\d/i.test(s);
-    return { until: cd.until, kind: rl ? "rate-limit" : "allowance-empty" };
+    return { until: cd.until, kind: rl ? "rate-limit" : "allowance-empty", hint: cd.hint };
   }
   const rl = isRateLimitText(s);
-  return { until: now + (rl ? RATE_LIMIT_TTL_MS : QUOTA_TTL_MS), kind: rl ? "rate-limit" : "limit-unknown" };
+  return { until: now + (rl ? RATE_LIMIT_TTL_MS : QUOTA_TTL_MS), kind: rl ? "rate-limit" : "limit-unknown", hint: "" };
 }
 
 /** Short-window rate limit (re-probe soon) vs period/allowance empty (long TTL). */
