@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { projectLanes, annotateFreemodelEntries, buildAllowanceTextForBots, ensureBotLedger, stampDepleted, withCatalogLanes, entriesFromLanes } from './lib/free-lanes.mjs';
+import { projectLanes, annotateFreemodelEntries, buildAllowanceTextForBots, ensureBotLedger, stampDepleted, withCatalogLanes, entriesFromLanes, planCodeForLane } from './lib/free-lanes.mjs';
 import { selectTurnLanes } from './bot-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -325,7 +325,21 @@ try {
   // Provider AND model: keying on the model name alone merged Cline's
   // `deepseek-v4.1-flash` with Freebuff's — same last segment, different accounts —
   // and one of them vanished from the list.
-  check('and the key carries the provider as well as the model', /const provider = String\(v\.effectiveProvider/.test(fmSrc) && /`\$\{provider\}\|\$\{model\}`/.test(fmSrc));
+  // The plan code is the one identity both commands already agree on — /allowance
+  // prints it in its Plan column. The raw provider did not work: the ledger calls
+  // the Gemini lanes `google`, the catalog calls them `gemini`, and
+  // `opencode-go/space-bunny-free` is the same model as `opencode/space-bunny-free`,
+  // so each of those was counted twice.
+  check('and the identity is the plan code, not the raw provider',
+    /const tag = v\.lane \? planCodeForLane\(v\.lane\)/.test(fmSrc) && /`\$\{tag\}\|\$\{model\}`/.test(fmSrc));
+  // Called, not grepped: the ledger spells the Gemini lanes `google/…` and the
+  // catalog spells them `gemini`, and only the plan code folds the two together.
+  check('the plan code folds the google/gemini spelling together',
+    planCodeForLane({ provider: 'google', model: 'google/gemini-3.8-flash' }) === 'GM'
+    && planCodeForLane({ provider: 'gemini', model: 'gemini-3.8-flash' }) === 'GM',
+    `${planCodeForLane({ provider: 'google', model: 'google/gemini-3.8-flash' })}/${planCodeForLane({ provider: 'gemini', model: 'gemini-3.8-flash' })}`);
+  check('and folds an opencode vendor twin onto the same code',
+    planCodeForLane({ provider: 'opencode-go', model: 'opencode-go/space-bunny-free' }) === planCodeForLane({ provider: 'opencode', model: 'opencode/space-bunny-free' }));
   const twinLanes = { version: 3, buckets: {}, lanes: [
     { pref: 5, provider: 'opencode', model: 'tokenharbor/deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'OpenCode Token Harbor DeepSeek V4.1 Flash free' },
     { pref: 7, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'Token Harbor chat DeepSeek V4.1 Flash free' },
