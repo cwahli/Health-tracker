@@ -108,6 +108,15 @@ try {
   check('/allowance shows the reset for the stamped lane', /Zen A/.test(text));
   check('/allowance never marks a blocked lane as available', !/✅ (Old Promo|FB)/.test(text));
   check('/allowance names the next usable lane', /Next up: Deep B/.test(text));
+
+  // 7. /freemodel's body must not contradict /allowance.
+  const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
+  check('/freemodel renders the annotated rows, not the raw catalog', /const rows = \(entries \|\| \[\]\)\.map\(verdictOf\)/.test(botSrc));
+  check('/freemodel marks blocked rows instead of hiding the reason', /Not selectable right now:/.test(botSrc));
+  const codeOnly = botSrc.split('\n').filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//')).join('\n');
+  check('/freemodel no longer claims everything is available', !/all selectable lanes look available/.test(codeOnly));
+  check('/freemodel counts selectable and blocked', /\$\{usable\.length\} selectable, \$\{blocked\.length\} blocked/.test(botSrc));
+  check('the tappable keyboard only offers usable rows', /const keyboardEntries = available\.length \? available : selectable;/.test(botSrc));
 } finally {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
   if (oldOverride === undefined) delete process.env.FREE_LANES_DIR; else process.env.FREE_LANES_DIR = oldOverride;

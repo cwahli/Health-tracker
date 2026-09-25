@@ -663,15 +663,52 @@ async function sendHtml(api, chatId, html) {
   }
 }
 
+/**
+ * The /freemodel body, from the same projection /allowance renders.
+ *
+ * It used to print the raw catalog and put depletion in a footer, and that
+ * footer computed "blocked" from the already-filtered selectable set, so it
+ * printed "all selectable lanes look available" while the list above it offered
+ * a lane /allowance was showing as ❌. Two surfaces, two answers. Now every
+ * entry carries its verdict: usable rows first, blocked rows after with the
+ * reason, and a model with no lane row is named as such.
+ */
 function formatFreemodelWithDepletion(entries, annotated, { current, location } = {}) {
-  const selectable = annotated.filter((a) => a.selectable !== false);
-  const base = formatFreeModelText(entries, { current, location });
-  const depleted = selectable.filter((a) => a.depleted);
-  if (!depleted.length) return `${base}\n\nAllowance: all selectable lanes look available (per-host ledger). /allowance for Reset in times.`;
-  const lines = depleted.map((d) => `❌ ${d.label} — depleted (reset in ${d.resetIn || 'unknown'})`);
-  const next = selectable.find((a) => !a.depleted);
-  if (next) lines.push(`Next up: ${next.label}`);
-  return `${base}\n\nAllowance (per-host ledger):\n${lines.join('\n')}\n\n/allowance for full table.`;
+  const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
+  const verdictOf = (e) => {
+    const a = byRef.get(e?.ref);
+    if (a) return a;
+    return { ...e, selectable: e?.selectable !== false, depleted: false, ended: false, terminalOnly: false, inLedger: false };
+  };
+  const rows = (entries || []).map(verdictOf);
+  const blockedOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
+  const usable = rows.filter((r) => !blockedOf(r));
+  const blocked = rows.filter(blockedOf);
+  const header = formatFreeModelText(entries, { current, location }).split('\n')[0];
+  const lines = [header, ''];
+  for (const r of usable) lines.push(`• ${r.label}${r.note ? `: ${r.note}` : ''}`);
+  if (blocked.length) {
+    lines.push('', 'Not selectable right now:');
+    for (const r of blocked) {
+      const why = r.ended
+        ? 'promotion ended'
+        : r.terminalOnly
+          ? 'terminal only, not selectable from chat'
+          : r.depleted
+            ? `depleted${r.resetIn && r.resetIn !== '-' ? ` (reset in ${r.resetIn})` : ''}`
+            : r.reason || 'not available';
+      lines.push(`❌ ${r.label} — ${why}`);
+    }
+  }
+  const missing = rows.filter((r) => r.inLedger === false);
+  if (missing.length) {
+    lines.push('', 'Not in this ledger (no quota record):');
+    for (const r of missing.slice(0, 6)) lines.push(`· ${r.label}`);
+  }
+  const next = usable.find((r) => !r.depleted);
+  if (next) lines.push('', `Next up: ${next.label}`);
+  lines.push('', `Allowance (per-host ledger): ${usable.length} selectable, ${blocked.length} blocked. /allowance for the full table.`);
+  return lines.join('\n');
 }
 
 export class ProgressRenderer {
