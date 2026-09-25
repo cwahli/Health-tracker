@@ -119,11 +119,24 @@ export function bucketKeyFor(lane) {
  * cooldown instead of the 6h quota default. Same ENOTFOUND/ECONNREFUSED
  * vocabulary the Node fetch and CLI layers produce.
  */
-const CONNECTION_FAILURE_RE =
-  /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|EHOSTUNREACH|ENETUNREACH|socket hang up|fetch failed|network error|getaddrinfo|network request failed|proxy/i;
+/**
+ * Transport failure, not a quota decision.
+ *
+ * Two vocabularies, because two surfaces report this differently and the live
+ * proof on 2026-09-25 showed the gap: the Cline CLI said
+ * "Cannot connect to API: Unable to connect ... (ConnectionRefused)" and the
+ * OpenCode CLI said "HttpClientError: Transport error (GET https://...)".
+ * Neither contains an errno, and a cooldown keyed only on errnos never fired.
+ * So: the errno set, plus the human wording those CLIs actually emit.
+ */
+const CONNECTION_ERRNO_RE =
+  /econnrefused|econnreset|etimedout|eai_again|enotfound|epipe|ehostunreach|enetunreach|ePROTO|econnaborted/i;
+const CONNECTION_WORDING_RE =
+  /connection\s?refused|connection\s?reset|connection\s?timed\s?out|unable to connect|cannot connect|transport error|socket hang up|fetch failed|network error|network request failed|getaddrinfo|temporary failure in name resolution|proxy|tunnel|ssl|wrong version number/i;
 
 export function isConnectionFailure(msg) {
-  return CONNECTION_FAILURE_RE.test(String(msg || ""));
+  const text = String(msg || "");
+  return CONNECTION_ERRNO_RE.test(text) || CONNECTION_WORDING_RE.test(text);
 }
 
 /** How long a connection failure keeps a lane out of the walk. */

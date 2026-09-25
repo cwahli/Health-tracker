@@ -55,6 +55,10 @@ try {
   check('ECONNREFUSED is a connection failure', isConnectionFailure('connect ECONNREFUSED 127.0.0.1:443'));
   check('fetch failed is a connection failure', isConnectionFailure('TypeError: fetch failed'));
   check('socket hang up is a connection failure', isConnectionFailure('socket hang up'));
+  // The two strings the live proof actually produced, 2026-09-25.
+  check('the Cline wording is a connection failure', isConnectionFailure('Cannot connect to API: Unable to connect. Is the computer able to access the url?: Unable to connect. Is the computer able to access the url? (ConnectionRefused)'));
+  check('the OpenCode wording is a connection failure', isConnectionFailure('HttpClientError: Transport error (GET https://models.opencode.ai/api.json)'));
+  check('a name-resolution failure counts', isConnectionFailure('getaddrinfo EAI_AGAIN models.opencode.ai'));
   check('a 429 is not a connection failure', !isConnectionFailure('429 Too Many Requests'));
   check('a quota message is not a connection failure', !isConnectionFailure('Try again in 22h 46m'));
 
