@@ -26,6 +26,15 @@ const MIRRORS = [
     dest: join(ROOT, 'tools', 'telegram-provider-router', 'src', 'inbound-media.vendor.mjs'),
     marker: '// === VENDORED FROM scripts/lib/inbound-media.mjs — DO NOT EDIT ===',
   },
+  {
+    // free-lanes.mjs imports this for the per-provider setup verdict, and the
+    // router ships standalone, so the import has to resolve inside its src/.
+    // Without this mirror the router's own test suite cannot even import
+    // free-lane-table.vendor.mjs.
+    src: join(ROOT, 'scripts', 'lib', 'setup-gaps.mjs'),
+    dest: join(ROOT, 'tools', 'telegram-provider-router', 'src', 'setup-gaps.mjs'),
+    marker: '// === VENDORED FROM scripts/lib/setup-gaps.mjs — DO NOT EDIT ===',
+  },
 ];
 
 for (const { src, dest, marker } of MIRRORS) {
