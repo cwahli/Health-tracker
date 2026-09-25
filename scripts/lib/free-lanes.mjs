@@ -1043,6 +1043,14 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   if (fb) {
     lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
   }
+  // A green row is not proof that a turn runs. Token Harbor's balance is not
+  // exposed by any API (every /v1 billing path 404s) and a $0 account answers
+  // every completion with 402, so disclose it beside the rows instead of
+  // letting the tick stand as the last word. Found live on 2026-09-25: key
+  // present and authenticating, balance $0, every turn 402.
+  if (usable.some((l) => planCodeForLane(l) === "TH")) {
+    lines.push("Token Harbor: counted as usable, but its balance is not API-visible — a $0 account fails every turn with 402 (top up at tokenharbor.ai/dashboard).");
+  }
   if (blocked.length) {
     lines.push("");
     lines.push("Not counted on this host (no credential — cannot run):");

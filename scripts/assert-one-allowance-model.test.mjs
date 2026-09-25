@@ -113,6 +113,20 @@ try {
   check('and marks it terminal when it is the only option', /Next up: \(no free lane available/.test(text) || !/Next up: FB/.test(text));
   check('/allowance names the next usable lane', /Next up: Deep B/.test(text));
 
+  // 6b. A green Token Harbor row is not proof a turn runs. Live finding
+  // 2026-09-25: the key authenticated, /v1/models answered 200, and every
+  // completion came back 402 because the balance was $0 — with the row still
+  // ticking. Token Harbor exposes no balance endpoint, so the disclosure has to
+  // sit next to the rows rather than wait for the walk to fail.
+  check('/allowance discloses that the Token Harbor balance is unverifiable', /Token Harbor: counted as usable/.test(text));
+  check('and says a $0 account fails the turn', /402/.test(text));
+  check('and names where to top up', /tokenharbor\.ai\/dashboard/.test(text));
+  const thFreeTable = { ...table, lanes: table.lanes.filter((l) => l.provider !== 'tokenharbor') };
+  fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(thFreeTable, null, 2));
+  const noThText = buildAllowanceTextForBots({ stateDir: dir, now });
+  check('and the disclosure is absent when no Token Harbor lane is listed', !/Token Harbor: counted as usable/.test(noThText));
+  fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table, null, 2));
+
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel renders the annotated rows, not the raw catalog', /const rows = \(entries \|\| \[\]\)\.map\(verdictOf\)/.test(botSrc));

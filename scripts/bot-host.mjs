@@ -1457,7 +1457,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const gaps = setupGaps(readiness);
       const host = workLocation();
       if (!gaps.length) {
-        await api.sendMessage(chatId, `✅ Every provider this bot uses is ready on ${host}. Nothing to set up.`);
+        const lines = [`✅ Every provider this bot uses is ready on ${host}. Nothing to set up.`];
+        // "Ready" is not the same as "a turn will run". Token Harbor's balance is
+        // not API-visible and a $0 account 402s every completion, so the all-clear
+        // must not be the last thing the user hears about it.
+        if (readiness.tokenharbor && readiness.tokenharbor.ready && readiness.tokenharbor.note) {
+          lines.push(`⚠️ ${readiness.tokenharbor.note}`);
+        }
+        await api.sendMessage(chatId, lines.join("\n"));
         return;
       }
       const lines = [`*Setup gaps on ${host}* — ${gaps.length} provider(s) cannot run here:`, ''];
