@@ -937,9 +937,11 @@ record_audit() {
 # tsc + git commit check
 # ---------------------------------------------------------------
 SNAP_FILE=""
+BASE_HEAD=""
 snapshot_workspace() {
   rm -f "${SNAP_FILE:-}"
   SNAP_FILE=$(mktemp)
+  BASE_HEAD=$(git -C "$CODER_DIR" rev-parse HEAD 2>/dev/null || true)
   git -C "$CODER_DIR" status --porcelain | grep -v 'src/git-version.generated.ts' > "$SNAP_FILE" || true
 }
 
@@ -954,6 +956,18 @@ new_changes() {
     cat "$now" || true
   fi
   rm -f "$now"
+}
+
+# Files the agent already committed itself (HEAD advanced past the snapshot).
+# A model that commits+pushes on its own leaves a clean worktree; without this
+# the dispatcher reads 0 changes and falsely reports "did not resolve".
+self_committed_changes() {
+  [ -n "${BASE_HEAD:-}" ] || return 0
+  local head_now
+  head_now=$(git -C "$CODER_DIR" rev-parse HEAD 2>/dev/null || true)
+  [ -n "$head_now" ] && [ "$head_now" != "$BASE_HEAD" ] || return 0
+  git -C "$CODER_DIR" diff --name-only "${BASE_HEAD}..${head_now}" 2>/dev/null \
+    | grep -v '^src/git-version.generated.ts$' || true
 }
 
 commit_fix() {
@@ -976,6 +990,18 @@ check_git_and_tsc() {
   local diff_files diff_count
   diff_files=$(new_changes)
   diff_count=$(printf '%s\n' "$diff_files" | grep -c '[^[:space:]]' || true)
+
+  local self_committed=0
+  if [ "$diff_count" -eq 0 ]; then
+    local committed_files
+    committed_files=$(self_committed_changes)
+    if [ -n "$committed_files" ]; then
+      echo "[Dispatcher] $tool_name committed its own changes — using the committed diff as the fix."
+      diff_files="$committed_files"
+      diff_count=$(printf '%s\n' "$diff_files" | grep -c '[^[:space:]]' || true)
+      self_committed=1
+    fi
+  fi
 
   if [ "$diff_count" -eq 0 ]; then
     echo "[Dispatcher] No code changes produced by $tool_name."
@@ -1038,16 +1064,20 @@ Reverting this attempt's uncommitted changes..."
     fi
 
     echo "[Dispatcher] All pre-commit checks green — committing real changes..."
-    local line path
-    while IFS= read -r line; do
-      [ -z "$line" ] && continue
-      path="${line:3}"
-      [ -n "$path" ] && git -C "$CODER_DIR" add -- "$path" || true
-    done <<< "$diff_files"
-    if ! commit_fix "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)"; then
-      echo "[Dispatcher] git commit failed."
-      tg_msg "⚠️ *[Orchestrator]* *$tool_name* edited files for \`$BUG_ID\`, but \`git commit\` failed."
-      return 1
+    if [ "$self_committed" -eq 1 ]; then
+      echo "[Dispatcher] Skipping commit — $tool_name already committed the fix."
+    else
+      local line path
+      while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        path="${line:3}"
+        [ -n "$path" ] && git -C "$CODER_DIR" add -- "$path" || true
+      done <<< "$diff_files"
+      if ! commit_fix "fix($CATEGORY): $BUG_ID via $tool_name ($model_desc)"; then
+        echo "[Dispatcher] git commit failed."
+        tg_msg "⚠️ *[Orchestrator]* *$tool_name* edited files for \`$BUG_ID\`, but \`git commit\` failed."
+        return 1
+      fi
     fi
     # Push the per-run branch (never main directly). Parallel runs land on
     # agent/dispatch-* branches; claim-guard blocks same-file overlap at PR.

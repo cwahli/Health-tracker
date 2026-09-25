@@ -77,6 +77,16 @@ describe('card stewardship', () => {
     expect(applyCuration(item, { op: 'review', expected_revision: 1, reason: 'stale' })).toMatchObject({ ok: false });
   });
 
+  it('archives without deleting the card or its history', () => {
+    const item = base({ defect: { component: 'E2E', observed: 'observed', expected: 'expected', criteria: 'criteria' } });
+    const result = applyCuration(item, { op: 'archive', expected_revision: 0, reason: 'disposable live test' }, '2026-09-25T00:00:00.000Z');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.archived_at).toBe('2026-09-25T00:00:00.000Z');
+    expect(result.value.curation_events).toHaveLength(1);
+    expect(result.value.defect).toEqual(item.defect);
+  });
+
   it('creates an explicit current orchestrator handoff', () => {
     const item = base({ defect: { component: 'HomeTab', observed: 'observed', expected: 'expected', criteria: 'criteria' } });
     const result = applyCuration(item, { op: 'handoff', expected_revision: 0, reason: 'reviewed', assignee: 'orchestrator' }, '2026-09-24T00:00:00.000Z');

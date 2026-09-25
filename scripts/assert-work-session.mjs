@@ -52,6 +52,7 @@ const {
   resolveSession,
   getSession,
   setTx,
+  setWorkView,
   handoffSession,
   abortSession,
   ensureTmuxWorkView,
@@ -64,9 +65,13 @@ const {
   statusForTelegram,
 } = await import(new URL(`file://${libPath.replace(/\\/g, '/')}`).href);
 
-for (const fn of ['resolveSession', 'setTx', 'handoffSession', 'abortSession', 'ensureTmuxWorkView', 'debugProbe', 'sessionStatus', 'statusForTelegram']) {
-  check(`exports ${fn}`, typeof ({ resolveSession, setTx, handoffSession, abortSession, ensureTmuxWorkView, debugProbe, sessionStatus, statusForTelegram })[fn] === 'function');
+for (const fn of ['resolveSession', 'setTx', 'setWorkView', 'handoffSession', 'abortSession', 'ensureTmuxWorkView', 'debugProbe', 'sessionStatus', 'statusForTelegram']) {
+  check(`exports ${fn}`, typeof ({ resolveSession, setTx, setWorkView, handoffSession, abortSession, ensureTmuxWorkView, debugProbe, sessionStatus, statusForTelegram })[fn] === 'function');
 }
+const tuiLibPath = path.join(ROOT, 'scripts/lib/opencode-tui.mjs');
+const { tuiAttachCommand } = await import(new URL(`file://${tuiLibPath.replace(/\\/g, '/')}`).href);
+check('OpenCode TUI helper exists', fs.existsSync(tuiLibPath));
+check('OpenCode TUI attach targets the server session', tuiAttachCommand({ serverUrl: 'http://127.0.0.1:4096', workspace: '/ws', sessionId: 'ses_test' }).includes("--session 'ses_test'"));
 
 // Isolated store for the gate (never the live ~/.hermes file).
 const tmpStore = path.join(os.tmpdir(), `ws_gate_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
@@ -156,6 +161,11 @@ check('tmux lifecycle contains no destructive replacement command',
 const termProbe = debugProbe('opencode', { session: s1, tmux: lifecycleTmux });
 check('terminal lane reports verified observer liveness',
   termProbe.surface === 'terminal' && termProbe.attach === true && termProbe.observerLive === true && termProbe.tmuxSession === 'work-vps');
+const tuiCommand = "'opencode' attach 'http://127.0.0.1:4096' --dir '/home/ubuntu/src/Health-tracker' --session 'ses_test'";
+const tuiSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-tui', viewMode: 'tui', viewCommand: tuiCommand };
+const tuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux });
+check('stored interactive TUI command owns the exact workstream pane',
+  tuiView.ok === true && tuiView.observerPane && lifecycleCalls.some((args) => args[0] === 'new-window' && args.at(-1) === tuiCommand));
 const migrationSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-migrate' };
 const migrationWindow = tmuxWindowFor(migrationSession.id);
 lifecycleSessions.get('work-vps').add(migrationWindow);
@@ -165,10 +175,12 @@ check('legacy blank window migrates non-destructively',
   migratedView.ok === true && migratedView.migrated === true && lifecycleCalls.some((args) => args[0] === 'split-window'));
 const observer = createObserver(s1, { root: observerRoot, now: () => '2026-09-24T00:00:00.000Z' });
 observer.onEvent({ kind: 'reasoning', text: 'private reasoning' });
-observer.onEvent({ kind: 'tool', tool: 'read', status: 'done', input: 'private input', output: 'private output' });
+observer.onEvent({ kind: 'tool', tool: 'read', status: 'done', input: { path: 'src/index.ts', apiKey: 'do-not-log' }, output: 'private output' });
+observer.onEvent({ kind: 'text', text: 'final answer' });
 const observerBody = fs.readFileSync(observer.path, 'utf8');
+const observerRecords = observerBody.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
 check('observer path is private and hashed', !observer.path.includes(s1.id) && (fs.statSync(observerRoot).mode & 0o777) === 0o700 && (fs.statSync(observer.path).mode & 0o777) === 0o600);
-check('observer projection excludes prompts, reasoning, payloads, and errors', !/private reasoning|private input|private output/.test(observerBody) && observerBody.includes('"kind":"thinking"'));
+check('observer projection carries sanitized full activity', observerRecords.some((record) => record.kind === 'thinking' && record.content === 'private reasoning') && observerRecords.some((record) => record.kind === 'tool' && record.content.includes('src/index.ts')) && observerRecords.some((record) => record.kind === 'text' && record.content === 'final answer') && !observerBody.includes('do-not-log'));
 const stopped = disableTmuxObserver(s1, { tmux: lifecycleTmux });
 check('/tx off stops only the exact observer pane', stopped.ok === true && stopped.stopped === true && lifecycleCalls.some((args) => args[0] === 'kill-pane' && args[2] === createdView.observerPane));
 let apiTmuxCalls = 0;

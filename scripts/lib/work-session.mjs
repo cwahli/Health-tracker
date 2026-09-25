@@ -46,6 +46,28 @@ function safeObserverNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+const OBSERVER_SECRET_KEY = /(?:^|[_-])(?:api[_-]?key|access[_-]?key|token|secret|password|passwd|authorization|cookie|credential|private[_-]?key)$/i;
+
+function redactObserverValue(value, key = '') {
+  if (key && OBSERVER_SECRET_KEY.test(key)) return '[redacted]';
+  if (Array.isArray(value)) return value.map((item) => redactObserverValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, redactObserverValue(childValue, childKey)]));
+  }
+  if (typeof value === 'string') return scrubSecrets(value);
+  return value;
+}
+
+function safeObserverContent(value, max = 16000) {
+  let serialized;
+  try {
+    serialized = typeof value === 'string' ? value : JSON.stringify(redactObserverValue(value));
+  } catch {
+    serialized = String(value ?? '');
+  }
+  return scrubSecrets(safeObserverString(serialized, max));
+}
+
 function observerContext(context = {}) {
   const record = {};
   if (context.model != null) record.model = safeObserverString(context.model, 160);
@@ -60,15 +82,19 @@ export function formatObserverRecord(type, payload = {}, context = {}, at = new 
   Object.assign(record, observerContext(context));
   if (type === 'event') {
     const kind = String(payload?.kind || '');
-    if (kind === 'reasoning') return { ...record, kind: 'thinking' };
+    if (kind === 'reasoning') return { ...record, kind: 'thinking', content: safeObserverContent(payload.text) };
+    if (kind === 'text') return { ...record, kind: 'text', content: safeObserverContent(payload.text) };
     if (kind === 'tool') {
       return {
         ...record,
         kind: 'tool',
         tool: safeObserverString(payload.tool, 100),
         status: safeObserverString(payload.status, 60),
+        content: safeObserverContent({ input: payload.input, output: payload.output }),
       };
     }
+    if (kind === 'run_result') return { ...record, kind: 'text', content: safeObserverContent(payload.text) };
+    if (kind === 'error') return { ...record, kind: 'error', content: safeObserverContent(payload.message) };
     if (kind === 'step_finish') {
       const tokens = payload?.tokens;
       const total = typeof tokens === 'object' ? tokens?.total : tokens;
@@ -87,6 +113,8 @@ export function formatObserverRecord(type, payload = {}, context = {}, at = new 
       const total = typeof tokens === 'object' ? tokens?.total : tokens;
       record.tokens = safeObserverNumber(total);
       record.cost = safeObserverNumber(payload?.usage?.cost);
+      if (type === 'run_complete') record.content = safeObserverContent(payload?.finalText);
+      if (type === 'failed') record.content = safeObserverContent(payload?.lastError);
     }
   }
   return record;
@@ -200,6 +228,8 @@ export function resolveSession({ location = '', chat = '', workspace = '', lane 
       lane: String(lane),
       laneHistory: [String(lane)],
       tx: false,
+      viewMode: 'observer',
+      viewCommand: null,
       state: 'active',
       transcriptRef: null,
       createdAt: now,
@@ -227,6 +257,10 @@ function updateSession(id, patch, storePath = sessionsPath()) {
 /** tx on/off: shared observation without stopping work. */
 export function setTx(id, on, storePath = sessionsPath()) {
   return updateSession(id, { tx: Boolean(on) }, storePath);
+}
+
+export function setWorkView(id, patch, storePath = sessionsPath()) {
+  return updateSession(id, patch, storePath);
 }
 
 /**
@@ -281,6 +315,10 @@ function observerCommand(logPath) {
   return `/usr/bin/tail -n 40 -F -- ${shellQuote(logPath)}`;
 }
 
+function workViewCommand(session, logPath = observerLogPath(session)) {
+  return session?.viewCommand || observerCommand(logPath);
+}
+
 /**
  * Real tmux renders `pane_start_command` as a shell-style quoted word
  * ("cmd 'arg'") while fake runners in tests pass it through unquoted. An
@@ -308,10 +346,10 @@ function parseObserverPanes(output) {
   });
 }
 
-function observerPaneFor(target, logPath, tmux) {
-  const expected = observerCommand(logPath);
+function observerPaneFor(target, logPath, tmux, expected = observerCommand(logPath)) {
   const panes = parseObserverPanes(tmux(['list-panes', '-t', target, '-F', '#{pane_id}\t#{pane_start_command}']));
-  return panes.find((pane) => pane.command === expected) || null;
+  const normalized = unquoteTmuxValue(expected);
+  return panes.find((pane) => pane.command === expected || pane.command === normalized) || null;
 }
 
 export function disableTmuxObserver(session, { tmux = defaultTmuxRunner } = {}) {
@@ -322,7 +360,7 @@ export function disableTmuxObserver(session, { tmux = defaultTmuxRunner } = {}) 
   const tmuxWindow = tmuxWindowFor(session.id);
   const target = `${tmuxSession}:${tmuxWindow}`;
   const logPath = observerLogPath(session);
-  const pane = observerPaneFor(target, logPath, tmux);
+  const pane = observerPaneFor(target, logPath, tmux, workViewCommand(session, logPath));
   if (!pane) return { ok: true, stopped: false, pane: null };
   const stopped = Boolean(tmux(['kill-pane', '-t', pane.id]));
   return { ok: stopped, stopped, pane: pane.id };
@@ -340,7 +378,7 @@ export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
   if (!ensureObserverFile(logPath)) {
     return { ok: false, created: false, migrated: false, surface: 'terminal', tmuxSession, tmuxWindow, target, observerPane: null, observerLog: logPath };
   }
-  const command = observerCommand(logPath);
+  const command = workViewCommand(session, logPath);
   let created = false;
   if (!tmux(['has-session', '-t', tmuxSession])) {
     tmux(['new-session', '-d', '-s', tmuxSession, '-n', tmuxWindow, '-c', session.workspace, command]);
@@ -358,7 +396,7 @@ export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner } = {}) {
     created = true;
   }
 
-  let pane = observerPaneFor(target, logPath, tmux);
+  let pane = observerPaneFor(target, logPath, tmux, command);
   let migrated = false;
   if (!pane) {
     const paneId = tmux(['split-window', '-h', '-t', target, '-c', session.workspace, '-P', '-F', '#{pane_id}', command]);
@@ -383,7 +421,7 @@ export function debugProbe(backend, { session = null, tmux = defaultTmuxRunner }
   const tmuxWindow = session ? tmuxWindowFor(session.id) : null;
   const target = tmuxSession && tmuxWindow ? `${tmuxSession}:${tmuxWindow}` : null;
   const observerLog = session && lane.kind === 'cli' ? observerLogPath(session) : null;
-  const observer = lane.kind === 'cli' && target ? observerPaneFor(target, observerLog, tmux) : null;
+  const observer = lane.kind === 'cli' && target ? observerPaneFor(target, observerLog, tmux, workViewCommand(session, observerLog)) : null;
   const observerLive = Boolean(observer);
   return {
     backend: lane.backend,
@@ -413,9 +451,9 @@ export function sessionStatus(id, { tmux = defaultTmuxRunner } = {}, storePath =
 
 /** Patterns that must never reach Telegram. */
 const SECRET_PATTERNS = [
-  /[A-Za-z_]*TOKEN[A-Za-z_]*\s*[:=]\s*\S+/g,
-  /[A-Za-z_]*KEY[A-Za-z_]*\s*[:=]\s*\S+/g,
-  /[A-Za-z_]*SECRET[A-Za-z_]*\s*[:=]\s*\S+/g,
+  /[A-Za-z_]*TOKEN[A-Za-z_]*\s*[:=]\s*\S+/gi,
+  /[A-Za-z_]*KEY[A-Za-z_]*\s*[:=]\s*\S+/gi,
+  /[A-Za-z_]*SECRET[A-Za-z_]*\s*[:=]\s*\S+/gi,
   /\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g, // telegram bot token shape
 ];
 

@@ -26,6 +26,7 @@ export function dispatchGuard(packet, opts = {}) {
     return { ok: true, reason: 'same run (lock pid matches)' };
   }
   const flags = packet?.flags || {};
+  if (packet?.archived_at) return { ok: false, reason: 'card is archived' };
   if (flags.blocked_reason) return { ok: false, reason: `blocked_reason=${flags.blocked_reason}` };
   if (flags.duplicate_of) return { ok: false, reason: `duplicate_of=${flags.duplicate_of}` };
   if (flags.not_reproducible) return { ok: false, reason: 'not_reproducible (repro lane closed this card)' };

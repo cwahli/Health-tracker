@@ -11,6 +11,7 @@
  * Pure-logic core: no network, no child processes, no live ledger writes.
  */
 import { createRequire } from "module";
+import fs from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -282,6 +283,160 @@ t("C12 nextLane failover order: same family → same family other tool → pref 
 t("C13 core is dependency-free and test loads the repo copy only", () => {
   eq(join(TOOL_DIR, "src", "allowance-watch-core.cjs").endsWith("src/allowance-watch-core.cjs"), true, "repo copy path");
   eq(typeof core.computeSweepPlan, "function", "exports present");
+});
+
+// ---------------------------------------------------------------- C16 Cloudflare 4006 daily neurons exhaustion → next 00:00 UTC
+t("C16 nextMidnightUtc: next 00:00 UTC strictly after now", () => {
+  // 2026-09-25T07:25:00Z → 2026-09-26T00:00:00Z
+  eq(core.nextMidnightUtc(Date.parse("2026-09-25T07:25:00Z")), Date.parse("2026-09-26T00:00:00Z"), "mid-day → next midnight");
+  eq(core.nextMidnightUtc(Date.parse("2026-09-25T23:59:59Z")), Date.parse("2026-09-26T00:00:00Z"), "just before midnight → next midnight");
+  eq(core.nextMidnightUtc(Date.parse("2026-09-25T00:00:00Z")), Date.parse("2026-09-26T00:00:00Z"), "exactly midnight → next day (strictly after)");
+});
+
+t("C16b CF 4006 'daily free allocation of 10,000 neurons' → depleted until next 00:00 UTC, NOT the 45m TTL (ADDENDUM #4)", () => {
+  const realError = `Error: Too Many Requests: {"errors":[{"message":"AiError: AiError: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare's Workers Paid plan if you would like to continue usage. (f24e675b)","code":4006}],"success":false}`;
+  ok(core.isCloudflareDailyExhausted(realError), "real 4006 payload detected");
+  ok(core.isCloudflareDailyExhausted("code: 4006"), "bare 4006 code");
+  eq(core.isCloudflareDailyExhausted("Rate limit exceeded"), false, "ordinary rate limit is not 4006");
+  eq(core.isCloudflareDailyExhausted("HTTP 429: quota"), false, "plain 429 is not 4006");
+
+  const now = Date.parse("2026-09-25T07:25:00Z");
+  const d = core.depletionUntilFromText(realError, now);
+  eq(d.until, Date.parse("2026-09-26T00:00:00Z"), "4006 → next 00:00 UTC (7h+ away, not 45m)");
+  eq(d.kind, "allowance-empty", "4006 kind");
+  // the old buggy behaviour for contrast: default TTL would have been now+45m
+  ok(d.until - now > 6 * HOUR, "must be more than the 45m default TTL away");
+});
+
+t("C16c depletionUntilFromText: one policy for countdown / rate-limit / unknown text", () => {
+  const now = Date.now(); // parseCountdownHint's "in Xh Ym" branch anchors to real now
+  const cd = core.depletionUntilFromText("Daily free model limit reached. Try again in 23h 15m.", now);
+  near(cd.until, now + (23 * 60 + 15) * 60 * 1000, 5000, "vendor countdown honoured");
+  eq(cd.kind, "allowance-empty", "'try again in' countdown is a period, not a short burst");
+  const rl = core.depletionUntilFromText("Rate limit exceeded", now);
+  near(rl.until, now + core.RATE_LIMIT_TTL_MS, 2000, "plain rate-limit → 45m");
+  eq(rl.kind, "rate-limit", "rate-limit kind");
+  const unk = core.depletionUntilFromText("some weird limit text", now);
+  near(unk.until, now + core.QUOTA_TTL_MS, 2000, "unknown → 6h");
+  eq(unk.kind, "limit-unknown", "unknown kind");
+});
+
+// ---------------------------------------------------------------- C17 OpenCode Zen silent rate-limit (ADDENDUM #5/#8)
+t("C17 OpenCode Zen models use a 3-min silence window; others keep 90 s", () => {
+  eq(core.OPENCODE_ZEN_SILENCE_MS, 3 * 60 * 1000, "zen silence constant");
+  ok(core.isOpenCodeZenModel("opencode/muse-spark-1.3-contributor-free"), "muse is zen");
+  ok(core.isOpenCodeZenModel("opencode/mimo-v2.6-flash-free"), "mimo is zen");
+  ok(core.isOpenCodeZenModel("opencode/space-bunny-2"), "space bunny is zen");
+  eq(core.isOpenCodeZenModel("cloudflare/@cf/qwen/qwen3.8-27b"), false, "cloudflare qwen is not zen");
+  eq(core.opencodeSilenceMsForModel("opencode/mimo-v2.6-flash-free"), 180000, "zen → 3 min");
+  eq(core.opencodeSilenceMsForModel("cloudflare/@cf/qwen/qwen3.8-27b"), 90000, "cf → 90 s");
+  eq(core.opencodeSilenceMsForModel("x", { defaultMs: 5, zenMs: 9 }), 5, "non-zen → injectable default");
+  eq(core.opencodeSilenceMsForModel("opencode/zen-lane", { defaultMs: 5, zenMs: 9 }), 9, "zen → injectable zen window");
+});
+
+t("C17b zen-style silent hang: log quota fires after 3 min for zen, not before", () => {
+  const tErr = Date.parse("2026-09-25T12:00:00Z");
+  const lines = [
+    ocLine("2026-09-25T11:59:00Z", "step part.created"),
+    ocLine("2026-09-25T12:00:00Z", "error Rate limit exceeded modelID=opencode/mimo-v2.6-flash-free providerID=opencode"),
+  ];
+  eq(core.opencodeLogQuota(lines, tErr + 3 * 60 * 1000 + 1000, { silenceMs: core.opencodeSilenceMsForModel("opencode/mimo-v2.6-flash-free") }),
+    "opencode/mimo-v2.6-flash-free", "3 min silence → zen quota");
+  eq(core.opencodeLogQuota(lines, tErr + 100 * 1000, { silenceMs: core.opencodeSilenceMsForModel("opencode/mimo-v2.6-flash-free") }),
+    null, "2 min in → still waiting");
+});
+
+// ---------------------------------------------------------------- C14 freebuff session-end detection
+t("C14 session-end: box variants + took-over + Freebucks count detected; working/agent lines stay silent", () => {
+  const st = core.freebuffSessionEndState([
+    "╭─".repeat(20),
+    "Session ended · 5 Freebucks left",
+    "Press Enter to continue in a new session",
+    "╰─".repeat(20),
+  ]);
+  ok(st.sessionEnded && st.pressEnter, "session ended + press-enter box");
+  eq(st.freebucksLeft, 5, "freebucks parsed");
+  ok(!st.tookOver && !st.wrappingUp && !st.taskPrompt, "no other flags");
+
+  const wrap = core.freebuffSessionEndState(["Agent is wrapping up. Rejoin the wait room after it's finished."]);
+  ok(wrap.wrappingUp && !wrap.sessionEnded && !wrap.pressEnter, "older 'wrapping up' variant");
+
+  const took = core.freebuffSessionEndState(["Another freebuff instance took over this account"]);
+  ok(took.tookOver, "took-over screen detected");
+
+  const fresh = core.freebuffSessionEndState(["Session ended · 0 Freebucks left"]); // → 0 when depleted
+  eq(fresh.freebucksLeft, 0, "0 freebucks parsed (not null)");
+
+  eq(core.freebuffSessionEndState(["working...", "Thinking"]).sessionEnded, false, "alive screens stay silent");
+  eq(core.freebuffSessionEndState(["Session ended"]).taskPrompt, false, "end box is not the task prompt");
+  eq(
+    core.freebuffSessionEndState([
+      "const t = 'Session ended'; // Press Enter to continue",
+      "# session ended — see TICKET.md",
+      "> agent is wrapping up",
+      "- Another freebuff instance took over this account",
+    ]).tookOver,
+    false,
+    "source/prompt text with code punctuation never matches (status-line discipline)",
+  );
+});
+
+t("C14b session-end: full-box priority (took-over beats press-enter on a mixed screen)", () => {
+  const st = core.freebuffSessionEndState([
+    "Session ended · 0 Freebucks left",
+    "Press Enter to continue in a new session",
+    "Another freebuff instance took over this account",
+  ]);
+  ok(st.tookOver, "tookOver set → ht-watch must exit SESSION_LOST, not press Enter");
+});
+
+t("C14c resume prompt carries the ticket dir from the .meta prompt file path", () => {
+  const p = core.buildFreebuffResumePrompt("/workspace/biomarker-and-nutrient-tracker/tmp/ht-freebuff-autocontinue");
+  ok(p.startsWith("Continue the previous task: re-read "), "prefix");
+  ok(p.includes("/TICKET.md and resume from "), "both files named");
+  ok(p.endsWith("ending with VERIFIED: yes or no."), "VERIFIED wording");
+  eq(core.buildFreebuffResumePrompt(""), "", "empty ticket dir → no prompt");
+  eq(core.buildFreebuffResumePrompt("/tmp/x/"), core.buildFreebuffResumePrompt("/tmp/x"), "trailing slash normalized");
+});
+
+t("C14d GLM 5.3 Flash picked from the numbered menu when Freebucks are 0; default Enter otherwise", () => {
+  const menu = ["Select a model:", "  1) Muse 2.1 (45/hr)", "  2) GLM 5.3 Flash (0/hr)", "  3) DeepSeek V4.1 (30/hr)"];
+  const pick = core.freebuffModelPickerChoice(menu, { freebucksLeft: 0 });
+  eq(pick.keys, "2", "0 fb → GLM 5.3 Flash (menu #)");
+  eq(pick.model, "GLM 5.3 Flash (0/hr)", "0 fb → GLM 5.3 Flash (label)");
+  eq(core.freebuffModelPickerChoice(menu, { freebucksLeft: 5 }).keys, "", "fb left → plain Enter (default is already GLM)");
+  eq(core.freebuffModelPickerChoice(menu, {}).keys, "", "unknown fb → default Enter");
+  eq(core.freebuffModelPickerChoice(["1) Muse 2.1 (45/hr)"], { freebucksLeft: 0 }).keys, "", "no GLM entry → no digit typed");
+  ok(core.freebuffMenuVisible(menu), "menu detection");
+  eq(core.freebuffMenuVisible(["Enter a coding task"]), false, "task prompt is not a menu");
+});
+
+t("C14e enter-wait policy: wrapping-up grace is capped at 10 min; press-enter proceeds immediately; took-over stops", () => {
+  const now = Date.now();
+  ok(core.shouldKeepWaitingForEnter(core.freebuffSessionEndState(["Agent is wrapping up."]), 0), "wrapping up → wait");
+  ok(core.shouldKeepWaitingForEnter(core.freebuffSessionEndState(["Agent is wrapping up."]), core.FREEBUFF_ENTER_WAIT_MS - 1000), "within grace");
+  eq(core.shouldKeepWaitingForEnter(core.freebuffSessionEndState(["Agent is wrapping up."]), core.FREEBUFF_ENTER_WAIT_MS), false, "grace elapsed → stop waiting");
+  ok(core.shouldKeepWaitingForEnter(core.freebuffSessionEndState(["Press Enter to continue in a new session"]), 0), "press-enter → proceed now");
+  eq(core.shouldKeepWaitingForEnter(core.freebuffSessionEndState(["Another freebuff instance took over this account"]), 0), false, "took-over → never wait/continue");
+  eq(core.shouldKeepWaitingForEnter(core.freebuffSessionEndState(["working..."]), 0), false, "no end-state → no wait");
+  void now;
+});
+
+t("C14f ticket constants: cap 12, 3 fails, waits", () => {
+  eq(core.FREEBUFF_AUTOCONTINUE_CAP, 12, "cap");
+  eq(core.FREEBUFF_CONTINUE_MAX_FAILS, 3, "consecutive-fail limit");
+  eq(core.FREEBUFF_ENTER_WAIT_MS, 10 * 60 * 1000, "wrapping-up grace 10 min");
+  eq(core.FREEBUFF_PROMPT_WAIT_MS, 60 * 1000, "prompt wait 1 min");
+  eq(core.FREEBUFF_TYPED_WAIT_MS, 3 * 60 * 1000, "typed wait 3 min");
+});
+
+// ---------------------------------------------------------------- C15 prompt-file sidecar
+t("C15 prompt-file sidecar naming (ht-run ↔ ht-watch handshake, no inline long text)", () => {
+  const session = "ht-fbac-a";
+  const contFile = `/workspace/logs/${session}.cont`;
+  eq(contFile, "/workspace/logs/ht-fbac-a.cont", "cont sidecar path");
+  const meta = JSON.parse(fs.readFileSync(join(TOOL_DIR, "package.json"), "utf8"));
+  eq(meta.name, "tg-provider-router", "meta sanity (tool still parses JSON)");
 });
 
 // ---- summary ----

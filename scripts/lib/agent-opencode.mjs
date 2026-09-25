@@ -85,13 +85,18 @@ export function mapOpencodeEvent(raw) {
     case 'text':
       return { kind: 'text', text: part.text || '' };
     case 'tool':
+    case 'tool_use':
+    case 'tool_result': {
+      const toolPart = part.tool || part.name || raw.tool || raw.name || 'tool';
+      const state = part.state || raw.state || {};
       return {
         kind: 'tool',
-        tool: part.tool || 'tool',
-        status: part.state?.status || 'unknown',
-        input: part.state?.input,
-        output: part.state?.output,
+        tool: toolPart,
+        status: state.status || part.status || raw.status || 'unknown',
+        input: state.input ?? part.input ?? raw.input,
+        output: state.output ?? part.output ?? raw.output,
       };
+    }
     case 'step_start':
       return { kind: 'step_start' };
     case 'step_finish':
@@ -166,13 +171,15 @@ export function listModelsVerbose(opts = {}) {
   return execOpencode(['models', '--verbose'], { timeoutMs: 60000, ...opts });
 }
 
-export function buildOpencodeArgs({ prompt, model, variant, thinking = true, extraArgs = [] }) {
+export function buildOpencodeArgs({ prompt, model, variant, thinking = true, attachUrl, sessionId, extraArgs = [] }) {
   const args = ['run', '--format', 'json'];
   // Provider failures (rate limit, no funds, bad auth) are written to stderr as
   // ERROR log lines, after which opencode sits there forever with an EMPTY
   // stdout — no JSON events at all. Without these flags the only thing the bot
   // can report is "timed out after 900000ms", 15 minutes later.
   args.push('--print-logs', '--log-level', 'ERROR');
+  if (attachUrl) args.push('--attach', attachUrl);
+  if (sessionId) args.push('--session', sessionId);
   if (thinking) args.push('--thinking');
   if (variant) args.push('--variant', variant);
   if (model) args.push('-m', model);
@@ -373,14 +380,17 @@ export function runOpencode({
   thinking = true,
   timeoutMs = 900000,
   opencodeBin,
+  attachUrl,
+  sessionId,
   onEvent,
   onSpawn,
+  onAbort,
   extraArgs = [],
   env,
   spawnImpl = spawn,
 }) {
   return new Promise((resolve) => {
-    const args = buildOpencodeArgs({ prompt, model, variant, thinking, extraArgs });
+    const args = buildOpencodeArgs({ prompt, model, variant, thinking, attachUrl, sessionId, extraArgs });
     const child = spawnImpl(resolveOpencodeBin(opencodeBin), args, {
       cwd: workspace,
       env: { ...process.env, ...(env || {}) },
@@ -408,6 +418,11 @@ export function runOpencode({
       timeoutMs > 0
         ? setTimeout(() => {
             lastError = lastError || `timed out after ${timeoutMs}ms`;
+            try {
+              onAbort?.();
+            } catch {
+              // ignore
+            }
             try {
               child.kill('SIGKILL');
             } catch {

@@ -30,9 +30,11 @@ This package encodes the fixes. Read `docs/` and `tickets/*_REPORT.md` before ch
 | **Cline** | CLI (`cline -m cline-free/…`) | **Per-model** daily free caps | Track child PID; default timeout ≥20 min; SIGTERM→SIGKILL on unlock/timeout. `/think` wired. |
 | **Token Harbor** | OpenAI-compatible API *or* OpenCode `tokenharbor/<model>` | **Shared** rolling ~7-day free value bar | `/freemodel` Token Harbor taps → OpenCode+tools; `/switch tokenharbor` stays chat-only. |
 | **Cloudflare** | OpenCode `@cf/…` / Workers AI | **Shared** 10k neurons/day (UTC) | `/allowance` uses per-reply neuron estimates; live GraphQL needs Analytics Read on the token. |
-| **Freebuff** | CLI / session Freebucks | **Shared** daily Freebucks (region-based) | Prefer **terminal-only** until durable one-shot chat is restored; do not burn Freebucks just to probe. |
+| **Freebuff** | CLI / session Freebucks | **Shared** daily Freebucks (region-based) | Terminal-only by default (TUI/`login` only, one session per account). EXPERIMENTAL Telegram lane exists behind `FREEBUFF_TG_LANE=1` (`src/freebuff-tg-lane.js`, stub-tested): yields to a live terminal session, single-flight, balance pre-check, always cleans up. Needs funded balance + idle account — not yet proven live. |
 
 Commands (high level): `/switch`, `/model`, `/freemodel`, `/allowance`, `/allowance table` (same free-lane ledger as an HTML grid, delivered with `MEDIA:<abs-path.html>`), `/status`, `/think`, `/compact`, `/unlock`, Cancel & unlock on Busy replies.
+
+`/freemodel` is **buttons-only**: a short header plus one inline button per free lane (no per-model text dump). Token Harbor chat and OpenCode `tokenharbor/…` are the same free bar, so they render as **one** button (the OpenCode tools path wins). Freebuff gets a button whenever the box is signed in; tapping it replies with terminal-only instructions (run `freebuff` in a tmux on the host) and does **not** switch the Telegram route. Labels are right-padded with spaces because Telegram's `InlineKeyboardButton` has no `align` (see `tmp/ht-freemodel-buttons-only/REPORT.md`).
 
 ---
 

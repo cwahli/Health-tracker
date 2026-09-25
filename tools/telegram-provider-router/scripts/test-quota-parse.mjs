@@ -163,9 +163,12 @@ for (const [text, delta, hint] of VARIANTS) {
   });
 }
 t("ISO reset stamp with +00:00 offset is parsed exactly", () => {
-  const p = parseCountdownHint("Depleted until 2026-09-25T09:38:00.000+00:00 (Cline UI)");
+  // Relative fixture: an absolute stamp rots the moment wall-clock passes it
+  // (red after 2026-09-25T09:38Z with the old literal). +00:00 offset kept.
+  const iso = new Date(Date.now() + HOUR).toISOString().replace(/Z$/, "+00:00");
+  const p = parseCountdownHint(`Depleted until ${iso} (Cline UI)`);
   eq(p.countdownParsed, true, "countdownParsed");
-  eq(p.until, Date.parse("2026-09-25T09:38:00.000+00:00"), "until");
+  eq(p.until, Date.parse(iso), "until");
 });
 t("no countdown \u2192 countdownParsed false (caller uses default TTL)", () => {
   const p = parseCountdownHint("402 freebucks empty \u2014 no free usage left");

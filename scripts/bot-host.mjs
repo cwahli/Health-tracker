@@ -2,6 +2,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
@@ -13,6 +15,7 @@ import {
   resolveSession,
   getSession,
   setTx,
+  setWorkView,
   handoffSession,
   abortSession,
   checkpointSession,
@@ -38,6 +41,7 @@ import {
   isQuotaOrLimitError,
   extractLogError,
 } from './lib/agent-opencode.mjs';
+import { ensureOpencodeTui, abortOpencodeSession } from './lib/opencode-tui.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import {
@@ -717,20 +721,46 @@ export function workLocation() {
   return os.homedir() === '/root' ? 'mobile' : 'vps';
 }
 
-export async function handleTxCommand({ api, config, chatId, arg, tmux = defaultTmuxRunner }) {
+export async function handleTxCommand({ api, config, chatId, arg, lane: requestedLane, tmux = defaultTmuxRunner, ensureTui = ensureOpencodeTui }) {
   const location = workLocation();
   const id = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
   const sub = String(arg || '').trim().toLowerCase();
   if (sub === 'on') {
-    const lane = config.agent.kind || 'opencode';
+    const lane = requestedLane || config.agent.kind || 'opencode';
     let session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane });
     if (session.lane !== lane) session = handoffSession(id, lane) || session;
+    if (lane === 'opencode') {
+      let tui;
+      try {
+        tui = await ensureTui({
+          serverUrl: session.serverUrl,
+          opencodeSessionId: session.opencodeSessionId,
+          workspace: config.agent.workspace,
+          title: `Health-tracker ${location} ${chatId}`,
+          env: opencodeEnv(config),
+          opencodeBin: config.agent.opencodeBin,
+        });
+      } catch (error) {
+        await api.sendMessage(chatId, `Interactive OpenCode TUI unavailable: ${error.message}`);
+        return;
+      }
+      session = setWorkView(id, {
+        tx: true,
+        viewMode: 'tui',
+        viewCommand: tui.command,
+        serverUrl: tui.serverUrl,
+        serverPid: tui.serverPid ?? session.serverPid ?? null,
+        opencodeSessionId: tui.opencodeSessionId,
+      });
+    } else {
+      session = setWorkView(id, { tx: true, viewMode: 'observer', viewCommand: null });
+    }
     const created = ensureTmuxWorkView(session, { tmux });
     if (!created.ok) {
-      await api.sendMessage(chatId, `Shared work view unavailable: could not create \`${created.target}\` without replacing an existing tmux session.`);
+      await api.sendMessage(chatId, `Interactive work view unavailable: could not create \`${created.target}\` without replacing an existing tmux session.`);
       return;
     }
-    setTx(id, true);
+    if (lane !== 'opencode') setTx(id, true);
   } else if (sub === 'off') {
     const session = getSession(id);
     if (session) disableTmuxObserver(session, { tmux });
@@ -747,15 +777,20 @@ export async function handleTxCommand({ api, config, chatId, arg, tmux = default
     await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
     return;
   }
-  const observer = view.probe?.observerLive
-    ? `Observer: live on \`${view.probe.target}\``
-    : view.probe?.surface === 'terminal'
-      ? 'Observer: unavailable — use /tx on to create the live observer'
-      : 'Live attach: unavailable for this execution surface';
+  const observer = view.viewMode === 'tui'
+    ? view.probe?.observerLive
+      ? `Interactive TUI: live on \`${view.probe.target}\``
+      : 'Interactive TUI: unavailable — use /tx on to create it'
+    : view.probe?.observerLive
+      ? `Observer: live on \`${view.probe.target}\``
+      : view.probe?.surface === 'terminal'
+        ? 'Observer: unavailable — use /tx on to create the live observer'
+        : 'Live attach: unavailable for this execution surface';
   const lines = [
     `*Shared work view:* ${view.tx ? 'ON' : 'OFF'}`,
     `Session: \`${view.id}\``,
     `Lane: \`${view.lane}\` (${view.state})`,
+    `View: ${view.viewMode === 'tui' ? 'interactive OpenCode TUI' : 'structured observer'}`,
     observer,
   ];
   if (sub === 'debug') {
@@ -765,6 +800,46 @@ export async function handleTxCommand({ api, config, chatId, arg, tmux = default
     lines.push(`Attach: \`tmux attach -t ${view.probe.target}\``);
   }
   await api.sendMessage(chatId, lines.join('\n'));
+}
+
+// V-30.5 /resume — prints the current ticket packet straight from the bug
+// store (bugctl queue → packet). Read-only: no second state store, no chat
+// scrollback. `/resume n` = card #n; bare /resume = the queue's next open card.
+const execFileP = promisify(execFile);
+const BUGCTL_BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bugctl.mjs');
+
+async function runBugctl(args) {
+  const { stdout } = await execFileP(process.execPath, [BUGCTL_BIN, ...args], {
+    timeout: 8000,
+    encoding: 'utf8',
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  return String(stdout || '');
+}
+
+async function resumePacketText(rawArg) {
+  const wanted = String(rawArg || '').replace(/^#/, '').trim();
+  let id = wanted;
+  if (!id) {
+    let queue;
+    try {
+      queue = JSON.parse(await runBugctl(['queue', '--json']));
+    } catch (e) {
+      return 'Bug store unreachable (bug API down or not local to this host). /resume needs the store — retry later or use /resume <n> once it is back.';
+    }
+    const rows = Array.isArray(queue?.rows) ? queue.rows : [];
+    if (!rows.length) return 'Bug queue is empty — no open ticket to resume. Use /resume <n> for a specific card.';
+    id = String(rows[0].public_n ?? '').trim();
+    if (!id) return 'Queue returned a card without a number — use /resume <n>.';
+  }
+  let packet;
+  try {
+    packet = (await runBugctl(['packet', `--id=#${id}`, '--format=text'])).trim();
+  } catch (e) {
+    return `Bug store unreachable for #${id} (bug API down or not local to this host). ${String(e?.message || '').slice(0, 120)}`;
+  }
+  if (!packet) return `No packet content for #${id}.`;
+  return `Current ticket packet — #${id}\n\n${packet}\n\n/resume ${id} reprints this packet.`;
 }
 
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
@@ -1049,6 +1124,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       active.aborted = true;
+      await abortOpencodeSession({ serverUrl: active.serverUrl, sessionId: active.opencodeSessionId }).catch(() => false);
       try {
         active.child.kill('SIGTERM');
         setTimeout(() => {
@@ -1103,7 +1179,16 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'tx': {
-      await handleTxCommand({ api, config, chatId, arg: cmd.args });
+      await handleTxCommand({ api, config, chatId, arg: cmd.args, lane: parseModelRef(eff.model).surface });
+      return;
+    }
+
+    case 'resume': {
+      if (running.get(chatId)) {
+        await api.sendMessage(chatId, 'A request is running. Finish or /abort it before resuming a ticket.');
+        return;
+      }
+      await api.sendMessage(chatId, await resumePacketText(cmd.args));
       return;
     }
 
@@ -1411,8 +1496,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       : '';
     const prompt = basePrompt + routeNote;
     const extraArgs = [];
-    const sessionId = sessions.get(chatId);
-    if (sessionId) extraArgs.push('--session', sessionId);
     if (eff.agent) extraArgs.push('--agent', eff.agent);
 
     const media = await collectInboundMedia(api, message, config);
@@ -1424,6 +1507,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
     let workSession = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: workLane });
     if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
+    if (workSession.viewMode !== 'tui' && sessions.get(chatId)) extraArgs.push('--session', sessions.get(chatId));
     try { observer = createObserver(workSession); } catch {}
     observerContext = { model: ref.id, attempt: 1, surface: ref.surface, provider: ref.surface };
     const onObserverEvent = (event) => fanoutProgressEvent({ renderer, observer, event, context: observerContext });
@@ -1465,8 +1549,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
              thinking: config.agent.thinking,
              timeoutMs: config.agent.timeoutMs,
              opencodeBin: config.agent.opencodeBin,
+             attachUrl: workSession.viewMode === 'tui' ? workSession.serverUrl : undefined,
+             sessionId: workSession.viewMode === 'tui' ? workSession.opencodeSessionId : undefined,
              onEvent: onObserverEvent,
-             onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+             onSpawn: (child) => running.set(chatId, { child, aborted: false, serverUrl: workSession.serverUrl, opencodeSessionId: workSession.opencodeSessionId }),
+             onAbort: () => abortOpencodeSession({ serverUrl: workSession.serverUrl, sessionId: workSession.opencodeSessionId }).catch(() => false),
              onAttemptStart: ({ model, attempt }) => {
                observerTerminalWritten = false;
                observerContext = { model, attempt, surface: 'opencode', provider: 'opencode' };

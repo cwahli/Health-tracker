@@ -280,10 +280,13 @@ describe('agent-opencode event mapping', () => {
     });
   });
 
-  it('maps tool, step_finish and error', () => {
+  it('maps tool, tool_use, step_finish and error', () => {
     expect(
       mapOpencodeEvent({ type: 'tool', part: { tool: 'bash', state: { status: 'completed' } } }),
     ).toMatchObject({ kind: 'tool', tool: 'bash', status: 'completed' });
+    expect(
+      mapOpencodeEvent({ type: 'tool_use', part: { tool: 'read', state: { status: 'running', input: { path: 'README.md' } } } }),
+    ).toMatchObject({ kind: 'tool', tool: 'read', status: 'running', input: { path: 'README.md' } });
     expect(mapOpencodeEvent({ type: 'step_finish', part: { cost: 0.01 } })).toMatchObject({
       kind: 'step_finish',
     });
@@ -315,6 +318,28 @@ describe('agent-opencode event mapping', () => {
       'opencode-go/deepseek-v4.1-flash',
       '--session',
       'ses_1',
+       'fix it',
+     ]);
+   });
+
+   it('builds attached TUI-session args', () => {
+    const args = buildOpencodeArgs({
+      prompt: 'fix it',
+      attachUrl: 'http://127.0.0.1:4096',
+      sessionId: 'ses_tui',
+      thinking: false,
+    });
+    expect(args).toEqual([
+      'run',
+      '--format',
+      'json',
+      '--print-logs',
+      '--log-level',
+      'ERROR',
+      '--attach',
+      'http://127.0.0.1:4096',
+      '--session',
+      'ses_tui',
       'fix it',
     ]);
   });
@@ -630,10 +655,27 @@ describe('commands', () => {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
     };
     const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
-    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/abort', '/help']) {
+    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/abort', '/help', '/resume']) {
       expect(text).toContain(cmd);
     }
     expect(text).toContain('opencode-go/muse-spark-1.3');
+  });
+
+  it('advertises /resume with a handler, help line, and telegram payload (V-30.5)', async () => {
+    expect(COMMAND_NAMES).toContain('resume');
+    const entry = BOT_COMMANDS.find((c) => c.command === 'resume');
+    expect(entry?.description.length).toBeGreaterThan(0);
+    expect(toTelegramCommands().find((c) => c.command === 'resume')?.description).toBe(entry?.description);
+    expect(helpText({ name: 'b', agent: {} }, {})).toContain('/resume [n]');
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
+    );
+    // handler exists and is read-only (queue/packet reads, no second store).
+    expect(src).toContain("case 'resume'");
+    expect(src).toContain('resumePacketText');
+    expect(src).toMatch(/runBugctl\(\['queue', '--json'\]\)/);
+    expect(src).toMatch(/runBugctl\(\['packet', `--id=#\$\{id\}`, '--format=text'\]\)/);
+    expect(parseCommand('/resume 5')).toEqual({ name: 'resume', args: '5', raw: '/resume 5' });
   });
 
   it('shows the effective model in status', () => {
@@ -1853,6 +1895,12 @@ describe('BOT-19 /tx wiring', () => {
   });
 
   const fakeCfg = (kind = 'opencode') => ({ agent: { workspace: '/ws', kind } });
+  const fakeTui = async () => ({
+    serverUrl: 'http://127.0.0.1:4096',
+    serverPid: 123,
+    opencodeSessionId: 'ses_test',
+    command: "'opencode' attach 'http://127.0.0.1:4096' --dir '/ws' --session 'ses_test'",
+  });
   const fakeApi = (sent) => ({ sendMessage: async (chatId, text) => { sent.push(text); return {}; } });
   const fakeTxTmux = (initial = {}) => {
     const sessions = new Map(Object.entries(initial).map(([name, windows]) => [name, new Set(windows)]));
@@ -1906,7 +1954,7 @@ describe('BOT-19 /tx wiring', () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
     const tmux = fakeTxTmux();
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(sent.length).toBe(1);
     expect(sent[0]).toContain('ON');
     expect(sent[0]).toMatch(/tmux attach -t work-testbox:ws-/);
@@ -1920,7 +1968,7 @@ describe('BOT-19 /tx wiring', () => {
     const sent = [];
     const legacyWindow = tmuxWindowFor(sessionKey({ location: 'testbox', chat: '9', workspace: '/ws' }));
     const tmux = fakeTxTmux({ 'work-testbox': [legacyWindow] });
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(tmux.sessions.get('work-testbox')).toEqual(new Set([legacyWindow]));
     expect(tmux.calls.map((args) => args[0])).toContain('split-window');
     expect(tmux.calls.flat().some((arg) => /kill-window|kill-session|respawn-pane|send-keys/.test(String(arg)))).toBe(false);
@@ -1930,7 +1978,7 @@ describe('BOT-19 /tx wiring', () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
     const tmux = fakeTxTmux();
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'off', tmux: tmux.run });
     expect(sent[1]).toContain('OFF');
     expect(tmux.sessions.get('work-testbox').size).toBe(1);
@@ -1949,7 +1997,7 @@ describe('BOT-19 /tx wiring', () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
     const tmux = fakeTxTmux();
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg('gemini'), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg('gemini'), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(sent[0]).toContain('ON');
     expect(sent[0]).toContain('Live attach: unavailable');
     expect(sent[0]).not.toContain('tmux attach');
