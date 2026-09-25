@@ -189,6 +189,7 @@ only A additionally needs the swap itself.
 | `scripts/assert-swap-guards.test.mjs` (new, guards 4–8) | 64 pass / 0 fail |
 | `scripts/assert-swap-pack.test.mjs` (new, guard 9) | 35 pass / 0 fail |
 | `scripts/assert-poller-lease.test.mjs` (new, guard 10) | 21 pass / 0 fail |
+| `scripts/assert-swap-drill.mjs` (new, end-to-end) | 16 pass / 0 fail — real relay + real `runOnWorker`, 10 swaps, 1 injected wrong-ledger rollback, row never forked |
 | `tests/work-session.test.ts` + `tests/bot-host.test.ts` (vitest) | 176 pass / 0 fail |
 | master scorecard | 947 pass / 4 fail — all 4 pre-existing (scout retry backoff ×2, journey-guard spec ambiguity, biomarker M31), none touching sessions |
 
