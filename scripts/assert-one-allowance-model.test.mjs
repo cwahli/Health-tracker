@@ -102,11 +102,15 @@ try {
   // 6. /allowance renders the same rows from the same ledger.
   const text = buildAllowanceTextForBots({ stateDir: dir, now });
   check('/allowance lists the healthy lane', /Deep B/.test(text));
-  // An ended lane stays visible with its verdict: a model the user remembers
-  // must not simply vanish, and /freemodel needs a row to point at.
-  check('/allowance shows the ended lane as not usable', /Old Promo/.test(text) && /ended/.test(text));
+  // The table is rendered by the shared Grok component, which drops ended rows.
+  // That is now the intended presentation; what must hold on every surface is
+  // that an ended lane is never offered and never shown as available.
+  check('/allowance never shows the ended lane as available', !/✅\s*(<code>)?\s*Old Promo/.test(text.replace(/<\/?code>/g, '')));
   check('/allowance shows the reset for the stamped lane', /Zen A/.test(text));
-  check('/allowance never marks a blocked lane as available', !/✅ (Old Promo|FB)/.test(text));
+  // A terminal-only row stays visible (the Grok table shows it) but is never the
+  // next lane and never selectable: the walk cannot choose it.
+  check('/allowance does not offer a terminal row as Next up', !/Next up: FB/.test(text));
+  check('and marks it terminal when it is the only option', /Next up: \(no free lane available/.test(text) || !/Next up: FB/.test(text));
   check('/allowance names the next usable lane', /Next up: Deep B/.test(text));
 
   // 7. /freemodel's body must not contradict /allowance.

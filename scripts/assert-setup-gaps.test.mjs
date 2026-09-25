@@ -67,10 +67,35 @@ try {
   const { dir } = ensureBotLedger('vm');
   fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table, null, 2));
   const text = buildAllowanceTextForBots({ stateDir: dir, readiness: r });
-  check('/allowance marks the unrunnable lane with a pause, not a tick', /⏸ Ghost lane/.test(text));
-  check('/allowance never marks it available', !/✅ Ghost lane/.test(text));
-  check('/allowance names the variable', /TOKEN_HARBOR_API_KEY/.test(text));
-  check('/allowance points at the fix', /\/setup/.test(text));
+  // The unrunnable lanes leave the table entirely: they are not counted, they
+  // are listed underneath with the variable each one needs. That also keeps the
+  // table's columns aligned — the mixed-width marks were the misalignment.
+  check('the unrunnable lane is out of the table', !/Ghost lane/.test(text.split('Not counted')[0]));
+  check('it is listed as not counted', /Not counted on this host/.test(text));
+  check('outside the table it carries the pause mark', /⏸ Ghost lane/.test(text));
+  check('and names the variable', /TOKEN_HARBOR_API_KEY/.test(text));
+  check('and points at the fix', /\/setup/.test(text));
+  check('the missing variables are summarised once', /Missing: .*TOKEN_HARBOR_API_KEY/.test(text));
+
+  // Ranking: the chat's own lane leads, and Next up agrees with row one. Its
+  // own fixture: the table above has no Cline lane to promote.
+  const rankDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rank-'));
+  try {
+    fs.writeFileSync(path.join(rankDir, 'free-lane-table.json'), JSON.stringify({ lanes: [
+      { provider: 'opencode', model: 'opencode/zen-a', pref: 1, status: 'available', tg: true, label: 'Zen A' },
+      { provider: 'cline', model: 'cline-free/deep-b', pref: 2, status: 'available', tg: true, label: 'Deep B' },
+    ] }, null, 2));
+    const ranked = buildAllowanceTextForBots({ stateDir: rankDir, provider: 'cline', model: 'cline-free/deep-b', readiness: r });
+    const rowsInOrder = ranked.split('\n').filter((l) => /^(✅|❌)/.test(l)).map((l) => l.replace(/^(✅|❌)\s*/, '').trim().split(/\s{2,}/)[0]);
+    check('the current lane is the first row, not the top preference', /Deep B/.test(rowsInOrder[0] || '') && rowsInOrder.length === 2);
+    check('Next up names that same lane', /Next up: Deep B/.test(ranked));
+    const dataRows = ranked.split('\n').filter((l) => /^(✅|❌)/.test(l));
+    const offsets = dataRows.map((l) => l.search(/(?:^|\s)(OC|CL|TH|CF|FB)(?:\s|$)/));
+    check('every row aligns its Plan column', offsets.length > 1 && new Set(offsets).size === 1);
+    check('and the header aligns with them', /Model\s+Plan\s+Reset in/.test(ranked.replace(/<\/?code>/g, '')));
+  } finally {
+    fs.rmSync(rankDir, { recursive: true, force: true });
+  }
   const ann = annotateFreemodelEntries([{ ref: 'th/ghost', label: 'Ghost lane' }], table, {}, { readiness: r });
   check('/freemodel also refuses it', ann[0].selectable === false);
   check('/freemodel explains why', /TOKEN_HARBOR_API_KEY/.test(ann[0].reason || ''));
@@ -83,10 +108,11 @@ try {
   ] };
   const tp = projectLanes(through, {}, { readiness: r });
   check('a tokenharbor lane behind opencode is blocked by the missing key', tp.find((x) => x.label === 'TH via opencode')?.needsSetup === true);
-  check('and its plan code is TH, not OP', tp.find((x) => x.label === 'TH via opencode')?.plan === 'TO');
+  check('and its plan code is TH, from the shared component', tp.find((x) => x.label === 'TH via opencode')?.plan === 'TH');
   check('a cloudflare lane behind opencode is blocked too', tp.find((x) => x.label === 'CF via opencode')?.needsSetup === true);
+  check('and its plan code is CF', tp.find((x) => x.label === 'CF via opencode')?.plan === 'CF');
   check('a genuine opencode lane is unaffected', tp.find((x) => x.label === 'Real opencode lane')?.selectable === true);
-  check('and keeps the OP code', tp.find((x) => x.label === 'Real opencode lane')?.plan === 'OP');
+  check('and keeps the OC code', tp.find((x) => x.label === 'Real opencode lane')?.plan === 'OC');
 
   // 7. The command exists and names the same things.
   const src = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');

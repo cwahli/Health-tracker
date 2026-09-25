@@ -437,13 +437,14 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
     else reason = "available";
     return {
       ref,
+      lane,
       provider,
       model,
       pref: lane.pref,
       family: lane.family || null,
       bucket: lane.bucket || null,
       label: lane.label || model,
-      plan: String(effectiveProvider || "").slice(0, 2).toUpperCase(),
+      plan: planCodeForLane(lane),
       effectiveProvider,
       location,
       ended,
@@ -459,9 +460,11 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
   });
 }
 
+// Only the providers setup-gaps knows about. A wider set here invented owners:
+// a Freebuff lane whose model path contains `deepseek/` resolved to deepseek and
+// rendered as plan code "DE".
 const PROVIDER_ALIASES = new Set([
-  'tokenharbor', 'cloudflare', 'google', 'openai', 'deepseek', 'openrouter',
-  'freebuff', 'opencode', 'cline', 'gemini', 'tinfoil', 'meta', 'zhipuai',
+  'tokenharbor', 'cloudflare', 'freebuff', 'opencode', 'cline', 'gemini',
 ]);
 
 /** The provider that actually serves a lane, from its model path. */
@@ -885,48 +888,6 @@ function laneInAllowanceTable(lane) {
   return provider === "freebuff" || bucket.includes("freebuff");
 }
 
-/**
- * The /allowance table, from projected rows. Same columns as the router's
- * table: Model, Plan, Reset in — and the same ✅/❌ verdicts, with a reason
- * line under the table instead of a different rule per surface.
- */
-function renderProjectedAllowance(rows, { provider = "", model = "" } = {}) {
-  const active = `${provider}/${model}`;
-  const lines = [];
-  const head = ["Model", "Plan", "Reset in"];
-  const body = rows.map((r) => {
-    const mark = r.needsSetup ? "⏸" : r.selectable ? "✅" : "❌";
-    const label = r.model.replace(/^.*\//, (m) => m).replace(/^[a-z]+\//, "");
-    const name = `${mark} ${r.label || label}`;
-    const reset = r.selectable ? "—" : r.resetLabel || (r.ended ? "ended" : "—");
-    return [name, r.plan, reset];
-  });
-  const widths = head.map((h, i) => Math.max(dispWidth(h), ...body.map((b) => dispWidth(b[i]))));
-  const fmt = (cells) => cells.map((c, i) => pad(c, widths[i])).join(" ").trimEnd();
-  lines.push(fmt(head));
-  lines.push("-".repeat(Math.max(...widths.map((w) => w + 1)) - 1));
-  for (const cells of body) lines.push(fmt(cells));
-  const next = rows.find((r) => r.selectable);
-  if (next) lines.push("", `Next up: ${next.label} · ${next.plan} · ${next.ref}`);
-  const blocked = rows.filter((r) => !r.selectable && r.reason && r.reason !== "available");
-  if (blocked.length) {
-    lines.push("");
-    for (const r of blocked.slice(0, 6)) lines.push(`${r.needsSetup ? "⏸" : "·"} ${r.label}: ${r.reason}`);
-  }
-  const gaps = [...new Set(rows.filter((r) => r.needsSetup).map((r) => String(r.reason || "").replace(/^needs /, "")))];
-  if (gaps.length) lines.push(`\n${gaps.length} provider(s) not set up on this host: ${gaps.join(", ")} — /setup for the fix.`);
-  if (active) {
-    const on = rows.find((r) => `${r.provider}/${r.model}` === active || r.ref === active);
-    if (on) lines.push("", `Active route: ${on.label} · ${on.plan}${on.selectable ? '' : ` (${on.reason})`}`);
-  }
-  return lines.join("\n");
-}
-
-function pad(text, width) {
-  const gap = width - dispWidth(text);
-  return gap > 0 ? `${text}${" ".repeat(gap)}` : text;
-}
-
 /** Display width for Telegram monospace (emoji ≈ 2 cells). */
 function dispWidth(s) {
   let w = 0;
@@ -988,7 +949,28 @@ function laneResetAt(lane, table) {
  * three text columns stay fixed-width inside HTML <code> (parse_mode HTML).
  * Available first by pref; depleted by soonest reset. No ★. Freebuff included.
  */
-export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel } = {}) {
+/** Stable identity for a lane across clones of the same table. */
+export function laneKey(lane) {
+  return `${String(lane?.provider || "")}/${String(lane?.model || "")}`;
+}
+
+/** The chat's own lane first when it is usable, then preference order. */
+export function orderLikeWalk(lanes, currentModel) {
+  const list = [...(lanes || [])];
+  if (!currentModel) return list;
+  const tail = String(currentModel);
+  const key = (l) => `${String(l?.provider || "")}/${String(l?.model || "")}`;
+  const alt = (l) => String(l?.model || "");
+  // Match on the full route or the bare model id. A looser test (endsWith on
+  // the model) matched the FIRST lane for every input, so the ranking never
+  // moved anything.
+  const at = list.findIndex((l) => key(l) === tail || alt(l) === tail || key(l) === `${l.provider}/${tail}`);
+  if (at <= 0) return list;
+  const [first] = list.splice(at, 1);
+  return [first, ...list];
+}
+
+export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "" } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });
   // TH + OC-TH are one row (display-only); failover still uses both lanes.
   const lanes = dedupeTokenHarborLanes([...(t.lanes || [])].filter(laneInAllowanceTable));
@@ -1003,7 +985,13 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
       if (am !== bm) return am - bm;
       return (Number(a.pref) || 0) - (Number(b.pref) || 0);
     });
-  const ordered = [...usable, ...depleted];
+  // Ranking: the same order the turn walks. The chat's current lane first when
+  // it is usable, then preference order — so the first row of the table is the
+  // lane that will actually be used next, and "Next up" cannot disagree with it.
+  const usableOrdered = rows
+    ? orderLikeWalk(usable, currentModel)
+    : usable;
+  const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
   const W_MODEL = 16;
   const W_PLAN = 6;
@@ -1014,7 +1002,16 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const lines = [
     "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
   ];
+  const blocked = [];
   for (const l of ordered) {
+    const verdict = rows ? rows.find((r) => laneKey(r.lane) === laneKey(l)) : null;
+    // A lane whose provider has no credential on this host cannot be counted,
+    // so it leaves the table entirely rather than sitting in it as a mystery
+    // row. It is listed underneath with the variable it needs.
+    if (verdict?.needsSetup) {
+      blocked.push(verdict);
+      continue;
+    }
     const ok = laneIsUsable(l);
     const name = shortModelName(l);
     const plan = planCodeForLane(l);
@@ -1023,8 +1020,14 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     lines.push((ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>");
   }
   lines.push("");
-  if (usable[0]) {
-    const u = usable[0];
+  // "Next up" must be a lane the walk can actually choose. A terminal-only row
+  // (Freebuff and friends) stays in the table so the user can see it, but it is
+  // never the next lane: offering "Next up: FB (terminal)" sent the user looking
+  // for a turn that can never run on it.
+  const selectableIn = (l) => l.tg !== false && !rows?.find((r) => laneKey(r.lane) === laneKey(l))?.needsSetup;
+  const firstUsable = (rows ? usableOrdered : usable).find(selectableIn) || null;
+  if (firstUsable) {
+    const u = firstUsable;
     const term = u.tg === false ? " (terminal)" : "";
     lines.push(
       "Next up: " + escHtml(shortModelName(u)) + " · " + planCodeForLane(u) + term +
@@ -1039,6 +1042,15 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const fb = usable.find((l) => String(l.provider || "").toLowerCase() === "freebuff" || String(l.bucket || "").toLowerCase().includes("freebuff"));
   if (fb) {
     lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
+  }
+  if (blocked.length) {
+    lines.push("");
+    lines.push("Not counted on this host (no credential — cannot run):");
+    for (const r of blocked.slice(0, 8)) {
+      lines.push("⏸ " + escHtml(shortModelName(r.lane)) + " · " + planCodeForLane(r.lane) + " — " + escHtml(String(r.reason || "provider not set up")));
+    }
+    const vars = [...new Set(blocked.map((r) => String(r.reason || "").replace(/^needs /, "")).filter(Boolean))];
+    if (vars.length) lines.push("Missing: " + escHtml(vars.join(", ")) + " — /setup for the fix.");
   }
   lines.push("Auto-track: empty/rate-limit stamps Reset; refreshes from ledger + OpenCode log.");
   return lines.join(nl);
@@ -1242,9 +1254,14 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
     // (ended, or a terminal-only row that is not in the table) are not invented
     // back here.
     const projection = projectLanes(table, sess, { now, labelFn, location, readiness });
-    const body = projection.length
-      ? renderProjectedAllowance(projection, { provider, model })
-      : formatCompactAllowanceChat(table, sess, { now, labelFn });
+    // The same component the Grok router renders with, fed the projection. A
+    // second renderer is how the columns drifted apart in the first place.
+    const body = formatCompactAllowanceChat(table, sess, {
+      now,
+      labelFn,
+      rows: projection.length ? projection : null,
+      currentModel: provider && model ? `${provider}/${model}` : "",
+    });
     const prefix = location ? `Host: ${location} · own provider credentials and quota\n\n` : '';
     return prefix + (source === "pref-doc-fallback"
       ? `${body}\n\n(note: per-bot ledger not yet stamped — pref order only until first quota hit)`
