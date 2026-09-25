@@ -84,7 +84,10 @@
         "tokenEnv": "VM2_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm2"
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm2",
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free"
       }
     },
     {
