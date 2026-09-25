@@ -349,6 +349,62 @@ export function nextAvailableRoutes(table, session, {
   return out;
 }
 
+/**
+ * Every lane a turn may actually use on this host, in preference order.
+ *
+ * The turn path used to walk a fixed two-entry list (the chat's model, then
+ * the bot default) and retry a lane the ledger already knew was spent. This is
+ * the list the walk should use: Telegram-selectable rows that are not
+ * depleted, not ended, not unavailable, and not inside a live quota window.
+ * Terminal-only rows (Freebuff) are never in it.
+ *
+ * @returns {{lanes: Array, skipped: Array}} skipped rows carry why, for the chat.
+ */
+export function usableTurnLanes(table, session, { now = Date.now(), labelFn = defaultResetLabel } = {}) {
+  const t = overlayLiveQuota(table || {}, session || {}, { now, labelFn });
+  const all = [...(t.lanes || [])].sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  const lanes = [];
+  const skipped = [];
+  for (const lane of all) {
+    if (!lane) continue;
+    const id = { provider: String(lane.provider || ""), model: String(lane.model || "") };
+    const label = lane.label || id.model;
+    if (lane.tg === false) {
+      skipped.push({ ...id, label, why: "terminal-only, not selectable from chat" });
+      continue;
+    }
+    if (String(lane.status || "").toLowerCase() === "ended") {
+      skipped.push({ ...id, label, why: "lane ended, never offered again" });
+      continue;
+    }
+    if (!laneIsUsable(lane)) {
+      const until = lane.nextResetAt ? Date.parse(lane.nextResetAt) : NaN;
+      skipped.push({
+        ...id,
+        label,
+        why: lane.status === "depleted" ? "depleted" : `status ${lane.status}`,
+        until: Number.isFinite(until) ? until : null,
+        resetLabel: Number.isFinite(until) ? labelFn(until, lane.countdownHint) : null,
+      });
+      continue;
+    }
+    const live = liveRecForLane(lane, session || {}, now);
+    if (live) {
+      skipped.push({
+        ...id,
+        label,
+        why: "depleted",
+        until: live.depletedUntil || null,
+        resetLabel: live.nextResetAt || (live.depletedUntil ? labelFn(live.depletedUntil, live.countdownHint) : null),
+      });
+      continue;
+    }
+    if (!id.provider || !id.model) continue;
+    lanes.push({ ...id, pref: lane.pref, family: lane.family || null, label });
+  }
+  return { lanes, skipped };
+}
+
 /** Soonest Reset-in among depleted TG lanes (for all-depleted Stop message). */
 export function soonestResetAmongDepleted(table, session, { now = Date.now(), labelFn = defaultResetLabel } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });

@@ -1,0 +1,119 @@
+// R-14.1 cards 6 and 6b sensor: the turn walk comes from the ledger.
+//
+// On 2026-09-25 12:29Z the VM bot was on cline-free/muse-spark-1.3-contributor,
+// the provider returned 429 "try again in 22h 46m", and the chat received the
+// raw INFERENCE_CAP_ERROR JSON. No stamp, no next lane. The selection list was
+// [chat model, bot default] — two fixed entries that never asked the ledger.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { usableTurnLanes, stampDepleted, ensureBotLedger } from './lib/free-lanes.mjs';
+import { selectTurnLanes } from './bot-host.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+let passed = 0;
+let failed = 0;
+
+function check(name, cond) {
+  if (cond) {
+    console.log(`  PASS  ${name}`);
+    passed++;
+  } else {
+    console.error(`  FAIL  ${name}`);
+    failed++;
+  }
+}
+
+console.log('assert-allowance-walk:');
+
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'walk-'));
+const oldHome = process.env.HOME;
+process.env.HOME = home;
+
+try {
+  const now = Date.now();
+  const table = {
+    lanes: [
+      { provider: 'opencode', model: 'zen/nemotron', pref: 1, status: 'available', tg: true, bucket: 'opencode-zen' },
+      { provider: 'opencode', model: 'zen/muse', pref: 2, status: 'available', tg: true, bucket: 'opencode-zen' },
+      { provider: 'cline', model: 'cline-free/muse-spark', pref: 3, status: 'available', tg: true },
+      { provider: 'tokenharbor', model: 'th/cheap', pref: 4, status: 'available', tg: true },
+      { provider: 'freebuff', model: 'freebuff/terminal', pref: 5, status: 'available', tg: false },
+      { provider: 'opencode', model: 'zen/old-promo', pref: 6, status: 'ended', tg: true },
+    ],
+  };
+
+  // 1. With an empty session every TG lane is usable and Freebuff is not one.
+  const fresh = usableTurnLanes(table, {}, { now });
+  check('all four selectable lanes are usable', fresh.lanes.length === 4);
+  check('Freebuff is never selectable', !fresh.lanes.some((l) => l.provider === 'freebuff'));
+  check('an ended lane is never offered', !fresh.lanes.some((l) => l.model === 'zen/old-promo'));
+  check('the ended lane is reported as skipped', fresh.skipped.some((s) => /never offered again/.test(s.why)));
+  check('Freebuff is reported as terminal-only', fresh.skipped.some((s) => /terminal-only/.test(s.why)));
+
+  // 2. A shared bucket: one stamp takes the siblings with it. The stamp works
+  // on the host ledger, so the test table is what that ledger holds.
+  const { dir } = ensureBotLedger('vm');
+  fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table, null, 2));
+  stampDepleted({
+    stateDir: dir,
+    provider: 'opencode',
+    model: 'zen/nemotron',
+    errText: '429 Too Many Requests, try again in 22h',
+    depletedUntil: now + 22 * 3600 * 1000,
+    countdownHint: '22h',
+  });
+  const session = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf8'));
+  check('the stamp wrote the route key', Boolean(session.quota?.['opencode/zen/nemotron']));
+  check('the stamp wrote the shared bucket key', Boolean(session.quota?.['bucket:opencode-zen']));
+  const afterStamp = usableTurnLanes(table, session, { now });
+  check('the stamped lane is out', !afterStamp.lanes.some((l) => l.model === 'zen/nemotron'));
+  check('its bucket sibling is out too', !afterStamp.lanes.some((l) => l.model === 'zen/muse'));
+  check('an unrelated lane is still in', afterStamp.lanes.some((l) => l.model === 'cline-free/muse-spark'));
+  const skippedNemotron = afterStamp.skipped.find((s) => s.model === 'zen/nemotron');
+  check('the skip carries the vendor reset, not the 6h default', /22h/.test(String(skippedNemotron?.resetLabel || skippedNemotron?.until || '')));
+
+  // 3. The turn selection uses the ledger, not the two fixed entries.
+  const choice = selectTurnLanes({ botId: 'vm', model: 'opencode:zen/nemotron', fallback: 'zen/muse' });
+  check('the selection came from the ledger', choice.fromLedger === true);
+  check('a stamped lane is not selected', !choice.models.includes('opencode/zen/nemotron'));
+  check('the chain moved past it', choice.models[0] !== 'opencode/zen/nemotron');
+  check('the displaced lane is reported with a reason', Boolean(choice.displaced?.why));
+  check('Freebuff is not in the chain', !choice.models.some((m) => /freebuff/.test(m)));
+  check('an ended lane is not in the chain', !choice.models.some((m) => /old-promo/.test(m)));
+
+  // 4. A usable current model still goes first.
+  const keep = selectTurnLanes({ botId: 'vm', model: 'cline:cline-free/muse-spark', fallback: 'zen/muse' });
+  check('a usable chat model stays first', keep.models[0] === 'cline:cline-free/muse-spark');
+  check('nothing is displaced when the chat model is fine', keep.displaced === null);
+
+  // 5. Everything stamped means the turn does not run at all.
+  const table2 = JSON.parse(JSON.stringify(table));
+  for (const lane of table2.lanes) if (lane.tg !== false && lane.status !== 'ended') lane.status = 'depleted';
+  const { dir: dir2 } = ensureBotLedger('vm2');
+  fs.writeFileSync(path.join(dir2, 'free-lane-table.json'), JSON.stringify(table2, null, 2));
+  const empty = selectTurnLanes({ botId: 'vm2', model: 'cline:cline-free/muse-spark', fallback: 'zen/muse' });
+  check('an exhausted host selects nothing', empty.models.length === 0);
+  check('an exhausted host is reported as exhausted', empty.exhausted === true);
+
+  // 6. A host with no ledger keeps the old chain, so a fresh install is unchanged.
+  const bare = selectTurnLanes({ botId: 'brand-new-bot', model: 'zen/muse', fallback: 'zen/nemotron' });
+  check('a fresh bot still gets a usable chain', bare.models.length > 0);
+  check('a fresh bot chain never picks Freebuff', !bare.models.some((m) => /freebuff/.test(m)));
+  check('a fresh bot chain never picks an ended lane', !bare.models.some((m) => /old-promo/.test(m)));
+
+  // 7. Wiring: the turn path calls the ledger selection, not failoverModels alone.
+  const src = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
+  check('the turn path calls selectTurnLanes', /const laneChoice = selectTurnLanes\(\{/.test(src));
+  check('the chain comes from laneChoice.models', /models: laneChoice\.models\.length \? laneChoice\.models/.test(src));
+  check('an exhausted host is told nothing ran', /Nothing was run and nothing was spent/.test(src));
+  check('the raw two-entry chain is no longer the only list', !/models: failoverModels\(eff\.model, config\.agent\.model\),/.test(src));
+} finally {
+  if (oldHome === undefined) delete process.env.HOME;
+  else process.env.HOME = oldHome;
+  fs.rmSync(home, { recursive: true, force: true });
+}
+
+console.log(`\n${passed} pass, ${failed} fail`);
+process.exit(failed === 0 ? 0 : 1);
