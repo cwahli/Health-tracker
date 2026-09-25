@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, openSyn
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn, execSync } from "child_process";
+import { homedir } from "os";
 // F) Free-lane allowance table: authoritative model + telegram-tables HTML grid
 // (JSON -> qa-evidence/build-table.py -> HTML -> MEDIA:). Never tool-allowance.mjs.
 import {
@@ -2755,7 +2756,12 @@ async function probeTokenHarborFree() {
 }
 
 /** Freebuff CLI credentials on this box (test seam: pass a temp path). */
-const FREEBUFF_CREDS_PATH = "/home/box/.config/manicode/credentials.json";
+// FREEBUFF_CREDS wins; otherwise resolve against THIS host's home. The old
+// value was pinned to another machine's home directory, so the Freebuff check
+// could never be true here and a signed-in box was reported as "not signed in".
+const FREEBUFF_CREDS_PATH =
+  process.env.FREEBUFF_CREDS ||
+  join(homedir(), ".config", "manicode", "credentials.json");
 /**
  * Freebuff model ids, corrected 2026-09-25 from the published price list
  * (`GET /api/v1/freebuff/session` → freebucks.prices), which is what the TUI

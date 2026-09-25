@@ -54,6 +54,33 @@ function binaryOnPath(env, bin) {
 }
 
 /**
+ * Where this host keeps Freebuff credentials. FREEBUFF_CREDS wins, then the
+ * paths the freebuff CLI actually uses, resolved against THIS home directory.
+ * Returns whether a token is present and which paths were tried, so the fix text
+ * can name them instead of guessing.
+ */
+export function findFreebuffCredentials({ env = process.env, home = os.homedir() } = {}) {
+  const searched = [];
+  const candidates = [
+    env.FREEBUFF_CREDS,
+    path.join(home, '.config', 'manicode', 'credentials.json'),
+    path.join(home, '.manicode', 'credentials.json'),
+    path.join(home, '.config', 'freebuff', 'credentials.json'),
+  ].filter(Boolean);
+  for (const file of candidates) {
+    searched.push(file);
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const inner = parsed?.default || parsed || {};
+      if (inner.authToken || inner.token || inner.accessToken) return { ok: true, path: file, searched };
+    } catch {
+      // absent or unreadable: keep looking
+    }
+  }
+  return { ok: false, path: null, searched };
+}
+
+/**
  * @returns {Object} provider -> { ready: true|false|'unknown', needs, fix, command }
  */
 export function providerReadiness({ env = process.env, home = os.homedir(), location = '', clineReady = null } = {}) {
@@ -126,15 +153,31 @@ export function providerReadiness({ env = process.env, home = os.homedir(), loca
     };
   }
 
-  // Freebuff is terminal-only by design, so it is never a turn lane. It is
-  // still listed so the gap is visible rather than mysterious.
-  out.freebuff = {
-    ready: false,
-    needs: 'the Freebuff app signed in (terminal only, never a turn lane)',
-    fix: 'sign in on the Freebuff side, then /unlock to refresh',
-    command: '/unlock',
-    terminalOnly: true,
-  };
+  // Freebuff is terminal-only by design, so it is never a turn lane — but
+  // "terminal only" is not "not set up". This host has the freebuff CLI and a
+  // signed-in credentials file, and the old hardcoded "not signed in" was
+  // simply wrong. It is checked the same way the router checks it, except the
+  // path is discovered per host: the router's copy was pinned to another
+  // machine's home directory and could never be true here.
+  const fbCreds = findFreebuffCredentials({ env, home });
+  out.freebuff = fbCreds.ok
+    ? {
+        ready: true,
+        needs: null,
+        fix: null,
+        command: '/unlock',
+        terminalOnly: true,
+        note: 'signed in · terminal only, never a turn lane',
+      }
+    : {
+        ready: false,
+        needs: 'the Freebuff CLI signed in (terminal only, never a turn lane)',
+        fix: fbCreds.searched.length
+          ? `run \`freebuff login\` on this host (looked in ${fbCreds.searched.join(', ')})`
+          : 'install the freebuff CLI, then run `freebuff login` on this host',
+        command: '/unlock',
+        terminalOnly: true,
+      };
 
   return out;
 }

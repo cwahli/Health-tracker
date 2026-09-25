@@ -33,11 +33,28 @@ try {
   check('cloudflare names the exact variable', r.cloudflare.needs === 'CLOUDFLARE_WORKERS_AI_TOKEN');
   check('the fix is copy-pasteable and says where', /common\.env/.test(String(r.cloudflare.fix)) && /systemctl restart/.test(String(r.cloudflare.fix)));
   check('freebuff points at its own command', r.freebuff.command === '/unlock');
-  check('freebuff is never sold as a turn lane', /terminal only/.test(r.freebuff.needs));
+  check('freebuff is never sold as a turn lane', r.freebuff.terminalOnly === true);
+  // Freebuff is checked, not assumed. This host has the CLI and a signed-in
+  // credentials file, and the old hardcoded "not signed in" was wrong; the
+  // router's own copy was pinned to another machine's home directory.
+  const { findFreebuffCredentials } = await import('./lib/setup-gaps.mjs');
+  const signedIn = findFreebuffCredentials({ env: {}, home: '/home/ubuntu' });
+  check('a signed-in freebuff file is detected', signedIn.ok === true);
+  check('and the path it read is this host\'s', signedIn.path === '/home/ubuntu/.config/manicode/credentials.json');
+  check('the searched paths are reported for the fix text', signedIn.searched.length >= 1 && signedIn.searched.every((f) => typeof f === 'string'));
+  check('an unsigned-in host reads as not ready', findFreebuffCredentials({ env: {}, home: '/tmp/definitely-not-here' }).ok === false);
+  const realHost = providerReadiness({ env: { PATH: process.env.PATH, GEMINI_API_KEY: 'k' }, home: '/home/ubuntu', clineReady: () => true });
+  check('so this host is NOT reported as missing freebuff', realHost.freebuff.ready === true);
+  check('and it stays terminal-only', realHost.freebuff.terminalOnly === true);
+  check('the ready note says signed in', /signed in/.test(String(realHost.freebuff.note || '')));
+  const routerSrc = fs.readFileSync(path.join(HERE, '..', 'tools', 'telegram-provider-router', 'src', 'index.js'), 'utf8');
+  check('the router no longer pins freebuff creds to another home', !/\/home\/box\/\.config\/manicode/.test(routerSrc));
+  check('the router resolves the path per host', /FREEBUFF_CREDS[\s\S]{0,120}homedir\(\)/.test(routerSrc));
 
   // 2. SetupGaps lists exactly the not-ready ones.
   const gaps = setupGaps(r).map((g) => g.provider).sort();
   check('gaps exclude the ready providers', !gaps.includes('gemini') && !gaps.includes('opencode') && !gaps.includes('cline'));
+  check('a signed-in terminal provider is not a gap either', !gaps.includes('freebuff') || r.freebuff.ready !== true);
   check('gaps include the missing credentials', gaps.includes('tokenharbor') && gaps.includes('cloudflare'));
 
   // 3. The lane verdict follows the provider.
