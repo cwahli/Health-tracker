@@ -1,0 +1,212 @@
+#!/usr/bin/env node
+/**
+ * assert-swap-drill.mjs — 10 sequential location swaps, for real.
+ *
+ * A real worker relay (child process), two fake workers (drill-a/drill-b),
+ * and the REAL turn path from scripts/bot-host.mjs (`runOnWorker` with
+ * preflight + canary + pack), decided exactly the way the live turn decides
+ * (validate → confirm / rollback). One real opencode conversation, created
+ * once, must survive all 10 swaps; one injected wrong-ledger turn must roll
+ * the route back without touching the conversation row.
+ *
+ * Fully isolated: a fresh HOME, its own relay port, its own tmux-free
+ * sandbox. Zero model calls (fake workers answer), zero Telegram messages.
+ *
+ * One honest split: the canary decision block below mirrors the live turn
+ * path in bot-host.mjs turn-for-turn (same functions, same order) because
+ * that block needs a Telegram chat to run in place. When `settleCanary`
+ * lands in bot-host, this drill should call it instead of mirroring it.
+ *
+ * Exit 0 on all pass; exit 1 with FAIL lines otherwise.
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// ---- isolated HOME before any homedir-dependent module loads
+const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'swap-drill-'));
+process.env.HOME = HOME;
+
+const { runOnWorker } = await import(path.join(HERE, 'bot-host.mjs'));
+const { armRoute, confirmRoute, rollbackRoute, routeState, needsCanary, validateCanaryResult } =
+  await import(path.join(HERE, 'lib', 'worker-routing.mjs'));
+const { recordWorkerConnected } = await import(path.join(HERE, 'lib', 'worker-presence.mjs'));
+
+let pass = 0;
+let fail = 0;
+const failures = [];
+function check(name, ok, detail = '') {
+  if (ok) {
+    pass++;
+    console.log(`  PASS  ${name}${detail ? ` — ${detail}` : ''}`);
+  } else {
+    fail++;
+    failures.push(name + (detail ? ` — ${detail}` : ''));
+    console.log(`  FAIL  ${name}${detail ? ` — ${detail}` : ''}`);
+  }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+console.log('assert-swap-drill\n');
+console.log(`sandbox HOME: ${HOME}\n`);
+
+const HOSTS = ['drill-a', 'drill-b'];
+const SESSION_ID = 'ses_drillSwap01';
+const PORT = 8910 + Math.floor(Math.random() * 60);
+const RELAY = `http://127.0.0.1:${PORT}`;
+const WS = path.join(HOME, 'ws');
+fs.mkdirSync(WS, { recursive: true });
+
+const relay = spawn(process.execPath, [path.join(HERE, 'worker-relay.mjs'), `--port=${PORT}`], {
+  env: { ...process.env, HOME },
+  stdio: 'ignore',
+});
+function cleanup() {
+  try { relay.kill('SIGKILL'); } catch {}
+  try { fs.rmSync(HOME, { recursive: true, force: true }); } catch {}
+}
+process.on('exit', cleanup);
+process.on('SIGINT', () => { cleanup(); process.exit(2); });
+
+try {
+  // relay up?
+  let up = false;
+  for (let i = 0; i < 60 && !up; i++) {
+    try { up = (await fetch(`${RELAY}/health`)).ok; } catch { await sleep(200); }
+  }
+  check('the drill relay listens', up);
+  if (!up) throw new Error('relay did not start');
+
+  // one real conversation, created once in the sandbox HOME
+  const fixturePath = path.join(HOME, 'session-fixture.json');
+  fs.writeFileSync(fixturePath, `${JSON.stringify({
+    info: {
+      id: SESSION_ID, slug: 'swap-drill', projectID: 'global', directory: WS, path: WS,
+      title: 'conversation under test', agent: 'build',
+      model: { id: 'mock-free', providerID: 'opencode', variant: 'default' },
+      version: '1.18.32', summary: { additions: 0, deletions: 0, files: 0 },
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: Date.now(), updated: Date.now() },
+    },
+    messages: [],
+  }, null, 2)}\n`);
+  const imp = spawnSync('opencode', ['import', fixturePath], { encoding: 'utf8', env: { ...process.env, HOME } });
+  check('the drill conversation exists once', imp.status === 0, (imp.stdout + imp.stderr).replace(/\s+/g, ' ').slice(0, 120));
+
+  // workspace with one dirty file, so guard 9 has something to carry
+  execFileSync('git', ['init', '-q', WS]);
+  execFileSync('git', ['-C', WS, 'config', 'user.email', 'drill@localhost']);
+  execFileSync('git', ['-C', WS, 'config', 'user.name', 'drill']);
+  fs.writeFileSync(path.join(WS, 'midway.txt'), 'point 1 drafted\n');
+  execFileSync('git', ['-C', WS, 'add', '.']);
+  execFileSync('git', ['-C', WS, 'commit', '-qm', 'base']);
+  fs.writeFileSync(path.join(WS, 'midway.txt'), 'point 1 drafted — metric receipt still missing\n');
+
+  // presence the drill side can see (same HOME), refreshed as the drill runs
+  const beat = () => {
+    for (const h of HOSTS) recordWorkerConnected({ host: h, pid: process.pid, detail: 'swap drill', home: HOME });
+  };
+  beat();
+
+  // fake workers: claim jobs from the relay, answer like worker-agent would
+  const evilOnce = { n: -1 };
+  async function fakeWorker(host, turns) {
+    for (let n = 0; n < turns; n++) {
+      let job = null;
+      try {
+        const res = await fetch(`${RELAY}/jobs/next?host=${encodeURIComponent(host)}&wait=15000`);
+        if (res.status === 204) continue;
+        ({ job } = await res.json());
+      } catch { continue; }
+      if (!job) continue;
+      const evil = evilOnce.n === 0;
+      if (evil) evilOnce.n = -1;
+      let packApplied = 0;
+      if (job.packId) {
+        try {
+          const pack = await (await fetch(`${RELAY}/packs/${encodeURIComponent(job.packId)}`)).json();
+          packApplied = Array.isArray(pack?.files) ? pack.files.length : 0;
+        } catch { /* pack unreachable: answer anyway, canary decides */ }
+      }
+      await fetch(`${RELAY}/jobs/result`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jobId: job.id,
+          text: `swap turn answered on ${host}`,
+          code: 0, model: job.model, error: '',
+          ledger: evil ? `${HOME}/.hermes/ledger/worker-evil` : `${HOME}/.hermes/ledger/worker-${host}`,
+          sessionID: job.sessionId,
+          resumedFrom: 'local',
+          workspace: WS,
+          packApplied,
+        }),
+      });
+    }
+  }
+  const workers = [fakeWorker('drill-a', 12), fakeWorker('drill-b', 12)];
+
+  // the conversation row, mirroring the live turn: only a passed canary moves it
+  let sessionRow = SESSION_ID;
+  let continuity = 0;
+  const order = Array.from({ length: 11 }, (_, i) => HOSTS[i % HOSTS.length]);
+  const FAIL_AT = 6;
+  let rolledBack = 0;
+  let rearmed = 0;
+
+  for (let i = 1; i < order.length; i++) {
+    const host = order[i];
+    const other = order[i - 1];
+    if (i % 3 === 0) beat();
+    const wantCanary = needsCanary(host, { home: HOME });
+    if (wantCanary) armRoute(host, { previous: other, home: HOME });
+    if (i === FAIL_AT) evilOnce.n = 0;
+    const t0 = Date.now();
+    const handed = await runOnWorker({
+      host, prompt: `swap ${i} of 10 via ${host}`, model: 'opencode/mock-free',
+      project: 'health-tracker', role: '', workspace: 'health-tracker',
+      sessionId: sessionRow, envMode: 'project', relay: RELAY,
+      canary: wantCanary, preflightFull: wantCanary, packRoot: WS,
+      timeoutMs: 30000, attempts: 2,
+    });
+    const ms = Date.now() - t0;
+    const before = sessionRow;
+    // the live turn's canary decision, same functions, same order
+    const verdict = validateCanaryResult({ host, requestedSessionId: before, result: handed || {} });
+    if (!verdict.ok) {
+      const row = rollbackRoute(host, { jobId: handed?.jobId || '', reason: verdict.reasons.join('; '), home: HOME });
+      rolledBack++;
+      check(`swap ${i}: wrong-ledger turn rolls back, row untouched`,
+        routeState(host, { home: HOME }) === 'failed' && sessionRow === before && sessionRow === SESSION_ID,
+        `${verdict.reasons.join('; ')} (${ms}ms)`);
+      check(`swap ${i}: rollback names the job`, String(row?.canary?.jobId || '') === String(handed?.jobId || '') && row?.canary?.jobId !== '');
+      // re-arm like a fresh /location would: the next swap must succeed
+      armRoute(host, { previous: other, home: HOME });
+      rearmed++;
+      continue;
+    }
+    confirmRoute(host, { jobId: handed?.jobId || '', home: HOME });
+    if (handed?.sessionID) sessionRow = handed.sessionID;
+    const ok = handed?.code === 0 && handed?.text && sessionRow === SESSION_ID
+      && routeState(host, { home: HOME }) === 'active';
+    if (ok) continuity++;
+    check(`swap ${i}: ${other} -> ${host} keeps the conversation`,
+      Boolean(ok), `${String(handed?.text || handed?.error || '').slice(0, 80)} (${ms}ms)`);
+  }
+  await Promise.all(workers);
+
+  check('all 9 honest swaps kept the same conversation', continuity === 9, `${continuity}/9`);
+  check('exactly one rollback happened, then the route re-armed', rolledBack === 1 && rearmed === 1);
+  check('the conversation row never forked', sessionRow === SESSION_ID, sessionRow);
+} finally {
+  cleanup();
+}
+
+console.log(`\n${pass} pass, ${fail} fail`);
+if (fail > 0) {
+  console.error('\nFailures:\n' + failures.map((f) => `  - ${f}`).join('\n'));
+  process.exit(1);
+}
