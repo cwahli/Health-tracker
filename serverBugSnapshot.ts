@@ -1438,7 +1438,6 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
           };
         })
         .filter((row) => {
-          if (row.archived_at) return false;
           if (wantState && row.state !== wantState) return false;
           if (wantAssignee && row.assignee !== wantAssignee) return false;
           if (wantSurface && row.surface !== wantSurface) return false;
@@ -2244,8 +2243,8 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         bug: item.bug,
         class: item.class,
         fingerprint: item.fingerprint,
-        surface: item.surface,
-        source: item.source,
+         surface: item.surface,
+         source: item.source,
          assignee: item.assignee,
          archived_at: item.archived_at || null,
          archive_reason: item.archive_reason || null,
@@ -2261,8 +2260,11 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         parked: item.parked,
         done: item.done,
         burns: item.burns,
-        commits: item.commits,
-        occurrences: item.occurrences,
+         commits: item.commits,
+         occurrences: item.occurrences,
+         revision: Number(item.revision || 0),
+         curation_events: item.curation_events || [],
+         handoff: item.handoff || null,
         blocked_by: item.blocked_by || [],
         duplicate_of: item.duplicate_of || null,
         blocked_reason: item.blocked_reason || null,

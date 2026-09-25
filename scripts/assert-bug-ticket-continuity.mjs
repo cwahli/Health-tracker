@@ -70,6 +70,7 @@ check('POST plan endpoint', /app\.post\('\/api\/bugs\/:tagId\/plan'/.test(server
 check('POST verify endpoint', /app\.post\('\/api\/bugs\/:tagId\/verify'/.test(serverSrc));
 check('GET canonical list endpoint', /app\.get\('\/api\/bugs\/list'/.test(serverSrc));
 check('POST steward curation endpoint', /app\.post\('\/api\/bugs\/:tagId\/curation'/.test(serverSrc));
+check('packet exposes steward revision and handoff', /revision: Number\(item\.revision/.test(serverSrc) && /handoff: item\.handoff/.test(serverSrc));
 check('NO agent-settable state route', !/app\.(post|patch|put)\(\s*['"`][^'"`]*\/state['"`]/.test(serverSrc));
 check('bugWriteGuard defined (A-f5)', /function bugWriteGuard\b/.test(serverSrc));
 check('bugWriteGuard on attempts', /app\.post\('\/api\/bugs\/:tagId\/attempts',\s*bugWriteGuard/.test(serverSrc));

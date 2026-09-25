@@ -46,6 +46,28 @@ function safeObserverNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+const OBSERVER_SECRET_KEY = /(?:^|[_-])(?:api[_-]?key|access[_-]?key|token|secret|password|passwd|authorization|cookie|credential|private[_-]?key)$/i;
+
+function redactObserverValue(value, key = '') {
+  if (key && OBSERVER_SECRET_KEY.test(key)) return '[redacted]';
+  if (Array.isArray(value)) return value.map((item) => redactObserverValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, redactObserverValue(childValue, childKey)]));
+  }
+  if (typeof value === 'string') return scrubSecrets(value);
+  return value;
+}
+
+function safeObserverContent(value, max = 16000) {
+  let serialized;
+  try {
+    serialized = typeof value === 'string' ? value : JSON.stringify(redactObserverValue(value));
+  } catch {
+    serialized = String(value ?? '');
+  }
+  return scrubSecrets(safeObserverString(serialized, max));
+}
+
 function observerContext(context = {}) {
   const record = {};
   if (context.model != null) record.model = safeObserverString(context.model, 160);
@@ -60,15 +82,19 @@ export function formatObserverRecord(type, payload = {}, context = {}, at = new 
   Object.assign(record, observerContext(context));
   if (type === 'event') {
     const kind = String(payload?.kind || '');
-    if (kind === 'reasoning') return { ...record, kind: 'thinking' };
+    if (kind === 'reasoning') return { ...record, kind: 'thinking', content: safeObserverContent(payload.text) };
+    if (kind === 'text') return { ...record, kind: 'text', content: safeObserverContent(payload.text) };
     if (kind === 'tool') {
       return {
         ...record,
         kind: 'tool',
         tool: safeObserverString(payload.tool, 100),
         status: safeObserverString(payload.status, 60),
+        content: safeObserverContent({ input: payload.input, output: payload.output }),
       };
     }
+    if (kind === 'run_result') return { ...record, kind: 'text', content: safeObserverContent(payload.text) };
+    if (kind === 'error') return { ...record, kind: 'error', content: safeObserverContent(payload.message) };
     if (kind === 'step_finish') {
       const tokens = payload?.tokens;
       const total = typeof tokens === 'object' ? tokens?.total : tokens;
@@ -87,6 +113,8 @@ export function formatObserverRecord(type, payload = {}, context = {}, at = new 
       const total = typeof tokens === 'object' ? tokens?.total : tokens;
       record.tokens = safeObserverNumber(total);
       record.cost = safeObserverNumber(payload?.usage?.cost);
+      if (type === 'run_complete') record.content = safeObserverContent(payload?.finalText);
+      if (type === 'failed') record.content = safeObserverContent(payload?.lastError);
     }
   }
   return record;
@@ -413,9 +441,9 @@ export function sessionStatus(id, { tmux = defaultTmuxRunner } = {}, storePath =
 
 /** Patterns that must never reach Telegram. */
 const SECRET_PATTERNS = [
-  /[A-Za-z_]*TOKEN[A-Za-z_]*\s*[:=]\s*\S+/g,
-  /[A-Za-z_]*KEY[A-Za-z_]*\s*[:=]\s*\S+/g,
-  /[A-Za-z_]*SECRET[A-Za-z_]*\s*[:=]\s*\S+/g,
+  /[A-Za-z_]*TOKEN[A-Za-z_]*\s*[:=]\s*\S+/gi,
+  /[A-Za-z_]*KEY[A-Za-z_]*\s*[:=]\s*\S+/gi,
+  /[A-Za-z_]*SECRET[A-Za-z_]*\s*[:=]\s*\S+/gi,
   /\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g, // telegram bot token shape
 ];
 
