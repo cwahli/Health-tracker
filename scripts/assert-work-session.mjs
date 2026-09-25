@@ -52,6 +52,7 @@ const {
   resolveSession,
   getSession,
   setTx,
+  setWorkView,
   handoffSession,
   abortSession,
   ensureTmuxWorkView,
@@ -64,9 +65,13 @@ const {
   statusForTelegram,
 } = await import(new URL(`file://${libPath.replace(/\\/g, '/')}`).href);
 
-for (const fn of ['resolveSession', 'setTx', 'handoffSession', 'abortSession', 'ensureTmuxWorkView', 'debugProbe', 'sessionStatus', 'statusForTelegram']) {
-  check(`exports ${fn}`, typeof ({ resolveSession, setTx, handoffSession, abortSession, ensureTmuxWorkView, debugProbe, sessionStatus, statusForTelegram })[fn] === 'function');
+for (const fn of ['resolveSession', 'setTx', 'setWorkView', 'handoffSession', 'abortSession', 'ensureTmuxWorkView', 'debugProbe', 'sessionStatus', 'statusForTelegram']) {
+  check(`exports ${fn}`, typeof ({ resolveSession, setTx, setWorkView, handoffSession, abortSession, ensureTmuxWorkView, debugProbe, sessionStatus, statusForTelegram })[fn] === 'function');
 }
+const tuiLibPath = path.join(ROOT, 'scripts/lib/opencode-tui.mjs');
+const { tuiAttachCommand } = await import(new URL(`file://${tuiLibPath.replace(/\\/g, '/')}`).href);
+check('OpenCode TUI helper exists', fs.existsSync(tuiLibPath));
+check('OpenCode TUI attach targets the server session', tuiAttachCommand({ serverUrl: 'http://127.0.0.1:4096', workspace: '/ws', sessionId: 'ses_test' }).includes("--session 'ses_test'"));
 
 // Isolated store for the gate (never the live ~/.hermes file).
 const tmpStore = path.join(os.tmpdir(), `ws_gate_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
@@ -156,6 +161,11 @@ check('tmux lifecycle contains no destructive replacement command',
 const termProbe = debugProbe('opencode', { session: s1, tmux: lifecycleTmux });
 check('terminal lane reports verified observer liveness',
   termProbe.surface === 'terminal' && termProbe.attach === true && termProbe.observerLive === true && termProbe.tmuxSession === 'work-vps');
+const tuiCommand = "'opencode' attach 'http://127.0.0.1:4096' --dir '/home/ubuntu/src/Health-tracker' --session 'ses_test'";
+const tuiSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-tui', viewMode: 'tui', viewCommand: tuiCommand };
+const tuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux });
+check('stored interactive TUI command owns the exact workstream pane',
+  tuiView.ok === true && tuiView.observerPane && lifecycleCalls.some((args) => args[0] === 'new-window' && args.at(-1) === tuiCommand));
 const migrationSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-migrate' };
 const migrationWindow = tmuxWindowFor(migrationSession.id);
 lifecycleSessions.get('work-vps').add(migrationWindow);

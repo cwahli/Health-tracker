@@ -318,6 +318,28 @@ describe('agent-opencode event mapping', () => {
       'opencode-go/deepseek-v4.1-flash',
       '--session',
       'ses_1',
+       'fix it',
+     ]);
+   });
+
+   it('builds attached TUI-session args', () => {
+    const args = buildOpencodeArgs({
+      prompt: 'fix it',
+      attachUrl: 'http://127.0.0.1:4096',
+      sessionId: 'ses_tui',
+      thinking: false,
+    });
+    expect(args).toEqual([
+      'run',
+      '--format',
+      'json',
+      '--print-logs',
+      '--log-level',
+      'ERROR',
+      '--attach',
+      'http://127.0.0.1:4096',
+      '--session',
+      'ses_tui',
       'fix it',
     ]);
   });
@@ -1873,6 +1895,12 @@ describe('BOT-19 /tx wiring', () => {
   });
 
   const fakeCfg = (kind = 'opencode') => ({ agent: { workspace: '/ws', kind } });
+  const fakeTui = async () => ({
+    serverUrl: 'http://127.0.0.1:4096',
+    serverPid: 123,
+    opencodeSessionId: 'ses_test',
+    command: "'opencode' attach 'http://127.0.0.1:4096' --dir '/ws' --session 'ses_test'",
+  });
   const fakeApi = (sent) => ({ sendMessage: async (chatId, text) => { sent.push(text); return {}; } });
   const fakeTxTmux = (initial = {}) => {
     const sessions = new Map(Object.entries(initial).map(([name, windows]) => [name, new Set(windows)]));
@@ -1926,7 +1954,7 @@ describe('BOT-19 /tx wiring', () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
     const tmux = fakeTxTmux();
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(sent.length).toBe(1);
     expect(sent[0]).toContain('ON');
     expect(sent[0]).toMatch(/tmux attach -t work-testbox:ws-/);
@@ -1940,7 +1968,7 @@ describe('BOT-19 /tx wiring', () => {
     const sent = [];
     const legacyWindow = tmuxWindowFor(sessionKey({ location: 'testbox', chat: '9', workspace: '/ws' }));
     const tmux = fakeTxTmux({ 'work-testbox': [legacyWindow] });
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(tmux.sessions.get('work-testbox')).toEqual(new Set([legacyWindow]));
     expect(tmux.calls.map((args) => args[0])).toContain('split-window');
     expect(tmux.calls.flat().some((arg) => /kill-window|kill-session|respawn-pane|send-keys/.test(String(arg)))).toBe(false);
@@ -1950,7 +1978,7 @@ describe('BOT-19 /tx wiring', () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
     const tmux = fakeTxTmux();
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'off', tmux: tmux.run });
     expect(sent[1]).toContain('OFF');
     expect(tmux.sessions.get('work-testbox').size).toBe(1);
@@ -1969,7 +1997,7 @@ describe('BOT-19 /tx wiring', () => {
     const { handleTxCommand } = await import('../scripts/bot-host.mjs');
     const sent = [];
     const tmux = fakeTxTmux();
-    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg('gemini'), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg('gemini'), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(sent[0]).toContain('ON');
     expect(sent[0]).toContain('Live attach: unavailable');
     expect(sent[0]).not.toContain('tmux attach');
