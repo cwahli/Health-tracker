@@ -151,6 +151,25 @@ The walk is the one the Grok router already has: `markDepleted`, `isDepleted`, a
 5. Repeat 2–4 until the selectable list on that host is empty. The following reply names the next connected host, or says no location has quota.
 6. Paste both bots' replies and both ledger copies. A pass on the router alone does not close the card. A hand-written stamp does not close the card.
 
+The location change inside step 5 must also cover a host that has no allowance left to write the handoff. Build the pack from the files on disk with no model call: project, role, `index.md`, and the turn log. If another connected lane still has allowance, it may write the short summary, and the reply says which lane wrote it. If none do, the reply says the summary was not written and the disk pack was sent anyway. The lane that just failed is not called. Paste that reply.
+
+### Card 6b — Do not retry a failure that is already stamped
+
+**Change.** Before choosing a lane, read the stamps. Allowance used and rate limit stay skipped until `depletedUntil`. A promotion that ended is status `ended` and is never offered again, on the router and on bot-host. An API connection failure gets one retry, then a `connection-failed` cooldown, and the next lane is used. The second copy of the same signature appends one dead-end line, which the next build or investigate turn reads. The model does not rewrite its instructions.
+
+**Live proof.** On the ledger copy, in order, on `@VM_19485_bot` and on the Grok router:
+
+1. A quota-shaped error. The next `/allowance` shows that lane depleted. The next message does not select it.
+2. Mark one lane `ended` the way a finished promotion is marked. It is absent from the selectable list and from the next run.
+3. An API-connection failure. The reply shows one retry, then the cooldown, then a different lane. A second message does not pick the failed lane while the cooldown holds.
+4. Cause the same signature twice. The dead-end line exists. A later build or investigate reply includes that line. The instruction files are unchanged.
+
+### Card 6c — Location and project keep the tool TUI
+
+**Change.** `/tx on` stays on across `/location` and `/project`. Neither command runs `kill-session`. The phone and the VM do not share one tmux server. The live view is `work-<host>` on the host that is running the turn, and this chat's window is reused. `tmux capture-pane` shows the TUI of the tool that is running.
+
+**Live proof.** `/tx on`, then one turn. `tmux capture-pane -t work-<host>` shows the OpenCode TUI (or the Cline screen if that surface was selected), not a log tail. Then `/project external 2` and one turn. The same session still exists, the window was not replaced, and capture-pane shows that tool's TUI on the external workspace. Then `/location` to a connected host and one turn. Capture-pane on that host's `work-<host>` shows the TUI of the tool that ran there. The previous host's session was not killed. Paste the session name, the host, and the capture for each step. A blank pane or the previous tool left on screen is a fail.
+
 ### Card 7 — Project 3 is empty of project 2
 
 **Change.** `external-2` remains the rating case. `/project external 3` creates a blank charter, empty evidence, and the role files. It does not copy project 2's output or case text.
@@ -170,7 +189,7 @@ The walk is the one the Grok router already has: `markDepleted`, `isDepleted`, a
 
 ### Card 9 — Live matrix, then stop
 
-Run cards 1 through 8's live proofs again, in order, on one restarted `bot-host@vm`, and paste one evidence block per card. The author of any of those patches does not run this pass.
+Run cards 1 through 8, including 6b and 6c, again in order on one restarted `bot-host@vm`, and paste one evidence block per card. The author of any of those patches does not run this pass. Card 6's router half is part of this pass. A missing 6b or 6c block means the feature is not ready.
 
 The feature is ready for the user only when all nine evidence blocks are in the ticket and every negative check passed. Until then the user-facing status is: not ready to test.
 

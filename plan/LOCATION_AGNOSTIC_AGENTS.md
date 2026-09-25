@@ -61,10 +61,23 @@ When a real provider error is a quota or rate limit:
 1. The same process that saw the error writes `depletedUntil` before the reply is sent. Nobody types the stamp by hand.
 2. The reply names the failed lane and the next lane `nextFailoverRoutes` returns on that same worker. Freebuff is shown and is not chosen.
 3. The following message uses that next lane. Repeat down the list.
-4. When that worker's selectable list is empty, pack the project, the role, and the short log, and continue on the next connected worker whose own list still has a lane. The reply names that worker.
-5. When every connected worker is empty, say so and stop.
+4. When that worker's selectable list is empty, continue on the next connected worker whose own list still has a lane. The reply names that worker.
+5. When every connected worker is empty, say so and stop. Do not call the lane that just failed.
 
-The pack is the continuity. An OpenCode session on the VM does not reopen on the phone.
+The move in step 4 must not depend on the depleted lane having allowance left to write a summary. Build the pack with no model call from the files already on disk: project, role, `index.md`, and the turn log. If that log is long and some other connected lane still has allowance, that lane may write the short pack. If no lane has allowance, send the disk pack anyway and say the summary was not written. A depleted model is never asked to summarize itself.
+
+These are separate stamps, and the chooser reads them before every attempt so the same failure is not tried again:
+
+- Allowance used, or a rate limit: `depletedUntil`. Skip until that time.
+- Promotion ended: status `ended`. Never offer that lane again. The router already drops `ended` lanes. Bot-host must do the same.
+- API connection failed: one retry, then a cooldown stamp `connection-failed`. Skip until the cooldown ends, and take the next lane.
+- A help page or a status table is still not a stamp.
+
+The second time the same signature is recorded, append one dead-end line. The next build or investigate turn reads that line. The model does not rewrite its own instructions.
+
+## Tmux
+
+`/tx on` stays on across `/location` and `/project`. Neither command kills the session. One host has one tmux server, so the phone and the VM do not share a session name. The live view is `work-<host>` from `tmuxSessionFor` on the host that is running the turn, and the window for this chat is reused rather than replaced by a new one. `tmux capture-pane` on that window shows the TUI of the tool that is actually running (the OpenCode attach screen, or the Cline screen when that surface was selected). A log tail, a blank pane, or the previous tool left on screen is a failure. The reply names the session and the host so the check looks at the right machine.
 
 ## External project boundary
 
