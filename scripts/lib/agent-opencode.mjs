@@ -85,13 +85,18 @@ export function mapOpencodeEvent(raw) {
     case 'text':
       return { kind: 'text', text: part.text || '' };
     case 'tool':
+    case 'tool_use':
+    case 'tool_result': {
+      const toolPart = part.tool || part.name || raw.tool || raw.name || 'tool';
+      const state = part.state || raw.state || {};
       return {
         kind: 'tool',
-        tool: part.tool || 'tool',
-        status: part.state?.status || 'unknown',
-        input: part.state?.input,
-        output: part.state?.output,
+        tool: toolPart,
+        status: state.status || part.status || raw.status || 'unknown',
+        input: state.input ?? part.input ?? raw.input,
+        output: state.output ?? part.output ?? raw.output,
       };
+    }
     case 'step_start':
       return { kind: 'step_start' };
     case 'step_finish':
