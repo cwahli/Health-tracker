@@ -1004,6 +1004,18 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
 /** Per-bot ledger dir for a bot-host bot id (created on demand). */
 export function resolveBotLedgerDir(botId) {
   const home = process.env.HOME || process.env.USERPROFILE || osHomedirFallback();
+  if (process.env.FREE_LANES_SHARED_DIR) {
+    const dir = process.env.FREE_LANES_SHARED_DIR;
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+  // Centralized shared ledger on host: all bots share the same free-lane state & quota.
+  // Override with FREE_LANES_PER_BOT=1 if explicit per-bot isolation is requested.
+  if (!process.env.FREE_LANES_PER_BOT) {
+    const dir = join(home, ".local", "state", "shared-free-lanes");
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
   const dir = join(home, ".local", "state", "bot-host", String(botId || "default"), "free-lanes");
   mkdirSync(dir, { recursive: true });
   return dir;
