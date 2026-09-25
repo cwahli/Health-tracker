@@ -1110,6 +1110,17 @@ export function candidateRouterStateDirs(explicit) {
 }
 
 /**
+ * Identity of a model for matching across surfaces: the vendor prefix is not part
+ * of it, everything else is. `opencode/space-bunny-free` and
+ * `opencode-go/space-bunny-free` are one model; `mimo-v2.5-free` and
+ * `mimo-v2.5:free` are two. Normalising punctuation away as well would merge those
+ * two and delete a real lane, so only the prefix goes.
+ */
+function modelKey(s) {
+  return String(s || "").trim().toLowerCase().replace(/^[^/]*\//, "").replace(/\s+/g, " ");
+}
+
+/**
  * Add a ledger row for every catalogued model that has none.
  *
  * The two surfaces drew their rows from different places: /freemodel from the
@@ -1141,12 +1152,6 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
   // under its own path. Matching on provider+model therefore folded in a second
   // row for it and the table showed the same model twice under two plan codes, so
   // the model id is compared with the vendor prefix and the surface stripped.
-  // Only the vendor prefix is stripped, and the model id keeps its own characters.
-  // Normalising punctuation away as well merged two genuinely different lanes:
-  // Token Harbor's `mimo-v2.5:free` and OpenCode's `mimo-v2.5-free` reduced to the
-  // same key, so the OpenCode lane was dropped from the table. `opencode/x` and
-  // `opencode-go/x` are the same model and must still collapse.
-  const modelKey = (s) => String(s || "").trim().toLowerCase().replace(/^[^/]*\//, "").replace(/\s+/g, " ");
   const known = new Set(lanes.map((l) => modelKey(l.model)).filter(Boolean));
   for (const entry of entries || []) {
     const ref = typeof entry === "string" ? entry : entry?.ref || "";
@@ -1206,12 +1211,6 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
  */
 export function entriesFromLanes(table, entries = []) {
   if (!table || !Array.isArray(table.lanes)) return [];
-  // Only the vendor prefix is stripped, and the model id keeps its own characters.
-  // Normalising punctuation away as well merged two genuinely different lanes:
-  // Token Harbor's `mimo-v2.5:free` and OpenCode's `mimo-v2.5-free` reduced to the
-  // same key, so the OpenCode lane was dropped from the table. `opencode/x` and
-  // `opencode-go/x` are the same model and must still collapse.
-  const modelKey = (s) => String(s || "").trim().toLowerCase().replace(/^[^/]*\//, "").replace(/\s+/g, " ");
   const known = new Set((entries || []).map((e) => modelKey(typeof e === "string" ? e : e?.ref || "")).filter(Boolean));
   const out = [];
   for (const lane of table.lanes) {
@@ -1351,9 +1350,20 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
     const lane = routeCandidates(ref)
       .map((route) => table?.lanes?.find((l) => laneMatchesRoute(l, route.provider, route.model)))
       .find(Boolean) || null;
+    // The same model on two vendor prefixes is one ledger row, so a bullet that
+    // names the second prefix must resolve to that row instead of reporting "no
+    // ledger row" for a model whose allowance is right there in the table. Live on
+    // 2026-09-25: `opencode-go:space-bunny-free` was listed with no ledger row
+    // while `opencode:space bunny free` carried it.
+    const twin = lane || (table?.lanes || []).find((l) => {
+      const k = modelKey(routeCandidates(ref)[0]?.model || "");
+      return k && modelKey(l.model) === k;
+    }) || null;
+    const refRoute = routeCandidates(ref)[0];
     const verdict = byRef.get(ref)
-      || projection.find((r) => r.provider === routeCandidates(ref)[0]?.provider
-        && String(r.model).replace(/^[^/]+\//, '') === String(routeCandidates(ref)[0]?.model || '').replace(/^[^/]+\//, ''));
+      || (twin ? projection.find((r) => r.model === twin.model) : null)
+      || projection.find((r) => r.provider === refRoute?.provider
+        && String(r.model).replace(/^[^/]+\//, '') === String(refRoute?.model || '').replace(/^[^/]+\//, ''));
     const depleted = verdict ? verdict.depleted : isFreemodelEntryDepleted(e, table, session, { now });
     let resetIn = "-";
     try {
@@ -1365,7 +1375,7 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
       ...e,
       depleted,
       resetIn,
-      laneLabel: lane?.label || null,
+      laneLabel: (twin || lane)?.label || null,
       // the same three verdicts /allowance renders, on the same rows
       ended: Boolean(verdict?.ended),
       terminalOnly: Boolean(verdict?.terminalOnly),

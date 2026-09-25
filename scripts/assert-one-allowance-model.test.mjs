@@ -94,6 +94,16 @@ try {
   check('a folded gemini row is selectable', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.selectable === true);
   check('a folded gemini row is planned as GM', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.plan === 'GM');
   check('a vendor-prefixed opencode lane is planned as OC', foldedRows.find((r) => /space-bunny-free$/.test(r.model))?.plan === 'OC');
+  // A bullet naming a second vendor prefix for a model the table already carries
+  // must resolve to that row, not claim the model has no ledger row.
+  const twinTable = { version: 3, lanes: [
+    { pref: 1, provider: 'opencode', model: 'opencode/space-bunny-free', status: 'depleted', nextResetAt: '2030-01-01T00:00:00Z', tg: true, label: 'Space Bunny' },
+  ] };
+  const twinAnn = annotateFreemodelEntries([{ ref: 'opencode-go/space-bunny-free', label: 'opencode-go:space-bunny-free (free)' }], twinTable, {});
+  check('a vendor-prefix twin resolves to the existing ledger row', twinAnn[0].inLedger === true);
+  check('and inherits its depletion rather than claiming availability', twinAnn[0].depleted === true);
+  check('so no row is reported as having no ledger row', twinAnn.filter((a) => !a.inLedger).length === 0);
+
   // The same base name reached through two different providers is two lanes, not
   // one. Token Harbor's `mimo-v2.5:free` and OpenCode's `mimo-v2.5-free` differ by
   // punctuation, and a key that normalised punctuation away dropped a real lane.
