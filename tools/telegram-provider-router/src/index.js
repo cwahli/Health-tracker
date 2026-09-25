@@ -102,6 +102,7 @@ const PROVIDERS = {
       "opencode/muse-spark-1.3-contributor-free",
       "opencode/muse-spark-1.2-contributor-free",
       "opencode/mimo-v2.6-flash-free",
+      "opencode/space-bunny-free",
       "opencode/big-pickle",
       "cloudflare/@cf/qwen/qwen3.8-27b",
       "cloudflare/@cf/zai-org/glm-4.7-flash",
@@ -127,9 +128,13 @@ const PROVIDERS = {
   },
   freebuff: {
     label: "Freebuff",
+    // Freebuff picker ids (bakeoff 2026-09-24 + live ~/.config/manicode):
+    // GLM 5.3 Flash and MiMo 2.6 Flash bill 0 Freebucks/hr while running;
+    // DeepSeek V4.1 Flash is 5/hr. Order below = /freemodel order (0/hr first).
     freeModels: [
-      "deepseek/deepseek-v4-flash",
-      "xiaomi/mimo-v2-flash",
+      "z-ai/glm-5.3-flash",
+      "xiaomi/mimo-v2.6-flash",
+      "deepseek/deepseek-v4.1-flash",
     ],
   },
   commandcode: {
@@ -170,12 +175,13 @@ function freeFamilyKey(modelId) {
   s = s.replace(/^tokenharbor\//, "").replace(/^freebuff\//, "").replace(/^cloudflare\//, "");
   s = s.replace(/:free$/, "").replace(/-free$/, "");
   s = s.replace(/-contributor(?:-free)?$/, "");
-  s = s.replace(/^deepseek\//, "").replace(/^xiaomi\//, "").replace(/^glm-/, "glm-");
+  s = s.replace(/^deepseek\//, "").replace(/^xiaomi\//, "").replace(/^z-ai\//, "").replace(/^glm-/, "glm-");
   // Collapse common aliases
   s = s.replace(/deepseek-v4\.1-flash.*/, "deepseek-v4.1-flash");
   s = s.replace(/deepseek-v4-flash.*/, "deepseek-v4-flash");
   s = s.replace(/muse-spark-1\.3.*/, "muse-spark-1.3");
   s = s.replace(/muse-spark-1\.2.*/, "muse-spark-1.2");
+  s = s.replace(/space-bunny-free.*/, "space-bunny");
   s = s.replace(/mimo-v2\.6-flash.*/, "mimo-v2.6-flash");
   s = s.replace(/mimo-v2\.5.*/, "mimo-v2.5");
   s = s.replace(/qwen3\.8-flash.*/, "qwen3.8-flash");
@@ -208,6 +214,9 @@ const FREE_FAMILIES = {
   ],
   "muse-spark-1.2": [
     { provider: "opencode", model: "opencode/muse-spark-1.2-contributor-free" },
+  ],
+  "space-bunny": [
+    { provider: "opencode", model: "opencode/space-bunny-free" },
   ],
   "mimo-v2.6-flash": [
     { provider: "opencode", model: "opencode/mimo-v2.6-flash-free" },
@@ -372,17 +381,21 @@ function allFreeLanesDepletedMessage(fromProvider, fromModel) {
   const table = loadFreeLaneTable();
   const soon = table ? soonestResetAmongDepleted(table, state) : null;
   const sticky = `${fromProvider}/${fromModel}`;
-  if (soon?.label) {
-    return (
-      `All free Telegram lanes are depleted right now (sticky was ${sticky}). ` +
-      `Soonest Reset in: ${soon.label}` +
-      (soon.lane?.model ? ` · ${soon.lane.model}` : "") +
-      `. Try /allowance or wait for reset — no hang on Stop.`
-    );
-  }
+  // Never claim "everything is dead": Freebuff stays usable in the terminal
+  // while the Telegram chat lanes are empty (Freebuff is not a TG lane).
+  const fbSignedIn = freebuffCredsOk();
+  const fbOffer = fbSignedIn
+    ? `Freebuff is still usable in the terminal on this box: GLM 5.3 Flash (0/hr), MiMo 2.6 Flash (0/hr), DeepSeek V4.1 Flash (5/hr) — open a terminal and run ` +
+      "`freebuff`, or use the Freebuff taps in /freemodel."
+    : "Freebuff would also be usable in the terminal, but this box is not signed in — run `freebuff` in a terminal to sign in.";
+  const reset =
+    soon?.label
+      ? `Soonest Reset in: ${soon.label}` + (soon.lane?.model ? ` · ${soon.lane.model}` : "")
+      : `Check /allowance for Reset in times.`;
   return (
-    `All free Telegram lanes are depleted right now (sticky was ${sticky}). ` +
-    `Check /allowance for Reset in times.`
+    `All free Telegram chat lanes are depleted right now (sticky was ${sticky}). ` +
+    `${reset} — no hang on Stop.\n` +
+    fbOffer
   );
 }
 
@@ -620,8 +633,6 @@ const FREE_ALLOWANCE_BUCKETS = [
     scope: "shared",
     label: "OpenCode Zen free",
     resetHint: "rolling / rate-limit",
-    // Membership list (kept for future server-pickup; Space Bunny is not
-    // advertised on /freemodel until the running server exposes it).
     members: [
       "muse-spark-1.3-contributor-free",
       "muse-spark-1.2-contributor-free",
@@ -2444,6 +2455,7 @@ async function compactOpenCodeSession() {
 
 
 function prettyFreeLabel(providerKey, modelId) {
+  if (providerKey === "opencode" && /space-bunny/i.test(modelId)) return "Space Bunny";
   let s = String(modelId || "");
   s = s
     .replace(/^opencode\//i, "")
@@ -2494,6 +2506,24 @@ function freeModelDepletion(providerKey, modelId, now = Date.now()) {
       const until = lane.nextResetAt ? Date.parse(lane.nextResetAt) : NaN;
       if (Number.isFinite(until) && until > now) {
         found.push({ until, key: "free-lane-table.json", hint: lane.countdownHint || "" });
+      }
+    }
+  } catch {}
+  try {
+    // Shared buckets deplete as ONE pool even when the per-model quota rows have
+    // expired: a live `bucket:<id>` record must ❌ every member (the 2026-09-24
+    // repro — user tapped OpenCode MiMo with no ❌ while the Zen bucket cool-off
+    // was still running). OpenCode Zen muse/mimo/ling/nemotron/space-bunny all
+    // resolve to `bucket:opencode-zen-free` via quotaRecordKey.
+    const bucket = resolveAllowanceBucket(providerKey, modelId);
+    if (bucket && bucket.scope === "shared") {
+      const rec = bucketLive(bucket);
+      if (rec) {
+        found.push({
+          until: Number(rec.depletedUntil || 0),
+          key: bucketKey(bucket.id),
+          hint: rec.countdownHint || "",
+        });
       }
     }
   } catch {}
@@ -2592,25 +2622,35 @@ function clineAuthOk() {
     return false;
   }
 }
-async function probeClineFree() {
+/**
+ * E) Cline known free lanes, filtered by the ledger: a lane marked
+ * unavailable/ended (e.g. the GLM 5.3 free promo that ended) must never be
+ * offered as a healthy button. Exported pure so tests exercise the exact
+ * filter probeClineFree uses. Unknown status (no lane row) = keep.
+ */
+function availableClineKnownLanes(table = loadFreeLaneTable()) {
   const known = [
-    {
-      id: "cline-free/muse-spark-1.3-contributor",
-      label: "muse spark 1.3 free",
-    },
-    {
-      id: "cline-free/deepseek-v4.1-flash",
-      label: "deepseek v4.1 flash free",
-    },
-    // Used successfully on this box as free lane; keep only if auth+hub up.
-    {
-      id: "cline-free/glm-5.3-flash",
-      label: "glm 5.3 flash free",
-    },
+    { id: "cline-free/muse-spark-1.3-contributor", label: "muse spark 1.3 free" },
+    { id: "cline-free/deepseek-v4.1-flash", label: "deepseek v4.1 flash free" },
+    // Used successfully on this box as free lane; keep only if the ledger does
+    // not say unavailable/ended.
+    { id: "cline-free/glm-5.3-flash", label: "glm 5.3 flash free" },
   ];
+  return known.filter((k) => {
+    const lane = table?.lanes?.find((l) => laneMatchesRoute(l, "cline", k.id));
+    const st = String(lane?.status || "").toLowerCase();
+    return st !== "unavailable" && st !== "ended";
+  });
+}
+
+async function probeClineFree() {
   if (!clineAuthOk()) {
     return { ok: false, reason: "Cline not signed in", items: [] };
   }
+  // E) Honesty: a lane the ledger marks unavailable/ended (e.g. the GLM 5.3
+  // free promo that ended) must never render as a healthy button — drop it
+  // here so the probe returns the remaining healthy lanes only.
+  const known = availableClineKnownLanes();
   // Prefer live hub check via spawn sync without breaking ESM: use runCmd pattern via promisify later.
   // Lightweight TCP/http check on hub port.
   try {
@@ -2621,6 +2661,11 @@ async function probeClineFree() {
     }
   } catch (e) {
     return { ok: false, reason: "Cline hub not reachable", items: [] };
+  }
+  // Every known lane unavailable/ended (e.g. GLM promo ended and it was the
+  // only one): say so instead of an empty healthy probe.
+  if (!known.length) {
+    return { ok: false, reason: "Cline free lanes unavailable/ended per ledger", items: [] };
   }
   return {
     ok: true,
@@ -2661,6 +2706,17 @@ async function probeTokenHarborFree() {
 const FREEBUFF_CREDS_PATH = "/home/box/.config/manicode/credentials.json";
 /** Freebuff ledger id for DeepSeek V4.1 Flash (docs/free-lane-preference.json pref 17). */
 const FREEBUFF_DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
+/** Freebuff picker ids for the 0 Freebucks/hr models (bakeoff + live config). */
+const FREEBUFF_GLM_MODEL = "z-ai/glm-5.3-flash";
+const FREEBUFF_MIMO_MODEL = "xiaomi/mimo-v2.6-flash";
+/** Button/pick labels for the three Freebuff taps. 0/hr = does not burn
+ * Freebucks while running (not "unlimited forever"): still needs sign-in,
+ * and Freebuff can change pricing/availability. */
+const FREEBUFF_MODEL_LABELS = {
+  [FREEBUFF_GLM_MODEL]: "GLM 5.3 Flash (0/hr)",
+  [FREEBUFF_MIMO_MODEL]: "MiMo 2.6 Flash (0/hr)",
+  [FREEBUFF_DEFAULT_MODEL]: "DeepSeek V4.1 Flash (5/hr)",
+};
 
 function freebuffCredsOk(credsPath = FREEBUFF_CREDS_PATH) {
   try {
@@ -2690,7 +2746,12 @@ async function probeFreebuffFree(credsPath = FREEBUFF_CREDS_PATH) {
   return {
     ok: true,
     reason: "",
-    items: [{ id: FREEBUFF_DEFAULT_MODEL, label: "DeepSeek V4.1 Flash" }],
+    // 0 Freebucks/hr first: GLM 5.3 Flash, MiMo 2.6 Flash, then DeepSeek (5/hr).
+    items: [
+      { id: FREEBUFF_GLM_MODEL, label: FREEBUFF_MODEL_LABELS[FREEBUFF_GLM_MODEL] },
+      { id: FREEBUFF_MIMO_MODEL, label: FREEBUFF_MODEL_LABELS[FREEBUFF_MIMO_MODEL] },
+      { id: FREEBUFF_DEFAULT_MODEL, label: FREEBUFF_MODEL_LABELS[FREEBUFF_DEFAULT_MODEL] },
+    ],
   };
 }
 
@@ -2758,13 +2819,14 @@ function applyFreeModelPick(providerKey, modelId) {
     const mid = String(modelId || state.models.freebuff || FREEBUFF_DEFAULT_MODEL);
     state.models.freebuff = mid;
     saveState(state);
+    const name = FREEBUFF_MODEL_LABELS[mid] || prettyFreeLabel(providerKey, mid);
     return (
       "Freebuff is terminal-only — there is no Telegram chat lane.\n" +
-      `Model: \`${mid}\` (DeepSeek V4.1 Flash)\n\n` +
+      `Model: \`${mid}\` (${name})\n\n` +
       "Use it on this box:\n" +
       "• Open a terminal (tmux) on the host and run `freebuff`.\n" +
-      "• Pick DeepSeek V4.1 Flash in the Freebuff session.\n" +
-      "• Freebucks are shared daily — use it promptly.\n\n" +
+      `• Pick ${name.replace(/ \(.*\)$/, "")} in the Freebuff picker.\n` +
+      "• 0/hr = does not burn Freebucks while running (DeepSeek is 5/hr); still needs Freebuff signed in and Freebuff can change pricing.\n\n" +
       `Telegram messages still go to ${PROVIDERS[state.provider]?.label || state.provider}. Nothing was switched.`
     );
   }
@@ -2808,18 +2870,18 @@ const FREEMODEL_HEADER = [
   "Depleted lanes are marked ❌ and stay tappable; auto-failover announces switches to the next free lane.",
   "Token Harbor / Cloudflare taps run via OpenCode (tools).",
   "Freebuff is a terminal-only coding lane — no Telegram chat (tap for instructions).",
+  "Telegram centers button text (no API align).",
 ];
 
 /**
- * Telegram's InlineKeyboardButton has no `align`; those clients render button
- * text centred. Practical workaround: keep the label short and right-pad with
- * spaces so it reads flush-left-ish. Telegram caps button text at 64 chars.
+ * Telegram's InlineKeyboardButton has no `align`; clients render button text
+ * centred and a space pad did NOT left-align it (2026-09-24 screenshot) — it
+ * just added noise. Kept as a cap-only helper so long labels still respect the
+ * 64-char Telegram limit; no fake padding.
  */
-const FREEMODEL_BUTTON_WIDTH = 38;
+const FREEMODEL_BUTTON_WIDTH = 64;
 function leftishButtonLabel(text, width = FREEMODEL_BUTTON_WIDTH) {
-  const s = String(text ?? "").slice(0, 64);
-  if (s.length >= width) return s.slice(0, Math.max(1, width));
-  return s.padEnd(width);
+  return String(text ?? "").slice(0, Math.max(1, width));
 }
 
 /** Short provider tag for a /freemodel button (the body no longer lists providers). */
@@ -2903,6 +2965,7 @@ function buildFreemodelReply(results, now = Date.now()) {
       const dep = freeModelDepletion(key, item.id, now);
       if (dep) depletedCount += 1;
       const btnText = `${dep ? "❌ " : ""}${freemodelProviderTag(key, item)}: ${item.label}`;
+      // No space pad: Telegram centers button text and the pad never aligned it.
       kb.text(leftishButtonLabel(btnText), freemodelCallbackData(key, item.id)).row();
     }
   }
@@ -2920,7 +2983,7 @@ function buildFreemodelReply(results, now = Date.now()) {
           .join("; ")
     );
   }
-  if (total) kb.text(leftishButtonLabel("Cancel — keep current model"), "fm_cancel").row();
+  if (total) kb.text("Cancel — keep current model", "fm_cancel").row();
   return { text: lines.join("\n"), keyboard: total ? kb : null, total, depletedCount, skipped };
 }
 
@@ -3906,6 +3969,10 @@ export {
   leftishButtonLabel,
   freemodelProviderTag,
   dedupeFreemodelItems,
+  FREEBUFF_GLM_MODEL,
+  FREEBUFF_MIMO_MODEL,
+  FREEBUFF_MODEL_LABELS,
+  availableClineKnownLanes,
   buildFreemodelReply,
   applyFreeModelPick,
   freemodelReply,

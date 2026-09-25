@@ -236,8 +236,10 @@ try {
   stopMsg = e.message;
 }
 const msg = stopMsg || allFreeLanesDepletedMessage("opencode", STICKY_MODEL);
-check("S13 all-depleted plan throws the clear message (not the raw vendor text)", /All free Telegram lanes are depleted/i.test(msg), msg);
+check("S13 all-depleted plan throws the clear message (not the raw vendor text)", /All free Telegram chat lanes are depleted/i.test(msg), msg);
 check("S14 all-depleted message lists the soonest Reset in", /Soonest Reset in:/i.test(msg), msg);
+check("S15 all-depleted Stop still offers the Freebuff terminal lane (never 'everything dead')", /Freebuff/i.test(msg) && /terminal/i.test(msg), msg);
+check("S16 the Stop copy never implies Freebuff is a Telegram lane", !/Telegram Freebuff lane/i.test(msg), msg);
 
 if (failed) {
   console.error(`\nFAIL: ${failed} check(s) failed`);
