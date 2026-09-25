@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { projectLanes, annotateFreemodelEntries, buildAllowanceTextForBots, ensureBotLedger, stampDepleted } from './lib/free-lanes.mjs';
+import { projectLanes, annotateFreemodelEntries, buildAllowanceTextForBots, ensureBotLedger, stampDepleted, withCatalogLanes } from './lib/free-lanes.mjs';
 import { selectTurnLanes } from './bot-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +47,38 @@ try {
   check('an ended lane is never selectable', clean.find((r) => r.label === 'Old Promo')?.selectable === false);
   check('an ended lane says why', /never offered again/.test(clean.find((r) => r.label === 'Old Promo')?.reason || ''));
   check('each row carries a plan code', clean.every((r) => typeof r.plan === 'string' && r.plan.length >= 2));
+
+  // 1b. Gemini is a lane with its own allowance, and it must not borrow another
+  // provider's plan code — that is the mistake the tokenharbor rows above had.
+  const gemTable = { version: 3, lanes: [
+    { pref: 1, provider: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', status: 'available', tg: true, label: 'OC row' },
+    { pref: 2, provider: 'gemini', model: 'gemini-3.8-flash', status: 'available', tg: true, label: 'Gemini 3.8' },
+    { pref: 3, provider: 'opencode', model: 'google/gemini-3.7-flash', status: 'available', tg: true, label: 'Gemini 3.7 via opencode' },
+  ] };
+  const gemRows = projectLanes(gemTable, {});
+  check('a gemini provider row is planned as GM', gemRows.find((r) => r.label === 'Gemini 3.8')?.plan === 'GM');
+  check('a gemini model reached through opencode is planned as GM', gemRows.find((r) => r.label === 'Gemini 3.7 via opencode')?.plan === 'GM');
+  check('a plain opencode row is still OC', gemRows.find((r) => r.label === 'OC row')?.plan === 'OC');
+  check('a gemini row is selectable when the key is there', gemRows.find((r) => r.label === 'Gemini 3.8')?.selectable === true);
+
+  // 1c. The catalog is folded into the table, so /allowance and /freemodel offer
+  // the same rows. Live on 2026-09-25: /freemodel listed 43 models of which 38
+  // had no ledger row, and /allowance showed no Gemini at all.
+  const foldCatalog = [
+    { ref: 'opencode/muse-spark-1.3-contributor-free', label: 'Muse 1.3' },
+    { ref: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { ref: 'gemini:gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+    { ref: 'pending:tokenharbor', label: 'tokenharbor (pending setup/sign-in)' },
+  ];
+  const folded = withCatalogLanes(gemTable, foldCatalog, { now: Date.now() });
+  check('a catalogued model with no lane row gets one', folded.added.length === 2, JSON.stringify(folded.added.map((l) => l.model)));
+  check('the gemini row it added is a real lane', folded.table.lanes.some((l) => l.model === 'google/gemini-3.8-flash'));
+  check('a pending-signin placeholder is not turned into a lane', !folded.table.lanes.some((l) => String(l.model).includes('pending:')));
+  check('an existing row is not duplicated', folded.table.lanes.filter((l) => l.model === 'opencode/muse-spark-1.3-contributor-free').length === 1);
+  check('appended rows land after the existing ones', Number(folded.added[0].pref) > Number(gemTable.lanes[gemTable.lanes.length - 1].pref));
+  check('folding twice adds nothing', withCatalogLanes(folded.table, foldCatalog).added.length === 0);
+  check('an existing stamp survives the fold', withCatalogLanes({ ...gemTable, lanes: gemTable.lanes.map((l) => (l.pref === 1 ? { ...l, status: 'depleted', nextResetAt: '2030-01-01T00:00:00Z' } : l)) }, foldCatalog).table.lanes.find((l) => l.pref === 1)?.status === 'depleted');
+  check('a folded gemini row projects as selectable', projectLanes(folded.table, {}).find((r) => r.label === 'Gemini 3.8 Flash')?.selectable === true);
 
   // 2. Quota marks a lane, and only for the worker whose session says so.
   const now = Date.now();

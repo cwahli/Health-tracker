@@ -68,6 +68,7 @@ import {
   annotateFreemodelEntries,
   isFreemodelEntryDepleted,
   buildAllowanceTextForBots,
+  withCatalogLanes,
   renderFreeLaneTableHtml,
   ensureBotLedger,
   stampDepleted,
@@ -497,9 +498,20 @@ function getLedger(botId) {
 function getAnnotatedFreeModels(caches, botId) {
   const base = caches.free || buildFreeModelList({ location: workLocation() });
   caches.free = base;
-  const { table, session, source } = getLedger(botId);
-  if (!table) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
-  return { entries: base, annotated: annotateFreemodelEntries(base, table, session, { location: workLocation(), readiness: hostReadiness(caches) }), table, session, source };
+  // The table is folded with the catalog first, so a model the catalog knows but
+  // the table predates (every Gemini row) gets a lane row and a verdict here
+  // instead of being reported as "not in this ledger" and marked selectable.
+  const loaded = getLedger(botId);
+  const { table: merged, added } = withCatalogLanes(loaded.table, base);
+  if (!merged) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
+  return {
+    entries: base,
+    annotated: annotateFreemodelEntries(base, merged, loaded.session, { location: workLocation(), readiness: hostReadiness(caches) }),
+    table: merged,
+    session: loaded.session,
+    source: loaded.source,
+    addedFromCatalog: added.length,
+  };
 }
 
 /**
@@ -1437,14 +1449,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           return;
         } catch (e) {
           const route2 = freemodelRefToRoute(eff.model || '');
-          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model, location: workLocation(), readiness: hostReadiness(caches) }));
+          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model, location: workLocation(), readiness: hostReadiness(caches), catalogEntries: await getFreeModels(caches, config) }));
           return;
         }
       }
       // Router parity: raw HTML grid text (screenshot), NOT the markdown converter.
       await sendHtml(api, chatId, buildAllowanceTextForBots({
         stateDir: getLedger(config.id).dir, provider: route.provider, model: route.model, location: workLocation(),
-        readiness: hostReadiness(caches),
+        readiness: hostReadiness(caches), catalogEntries: await getFreeModels(caches, config),
       }));
       return;
     }

@@ -144,6 +144,12 @@ function pickProbeKind(lane) {
   if (provider === "tokenharbor") return { kind: "tokenharbor" };
   if (provider === "cloudflare" || model.includes("@cf/") || model.startsWith("cloudflare/")) return { kind: "cloudflare" };
   if (provider === "cline") return { kind: "cline" };
+  // Gemini is keyed rather than free-tier, but it is reached through the OpenCode
+  // CLI like every other lane, and its allowance moves the same way: a 429 or
+  // RESOURCE_EXHAUSTED is a depletion with a reset, and the next sweep finds it
+  // open again. Without a kind here these rows were skipped, so a Gemini
+  // depletion could be neither detected nor cleared.
+  if (provider === "gemini" || /(^|\/)gemini-|^google\//.test(model)) return { kind: "opencode" };
   if (provider === "opencode") return { kind: "opencode" };
   return { kind: "skip", why: `no probe for provider ${provider || "?"}` };
 }

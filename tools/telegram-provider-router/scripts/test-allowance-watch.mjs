@@ -92,6 +92,20 @@ t("C3 probeCli maps vendor output to available/depleted/uncertain", () => {
   eq(core.probeCli(silent, "opencode", [], 1000).status, "uncertain", "no output → uncertain");
 });
 
+// A lane with no probe kind can never be detected as spent or seen to renew, so a
+// provider that lands in the table without one is a provider whose allowance is
+// frozen. Gemini rows arrive from the catalog; they must be probeable.
+t("C3b every provider that can sit in the table has a probe kind", () => {
+  const kind = (lane) => core.pickProbeKind(lane).kind;
+  eq(kind({ provider: "opencode", model: "opencode/muse-spark-1.3-contributor-free" }), "opencode", "opencode probed");
+  eq(kind({ provider: "cline", model: "cline-free/deepseek-v4.1-flash" }), "cline", "cline probed");
+  eq(kind({ provider: "tokenharbor", model: "deepseek-v4.1-flash:free" }), "tokenharbor", "tokenharbor probed");
+  eq(kind({ provider: "opencode", model: "cloudflare/@cf/qwen/qwen3.8-27b" }), "cloudflare", "cloudflare probed");
+  eq(kind({ provider: "gemini", model: "gemini-3.8-flash" }), "opencode", "gemini probed through opencode");
+  eq(kind({ provider: "opencode", model: "google/gemini-3.8-flash" }), "opencode", "gemini via opencode path probed");
+  eq(kind({ provider: "freebuff", model: "deepseek/deepseek-v4.1-flash" }), "skip", "freebuff stays unprobed (terminal)");
+});
+
 // ---------------------------------------------------------------- C4/C5 parsing
 t("C4 countdown parse: 'Try again in 23h 15m' and future ISO stamps", () => {
   const cd = core.parseCountdownHint("Daily free model limit reached. Try again in 23h 15m.");

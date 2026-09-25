@@ -787,6 +787,11 @@ export function planCodeForLane(lane) {
   // shared `tokenharbor-free` bucket, so they share one public plan code.
   if (provider === "tokenharbor") return "TH";
   if (provider === "opencode" && (model.includes("tokenharbor/") || bucket.includes("tokenharbor"))) return "TH";
+  // Gemini is keyed, not free-tier, but it is a lane with its own allowance: a
+  // 429 or RESOURCE_EXHAUSTED is stamped and reset like any other. Labelling it
+  // "OC" hid which provider the row belonged to, the same mistake the tokenharbor
+  // rows above had.
+  if (provider === "gemini" || model.includes("gemini-") || /^google\//.test(model)) return "GM";
   if (provider === "opencode") return "OC";
   return (provider || "?").slice(0, 6).toUpperCase();
 }
@@ -1107,6 +1112,63 @@ export function candidateRouterStateDirs(explicit) {
   return [...new Set(out.filter(Boolean))];
 }
 
+/**
+ * Add a ledger row for every catalogued model that has none.
+ *
+ * The two surfaces drew their rows from different places: /freemodel from the
+ * catalog (buildFreeModelList) and /allowance from the ledger table. A model the
+ * catalog knew but the table did not — every Gemini row, and any provider added
+ * to the catalog after the table was last written — therefore appeared in one
+ * list and not the other, and had no row for the watcher to stamp, so its
+ * allowance could never be tracked. Live on 2026-09-25: /freemodel offered 43
+ * models of which 38 had no ledger row at all, and /allowance showed no Gemini
+ * whatsoever.
+ *
+ * So the catalog is folded into the table at read time. Rows are appended after
+ * the existing ones, which is what puts a model with no balance or no credential
+ * at the bottom of the list instead of dropping it: the projection's own verdicts
+ * (`needsSetup`, `terminalOnly`, `depleted`) then decide the tick, and the
+ * watcher can stamp these rows like any other.
+ *
+ * Existing rows are never rewritten and nothing is removed, so a stamp, a reset
+ * time or a family's position cannot be lost by a catalog refresh.
+ */
+export function withCatalogLanes(table, entries = [], { now = Date.now() } = {}) {
+  if (!table || !Array.isArray(table.lanes)) return { table, added: [] };
+  const lanes = [...table.lanes];
+  let nextPref = lanes.reduce((m, l) => Math.max(m, Number(l.pref) || 0), 0);
+  const added = [];
+  for (const entry of entries || []) {
+    const ref = typeof entry === "string" ? entry : entry?.ref || "";
+    if (!ref) continue;
+    // A pending-signin placeholder is not a model; it is the absence of one, and
+    // it is already reported as a gap by /setup.
+    if (typeof entry === "object" && entry && (entry.status === "pending-signin" || /^pending:/.test(ref))) continue;
+    for (const route of routeCandidates(ref)) {
+      if (lanes.some((l) => laneMatchesRoute(l, route.provider, route.model))) continue;
+      nextPref += 1;
+      const terminalOnly = typeof entry === "object" && entry ? entry.selectable === false : false;
+      const lane = {
+        pref: nextPref,
+        provider: route.provider,
+        model: route.model,
+        label: (typeof entry === "object" && entry?.label) || route.model,
+        // `available` means "not known to be spent". The projection is what refuses
+        // to offer it — a missing credential, a terminal-only tool or a live
+        // depletion record each turn the row into its own honest verdict, and a
+        // row stamped by the watcher flips this to `depleted` on its own.
+        status: "available",
+        ...(terminalOnly ? { tg: false } : {}),
+        fromCatalog: true,
+        addedAt: isoZ(now),
+      };
+      lanes.push(lane);
+      added.push(lane);
+    }
+  }
+  return { table: added.length ? { ...table, lanes } : table, added };
+}
+
 /** Minimal table built from the repo pref doc when no live ledger exists. */
 export function tableFromPreferenceDoc(prefDoc) {
   const lanes = Array.isArray(prefDoc?.lanes) ? prefDoc.lanes : [];
@@ -1138,14 +1200,18 @@ export function tableFromPreferenceDoc(prefDoc) {
  * { table, session, tablePath, sessionPath, source }. Source is one of
  * `live-state`, `pref-doc-fallback`, or `empty` (no ledger found).
  */
-export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionPath = null } = {}) {
+export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionPath = null, catalogEntries = null } = {}) {
   const dirs = candidateRouterStateDirs(stateDir);
   for (const dir of dirs) {
     const tPath = tablePath || join(dir, "free-lane-table.json");
     const sPath = sessionPath || join(dir, "session.json");
     const table = readJson(tPath);
     if (table && Array.isArray(table.lanes)) {
-      return { table, session: readJson(sPath) || {}, tablePath: tPath, sessionPath: sPath, source: "live-state" };
+      // Fold the catalog in so /allowance shows the same rows /freemodel offers,
+      // including models the table predates. Without this the two lists disagree
+      // and a catalogued model has no row for the watcher to stamp.
+      const merged = catalogEntries ? withCatalogLanes(table, catalogEntries).table : table;
+      return { table: merged, session: readJson(sPath) || {}, tablePath: tPath, sessionPath: sPath, source: "live-state" };
     }
   }
   // Fallback: repo pref doc → all-available table so /allowance still shows order.
@@ -1251,8 +1317,8 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
  * Pass the chat's effective provider/model so the `Active route` + `Next up`
  * lines are chat-aware (bot-host has no sticky session like the router).
  */
-export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null } = {}) {
-  const { table, session, source } = loadFreeLaneLedger({ stateDir });
+export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null, catalogEntries = null } = {}) {
+  const { table, session, source } = loadFreeLaneLedger({ stateDir, catalogEntries });
   if (!table) {
     return "Allowance: no shared free-lane ledger found (router state + pref doc missing). Use /freemodel to list free models.";
   }
