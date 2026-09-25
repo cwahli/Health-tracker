@@ -215,17 +215,27 @@ try {
   check('capabilities.json parses', false, e.message);
 }
 
-// profile bootstrap (local; missing is warn-level fail so VPS setup is explicit)
-const prof = path.join(process.env.HOME || '/home/ubuntu', '.hermes/profiles/bug_ticket');
-check('hermes profile bug_ticket/SOUL.md', fs.existsSync(path.join(prof, 'SOUL.md')));
-check('hermes profile bug_ticket/config.yaml preloads bug-ticket', (() => {
+// profile bootstrap — V-30.5 CI-safe host-profile check. On a host that has
+// ~/.hermes at all, the bug_ticket profile must exist and pass exactly as
+// before (strength unchanged). A clean runner without ~/.hermes uses the
+// committed fixture profile (scripts/fixtures/hermes-profiles/bug_ticket) so
+// the same three assertions still exercise real content — no repository
+// assertion is skipped. BUGTICKET_PROFILE_HOME forces a specific profile dir.
+const homeDir = process.env.HOME || '/home/ubuntu';
+const forcedProfile = process.env.BUGTICKET_PROFILE_HOME;
+const hostHasHermes = fs.existsSync(path.join(homeDir, '.hermes'));
+const useFixtureProfile = !forcedProfile && !hostHasHermes;
+const prof = forcedProfile || (useFixtureProfile ? path.join(ROOT, 'scripts/fixtures/hermes-profiles/bug_ticket') : path.join(homeDir, '.hermes/profiles/bug_ticket'));
+const profNote = useFixtureProfile ? ' (fixture HOME — clean runner)' : '';
+check(`hermes profile bug_ticket/SOUL.md${profNote}`, fs.existsSync(path.join(prof, 'SOUL.md')));
+check(`hermes profile bug_ticket/config.yaml preloads bug-ticket${profNote}`, (() => {
   try {
     return /bug-ticket/.test(fs.readFileSync(path.join(prof, 'config.yaml'), 'utf8'));
   } catch {
     return false;
   }
 })());
-check('MEMORY.md within 2200 chars', (() => {
+check(`MEMORY.md within 2200 chars${profNote}`, (() => {
   try {
     return fs.readFileSync(path.join(prof, 'memories/MEMORY.md'), 'utf8').length <= 2200;
   } catch {

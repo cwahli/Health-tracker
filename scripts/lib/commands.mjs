@@ -26,6 +26,7 @@ export const BOT_COMMANDS = [
   { command: 'abort', description: 'Cancel the running request' },
   { command: 'debug', description: 'Show the active work-session debug view' },
   { command: 'handoff', description: 'Checkpoint this work session for continuation' },
+  { command: 'resume', description: 'Print the current bug-ticket packet' },
   { command: 'tx', description: 'Shared work view on|off|status|debug for this chat' },
 ];
 
@@ -199,6 +200,7 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/status           show session, model, agent, workspace, usage',
     '/debug            show the active work-session debug view',
     '/handoff          checkpoint this work session for continuation',
+    '/resume [n]       print the current bug-ticket packet (n = card #)',
     '/tx [on|off|status|debug] shared work view for this chat',
     '/abort            cancel the running request',
     '/help             this message',

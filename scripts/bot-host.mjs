@@ -2,6 +2,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
@@ -767,6 +769,46 @@ export async function handleTxCommand({ api, config, chatId, arg, tmux = default
   await api.sendMessage(chatId, lines.join('\n'));
 }
 
+// V-30.5 /resume — prints the current ticket packet straight from the bug
+// store (bugctl queue → packet). Read-only: no second state store, no chat
+// scrollback. `/resume n` = card #n; bare /resume = the queue's next open card.
+const execFileP = promisify(execFile);
+const BUGCTL_BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bugctl.mjs');
+
+async function runBugctl(args) {
+  const { stdout } = await execFileP(process.execPath, [BUGCTL_BIN, ...args], {
+    timeout: 8000,
+    encoding: 'utf8',
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  return String(stdout || '');
+}
+
+async function resumePacketText(rawArg) {
+  const wanted = String(rawArg || '').replace(/^#/, '').trim();
+  let id = wanted;
+  if (!id) {
+    let queue;
+    try {
+      queue = JSON.parse(await runBugctl(['queue', '--json']));
+    } catch (e) {
+      return 'Bug store unreachable (bug API down or not local to this host). /resume needs the store — retry later or use /resume <n> once it is back.';
+    }
+    const rows = Array.isArray(queue?.rows) ? queue.rows : [];
+    if (!rows.length) return 'Bug queue is empty — no open ticket to resume. Use /resume <n> for a specific card.';
+    id = String(rows[0].public_n ?? '').trim();
+    if (!id) return 'Queue returned a card without a number — use /resume <n>.';
+  }
+  let packet;
+  try {
+    packet = (await runBugctl(['packet', `--id=#${id}`, '--format=text'])).trim();
+  } catch (e) {
+    return `Bug store unreachable for #${id} (bug API down or not local to this host). ${String(e?.message || '').slice(0, 120)}`;
+  }
+  if (!packet) return `No packet content for #${id}.`;
+  return `Current ticket packet — #${id}\n\n${packet}\n\n/resume ${id} reprints this packet.`;
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
   const eff = effective(config, prefs, chatId);
 
@@ -1104,6 +1146,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'tx': {
       await handleTxCommand({ api, config, chatId, arg: cmd.args });
+      return;
+    }
+
+    case 'resume': {
+      if (running.get(chatId)) {
+        await api.sendMessage(chatId, 'A request is running. Finish or /abort it before resuming a ticket.');
+        return;
+      }
+      await api.sendMessage(chatId, await resumePacketText(cmd.args));
       return;
     }
 

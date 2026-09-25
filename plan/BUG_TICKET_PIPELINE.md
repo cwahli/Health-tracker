@@ -1,14 +1,14 @@
 # Bug ticket pipeline for TG agentic development — audit + plan (proposal)
 
-**Status:** **V-30.1 DONE 2026-09-24** (store + CLI + A-f1/A-f5); **V-30.2 DONE 2026-09-24** (packer + fixtures + P9 token + one live Telegram E2E reply + `enabled: true` + `@Bug_ticket_bot`; fixture traceability + packer-only boundary closed in the same change); **V-30.3 DONE 2026-09-24** (`qa-reproduce` skill, `qa-runner --ticket`, `bugctl repro --check`, §4.6 R2 bundle, `svc-repro` done, gate `assert-bug-repro` 57/0, and a live verdict posted on card #2: `failed` → `not_reproducible` with R2 evidence keys — card #2 was already fixed by `00b8cb1`, proving the known-good path end to end); **V-30.4 DONE 2026-09-24** (human go received; packet-driven `run-coding-dispatch.sh --ticket=#n`, `scripts/lib/bug-dispatch.mjs` idempotency guard, plan-before-dispatch, attempt start/end rows, failure → `bugctl block --reason`, verifier separation, scratch fixture `src/utils/bugDispatchFlow.test.ts`, gate `assert-bug-dispatch` 49/0 (50/0 on VPS); bugctl reads never enter the offline queue; **live proof complete**: card #3 `new→packed→in_fix→verifying→done` with PR #101 + named_test verify by a non-author + exit-3 double-dispatch refusal; card #4 failure → `blocked_reason` + guard refusal; three hardening fixes from the proof — #98 stop/heartbeat zombie, #102/#103 journal drops); **V-30.5 NOT STARTED** and still requires its explicit human go. V-30.0 decisions all recorded (§6.1/§8). The executable handoff is §6.2.
-**Drafted / last updated:** 2026-09-24
+**Status:** **V-30.1 DONE 2026-09-24** (store + CLI + A-f1/A-f5); **V-30.2 DONE 2026-09-24** (packer + fixtures + P9 token + one live Telegram E2E reply + `enabled: true` + `@Bug_ticket_bot`; fixture traceability + packer-only boundary closed in the same change); **V-30.3 DONE 2026-09-24** (`qa-reproduce` skill, `qa-runner --ticket`, `bugctl repro --check`, §4.6 R2 bundle, `svc-repro` done, gate `assert-bug-repro` 57/0, and a live verdict posted on card #2: `failed` → `not_reproducible` with R2 evidence keys — card #2 was already fixed by `00b8cb1`, proving the known-good path end to end); **V-30.4 DONE 2026-09-24** (human go received; packet-driven `run-coding-dispatch.sh --ticket=#n`, `scripts/lib/bug-dispatch.mjs` idempotency guard, plan-before-dispatch, attempt start/end rows, failure → `bugctl block --reason`, verifier separation, scratch fixture `src/utils/bugDispatchFlow.test.ts`, gate `assert-bug-dispatch` 49/0 (50/0 on VPS); bugctl reads never enter the offline queue; **live proof complete**: card #3 `new→packed→in_fix→verifying→done` with PR #101 + named_test verify by a non-author + exit-3 double-dispatch refusal; card #4 failure → `blocked_reason` + guard refusal; three hardening fixes from the proof — #98 stop/heartbeat zombie, #102/#103 journal drops); **V-30.5 DONE 2026-09-25** (human go received; generated backlog with preserved legacy file, `/resume`, capability proof transitions with ticket-scoped strict, CI gates including retro-audit + dispatch self-commit sensor, `docs/agent/BUG_PIPELINE.md` + `telegram_work.md` ticket-first handoff, and the BUG-8449 retro-audit 6/6 answered from disk on re-opened card #7). V-30.0 decisions all recorded (§6.1/§8). The executable handoff is §6.2.
+**Drafted / last updated:** 2026-09-25
 **Scope:** make one durable bug-ticket store the working memory for the Telegram (TG) agent
 fleet, so a chat agent can never lose a bug between answers.
 **Roadmap entry:** `plan/ROADMAP.md` → *Track V Phase 10* — `V-30.0` **DECIDED 2026-09-24**;
 `V-30.1` **DONE 2026-09-24**; `V-30.2` **DONE 2026-09-24** (P9 + E2E closed);
 `V-30.3` **DONE 2026-09-24** (human go received; live verdict posted on card #2);
 `V-30.4` **DONE 2026-09-24** (human go received; gate `assert-bug-dispatch` 49/0; live proof: card #3 full lifecycle → `done`, card #4 → `blocked_reason`, stop/heartbeat + journal fixes #98/#102/#103);
-`V-30.5` **NOT STARTED**, requiring its explicit human go.
+`V-30.5` **DONE 2026-09-25** (human go received).
 
 **This is not a fifth pillar.** It sits beside `plan/BOT_ROLES.md` and
 `docs/agents/telegram_work.md` and proposes a new **track** (see §6). It borrows the
@@ -29,7 +29,7 @@ local ground-truth file list is in §9.
 |---|---|---|
 | `plan/BUG_TICKET_PIPELINE.md` (this file) | **new, tracked in HEAD** | ✅ yes — it *is* the proposal |
 | `plan/ROADMAP.md` | Track V Phase 10 status + executable handoff pointer + decision mirror | ✅ yes |
-| implementation files listed in §5.2 (`src/`, `scripts/`, `bots/`, tests) | **V-30.1–V-30.4 done; V-30.5 still open** | follow the phase gates; do not re-open completed rows |
+| implementation files listed in §5.2 (`src/`, `scripts/`, `bots/`, tests) | **V-30.1–V-30.5 done** | follow the phase gates; do not re-open completed rows |
 
 **State of the tree (2026-09-24, updated after V-30.2 closure + V-30.3):** V-30.1 is merged and
 V-30.2 is **closed**: `HERMES_BUG_TICKET_TOKEN` present on the host, one live E2E reply recorded
@@ -42,7 +42,7 @@ artifact no longer reproduces; fixed by `00b8cb1` on 2026-09-22), deriving
 `not_reproducible` with R2 keys `bugs/tag_mufs4t96_wj02x7/1790272128947-*` and
 `svc-repro` → `done`. The `confirmed` (known-bad) path is gate-proven and awaits the
 next genuinely-reproducing card. V-30.4 is done with a live VPS proof (card #3 → `done`,
-card #4 → `blocked_reason`, gate `assert-bug-dispatch` 50/0 on VPS); V-30.5 has no implementation. Re-read §6.2
+card #4 → `blocked_reason`, gate `assert-bug-dispatch` 50/0 on VPS); V-30.5 closed 2026-09-25 (see the Status header). Re-read §6.2
 before starting any later phase; the dependency graph is intentional.
 
 **Review order:**
@@ -57,7 +57,7 @@ before starting any later phase; the dependency graph is intentional.
 **Historical review note (before implementation):** the proposal required an explicit human go
 before each phase. V-30.1 and V-30.2 have since landed and closed (P9 + E2E recorded 2026-09-24);
 V-30.3 received its human go and is code-done; V-30.4 received its human go and is done
-(gate green + live VPS proof). V-30.5 still follows the same gate rule.
+(gate green + live VPS proof). V-30.5 received its human go and closed 2026-09-25 under the same gate rule.
 Do not treat this document's review as a new authorization for token creation or protected-doc edits.
 
 **Do not, as part of a review:** edit protected docs (`AGENTS.md`, `docs/agent/**`,
@@ -759,27 +759,29 @@ checker · `failure-log.mjs` + `review-failures.mjs` · `standing.json` /
 | `scripts/lib/bug-dispatch.mjs` | **V-30.4 new (pure, no HTTP):** `dispatchGuard` (idempotency + same-run lock exception), `categoryFor` (surface → category), `specPathFor`/`parseSpec` (locked spec frontmatter), `planFromPacket` (hypothesis/files/gates, default named gate), CLI `guard\|category\|spec-path\|plan-args` for the dispatcher. |
 | `scripts/assert-bug-dispatch.mjs` + `src/utils/bugDispatchFlow.test.ts` | **V-30.4 new named gate:** wiring/contract asserts (49 checks) + the committed scratch fixture proving `packed → in_fix → verifying → done`, failed dispatch keeps `blocked_reason`, and double-dispatch refusal — no production card is the test fixture. |
 | `scripts/qa-runner.mjs` | **V-30.3 landed:** `--ticket=<#n>` loads the packet via `bugctl packet`, runs the card's command (exit 0 = reproduced → `confirmed`, non-zero → `failed`), captures `before.png`, uploads the §4.6 bundle as R2 keys (`repro.txt`, `run.log`, `before.png`, `expected.md`, `result.json` under `bugs/<tag_id>/<ts>-<kind>.<ext>`), and writes the verdict through `bugctl repro` (no R2 creds → exit 3, verdict withheld — a host path is not evidence). Journey mode unchanged. |
-| `scripts/bug-backlog.mjs` | **V-30.5 open:** generate `bug-backlog.md` from the store; do not delete the current hand-compiled file until the generator reproduces the BUG-8449 fixture and its source evidence is preserved. |
+| `scripts/bug-backlog.mjs` | **V-30.5 landed 2026-09-25:** generates `bug-backlog.md` from the store (`--source=auto\|api\|journal`); the hand-compiled file is preserved verbatim as `bug-backlog.legacy.md` and embedded in the output; `--check` runs 6 parity checks (fixture rows, legacy rows/title, embed, legacy file, store section) → 6/0. |
 | `bots/registry.json` | **V-30.2 landed + closed 2026-09-24:** `hermes_bug_ticket` with `enabled: true`, `HERMES_BUG_TICKET_TOKEN`, `hermes.profile=bug_ticket`, and `hermes.username="@Bug_ticket_bot"` (filled after one E2E reply per §6.2 runbook). |
-| `bots/capabilities.json` | **V-30.2 landed** `svc-bug-ticket` (now `done`, E2E proven), `proc-ticket-state`, `sess-ticket-resume`; **V-30.3 landed** `svc-repro` (**`done`** — gate 57/0 + live verdict on card #2 with real R2 keys); V-30.5 updates statuses from proof and runs `check-capability-propagation.mjs --strict` in CI. Do not duplicate the existing rows. |
+| `bots/capabilities.json` | **V-30.2 landed** `svc-bug-ticket` (now `done`, E2E proven), `proc-ticket-state`, `sess-ticket-resume`; **V-30.3 landed** `svc-repro` (**`done`** — gate 57/0 + live verdict on card #2 with real R2 keys); V-30.5 (2026-09-25) closed `svc-bug-ticket` + `sess-ticket-resume` from proof and runs `check-capability-propagation.mjs` **plus the ticket-scoped** `--strict --ids=svc-bug-ticket,proc-ticket-state,sess-ticket-resume,svc-repro` in CI (global strict stays red on the 5 BOT-11 foreign partials by design). Do not duplicate the existing rows. |
 | `scripts/skills/common/qa-reproduce/SKILL.md` | **V-30.3 landed:** reproduce-only procedure (verdict table, `repro --check`, §4.6 keys, `not_needed` ≠ `not_reproducible`, never fix/dispatch/verify), preloaded into the `qa_meal` profile by `setup-hermes-global-soul.sh`. Do not create a second `.agents/skills` copy. |
 | `scripts/skills/common/orchestrator-dispatcher/SKILL.md` | **V-30.4 landed (v2.1.0):** Step 0 packet dispatch (`--ticket=#n`, guard refusals surfaced, plan/attempt/block owned by the dispatcher, specify-role-first pointer), Step 5 verification is NOT yours (`named_test` + named gate + journey never closes), invariants 5–6 (packet is the prompt; author ≠ verifier; never main). |
 | `specs/TEMPLATE.md` | **V-30.4 landed:** the three anti-patch sections every bug spec must carry — **Understanding** (mechanism / not-this / evidence key / explicit non-goal), **Layer** (display\|calc\|data, siblings frozen), **Forbidden patch** (no symptom-hide, no new flag, no renamed locator, no second write path) — plus the **two-sided fixture** section. |
-| `.github/workflows/ci.yml` | **V-30.5 open:** add the ticket-state, pack-fixture, continuity, and strict capability gates. Make `assert-bug-pack.mjs` host-independent first: it currently checks `~/.hermes/profiles/bug_ticket` and would fail in clean CI. |
-| `docs/agents/telegram_work.md` | **V-30.5 open:** add ticket-first handoff rules, the "needs human" list, and the exact waiting/claim rules. Keep the existing BUG-8449 incident section as evidence. |
+| `.github/workflows/ci.yml` | **V-30.5 landed 2026-09-25:** ticket-state, pack-fixture, continuity, capability (full + ticket-scoped strict), retro-audit, and the dispatch self-commit sensor all run in CI; `assert-bug-pack.mjs` is host-independent first (committed fixture HOME under `scripts/fixtures/hermes-profiles/bug_ticket`, `BUGTICKET_PROFILE_HOME` override, host strength preserved). |
+| `docs/agents/telegram_work.md` | **V-30.5 landed 2026-09-25:** §0 ticket-first handoff (handoff / waiting-claim / needs-human) is now primary; §3 marked legacy; the BUG-8449 incident section kept as evidence. |
 
 ### 5.3 Protected and durable documentation still open
 
 - `AGENTS.md` L15: add trigger phrases (`pack bug`, `repro #n`, `plan #n`, `verify #n`) and
   the three laws — L15 must stay ~6 lines. This is **not yet edited** and needs the human
   before→after process required by `AGENTS.md` §3.
-- `docs/agent/BUG_PIPELINE.md` **must be created before V-30.5 closes**: the bug-lane counterpart
-  of `JOURNEY.md` (states, gates, who moves what) + a row in `docs/agent/README.md`.
-- `docs/agents/telegram_work.md`: add ticket-first handoff and the "needs human" list; this
-  file currently still describes the old QA → dispatch → QA path as the primary workflow.
-- `plan/ROADMAP.md`: the new IDs (§6) + a line in **Current work**.
+- `docs/agent/BUG_PIPELINE.md` **created 2026-09-25 (V-30.5)**: the bug-lane counterpart
+  of `JOURNEY.md` (states, gates, who moves what) + a row in `docs/agent/README.md`;
+  it also carries the recorded §4.10 retro-audit transcript (card #7).
+- `docs/agents/telegram_work.md`: **landed 2026-09-25** — ticket-first handoff + "needs human"
+  list in §0; the BUG-8449 incident section kept as evidence.
+- `plan/ROADMAP.md`: **landed 2026-09-25** — V-30.5 row + status lines updated to DONE.
 - `plan/QUALITY.md` §14: one pointer that the TG lane now writes the same cards (no rule
-  change). Do not change the quality rules without the required review.
+  change). Do not change the quality rules without the required review. **Still open —
+  report-only item.**
 
 ### 5.4 Explicitly NOT building (non-goals)
 
@@ -1022,8 +1024,10 @@ Start only after V-30.4's end-to-end fixture is green.
 - [ ] One live Telegram E2E message/reply is recorded with a public card id.
 - [ ] V-30.3 proves both derived repro flags with portable artifact keys.
 - [x] V-30.4 proves plan → attempt → verify and blocked failure without direct main push. (live 2026-09-24: card #3/#4, PR #101, refusals exit 3)
-- [ ] V-30.5 proves generated backlog, `/resume`, CI gates, strict capability status, docs, and
-      the BUG-8449 retro-audit.
+- [x] V-30.5 proves generated backlog, `/resume`, CI gates, strict capability status, docs, and
+      the BUG-8449 retro-audit. (2026-09-25: backlog `--check` 6/0 + VPS regeneration, `/resume`
+      handler + help + tests, CI gates incl. ticket-scoped strict, retro-audit 6/6 from disk on
+      card #7, fixture signature sensorized with zero recurrence since #130)
 - [ ] No phase is marked DONE from a chat claim, synthetic fixture, or tokenless test alone.
 
 **Rollback story:** every phase is additive — new `work_item` fields are optional, `--task=`
@@ -1055,8 +1059,8 @@ human go. V-30.2's code landed, but its P9 token + E2E closure is still a human 
 
 **Decided 2026-09-24 — decisions are locked, but operational gates remain:** no decision is
 waiting for a new product choice. P9 is the remaining V-30.2 human operation: BotFather token →
-master `tokens.env` → sync → one E2E reply → `enabled: true`. V-30.3…V-30.5 remain unstarted
-until their explicit human go.
+master `tokens.env` → sync → one E2E reply → `enabled: true`. V-30.3…V-30.5 have since each
+received their explicit human go and closed (V-30.3/30.4 2026-09-24, V-30.5 2026-09-25).
 
 ---
 
@@ -1135,8 +1139,8 @@ re-sync the roadmap status strings.
    states (S-A/S-B, rejected with reasons in §4.3.2).
 
 **Next execution unit after the V-30.2 code merge:** close P9 and the one live Telegram E2E
-(§6.2). Do not start V-30.3 from a tokenless fixture; do not start V-30.4 or V-30.5 ahead of
-their predecessor gates.
+(§6.2). Do not start V-30.3 from a tokenless fixture; do not start a phase ahead of
+its predecessor gates. (All of V-30.3…V-30.5 have since closed — see the Status header.)
 
 ---
 
