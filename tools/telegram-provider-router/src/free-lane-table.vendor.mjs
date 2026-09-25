@@ -143,6 +143,32 @@ export function isConnectionFailure(msg) {
   return CONNECTION_ERRNO_RE.test(text) || CONNECTION_WORDING_RE.test(text);
 }
 
+/**
+ * Token Harbor's free allowance is one shared, rolling ~7-day value bar, not a
+ * per-model daily cap. That is the Grok router's model and the table says so on
+ * every Token Harbor row (`resetRule: "rolling ~7-day value bar"`), with all six
+ * rows sharing the `tokenharbor-free` bucket so one empty bar empties all of them.
+ *
+ * When the bar is spent the vendor answers `402` with "balance is at $0" and no
+ * countdown. The generic fallback stamped 6 hours, which is a guess borrowed from
+ * a daily provider: on a weekly bar it re-probed four times a day against an
+ * allowance that will not refill until the week turns over, and the row showed a
+ * confident "6h" that was never true. Cloudflare's daily bar already had a case
+ * of its own; this is the same treatment for the weekly one.
+ */
+export const TOKEN_HARBOR_WEEKLY_BAR_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** A Token Harbor value-bar exhaustion: 402, or the balance wording it returns. */
+export function isTokenHarborBarExhausted(msg) {
+  const text = String(msg || "");
+  // Token Harbor must be named in the text. A bare 402 means "payment required"
+  // to whichever provider sent it, and treating every 402 as a weekly bar would
+  // hand a 7-day cooldown to providers whose allowance is not weekly at all. The
+  // vendor's own body names it: "Your Token Harbor balance is at $0".
+  if (!/token\s*harbor/i.test(text)) return false;
+  return /\b402\b/.test(text) || /balance[^.]{0,40}\$?0\b/i.test(text);
+}
+
 /** How long a connection failure keeps a lane out of the walk. */
 export const CONNECTION_FAILED_COOLDOWN_MS = 10 * 60 * 1000;
 
@@ -1051,14 +1077,16 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   if (fb) {
     lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
   }
-  // A green row is not proof that a turn runs. Token Harbor's balance is not
-  // exposed by any API (every /v1 billing path 404s) and a $0 account answers
-  // every completion with 402, so disclose it beside the rows instead of
-  // letting the tick stand as the last word. Found live on 2026-09-25: key
-  // present and authenticating, balance $0, every turn 402.
-  if (usable.some((l) => planCodeForLane(l) === "TH")) {
-    lines.push("Token Harbor: counted as usable, but its balance is not API-visible — a $0 account fails every turn with 402 (top up at tokenharbor.ai/dashboard).");
+  // Token Harbor's free models share ONE rolling ~7-day value bar, which is what
+  // the table's own resetRule says on every TH row and what the shared
+  // `tokenharbor-free` bucket enforces. So an empty bar takes all the TH rows down
+  // together and they return together — it is not five separate models running
+  // out, and it needs no purchase to come back. Stated once, here, because the
+  // rows alone look like five independent lanes.
+  if ((t.lanes || []).some((l) => planCodeForLane(l) === "TH")) {
+    lines.push("Token Harbor: one shared rolling ~7-day value bar — when it empties all TH rows go at once and return together.");
   }
+
   if (blocked.length) {
     lines.push("");
     lines.push("Not counted on this host (no credential — cannot run):");
@@ -1619,7 +1647,10 @@ export function stampDepleted({ stateDir, provider, model, errText, depletedUnti
     const table = readJson(tablePath);
     if (!table || !Array.isArray(table.lanes)) return { stamped: false, reason: "ledger table unreadable" };
     const lane = (table.lanes || []).find((l) => laneMatchesRoute(l, provider, model));
-    const until = Number(depletedUntil) > now ? Number(depletedUntil) : now + 6 * 3600 * 1000;
+    const barEmpty = isTokenHarborBarExhausted(errText);
+    const until = Number(depletedUntil) > now
+      ? Number(depletedUntil)
+      : now + (barEmpty ? TOKEN_HARBOR_WEEKLY_BAR_MS : 6 * 3600 * 1000);
     const session = readJson(sessionPath) || {};
     session.quota = session.quota || {};
     const keys = lane ? quotaKeysForLane(lane) : [`${provider}/${model}`].filter((k) => k !== "/");

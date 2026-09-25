@@ -38,8 +38,14 @@ try {
   const thKeyed = providerReadiness({ env: { PATH: process.env.PATH, GEMINI_API_KEY: 'k', TOKEN_HARBOR_API_KEY: 'thk_live_test' }, home, location: 'vps', clineReady: () => true });
   check('a keyed tokenharbor reads ready', thKeyed.tokenharbor.ready === true);
   check('but is not reported as a gap', !setupGaps(thKeyed).some((g) => g.provider === 'tokenharbor'));
-  check('its note says the balance is not API-visible', /balance is not API-visible/.test(String(thKeyed.tokenharbor.note || '')));
-  check('and points at the dashboard to top up', /tokenharbor\.ai\/dashboard/.test(String(thKeyed.tokenharbor.note || '')));
+  // Token Harbor's free models share ONE rolling ~7-day value bar (the table's own
+  // resetRule, enforced by the shared `tokenharbor-free` bucket). An earlier version
+  // of this note told the user their balance was not API-visible and to top up at
+  // the dashboard — which misread a weekly bar that refills on its own as a
+  // missing payment, and sent the user to spend money to fix a weekly allowance.
+  check('its note describes the shared weekly value bar', /rolling ~7-day value bar/.test(String(thKeyed.tokenharbor.note || '')));
+  check('and says the lanes return together on the weekly reset', /weekly reset/.test(String(thKeyed.tokenharbor.note || '')));
+  check('and does not tell the user to buy anything', !/top up|add money|balance is not API-visible|dashboard/i.test(String(thKeyed.tokenharbor.note || '')), String(thKeyed.tokenharbor.note || ''));
   check('cloudflare names the exact variable', r.cloudflare.needs === 'CLOUDFLARE_WORKERS_AI_TOKEN');
   check('the fix is copy-pasteable and says where', /common\.env/.test(String(r.cloudflare.fix)) && /systemctl restart/.test(String(r.cloudflare.fix)));
   check('freebuff points at its own command', r.freebuff.command === '/unlock');

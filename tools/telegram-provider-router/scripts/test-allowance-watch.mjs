@@ -128,6 +128,27 @@ t("C3b every provider that can sit in the table has a probe kind", () => {
 });
 
 // ---------------------------------------------------------------- C4/C5 parsing
+// Token Harbor's free models share one rolling ~7-day value bar, and an empty bar
+// answers 402 with no countdown. The generic fallback stamped 6h — a daily
+// provider's number on a weekly one — so the watcher re-probed four times a day
+// against an allowance that cannot refill until the week turns over, and the row
+// showed a reset time that was never going to arrive.
+t("C3c a Token Harbor 402 stamps the weekly bar, not a 6h guess", () => {
+  const body = "HTTP 402 {'message': \"Your Token Harbor balance is at $0. Top up at https://tokenharbor.ai/dashboard to keep using paid models.\"}";
+  const dep = core.depletionUntilFromText(body);
+  near(dep.until - Date.now(), 7 * 24 * 3600 * 1000, 60000, "a 7-day window");
+  eq(dep.kind, "allowance-empty", "an empty allowance, not an unknown limit");
+  ok(core.isTokenHarborBarExhausted(body), "recognised");
+  ok(/7-day/.test(dep.hint || ""), "the hint says it is the weekly bar");
+
+  // A bare 402 belongs to whichever provider sent it. Handing it a 7-day window
+  // would freeze a daily provider for a week.
+  ok(!core.isTokenHarborBarExhausted("HTTP 402 payment required"), "a bare 402 is not Token Harbor's");
+  const cf = core.depletionUntilFromText("HTTP 402 payment required");
+  ok(cf.until - Date.now() <= 7 * 3600 * 1000, "a bare 402 keeps the 6h default");
+  ok(!core.isTokenHarborBarExhausted("Error 429: Rate limit exceeded"), "a 429 is not a bar exhaustion");
+});
+
 t("C4 countdown parse: 'Try again in 23h 15m' and future ISO stamps", () => {
   const cd = core.parseCountdownHint("Daily free model limit reached. Try again in 23h 15m.");
   ok(cd.countdownParsed, "countdown parsed");

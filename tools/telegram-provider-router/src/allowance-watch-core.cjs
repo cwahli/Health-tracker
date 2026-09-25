@@ -81,9 +81,28 @@ function isCloudflareDailyExhausted(text) {
  *   - rate-limit text without a countdown     → now + RATE_LIMIT_TTL_MS (45 m)
  *   - anything else                           → now + QUOTA_TTL_MS (6 h)
  */
+// Token Harbor's free allowance is one shared, rolling ~7-day value bar (the
+// table's own resetRule on every Token Harbor row), and an empty bar answers 402
+// with "balance is at $0" and no countdown. The generic fallback stamped 6h,
+// which is a daily provider's number applied to a weekly one: the watcher then
+// re-probed against a bar that will not refill until the week turns over, and the
+// row displayed a confident 6h that was never going to be true. Same shape as the
+// Cloudflare daily case above.
+const TOKEN_HARBOR_WEEKLY_BAR_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isTokenHarborBarExhausted(text) {
+  const s = String(text || "");
+  // Token Harbor must be named: a bare 402 is "payment required" from whichever
+  // provider sent it, and a weekly window must not be handed to a provider whose
+  // allowance is not weekly.
+  if (!/token\s*harbor/i.test(s)) return false;
+  return /\b402\b/.test(s) || /balance[^.]{0,40}\$?0\b/i.test(s);
+}
+
 function depletionUntilFromText(text, now = Date.now()) {
   const s = String(text || "");
   if (isCloudflareDailyExhausted(s)) return { until: nextMidnightUtc(now), kind: "allowance-empty", hint: "" };
+  if (isTokenHarborBarExhausted(s)) return { until: now + TOKEN_HARBOR_WEEKLY_BAR_MS, kind: "allowance-empty", hint: "rolling ~7-day value bar" };
   const cd = parseCountdownHint(s);
   if (cd.countdownParsed && cd.until > now) {
     const rl = isRateLimitText(s) && !/try\s+again\s+in\s+\d/i.test(s);
@@ -530,6 +549,8 @@ module.exports = {
   parseCountdownHint,
   nextMidnightUtc,
   isCloudflareDailyExhausted,
+  isTokenHarborBarExhausted,
+  TOKEN_HARBOR_WEEKLY_BAR_MS,
   depletionUntilFromText,
   OPENCODE_ZEN_SILENCE_MS,
   isOpenCodeZenModel,

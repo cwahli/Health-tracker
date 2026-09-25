@@ -219,14 +219,45 @@ try {
   // completion came back 402 because the balance was $0 — with the row still
   // ticking. Token Harbor exposes no balance endpoint, so the disclosure has to
   // sit next to the rows rather than wait for the walk to fail.
-  check('/allowance discloses that the Token Harbor balance is unverifiable', /Token Harbor: counted as usable/.test(text));
-  check('and says a $0 account fails the turn', /402/.test(text));
-  check('and names where to top up', /tokenharbor\.ai\/dashboard/.test(text));
+  // One shared weekly bar, said once. The rows look like five independent models,
+  // so without this the user reads an empty bar as five separate failures.
+  check('/allowance says Token Harbor is one shared bar', /Token Harbor: one shared rolling ~7-day value bar/.test(text));
+  check('and that the rows go and return together', /all TH rows go at once and return together/.test(text));
+  check('and it does not tell the user to buy anything', !/top up|add money|balance is not API-visible/.test(text), text.slice(0, 200));
   const thFreeTable = { ...table, lanes: table.lanes.filter((l) => l.provider !== 'tokenharbor') };
   fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(thFreeTable, null, 2));
   const noThText = buildAllowanceTextForBots({ stateDir: dir, now });
   check('and the disclosure is absent when no Token Harbor lane is listed', !/Token Harbor: counted as usable/.test(noThText));
   fs.writeFileSync(path.join(dir, 'free-lane-table.json'), JSON.stringify(table, null, 2));
+
+  // 6c. Token Harbor's bar is weekly, so a 402 must not be stamped with the 6h
+  // daily default. The table has said "rolling ~7-day value bar" on every TH row
+  // all along; the stamper disagreed, and a 6h re-probe against a weekly bar shows
+  // a reset time that is never going to arrive.
+  const thTable = { version: 3, buckets: {}, lanes: [
+    { pref: 1, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'DeepSeek V4.1', resetRule: 'rolling ~7-day value bar (shared Token Harbor free)' },
+    { pref: 2, provider: 'tokenharbor', model: 'mimo-v2.6-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'MiMo V2.6', resetRule: 'rolling ~7-day value bar (shared Token Harbor free)' },
+  ] };
+  const thDir = fs.mkdtempSync(path.join(os.tmpdir(), 'th-bar-'));
+  fs.writeFileSync(path.join(thDir, 'free-lane-table.json'), JSON.stringify(thTable, null, 2));
+  const thStamp = stampDepleted({ stateDir: thDir, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', errText: "HTTP 402 {'message': 'Your Token Harbor balance is at $0.'}" });
+  check('a Token Harbor 402 is stamped', thStamp.stamped === true, JSON.stringify(thStamp));
+  const thSession = JSON.parse(fs.readFileSync(path.join(thDir, 'session.json'), 'utf8'));
+  const thRec = thSession.quota['bucket:tokenharbor-free'];
+  check('it stamps the SHARED tokenharbor bucket, not just one model', Boolean(thRec), JSON.stringify(Object.keys(thSession.quota || {})));
+  check('with a weekly window, not the 6h daily default', thRec && thRec.depletedUntil - Date.now() > 6.5 * 24 * 3600 * 1000, thRec ? String(Math.round((thRec.depletedUntil - Date.now()) / 3600000)) + 'h' : 'no record');
+  const thRows = projectLanes(thTable, thSession, { now: Date.now() });
+  check('so every Token Harbor row is depleted together', thRows.every((r) => r.depleted === true), JSON.stringify(thRows.map((r) => [r.label, r.depleted])));
+  check('and none of them is offered', thRows.every((r) => r.selectable === false));
+  check('a non-Token-Harbor 402 keeps the 6h default', (() => {
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-bar-'));
+    const cfTable = { version: 3, buckets: {}, lanes: [{ pref: 1, provider: 'opencode', model: 'opencode/zen', status: 'available', tg: true, label: 'Zen' }] };
+    fs.writeFileSync(path.join(d2, 'free-lane-table.json'), JSON.stringify(cfTable, null, 2));
+    const s2 = stampDepleted({ stateDir: d2, provider: 'opencode', model: 'opencode/zen', errText: 'HTTP 402 payment required' });
+    const rec = (JSON.parse(fs.readFileSync(path.join(d2, 'session.json'), 'utf8')).quota || {})['opencode/opencode/zen'];
+    return s2.stamped === true && rec && rec.depletedUntil - Date.now() <= 7 * 3600 * 1000;
+  })());
+  fs.rmSync(thDir, { recursive: true, force: true });
 
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');

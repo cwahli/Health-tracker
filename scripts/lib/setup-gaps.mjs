@@ -121,17 +121,18 @@ export function providerReadiness({ env = process.env, home = os.homedir(), loca
   }
 
   if (hasEnv(env, 'TOKEN_HARBOR_API_KEY')) {
-    // The key being present does not mean a turn can run. Token Harbor exposes no
-    // balance or quota endpoint (every /v1 billing path 404s) and a spent account
-    // answers a real completion with 402, so "ready" here means "the key is wired
-    // up", not "a turn will succeed". Say so, or /setup claims a working lane the
-    // walk will hit and fail on.
+    // The key being present does not mean a turn can run right now, and the reason
+    // is not a missing credential. Token Harbor's free models share one rolling
+    // ~7-day value bar (the table's own resetRule, enforced by the shared
+    // `tokenharbor-free` bucket): when the bar is empty the vendor answers 402 and
+    // every TH row comes back together a week later. No API exposes the bar, so
+    // readiness is the key being wired up, and the bar is reported by /allowance.
     out.tokenharbor = {
       ready: true,
       needs: null,
       fix: null,
       command: null,
-      note: 'key accepted, but balance is not API-visible — a $0 account fails every turn with 402; check tokenharbor.ai/dashboard',
+      note: 'key accepted — free models share one rolling ~7-day value bar; when it empties every Token Harbor lane pauses together and returns on the weekly reset (/allowance shows the state)',
     };
   } else {
     out.tokenharbor = {
