@@ -131,11 +131,15 @@ export function sortModelsFreeFirst(models) {
   return [...free, ...paid];
 }
 
-export function modelKeyboard(models, { page = 0, pageSize = 8, kind = 'm' } = {}) {
+export function modelKeyboard(models, { page = 0, pageSize = 8, kind = 'm', all = false, footer = null } = {}) {
+  // `all: true` puts every model in one keyboard, the way the Grok router's
+  // /freemodel does — one button per row, no paging. With 50+ lanes on a host,
+  // paging eight at a time means seven taps of "Next" to see the list, which is
+  // the thing the router's single list avoids.
   const total = models.length;
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  const current = Math.min(Math.max(0, page), pages - 1);
-  const slice = models.slice(current * pageSize, current * pageSize + pageSize);
+  const pages = all ? 1 : Math.max(1, Math.ceil(total / pageSize));
+  const current = all ? 0 : Math.min(Math.max(0, page), pages - 1);
+  const slice = all ? models : models.slice(current * pageSize, current * pageSize + pageSize);
   // Embed the full model id (<=40 chars, well under Telegram's 64-byte
   // callback_data limit) instead of a bare index, so taps stay valid even
   // if the list was refetched/re-sorted (free-first) between showing the
@@ -145,6 +149,10 @@ export function modelKeyboard(models, { page = 0, pageSize = 8, kind = 'm' } = {
   const rows = slice.map((model) => [
     { text: model, callback_data: `${kind}:${model}` },
   ]);
+  if (all) {
+    if (footer) rows.push([footer]);
+    return { inline_keyboard: rows };
+  }
   const nav = [];
   if (current > 0) nav.push({ text: 'Prev', callback_data: `${kind}p:${current - 1}` });
   nav.push({ text: `${current + 1}/${pages}`, callback_data: 'noop' });

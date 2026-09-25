@@ -1404,8 +1404,17 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
       return k && modelKey(l.model) === k;
     }) || null;
     const refRoute = routeCandidates(ref)[0];
+    // Match by model identity, not by string shape. A lane's ref is not always
+    // spelled the way the catalog spells it — the Freebuff lane's projection ref is
+    // `deepseek/deepseek-v4.1-flash` with no provider prefix at all, while the
+    // catalog entry is `freebuff/deepseek/deepseek-v4.1-flash` — so an exact ref
+    // lookup missed it and the row fell back to "available". That is how a
+    // terminal-only lane came back tappable in /freemodel while /allowance marked
+    // it not usable. Same model, one row, one verdict.
+    const byModelIdentity = new Map(projection.map((r) => [modelKey(r.model), r]));
     const verdict = byRef.get(ref)
-      || (twin ? projection.find((r) => r.model === twin.model) : null)
+      || (twin ? byModelIdentity.get(modelKey(twin.model)) : null)
+      || byModelIdentity.get(modelKey(refRoute?.model || ""))
       || projection.find((r) => r.provider === refRoute?.provider
         && String(r.model).replace(/^[^/]+\//, '') === String(refRoute?.model || '').replace(/^[^/]+\//, ''));
     const depleted = verdict ? verdict.depleted : isFreemodelEntryDepleted(e, table, session, { now });

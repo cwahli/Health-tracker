@@ -286,6 +286,35 @@ try {
   check('/allowance says why it is not usable', /terminal only/.test(fbText));
   check('/freemodel marks the same lane not usable', /❌/.test(fbText) && /Freebuff/.test(fbText));
 
+  // 6e. Parity, asserted over a table that mixes every awkward shape at once: a
+  // plain opencode lane, a terminal-only Freebuff lane whose projection ref carries
+  // no provider prefix, a Token Harbor lane behind two prefixes, and a lane reached
+  // through a vendor-prefixed path. For every model, the verdict /freemodel gives
+  // must be the verdict /allowance gives.
+  const parityTable = { version: 3, buckets: {}, lanes: [
+    { pref: 1, provider: 'opencode', model: 'opencode/zen', status: 'available', tg: true, label: 'Zen' },
+    { pref: 2, provider: 'freebuff', model: 'deepseek/deepseek-v4.1-flash', status: 'available', tg: false, label: 'Freebuff DeepSeek' },
+    { pref: 3, provider: 'opencode', model: 'tokenharbor/deepseek-v4.1-flash:free', status: 'available', tg: true, label: 'TH DeepSeek' },
+    { pref: 4, provider: 'opencode', model: 'opencode/space-bunny-free', status: 'depleted', nextResetAt: '2030-01-01T00:00:00Z', tg: true, label: 'Space Bunny' },
+  ] };
+  const parityEntries = [
+    { ref: 'opencode/zen', label: 'opencode:zen (free)' },
+    { ref: 'freebuff/deepseek/deepseek-v4.1-flash', label: 'freebuff:deepseek (terminal-only)', selectable: false },
+    { ref: 'tokenharbor/deepseek-v4.1-flash:free', label: 'OpenCode Token Harbor DeepSeek free' },
+    { ref: 'opencode/space-bunny-free', label: 'opencode:space bunny free (free)' },
+  ];
+  const parityProj = projectLanes(parityTable, {});
+  const parityAnn = annotateFreemodelEntries(parityEntries, parityTable, {});
+  const unusableOf = (r) => r.selectable === false || r.depleted || r.ended === true;
+  for (const row of parityProj) {
+    const key = String(row.model).toLowerCase().split('/').pop();
+    const ann = parityAnn.find((a) => String(a.ref).toLowerCase().split('/').pop() === key);
+    check(`same verdict on both surfaces: ${row.label}`, Boolean(ann) && unusableOf(ann) === unusableOf(row) && ann.terminalOnly === row.terminalOnly,
+      `allowance=${unusableOf(row) ? 'not usable' : 'usable'}/${row.terminalOnly ? 'terminal' : 'chat'} freemodel=${ann ? `${unusableOf(ann) ? 'not usable' : 'usable'}/${ann.terminalOnly ? 'terminal' : 'chat'}` : 'NO ROW'}`);
+  }
+  check('a terminal-only lane is not usable in either surface',
+    parityAnn.find((a) => /freebuff/.test(a.ref))?.selectable === false && parityProj.find((r) => r.terminalOnly)?.selectable === false);
+
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel renders the annotated rows, not the raw catalog', /const rows = \(entries \|\| \[\]\)\.map\(verdictOf\)/.test(botSrc));
@@ -314,9 +343,19 @@ try {
   // Depleted lanes stay tappable, exactly as the router does, so a tap can answer
   // with what to use instead. Filtering them out is what made the two commands
   // list different things.
-  check('every row is a button, unusable ones marked ❌', /const buttons = rows\.map\(\(r\) => `\$\{unusableOf\(r\) \? '❌ ' : ''\}/.test(botSrc));
+  // The router's button: a provider tag, the model's own name, ❌ when unusable.
+  // The tag is the same plan code /allowance prints, which is what makes the two
+  // commands read as one list instead of two vocabularies.
+  check('a button is the plan code and the model name, ❌ when unusable',
+    /buttons\.push\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{tag \? tag \+ ': ' : ''\}\$\{label\}`/.test(botSrc), botSrc.match(/buttons\.push\([^\n]*/)?.[0] || 'not found');
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
   check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
+  // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven
+  // taps of "Next" to see the list, which is what the router's single list avoids.
+  check('the keyboard is not paged', /all: true/.test(botSrc) && /kind: 'fm',\s*all: true/.test(botSrc.replace(/\s+/g, ' ')));
+  check('and it carries the router\'s cancel row', /Cancel — keep current model/.test(botSrc));
+  check('the two Token Harbor paths collapse to one button', /const seen = new Set\(\)/.test(botSrc) && /seen\.has\(key\)/.test(botSrc));
+  check('modelKeyboard can render every model in one keyboard', /all = false/.test(fs.readFileSync(path.join(HERE, 'lib', 'commands.mjs'), 'utf8')));
   check('and a tap strips the ❌ marker and resolves that label back to the model',
     /a\.laneLabel === wanted/.test(botSrc) && /replace\(\/\^❌\\s\*\//.test(botSrc), 'the ❌ prefix must be stripped before matching');
 } finally {

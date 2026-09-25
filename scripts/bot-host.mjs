@@ -71,6 +71,7 @@ import {
   withCatalogLanes,
   entriesFromLanes,
   effectiveProviderOf,
+  planCodeForLane,
   renderFreeLaneTableHtml,
   ensureBotLedger,
   stampDepleted,
@@ -769,8 +770,26 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location } 
     footer.push(`not usable: ${unusable.slice(0, 4).map((r) => `${r.label} (${why(r)})`).join('; ')}${unusable.length > 4 ? `; +${unusable.length - 4} more` : ''}`);
   }
   if (footer.length) lines.push(footer.join(' — '));
-  // One button per row, labelled as /allowance labels it.
-  const buttons = rows.map((r) => `${unusableOf(r) ? '❌ ' : ''}${r.laneLabel || r.label}`);
+  // One button per row, the way the router builds its /freemodel keyboard: a
+  // provider tag, the model's own name, and ❌ when the row cannot be used. The tag
+  // is the same plan code /allowance prints in its Plan column, which is what makes
+  // the two read as one list rather than two vocabularies — a bare "big pickle"
+  // button next to a "big pickle OC" table row is the mismatch.
+  //
+  // The router also collapses the two Token Harbor paths (the OpenCode tools lane
+  // and the chat-only lane) onto one button, because they are the same shared
+  // `tokenharbor-free` bar. Two buttons saying the same thing is the same
+  // double-list problem one level down.
+  const seen = new Set();
+  const buttons = [];
+  for (const r of rows) {
+    const label = r.laneLabel || r.label;
+    const tag = r.lane ? planCodeForLane(r.lane) : '';
+    const key = `${tag}|${label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    buttons.push(`${unusableOf(r) ? '❌ ' : ''}${tag ? tag + ': ' : ''}${label}`);
+  }
   return { text: lines.join('\n'), buttons, rows, usable, unusable };
 }
 
@@ -1453,8 +1472,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // to use instead. Filtering them out of the keyboard is what made /freemodel
       // and /allowance list different things.
       const body = formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() });
+      // One keyboard with every model, no paging, and the router's cancel row.
       await api.sendMessage(chatId, body.text, {
-        reply_markup: modelKeyboard(body.buttons, { kind: 'fm' }),
+        reply_markup: modelKeyboard(body.buttons, {
+          kind: 'fm',
+          all: true,
+          footer: { text: 'Cancel — keep current model', callback_data: 'noop' },
+        }),
       });
       return;
     }
@@ -1481,10 +1505,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         }
       }
       // Router parity: raw HTML grid text (screenshot), NOT the markdown converter.
-      await sendHtml(api, chatId, buildAllowanceTextForBots({
+      // The sortable grid the router sends as its primary allowance view is one
+      // argument away (`/allowance table`) and is now named here, so the text table
+      // and the grid are discoverable as the same list rather than two features.
+      const text = buildAllowanceTextForBots({
         stateDir: getLedger(config.id).dir, provider: route.provider, model: route.model, location: workLocation(),
         readiness: hostReadiness(caches), catalogEntries: await getFreeModels(caches, config),
-      }));
+      });
+      await sendHtml(api, chatId, `${text}\n\nSortable grid: /allowance table`);
       return;
     }
 
