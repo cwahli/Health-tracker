@@ -1,0 +1,16 @@
+{
+  "slug": "r15-omni-agent-lanes",
+  "node": "planner",
+  "at": "2026-09-25T19:38:53.260Z",
+  "git": {
+    "head": "63e17ab02302af5e4e3c93d437bcd511af4f4670",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/r15-omni-agent-lanes.md"
+  ]
+}

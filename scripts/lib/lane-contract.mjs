@@ -47,6 +47,12 @@ export const LANES = {
     degradedReason: 'Antigravity CLI is location-blocked on VPS/cloud IPs; phone-only.',
     roles: [...ROLES],
   },
+  freebuff: {
+    kind: 'cli', apiOnly: false, tools: true, session: false,
+    degraded: ['resume', 'headless'],
+    degradedReason: 'Freebuff CLI 0.0.19x is TUI/login only — no one-shot, no serve/ACP; the TG lane is an opt-in tmux scrape (FREEBUFF_TG_LANE=1), unproven against the live vendor.',
+    roles: [...ROLES],
+  },
   gemini: {
     kind: 'api', apiOnly: true, tools: false, session: false,
     degraded: ['resume', 'tools', 'plan'],
@@ -85,6 +91,17 @@ export function laneFor(backend) {
 /** True when the lane cannot honor the capability. Unknown lane throws. */
 export function isDegraded(backend, capability) {
   return laneFor(backend).degraded.includes(String(capability));
+}
+
+/**
+ * True when the lane honors the capability today (not degraded).
+ * The `headless` capability is the formal probe for "can this backend take a
+ * one-shot prompt from a script right now" — dispatchers must check it before
+ * selecting a lane; a lane that graduates (e.g. a CLI gains a run/serve verb)
+ * flips automatically when its degraded list shrinks.
+ */
+export function laneSupports(backend, capability) {
+  return !isDegraded(backend, capability);
 }
 
 /** True when the lane may fill the role. Unknown lane throws. */
