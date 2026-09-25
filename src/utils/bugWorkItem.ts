@@ -174,6 +174,8 @@ export type BugWorkItem = {
   revision?: number;
   curation_events?: BugCurationEvent[];
   handoff?: BugHandoff;
+  archived_at?: string;
+  archive_reason?: string;
   /** Derived S-C-lite state (projected by bugState(); never agent-set). */
   state?: string;
 };
