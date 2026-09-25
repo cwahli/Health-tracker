@@ -25,6 +25,9 @@ import {
   ensureTmuxWorkView,
   disableTmuxObserver,
   createObserver,
+  WORK_VIEW_SESSION,
+  workViewTarget,
+  repointWorkView,
 } from './lib/work-session.mjs';
 import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
@@ -1153,7 +1156,7 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
     } else {
       session = setWorkView(id, { tx: true, viewMode: 'observer', viewCommand: null });
     }
-    const created = ensureTmuxWorkView(session, { tmux, solo: lane === 'opencode' });
+    const created = ensureTmuxWorkView(session, { tmux, solo: lane === 'opencode', sessionName: WORK_VIEW_SESSION });
     if (!created.ok) {
       await api.sendMessage(chatId, `Interactive work view unavailable: could not create \`${created.target}\` without replacing an existing tmux session.`);
       return;
@@ -1161,7 +1164,7 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
     if (lane !== 'opencode') setTx(id, true);
   } else if (sub === 'off') {
     const session = getSession(id);
-    if (session) disableTmuxObserver(session, { tmux });
+    if (session) disableTmuxObserver(session, { tmux, sessionName: WORK_VIEW_SESSION });
     setTx(id, false);
   } else if (sub === 'help') {
     await api.sendMessage(chatId, 'Usage: /tx on|off|status|debug|help — shared work-view for this chat.');
@@ -1170,7 +1173,7 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
     await api.sendMessage(chatId, 'Usage: /tx on|off|status|debug|help — shared work-view for this chat.');
     return;
   }
-  const view = statusForTelegram(id, { tmux });
+  const view = statusForTelegram(id, { tmux, sessionName: WORK_VIEW_SESSION });
   if (!view) {
     await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
     return;
@@ -1214,7 +1217,12 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
 export async function reconcileWorkViewForLane({ session, lane, workspace, tmux = defaultTmuxRunner, ensureTui = ensureOpencodeTui, env = {}, opencodeBin } = {}) {
   if (!session) return null;
   if (lane === 'opencode') {
-    if (session.viewMode === 'tui' && session.serverUrl && session.opencodeSessionId) return session;
+    // A live TUI is not automatically the right one: a swap (or a resume onto
+    // another thread) changes which conversation the pane should be showing.
+    // Rebinding keeps the view, changes what it points at.
+    if (session.viewMode === 'tui' && session.serverUrl && session.opencodeSessionId) {
+      return rebindWorkView(session, { tmux, ensureTui, workspace, env, opencodeBin });
+    }
     try {
       const tui = await ensureTui({
         serverUrl: session.serverUrl,
@@ -1231,22 +1239,54 @@ export async function reconcileWorkViewForLane({ session, lane, workspace, tmux 
         serverPid: tui.serverPid ?? session.serverPid ?? null,
         opencodeSessionId: tui.opencodeSessionId,
       });
-      ensureTmuxWorkView(updated, { tmux, solo: true });
+      ensureTmuxWorkView(updated, { tmux, solo: true, sessionName: WORK_VIEW_SESSION });
       return updated;
     } catch {
       const updated = setWorkView(session.id, { viewMode: 'observer', viewCommand: null });
-      ensureTmuxWorkView(updated, { tmux });
+      ensureTmuxWorkView(updated, { tmux, sessionName: WORK_VIEW_SESSION });
       return updated;
     }
   }
   if (session.viewMode === 'tui') {
-    try { disableTmuxObserver(session, { tmux }); } catch {
+    try { disableTmuxObserver(session, { tmux, sessionName: WORK_VIEW_SESSION }); } catch {
       // stale pane cleanup is best-effort; the metadata downgrade below is the fix
     }
   }
   const updated = setWorkView(session.id, { viewMode: 'observer', viewCommand: null });
-  ensureTmuxWorkView(updated, { tmux });
+  ensureTmuxWorkView(updated, { tmux, sessionName: WORK_VIEW_SESSION });
   return updated;
+}
+
+/**
+ * The view follows the conversation. The record names the thread that ran;
+ * when it names a different one than the pane was built for, the command is
+ * rebuilt and the pane is re-pointed in place — same `work-view` session, same
+ * pane, current tool. Nothing stale means nothing is touched.
+ */
+async function rebindWorkView(session, { tmux, ensureTui, workspace, env = {}, opencodeBin } = {}) {
+  try {
+    const tui = await ensureTui({
+      serverUrl: session.serverUrl,
+      opencodeSessionId: session.opencodeSessionId,
+      workspace,
+      title: `Health-tracker ${session.location} ${session.chat}`,
+      env,
+      opencodeBin,
+    });
+    if (!tui?.command || tui.command === session.viewCommand) return session;
+    const updated = setWorkView(session.id, {
+      viewCommand: tui.command,
+      serverUrl: tui.serverUrl ?? session.serverUrl,
+      serverPid: tui.serverPid ?? session.serverPid ?? null,
+      opencodeSessionId: tui.opencodeSessionId ?? session.opencodeSessionId,
+    });
+    const outcome = repointWorkView({ target: workViewTarget(updated.id), command: updated.viewCommand, tmux });
+    console.log(`[rebind] ${updated.id} -> ${outcome.method || 'no pane'} (${outcome.ok ? 'verified' : 'not verified'})`);
+    return updated;
+  } catch (err) {
+    console.log(`[rebind] ${session.id} left as it was: ${err?.message || err}`);
+    return session;
+  }
 }
 
 // V-30.5 /resume — prints the current ticket packet straight from the bug
@@ -1301,7 +1341,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'status': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
-      const work = statusForTelegram(workId);
+      const work = statusForTelegram(workId, { sessionName: WORK_VIEW_SESSION });
       const effSurface = parseModelRef(eff.model).surface;
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
@@ -1625,7 +1665,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'debug': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
-      const view = statusForTelegram(workId);
+      const view = statusForTelegram(workId, { sessionName: WORK_VIEW_SESSION });
       if (!view) {
         await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
         return;
@@ -2524,7 +2564,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       }
       // The thread id the worker ran is now ours too, so the next turn —
       // here or there — resumes the same conversation.
-      if (handed.sessionID) sessions.set(chatId, handed.sessionID);
+      if (handed.sessionID) {
+        sessions.set(chatId, handed.sessionID);
+        // The view is built from this record, so the record has to name the
+        // thread that just ran — otherwise /tx keeps showing the conversation
+        // from the previous host until something else rewrites it.
+        workSession = setWorkView(workSession.id, { opencodeSessionId: handed.sessionID }) || workSession;
+        if (workSession.tx) {
+          try {
+            workSession = await reconcileWorkViewForLane({
+              session: workSession,
+              lane: workLane,
+              workspace: config.agent.workspace,
+              tmux: defaultTmuxRunner,
+              env: opencodeEnv(config),
+              opencodeBin: config.agent.opencodeBin,
+            }) || workSession;
+          } catch {
+            // view rebind is best-effort; the answer is already on its way
+          }
+        }
+      }
       console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
       await renderer.finish(
         { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
