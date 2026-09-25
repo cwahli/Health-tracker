@@ -262,6 +262,93 @@ tests.push(["no working activity → timeout verdict + cleanup", async () => {
   ok(killed >= 2, "session cleaned up");
 }]);
 
+// ---- takeover: auto-close an IDLE human session, never a busy one ----------
+// A live scripted human session: a tmux pane plus a pid that dies on TERM.
+function humanEnv(mode) {
+  return { FREEBUFF_TG_LANE: "1", FREEBUFF_TG_TAKEOVER: mode };
+}
+function takeoverExec({ paneText, busyMarker = false, refuseClose = false, calls = [] }) {
+  let alive = true;
+  const pane = busyMarker ? `${paneText}\nworking...` : paneText;
+  return async (argv) => {
+    calls.push(argv.join(" "));
+    const sub = argv[0];
+    if (sub === "ps") return { stdout: "/dev/pts/7\n", code: 0 };
+    if (sub === "tmux" && argv[1] === "list-panes") return { stdout: "ht-human\t/dev/pts/7\n", code: 0 };
+    if (sub === "tmux" && argv[1] === "capture-pane") return { stdout: pane, code: 0 };
+    if (sub === "tmux" && argv[1] === "send-keys") return { stdout: "", code: 0 };
+    if (sub === "tmux" && argv[1] === "kill-session") return { stdout: "", code: 0 };
+    if (sub === "kill" && argv[1] === "-0") return { stdout: "", code: alive ? 0 : 1 };
+    if (sub === "kill" && argv[1] === "-TERM") {
+      if (refuseClose) return { stdout: "", code: 1 };
+      alive = false;
+      return { stdout: "", code: 0 };
+    }
+    if (sub === "kill") return { stdout: "", code: 0 };
+    if (sub === "tmux" && argv[1] === "new-session") return { stdout: "", code: 0 };
+    return { stdout: "", code: 0 };
+  };
+}
+
+tests.push(["takeover off (default): yields, never closes the human session", async () => {
+  const calls = [];
+  const r = await runFreebuffLane({
+    prompt: "hi", model: "stealth/space-bunny-alpha", env: humanEnv("off"),
+    fetchFn: fetchBalance(10), credsPath: creds(), ownerPath: owner(process.pid),
+    exec: takeoverExec({ paneText: "Enter a coding task", calls }),
+    sleep: noSleep, timeouts: { ...fastTimeouts, takeoverIdleMs: 20, takeoverPollMs: 10 },
+  });
+  eq(r.ok, false, "not ok");
+  ok(/yields to it/i.test(r.text), "yields");
+  ok(!calls.some((c) => /^kill /.test(c)), "no kill attempted");
+  ok(!calls.some((c) => c.includes("new-session")), "no second instance started");
+}]);
+
+tests.push(["takeover idle + busy pane: refuses to close, yields", async () => {
+  const calls = [];
+  const r = await runFreebuffLane({
+    prompt: "hi", model: "stealth/space-bunny-alpha", env: humanEnv("idle"),
+    fetchFn: fetchBalance(10), credsPath: creds(), ownerPath: owner(process.pid),
+    exec: takeoverExec({ paneText: "Enter a coding task", busyMarker: true, calls }),
+    sleep: noSleep, timeouts: { ...fastTimeouts, takeoverIdleMs: 20, takeoverPollMs: 10 },
+  });
+  eq(r.ok, false, "not ok");
+  ok(/looks busy/i.test(r.text), "busy verdict");
+  ok(!calls.some((c) => /^kill /.test(c)), "busy session never killed");
+  ok(!calls.some((c) => c.includes("new-session")), "no second instance started");
+}]);
+
+tests.push(["takeover idle + idle pane: closes the session, then runs", async () => {
+  const calls = [];
+  const base = takeoverExec({ paneText: "Enter a coding task", calls });
+  const r = await runFreebuffLane({
+    prompt: "hi", model: "stealth/space-bunny-alpha", env: humanEnv("idle"),
+    fetchFn: fetchBalance(10), credsPath: creds(), ownerPath: owner(process.pid),
+    exec: base,
+    sleep: noSleep,
+    timeouts: { ...fastTimeouts, takeoverIdleMs: 20, takeoverPollMs: 10, taskPromptMs: 30, workingAppearMs: 30, totalMs: 120 },
+  });
+  // Whatever the run outcome, the human session must be closed first and the
+  // lane must not have bailed on the yield/busy paths.
+  ok(!/yields to it|looks busy/i.test(r.text), `must not yield: ${r.text}`);
+  ok(calls.some((c) => c.includes("send-keys -t ht-human Escape")), "graceful Escape sent to the idle session");
+  ok(calls.some((c) => /kill -TERM/.test(c)), "SIGTERM used to close it");
+  ok(calls.some((c) => c.includes("new-session")), "lane then started its own session");
+}]);
+
+tests.push(["takeover idle + close fails: honest refusal, no second instance", async () => {
+  const calls = [];
+  const r = await runFreebuffLane({
+    prompt: "hi", model: "stealth/space-bunny-alpha", env: humanEnv("idle"),
+    fetchFn: fetchBalance(10), credsPath: creds(), ownerPath: owner(process.pid),
+    exec: takeoverExec({ paneText: "Enter a coding task", refuseClose: true, calls }),
+    sleep: noSleep, timeouts: { ...fastTimeouts, takeoverIdleMs: 20, takeoverPollMs: 10 },
+  });
+  eq(r.ok, false, "not ok");
+  ok(/could not close/i.test(r.text), `honest close failure: ${r.text}`);
+  ok(!calls.some((c) => c.includes("new-session")), "no second instance started");
+}]);
+
 // ---- run ----
 for (const [name, fn] of tests) await t(name, fn);
 console.log("");
