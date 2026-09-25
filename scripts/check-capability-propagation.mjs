@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const REG_PATH = path.join(ROOT, 'bots', 'capabilities.json');
+const MATRIX_PATH = path.join(ROOT, 'public', 'capability-matrix.html');
 const SKILLS_DIR = path.join(ROOT, 'scripts', 'skills', 'common');
 const LIB_DIR = path.join(ROOT, 'scripts', 'lib');
 
@@ -88,6 +89,20 @@ try {
 
 if (JSON.stringify(reg.classes) !== JSON.stringify(CLASS_KEYS)) {
   fail(`registry classes must be exactly [${CLASS_KEYS.join(', ')}]`);
+}
+
+if (!fs.existsSync(MATRIX_PATH)) {
+  fail(`missing capability matrix: ${path.relative(ROOT, MATRIX_PATH)}`);
+} else {
+  const matrix = fs.readFileSync(MATRIX_PATH, 'utf8');
+  const matrixClasses = [...matrix.matchAll(/data-capability-class="([^"]+)"/g)].map((match) => match[1]);
+  if (JSON.stringify(matrixClasses) !== JSON.stringify(CLASS_KEYS)) {
+    fail(`capability matrix classes must be exactly [${CLASS_KEYS.join(', ')}]`);
+  }
+  if (/<th[^>]*>\s*(?:OpenCode|Android|Chat)\s*<\/th>/i.test(matrix)) {
+    fail('capability matrix contains legacy class headers');
+  }
+  if (!matrix.includes('bots/capabilities.json')) fail('capability matrix must name bots/capabilities.json as its source');
 }
 
 const skillToCap = new Map();
