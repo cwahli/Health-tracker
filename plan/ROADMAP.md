@@ -45,9 +45,25 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 
 **Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (340 KB / 6,474 lines, under its 6,500 ceiling after extraction).
 
-## BOT-24 — location-scoped `/freemodel` + allowance (OPEN)
+## BOT-24 — location-scoped `/freemodel` + allowance (IN PROGRESS — HANDOFF 2026-09-25)
 
 **Rule:** `/freemodel` is a property of the current host and bot, never a global catalog. Each VM, phone/proot, and Collab host has its own installed tools, credentials, provider catalog, and quota. The list may show Cline, Token Harbor, Freebuff, Gemini-through-OpenCode, or omit them when that host cannot run or authenticate them. Never infer availability from another host's list or shared pref document.
+
+**Progress reviewed on `main` at `15381ba`; WIP handoff branch: `agent/bot24-catalog-handoff`.** This section is the BOT-24 execute board; do not reopen the completed slices below.
+
+**Landed:** `f34f9b1` added the shared per-bot allowance ledger and per-bot auto-track; `5ee133d` added location-scoped host capability filtering; `931cab2` routed Gemini through OpenCode; `2ce8a43` added router depletion UX and exhausted-route switching; `cd733ed` added the active tool-allowance ping; `712eab9` added explicit Cline enrollment and made router Cline candidates ledger-driven. The active ping and the bot-host command wiring have been live-checked on the VM, but the full BOT-24 live matrix is not complete.
+
+**Reviewed gap:** the command surfaces do not yet share one canonical, host-aware route projection. Bot-host `/freemodel` starts from host discovery and annotates a per-bot ledger, while `/allowance` renders that ledger; the router separately probes provider catalogs and reads its router ledger. A route can therefore appear in one surface but not the other, and a tap can resolve a display label rather than a stable execution route. The shared `free-lanes.mjs` vendor copy has ledger/quota/rendering helpers but no exported host-aware usable-choice projection.
+
+**High-risk findings to fix next:** normalize OpenCode-hosted `tokenharbor/*`, `cloudflare/*`, and `google/*` refs to their actual execution owner before quota/allowance matching; make bot-host callbacks use stable route identities; make bot-host failover and quota stamping use the selected actual route and the per-bot ledger; keep router Freebuff terminal-only by default; pass vendor reset hints through the active ping; and make ping target eligibility and ledger writes explicitly per bot. Do not treat pending/unauthenticated/ended lanes as selectable. The current bot-host freemodels tests still contain three known stale failures from the pre-location-scoped/Gemini behavior.
+
+**Next packet, in order:**
+1. Add a pure host-aware canonical usable-choice projection in `scripts/lib/free-lanes.mjs`, with normalized execution route identity, selectable/terminal-only status, current quota, and catalog availability; sync the router vendor mirror.
+2. Make bot-host and router `/freemodel` bodies/buttons and `/allowance` usable rows consume that projection, preserving per-bot quota isolation and explicit Freebuff visibility without Telegram selection.
+3. Add stable callback tokens, selected-route execution/failover, and per-route quota stamping tests; then add the per-bot active-ping reset/isolation integration test.
+4. Run the VM and mobile live checklist below, record host/bot/command/timestamp/reply evidence, and only then mark BOT-24 DONE.
+
+**Completion bar:** the same normalized route-key set is shown by `/freemodel` and `/allowance` for the same host and bot, selected routes execute through the normalized route, depleted selection names the next usable route, vendor reset clocks survive both ledgers, and VM + mobile live acceptance evidence is captured. This WIP branch is documentation-only; no BOT-24 implementation changes are staged here.
 
 1. **Location detection and filtering** — `scripts/lib/freemodels.mjs` detects `BOT_LOCATION`/Termux/host, checks local OpenCode, Cline CLI + auth, OpenCode provider catalog, Token Harbor credentials/catalog, and Freebuff binary + credentials. VM and mobile must produce different lists when their local capabilities differ. Each bot's `/freemodel` must read its own host state.
 2. **Cline** — list Cline models only when the local Cline executable works and its auth is present. Mobile ARM64 Cline is omitted until the CLI is actually supported and installed; do not advertise a static Cline list that cannot run.
