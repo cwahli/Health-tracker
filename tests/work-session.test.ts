@@ -9,6 +9,7 @@ import {
   resolveSession,
   getSession,
   setTx,
+  setWorkView,
   handoffSession,
   abortSession,
   ensureTmuxWorkView,
@@ -195,6 +196,17 @@ describe('tmux work view', () => {
     expect(tmux.calls.filter((args) => args[0] === 'split-window')).toHaveLength(0);
     expect(tmux.calls.filter((args) => args[0] === 'select-pane').length).toBeGreaterThanOrEqual(2);
     expect(tmux.calls.flat().some((arg) => /send-keys|respawn-pane|kill-window|kill-session/.test(String(arg)))).toBe(false);
+  });
+
+  it('uses a stored interactive TUI command for the workstream pane', () => {
+    const session = resolveSession({ ...loc, id: undefined, lane: 'opencode' }, store);
+    const command = "'opencode' attach 'http://127.0.0.1:4096' --dir '/ws' --session 'ses_test'";
+    const tuiSession = setWorkView(session.id, { viewMode: 'tui', viewCommand: command }, store);
+    const tmux = fakeTmux();
+    const result = ensureTmuxWorkView(tuiSession, { tmux: tmux.run });
+    expect(result.ok).toBe(true);
+    expect(tmux.calls.find((args) => args[0] === 'new-session').at(-1)).toBe(command);
+    expect(debugProbe('opencode', { session: tuiSession, tmux: tmux.run }).observerLive).toBe(true);
   });
 
   it('adds only a missing window to an existing session', () => {
