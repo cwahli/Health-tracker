@@ -85,6 +85,11 @@ try {
   check('folding twice adds nothing', withCatalogLanes(folded.table, foldCatalog).added.length === 0);
   check('a folded row is labelled like the rest of the table, not as a raw ref',
     folded.added.every((l) => !/^(cline:|opencode:|google:)/.test(String(l.label || ''))), JSON.stringify(folded.added.map((l) => l.label)));
+  check('a folded label drops the surface prefix and the (free) suffix',
+    withCatalogLanes({ version: 3, lanes: [] }, [{ ref: 'opencode/big-pickle', label: 'opencode:big pickle (free)' }]).added[0].label === 'big pickle',
+    JSON.stringify(withCatalogLanes({ version: 3, lanes: [] }, [{ ref: 'opencode/big-pickle', label: 'opencode:big pickle (free)' }]).added.map((l) => l.label)));
+  check('a folded label keeps a real product name intact',
+    withCatalogLanes({ version: 3, lanes: [] }, [{ ref: 'cline:cline-free/kat-coder-pro', label: 'cline:kat coder pro (free)' }]).added[0].label === 'kat coder pro');
   const foldedRows = projectLanes(folded.table, {});
   check('a folded gemini row is selectable', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.selectable === true);
   check('a folded gemini row is planned as GM', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.plan === 'GM');

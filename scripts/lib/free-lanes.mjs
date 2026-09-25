@@ -1155,14 +1155,20 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
       known.add(key);
       nextPref += 1;
       const terminalOnly = typeof entry === "object" && entry ? entry.selectable === false : false;
+      // The table's own labels are short human names ("Space Bunny", "MiMo V2.6"),
+      // and the renderer sizes its columns from them. The catalog's label is written
+      // for /freemodel, so the surface prefix and the "(free)" suffix come off:
+      // `opencode:big pickle (free)` reads as `big pickle`, not `opencode/big-pic`.
+      const rawLabel = (typeof entry === "object" && entry?.label) || "";
+      const cleanLabel = rawLabel
+        .replace(/^[a-z][a-z0-9-]*:\s*/i, "")
+        .replace(/\s*\(free\)\s*$/i, "")
+        .trim();
       const lane = {
         pref: nextPref,
         provider: route.provider,
         model: route.model,
-        // The table's own labels are short names, not raw refs, and the renderer
-        // sizes its columns from them: a folded row labelled `cline:kat coder pro
-        // (free)` pushed the plan code off the edge of the table.
-        label: shortModelName(route.model) || route.model,
+        label: cleanLabel || shortModelName(route.model) || route.model,
         // `available` means "not known to be spent". The projection is what refuses
         // to offer it — a missing credential, a terminal-only tool or a live
         // depletion record each turn the row into its own honest verdict, and a
