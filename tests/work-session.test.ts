@@ -297,22 +297,27 @@ describe('handoff / abort', () => {
 });
 
 describe('private observer log', () => {
-  it('writes only allowlisted activity and uses a hashed private path', () => {
+  it('writes sanitized full activity and uses a hashed private path', () => {
     const root = path.join(os.tmpdir(), `observer_${Date.now()}_${Math.random().toString(36).slice(2)}`);
     const session = resolveSession(loc, store);
     const observer = createObserver(session, { root, now: () => '2026-09-24T00:00:00.000Z' });
     expect(path.basename(observer.path)).not.toContain(session.id);
     expect(path.dirname(observer.path)).toBe(root);
-    observer.onEvent({ kind: 'reasoning', text: 'private reasoning secret' });
-    observer.onEvent({ kind: 'tool', tool: 'read', status: 'completed', input: 'secret input', output: 'secret output' });
-    observer.onEvent({ kind: 'step_finish', tokens: { total: 42, input: 'secret input' }, cost: 0.01 });
-    observer.onEvent({ kind: 'text', text: 'secret final text' });
-    observer.onEvent({ kind: 'error', message: 'secret provider error' });
+    observer.onEvent({ kind: 'reasoning', text: 'private reasoning' });
+    observer.onEvent({ kind: 'tool', tool: 'read', status: 'completed', input: { path: 'src/index.ts', apiKey: 'do-not-log' }, output: 'file contents' });
+    observer.onEvent({ kind: 'step_finish', tokens: { total: 42, input: 'do-not-log' }, cost: 0.01 });
+    observer.onEvent({ kind: 'text', text: 'final answer' });
+    observer.onEvent({ kind: 'error', message: 'provider error' });
     const content = fs.readFileSync(observer.path, 'utf8');
-    expect(content).toContain('"kind":"thinking"');
-    expect(content).toContain('"tool":"read"');
+    const records = content.trim().split('\n').map((line) => JSON.parse(line));
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'thinking', content: 'private reasoning' }),
+      expect.objectContaining({ kind: 'tool', tool: 'read', content: expect.stringContaining('src/index.ts') }),
+      expect.objectContaining({ kind: 'text', content: 'final answer' }),
+      expect.objectContaining({ kind: 'error', content: 'provider error' }),
+    ]));
     expect(content).toContain('"tokens":42');
-    expect(content).not.toMatch(/private reasoning|secret input|secret output|secret final text|secret provider error/);
+    expect(content).not.toContain('do-not-log');
     expect(fs.statSync(root).mode & 0o777).toBe(0o700);
     expect(fs.statSync(observer.path).mode & 0o777).toBe(0o600);
     fs.rmSync(root, { recursive: true, force: true });
