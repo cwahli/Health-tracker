@@ -144,7 +144,7 @@ Every bundle records:
 
 ## Contact model (opencode master = self-serve)
 
-The OpenCode Telegram bot (`@Opencode_135_bot`, registry master `opencode`) **runs this
+The OpenCode Telegram bot (`@VM_19485_bot`, registry master `vm`) **runs this
 engine itself** when asked to audit a meal. It does **not** message `@Meal_audit_bot`
 or any other bot — Telegram cannot deliver bot→bot, and a second `getUpdates` on the
 meal_audit token would conflict with `hermes-gateway`.
