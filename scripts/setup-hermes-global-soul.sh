@@ -57,17 +57,17 @@ done
 
 cat > "${PROFILES_DIR}/bug_ticket/memories/MEMORY.md" << 'BUG_TICKET_MEM_EOF'
 Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
-The only binary: run from the repo root — cd /home/ubuntu/src/Health-tracker && node scripts/bugctl.mjs (gateway cwd is ~/.hermes, a relative path fails there). pack --check before pack POST; repro --check before repro POST. State is derived from artifacts — never set it.
+The only binary: run from the repo root — cd /home/ubuntu/src/Health-tracker && node scripts/bugctl.mjs (gateway cwd is ~/.hermes, a relative path fails there). Read the canonical list with `bugctl list --json`; use `queue` only for the open queue. pack --check before pack POST; repro --check before repro POST. State is derived from artifacts — never set it.
 Multi-item reports (e.g. BUG-8449's 7 Home discrepancies): ONE card + a split list, never a bundled ticket.
 Vague report → card + repro status=needed (needs_repro). Fingerprint = class|canonical_key|iso-week.
 Token HERMES_BUG_TICKET_TOKEN lives in ~/.config/bot-host/tokens.env (handle @Bug_ticket_bot); never print it.
-Packer never dispatches coders; triage handoff is a separate phase after packed.
+Steward never dispatches coders; curation edits are revisioned and handoff is a separate receipted phase after review.
 BUG_TICKET_MEM_EOF
 echo "  ✓ USER.md synced across profiles; bug_ticket MEMORY.md written"
 
 cat > "${PROFILES_DIR}/qa_meal/memories/MEMORY.md" << 'QA_MEM_EOF'
 Live site is https://health-tracking.duckdns.org. Dev checkout is /home/ubuntu/src/Health-tracker.
-Tickets: cd /home/ubuntu/src/Health-tracker && node scripts/bugctl.mjs queue --assignee=qa_meal (boot, never MEMORY.md).
+Tickets: cd /home/ubuntu/src/Health-tracker && node scripts/bugctl.mjs list --assignee=qa_meal (canonical list, never MEMORY.md).
 Reproduce-only lane: qa-reproduce skill + scripts/qa-runner.mjs --ticket=<n>; never fix, dispatch, or verify.
 A QA bug is fixed only by run-coding-dispatch.sh. The OpenCode Telegram bot is a separate interactive door.
 OpenCode model opencode/muse-spark-1.3 returned insufficient funds on 2026-09-22. Antigravity is blocked in this region.
