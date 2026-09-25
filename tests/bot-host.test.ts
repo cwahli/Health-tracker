@@ -911,22 +911,41 @@ describe('freemodels', () => {
     expect(refs).toEqual(['opencode/big-pickle', 'opencode/mimo-v2.6-flash-free']);
   });
 
-  it('lists cline free models first and reports notes in the text', () => {
+  it('lists cline free models first, only when the local CLI and auth are usable', () => {
+    const readJson = (file: string) => {
+      if (String(file).endsWith('providers.json')) {
+        return { providers: { cline: { settings: { auth: { accessToken: 'x' } } } } };
+      }
+      return null;
+    };
+    const entries = buildFreeModelList({
+      modelsCachePath: '/missing-models.json',
+      authPath: '/missing-auth.json',
+      readJson,
+      clineBin: process.execPath,
+      opencodeBin: '/definitely/not/installed',
+    });
+    const cline = entries.filter((e) => e.surface === 'cline');
+    expect(cline.map((e) => e.ref)).toEqual(CLINE_FREE_MODELS.map((id) => `cline:${id}`));
+    const text = formatFreeModelText(entries, { current: 'opencode/big-pickle' });
+    expect(text).toContain('opencode/big-pickle');
+    expect(text).toContain('daily free cap');
+    expect(text).toContain('4 cline');
+  });
+
+  it('omits cline models when the local CLI or auth is missing', () => {
     const entries = buildFreeModelList({
       modelsCachePath: '/missing-models.json',
       authPath: '/missing-auth.json',
       readJson: () => null,
+      clineBin: '/definitely/not/installed',
+      opencodeBin: '/definitely/not/installed',
     });
-    expect(entries).toHaveLength(CLINE_FREE_MODELS.length + GEMINI_MODELS.length);
-    expect(entries[0].surface).toBe('cline');
-    expect(entries[0].ref).toBe('cline:cline-free/deepseek-v4.1-flash');
-    const text = formatFreeModelText(entries, { current: 'opencode/big-pickle' });
-    expect(text).toContain('opencode/big-pickle');
-    expect(text).toContain('daily free cap');
-    expect(text).toContain('4 cline, 4 gemini, 0 opencode');
+    expect(entries.filter((e) => e.surface === 'cline').every((e) => e.selectable === false)).toBe(true);
+    expect(entries.some((e) => String(e.pendingAction || '').includes('Install the Cline CLI'))).toBe(true);
   });
 
-  it('parses gemini: refs and formats api labels', () => {
+  it('parses gemini: refs and marks legacy labels as moved to opencode', () => {
     expect(parseModelRef('gemini:gemini/gemini-3.8-flash')).toEqual({
       surface: 'gemini',
       id: 'gemini/gemini-3.8-flash',
@@ -934,22 +953,52 @@ describe('freemodels', () => {
     });
     expect(toModelRef('gemini', 'gemini/gemini-3.1-pro')).toBe('gemini:gemini/gemini-3.1-pro');
     expect(formatFreeLabel('gemini:gemini/gemini-3.5-flash-lite')).toBe(
-      'gemini:gemini-3.5-flash-lite (api)',
+      'gemini:gemini-3.5-flash-lite (moved to opencode)',
     );
     expect(GEMINI_MODELS).toHaveLength(4);
   });
 
-  it('lists curated gemini models even without opencode cache', () => {
+  it('exposes gemini through opencode only when the local catalog has it', () => {
+    const readJson = (file: string) => {
+      if (String(file).endsWith('models.json')) {
+        return {
+          google: {
+            models: {
+              'gemini-3.5-flash-lite': { cost: { input: 0, output: 0 } },
+              'gemini-3.7-flash': { cost: { input: 0, output: 0 } },
+            },
+          },
+        };
+      }
+      if (String(file).endsWith('auth.json')) return { google: { apiKey: 'x' } };
+      return null;
+    };
+    const entries = buildFreeModelList({
+      modelsCachePath: '/cache/models.json',
+      authPath: '/cache/auth.json',
+      readJson,
+      opencodeBin: process.execPath,
+      clineBin: '/definitely/not/installed',
+    });
+    // No standalone gemini picker entries — Gemini rides the OpenCode surface.
+    expect(entries.some((e) => e.surface === 'gemini')).toBe(false);
+    const gemini = entries.filter((e) => e.provider === 'gemini');
+    expect(gemini.map((e) => e.ref).sort()).toEqual(['google/gemini-3.5-flash-lite', 'google/gemini-3.7-flash']);
+    expect(gemini.every((e) => e.surface === 'opencode')).toBe(true);
+  });
+
+  it('marks gemini pending (not listed) when the local catalog lacks it', () => {
     const entries = buildFreeModelList({
       modelsCachePath: '/missing-models.json',
       authPath: '/missing-auth.json',
       readJson: () => null,
+      opencodeBin: '/definitely/not/installed',
+      clineBin: '/definitely/not/installed',
     });
-    expect(entries.slice(0, CLINE_FREE_MODELS.length).every((e) => e.surface === 'cline')).toBe(true);
-    const gemini = entries.filter((e) => e.surface === 'gemini');
-    expect(gemini.map((e) => e.ref)).toEqual(GEMINI_MODELS.map((id) => `gemini:${id}`));
-    const text = formatFreeModelText(entries, { current: 'gemini:gemini/gemini-3.7-flash' });
-    expect(text).toContain('gemini:gemini-3.7-flash (api)');
+    // No SELECTABLE standalone gemini picker entries — only the pending setup row.
+    expect(entries.filter((e) => e.surface === 'gemini').every((e) => e.selectable === false)).toBe(true);
+    expect(entries.some((e) => String(e.pendingAction || '').includes('GEMINI_API_KEY'))).toBe(true);
+    const text = formatFreeModelText(entries, { current: 'opencode/big-pickle' });
     expect(text).toContain('GEMINI_API_KEY');
   });
 });
@@ -2012,5 +2061,234 @@ describe('BOT-19 /tx wiring', () => {
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'nope', tmux: tmux.run });
     expect(sent[0]).toContain('Usage: /tx on|off|status|debug|help');
     expect(tmux.calls).toEqual([]);
+  });
+});
+
+describe('provider switching (opencode <-> cline)', () => {
+  it('labels the provider from the effective model surface', async () => {
+    const { providerLabelForModel } = await import('../scripts/bot-host.mjs');
+    expect(providerLabelForModel('cline:cline-free/muse-spark-1.3-contributor')).toBe('Cline');
+    expect(providerLabelForModel('gemini:gemini/gemini-3.5-flash-lite')).toBe('Gemini');
+    expect(providerLabelForModel('opencode/nemotron-3.5-lightning-free')).toBe('OpenCode');
+    expect(providerLabelForModel('nemotron-3.5-lightning-free')).toBe('OpenCode');
+  });
+
+  it('fails over from a quota-hit cline lane to the opencode fallback', async () => {
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const seen = [];
+    const runModel = (model) => {
+      seen.push(model);
+      if (String(model).startsWith('cline:')) {
+        return Promise.resolve({
+          code: 1, sessionID: null, finalText: '',
+          lastError: 'Error 429: Daily free limit reached on model meta/muse-spark-1.3-contributor. Try again in 22h 46m',
+          stderr: '', usage: { cost: 0, tokens: null },
+        });
+      }
+      return Promise.resolve({
+        code: 0, sessionID: null, finalText: 'ok', lastError: null, stderr: '', usage: { cost: 0, tokens: null },
+      });
+    };
+    const sent = [];
+    const result = await runOpencodeWithFailover({
+      api: { sendMessage: async (chatId, text) => { sent.push(text); return {}; } },
+      chatId: 9,
+      prompt: 'Reply with exactly: ok',
+      models: ['cline:cline-free/muse-spark-1.3-contributor', 'opencode/space-bunny-free'],
+      runModel,
+    });
+    expect(seen).toEqual(['cline:cline-free/muse-spark-1.3-contributor', 'opencode/space-bunny-free']);
+    expect(result.finalText).toBe('ok');
+    expect(sent.length).toBe(1);
+    expect(sent[0]).toMatch(/switching to/);
+    expect(sent[0]).toMatch(/free limit/);
+    expect(sent[0]).not.toMatch(/[{}]/);
+  });
+
+  it('never auto-retries a cline timeout onto the next lane', async () => {
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const seen = [];
+    const result = await runOpencodeWithFailover({
+      api: { sendMessage: async () => ({}) },
+      chatId: 9,
+      prompt: 'x',
+      models: ['cline:cline-free/muse-spark-1.3-contributor', 'opencode/space-bunny-free'],
+      runModel: (model) => {
+        seen.push(model);
+        return Promise.resolve({
+          code: 1, sessionID: null, finalText: '', lastError: 'timed out after 120000ms', stderr: '', usage: {},
+        });
+      },
+    });
+    expect(seen).toEqual(['cline:cline-free/muse-spark-1.3-contributor']);
+    expect(result.finalText).toBe('');
+  });
+
+  it('summarizes a cline daily-cap failure without raw JSON', async () => {
+    const { formatProviderFailure } = await import('../scripts/bot-host.mjs');
+    const out = formatProviderFailure({
+      surface: 'cline',
+      model: 'cline:cline-free/muse-spark-1.3-contributor',
+      lastError: 'Error 429: Daily free limit reached on model meta/muse-spark-1.3-contributor. Try again in 22h 46m',
+      stderr: '{"ts":"2026-09-25T12:29:04.094Z","type":"error","message":"Daily free model limit reached"}',
+    });
+    expect(out.message).toMatch(/daily free limit/i);
+    expect(out.message).toMatch(/22h/);
+    expect(out.message).not.toMatch(/[{}]/);
+    expect(out.stderr).toBe('');
+  });
+});
+
+describe('provider-switch tx reconcile', () => {
+  const OLD_WS = process.env.WORK_SESSIONS;
+  const OLD_LOC = process.env.BOT_LOCATION;
+  const OLD_OBSERVERS = process.env.WORK_OBSERVERS;
+  let wsFile;
+  let observerRoot;
+  beforeEach(() => {
+    wsFile = `${os.tmpdir()}/switch_tx_${Date.now()}_${Math.random().toString(36).slice(2)}.json`;
+    observerRoot = `${os.tmpdir()}/switch_tx_obs_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    process.env.WORK_SESSIONS = wsFile;
+    process.env.WORK_OBSERVERS = observerRoot;
+    process.env.BOT_LOCATION = 'switchbox';
+  });
+  afterEach(() => {
+    if (OLD_WS === undefined) delete process.env.WORK_SESSIONS;
+    else process.env.WORK_SESSIONS = OLD_WS;
+    if (OLD_LOC === undefined) delete process.env.BOT_LOCATION;
+    else process.env.BOT_LOCATION = OLD_LOC;
+    if (OLD_OBSERVERS === undefined) delete process.env.WORK_OBSERVERS;
+    else process.env.WORK_OBSERVERS = OLD_OBSERVERS;
+    try { fs.unlinkSync(wsFile); } catch {}
+    try { fs.rmSync(observerRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  const TUI_CMD = "'opencode' attach 'http://127.0.0.1:4096' --dir '/ws' --session 'ses_test'";
+  const fakeSwitchTmux = (initialPanes = []) => {
+    const calls = [];
+    const panes = new Map(initialPanes.map((p, i) => [`%${i + 1}`, p]));
+    const windows = new Set(['ws-switchbox-1']);
+    let next = initialPanes.length + 1;
+    const run = (args) => {
+      calls.push(args);
+      if (args[0] === 'has-session') return true;
+      if (args[0] === 'list-windows') return [...windows].join('\n');
+      if (args[0] === 'new-window') {
+        windows.add(args[5]);
+        const id = `%${next++}`;
+        panes.set(id, args.at(-1));
+        return true;
+      }
+      if (args[0] === 'list-panes') {
+        return [...panes.entries()].map(([id, command]) => `${id}\t${command}`).join('\n');
+      }
+      if (args[0] === 'split-window') {
+        const id = `%${next++}`;
+        panes.set(id, args.at(-1));
+        return id;
+      }
+      if (args[0] === 'select-pane') return true;
+      if (args[0] === 'kill-pane') return panes.delete(args[2]);
+      return false;
+    };
+    return { calls, panes, run };
+  };
+
+  it('drops a stale opencode TUI pane when the lane moves to cline', async () => {
+    const { reconcileWorkViewForLane } = await import('../scripts/bot-host.mjs');
+    const { resolveSession, setWorkView, getSession } = await import('../scripts/lib/work-session.mjs');
+    const session = resolveSession({ location: 'switchbox', chat: '9', workspace: '/ws', lane: 'opencode' });
+    setWorkView(session.id, { tx: true, viewMode: 'tui', viewCommand: TUI_CMD });
+    const tmux = fakeSwitchTmux([TUI_CMD]);
+    const updated = await reconcileWorkViewForLane({ session: getSession(session.id), lane: 'cline', workspace: '/ws', tmux: tmux.run });
+    expect(updated.viewMode).toBe('observer');
+    expect(updated.viewCommand).toBeNull();
+    expect(tmux.calls.some((args) => args[0] === 'kill-pane')).toBe(true);
+    expect(tmux.panes.size).toBe(1);
+  });
+
+  it('recreates the opencode TUI view when the lane moves back', async () => {
+    const { reconcileWorkViewForLane } = await import('../scripts/bot-host.mjs');
+    const { resolveSession, setWorkView, getSession } = await import('../scripts/lib/work-session.mjs');
+    const session = resolveSession({ location: 'switchbox', chat: '9', workspace: '/ws', lane: 'cline' });
+    setWorkView(session.id, { tx: true, viewMode: 'observer', viewCommand: null });
+    const tmux = fakeSwitchTmux();
+    const tuiCommand = "'opencode' attach 'http://127.0.0.1:4100' --dir '/ws' --session 'ses_back'";
+    const updated = await reconcileWorkViewForLane({
+      session: getSession(session.id),
+      lane: 'opencode',
+      workspace: '/ws',
+      tmux: tmux.run,
+      ensureTui: async () => ({
+        serverUrl: 'http://127.0.0.1:4100', serverPid: 4242, opencodeSessionId: 'ses_back', command: tuiCommand,
+      }),
+    });
+    expect(updated.viewMode).toBe('tui');
+    expect(updated.viewCommand).toBe(tuiCommand);
+    expect(updated.opencodeSessionId).toBe('ses_back');
+  });
+});
+
+describe('ledger depletion visibility (stamped routes)', () => {
+  it('shows a stamped route as depleted even with no table lane row', async () => {
+    const { isFreemodelEntryDepleted, annotateFreemodelEntries } = await import('../scripts/lib/free-lanes.mjs');
+    const now = Date.now();
+    const table = { lanes: [] };
+    const session = {
+      quota: {
+        'cline/cline-free/muse-spark-1.3-contributor': {
+          depletedUntil: now + 22 * 3600 * 1000,
+          lastError: 'Error 429: Daily free limit reached',
+          scope: 'per-model',
+          depletedObservedAt: new Date(now).toISOString(),
+        },
+      },
+    };
+    const entry = { ref: 'cline:cline-free/muse-spark-1.3-contributor', label: 'x', selectable: true };
+    expect(isFreemodelEntryDepleted(entry, table, session, { now })).toBe(true);
+    const [annotated] = annotateFreemodelEntries([entry], table, session, { now });
+    expect(annotated.depleted).toBe(true);
+    expect(annotated.resetIn).toMatch(/22h/);
+  });
+
+  it('ignores expired or doc-noise stamps on table-less routes', async () => {
+    const { isFreemodelEntryDepleted } = await import('../scripts/lib/free-lanes.mjs');
+    const now = Date.now();
+    const table = { lanes: [] };
+    const entry = { ref: 'cline:cline-free/muse-spark-1.3-contributor', selectable: true };
+    expect(isFreemodelEntryDepleted(entry, table, {
+      quota: { 'cline/cline-free/muse-spark-1.3-contributor': { depletedUntil: now - 1000, lastError: '429' } },
+    }, { now })).toBe(false);
+    expect(isFreemodelEntryDepleted(entry, table, {
+      quota: { 'cline/cline-free/muse-spark-1.3-contributor': { depletedUntil: now + 3600000, lastError: '| Tool | Installed |\n|---|---|\nlimit depleted' } },
+    }, { now })).toBe(false);
+    expect(isFreemodelEntryDepleted(entry, table, { quota: {} }, { now })).toBe(false);
+  });
+
+  it('carries the vendor retry countdown into the stamp', async () => {
+    const { trackRunQuota } = await import('../scripts/bot-host.mjs');
+    const OLD_HOME = process.env.HOME;
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-home-'));
+    process.env.HOME = home;
+    try {
+      const stamped = trackRunQuota({
+        botId: 'probe-bot',
+        modelRef: 'cline:cline-free/muse-spark-1.3-contributor',
+        result: {
+          finalText: '',
+          lastError: 'Error 429: Daily free limit reached on model meta/muse-spark-1.3-contributor. Try again in 22h 26m',
+          stderr: '',
+        },
+      });
+      expect(stamped?.stamped).toBe(true);
+      const session = JSON.parse(fs.readFileSync(
+        path.join(home, '.local', 'state', 'bot-host', 'probe-bot', 'free-lanes', 'session.json'), 'utf8'));
+      const rec = session.quota['cline/cline-free/muse-spark-1.3-contributor'];
+      expect(rec.countdownHint).toMatch(/22h/);
+      expect(rec.depletedUntil - Date.now()).toBeGreaterThan(20 * 3600 * 1000);
+    } finally {
+      process.env.HOME = OLD_HOME;
+      try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
+    }
   });
 });

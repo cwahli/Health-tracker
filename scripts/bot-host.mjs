@@ -40,10 +40,12 @@ import {
   isTimeoutError,
   isQuotaOrLimitError,
   extractLogError,
+  parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession } from './lib/opencode-tui.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
+import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
 import {
   parseModelRef,
   buildFreeModelList,
@@ -280,6 +282,68 @@ function effective(config, prefs, chatId) {
   };
 }
 
+/**
+ * Provider label follows the chat's EFFECTIVE model surface, never the bot's
+ * registry default: after `/freemodel` switches a chat to Cline, status and
+ * progress headlines must say Cline, not OpenCode.
+ */
+export function providerLabelForModel(model) {
+  const surface = parseModelRef(model).surface;
+  if (surface === 'cline') return 'Cline';
+  if (surface === 'gemini') return 'Gemini';
+  return 'OpenCode';
+}
+
+function shortProviderModel(model) {
+  const { surface, id } = parseModelRef(model);
+  if (surface === 'cline') return String(id).replace(/^cline-free\//, '');
+  return id;
+}
+
+function extractEmbeddedMessage(text) {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  try {
+    const parsed = JSON.parse(s);
+    const message = parsed?.message || parsed?.error?.message || parsed?.error;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  } catch {
+    // not a JSON envelope — use the raw text below
+  }
+  return s;
+}
+
+/**
+ * One user-actionable line for a non-OpenCode lane failure. Cline reports
+ * quota hits as a raw `INFERENCE_CAP_ERROR` JSON blob plus a JSON stderr
+ * tail; the chat should instead see the limit, the vendor retry hint, and
+ * the next step — never the raw envelope.
+ */
+export function formatProviderFailure({ surface, model, lastError, stderr } = {}) {
+  const provider = surface === 'cline' ? 'Cline' : surface === 'gemini' ? 'Gemini' : 'OpenCode';
+  const combined = `${lastError || ''} ${stderr || ''}`;
+  const hint = parseRetryAfter(combined);
+  if (isQuotaOrLimitError(combined)) {
+    const daily = /daily free|free limit|free_tier_limit|free usage/i.test(combined);
+    const head = daily
+      ? `${provider} daily free limit reached for ${shortProviderModel(model)}`
+      : `${provider} quota/rate limit hit for ${shortProviderModel(model)}`;
+    return {
+      message: `${head}.${hint ? ` ${hint}` : ''} Pick another lane from /freemodel or wait for reset.`,
+      stderr: '',
+    };
+  }
+  const detail = extractEmbeddedMessage(lastError)
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+  return {
+    message: `${provider} error for ${shortProviderModel(model)}: ${detail || 'unknown error'}`,
+    stderr: String(stderr || ''),
+  };
+}
+
 function makeCaches() {
   return { models: null, verbose: null, agents: null, free: null };
 }
@@ -376,7 +440,7 @@ function getAnnotatedFreeModels(caches, botId) {
  * small=true-filtered error so cosmetic title-agent failures never deplete
  * a lane. Best-effort — never throws, never blocks the chat.
  */
-function trackRunQuota({ botId, modelRef, result }) {
+export function trackRunQuota({ botId, modelRef, result }) {
   try {
     if (!result || result.aborted) return null;
     const text = String(result.finalText || '').trim();
@@ -385,7 +449,18 @@ function trackRunQuota({ botId, modelRef, result }) {
     const { provider, model } = freemodelRefToRoute(modelRef || '');
     if (!provider || !model || provider === 'gemini') return null;
     const { dir } = ensureBotLedger(botId || 'default');
-    const stamped = stampDepleted({ stateDir: dir, provider, model, errText: filtered });
+    // Carry the vendor's own retry countdown into the stamp: a Cline daily
+    // cap ("try again in 22h") must not decay to the 6h default TTL, or the
+    // lane shows available while it is still dead.
+    const hint = parseRetryAfter(filtered);
+    const until = parseRetryHintMs(hint);
+    const stamped = stampDepleted({
+      stateDir: dir,
+      provider,
+      model,
+      errText: filtered,
+      ...(until ? { depletedUntil: until, countdownHint: hint } : {}),
+    });
     if (stamped.stamped) console.log(`[free-lanes] ${botId}: stamped ${stamped.keys.join(', ')} from quota error`);
     return stamped.stamped ? stamped : null;
   } catch {
@@ -802,6 +877,55 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
   await api.sendMessage(chatId, lines.join('\n'));
 }
 
+/**
+ * Keep the `tx` view honest when the effective lane changes AFTER `/tx on`.
+ * `/tx on` picks the view for the lane active at that moment, but a later
+ * `/freemodel` switch leaves the old OpenCode TUI pane behind while Cline
+ * runs outside it. Reconciling on every message means:
+ * - opencode lane -> (re)ensure the interactive TUI attach view;
+ * - any other lane -> drop a stale TUI pane and fall back to the structured
+ *   observer tail, which is the only live view Cline/Gemini can feed.
+ * Only touches tmux when the chat already has tx on; never throws — the run
+ * must continue on the observer log even if the TUI cannot be built.
+ */
+export async function reconcileWorkViewForLane({ session, lane, workspace, tmux = defaultTmuxRunner, ensureTui = ensureOpencodeTui, env = {}, opencodeBin } = {}) {
+  if (!session) return null;
+  if (lane === 'opencode') {
+    if (session.viewMode === 'tui' && session.serverUrl && session.opencodeSessionId) return session;
+    try {
+      const tui = await ensureTui({
+        serverUrl: session.serverUrl,
+        opencodeSessionId: session.opencodeSessionId,
+        workspace,
+        title: `Health-tracker ${session.location} ${session.chat}`,
+        env,
+        opencodeBin,
+      });
+      const updated = setWorkView(session.id, {
+        viewMode: 'tui',
+        viewCommand: tui.command,
+        serverUrl: tui.serverUrl,
+        serverPid: tui.serverPid ?? session.serverPid ?? null,
+        opencodeSessionId: tui.opencodeSessionId,
+      });
+      ensureTmuxWorkView(updated, { tmux, solo: true });
+      return updated;
+    } catch {
+      const updated = setWorkView(session.id, { viewMode: 'observer', viewCommand: null });
+      ensureTmuxWorkView(updated, { tmux });
+      return updated;
+    }
+  }
+  if (session.viewMode === 'tui') {
+    try { disableTmuxObserver(session, { tmux }); } catch {
+      // stale pane cleanup is best-effort; the metadata downgrade below is the fix
+    }
+  }
+  const updated = setWorkView(session.id, { viewMode: 'observer', viewCommand: null });
+  ensureTmuxWorkView(updated, { tmux });
+  return updated;
+}
+
 // V-30.5 /resume — prints the current ticket packet straight from the bug
 // store (bugctl queue → packet). Read-only: no second state store, no chat
 // scrollback. `/resume n` = card #n; bare /resume = the queue's next open card.
@@ -855,9 +979,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
       const work = statusForTelegram(workId);
+      const effSurface = parseModelRef(eff.model).surface;
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
-        platform: config.agent.kind || 'opencode',
+        platform: effSurface || 'opencode',
         capabilities: { compact: true, costTracking: true, backends: false },
         effective: eff,
         session: sessions.get(chatId) ? { id: sessions.get(chatId) } : null,
@@ -874,10 +999,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           ? [
               `work session: ${work.id} (${work.state})`,
               `observer: ${work.probe?.observerLive ? 'live' : work.probe?.surface === 'terminal' ? 'offline' : 'unavailable'}`,
-              `controller: ${config.agent.kind || 'opencode'}`,
+              `controller: ${effSurface || 'opencode'}`,
               `debug: ${work.probe?.events ? 'structured events' : 'unavailable'}`,
             ]
-          : ['work session: none', 'observer: unavailable', `controller: ${config.agent.kind || 'opencode'}`, 'debug: structured events'],
+          : ['work session: none', 'observer: unavailable', `controller: ${effSurface || 'opencode'}`, 'debug: structured events'],
       });
       await api.sendMessage(chatId, formatStatusPlain(snap));
       return;
@@ -1391,7 +1516,7 @@ export function fanoutProgressEvent({ renderer, observer, event, context = {} })
   try { observer?.onEvent(event, context); } catch {}
 }
 
-export async function runOpencodeWithFailover({ api, chatId, prompt, models, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, ...runArgs }) {
+export async function runOpencodeWithFailover({ api, chatId, prompt, models, runModel = null, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, ...runArgs }) {
   let attempt = 0;
   const { result } = await runWithModelFailover({
     models,
@@ -1400,14 +1525,25 @@ export async function runOpencodeWithFailover({ api, chatId, prompt, models, onS
       if (typeof onAttemptStart === 'function') {
         try { onAttemptStart({ model, attempt }); } catch {}
       }
-      const attemptResult = await runOpencode({ prompt, model, ...runArgs });
+      // runModel lets one failover chain span surfaces (cline quota-hit ->
+      // opencode fallback and back). Without it every candidate runs through
+      // the OpenCode CLI, exactly as before.
+      const attemptResult = runModel
+        ? await runModel(model)
+        : await runOpencode({ prompt, model, ...runArgs });
       if (typeof onAttemptComplete === 'function') {
         try { onAttemptComplete({ model, attempt, result: attemptResult, aborted: Boolean(isAborted()) }); } catch {}
       }
       return attemptResult;
     },
     onSwitch: ({ from, to, reason }) => {
-      const line = `🔀 *${from}* failed (${String(reason || 'error').slice(0, 200)}) — switching to *${to}*…`;
+      const raw = String(reason || 'error');
+      // Quota envelopes (Cline's INFERENCE_CAP_ERROR JSON) stay in the
+      // ledger/observer log; the chat line carries the short verdict only.
+      const short = isQuotaOrLimitError(raw)
+        ? `free limit hit${parseRetryAfter(raw) ? ` (${parseRetryAfter(raw)})` : ''}`
+        : raw.slice(0, 200);
+      const line = `🔀 *${from}* failed (${short.slice(0, 200)}) — switching to *${to}*…`;
       try {
         if (typeof onSwitchNotify === 'function') {
           onSwitchNotify(line);
@@ -1479,10 +1615,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     await renderer.start();
     const eff = effective(config, prefs, chatId);
     // One shared working headline (provider + model + elapsed + usage) for
-    // every bot-host agent — same line shape as the Grok TG router.
-    const kind = config.agent.kind || 'opencode';
+    // every bot-host agent — same line shape as the Grok TG router. The
+    // provider follows the chat's effective model, not the registry default.
     renderer.setHeadline({
-      providerLabel: kind === 'cline' ? 'Cline' : kind === 'gemini' ? 'Gemini' : 'OpenCode',
+      providerLabel: providerLabelForModel(eff.model),
       modelLabel: eff.model || '',
     });
     const handoff = prefs.get(chatId)?.handoff || '';
@@ -1507,67 +1643,94 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
     let workSession = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: workLane });
     if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
+    // A `/freemodel` switch after `/tx on` must move the live view with the
+    // lane: stale OpenCode TUI panes are dropped for Cline/Gemini and the TUI
+    // is re-ensured when the lane comes back to OpenCode.
+    if (workSession.tx) {
+      try {
+        workSession = await reconcileWorkViewForLane({
+          session: workSession,
+          lane: workLane,
+          workspace: config.agent.workspace,
+          tmux: defaultTmuxRunner,
+          env: opencodeEnv(config),
+          opencodeBin: config.agent.opencodeBin,
+        }) || workSession;
+      } catch {
+        // view reconcile is best-effort — the run continues on the observer log
+      }
+    }
     if (workSession.viewMode !== 'tui' && sessions.get(chatId)) extraArgs.push('--session', sessions.get(chatId));
     try { observer = createObserver(workSession); } catch {}
-    observerContext = { model: ref.id, attempt: 1, surface: ref.surface, provider: ref.surface };
+    observerContext = { model: eff.model, attempt: 1, surface: ref.surface, provider: ref.surface };
     const onObserverEvent = (event) => fanoutProgressEvent({ renderer, observer, event, context: observerContext });
-    const writeObserverTerminal = (result) => {
-      if (observerTerminalWritten) return;
-      observerTerminalWritten = true;
-      if (observer) observer.write(running.get(chatId)?.aborted ? 'aborted' : result?.finalText ? 'run_complete' : 'failed', result || {}, observerContext);
+    let lastAttemptModel = eff.model;
+    const runSurfaceModel = (model) => {
+      const candidate = parseModelRef(model);
+      if (candidate.surface === 'cline') {
+        return runCline({
+          prompt: promptWithMedia,
+          model: candidate.id,
+          variant: eff.variant,
+          plan: eff.agent === 'plan',
+          workspace: config.agent.workspace,
+          timeoutMs: config.agent.timeoutMs,
+          clineBin: config.agent.clineBin,
+          onEvent: onObserverEvent,
+          onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+          env: chatEnv(api, chatId),
+        });
+      }
+      if (candidate.surface === 'gemini') {
+        return runGemini({
+          prompt: promptWithMedia,
+          model: candidate.id,
+          timeoutMs: config.agent.timeoutMs,
+          env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+        });
+      }
+      return runOpencode({
+        prompt: promptWithMedia,
+        model,
+        variant: eff.variant,
+        workspace: config.agent.workspace,
+        thinking: config.agent.thinking,
+        timeoutMs: config.agent.timeoutMs,
+        opencodeBin: config.agent.opencodeBin,
+        attachUrl: workSession.viewMode === 'tui' ? workSession.serverUrl : undefined,
+        sessionId: workSession.viewMode === 'tui' ? workSession.opencodeSessionId : undefined,
+        onEvent: onObserverEvent,
+        onSpawn: (child) => running.set(chatId, { child, aborted: false, serverUrl: workSession.serverUrl, opencodeSessionId: workSession.opencodeSessionId }),
+        onAbort: () => abortOpencodeSession({ serverUrl: workSession.serverUrl, sessionId: workSession.opencodeSessionId }).catch(() => false),
+        extraArgs,
+        env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+      });
     };
-    if (observer && workLane !== 'opencode') observer.write('run_start', {}, observerContext);
 
-    const result =
-      ref.surface === 'gemini'
-        ? await runGemini({
-            prompt: promptWithMedia,
-            model: ref.id,
-            timeoutMs: config.agent.timeoutMs,
-            env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
-          })
-        : ref.surface === 'cline'
-          ? await runCline({
-              prompt: promptWithMedia,
-              model: ref.id,
-              variant: eff.variant,
-              plan: eff.agent === 'plan',
-              workspace: config.agent.workspace,
-              timeoutMs: config.agent.timeoutMs,
-              clineBin: config.agent.clineBin,
-              onEvent: onObserverEvent,
-              onSpawn: (child) => running.set(chatId, { child, aborted: false }),
-              env: chatEnv(api, chatId),
-            })
-          : await runOpencodeWithFailover({
-             api,
-             chatId,
-             prompt: promptWithMedia,
-             models: failoverModels(eff.model, config.agent.model),
-             variant: eff.variant,
-             workspace: config.agent.workspace,
-             thinking: config.agent.thinking,
-             timeoutMs: config.agent.timeoutMs,
-             opencodeBin: config.agent.opencodeBin,
-             attachUrl: workSession.viewMode === 'tui' ? workSession.serverUrl : undefined,
-             sessionId: workSession.viewMode === 'tui' ? workSession.opencodeSessionId : undefined,
-             onEvent: onObserverEvent,
-             onSpawn: (child) => running.set(chatId, { child, aborted: false, serverUrl: workSession.serverUrl, opencodeSessionId: workSession.opencodeSessionId }),
-             onAbort: () => abortOpencodeSession({ serverUrl: workSession.serverUrl, sessionId: workSession.opencodeSessionId }).catch(() => false),
-             onAttemptStart: ({ model, attempt }) => {
-               observerTerminalWritten = false;
-               observerContext = { model, attempt, surface: 'opencode', provider: 'opencode' };
-               if (observer) observer.write('run_start', {}, observerContext);
-             },
-             onAttemptComplete: ({ result: attemptResult, aborted }) => {
-               observerTerminalWritten = true;
-               if (observer) observer.write(aborted ? 'aborted' : attemptResult?.finalText ? 'run_complete' : 'failed', attemptResult || {}, observerContext);
-             },
-             isAborted: () => Boolean(running.get(chatId)?.aborted),
-             extraArgs,
-             env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
-           });
-    if (workLane !== 'opencode') writeObserverTerminal(result);
+    const result = await runOpencodeWithFailover({
+      api,
+      chatId,
+      prompt: promptWithMedia,
+      models: failoverModels(eff.model, config.agent.model),
+      runModel: runSurfaceModel,
+      onAttemptStart: ({ model, attempt }) => {
+        lastAttemptModel = model;
+        observerTerminalWritten = false;
+        const candidate = parseModelRef(model);
+        observerContext = { model, attempt, surface: candidate.surface, provider: candidate.surface };
+        if (observer) observer.write('run_start', {}, observerContext);
+      },
+      onAttemptComplete: ({ result: attemptResult, aborted }) => {
+        observerTerminalWritten = true;
+        if (observer) observer.write(aborted ? 'aborted' : attemptResult?.finalText ? 'run_complete' : 'failed', attemptResult || {}, observerContext);
+        // Stamp a quota-hit lane even when the fallback succeeds, so
+        // /freemodel + /allowance show the depletion instead of hiding it.
+        if (!aborted && attemptResult && !String(attemptResult.finalText || '').trim()) {
+          trackRunQuota({ botId: config.id, modelRef: lastAttemptModel, result: attemptResult });
+        }
+      },
+      isAborted: () => Boolean(running.get(chatId)?.aborted),
+    });
 
     if (result.sessionID) {
       sessions.set(chatId, result.sessionID);
@@ -1576,6 +1739,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // Auto-track (screenshot footer): a quota/rate-limit failure stamps Reset
     // into this bot's OWN free-lane ledger so /allowance goes ❌ with a time.
     trackRunQuota({ botId: config.id, modelRef: eff.model, result });
+    // Non-OpenCode lanes used to dump raw provider envelopes (Cline's
+    // INFERENCE_CAP_ERROR JSON + stderr tail) into the chat. Summarize them
+    // into one actionable line; usage/ledger tracking above keeps the raw result.
+    let displayResult = result;
+    const finalSurface = parseModelRef(lastAttemptModel).surface;
+    if (!String(result?.finalText || '').trim() && String(result?.lastError || '').trim() && finalSurface !== 'opencode') {
+      const summary = formatProviderFailure({
+        surface: finalSurface,
+        model: lastAttemptModel,
+        lastError: result.lastError,
+        stderr: result.stderr,
+      });
+      displayResult = { ...result, lastError: summary.message, stderr: summary.stderr };
+    }
     if (running.get(chatId)?.aborted) {
       renderer.status = 'aborted';
       await renderer.deliver('Aborted.');
@@ -1587,7 +1764,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         prefs.set(chatId, kept);
         savePrefs(config.id, prefs);
       }
-      await renderer.finish(result, { footer: usageText });
+      await renderer.finish(displayResult, { footer: usageText });
     }
   } catch (err) {
     if (observer && !observerTerminalWritten) {
