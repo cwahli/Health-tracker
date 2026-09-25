@@ -1845,9 +1845,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const activeProject = getChatProject(chatId);
     const activeRole = getChatRole(chatId);
     const effectiveWorkspace = activeProject.type === 'external' ? activeProject.workspace : config.agent.workspace;
-    const finalPrompt = activeProject.type === 'external'
-      ? composeExternalPrompt({ chatId, prompt: promptWithMedia, activeProject, activeRole })
-      : promptWithMedia;
+    // Every project composes through the same path: an assigned role is
+    // prepended for project 1 too, and composeExternalPrompt returns the
+    // prompt untouched when the chat has no role.
+    const finalPrompt = composeExternalPrompt({ chatId, prompt: promptWithMedia, activeProject, activeRole });
 
     const ref = parseModelRef(eff.model);
     const location = workLocation();
