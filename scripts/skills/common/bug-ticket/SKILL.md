@@ -16,7 +16,7 @@ Every agent reads the same server-backed list:
 node scripts/bugctl.mjs list --json
 ```
 
-Use `list` for the full canonical list, including reviewed, blocked, in-flight, and done cards. Use `list --state=...` only as a filter. Use `queue` only when a caller specifically needs the open queue. Never answer from `MEMORY.md`, a local markdown list, or an old chat message. The list response includes `tag_id`, `public_n`, title, state, queue, assignee, revision, review status, last curation event, handoff, fingerprint/defect, and timestamps.
+Use `list` for the full canonical list, including reviewed, blocked, in-flight, and done cards. Use `list --state=...` only as a filter. Use `queue` only when a caller specifically needs the open queue. Never answer from `MEMORY.md`, a local markdown list, or an old chat message. Always quote the live read's `generated_at` and `count` in list answers so any other agent's answer can be compared; two agents quoting the same `generated_at` must show the same cards. If the read fails, say so and paste the error — never rebuild a list from history. The list response includes `tag_id`, `public_n`, title, state, queue, assignee, revision, review status, last curation event, handoff, fingerprint/defect, and timestamps.
 
 ### Workflow
 

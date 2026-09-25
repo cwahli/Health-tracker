@@ -49,7 +49,7 @@ Before answering any list question or dispatching, read the same server-backed l
 node "$REPO_DIR/scripts/bugctl.mjs" list --json
 ```
 
-Use `queue` only for the open-queue view. Never rely on a local markdown list, memory, or an old chat summary. A card is eligible for this workflow only when its `handoff.to` is `orchestrator`, `handoff.status` is `ready`, and `handoff.revision` equals the card's current `revision`. If it is not reviewed or the handoff is stale, ask `@Bug_ticket_bot` to review/hand it off; do not edit the card yourself.
+Use `queue` only for the open-queue view. Never rely on a local markdown list, memory, or an old chat summary. If the read fails, say so and paste the error — do not reconstruct the list from history. Always quote the live read's `generated_at` and `count` so any other agent's answer can be compared against yours; two agents quoting the same `generated_at` must show the same cards. A card is eligible for this workflow only when its `handoff.to` is `orchestrator`, `handoff.status` is `ready`, and `handoff.revision` equals the card's current `revision`. If it is not reviewed or the handoff is stale, ask `@Bug_ticket_bot` to review/hand it off; do not edit the card yourself.
 
 For a card that already exists on the bug board (the steward packed/reviewed it, QA repro may have run), the **card packet — not your chat summary — is the coder prompt**:
 ```bash

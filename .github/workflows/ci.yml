@@ -75,3 +75,8 @@ jobs:
       # — the dispatcher must keep reading self-committed diffs as the fix.
       - name: Dispatch self-commit sensor (dispatch:unresolved ratchet)
         run: npx vitest run tests/dispatch-selfcommit.test.ts
+
+      # 2026-09-25 cross-agent ticket-list mismatch → every agent's soul/skill
+      # must pin the one canonical list read, fail loud, quote generated_at.
+      - name: Ticket-list source sensor (cross-agent consistency)
+        run: npx vitest run tests/soul-ticket-source.test.ts
