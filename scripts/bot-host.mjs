@@ -713,58 +713,65 @@ async function sendHtml(api, chatId, html) {
 }
 
 /**
- * The /freemodel body, from the same projection /allowance renders.
+ * The /freemodel reply, in the router's shape.
  *
- * It used to print the raw catalog and put depletion in a footer, and that
- * footer computed "blocked" from the already-filtered selectable set, so it
- * printed "all selectable lanes look available" while the list above it offered
- * a lane /allowance was showing as ❌. Two surfaces, two answers. Now every
- * entry carries its verdict: usable rows first, blocked rows after with the
- * reason, and a model with no lane row is named as such.
+ * The router already solved this and its source says why: the per-model list is
+ * the KEYBOARD, the message is a short header plus one total line, and anything
+ * unavailable is "one short footer line — never a second per-model list". This
+ * command was doing the opposite: 49 bullets in the body, the same 49 as
+ * buttons, then a footer repeating the counts — a second list of the same models
+ * in a different wording, with catalog labels on one side and the table's labels
+ * on the other, so /freemodel and /allowance showed the same models as two
+ * different lists.
+ *
+ * So the models are the buttons (one row each, labelled exactly as /allowance
+ * labels them, ❌ when the row cannot be used, and still tappable so a tap can
+ * answer "depleted, pick this instead" the way the router's do), and the body is
+ * a header, a total, and at most one footer line for what has no credential.
+ * `returns.buttons` is the keyboard, built from the same projection /allowance
+ * renders, so the two commands cannot disagree about a row.
  */
 function formatFreemodelWithDepletion(entries, annotated, { current, location } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
     const a = byRef.get(e?.ref);
     if (a) return a;
-    return { ...e, selectable: e?.selectable !== false, depleted: false, ended: false, terminalOnly: false, inLedger: false };
+    return { ...e, selectable: e?.selectable !== false, depleted: false, ended: false, terminalOnly: false, inLedger: false, reason: 'not in this ledger' };
   };
   const rows = (entries || []).map(verdictOf);
-  const blockedOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
-  const usable = rows.filter((r) => !blockedOf(r));
-  const blocked = rows.filter(blockedOf);
-  const missing = rows.filter((r) => r.inLedger === false);
-  // The header is written here rather than borrowed from formatFreeModelText:
-  // that one counts the raw catalog, so the same message could claim 42
-  // selectable in the header and 43 in the footer.
-  const pending = String(entries?.length || 0) - rows.length;
+  const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
+  const usable = rows.filter((r) => !unusableOf(r));
+  const unusable = rows.filter(unusableOf);
+  const noCredential = rows.filter((r) => r.inLedger === false);
   const location0 = location ? ` at ${location}` : '';
+  const why = (r) => (r.ended
+    ? 'promotion ended'
+    : r.terminalOnly
+      ? 'terminal only'
+      : r.depleted
+        ? `depleted${r.resetIn && r.resetIn !== '-' ? ` (reset in ${r.resetIn})` : ''}`
+        : r.reason || 'not available');
   const lines = [
-    `Free models${location0}: ${usable.length} selectable (${missingCount(rows)} with no ledger row), ${blocked.length} blocked${pending > 0 ? `, ${pending} pending setup/sign-in` : ''} · current: ${current || 'default'}`,
+    `Free models${location0} — tap a button below (❌ = not usable right now; the first message auto-fails over to the next free lane).`,
+    'Depleted lanes are marked ❌ and stay tappable, so a tap can tell you what to use instead.',
+    'Token Harbor / Cloudflare / Gemini taps run through OpenCode. Freebuff is terminal-only — no chat turn.',
     '',
+    rows.length
+      ? `Total: ${rows.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''} · current: ${current || 'default'}`
+      : 'No free models are installed and authenticated on this host.',
   ];
-  for (const r of usable) lines.push(`• ${r.label}${r.note ? `: ${r.note}` : ''}`);
-  if (blocked.length) {
-    lines.push('', 'Not selectable right now:');
-    for (const r of blocked) {
-      const why = r.ended
-        ? 'promotion ended'
-        : r.terminalOnly
-          ? 'terminal only, not selectable from chat'
-          : r.depleted
-            ? `depleted${r.resetIn && r.resetIn !== '-' ? ` (reset in ${r.resetIn})` : ''}`
-            : r.reason || 'not available';
-      lines.push(`❌ ${r.label} — ${why}`);
-    }
+  // One short footer line — never a second per-model list.
+  const footer = [];
+  if (noCredential.length) {
+    footer.push(`no ledger row: ${noCredential.slice(0, 4).map((r) => r.label).join(', ')}${noCredential.length > 4 ? `, +${noCredential.length - 4} more` : ''}`);
   }
-  if (missing.length) {
-    lines.push('', 'Not in this ledger (no quota record):');
-    for (const r of missing.slice(0, 6)) lines.push(`· ${r.label}`);
+  if (unusable.length) {
+    footer.push(`not usable: ${unusable.slice(0, 4).map((r) => `${r.label} (${why(r)})`).join('; ')}${unusable.length > 4 ? `; +${unusable.length - 4} more` : ''}`);
   }
-  const next = usable.find((r) => !r.depleted);
-  if (next) lines.push('', `Next up: ${next.label}`);
-  lines.push('', `Allowance (per-host ledger): ${usable.length} selectable, ${blocked.length} blocked. /allowance for the full table.`);
-  return lines.join('\n');
+  if (footer.length) lines.push(footer.join(' — '));
+  // One button per row, labelled as /allowance labels it.
+  const buttons = rows.map((r) => `${unusableOf(r) ? '❌ ' : ''}${r.laneLabel || r.label}`);
+  return { text: lines.join('\n'), buttons, rows, usable, unusable };
 }
 
 /** Usable rows the ledger has no record for: honest, not hidden. */
@@ -1441,14 +1448,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
         return;
       }
-      const selectable = annotated.filter((a) => a.selectable !== false);
-      const available = selectable.filter((a) => !a.depleted);
-      const keyboardEntries = available.length ? available : selectable;
-      await api.sendMessage(chatId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() }), {
-        reply_markup: modelKeyboard(
-          keyboardEntries.map((entry) => entry.label),
-          { kind: 'fm' },
-        ),
+      // Every row is a button, including the ones that cannot be used right now:
+      // the router keeps a depleted lane tappable so the tap can answer with what
+      // to use instead. Filtering them out of the keyboard is what made /freemodel
+      // and /allowance list different things.
+      const body = formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() });
+      await api.sendMessage(chatId, body.text, {
+        reply_markup: modelKeyboard(body.buttons, { kind: 'fm' }),
       });
       return;
     }
@@ -1915,9 +1921,19 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       return;
     }
     if (kind === 'fm') {
-      const entries = await getFreeModels(caches, config);
-      const entry =
-        entries.find((e) => e.label === value || e.ref === value) || entries[Number(value)];
+      // The button text is the label /allowance gives the row, which for a folded or
+      // ledger-only model is NOT the catalog's label ("big pickle", not
+      // "opencode:big-pickle (free)"). So the tap is resolved against the annotated
+      // rows, which carry that label, and then back to the entry by ref.
+      const wanted = String(value || '').replace(/^❌\s*/, '').trim();
+      const bundle = getAnnotatedFreeModels(caches, config.id);
+      const hit = (bundle.annotated || []).find(
+        (a) => a.laneLabel === wanted || a.label === wanted || a.ref === value || a.ref === wanted,
+      );
+      const entries = bundle.entries?.length ? bundle.entries : await getFreeModels(caches, config);
+      const entry = hit
+        ? entries.find((e) => e.ref === hit.ref) || hit
+        : entries.find((e) => e.label === wanted || e.ref === value) || entries[Number(value)];
       if (!entry) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /freemodel again' });
         return;

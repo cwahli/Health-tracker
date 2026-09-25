@@ -265,13 +265,33 @@ try {
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
     /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));
-  check('/freemodel marks blocked rows instead of hiding the reason', /Not selectable right now:/.test(botSrc));
+  // Changed deliberately on 2026-09-25, to follow the Grok router, which had
+  // already solved this shape: the per-model list is the keyboard, the body is a
+  // header plus one total line, and anything unavailable is one short footer line
+  // — the router's own comment reads "never a second per-model list". This command
+  // was printing 49 bullets, the same 49 as buttons, and then repeating the counts,
+  // with catalog labels on one side and the table's on the other, so /freemodel and
+  // /allowance showed one set of models as two different lists.
   const codeOnly = botSrc.split('\n').filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//')).join('\n');
   check('/freemodel no longer claims everything is available', !/all selectable lanes look available/.test(codeOnly));
-  check('/freemodel counts selectable and blocked', /\$\{usable\.length\} selectable, \$\{blocked\.length\} blocked/.test(botSrc));
   check('/freemodel writes its own header, not the raw catalog count', /const header = formatFreeModelText/ .test(botSrc) === false);
   check('the header counts rows with no ledger row separately', /with no ledger row/.test(botSrc));
-  check('the tappable keyboard only offers usable rows', /const keyboardEntries = available\.length \? available : selectable;/.test(botSrc));
+  // The router's wording: a total, and how many are not usable.
+  check('/freemodel totals the rows the way the router does', /Total: \$\{rows\.length\}/.test(botSrc) && /not usable ❌/.test(botSrc));
+  // The reason is still shown, on one line, rather than as a second per-model list.
+  check('/freemodel still says why a row is unusable, on one line', /not usable: /.test(botSrc) && /\(reset in /.test(botSrc));
+  // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.
+  const fmBody = (botSrc.slice(botSrc.indexOf('function formatFreemodelWithDepletion'), botSrc.indexOf('/** Usable rows the ledger has no record for')) || '');
+  check('and the /freemodel body carries no per-model bullet list', !/lines\.push\(`• /.test(fmBody) && !/Not selectable right now:/.test(fmBody));
+  check('and it does not repeat the counts in a second footer', !/Allowance \(per-host ledger\)/.test(botSrc));
+  // Depleted lanes stay tappable, exactly as the router does, so a tap can answer
+  // with what to use instead. Filtering them out is what made the two commands
+  // list different things.
+  check('every row is a button, unusable ones marked ❌', /const buttons = rows\.map\(\(r\) => `\$\{unusableOf\(r\) \? '❌ ' : ''\}/.test(botSrc));
+  check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
+  check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
+  check('and a tap strips the ❌ marker and resolves that label back to the model',
+    /a\.laneLabel === wanted/.test(botSrc) && /replace\(\/\^❌\\s\*\//.test(botSrc), 'the ❌ prefix must be stripped before matching');
 } finally {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
   if (oldOverride === undefined) delete process.env.FREE_LANES_DIR; else process.env.FREE_LANES_DIR = oldOverride;
