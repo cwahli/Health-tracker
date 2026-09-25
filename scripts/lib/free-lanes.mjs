@@ -1057,10 +1057,24 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
 // ~/.local/state/bot-host/<botId>/free-lanes (created + seeded on first use).
 // ---------------------------------------------------------------------------
 
-/** Per-bot ledger dir for a bot-host bot id (created on demand). */
+/**
+ * Per-bot ledger dir for a bot-host bot id (created on demand).
+ *
+ * FREE_LANES_DIR points one process at a different directory. That exists so a
+ * live proof can run against a COPY of the ledger and leave the user's real one
+ * byte-identical, which plan/R14_1_AGENT_PLAN.md card 6 requires ("use a copy of
+ * the ledger for the bot under test; the real user ledger mtime is unchanged
+ * before and after").
+ *
+ * It names ONE directory for this process. It is deliberately not a shared
+ * default across bots: cards 5 and 6 need one ledger per worker, and a
+ * directory that every bot on the host writes to would make a phone run look
+ * like a VM run.
+ */
 export function resolveBotLedgerDir(botId) {
   const home = process.env.HOME || process.env.USERPROFILE || osHomedirFallback();
-  const dir = join(home, ".local", "state", "bot-host", String(botId || "default"), "free-lanes");
+  const override = String(process.env.FREE_LANES_DIR || "").trim();
+  const dir = override || join(home, ".local", "state", "bot-host", String(botId || "default"), "free-lanes");
   mkdirSync(dir, { recursive: true });
   return dir;
 }
