@@ -194,7 +194,7 @@
         "grok_tg": true,
         "collab": "adapter"
       },
-      "notes": "Single-source working headline (provider + model + thinking + elapsed + usage %, 60/75% warnings). Canonical: scripts/lib/tg-progress.mjs, imported by bot-host (vm/opencode/vm2/mobile). Grok TG router imports the vendored mirror; the checker fails on any drift, so a format change lands everywhere via one edit + sync. Box redeploy (sync-from-repo + deploy-to-live) still needed to activate router-side. Collab sends single thinking notes; Hermes gateway is a separate stack."
+      "notes": "Single-source working headline (provider + model + thinking + elapsed + usage %, 60/75% warnings). Canonical: scripts/lib/tg-progress.mjs, imported by bot-host (vm/vm2/mobile). Grok TG router imports the vendored mirror; the checker fails on any drift, so a format change lands everywhere via one edit + sync. Box redeploy (sync-from-repo + deploy-to-live) still needed to activate router-side. Collab sends single thinking notes; Hermes gateway is a separate stack."
     },
     {
       "id": "ui-typing",

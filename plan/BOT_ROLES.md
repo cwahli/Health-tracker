@@ -19,11 +19,11 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 - Global souls and `system_prompt_suffix` placeholders were cleaned when BOT-7 closed. Do not treat that cleanup as open work.
 - `qa_biomarker` and `qa_onboarding` preload `qa-meal-journey` and `qa-telegram-journey`. They have no Telegram token. Do not wake them.
 - `scripts/sync-hermes-skills.sh` symlinks every repo skill into profiles; it **excludes** `orchestrator-dispatcher` from `qa_*` and `meal_audit` (unlink on run). OpenCode master shares the same `scripts/skills/common/` via registry `sharedSkills` and runs meal-audit itself (model A) — it does not message @Meal_audit_bot.
-- Dispatch script `scripts/run-coding-dispatch.sh` (commit `28486b1`) already detaches, calls `opencode run --auto -m opencode/muse-spark-1.3`, reverts only files that attempt changed, and on a meal/biomarker/onboarding push runs `qa-runner` and posts to that QA profile, with one extra OpenCode attempt if validation fails.
+- Dispatch script `scripts/run-coding-dispatch.sh` (commit `28486b1`) already detaches, calls `opencode run --auto -m opencode/nemotron-3.5-lightning-free`, reverts only files that attempt changed, and on a meal/biomarker/onboarding push runs `qa-runner` and posts to that QA profile, with one extra OpenCode attempt if validation fails.
 - 2026-09-22 run of `BUG-20260921-8449`: OpenCode returned `Insufficient account funds` on `muse-spark-1.3`. Cline thought 8 minutes and aborted with no diff. `grok -p` wrote two sentences and hit the 10-minute limit with no diff. Antigravity returned `User location is not supported`. Audit row: escalated_human, 1,249 seconds. The tree stayed clean. Do not re-file 8449 as a meal bug. The Food History tab bar was compared with the Home tab bar. The Home screen already shows Home, Trends, Food, Progress. The real on-screen defect is the Omega-3 text `7.700000000000001g`.
-- Android device bot: `@Android_opencode_bot` (registry id `android`, display name "Mobile Bot", env `ANDROID_OPENCODE_BOT_TOKEN`). Separate token from `@Opencode_135_bot` and `@Meal_audit_bot`. One `getUpdates` per token.
-- **Binding (corrected 2026-09-22):** this bot is for the **Android device opencode** (Termux/proot, workspace `/root/Health-tracker`), not the VPS. Device token first lived in proot meal_audit `.env` (test: `opencode online`). VPS `bot-host@android` is **disabled** (wrong host). Phone owns the token via `~/start-android-opencode-bot.sh` + `~/.config/opencode-bot/android.env` inside proot (workspace `/root/Health-tracker`). `@Opencode_135_bot` remains the VPS interactive door.
-- Interactive doors, not QA coders: `@Opencode_135_bot` (`scripts/bot-host.mjs`, lock line `pid:opencode-chat`) and the human Grok session in tmux `dev`. The script waits up to 180 seconds if that lock is held, then exits 1. It must not delete a lock it does not own.
+- Android device bot **RETIRED 2026-09-25 (BOT-10)**: registry id `android` removed after succession — successor `@mobile_8768_bot` (registry id `mobile`, env `MOBILE_BOT_TOKEN`). One `getUpdates` per token; stop the phone's `~/start-android-opencode-bot.sh` legacy runner.
+- **Binding (corrected 2026-09-22, retired 2026-09-25):** the device intent lives with `mobile` (Termux/proot, workspace `/root/Health-tracker`), never the VPS. VPS `bot-host@android` is removed (wrong host); `android` is out of `bots/registry.json`. `@VM_19485_bot` (registry id `vm`) remains the VPS interactive door.
+- Interactive doors, not QA coders: `@VM_19485_bot` (`scripts/bot-host.mjs`, registry id `vm`) and the human Grok session in tmux `dev`. The script waits up to 180 seconds if that lock is held, then exits 1. It must not delete a lock it does not own.
 - Commit identity is not in git config on every checkout. The dispatch script already passes `GIT_AUTHOR_*` / `GIT_COMMITTER_*` (`cwahli` / `cwahli@users.noreply.github.com`) when `user.email` is unset. Do not run `git config`.
 
 ## 1. Who exists after this ID
@@ -36,7 +36,7 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 | qa_meal | @Meal_journey_QA_bot | Describe the meal screen, start the script, stop | Read `src/`, pick a coder, wait |
 | qa_biomarker | no bot until it has its own token | Dark | Preload the meal skill |
 | qa_onboarding | no bot until it has its own token | Dark | Preload the meal skill |
-| orchestrator | @Orchestrator_health_tracker_bot | Status log. The script posts here | Run OpenCode itself, or message @Opencode_135_bot |
+| orchestrator | @Orchestrator_health_tracker_bot | Status log. The script posts here | Run OpenCode itself, or message @VM_19485_bot |
 | meal_audit | @Meal_audit_bot (LIVE 2026-09-22; Hermes gateway owns the token) | Audit meals, write artifacts/meal_audits/ | Read src/, dispatch coders, touch golden/meal/; **not** in bot-host registry |
 
 ### OpenCode ↔ meal_audit (model A)
@@ -60,7 +60,7 @@ No parallel fan-out. One checkout, one coder. A failed attempt reverts only path
 
 ### Interactive doors (not in the QA loop)
 
-`@Opencode_135_bot` and the tmux `dev` Grok pane. Do not point the script at either. Do not `git clean` the src checkout.
+`@VM_19485_bot` and the tmux `dev` Grok pane. Do not point the script at either. Do not `git clean` the src checkout.
 
 ## 2. One bug, after this ID
 
