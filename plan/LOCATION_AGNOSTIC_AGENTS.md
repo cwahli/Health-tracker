@@ -46,13 +46,23 @@ If the phone or the notebook is not connected, the reply is that the host is unr
 
 Collab has no inbound address. The notebook connects outward to the VM and keeps that session open. There is no Tailscale hop and no public tunnel to register. The phone uses the same outward connection.
 
+## What stays a place
+
+The VM bot, the VM2 bot, the mobile bot, the Collab bot, and the Grok router each keep their own token and stay on the machine that already polls it. Those pollers are not deleted and they are not merged into one bot. What becomes the same on every one of them is the chat commands: `/location`, `/project`, `/role`, and the allowance walk below. Asking the phone bot to run the next turn on the VM is the same command as asking the VM bot to run the next turn on the phone. The poller that receives the command does not move.
+
 ## Quota
 
-Read the allowance list for the location that is actually running the turn.
+Use the sequence the Grok router already runs. Do not invent a second ledger. `markDepleted`, `isDepleted`, and `nextFailoverRoutes` in `tools/telegram-provider-router/src/index.js` are the behavior. Bot-host writes the same facts through `stampDepleted` in `scripts/lib/free-lanes.mjs`. A shared bucket (OpenCode Zen free) is one allowance: marking one model in that bucket marks the siblings. A per-model route marks only itself. A help page or a status table is not a quota error and must not stamp anything.
 
-1. If the current lane is depleted, take the next equivalent lane on that same location. Equivalent means a selectable tool lane (OpenCode, Cline, or Token Harbor), in the order `/allowance` already shows. Freebuff stays terminal-only. The reply names the lane it switched to.
-2. When every equivalent lane on that location is depleted, pack the chat (project, role, instruction file, and the short turn log) and continue on the next location whose worker is connected and whose allowance list still has a lane.
-3. If no location has a lane, say so and stop.
+`/allowance` on the bot you are talking to shows the list for the worker that will run the turn, in preference order, with depleted rows and their reset time.
+
+When a real provider error is a quota or rate limit:
+
+1. The same process that saw the error writes `depletedUntil` before the reply is sent. Nobody types the stamp by hand.
+2. The reply names the failed lane and the next lane `nextFailoverRoutes` returns on that same worker. Freebuff is shown and is not chosen.
+3. The following message uses that next lane. Repeat down the list.
+4. When that worker's selectable list is empty, pack the project, the role, and the short log, and continue on the next connected worker whose own list still has a lane. The reply names that worker.
+5. When every connected worker is empty, say so and stop.
 
 The pack is the continuity. An OpenCode session on the VM does not reopen on the phone.
 

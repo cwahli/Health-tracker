@@ -136,11 +136,20 @@ The worker connects outward to the VM. The VM does not dial the phone or the not
 3. Side effect: a new stamp or log line under the phone ledger, and the VM ledger mtime unchanged.
 4. Repeat the shape for `collab` only while the notebook session is connected. If it is not connected, card 4's warning is the pass for collab, and this card stays open for collab until the notebook is up. Do not skip it and call the feature done.
 
-### Card 6 — Quota stays on the location until that list is empty
+### Card 6 — Same allowance walk on every bot
 
-**Change.** On a depleted lane, the next run uses the next equivalent row in that host's `/allowance` list (OpenCode, Cline, Token Harbor). Freebuff is not a Telegram substitute. When every equivalent row on that host is depleted, pack project, role, and the short log, and continue on the next connected host that still has a row. If none do, stop. Do not ask, and do not jump location while a local row remains.
+**Change.** VM, VM2, mobile, Collab, and the Grok router keep their own pollers. Each one accepts `/location`, `/project`, `/role`, and the allowance walk. Do not delete a bot to make this true.
 
-**Live proof.** Use a copy of the ledger mounted only for this test. Stamp every lane except one on `vps`. Send a message. The reply names that remaining lane and the host stays `vps`. Then stamp that last lane. The reply names the next connected host, or says no location has quota. Paste the allowance list you stamped and both replies. The real user ledger is untouched: `stat` its mtime before and after.
+The walk is the one the Grok router already has: `markDepleted`, `isDepleted`, and `nextFailoverRoutes` in `tools/telegram-provider-router/src/index.js`. Bot-host records the same fact with `stampDepleted`. A provider quota or rate-limit error writes `depletedUntil` in that process before the reply. A shared OpenCode Zen bucket marks every model in the bucket. A help page or a status table does not mark anything. The next message uses the next selectable row on that same worker. Freebuff is never the row that is chosen. Only an empty selectable list moves the turn to the next connected worker, with the project, the role, and the short log. If every connected worker is empty, the reply says so and does not run.
+
+**Live proof.** Use a copy of the ledger for the bot under test. The real user ledger mtime is unchanged before and after. Do this twice: once to `@VM_19485_bot`, once to the Grok router bot. Same order both times.
+
+1. `/allowance` and paste the preference order.
+2. Cause one quota-shaped provider error on the first selectable lane. Do not hand-edit the ledger. The code path that handles the error must write the stamp.
+3. `/allowance` again. That lane shows depleted and a reset time. If it is in a shared bucket, a sibling shows depleted too. The next selectable lane does not.
+4. Send one message. The reply names that next lane, and the host stays the one you started on.
+5. Repeat 2–4 until the selectable list on that host is empty. The following reply names the next connected host, or says no location has quota.
+6. Paste both bots' replies and both ledger copies. A pass on the router alone does not close the card. A hand-written stamp does not close the card.
 
 ### Card 7 — Project 3 is empty of project 2
 
