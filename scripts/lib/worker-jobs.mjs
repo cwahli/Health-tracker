@@ -76,6 +76,7 @@ export function enqueueJob(job, { home = os.homedir(), now = Date.now() } = {}) 
     sessionId: String(job.sessionId || ''),
     envMode: String(job.envMode || 'project'),
     canary: Boolean(job.canary),
+    packId: String(job.packId || ''),
     attempts: 0,
     createdAt: new Date(now).toISOString(),
     claimedAt: null,

@@ -49,9 +49,10 @@ import { KNOWN_HOSTS, workerStatus, isLocalHost } from './lib/worker-presence.mj
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
 import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
-import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary } from './lib/swap-guards.mjs';
+import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary, relayUrl } from './lib/swap-guards.mjs';
 import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCanaryResult } from './lib/worker-routing.mjs';
 import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
+import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -566,7 +567,7 @@ export function attemptFailureText(result) {
  * It never falls back to running locally: the caller decides whether to hold
  * the turn (guard 5) rather than silently spending this machine's allowance.
  */
-export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3 } = {}) {
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3, packRoot = '' } = {}) {
   // Guard 4: presence → relay → workspace → session, each named, first failure
   // wins, so a bad target is caught before a job exists — not after a worker
   // has claimed it.
@@ -575,7 +576,32 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
     console.log(`[${host}] preflight failed at ${preflight.failed}: ${preflight.reason}`);
     return { text: '', code: 1, model, error: `preflight failed (${preflight.failed}): ${preflight.reason}`, remote: true, preflight, failed: preflight.failed };
   }
-  const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode, canary });
+  // Guard 9: on a swap the files this conversation has been editing travel
+  // with it, so the worker does not run the turn against its own copy.
+  let packId = '';
+  if (packRoot) {
+    const built = buildPack(packRoot);
+    if (!built.ok) {
+      console.log(`[${host}] pack refused: ${built.reason} (the turn runs without it)`);
+    } else {
+      const payload = packWithContents(built);
+      if (!payload.ok) console.log(`[${host}] pack not built: ${payload.reason} (the turn runs without it)`);
+      else {
+        const res = await fetch(`${relayUrl({ url: relay })}/packs/${encodeURIComponent(payload.id)}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          packId = payload.id;
+          console.log(`[${host}] pack ${payload.id} uploaded (${payload.files.length} file(s), ${payload.totalBytes} bytes)`);
+        } else {
+          console.log(`[${host}] pack upload refused with ${res.status} (the turn runs without it)`);
+        }
+      }
+    }
+  }
+  const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode, canary, packId });
   console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}${canary ? ' (canary)' : ''}`);
   const deadline = Date.now() + timeoutMs;
   const budget = Math.max(1000, Math.ceil(timeoutMs / Math.max(1, attempts)));
@@ -2469,6 +2495,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         envMode: turnEnvMode,
         canary: wantCanary,
         preflightFull: wantCanary,
+        packRoot: wantCanary ? effectiveWorkspace : '',
       });
       if (handed?.preflight) {
         setBlockedLocation(chatId, location, `${handed.preflight.failed}: ${handed.preflight.reason}`);

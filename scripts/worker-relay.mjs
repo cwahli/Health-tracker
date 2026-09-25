@@ -11,6 +11,10 @@
  *   POST /jobs/result    { jobId, text, code, model, error, ledger, sessionID }
  *   GET  /sessions/<id>/export                        that conversation, for a
  *                                                     worker that has not got it
+ *   GET  /sessions/<id>/check                         is it here? (preflight)
+ *   PUT  /packs/<id>                                  the sender's changed
+ *                                                     files, hashes checked
+ *   GET  /packs/<id>                                  that pack, for the worker
  *   GET  /health                                       liveness + who is connected
  *
  * The session export is a GET on purpose: conversations run 3.6 KB to 4 MB,
@@ -32,6 +36,7 @@ import {
   workerStatus,
 } from './lib/worker-presence.mjs';
 import { claimJob, completeJob, pendingCount } from './lib/worker-jobs.mjs';
+import { savePack, loadPack, PACK_BODY_MAX } from './lib/swap-pack.mjs';
 
 const arg = (name, fallback) => {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -48,12 +53,18 @@ function send(res, code, payload) {
   res.end(body);
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = MAX_BODY) {
   return new Promise((resolve) => {
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > MAX_BODY) req.destroy();
+      if (raw.length > maxBytes) {
+        // Refuse by name rather than hang: the sender gets a 413 instead of
+        // a socket that never answers.
+        raw = '';
+        req.destroy();
+        resolve({ __overflow: true });
+      }
     });
     req.on('end', () => {
       try {
@@ -156,6 +167,29 @@ const server = http.createServer(async (req, res) => {
     if (!job) return send(res, 404, { error: 'unknown job' });
     console.log(`[relay] ${job.id} finished on ${job.host} (code ${job.result?.code ?? '?'})`);
     return send(res, 200, { ok: true, jobId: job.id });
+  }
+
+  if (route.startsWith('PUT /packs/')) {
+    const id = decodeURIComponent(url.pathname.slice('/packs/'.length));
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return send(res, 400, { error: 'bad pack id' });
+    const body = await readBody(req, PACK_BODY_MAX);
+    if (body?.__overflow) return send(res, 413, { error: `pack exceeds ${PACK_BODY_MAX} bytes` });
+    if (body?.id && String(body.id) !== id) return send(res, 400, { error: 'pack id mismatch' });
+    const saved = savePack({ ...body, id });
+    if (!saved.ok) return send(res, 400, { error: saved.reason });
+    console.log(`[relay] pack ${id} stored (${saved.files} file(s), ${saved.bytes} bytes)`);
+    return send(res, 200, { ok: true, id, bytes: saved.bytes, files: saved.files });
+  }
+
+  if (route.startsWith('GET /packs/')) {
+    const id = decodeURIComponent(url.pathname.slice('/packs/'.length));
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return send(res, 400, { error: 'bad pack id' });
+    const payload = loadPack(id);
+    if (!payload) return send(res, 404, { error: 'no such pack' });
+    const body = JSON.stringify(payload);
+    res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+    res.end(body);
+    return;
   }
 
   if (route.startsWith('GET /sessions/')) {
