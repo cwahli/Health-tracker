@@ -28,6 +28,7 @@ import {
 import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
 import { recordFailure, loadFailures } from './lib/failure-log.mjs';
+import { providerReadiness, setupGaps } from './lib/setup-gaps.mjs';
 import {
   runOpencode,
   runWithModelFailover,
@@ -57,6 +58,7 @@ import {
   formatFreeModelText,
   formatFreeLabel,
   CLINE_FREE_MODELS,
+  clineReady,
   GEMINI_MODELS,
   GEMINI_TO_OPENCODE,
   toModelRef,
@@ -394,7 +396,22 @@ export function formatProviderFailure({ surface, model, lastError, stderr } = {}
 }
 
 function makeCaches() {
-  return { models: null, verbose: null, agents: null, free: null };
+  return { models: null, verbose: null, agents: null, free: null, readiness: null };
+}
+
+/**
+ * Which providers this host can actually use, and what is missing for the rest.
+ * Cached with the model list: credentials do not change between turns, and the
+ * check is local (env var, binary, auth file) so it costs nothing to repeat.
+ */
+export function hostReadiness(caches) {
+  if (caches.readiness) return caches.readiness;
+  caches.readiness = providerReadiness({
+    env: process.env,
+    location: workLocation(),
+    clineReady,
+  });
+  return caches.readiness;
 }
 
 function opencodeEnv(config) {
@@ -480,7 +497,7 @@ function getAnnotatedFreeModels(caches, botId) {
   caches.free = base;
   const { table, session, source } = getLedger(botId);
   if (!table) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
-  return { entries: base, annotated: annotateFreemodelEntries(base, table, session, { location: workLocation() }), table, session, source };
+  return { entries: base, annotated: annotateFreemodelEntries(base, table, session, { location: workLocation(), readiness: hostReadiness(caches) }), table, session, source };
 }
 
 /**
@@ -1418,14 +1435,38 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           return;
         } catch (e) {
           const route2 = freemodelRefToRoute(eff.model || '');
-          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model, location: workLocation() }));
+          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model, location: workLocation(), readiness: hostReadiness(caches) }));
           return;
         }
       }
       // Router parity: raw HTML grid text (screenshot), NOT the markdown converter.
       await sendHtml(api, chatId, buildAllowanceTextForBots({
         stateDir: getLedger(config.id).dir, provider: route.provider, model: route.model, location: workLocation(),
+        readiness: hostReadiness(caches),
       }));
+      return;
+    }
+
+    case 'setup': {
+      // The allowance surfaces now say a lane "needs TOKEN_HARBOR_API_KEY".
+      // This is where that turns into the command that fixes it.
+      const readiness = hostReadiness(caches);
+      const gaps = setupGaps(readiness);
+      const host = workLocation();
+      if (!gaps.length) {
+        await api.sendMessage(chatId, `✅ Every provider this bot uses is ready on ${host}. Nothing to set up.`);
+        return;
+      }
+      const lines = [`*Setup gaps on ${host}* — ${gaps.length} provider(s) cannot run here:`, ''];
+      for (const g of gaps) {
+        lines.push(`• *${g.provider}* — needs ${g.needs}`);
+        if (g.fix) lines.push(`  fix: ${g.fix}`);
+        if (g.command) lines.push(`  or ask me: ${g.command}`);
+        if (g.note) lines.push(`  (${g.note})`);
+        lines.push('');
+      }
+      lines.push('Lanes for these providers are shown as ⏸ in /allowance and are not offered in /freemodel until the credential is present.');
+      await api.sendMessage(chatId, lines.join('\n'));
       return;
     }
 
@@ -1845,7 +1886,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         const next = annotated.find((a) => a.selectable !== false && !a.depleted);
         await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${hit?.resetIn || 'unknown'}) — pick ${next?.label || 'another lane'}` });
         const route = freemodelRefToRoute(entry.ref);
-        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation() })}`);
+        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation(), readiness: hostReadiness(caches) })}`);
         return;
       }
       setPref(prefs, chatId, { model: entry.ref });
@@ -1954,7 +1995,7 @@ async function collectInboundMedia(api, message, config) {
  * the old one was skipped. A host with no ledger yet keeps the old two-entry
  * chain, so a fresh install behaves exactly as before.
  */
-export function selectTurnLanes({ botId, model, fallback, now = Date.now() } = {}) {
+export function selectTurnLanes({ botId, model, fallback, now = Date.now(), readiness = null } = {}) {
   const legacy = failoverModels(model, fallback);
   let ledger;
   try {
@@ -1968,7 +2009,7 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now() } = {
   }
   // The same projection /allowance and /freemodel read, so the walk can only
   // offer what those two surfaces call selectable.
-  const projection = projectLanes(table, ledger.session || {}, { now, location: botId });
+  const projection = projectLanes(table, ledger.session || {}, { now, location: botId, readiness });
   const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label }));
   const skipped = projection.filter((r) => !r.selectable).map((r) => ({
     provider: r.provider,

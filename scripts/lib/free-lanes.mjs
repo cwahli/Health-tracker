@@ -28,6 +28,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkS
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
+import { laneSetup } from './setup-gaps.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /**
@@ -397,7 +398,7 @@ export function nextAvailableRoutes(table, session, {
  * Quota stays per worker: the caller passes its own session. The lane CATALOG
  * is shared, the stamps are not.
  */
-export function projectLanes(table, session, { now = Date.now(), labelFn = defaultResetLabel, location = "" } = {}) {
+export function projectLanes(table, session, { now = Date.now(), labelFn = defaultResetLabel, location = "", readiness = null } = {}) {
   const t = overlayLiveQuota(table || {}, session || {}, { now, labelFn });
   // An ended lane stays VISIBLE with a verdict. Dropping it made a model the
   // user still remembers simply vanish from /allowance, and left /freemodel
@@ -417,9 +418,14 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
     const terminalOnly = lane.tg === false;
     const ended = status === "ended" || laneIsEnded(lane);
     const depleted = Boolean(live) || status === "depleted";
+    // A lane whose provider has no credential on this host cannot run, whatever
+    // the table says. Saying "available" there is how seven lanes sat in the
+    // table looking usable when none of them could be.
+    const setup = readiness ? laneSetup(provider, readiness) : { needsSetup: false, unknown: true, reason: null };
     let reason = "";
     if (ended) reason = "promotion ended, never offered again";
     else if (depleted) reason = `depleted until ${resetAt ? labelFn(resetAt, live?.countdownHint || lane.countdownHint) : "reset"}`;
+    else if (setup.needsSetup) reason = setup.reason || 'provider not set up on this host';
     else if (terminalOnly) reason = "terminal only, not selectable from chat";
     else reason = "available";
     return {
@@ -435,7 +441,9 @@ export function projectLanes(table, session, { now = Date.now(), labelFn = defau
       ended,
       depleted,
       terminalOnly,
-      selectable: !ended && !depleted && !terminalOnly,
+      needsSetup: Boolean(setup.needsSetup),
+      setupUnknown: Boolean(setup.unknown),
+      selectable: !ended && !depleted && !terminalOnly && !setup.needsSetup,
       resetAt,
       resetLabel: depleted && resetAt ? labelFn(resetAt, live?.countdownHint || lane.countdownHint) : null,
       reason,
@@ -861,7 +869,7 @@ function renderProjectedAllowance(rows, { provider = "", model = "" } = {}) {
   const lines = [];
   const head = ["Model", "Plan", "Reset in"];
   const body = rows.map((r) => {
-    const mark = r.selectable ? "✅" : "❌";
+    const mark = r.needsSetup ? "⏸" : r.selectable ? "✅" : "❌";
     const label = r.model.replace(/^.*\//, (m) => m).replace(/^[a-z]+\//, "");
     const name = `${mark} ${r.label || label}`;
     const reset = r.selectable ? "—" : r.resetLabel || (r.ended ? "ended" : "—");
@@ -877,8 +885,10 @@ function renderProjectedAllowance(rows, { provider = "", model = "" } = {}) {
   const blocked = rows.filter((r) => !r.selectable && r.reason && r.reason !== "available");
   if (blocked.length) {
     lines.push("");
-    for (const r of blocked.slice(0, 4)) lines.push(`· ${r.label}: ${r.reason}`);
+    for (const r of blocked.slice(0, 6)) lines.push(`${r.needsSetup ? "⏸" : "·"} ${r.label}: ${r.reason}`);
   }
+  const gaps = [...new Set(rows.filter((r) => r.needsSetup).map((r) => String(r.reason || "").replace(/^needs /, "")))];
+  if (gaps.length) lines.push(`\n${gaps.length} provider(s) not set up on this host: ${gaps.join(", ")} — /setup for the fix.`);
   if (active) {
     const on = rows.find((r) => `${r.provider}/${r.model}` === active || r.ref === active);
     if (on) lines.push("", `Active route: ${on.label} · ${on.plan}${on.selectable ? '' : ` (${on.reason})`}`);
@@ -1150,10 +1160,10 @@ export function isFreemodelEntryDepleted(entry, table, session, { now = Date.now
 }
 
 /** Annotate bot-host /freemodel entries with { depleted, resetIn, laneLabel }. */
-export function annotateFreemodelEntries(entries, table, session, { now = Date.now(), location = "" } = {}) {
+export function annotateFreemodelEntries(entries, table, session, { now = Date.now(), location = "", readiness = null } = {}) {
   // One projection decides the verdict, so /freemodel cannot offer a lane that
   // /allowance is showing as ended, terminal-only or depleted.
-  const projection = projectLanes(table, session, { now, location });
+  const projection = projectLanes(table, session, { now, location, readiness });
   const byRef = new Map(projection.map((r) => [r.ref, r]));
   return (entries || []).map((e) => {
     const ref = typeof e === "string" ? e : e?.ref || "";
@@ -1192,7 +1202,7 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
  * Pass the chat's effective provider/model so the `Active route` + `Next up`
  * lines are chat-aware (bot-host has no sticky session like the router).
  */
-export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel } = {}) {
+export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null } = {}) {
   const { table, session, source } = loadFreeLaneLedger({ stateDir });
   if (!table) {
     return "Allowance: no shared free-lane ledger found (router state + pref doc missing). Use /freemodel to list free models.";
@@ -1205,7 +1215,7 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
     // a lane cannot be ❌ here and selectable there. Rows the projection drops
     // (ended, or a terminal-only row that is not in the table) are not invented
     // back here.
-    const projection = projectLanes(table, sess, { now, labelFn, location });
+    const projection = projectLanes(table, sess, { now, labelFn, location, readiness });
     const body = projection.length
       ? renderProjectedAllowance(projection, { provider, model })
       : formatCompactAllowanceChat(table, sess, { now, labelFn });

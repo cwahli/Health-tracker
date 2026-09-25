@@ -597,8 +597,12 @@ function acquireSinglePollerLock() {
   const me = process.pid;
   let holderPid = null;
   try {
+    // The holder must NOT inherit this pipe. execSync waits for EOF on stdout,
+    // and a backgrounded child that keeps the write end open makes it wait for
+    // the full 100000000s sleep: the router hung here and never polled. Probe
+    // for a live holder on a timer instead of after execSync returns.
     const out = execSync(
-      `setsid flock -n "${LOCK_PATH}" sleep 100000000 & echo $!`,
+      `setsid flock -n "${LOCK_PATH}" sleep 100000000 >/dev/null 2>&1 & echo $!`,
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
     );
     { const n = Number(String(out || "").trim().split(/\s+/)[0]); holderPid = (Number.isFinite(n) && n > 0) ? n : null; }
@@ -2587,7 +2591,10 @@ async function probeOpenCodeFree() {
       });
     }
     // Cloudflare Workers AI free models (10k neurons/day) — no "free" tag in ids.
-    const cf = providers.find((p) => p.id === "cloudflare");
+    // The live provider id is "cloudflare-workers-ai" (27 models), not
+    // "cloudflare". Looking for the wrong id reported 0 models and made a
+    // working provider look empty. Accept any id that starts with cloudflare.
+    const cf = providers.find((p) => /^cloudflare/.test(String(p.id || "")) && p.models);
     if (cf?.models) {
       for (const [mid, meta] of Object.entries(cf.models)) {
         const name = (meta && meta.name) || mid;
@@ -3295,7 +3302,7 @@ async function allowanceText() {
       const th = providers.find((p) => p.id === "tokenharbor");
       const n = th?.models ? Object.keys(th.models).length : 0;
       lines.push(`OpenCode←TokenHarbor models: ${n}`);
-      const cf = providers.find((p) => p.id === "cloudflare");
+      const cf = providers.find((p) => /^cloudflare/.test(String(p.id || "")) && p.models);
       const ncf = cf?.models ? Object.keys(cf.models).length : 0;
       lines.push(`OpenCode←Cloudflare models: ${ncf}`);
     }
