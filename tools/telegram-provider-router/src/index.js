@@ -23,6 +23,7 @@ import {
   formatCompactAllowanceChat,
   formatResetIn,
 } from "./free-lane-table.js";
+import { freebuffLaneEnabled, runFreebuffLane } from "./freebuff-tg-lane.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -1905,6 +1906,19 @@ async function runFreebuff(prompt, opts = {}) {
     ).catch(() => {});
   }, 5000);
   try {
+    // EXPERIMENTAL Telegram lane (off unless FREEBUFF_TG_LANE=1): drives one
+    // CLI session per request with take-over yield + single-flight + balance
+    // pre-check. Stub-tested only — needs funded balance + idle account live.
+    if (freebuffLaneEnabled(process.env)) {
+      const lane = await runFreebuffLane({
+        prompt: String(prompt),
+        model,
+        env: process.env,
+        workspace: WORKSPACE,
+        onProgress,
+      });
+      return lane.text.slice(0, 4000);
+    }
     // Freebuff CLI is interactive (login / TUI). There is no stable non-interactive
     // `chat -m` for Telegram. Try a few known shapes, then explain clearly.
     const attempts = [
@@ -2814,12 +2828,27 @@ function freemodelCallbackData(providerKey, modelId) {
 function applyFreeModelPick(providerKey, modelId) {
   if (!PROVIDERS[providerKey]) throw new Error(`Unknown provider: ${providerKey}`);
   if (providerKey === "freebuff") {
-    // Freebuff has no Telegram chat lane. Do NOT switch the active route — just
-    // record the terminal preference and answer with honest instructions.
+    // Freebuff has no Telegram chat lane by default. Do NOT switch the active
+    // route — just record the terminal preference and answer with honest
+    // instructions. With FREEBUFF_TG_LANE=1 the experimental lane is on, so a
+    // tap actually switches (per-message guard still yields to a live terminal
+    // session, enforces single-flight, and pre-checks balance).
     const mid = String(modelId || state.models.freebuff || FREEBUFF_DEFAULT_MODEL);
     state.models.freebuff = mid;
     saveState(state);
     const name = FREEBUFF_MODEL_LABELS[mid] || prettyFreeLabel(providerKey, mid);
+    if (freebuffLaneEnabled(process.env)) {
+      state.provider = "freebuff";
+      saveState(state);
+      return (
+        `Switched to Freebuff (EXPERIMENTAL Telegram lane) — \`${mid}\` (${name}).\n\n` +
+        "Requirements, enforced per message: your terminal Freebuff session must be idle " +
+        "(Telegram yields while it is live — one session per account), one request at a time, " +
+        "and funded balance except on 0/hr models.\n\n" +
+        "Send a message to try it. Anything the lane refuses explains why; " +
+        "nothing ever starts a second session behind your back."
+      );
+    }
     return (
       "Freebuff is terminal-only — there is no Telegram chat lane.\n" +
       `Model: \`${mid}\` (${name})\n\n` +

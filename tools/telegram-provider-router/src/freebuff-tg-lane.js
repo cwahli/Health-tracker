@@ -1,0 +1,327 @@
+#!/usr/bin/env node
+/**
+ * Freebuff Telegram lane (EXPERIMENTAL, off by default).
+ *
+ * Ticket: TG-CLINE-FREEBUFF-LONGTERM follow-up — "Freebuff is terminal-only"
+ * today because the CLI (0.0.195) is TUI/`login` only: no `chat -m` one-shot,
+ * and the HTTP `POST /api/v1/chat/completions` answers "No runId found".
+ * HTTP agent-runs START was not attempted: Freebucks balance is 0 until
+ * 2026-10-16, and burning an empty pool proves nothing.
+ *
+ * What this module does: drive ONE Freebuff CLI session in tmux per Telegram
+ * request (same mechanics as ht-run/ht-watch, but owned by the router
+ * process), with guards that make it safe to leave wired in:
+ *
+ *   1. ENABLED only when `FREEBUFF_TG_LANE=1` (default off → old text).
+ *   2. YIELDS to a live human CLI session: the account supports a single
+ *      Freebuff instance; starting a second takes over and kills the first.
+ *      When the instance-owner pid is alive, the lane refuses with an honest
+ *      message and never spawns.
+ *   3. SINGLE-FLIGHT: one poller process = one lane mutex. A second
+ *      concurrent Telegram message gets an honest busy verdict, never a
+ *      second session.
+ *   4. BALANCE pre-check (read-only usage call, token never logged): 0
+ *      balance + non-0/hr model → honest empty message WITHOUT spawning a
+ *      session. 0/hr picker entries (GLM 5.3 / MiMo 2.6) may proceed.
+ *   5. ALWAYS cleans up: the tmux session is killed in `finally`, the mutex
+ *      released in `finally`, every terminal exit is a short verdict.
+ *
+ * Turn boundary (the hard part — the TUI has no reply-done signal):
+ * after typing the prompt, wait for `working...`/`Thinking` to appear, then
+ * for it to disappear AND the pane to stay unchanged for QUIET_MS. The reply
+ * is the pane text added since the prompt was typed, minus TUI chrome lines.
+ * Best-effort and documented as such; covered by stub tests, NOT yet proven
+ * against the live vendor (needs funded balance + idle account).
+ *
+ * Pure + injectable: `exec` (argv → {stdout,code}), `sleep`, `now`,
+ * `fetchFn`, fs paths. No network/child processes under test — the unit
+ * suite drives a scripted fake instead (never start a real second freebuff;
+ * HARD RULES).
+ */
+import { execFile } from "child_process";
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+
+export const FREEBUFF_TG_LANE_ENV = "FREEBUFF_TG_LANE";
+export const FREEBUFF_OWNER_FILE = "freebuff-instance-owner.json";
+export const ZERO_HR_HINTS = [/glm/i, /5\.3.*flash/i, /mimo/i, /2\.6.*flash/i];
+
+/** Gate: explicit opt-in only. Default off preserves terminal-only behaviour. */
+export function freebuffLaneEnabled(env = process.env) {
+  return String(env?.[FREEBUFF_TG_LANE_ENV] || "") === "1";
+}
+
+export function defaultCredsPath(env = process.env) {
+  return env?.FREEBUFF_CREDS_PATH || join(homedir(), ".config", "manicode", "credentials.json");
+}
+
+export function defaultOwnerPath(env = process.env) {
+  return env?.FREEBUFF_OWNER_PATH || join(homedir(), ".config", "manicode", FREEBUFF_OWNER_FILE);
+}
+
+/** 0/hr picker entries bill nothing while running (balance-0 may proceed). */
+export function isZeroHrModel(model) {
+  const m = String(model || "");
+  if (/0\s*\/\s*hr/.test(m)) return true;
+  return /glm-5\.3-flash|mimo-v2\.6-flash/i.test(m);
+}
+
+function redact(err) {
+  // Auth tokens must never reach chat/logs: keep only the shape of failures.
+  const m = String(err?.message || err || "unknown error");
+  return m.replace(/[A-Za-z0-9\-_]{20,}/g, "…").slice(0, 200);
+}
+
+function readJsonFile(p) {
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** Balance probe: read-only usage call. Returns {balance, resetAt} or {error}. */
+export async function readFreebucksBalance({ fetchFn = globalThis.fetch, credsPath, env = process.env } = {}) {
+  const creds = readJsonFile(credsPath || defaultCredsPath(env));
+  const inner = (creds && (creds.default || creds)) || {};
+  const token = inner.authToken || inner.token || inner.accessToken || "";
+  const fingerprintId = inner.fingerprintId || "";
+  if (!token) return { error: "not signed in" };
+  try {
+    // Single authed call. The token is used here and never logged, echoed,
+    // or interpolated into any user-facing string (see redact()).
+    const authed = await fetchFn("https://www.codebuff.com/api/v1/usage", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ fingerprintId }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const d = await authed.json().catch(() => ({}));
+    const bal = Number(d?.remainingBalance ?? NaN);
+    if (!Number.isFinite(bal)) return { error: `usage HTTP ${authed.status}` };
+    return { balance: bal, resetAt: d?.next_quota_reset || null };
+  } catch (e) {
+    return { error: redact(e) };
+  }
+}
+
+/**
+ * A live human CLI session owns the account (single instance per account).
+ * Owner file: {instanceId, pid}. pidAlive defaults to signal-0 probe.
+ */
+export function humanSessionActive({ ownerPath, env = process.env, pidAlive } = {}) {
+  const rec = readJsonFile(ownerPath || defaultOwnerPath(env));
+  const pid = Number(rec?.pid || 0);
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    if (pidAlive) return Boolean(pidAlive(pid));
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---- single-flight mutex (one poller process) ----
+let laneHeld = false;
+/** tryAcquire: true = we own the lane; false = busy (caller reports honestly). */
+export function tryAcquireLane() {
+  if (laneHeld) return false;
+  laneHeld = true;
+  return true;
+}
+export function releaseLane() {
+  laneHeld = false;
+}
+export function _laneHeldForTests() {
+  return laneHeld;
+}
+
+// ---- tmux driving (injectable exec) ----
+function defaultExec(argv, { timeoutMs = 15000 } = {}) {
+  return new Promise((resolve) => {
+    execFile(argv[0], argv.slice(1), { timeout: timeoutMs, encoding: "utf8" }, (err, stdout) => {
+      resolve({ stdout: String(stdout || ""), code: err ? 1 : 0 });
+    });
+  });
+}
+const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const CHROME_LINE = /working\.\.\.|Thinking|Enter a coding task|Freebucks left|Session ended|Press Enter to continue|^[╭╰│─\s]*$/;
+const ALIVE_LINE = /working\.\.\.|Thinking/;
+
+/** Strip TUI chrome; keep candidate reply lines. */
+export function stripChrome(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !CHROME_LINE.test(l));
+}
+
+/** Numbered picker entry ("2) GLM 5.3 Flash (0/hr)") matching a model family. */
+export function pickerChoiceFor(lines, model) {
+  const m = String(model || "").toLowerCase();
+  const want = [];
+  if (/glm/.test(m)) want.push(/glm/i);
+  if (/mimo/.test(m)) want.push(/mimo/i);
+  if (/deepseek/.test(m)) want.push(/deepseek/i);
+  if (!want.length) return "";
+  for (const raw of lines) {
+    const mt = String(raw || "").match(/^[ \t]*(\d{1,2})[.)][ \t]+(.+)$/);
+    if (!mt) continue;
+    if (want.some((re) => re.test(mt[2]))) return mt[1];
+  }
+  return "";
+}
+
+async function waitFor(pollFn, { timeoutMs, pollMs, exec, sleep }) {
+  const t0 = Date.now();
+  for (;;) {
+    const v = await pollFn();
+    if (v) return v;
+    if (Date.now() - t0 >= timeoutMs) return null;
+    await sleep(pollMs);
+  }
+}
+
+/**
+ * Full lane run. All paths return {ok, text} user-facing; never throws.
+ * NEVER call with a live human session active — checked inside, double-guard.
+ */
+export async function runFreebuffLane({
+  prompt,
+  model = "",
+  session = `tg-fb-${Date.now().toString(36)}`,
+  env = process.env,
+  exec = defaultExec,
+  sleep = defaultSleep,
+  now = Date.now,
+  fetchFn = globalThis.fetch,
+  credsPath,
+  ownerPath,
+  workspace,
+  onProgress,
+  timeouts = {},
+} = {}) {
+  const T = {
+    taskPromptMs: timeouts.taskPromptMs || 60000,
+    workingAppearMs: timeouts.workingAppearMs || 120000,
+    totalMs: timeouts.totalMs || 600000,
+    pollMs: timeouts.pollMs || 2000,
+    quietMs: timeouts.quietMs || 15000,
+  };
+  const fail = (text) => ({ ok: false, text });
+  if (!freebuffLaneEnabled(env)) return fail("Freebuff Telegram lane is off (FREEBUFF_TG_LANE=1 to enable).");
+  if (!String(prompt || "").trim()) return fail("Empty prompt — nothing sent to Freebuff.");
+  const run = async (argv, o) => exec(argv, o);
+  const cap = async () => (await run(["tmux", "capture-pane", "-p", "-t", session])).stdout;
+  const progress = (t) => {
+    try {
+      onProgress?.(t);
+    } catch {}
+  };
+
+  if (!tryAcquireLane()) {
+    return fail("Freebuff is busy with another Telegram request right now — try again in a minute. (One session per account; requests never overlap.)");
+  }
+  let started = false;
+  try {
+    if (humanSessionActive({ ownerPath, env })) {
+      return fail("Your terminal Freebuff session is active — Telegram yields to it (one session per account). Close it or wait, then ask again.");
+    }
+    const bal = await readFreebucksBalance({ fetchFn, credsPath, env });
+    if (bal.error && bal.error !== "not signed in") {
+      return fail(`Freebuff balance check failed (${bal.error}) — not starting a session. Terminal use is unaffected.`);
+    }
+    if (!bal.error && !(bal.balance > 0) && !isZeroHrModel(model)) {
+      return fail(
+        `Freebucks balance is 0${bal.resetAt ? ` (resets ${bal.resetAt})` : ""} — not starting a paid session from Telegram. ` +
+          `Pick a 0/hr model (GLM 5.3 Flash / MiMo 2.6 Flash) or run \`freebuff\` in a terminal.`
+      );
+    }
+
+    const cwd = workspace || env?.HT_WORKSPACE || `${homedir()}/src/Health-tracker`;
+    await run(["tmux", "kill-session", "-t", session]);
+    await run(["tmux", "new-session", "-d", "-s", session, "-x", "200", "-y", "50", `cd ${cwd} && freebuff --trust-agents; exec bash`]);
+    started = true;
+    const t0 = now();
+    const remain = () => T.totalMs - (now() - t0);
+
+    // 1. wait for the task prompt ("Enter a coding task"), accept default model
+    const pane1 = await waitFor(async () => {
+      const p = await cap();
+      return /Enter a coding task/.test(p) ? p : null;
+    }, { timeoutMs: Math.min(T.taskPromptMs, remain()), pollMs: T.pollMs, exec, sleep });
+    if (!pane1) return fail("Freebuff did not reach the task prompt in time — session closed, nothing burned. Try again or use the terminal.");
+    // Accept the default model, then check whether a picker menu appeared:
+    // pick the requested 0/hr entry by its number, else plain Enter (default).
+    await run(["tmux", "send-keys", "-t", session, "Enter"]);
+    await sleep(2000);
+    const afterEnter = await cap();
+    const menuPick = pickerChoiceFor(afterEnter.split(/\r?\n/), model);
+    if (menuPick) {
+      await run(["tmux", "send-keys", "-t", session, menuPick]);
+      await sleep(1000);
+      await run(["tmux", "send-keys", "-t", session, "Enter"]);
+      await sleep(2000);
+    }
+    // re-wait for a FRESH task prompt (stale pre-picker line must not count)
+    const fresh = await waitFor(async () => {
+      const p = await cap();
+      if (/Enter a coding task/.test(p) && !/Session ended|Press Enter to continue/.test(p)) return p;
+      return null;
+    }, { timeoutMs: Math.min(30000, remain()), pollMs: T.pollMs, exec, sleep });
+    if (!fresh) return fail("Freebuff model picker did not settle — session closed. Try again or use the terminal.");
+    const before = fresh;
+
+    // 2. type the prompt
+    await run(["tmux", "send-keys", "-t", session, "-l", String(prompt)]);
+    await run(["tmux", "send-keys", "-t", session, "Enter"]);
+    progress(`Freebuff working… prompt sent${model ? ` (${model})` : ""}. Waiting for the reply (one session per account).`);
+
+    // 3. working appears…
+    const working = await waitFor(async () => (ALIVE_LINE.test(await cap()) ? true : null), {
+      timeoutMs: Math.min(T.workingAppearMs, remain()), pollMs: T.pollMs, exec, sleep,
+    });
+    if (!working) return fail("Freebuff never showed activity after the prompt — session closed. The prompt was not processed; try again or use the terminal.");
+
+    // 4. …then gone AND pane quiet
+    let lastHash = "";
+    let quietSince = 0;
+    const done = await waitFor(async () => {
+      const p = await cap();
+      if (ALIVE_LINE.test(p)) {
+        quietSince = 0;
+        return null;
+      }
+      const h = `${p.length}:${p.slice(-200)}`;
+      if (h !== lastHash) {
+        lastHash = h;
+        quietSince = now();
+        return null;
+      }
+      return now() - quietSince >= T.quietMs ? p : null;
+    }, { timeoutMs: Math.min(remain(), T.totalMs), pollMs: T.pollMs, exec, sleep });
+    if (!done) return fail("Freebuff ran past the Telegram lane timeout — session closed to free the account. Check the terminal or retry with a smaller ask.");
+
+    // 5. reply = new non-chrome lines since the prompt went in, minus the
+    // echoed prompt line itself (TUI echoes what was typed).
+    const strip = (t) => new Set(stripChrome(t));
+    const seen = strip(before);
+    const promptEcho = String(prompt || "").trim().replace(/\s+/g, " ");
+    const freshLines = stripChrome(done).filter((l) => !seen.has(l) && l.replace(/\s+/g, " ") !== promptEcho);
+    const reply = freshLines.join("\n").slice(0, 3500).trim();
+    if (!reply) return fail("Freebuff finished but no reply text was captured — session closed. Try again or use the terminal for this one.");
+    return { ok: true, text: reply };
+  } catch (e) {
+    return fail(`Freebuff lane error (${redact(e)}) — session closed. Terminal use is unaffected.`);
+  } finally {
+    if (started) {
+      try {
+        await exec(["tmux", "kill-session", "-t", session]);
+      } catch {}
+    }
+    releaseLane();
+  }
+}
