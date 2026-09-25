@@ -72,7 +72,20 @@
         ],
         "model": "opencode/nemotron-3.5-lightning-free",
         "variant": null,
-        "smallModel": "opencode/space-bunny-free"
+        "smallModel": "opencode/space-bunny-free",
+        "defaultAgent": "build",
+        "timeoutMs": 900000,
+        "thinking": true,
+        "allowExternalDirectory": false
+      },
+      "progress": {
+        "mode": "concise",
+        "editIntervalMs": 2500,
+        "maxEdits": 40,
+        "maxChars": 220
+      },
+      "session": {
+        "mode": "per-chat"
       }
     },
     {
