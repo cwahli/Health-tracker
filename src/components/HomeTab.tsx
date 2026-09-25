@@ -11,6 +11,7 @@ import { getAgentCalibration, formatOptimalTargetValue } from '../utils/agentCal
 import { getCurrentDateInTimezone, toYYYYMMDD } from '../utils/dateUtils';
 import { standardizeUnit, reverseStandardizeUnit, formatNormalRange } from '../utils/unitConversion';
 import { isCoreNutrient, isAdditionalNutrient, getTopTargetNutrientKeys, extractNutrientValue, isLimitNutrient, isNutrientOverLimit, isNutrientGoalMet, lookupByNutrientKey, canonicalNutrientKey, nutrientKeySlug } from '../utils/nutrients';
+import { ceilDisplayValue, weeklyTargetFromDaily } from '../utils/nutrientDisplay';
 import { nutrientDefinitions } from '../utils/nutrition';
 import { BiomarkerExpandedSection } from './BiomarkerExpandedSection';
 import { FilterPills } from './ui/FilterPills';
@@ -770,11 +771,7 @@ export default function HomeTab({
   const baseSodiumTarget = report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.sodium, 1200) : 1200;
   const baseProteinTarget = report && report.dailyNutrientTargets ? parseTarget(report.dailyNutrientTargets.protein, 90) : 90;
 
-  const formatValue = (val: number) => {
-    const clean = Math.round(val * 1000) / 1000;
-    if (clean >= 10) return Math.ceil(clean);
-    return Math.ceil(clean * 10) / 10;
-  };
+  const formatValue = (val: number) => ceilDisplayValue(val);
 
   const activeTargets = {
     calories: formatValue(Number(timeframeTotals.calories || 0)),
@@ -1411,7 +1408,7 @@ export default function HomeTab({
               {sortNutrientKeys(topWeeklyNutrientKeys).map((key) => {
                 const reportTargetRaw = lookupTargetRaw(key);
                 const baseDailyTarget = parseTarget(reportTargetRaw, 0);
-                const weeklyTarget = Math.round(baseDailyTarget * 7 * 10) / 10;
+                const weeklyTarget = weeklyTargetFromDaily(baseDailyTarget);
                 const actual7dRaw = extractNutrientValue(rolling7DayTotals, key);
                 const actual7d = formatValue(actual7dRaw);
                 const unit = parseUnit(reportTargetRaw, fallbackUnits[canonicalNutrientKey(key)] || fallbackUnits[key] || 'mg');

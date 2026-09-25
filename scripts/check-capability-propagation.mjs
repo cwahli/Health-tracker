@@ -16,8 +16,14 @@
  * stay manual per the §14.7 distribute matrix — this script is the gate BEFORE
  * that step: a new capability with undeclared classes/adapters fails here.
  *
- * Usage: node scripts/check-capability-propagation.mjs [--strict]
+ * Usage: node scripts/check-capability-propagation.mjs [--strict] [--ids=a,b,c]
  *   --strict: also fail on `partial`/`open` capabilities (for release gates).
+ *   --ids:    scope the --strict status rule to these capability ids (the
+ *             ticket rows). Structural checks (schema, orphans, vendor drift,
+ *             core files) still run over EVERY row either way — --ids only
+ *             narrows which statuses must be `done` (V-30.5 ticket-scoped
+ *             strict; the 5 pre-existing foreign partials stay owned by their
+ *             owning work and are never marked done here).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const REG_PATH = path.join(ROOT, 'bots', 'capabilities.json');
+const MATRIX_PATH = path.join(ROOT, 'public', 'capability-matrix.html');
 const SKILLS_DIR = path.join(ROOT, 'scripts', 'skills', 'common');
 const LIB_DIR = path.join(ROOT, 'scripts', 'lib');
 
@@ -35,7 +42,7 @@ const ORPHAN_LIBS = [
   'tg-copy-code.mjs', 'tg-copy-code.test.mjs', 'tg-api.mjs', 'tg-throttle.mjs',
   'inbound-media.mjs', 'agent-opencode.mjs', 'agent-cline.mjs', 'agent-gemini.mjs', 'freemodels.mjs',
   'reasoning-compress.mjs', 'bot-commands.mjs', 'bot-status.mjs', 'commands.mjs',
-  'file-locks.mjs', 'registry.mjs', 'failure-log.mjs',
+  'file-locks.mjs', 'registry.mjs', 'failure-log.mjs', 'free-lanes.mjs',
 ];
 
 const SCOPES = new Set(['common', 'transport', 'runtime-adapter', 'bot-specific']);
@@ -52,9 +59,25 @@ const VENDOR_MIRRORS = [
     'tools/telegram-provider-router/src/tg-progress.vendor.mjs',
     '// === VENDORED FROM scripts/lib/tg-progress.mjs — DO NOT EDIT ===',
   ],
+  [
+    'scripts/lib/free-lanes.mjs',
+    'tools/telegram-provider-router/src/free-lane-table.vendor.mjs',
+    '// === VENDORED FROM scripts/lib/free-lanes.mjs — DO NOT EDIT ===',
+  ],
+  [
+    'scripts/lib/inbound-media.mjs',
+    'tools/telegram-provider-router/src/inbound-media.vendor.mjs',
+    '// === VENDORED FROM scripts/lib/inbound-media.mjs — DO NOT EDIT ===',
+  ],
 ];
 
 const strict = process.argv.includes('--strict');
+const idsArg = process.argv.find((a) => a.startsWith('--ids='));
+const strictIds = idsArg ? new Set(idsArg.slice(6).split(',').map((s) => s.trim()).filter(Boolean)) : null;
+if (strict && idsArg && !strictIds.size) {
+  console.error('FATAL: --ids= given but empty');
+  process.exit(2);
+}
 const failures = [];
 const warnings = [];
 let checked = 0;
@@ -83,6 +106,20 @@ try {
 
 if (JSON.stringify(reg.classes) !== JSON.stringify(CLASS_KEYS)) {
   fail(`registry classes must be exactly [${CLASS_KEYS.join(', ')}]`);
+}
+
+if (!fs.existsSync(MATRIX_PATH)) {
+  fail(`missing capability matrix: ${path.relative(ROOT, MATRIX_PATH)}`);
+} else {
+  const matrix = fs.readFileSync(MATRIX_PATH, 'utf8');
+  const matrixClasses = [...matrix.matchAll(/data-capability-class="([^"]+)"/g)].map((match) => match[1]);
+  if (JSON.stringify(matrixClasses) !== JSON.stringify(CLASS_KEYS)) {
+    fail(`capability matrix classes must be exactly [${CLASS_KEYS.join(', ')}]`);
+  }
+  if (/<th[^>]*>\s*(?:OpenCode|Android|Chat)\s*<\/th>/i.test(matrix)) {
+    fail('capability matrix contains legacy class headers');
+  }
+  if (!matrix.includes('bots/capabilities.json')) fail('capability matrix must name bots/capabilities.json as its source');
 }
 
 const skillToCap = new Map();
@@ -121,7 +158,15 @@ for (const cap of reg.capabilities || []) {
     if (!skillToCap.has(s)) skillToCap.set(s, []);
     skillToCap.get(s).push(cap.id);
   }
-  if (strict && cap.status !== 'done') fail(`${tag}: status "${cap.status}" (strict mode requires done)`);
+  if (strict && (!strictIds || strictIds.has(cap.id)) && cap.status !== 'done') {
+    fail(`${tag}: status "${cap.status}" (strict mode${strictIds ? ` for --ids=${[...strictIds].join(',')}` : ''} requires done)`);
+  }
+  if (strictIds) strictIds.delete(cap.id);
+}
+
+// A scoped --strict must not silently pass on typo'd ids.
+if (strictIds && strictIds.size) {
+  for (const missing of strictIds) fail(`--ids="${missing}" matches no capability`);
 }
 
 // Orphan scan A: every common skill must be mapped.

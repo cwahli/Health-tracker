@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,7 @@ import {
   evaluateReproVerdicts as evaluateCoordinationReproVerdicts,
 } from '../scripts/lib/coordination-tax.mjs';
 import { Throttle } from '../scripts/lib/tg-throttle.mjs';
+import { sessionKey, tmuxWindowFor } from '../scripts/lib/work-session.mjs';
 import {
   mapOpencodeEvent,
   buildOpencodeArgs,
@@ -88,6 +89,7 @@ import {
 } from '../scripts/lib/commands.mjs';
 import {
   ProgressRenderer,
+  fanoutProgressEvent,
   buildQuotedPrompt,
   loadLeases,
   saveLeases,
@@ -278,10 +280,13 @@ describe('agent-opencode event mapping', () => {
     });
   });
 
-  it('maps tool, step_finish and error', () => {
+  it('maps tool, tool_use, step_finish and error', () => {
     expect(
       mapOpencodeEvent({ type: 'tool', part: { tool: 'bash', state: { status: 'completed' } } }),
     ).toMatchObject({ kind: 'tool', tool: 'bash', status: 'completed' });
+    expect(
+      mapOpencodeEvent({ type: 'tool_use', part: { tool: 'read', state: { status: 'running', input: { path: 'README.md' } } } }),
+    ).toMatchObject({ kind: 'tool', tool: 'read', status: 'running', input: { path: 'README.md' } });
     expect(mapOpencodeEvent({ type: 'step_finish', part: { cost: 0.01 } })).toMatchObject({
       kind: 'step_finish',
     });
@@ -628,10 +633,27 @@ describe('commands', () => {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
     };
     const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
-    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/abort', '/help']) {
+    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/abort', '/help', '/resume']) {
       expect(text).toContain(cmd);
     }
     expect(text).toContain('opencode-go/muse-spark-1.3');
+  });
+
+  it('advertises /resume with a handler, help line, and telegram payload (V-30.5)', async () => {
+    expect(COMMAND_NAMES).toContain('resume');
+    const entry = BOT_COMMANDS.find((c) => c.command === 'resume');
+    expect(entry?.description.length).toBeGreaterThan(0);
+    expect(toTelegramCommands().find((c) => c.command === 'resume')?.description).toBe(entry?.description);
+    expect(helpText({ name: 'b', agent: {} }, {})).toContain('/resume [n]');
+    const src = (await import('node:fs')).readFileSync(
+      new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8',
+    );
+    // handler exists and is read-only (queue/packet reads, no second store).
+    expect(src).toContain("case 'resume'");
+    expect(src).toContain('resumePacketText');
+    expect(src).toMatch(/runBugctl\(\['queue', '--json'\]\)/);
+    expect(src).toMatch(/runBugctl\(\['packet', `--id=#\$\{id\}`, '--format=text'\]\)/);
+    expect(parseCommand('/resume 5')).toEqual({ name: 'resume', args: '5', raw: '/resume 5' });
   });
 
   it('shows the effective model in status', () => {
@@ -1682,3 +1704,284 @@ describe('BOT-21 — Coordination Tax Logger & Repro Consensus', () => {
   });
 });
 
+
+describe('BOT-9 live failover wiring', () => {
+  it('fans out renderer first and isolates observer failures', () => {
+    const order = [];
+    const context = { model: 'm1', attempt: 1 };
+    fanoutProgressEvent({
+      renderer: { onEvent: () => { order.push('renderer'); throw new Error('renderer failure'); } },
+      observer: { onEvent: (event, receivedContext) => { order.push(['observer', event.kind, receivedContext]); } },
+      event: { kind: 'reasoning', text: 'not persisted' },
+      context,
+    });
+    expect(order).toEqual(['renderer', ['observer', 'reasoning', context]]);
+    expect(() => fanoutProgressEvent({
+      renderer: { onEvent: () => order.push('renderer') },
+      observer: { onEvent: () => { throw new Error('observer failure'); } },
+      event: { kind: 'tool' },
+    })).not.toThrow();
+  });
+
+
+  it('failoverModels collapses duplicates and drops empties', async () => {
+    const { failoverModels } = await import('../scripts/lib/agent-opencode.mjs');
+    expect(failoverModels('m1', 'm1')).toEqual(['m1']);
+    expect(failoverModels('m1', 'm2')).toEqual(['m1', 'm2']);
+    expect(failoverModels('m1', '')).toEqual(['m1']);
+    expect(failoverModels('', null)).toEqual([]);
+  });
+
+  it('runOpencodeWithFailover switches lanes with a user-visible line', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const oldLog = process.env.BOT_FAILURE_LOG;
+    process.env.BOT_FAILURE_LOG = `${os.tmpdir()}/failover_test_${Date.now()}.jsonl`;
+    try {
+      const modelsSeen = [];
+      const spawnImpl = (bin, args) => {
+        const model = String(args[args.indexOf('-m') + 1]);
+        modelsSeen.push(model);
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => { child.emit('close', 1); };
+        queueMicrotask(() => {
+          if (model === 'm1') {
+            child.stderr.emit('data', Buffer.from('level=ERROR msg="run failed" error.error="rate limit exceeded, retry later"\n'));
+          } else {
+            child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"fixed it"}}\n'));
+          }
+          child.emit('close', model === 'm1' ? 1 : 0);
+        });
+        return child;
+      };
+      const sent = [];
+      const api = { sendMessage: async (chatId, text) => { sent.push(text); return {}; } };
+      const result = await runOpencodeWithFailover({
+        api, chatId: 7, prompt: 'fix x', models: ['m1', 'm2'],
+        workspace: '/tmp', timeoutMs: 5000, spawnImpl,
+      });
+      expect(modelsSeen).toEqual(['m1', 'm2']);
+      expect(result.finalText).toBe('fixed it');
+      expect(sent.length).toBe(1);
+      expect(sent[0]).toMatch(/m1.*switching to.*m2/);
+    } finally {
+      if (oldLog === undefined) delete process.env.BOT_FAILURE_LOG;
+      else process.env.BOT_FAILURE_LOG = oldLog;
+    }
+  });
+
+  it('attaches model and attempt context to every failover run', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const starts = [];
+    const completes = [];
+    const events = [];
+    const modelsSeen = [];
+    let currentModel = '';
+    const spawnImpl = (bin, args) => {
+      const model = String(args[args.indexOf('-m') + 1]);
+      modelsSeen.push(model);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => child.emit('close', 1);
+      queueMicrotask(() => {
+        if (model === 'm1') {
+          child.stdout.emit('data', Buffer.from('{"type":"error","error":{"message":"rate limit exceeded"}}\n'));
+        } else {
+          child.stdout.emit('data', Buffer.from('{"type":"reasoning","part":{"text":"private"}}\n'));
+          child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"done"}}\n'));
+        }
+        child.emit('close', model === 'm1' ? 1 : 0);
+      });
+      return child;
+    };
+    const oldLog = process.env.BOT_FAILURE_LOG;
+    process.env.BOT_FAILURE_LOG = '0';
+    try {
+      const result = await runOpencodeWithFailover({
+        api: { sendMessage: async () => ({}) },
+        chatId: 7,
+        prompt: 'fix x',
+        models: ['m1', 'm2'],
+        workspace: '/tmp',
+        timeoutMs: 5000,
+        spawnImpl,
+        onEvent: (event) => events.push(`${currentModel}:${event.kind}`),
+        onAttemptStart: ({ model, attempt }) => { currentModel = `${model}:${attempt}`; starts.push(currentModel); },
+        onAttemptComplete: ({ model, attempt, result: attemptResult }) => completes.push(`${model}:${attempt}:${attemptResult.finalText ? 'complete' : 'failed'}`),
+      });
+      expect(result.finalText).toBe('done');
+      expect(modelsSeen).toEqual(['m1', 'm2']);
+      expect(starts).toEqual(['m1:1', 'm2:2']);
+      expect(completes).toEqual(['m1:1:failed', 'm2:2:complete']);
+      expect(events).toEqual(['m1:1:error', 'm2:2:reasoning', 'm2:2:text']);
+    } finally {
+      if (oldLog === undefined) delete process.env.BOT_FAILURE_LOG;
+      else process.env.BOT_FAILURE_LOG = oldLog;
+    }
+  });
+
+  it('single-model chain behaves like a direct call with no switch line', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { runOpencodeWithFailover } = await import('../scripts/bot-host.mjs');
+    const spawnImpl = () => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => {};
+      queueMicrotask(() => {
+        child.stdout.emit('data', Buffer.from('{"type":"text","part":{"text":"done"}}\n'));
+        child.emit('close', 0);
+      });
+      return child;
+    };
+    const sent = [];
+    const api = { sendMessage: async (chatId, text) => { sent.push(text); return {}; } };
+    const result = await runOpencodeWithFailover({
+      api, chatId: 7, prompt: 'fix x', models: ['m1'], workspace: '/tmp', timeoutMs: 5000, spawnImpl,
+    });
+    expect(result.finalText).toBe('done');
+    expect(sent).toEqual([]);
+  });
+});
+
+describe('BOT-19 /tx wiring', () => {
+  const OLD_WS = process.env.WORK_SESSIONS;
+  const OLD_LOC = process.env.BOT_LOCATION;
+  const OLD_OBSERVERS = process.env.WORK_OBSERVERS;
+  let wsFile;
+  let observerRoot;
+  beforeEach(() => {
+    wsFile = `${os.tmpdir()}/tx_test_${Date.now()}_${Math.random().toString(36).slice(2)}.json`;
+    observerRoot = `${os.tmpdir()}/tx_observer_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    process.env.WORK_SESSIONS = wsFile;
+    process.env.WORK_OBSERVERS = observerRoot;
+    process.env.BOT_LOCATION = 'testbox';
+  });
+  afterEach(() => {
+    if (OLD_WS === undefined) delete process.env.WORK_SESSIONS;
+    else process.env.WORK_SESSIONS = OLD_WS;
+    if (OLD_LOC === undefined) delete process.env.BOT_LOCATION;
+    else process.env.BOT_LOCATION = OLD_LOC;
+    if (OLD_OBSERVERS === undefined) delete process.env.WORK_OBSERVERS;
+    else process.env.WORK_OBSERVERS = OLD_OBSERVERS;
+    try { fs.unlinkSync(wsFile); } catch {}
+    try { fs.rmSync(observerRoot, { recursive: true, force: true }); } catch {}
+  });
+
+  const fakeCfg = (kind = 'opencode') => ({ agent: { workspace: '/ws', kind } });
+  const fakeApi = (sent) => ({ sendMessage: async (chatId, text) => { sent.push(text); return {}; } });
+  const fakeTxTmux = (initial = {}) => {
+    const sessions = new Map(Object.entries(initial).map(([name, windows]) => [name, new Set(windows)]));
+    const panes = new Map();
+    const calls = [];
+    let nextPane = 1;
+    const targetKey = (target) => String(target).replace(/:$/, '');
+    const addPane = (target, command) => {
+      const id = `%${nextPane++}`;
+      panes.set(`${targetKey(target)}\t${id}`, { target: targetKey(target), id, command });
+      return id;
+    };
+    const run = (args) => {
+      calls.push(args);
+      if (args[0] === 'has-session') return sessions.has(args[2]);
+      if (args[0] === 'list-windows') return [...(sessions.get(args[2]) || [])].join('\n');
+      if (args[0] === 'new-session') {
+        const session = args[3];
+        sessions.set(session, new Set([args[5]]));
+        addPane(`${session}:${args[5]}`, args.at(-1));
+        return true;
+      }
+      if (args[0] === 'new-window') {
+        const session = args[3].replace(/:$/, '');
+        const windows = sessions.get(session) || new Set();
+        windows.add(args[5]);
+        sessions.set(session, windows);
+        addPane(`${session}:${args[5]}`, args.at(-1));
+        return true;
+      }
+      if (args[0] === 'list-panes') {
+        return [...panes.values()].filter((pane) => pane.target === targetKey(args[2])).map((pane) => `${pane.id}\t${pane.command}`).join('\n');
+      }
+      if (args[0] === 'split-window') return addPane(args[3], args.at(-1));
+      if (args[0] === 'select-pane' || args[0] === 'kill-pane') {
+        if (args[0] === 'kill-pane') {
+          const entry = [...panes.entries()].find(([, pane]) => pane.id === args[2]);
+          if (entry) panes.delete(entry[0]);
+        }
+        return true;
+      }
+      return false;
+    };
+    for (const [session, windows] of sessions) {
+      for (const window of windows) addPane(`${session}:${window}`, 'bash');
+    }
+    return { calls, run, sessions, panes };
+  };
+
+  it('/tx on creates and reports the exact workstream target', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    expect(sent.length).toBe(1);
+    expect(sent[0]).toContain('ON');
+    expect(sent[0]).toMatch(/tmux attach -t work-testbox:ws-/);
+    expect(sent[0]).toContain('testbox|9|/ws');
+    expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'new-session', 'has-session', 'list-windows', 'list-panes', 'select-pane', 'list-panes']);
+    expect(tmux.calls.flat().some((arg) => /kill|respawn|send-keys/.test(String(arg)))).toBe(false);
+  });
+
+  it('/tx on migrates a legacy blank workstream window without destructive tmux actions', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const legacyWindow = tmuxWindowFor(sessionKey({ location: 'testbox', chat: '9', workspace: '/ws' }));
+    const tmux = fakeTxTmux({ 'work-testbox': [legacyWindow] });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    expect(tmux.sessions.get('work-testbox')).toEqual(new Set([legacyWindow]));
+    expect(tmux.calls.map((args) => args[0])).toContain('split-window');
+    expect(tmux.calls.flat().some((arg) => /kill-window|kill-session|respawn-pane|send-keys/.test(String(arg)))).toBe(false);
+  });
+
+  it('/tx off disables without stopping', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run });
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'off', tmux: tmux.run });
+    expect(sent[1]).toContain('OFF');
+    expect(tmux.sessions.get('work-testbox').size).toBe(1);
+  });
+
+  it('/tx status reports without creating a session', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: '', tmux: tmux.run });
+    expect(sent[0]).toContain('No work session');
+    expect(tmux.calls).toEqual([]);
+  });
+
+  it('/tx on reports no tmux target for an API-only lane', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg('gemini'), chatId: 9, arg: 'on', tmux: tmux.run });
+    expect(sent[0]).toContain('ON');
+    expect(sent[0]).toContain('Live attach: unavailable');
+    expect(sent[0]).not.toContain('tmux attach');
+    expect(tmux.calls).toEqual([]);
+  });
+
+  it('/tx usage on unknown subcommand', async () => {
+    const { handleTxCommand } = await import('../scripts/bot-host.mjs');
+    const sent = [];
+    const tmux = fakeTxTmux();
+    await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'nope', tmux: tmux.run });
+    expect(sent[0]).toContain('Usage: /tx on|off|status|debug|help');
+    expect(tmux.calls).toEqual([]);
+  });
+});

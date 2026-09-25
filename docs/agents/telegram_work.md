@@ -4,6 +4,45 @@ This document defines the communication, pending-state, and active-progress obse
 
 ---
 
+## 0. Ticket-first handoff (primary since V-30.5)
+
+Every defect enters through a **card in the bug store** (`docs/agent/BUG_PIPELINE.md`). Chat is the
+announcement channel, never the state. The older QA → dispatch → deploy → QA narrative in §3 stays
+as legacy background for chat-only runs; new work starts with a card.
+
+### Handoff rules (post to the store first, then name the next role)
+
+1. **Intake** → `node scripts/bugctl.mjs create` + `pack` — or just report it to `@Bug_ticket_bot`,
+   which packs one card (or `needs_repro` / `duplicate_of`) for you → card `#n`.
+2. **Repro** → ping QA with `#n`: `node scripts/qa-runner.mjs --ticket=#n` → verdict + portable R2
+   keys. QA never fixes and never dispatches.
+3. **Plan/dispatch** → Orchestrator: `bugctl plan --id=#n …`, then
+   `bash scripts/run-coding-dispatch.sh --ticket=#n`. The packet is the prompt; the Orchestrator
+   never posts the verify.
+4. **Verify** → a verifier who did not author the fix:
+   `bugctl verify --id=#n --result green --command <gate> --evidence a,b --by <role>`.
+   Author ≠ verifier; a journey green never closes a card.
+
+### Waiting / claim rules
+
+- **Every yield names the entity** (§2 table), e.g. `⏳ Waiting for @qa_meal verdict on #12`.
+- **One open claim per card** (`bugctl claim --id=#n --assignee=<role>`); a second dispatch on an
+  `in_fix`/`verifying`/`done` card is refused by the guard (exit 3) — never queue a second writer.
+- **Re-entry after any gap** = `/resume [n]` (packet from the store) or
+  `bugctl packet --id=#n --format=text`. Chat scrollback is not memory.
+- **Blocked cards** carry `bugctl block --reason` in `blocked_reason` and leave the queue until
+  `bugctl unblock --id=#n`.
+
+### Needs human (stop and hand off — never fake it)
+
+- Scope beyond the single-defect rule when the split itself is contested.
+- Token/model/billing operations (BotFather, P9 token, allowance refills).
+- `not_reproducible` disputes: close vs re-scope.
+- Live TG taps that prove a command end to end (e.g. `/resume #n` on `@Bug_ticket_bot`).
+- Anything `plan/ROADMAP.md` marks `blocked_human` (including starting a gated V-30.x phase).
+
+---
+
 ## 1. The Three Loading Dots ("...") Standard
 
 Users and operators looking at Telegram must never wonder whether a bot has crashed, completed, or is actively working. Whenever an agent is running a task, it must visibly indicate progress.
@@ -46,7 +85,7 @@ Whenever an agent yields execution or awaits a response from another agent, back
 
 ---
 
-## 3. End-to-End Autonomous Workflow
+## 3. End-to-End Autonomous Workflow (legacy chat path — new defects enter via §0 ticket-first)
 
 The diagram below illustrates the full lifecycle from visual defect detection to automated live deployment and QA verification:
 
@@ -62,9 +101,9 @@ The diagram below illustrates the full lifecycle from visual defect detection to
    • Posts: "⏳ Status: Waiting for @Orchestrator..." -> STOPS in 1 turn
        │
        ▼
-2. @Orchestrator
-   • Evaluates tool allowances: node scripts/tool-allowance.mjs status & probe
-   • Fallback Hierarchy: OpenCode (deepseek) -> Cline CLI -> Grok Build -> Agy (skipped on VPS)
+ 2. @Orchestrator
+    • Evaluates tool allowances: node scripts/tool-allowance.mjs status & probe
+    • Fallback Hierarchy: OpenCode free lane (nemotron-3.5-lightning-free → space-bunny-free) -> Cline CLI -> Grok Build -> Agy (skipped on VPS)
    • Dynamic Thinking: --thinking=low for atomic UI/text fixes (<60s)
    • Starts Action-Aware Heartbeat + 4s Typing Pulse ("...")
    • Posts: "⏳ Status: Waiting for response from Agent <Tool>..."

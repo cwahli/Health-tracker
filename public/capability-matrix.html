@@ -29,47 +29,24 @@
 <div class="container">
   <div class="header">
     <h1>🤖 Bot Capability Matrix</h1>
-    <p>Health Tracker · Hermes vs OpenCode vs Android vs Chat agent</p>
+    <p>Health Tracker · shared capability classes and adapters</p>
   </div>
-  <div class="sub-header">Input</div>
+  <div class="sub-header">Capability registry snapshot</div>
   <table class="nutrient-table">
-    <thead><tr><th>Feature</th><th style="text-align:center">Hermes</th><th style="text-align:center">OpenCode</th><th style="text-align:center">Android</th><th style="text-align:center">Chat</th></tr></thead>
+    <thead><tr><th>Capability</th><th data-capability-class="hermes" style="text-align:center">Hermes</th><th data-capability-class="vps" style="text-align:center">VPS</th><th data-capability-class="mobile" style="text-align:center">Mobile</th><th data-capability-class="grok_tg" style="text-align:center">Grok TG</th><th data-capability-class="collab" style="text-align:center">Collab</th></tr></thead>
     <tbody>
-      <tr><td class="feat">Text via Telegram</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val no">✗</td></tr>
-      <tr><td class="feat">Photo via Telegram</td><td class="val yes">✓ <span class="unit">QA</span></td><td class="val no">✗</td><td class="val no">✗</td><td class="val no">✗</td></tr>
-    </tbody>
-  </table>
-  <div class="sub-header">Commands &amp; UX</div>
-  <table class="nutrient-table">
-    <tbody>
-      <tr><td class="feat">/ autocomplete</td><td class="val part">?</td><td class="val no">✗</td><td class="val no">✗</td><td class="val yes">✓</td></tr>
-      <tr><td class="feat">Slash commands</td><td class="val part">skills</td><td class="val yes">9</td><td class="val yes">9</td><td class="val no">✗</td></tr>
-      <tr><td class="feat">Inline buttons</td><td class="val no">✗</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val no">✗</td></tr>
-      <tr><td class="feat">Typing indicator</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val no">✗</td></tr>
-      <tr><td class="feat">Live progress msg</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val no">✗</td></tr>
-    </tbody>
-  </table>
-  <div class="sub-header">Output &amp; media</div>
-  <table class="nutrient-table">
-    <tbody>
-      <tr><td class="feat">Send photo / file</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val part">~</td><td class="val no">✗</td></tr>
-      <tr><td class="feat">HTML table file</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val no">✗</td></tr>
-      <tr><td class="feat">Table as chat image</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val no">✗</td><td class="val no">✗</td></tr>
-      <tr><td class="feat">Usage footer</td><td class="val no">✗</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val no">✗</td></tr>
-    </tbody>
-  </table>
-  <div class="sub-header">Execution</div>
-  <table class="nutrient-table">
-    <tbody>
-      <tr><td class="feat">Timeout + message</td><td class="val part">?</td><td class="val yes">900s</td><td class="val yes">900s</td><td class="val yes">✓</td></tr>
-      <tr><td class="feat">Manual cancel</td><td class="val no">✗</td><td class="val yes">/abort</td><td class="val yes">/abort</td><td class="val no">✗</td></tr>
-      <tr><td class="feat">Edit / commit / push</td><td class="val no">✗</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td></tr>
-      <tr><td class="feat">Run tests + gates</td><td class="val no">✗</td><td class="val yes">✓</td><td class="val part">~</td><td class="val yes">✓</td></tr>
-      <tr><td class="feat">Web search / fetch</td><td class="val part">?</td><td class="val no">✗</td><td class="val no">✗</td><td class="val yes">✓</td></tr>
+      <tr><td class="feat">Chat tables</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val part">~ adapter</td></tr>
+      <tr><td class="feat">Command menu</td><td class="val part">~ adapter</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val part">~ adapter</td></tr>
+      <tr><td class="feat">Typing and progress</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val part">~ adapter</td></tr>
+      <tr><td class="feat">Outbound photo</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val part">~ adapter</td><td class="val no">✗</td></tr>
+      <tr><td class="feat">Inbound photo</td><td class="val part">~ adapter</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val part">~ adapter</td><td class="val no">✗</td></tr>
+      <tr><td class="feat">Model failover</td><td class="val no">✗</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val part">~ adapter</td></tr>
+      <tr><td class="feat">Session continuity</td><td class="val part">~ adapter</td><td class="val yes">✓</td><td class="val yes">✓</td><td class="val part">~ adapter</td><td class="val part">~ adapter</td></tr>
+      <tr><td class="feat">Bug ticket intake</td><td class="val yes">✓</td><td class="val part">~ adapter</td><td class="val no">✗</td><td class="val no">✗</td><td class="val no">✗</td></tr>
     </tbody>
   </table>
   <div class="note">
-    ✓ yes · ✗ no · ~ partial · ? unverified from repo. Same component as /nutrient-table: static HTML + route, PNG via Playwright screenshot for chat.
+    ✓ works on this class · ~ class-specific adapter · ✗ explicitly out of scope. Source of truth: bots/capabilities.json. Live per-class smoke remains required before changing a status.
   </div>
 </div>
 </body>

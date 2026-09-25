@@ -26,9 +26,9 @@
       },
       "agent": {
         "kind": "opencode",
-        "model": "opencode-go/deepseek-v4.1-flash",
-        "variant": "high",
-        "smallModel": "opencode-go/deepseek-v4.1-flash",
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free",
         "defaultAgent": "build",
         "workspace": "/home/ubuntu/src/Health-tracker",
         "timeoutMs": 900000,
@@ -51,39 +51,6 @@
       }
     },
     {
-      "id": "opencode",
-      "name": "OpenCode Bot",
-      "runtime": "bot-host",
-      "enabled": true,
-      "telegram": {
-        "tokenEnv": "OPENCODE_BOT_TOKEN"
-      },
-      "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots"
-      }
-    },
-    {
-      "id": "android",
-      "name": "Mobile Bot",
-      "runtime": "device",
-      "enabled": false,
-      "telegram": {
-        "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
-      },
-      "agent": {
-        "kind": "opencode",
-        "workspace": "/root/Health-tracker",
-        "opencodeBin": "/root/.opencode/bin/opencode",
-        "playwrightOutputDir": null,
-        "sharedSkills": [
-          ".agents/skills",
-          "/root/Health-tracker/scripts/skills/common"
-        ],
-        "model": "opencode/muse-spark-1.3-contributor-free",
-        "variant": null
-      }
-    },
-    {
       "id": "mobile",
       "name": "Mobile Bot 8768",
       "runtime": "device",
@@ -103,8 +70,9 @@
           ".agents/skills",
           "/root/Health-tracker/scripts/skills/common"
         ],
-        "model": "opencode/muse-spark-1.3-contributor-free",
-        "variant": null
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free"
       }
     },
     {
@@ -116,7 +84,10 @@
         "tokenEnv": "VM2_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm2"
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm2",
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free"
       }
     },
     {
@@ -134,8 +105,9 @@
         "kind": "collab",
         "workspace": "/root/Health-tracker",
         "opencodeBin": "/root/.opencode/bin/opencode",
-        "model": "opencode/muse-spark-1.3-contributor-free",
-        "variant": null
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free"
       }
     },
     {
@@ -238,8 +210,8 @@
       "id": "hermes_bug_ticket",
       "name": "Bug Ticket Bot",
       "runtime": "hermes",
-      "enabled": false,
-      "notes": "V-30.2 packer. Start enabled:false until one E2E reply via HERMES_BUG_TICKET_TOKEN. Never links orchestrator-dispatcher.",
+      "enabled": true,
+      "notes": "V-30.2 steward/packer, enabled after one live E2E reply (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2). Owns the canonical server-backed list, reviews/edits cards with revision receipts, and hands off to orchestrator; never links orchestrator-dispatcher.",
       "telegram": {
         "tokenEnv": "HERMES_BUG_TICKET_TOKEN",
         "allowedUserIds": [
@@ -248,7 +220,7 @@
       },
       "hermes": {
         "profile": "bug_ticket",
-        "username": null
+        "username": "@Bug_ticket_bot"
       },
       "agent": {
         "kind": "hermes"

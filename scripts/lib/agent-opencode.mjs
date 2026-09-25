@@ -20,6 +20,7 @@ export function buildOpencodeEnv({
   sharedSkills,
   playwrightOutputDir,
   smallModel,
+  runtimeEnv = process.env,
 } = {}) {
   const content = { $schema: 'https://opencode.ai/config.json' };
   // opencode uses a separate "small" model for session titles and other
@@ -49,8 +50,12 @@ export function buildOpencodeEnv({
       },
     };
   }
-  if (Object.keys(content).length <= 1) return {};
-  return { OPENCODE_CONFIG_CONTENT: JSON.stringify(content) };
+  const env = {};
+  if (Object.keys(content).length > 1) env.OPENCODE_CONFIG_CONTENT = JSON.stringify(content);
+  if (runtimeEnv.GEMINI_API_KEY && !runtimeEnv.GOOGLE_GENERATIVE_AI_API_KEY) {
+    env.GOOGLE_GENERATIVE_AI_API_KEY = runtimeEnv.GEMINI_API_KEY;
+  }
+  return env;
 }
 
 export function resolveOpencodeBin(explicit) {
@@ -80,13 +85,18 @@ export function mapOpencodeEvent(raw) {
     case 'text':
       return { kind: 'text', text: part.text || '' };
     case 'tool':
+    case 'tool_use':
+    case 'tool_result': {
+      const toolPart = part.tool || part.name || raw.tool || raw.name || 'tool';
+      const state = part.state || raw.state || {};
       return {
         kind: 'tool',
-        tool: part.tool || 'tool',
-        status: part.state?.status || 'unknown',
-        input: part.state?.input,
-        output: part.state?.output,
+        tool: toolPart,
+        status: state.status || part.status || raw.status || 'unknown',
+        input: state.input ?? part.input ?? raw.input,
+        output: state.output ?? part.output ?? raw.output,
       };
+    }
     case 'step_start':
       return { kind: 'step_start' };
     case 'step_finish':
@@ -301,6 +311,16 @@ export function isQuotaOrLimitError(msg) {
 
 /** A timeout/abort means re-running would just wait again — never auto-retry those. */
 const NO_RETRY_RE = /timed out after|aborted|^Abort/i;
+
+/**
+ * Failover chain for one dispatch: the chat's effective model first, then
+ * the bot default. Identical entries collapse, so a chat on the default
+ * model runs exactly once (current behavior). No invented models — both
+ * ends come from the registry/prefs.
+ */
+export function failoverModels(primary, fallback) {
+  return [...new Set([primary, fallback].filter(Boolean))];
+}
 
 /**
  * Run the user's prompt on the first model that works, mirroring the provider

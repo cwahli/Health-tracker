@@ -194,7 +194,7 @@
         "grok_tg": true,
         "collab": "adapter"
       },
-      "notes": "Single-source working headline (provider + model + thinking + elapsed + usage %, 60/75% warnings). Canonical: scripts/lib/tg-progress.mjs, imported by bot-host (vm/opencode/vm2/mobile). Grok TG router imports the vendored mirror; the checker fails on any drift, so a format change lands everywhere via one edit + sync. Box redeploy (sync-from-repo + deploy-to-live) still needed to activate router-side. Collab sends single thinking notes; Hermes gateway is a separate stack."
+      "notes": "Single-source working headline (provider + model + thinking + elapsed + usage %, 60/75% warnings). Canonical: scripts/lib/tg-progress.mjs, imported by bot-host (vm/vm2/mobile). Grok TG router imports the vendored mirror; the checker fails on any drift, so a format change lands everywhere via one edit + sync. Box redeploy (sync-from-repo + deploy-to-live) still needed to activate router-side. Collab sends single thinking notes; Hermes gateway is a separate stack."
     },
     {
       "id": "ui-typing",
@@ -262,9 +262,13 @@
       "test": "T3",
       "scope": "runtime-adapter",
       "status": "partial",
-      "prove": "live smoke: photo \u2192 absolute path in prompt, per class",
+      "prove": "unit: tools/telegram-provider-router/scripts/test-inbound-media.mjs; live smoke: photo \u2192 absolute path in prompt, per class",
       "expect": [
-        "scripts/lib/inbound-media.mjs"
+        "scripts/lib/inbound-media.mjs",
+        "tools/telegram-provider-router/src/inbound-media.vendor.mjs",
+        "tools/telegram-provider-router/src/inbound-media-adapter.mjs",
+        "tools/telegram-provider-router/src/index.js",
+        "tools/telegram-provider-router/scripts/test-inbound-media.mjs"
       ],
       "skills": [
         "telegram-inbound-media"
@@ -276,29 +280,34 @@
         "grok_tg": "adapter",
         "collab": false
       },
-      "notes": "One downloader (\u00a714.7 Case C). Grok TG import/mirror into the router still pending; Hermes profile wiring per-profile."
+      "notes": "One downloader (\u00a714.7 Case C). Grok TG router adapter and vendor mirror are wired; live photo smoke remains pending. Hermes profile wiring stays per-profile."
     },
     {
       "id": "proc-failover",
       "test": "T4",
       "scope": "runtime-adapter",
       "status": "partial",
-      "prove": "live smoke: depleted lane \u2192 same prompt completes on next lane with switch line",
+      "prove": "live smoke: depleted lane \u2192 same prompt completes on next lane with switch line; gate: scripts/check-capability-propagation.mjs vendor-drift + unit tests for free-lanes",
       "expect": [
         "tools/telegram-provider-router/src/index.js",
-        "scripts/lib/agent-opencode.mjs"
+        "scripts/lib/agent-opencode.mjs",
+        "scripts/lib/free-lanes.mjs",
+        "scripts/bot-host.mjs",
+        "scripts/sync-router-vendor.mjs",
+        "scripts/probe-free-lanes.mjs",
+        "tools/telegram-provider-router/src/free-lane-table.vendor.mjs"
       ],
       "skills": [
         "telegram-allowance"
       ],
       "classes": {
         "hermes": false,
-        "vps": "adapter",
-        "mobile": "adapter",
+        "vps": true,
+        "mobile": true,
         "grok_tg": true,
-        "collab": false
+        "collab": "adapter"
       },
-      "notes": "Grok-built buckets/deplete-tracking/failover vendored; bot-host has vocabulary + runWithModelFailover but live auto-failover wiring is still open. Collab quota is compute units, not Muse buckets."
+      "notes": "Single-source free-lane ledger: scripts/lib/free-lanes.mjs canonical, router holds vendored mirror (drift fails gate). /allowance text + /allowance table + /freemodel depletion filter shared by bot-host family + router; collab shows text only (link-only media). Grok-built buckets/deplete-tracking/failover vendored; bot-host runWithModelFailover consumes same ledger."
     },
     {
       "id": "proc-allowance-watch",
@@ -428,7 +437,7 @@
         "grok_tg": "adapter",
         "collab": "adapter"
       },
-      "notes": "Learnings land in the picker/catalog once; all agents inherit. Cline Free deepseek is wallet-independent of OpenCode."
+      "notes": "Learnings land in the picker/catalog once; all agents inherit. `/freemodel` is location-scoped: each host lists only locally installed/authenticated tools, provider catalog entries, and its own quota. Cline Free deepseek is wallet-independent of OpenCode. Gemini is exposed through OpenCode, not as a standalone picker surface."
     },
     {
       "id": "tool-thinking",
@@ -454,7 +463,7 @@
       "test": "T4",
       "scope": "common",
       "status": "partial",
-      "prove": "unit test failure-log roundtrip/grouping; review flags repeats at threshold",
+      "prove": "unit test tests/failure-log.test.ts (roundtrip/grouping, repeat threshold); review flags repeats at threshold",
       "expect": [
         "scripts/lib/failure-log.mjs",
         "scripts/review-failures.mjs"
@@ -487,18 +496,20 @@
         "grok_tg": "adapter",
         "collab": "adapter"
       },
-      "notes": "Per-chat opencode sessions (disk-persisted sessions.json, --session resume, /new /compact /abort) verified on bot-host. AUDITED GAPS (2026-09-24): (1) cline lane is stateless \u2014 runCline hardcodes sessionID:null and never passes --id, so any bot on a cline model (e.g. VM2 via /freemodel) starts fresh every message; CLI supports --id resume. (2) TG reply-quoting dropped on all bot-host lanes \u2014 prompt uses message.text/caption only, reply_to_message content never included. CB-8 cross-turn memory still open; that's the remaining partial."
+      "notes": "Per-chat opencode sessions (disk-persisted sessions.json, --session resume, /new /compact /abort) verified on bot-host. TG reply-quoting SHIPS via buildQuotedPrompt (text/caption, tested in tests/bot-host.test.ts) \u2014 the earlier dropped-quoting note was stale. Cline lane stays stateless by design: BOT-12 forbids a fake --id (3.0.65 forces interactive mode, rejects --json). CB-8 cross-turn memory still open; that's the remaining partial."
     },
     {
       "id": "svc-bug-ticket",
       "test": "T2",
       "scope": "common",
-      "status": "open",
-      "prove": "unit: scripts/lib/bug-pack.mjs fixtures; live: packer replies via bugctl",
+      "status": "done",
+      "prove": "unit: scripts/lib/bug-pack.mjs fixtures; live: packer reply via bugctl E2E (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2)",
       "expect": [
         "scripts/bugctl.mjs",
         "scripts/lib/bug-pack.mjs",
-        "scripts/skills/common/bug-ticket/SKILL.md"
+        "scripts/skills/common/bug-ticket/SKILL.md",
+        "src/utils/bugTicketState.ts",
+        "serverBugSnapshot.ts"
       ],
       "skills": [
         "bug-ticket"
@@ -510,7 +521,7 @@
         "grok_tg": false,
         "collab": false
       },
-      "notes": "V-30.2 packer service \u2014 bugctl is the one binary; hermes profile bug_ticket owns intake. E2E blocked on HERMES_BUG_TICKET_TOKEN."
+      "notes": "V-30.2 packer service \u2014 bugctl is the one binary; hermes profile bug_ticket owns intake. E2E proven 2026-09-24 via HERMES_BUG_TICKET_TOKEN (@Bug_ticket_bot); registry enabled:true. Status done from that proof (V-30.5 transition)."
     },
     {
       "id": "proc-ticket-state",
@@ -536,8 +547,8 @@
       "id": "sess-ticket-resume",
       "test": "T6",
       "scope": "common",
-      "status": "open",
-      "prove": "offline queue: bugctl flush replays .bugctl-queue.jsonl after API downtime",
+      "status": "done",
+      "prove": "unit: tests/bugctl-queue.test.ts (offline queue on dead API, flush replay + empty, un-sendable rows kept, corrupt lines dropped, missing queue empty); /resume command surface: tests/bot-host.test.ts \"advertises /resume with a handler, help line, and telegram payload\" (queue\u2192packet read path, no second store)",
       "expect": [
         "scripts/bugctl.mjs",
         "scripts/lib/bug-pack.mjs"
@@ -552,7 +563,31 @@
         "grok_tg": false,
         "collab": false
       },
-      "notes": "Offline JSONL queue is the durability path for pack ops when API is unreachable (A-f5/offline)."
+      "notes": "Offline JSONL queue is the durability path for pack ops when API is unreachable (A-f5/offline). /resume (V-30.5) prints the current ticket packet read-only via bugctl queue + packet; live TG tap on @Bug_ticket_bot still on the needs-human list."
+    },
+    {
+      "id": "svc-repro",
+      "test": "T2",
+      "scope": "common",
+      "status": "done",
+      "prove": "unit: scripts/assert-bug-repro.mjs (both verdicts + derived flags via reproCheck + bugState walk); live: qa-runner --ticket=2 posted repro.status=failed with run.log/before.png R2 keys (bugs/tag_mufs4t96_wj02x7/1790272128947-*, by qa_meal) and derived flag not_reproducible",
+      "expect": [
+        "scripts/qa-runner.mjs",
+        "scripts/bugctl.mjs",
+        "scripts/skills/common/qa-reproduce/SKILL.md",
+        "scripts/assert-bug-repro.mjs"
+      ],
+      "skills": [
+        "qa-reproduce"
+      ],
+      "classes": {
+        "hermes": true,
+        "vps": "adapter",
+        "mobile": false,
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "V-30.3 reproducer \u2014 reuses the existing qa_meal profile (preload qa-reproduce), no new QA bot/token. Verdicts via bugctl repro --check (validateRepro vocabulary); evidence is R2 keys under bugs/<tag_id>/<ts>-<kind>.<ext>."
     }
   ]
 }

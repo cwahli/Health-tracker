@@ -44,6 +44,8 @@ import {
   bugState,
   evaluateReproVerdicts,
   projectBugState,
+  applyCuration,
+  validateCuration,
   validateDefect,
   validatePlan,
   validateRepro,
@@ -1396,6 +1398,57 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
     }
   });
 
+  app.get('/api/bugs/list', async (req: Request, res: Response) => {
+    try {
+      const { d1Query } = await import('./server_d1.js');
+      const r = await d1Query<any>(`SELECT * FROM issue_tags ORDER BY updated_at DESC LIMIT 1000`);
+      if (!r.success) return res.status(500).json({ error: r.error });
+      const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
+      const wantState = req.query.state ? String(req.query.state) : null;
+      const wantAssignee = req.query.assignee ? String(req.query.assignee) : null;
+      const wantSurface = req.query.surface ? String(req.query.surface) : null;
+      const rows = tags
+        .map((t) => {
+          const item = hydrateWorkItem(t);
+          const ticket = bugState(item);
+          const lastEvent = item.curation_events?.[item.curation_events.length - 1] || null;
+          return {
+            tag_id: t.id,
+            public_n: item.public_n,
+            title: t.title,
+            bug: item.bug,
+            class: item.class,
+            fingerprint: item.fingerprint,
+            state: ticket.state,
+            flags: ticket.flags,
+            queue: ticket.queue,
+            assignee: item.assignee,
+            surface: item.surface,
+            occurrences: item.occurrences,
+            revision: Number(item.revision || 0),
+            reviewed: Boolean(item.curation_events?.length),
+            last_curation: lastEvent,
+            handoff: item.handoff || null,
+            archived_at: item.archived_at || null,
+            archive_reason: item.archive_reason || null,
+            defect: item.defect || null,
+            blocked_by: item.blocked_by || [],
+            updated_at: t.updated_at,
+            created_at: t.created_at,
+          };
+        })
+        .filter((row) => {
+          if (wantState && row.state !== wantState) return false;
+          if (wantAssignee && row.assignee !== wantAssignee) return false;
+          if (wantSurface && row.surface !== wantSurface) return false;
+          return true;
+        });
+      res.json({ source: 'canonical-bug-list', rows, count: rows.length, generated_at: new Date().toISOString() });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'bug list failed' });
+    }
+  });
+
   /** GET /api/bugs/queue?state=&assignee=&surface= — ready queue + blocked_by.
    * Registered BEFORE /api/bugs/:tagId so "queue" is not captured as a tagId. */
   app.get('/api/bugs/queue', async (req: Request, res: Response) => {
@@ -1418,19 +1471,25 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
             public_n: item.public_n,
             title: t.title,
             bug: item.bug,
-            class: item.class,
-            state: ticket.state,
-            flags: ticket.flags,
-            queue: ticket.queue,
-            assignee: item.assignee,
-            surface: item.surface,
-            occurrences: item.occurrences,
-            blocked_by: item.blocked_by || [],
-            updated_at: t.updated_at,
-            created_at: t.created_at,
+             class: item.class,
+             fingerprint: item.fingerprint,
+             state: ticket.state,
+             flags: ticket.flags,
+             queue: ticket.queue,
+             assignee: item.assignee,
+             surface: item.surface,
+             occurrences: item.occurrences,
+             revision: Number(item.revision || 0),
+             handoff: item.handoff || null,
+             archived_at: item.archived_at || null,
+             archive_reason: item.archive_reason || null,
+             blocked_by: item.blocked_by || [],
+             updated_at: t.updated_at,
+             created_at: t.created_at,
           };
         })
         .filter((row) => {
+          if (row.archived_at) return false;
           if (wantState && row.state !== wantState) return false;
           if (wantAssignee && row.assignee !== wantAssignee) return false;
           if (wantSurface && row.surface !== wantSurface) return false;
@@ -2040,6 +2099,46 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
     }
   });
 
+  app.post('/api/bugs/:tagId/curation', bugWriteGuard, async (req: Request, res: Response) => {
+    try {
+      const tag = await findTagByParam(req.params.tagId);
+      if (!tag) return res.status(404).json({ error: 'not found' });
+      const item = hydrateWorkItem(tag);
+      const applied = applyCuration(item, req.body || {});
+      if (!applied.ok) return res.status(409).json({ error: applied.error });
+      const projected = projectBugState(applied.value);
+      if (applied.title) {
+        const { d1Query } = await import('./server_d1.js');
+        const title = String(applied.title).trim().slice(0, 200);
+        const titleKey = normalizeTagKey(title) || title.toLowerCase().slice(0, 160);
+        const titleUpdate = await d1Query(`UPDATE issue_tags SET title = ?, title_key = ? WHERE id = ?`, [title, titleKey, tag.id]);
+        if (!titleUpdate.success) return res.status(500).json({ error: titleUpdate.error || 'title update failed' });
+      }
+      await persistWorkItem(tag.id, projected.item);
+      return res.json({
+        ok: true,
+        persisted: true,
+        tag_id: tag.id,
+        public_n: projected.item.public_n,
+        state: projected.ticket.state,
+        flags: projected.ticket.flags,
+        queue: projected.ticket.queue,
+        receipt: {
+          op: applied.event.op,
+          from_revision: applied.event.from_revision,
+          to_revision: applied.event.to_revision,
+          before_hash: applied.before_hash,
+          after_hash: applied.after_hash,
+          actor: applied.event.actor,
+          at: applied.event.at,
+        },
+        work_item: projected.item,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'curation failed' });
+    }
+  });
+
   /** POST /api/bugs/:tagId/defect — packer posts the atomic defect (→ packed). */
   app.post('/api/bugs/:tagId/defect', bugWriteGuard, async (req: Request, res: Response) => {
     try {
@@ -2144,10 +2243,12 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         bug: item.bug,
         class: item.class,
         fingerprint: item.fingerprint,
-        surface: item.surface,
-        source: item.source,
-        assignee: item.assignee,
-        state: ticket.state,
+         surface: item.surface,
+         source: item.source,
+         assignee: item.assignee,
+         archived_at: item.archived_at || null,
+         archive_reason: item.archive_reason || null,
+         state: ticket.state,
         flags: ticket.flags,
         queue: ticket.queue,
         legacy_status: ticket.legacy_status,
@@ -2159,8 +2260,11 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         parked: item.parked,
         done: item.done,
         burns: item.burns,
-        commits: item.commits,
-        occurrences: item.occurrences,
+         commits: item.commits,
+         occurrences: item.occurrences,
+         revision: Number(item.revision || 0),
+         curation_events: item.curation_events || [],
+         handoff: item.handoff || null,
         blocked_by: item.blocked_by || [],
         duplicate_of: item.duplicate_of || null,
         blocked_reason: item.blocked_reason || null,

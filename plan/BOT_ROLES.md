@@ -19,11 +19,11 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 - Global souls and `system_prompt_suffix` placeholders were cleaned when BOT-7 closed. Do not treat that cleanup as open work.
 - `qa_biomarker` and `qa_onboarding` preload `qa-meal-journey` and `qa-telegram-journey`. They have no Telegram token. Do not wake them.
 - `scripts/sync-hermes-skills.sh` symlinks every repo skill into profiles; it **excludes** `orchestrator-dispatcher` from `qa_*` and `meal_audit` (unlink on run). OpenCode master shares the same `scripts/skills/common/` via registry `sharedSkills` and runs meal-audit itself (model A) — it does not message @Meal_audit_bot.
-- Dispatch script `scripts/run-coding-dispatch.sh` (commit `28486b1`) already detaches, calls `opencode run --auto -m opencode/muse-spark-1.3`, reverts only files that attempt changed, and on a meal/biomarker/onboarding push runs `qa-runner` and posts to that QA profile, with one extra OpenCode attempt if validation fails.
+- Dispatch script `scripts/run-coding-dispatch.sh` (commit `28486b1`) already detaches, calls `opencode run --auto -m opencode/nemotron-3.5-lightning-free`, reverts only files that attempt changed, and on a meal/biomarker/onboarding push runs `qa-runner` and posts to that QA profile, with one extra OpenCode attempt if validation fails.
 - 2026-09-22 run of `BUG-20260921-8449`: OpenCode returned `Insufficient account funds` on `muse-spark-1.3`. Cline thought 8 minutes and aborted with no diff. `grok -p` wrote two sentences and hit the 10-minute limit with no diff. Antigravity returned `User location is not supported`. Audit row: escalated_human, 1,249 seconds. The tree stayed clean. Do not re-file 8449 as a meal bug. The Food History tab bar was compared with the Home tab bar. The Home screen already shows Home, Trends, Food, Progress. The real on-screen defect is the Omega-3 text `7.700000000000001g`.
-- Android device bot: `@Android_opencode_bot` (registry id `android`, display name "Mobile Bot", env `ANDROID_OPENCODE_BOT_TOKEN`). Separate token from `@Opencode_135_bot` and `@Meal_audit_bot`. One `getUpdates` per token.
-- **Binding (corrected 2026-09-22):** this bot is for the **Android device opencode** (Termux/proot, workspace `/root/Health-tracker`), not the VPS. Device token first lived in proot meal_audit `.env` (test: `opencode online`). VPS `bot-host@android` is **disabled** (wrong host). Phone owns the token via `~/start-android-opencode-bot.sh` + `~/.config/opencode-bot/android.env` inside proot (workspace `/root/Health-tracker`). `@Opencode_135_bot` remains the VPS interactive door.
-- Interactive doors, not QA coders: `@Opencode_135_bot` (`scripts/bot-host.mjs`, lock line `pid:opencode-chat`) and the human Grok session in tmux `dev`. The script waits up to 180 seconds if that lock is held, then exits 1. It must not delete a lock it does not own.
+- Android device bot **RETIRED 2026-09-25 (BOT-10)**: registry id `android` removed after succession — successor `@mobile_8768_bot` (registry id `mobile`, env `MOBILE_BOT_TOKEN`). One `getUpdates` per token; stop the phone's `~/start-android-opencode-bot.sh` legacy runner.
+- **Binding (corrected 2026-09-22, retired 2026-09-25):** the device intent lives with `mobile` (Termux/proot, workspace `/root/Health-tracker`), never the VPS. VPS `bot-host@android` is removed (wrong host); `android` is out of `bots/registry.json`. `@VM_19485_bot` (registry id `vm`) remains the VPS interactive door.
+- Interactive doors, not QA coders: `@VM_19485_bot` (`scripts/bot-host.mjs`, registry id `vm`) and the human Grok session in tmux `dev`. The script waits up to 180 seconds if that lock is held, then exits 1. It must not delete a lock it does not own.
 - Commit identity is not in git config on every checkout. The dispatch script already passes `GIT_AUTHOR_*` / `GIT_COMMITTER_*` (`cwahli` / `cwahli@users.noreply.github.com`) when `user.email` is unset. Do not run `git config`.
 
 ## 1. Who exists after this ID
@@ -36,7 +36,7 @@ Practices this follows (Nous docs, HermesWatcher, HermesAgentTips, Loic Berthelo
 | qa_meal | @Meal_journey_QA_bot | Describe the meal screen, start the script, stop | Read `src/`, pick a coder, wait |
 | qa_biomarker | no bot until it has its own token | Dark | Preload the meal skill |
 | qa_onboarding | no bot until it has its own token | Dark | Preload the meal skill |
-| orchestrator | @Orchestrator_health_tracker_bot | Status log. The script posts here | Run OpenCode itself, or message @Opencode_135_bot |
+| orchestrator | @Orchestrator_health_tracker_bot | Status log. The script posts here | Run OpenCode itself, or message @VM_19485_bot |
 | meal_audit | @Meal_audit_bot (LIVE 2026-09-22; Hermes gateway owns the token) | Audit meals, write artifacts/meal_audits/ | Read src/, dispatch coders, touch golden/meal/; **not** in bot-host registry |
 
 ### OpenCode ↔ meal_audit (model A)
@@ -51,7 +51,7 @@ OpenCode master **self-serves** meal-audit via shared skill `meal-audit-engine` 
 
 | Agent | Invocation | Stop condition already seen |
 |---|---|---|
-| OpenCode CLI | `opencode run --auto --dir "$REPO_DIR" -m opencode/<model> "<task>"` | `muse-spark-1.3`: insufficient funds. Next model, once: `opencode/deepseek-v4.1-flash` (the model in `bots/registry.json`). Do not retry Muse in the same bug. |
+| OpenCode CLI | `opencode run --auto --dir "$REPO_DIR" -m opencode/<model> "<task>"` | Paid models (`muse-spark-1.3`, `deepseek-v4.1-flash`): insufficient funds — zen balance depleted. Free-only defaults: `nemotron-3.5-lightning-free`, fallback `space-bunny-free`. Never retry a paid model in the same bug. |
 | Cline CLI | `cline --auto-approve true --thinking high "<task>"` | No new files means failure. Do not treat a long think as a fix. |
 | Grok Build CLI | headless grok with the task as the prompt | No new files means failure. |
 | Antigravity `agy` | do not call | `User location is not supported`. Set allowance status so `pick-tool` skips it. |
@@ -60,14 +60,14 @@ No parallel fan-out. One checkout, one coder. A failed attempt reverts only path
 
 ### Interactive doors (not in the QA loop)
 
-`@Opencode_135_bot` and the tmux `dev` Grok pane. Do not point the script at either. Do not `git clean` the src checkout.
+`@VM_19485_bot` and the tmux `dev` Grok pane. Do not point the script at either. Do not `git clean` the src checkout.
 
 ## 2. One bug, after this ID
 
 1. The person messages the matching QA bot.
 2. That bot writes four lines (page, observed, expected, screenshot path), starts `run-coding-dispatch.sh` without `--foreground`, and stops.
 3. The script takes `~/.hermes/dispatch_lock` or waits 180 seconds.
-4. OpenCode with Muse, then once with `opencode/deepseek-v4.1-flash` if Muse says insufficient funds. Then Cline. Then Grok. Skip Antigravity.
+4. OpenCode with the free default (`nemotron-3.5-lightning-free`), then once with the free fallback `space-bunny-free` on failure. Then Cline. Then Grok. Skip Antigravity. Never paid models — zen balance is depleted.
 5. Done for a coder means new porcelain lines since the snapshot and `npx tsc --noEmit` exit 0. Then commit those paths and `git push origin main`.
 6. Sleep 45 seconds. Run `node scripts/qa-runner.mjs --journey=<category>`. Post the screenshot to that QA profile.
 7. On failure, one more OpenCode attempt with the QA failure text, push, validate once more, stop.
@@ -151,7 +151,7 @@ Confirm `qa-meal-journey` dispatches the user's actual report, category meal, no
 
 Keep the `28486b1` behavior (detach, own the lock, snapshot revert, QA hand-back).
 
-Add: on `Insufficient account funds`, one retry on the same surface with `-m opencode/deepseek-v4.1-flash`, then stop and post the real error. Do not hop to another vendor. Skip `agy` when `~/.hermes/tool_allowances.json` says `unavailable`. Antigravity is location-blocked. A coder with no new files is a failed attempt. The Telegram line must include the real error (funds, abort, or location), not only “0 code changes.”
+Add: on `Insufficient account funds`, one retry on the same surface with the free fallback `-m opencode/space-bunny-free`, then stop and post the real error. Do not hop to another vendor. Skip `agy` when `~/.hermes/tool_allowances.json` says `unavailable`. Antigravity is location-blocked. A coder with no new files is a failed attempt. The Telegram line must include the real error (funds, abort, or location), not only “0 code changes.”
 
 ### 3f. Orchestrator Health Probing, Investigation Mode & Dual-Sync Memory
 
@@ -160,7 +160,7 @@ To prevent 36-minute stall ladders (where broken tools loop or timeout before to
 1. **Autonomous Model Health Analysis (Pre-Flight Canary)**:
    - `scripts/tool-allowance.mjs` tracks granular model status per tool.
    - When a model returns `Insufficient account funds`, mark that model permanently `depleted` in `~/.hermes/tool_allowances.json` (do not clear it on the 15-minute cooldown timer).
-   - Fast fail-over: switch `opencode` active model to `opencode/deepseek-v4.1-flash` without burning 8 minutes.
+   - Fast fail-over: switch `opencode` active model to the free default `opencode/nemotron-3.5-lightning-free` without burning 8 minutes.
 
 2. **Investigation Mode on Stagnation / Abort**:
    - If a coder makes 0 code changes after 4 minutes or outputs an explicit abort:
@@ -214,7 +214,7 @@ A live bug run is not required to close V-28.
 - **Target File Hints**: Automatically attach known component paths based on the defect category (e.g. nutrition card $\to$ `src/components/`, styling $\to$ `src/index.css`) so coders don't crawl 90+ files.
 
 ### 6c. Coders: Scoped Prompts & Dynamic Thinking
-- **OpenCode**: Primary model `opencode/deepseek-v4.1-flash`; fallback to DeepSeek Chat. Pass `--dir "$REPO_DIR"` with scoped component targets.
+- **OpenCode**: Primary model `opencode/nemotron-3.5-lightning-free` (free); fallback `opencode/space-bunny-free` (free). Pass `--dir "$REPO_DIR"` with scoped component targets.
 - **Cline**: Use `--thinking=low` for atomic UI/text fixes (fast 30s execution); reserve `--thinking=high` only for multi-file architectural refactors. Append invariant guard: *"Never modify elements protected by Playwright tests in prototype/ or AGENTS.md."*
 - **Grok**: Reduce execution timeout to 6 minutes max. Do not attach screenshot images for pure text/formatting tickets to prevent visual over-analysis loops.
 

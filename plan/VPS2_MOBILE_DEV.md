@@ -1,9 +1,9 @@
 # VPS-2 mobile → VM → live site
 
-**Status:** LIVE & CUTOVER (V-0 through V-16 COMPLETE). Phase 6 (V-19…V-26) COMPLETE. **Open work: V-27** (phone terminal survives a Wi-Fi change).  
+**Status:** LIVE & CUTOVER (V-0 through V-16 COMPLETE). Phase 6 (V-19…V-26) COMPLETE. **V-27 DONE 2026-09-24** (phone terminal survives a Wi-Fi change).  
 **Replaces:** [plan/GCP_FREE_TIER_MIGRATION.md](./GCP_FREE_TIER_MIGRATION.md) (Cloud Run `min-instances=0`).  
 **Execute index:** [ROADMAP.md](./ROADMAP.md) **Track V / R-13.1**. Next mobile ID is **V-27** below. Do not redo V-0…V-26.  
-**Current Phase:** Phase 7 (V-27 OPEN). Phase 5 (V-17 Render deletion) stays on its own soak clock and is not this task.  
+**Current Phase:** Phase 7 (V-27 DONE 2026-09-24). Phase 5 (V-17 Render deletion) stays on its own soak clock and is not this task.  
 
 ---
 

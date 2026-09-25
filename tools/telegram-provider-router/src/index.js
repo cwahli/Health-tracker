@@ -24,6 +24,17 @@ import {
   formatResetIn,
 } from "./free-lane-table.js";
 import { freebuffLaneEnabled, runFreebuffLane } from "./freebuff-tg-lane.js";
+// BOT-22: per-chat OpenCode sessions (same contract as BOT-12). One global
+// session for every chat is retired; chats without an entry fall back to the
+// legacy global until their first write.
+import {
+  chatIdOf,
+  getChatSid,
+  setChatSid,
+  forgetChatSid,
+  ensureChatsMap,
+} from "./chat-sessions.js";
+import { prepareInboundMedia } from "./inbound-media-adapter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -453,6 +464,7 @@ function loadState() {
   if (!("lastReceivedText" in s)) s.lastReceivedText = null;
   if (!s.quota || typeof s.quota !== "object") s.quota = {};
   if (!s.sessions) s.sessions = {};
+  ensureChatsMap(s);
   if (!s.models) s.models = {};
   if (!s.models.commandcode) s.models.commandcode = "poolside/laguna-s-2.1-free";
   if (s.models.cline === "cline/muse-spark-1.3-contributor") {
@@ -1118,7 +1130,7 @@ async function clearBusyLock(reason, { abort = false, notify = false } = {}) {
   const wasBusy = state.busy;
   // B) /unlock (and watchdog/orphan clears) must reap orphaned cline children.
   try { reapClineChild(`clearBusyLock:${reason}`); } catch {}
-  const sid = state.sessions?.opencode;
+  const sid = getChatSid(state, state.lastChatId);
   const preview = state.lastReplyPreview;
   const task = state.lastUserText;
   if (abort && sid) {
@@ -1191,8 +1203,8 @@ async function ocAbort(sid) {
   }
 }
 
-async function ensureOcSession() {
-  const sid = state.sessions.opencode;
+async function ensureOcSession(chatId = null) {
+  const sid = getChatSid(state, chatId);
   if (sid) {
     try {
       const info = await oc(`/session/${sid}${OC_DIR_QS}`, { timeoutMs: 15000 });
@@ -1208,7 +1220,7 @@ async function ensureOcSession() {
     body: "{}",
     timeoutMs: 30000,
   });
-  state.sessions.opencode = created.id;
+  setChatSid(state, chatId, created.id);
   saveState(state);
   return created.id;
 }
@@ -1650,7 +1662,7 @@ async function extractLatestAssistantSince(sid, sinceCreated, excludeIds) {
   return extractOcText(pick);
 }
 
-async function runOpenCode(prompt, { onProgress, onTyping } = {}) {
+async function runOpenCode(prompt, { onProgress, onTyping, chatId = null } = {}) {
   try { ingestOpenCodeLogLimits(); } catch {}
   // Fail fast if sticky OpenCode free lane is known-empty/rate-limited
   try {
@@ -1664,7 +1676,7 @@ async function runOpenCode(prompt, { onProgress, onTyping } = {}) {
   } catch (e) {
     if (/Sticky OpenCode lane depleted/.test(String(e.message || e))) throw e;
   }
-  const sid = await ensureOcSession();
+  const sid = await ensureOcSession(chatId);
   const modelBody = ocModelBody();
   const body = {
     parts: [{ type: "text", text: prompt }],
@@ -1712,7 +1724,7 @@ async function runOpenCode(prompt, { onProgress, onTyping } = {}) {
   }
 
   if (onProgress) {
-    const sid0 = state.sessions?.opencode;
+    const sid0 = getChatSid(state, chatId);
     const head = sid0
       ? await headlineFromLive(sid0, { elapsedSec: 0, detail: "working" }).catch(() => headlineFromState(0, "working"))
       : headlineFromState(0, "working");
@@ -2181,7 +2193,7 @@ function statusPingReply() {
       `Yes — still working.\n` +
       `Task: ${(state.lastUserText || "(unknown)").slice(0, 300)}\n` +
       `Started: ${state.busySince || "?"}${elapsed != null ? ` (${elapsed}s ago)` : ""}\n` +
-      `Session: ${state.sessions.opencode || "(none)"}\n` +
+      `Session: ${getChatSid(state, state.lastChatId) || "(none)"}\n` +
       `If this looks stuck: /unlock or tap Cancel on the Busy message.`
     );
   }
@@ -2193,7 +2205,7 @@ function statusPingReply() {
       : "") +
     `Last reply: ${(state.lastReplyPreview || "(none)").slice(0, 300)}\n` +
     (state.lastError ? `Last error: ${String(state.lastError).slice(0, 300)}\n` : "") +
-    `Session: ${state.sessions.opencode || "(none)"}`
+    `Session: ${getChatSid(state, state.lastChatId) || "(none)"}`
   );
 }
 
@@ -2406,9 +2418,9 @@ async function statusText() {
   ];
 
   if (p === "opencode") {
-    const sid = state.sessions.opencode || "(none)";
+    const sid = getChatSid(state, state.lastChatId) || "(none)";
     lines.push(`Session: \`${sid}\``);
-    const live = await fetchOpenCodeLiveStatus(state.sessions.opencode);
+    const live = await fetchOpenCodeLiveStatus(getChatSid(state, state.lastChatId));
     if (live?.error) {
       lines.push(`OpenCode: unavailable (${live.error})`);
     } else if (live) {
@@ -2435,10 +2447,10 @@ async function statusText() {
     }
   } else if (p === "cline") {
     lines.push(`Thinking: ${clineThinkingDisplay()}`);
-    lines.push(`Session: ${state.sessions.opencode || "(none)"} (OpenCode sticky)`);
+    lines.push(`Session: ${getChatSid(state, state.lastChatId) || "(none)"} (OpenCode sticky)`);
     lines.push(`Note: live usage details are shown when provider is opencode.`);
   } else {
-    lines.push(`Session: ${state.sessions.opencode || "(none)"} (OpenCode sticky)`);
+    lines.push(`Session: ${getChatSid(state, state.lastChatId) || "(none)"} (OpenCode sticky)`);
     lines.push(`Note: live usage/thinking details are shown when provider is opencode.`);
   }
 
@@ -2451,8 +2463,8 @@ async function statusText() {
   return lines.join("\n");
 }
 
-async function compactOpenCodeSession() {
-  const sid = await ensureOcSession();
+async function compactOpenCodeSession(chatId = null) {
+  const sid = await ensureOcSession(chatId);
   const model = state.models.opencode || "opencode/muse-spark-1.3-contributor-free";
   const providerID = model.includes("/") ? model.split("/")[0] : "opencode";
   const modelID = model.includes("/") ? model.split("/").slice(1).join("/") : model;
@@ -2520,24 +2532,6 @@ function freeModelDepletion(providerKey, modelId, now = Date.now()) {
       const until = lane.nextResetAt ? Date.parse(lane.nextResetAt) : NaN;
       if (Number.isFinite(until) && until > now) {
         found.push({ until, key: "free-lane-table.json", hint: lane.countdownHint || "" });
-      }
-    }
-  } catch {}
-  try {
-    // Shared buckets deplete as ONE pool even when the per-model quota rows have
-    // expired: a live `bucket:<id>` record must ❌ every member (the 2026-09-24
-    // repro — user tapped OpenCode MiMo with no ❌ while the Zen bucket cool-off
-    // was still running). OpenCode Zen muse/mimo/ling/nemotron/space-bunny all
-    // resolve to `bucket:opencode-zen-free` via quotaRecordKey.
-    const bucket = resolveAllowanceBucket(providerKey, modelId);
-    if (bucket && bucket.scope === "shared") {
-      const rec = bucketLive(bucket);
-      if (rec) {
-        found.push({
-          until: Number(rec.depletedUntil || 0),
-          key: bucketKey(bucket.id),
-          hint: rec.countdownHint || "",
-        });
       }
     }
   } catch {}
@@ -3379,7 +3373,7 @@ bot.command("compact", async (ctx) => {
     state.busy = true;
     state.busySince = new Date().toISOString();
     saveState(state);
-    const { sid, live } = await compactOpenCodeSession();
+    const { sid, live } = await compactOpenCodeSession(ctx.chat.id);
     state.busy = false;
     state.busySince = null;
     saveState(state);
@@ -3592,7 +3586,7 @@ bot.callbackQuery(/^busy_/, async (ctx) => {
       await ctx.reply("Unlocked. Switch to opencode first for /new, or just send a new prompt.");
       return;
     }
-    const old = state.sessions.opencode;
+    const old = getChatSid(state, ctx.chat.id);
     if (old) await ocAbort(old);
     state.lastUserText = null;
     state.lastReplyPreview = null;
@@ -3603,7 +3597,7 @@ bot.callbackQuery(/^busy_/, async (ctx) => {
         body: "{}",
         timeoutMs: 30000,
       });
-      state.sessions.opencode = created.id;
+      setChatSid(state, ctx.chat.id, created.id);
       saveState(state);
       await ctx.reply(`New OpenCode session: \`${created.id}\`\nWorkspace: \`${WORKSPACE}\``);
     } catch (e) {
@@ -3621,7 +3615,8 @@ bot.command("new", async (ctx) => {
     return;
   }
   // Reset busy + last-task tracking, then create a fresh WORKSPACE-pinned session.
-  const old = state.sessions.opencode;
+  // Per-chat (BOT-22): only this chat's session is replaced.
+  const old = getChatSid(state, ctx.chat.id);
   if (old) await ocAbort(old);
   state.busy = false;
   state.busySince = null;
@@ -3634,19 +3629,19 @@ bot.command("new", async (ctx) => {
       body: "{}",
       timeoutMs: 30000,
     });
-    state.sessions.opencode = created.id;
-    saveState(state);
-    await ctx.reply(`New OpenCode session: \`${created.id}\`\nWorkspace: \`${WORKSPACE}\``);
-  } catch (e) {
-    state.lastError = e.message;
-    saveState(state);
-    await ctx.reply(`Failed to create session: ${e.message}`);
+      setChatSid(state, ctx.chat.id, created.id);
+      saveState(state);
+      await ctx.reply(`New OpenCode session: \`${created.id}\`\nWorkspace: \`${WORKSPACE}\``);
+    } catch (e) {
+      state.lastError = e.message;
+      saveState(state);
+      await ctx.reply(`Failed to create session: ${e.message}`);
   }
 });
 
-bot.on("message:text", async (ctx) => {
+bot.on(["message:text", "message:photo", "message:document"], async (ctx) => {
   if (!gate(ctx)) return;
-  const text = ctx.message.text;
+  const text = String(ctx.message.text ?? ctx.message.caption ?? "");
   if (text.startsWith("/")) return; // other commands
   // D) Record every received text immediately; lastUserText only advances when
   // dispatch actually starts, so 409 storms can't leave a stale "Last task".
@@ -3691,17 +3686,33 @@ bot.on("message:text", async (ctx) => {
       return;
     }
   }
+  const inbound = await prepareInboundMedia({
+    api: ctx.api,
+    message: ctx.message,
+    text,
+    chatId: ctx.chat.id,
+    workspace: WORKSPACE,
+    token: TOKEN,
+  });
+  if (inbound.selected && !inbound.paths.length) {
+    await ctx.reply("Could not download the Telegram attachment. Please send it again.");
+    return;
+  }
+  if (inbound.failures) {
+    await ctx.reply(`Downloaded ${inbound.paths.length} of ${inbound.selected} attachment(s); continuing with the available file(s).`).catch(() => {});
+  }
+  const prompt = inbound.prompt;
   state.busy = true;
   state.busySince = new Date().toISOString();
-  state.lastUserText = text.slice(0, 1000);
+  state.lastUserText = prompt.slice(0, 1000);
   state.lastChatId = ctx.chat.id;
   state.lastError = null;
   dispatchActive = true;
   saveState(state);
   const stopTyping = startTypingPulse(ctx.api, ctx.chat.id);
   const opener =
-    state.provider === "opencode" && state.sessions?.opencode
-      ? await headlineFromLive(state.sessions.opencode, { elapsedSec: 0, detail: "working" }).catch(() =>
+    state.provider === "opencode" && getChatSid(state, ctx.chat.id)
+      ? await headlineFromLive(getChatSid(state, ctx.chat.id), { elapsedSec: 0, detail: "working" }).catch(() =>
           headlineFromState(0, "working")
         )
       : headlineFromState(0, "working");
@@ -3718,7 +3729,8 @@ bot.on("message:text", async (ctx) => {
           ctx.api.editMessageText(ctx.chat.id, thinking.message_id, card.slice(0, 3500)).catch(() => {});
         }, 5000);
   try {
-    const reply = await dispatch(text, {
+    const reply = await dispatch(prompt, {
+      chatId: ctx.chat.id,
 
       onProgress: async (msg) => {
         await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
@@ -3851,7 +3863,7 @@ async function busyWatchdogTick() {
     return;
   }
   // Live dispatch: if OpenCode already idle for several checks, waiter is wedged — unlock.
-  const sid = state.sessions?.opencode;
+  const sid = getChatSid(state, state.lastChatId);
   if (!sid || state.provider !== "opencode") {
     busyIdleStreak = 0;
     return;
@@ -3890,7 +3902,7 @@ if (!NO_START) console.log(`single-poller lock ok: pidfile=${PID_PATH} lock=${LO
 // Crash/restart mid-wait leaves sticky busy with nobody awaiting the turn.
 // Always clear the Telegram lock; abort leftover OpenCode work so the next message can start.
 if (!NO_START && state.busy) {
-  const sid = state.sessions?.opencode;
+  const sid = getChatSid(state, state.lastChatId);
   console.log("startup: sticky busy=true; aborting leftover OpenCode turn and clearing lock…");
   Promise.resolve()
     .then(async () => {
@@ -4026,6 +4038,11 @@ export {
   laneMatchesRoute,
   syncFreeLaneTable,
   syncFreeLaneTableFromSession,
+  chatIdOf,
+  getChatSid,
+  setChatSid,
+  forgetChatSid,
+  ensureChatsMap,
   markDepleted,
   ingestOpenCodeLogLimits,
   quotaKey,

@@ -129,12 +129,22 @@ Treat silent changes to tombstone / merge semantics as **class X**.
 | `AGENTS.md` / `docs/agent/**` (only with confirmation) | `node scripts/assert-agent-governance.mjs` |
 | Sync/biomarker/food regression foundation files | Same smoke suites as domain sections above |
 | Bot memory stores (`scripts/lib/memory-stores.mjs`, `scripts/assert-memory-stores.mjs`) | `node scripts/assert-memory-stores.mjs` · `npx vitest run tests/memory-stores.test.ts` |
+| Bot run ledger (`scripts/lib/run-ledger.mjs`, `scripts/assert-run-ledger.mjs`, `run-coding-dispatch.sh` ledger hooks) | `node scripts/assert-run-ledger.mjs` · `npx vitest run tests/run-ledger.test.ts` |
+| Bot souls (`bots/soul*.md`, `scripts/lib/soul-compose.mjs`, `scripts/assert-soul-compose.mjs`) | `node scripts/assert-soul-compose.mjs` · `npx vitest run tests/soul-compose.test.ts` |
+| Bot lane contract (`scripts/lib/lane-contract.mjs`, `scripts/assert-lane-contract.mjs`) | `node scripts/assert-lane-contract.mjs` · `npx vitest run tests/lane-contract.test.ts` |
+| Bot work sessions (`scripts/lib/work-session.mjs`, `scripts/assert-work-session.mjs`) | `node scripts/assert-work-session.mjs` · `npx vitest run tests/work-session.test.ts` |
+| Live bot wiring (`/tx` in `bot-host.mjs`, startup lane check, dispatch memory block, soul `verify`) | `node scripts/assert-work-session.mjs` · `node scripts/assert-lane-contract.mjs` · `node scripts/assert-memory-stores.mjs` · `node scripts/assert-soul-compose.mjs` |
+| Grok router sessions (`tools/telegram-provider-router/src/chat-sessions.js`, `src/index.js` chat scope) | `npm test --prefix tools/telegram-provider-router` |
+| TG transport (`scripts/lib/tg-api.mjs`, `scripts/lib/tg-throttle.mjs`, `scripts/collab-bot.mjs` poll loop) | `node scripts/assert-tg-transport.mjs` · `npx vitest run tests/tg-transport.test.ts` |
 
 ## Bugs / triage tooling
 
 | If you touch… | Run |
 |---------------|-----|
 | Bug snapshot / domain packs | `npx vitest run src/utils/bug*.test.ts` (or relevant tests) |
+| Bot failure learning loop (`scripts/lib/failure-log.mjs`, `scripts/review-failures.mjs`) | `npx vitest run tests/failure-log.test.ts` |
+| Bug ticket offline queue (`scripts/bugctl.mjs` queue/flush) | `npx vitest run tests/bugctl-queue.test.ts` |
+| Bot-host model failover (`scripts/bot-host.mjs` message path, `runWithModelFailover`) | `node scripts/assert-model-failover.mjs` · `npx vitest run tests/bot-host.test.ts -t 'BOT-9'` |
 
 ---
 

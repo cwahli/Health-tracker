@@ -27,7 +27,9 @@
  *   collab        ~/.config/opencode-bot/collab.env
  *   router        tools/telegram-provider-router/.env (own host)
  * Without GEMINI_API_KEY, runGemini returns an actionable auth error and never
- * throws; the /freemodel picker lists the lane regardless.
+ * throws. The `/freemodel` picker does not advertise standalone `gemini:` lanes;
+ * keyed Gemini models are offered through the local OpenCode tool when the
+ * host has the credential and the OpenCode catalog exposes them.
  */
 import { GEMINI_MODELS, parseModelRef } from './freemodels.mjs';
 

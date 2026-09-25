@@ -1,0 +1,44 @@
+{
+  "source": "bug-backlog.md — §Bug #2 BUG-20260921-8449, 'Issues (7 items)' table rows 1-7 (normalized: ** and ` stripped)",
+  "title": "Home dashboard discrepancies vs reference design",
+  "items": [
+    {
+      "issue": "Bottom nav tab 2 label/icon",
+      "observed": "Health (pulse/heartbeat icon)",
+      "expected": "Trends (line graph icon)"
+    },
+    {
+      "issue": "Bottom nav tab 5 label/icon",
+      "observed": "Trends (upward line graph)",
+      "expected": "Progress (trending arrow)"
+    },
+    {
+      "issue": "Omega-3 weekly target display",
+      "observed": "7.700000000000001g (floating-point artifact)",
+      "expected": "7.7g (clean)",
+      "component": "Weekly targets",
+      "class": "UI",
+      "surface": "home"
+    },
+    {
+      "issue": "Telemetry Errors banner",
+      "observed": "Visible at top of page",
+      "expected": "Absent"
+    },
+    {
+      "issue": "\"Ready (5)\" status pill",
+      "observed": "Missing from header",
+      "expected": "Green pill with checkmark in header"
+    },
+    {
+      "issue": "Extra sections present",
+      "observed": "\"Health status to improve\" (HbA1c/Vitamin D/BMI), \"Clinical Action Recommendations 0/3 Completed\" (3 items), \"Daily Benefits\" (3 items)",
+      "expected": "Absent (per reference design)"
+    },
+    {
+      "issue": "\"What's up today\" button",
+      "observed": "Present under Daily Recommendation section",
+      "expected": "Absent"
+    }
+  ]
+}

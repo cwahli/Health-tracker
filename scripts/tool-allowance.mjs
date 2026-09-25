@@ -36,7 +36,7 @@ const DEFAULT_STATE = {
       failure_count: 0,
       rate_limit_count: 0,
       last_used: null,
-      default_model: 'deepseek-v4.1-flash',
+      default_model: 'nemotron-3.5-lightning-free',
       priority: 1
     },
     cline: {
@@ -99,9 +99,12 @@ function loadState() {
           parsed.tools[key] = defaultVal;
         }
       }
-      // Migrate depleted or outdated default models
-      if (parsed.tools.opencode && (parsed.tools.opencode.default_model === "muse-spark-1.3" || !parsed.tools.opencode.default_model)) {
-        parsed.tools.opencode.default_model = "deepseek-v4.1-flash";
+      // Migrate depleted or outdated default models (free-only policy: paid
+      // zen balance is depleted and opencode-go is paid — never default to them)
+      const CURRENT_FREE_DEFAULT = "nemotron-3.5-lightning-free";
+      if (parsed.tools.opencode && (!parsed.tools.opencode.default_model
+          || ["muse-spark-1.3", "deepseek-v4.1-flash", "deepseek-chat", "opencode-go/deepseek-v4.1-flash"].includes(parsed.tools.opencode.default_model))) {
+        parsed.tools.opencode.default_model = CURRENT_FREE_DEFAULT;
       }
       return parsed;
     }
@@ -118,7 +121,7 @@ function syncMemorySummary(state) {
     let content = fs.readFileSync(memoryFile, 'utf-8');
     const statusNotes = [];
     if (state.tools.opencode && state.tools.opencode.status === 'depleted') {
-      statusNotes.push('OpenCode model muse-spark-1.3 is depleted ($0 balance); default is deepseek-v4.1-flash.');
+      statusNotes.push('OpenCode paid balance is depleted (zen funds / opencode-go paid) — dispatch uses free models only: nemotron-3.5-lightning-free (default), space-bunny-free (fallback).');
     }
     if (state.tools.agy && state.tools.agy.status === 'unavailable') {
       statusNotes.push('Antigravity CLI is unavailable (European VPS IP geo-blocked by Gemini API).');
@@ -382,7 +385,7 @@ if (command === 'pick-tool') {
   refreshCooldowns(state);
 
   const AGENT_META = {
-    opencode: { tier: 'free', models: ['deepseek-v4.1-flash (active)', 'muse-spark-1.3 (depleted)'], thinking: false },
+    opencode: { tier: 'free', models: ['nemotron-3.5-lightning-free (default)', 'space-bunny-free (fallback)', 'paid zen models (depleted)'], thinking: false },
     cline:    { tier: 'free', models: ['DeepSeek auto-approve'],                 thinking: true  },
     grok:     { tier: 'free', models: ['grok-build (free quota)'],               thinking: false },
     agy:      { tier: 'free', models: ['gemini-flash (geo-blocked on VPS)'],     thinking: false }
@@ -442,12 +445,13 @@ if (command === 'pick-tool') {
     opencode: {
       name: 'OpenCode CLI',
       models: [
-        { id: 'deepseek-v4.1-flash', status: 'available', tier: 'free', notes: 'Recommended active model. Fast and reliable.' },
-        { id: 'deepseek-chat', status: 'available', tier: 'free', notes: 'General reasoning model.' },
+        { id: 'nemotron-3.5-lightning-free', status: 'available', tier: 'free', notes: 'Default. Probed working on VPS 2026-09-24.' },
+        { id: 'space-bunny-free', status: 'available', tier: 'free', notes: 'Free fallback when the default fails. Probed working.' },
+        { id: 'deepseek-v4.1-flash', status: 'depleted', tier: 'paid', notes: 'Zen balance depleted (insufficient account funds).' },
         { id: 'muse-spark-1.3', status: 'depleted', tier: 'paid', notes: 'Depleted ($0 balance / insufficient account funds).' }
       ],
       thinking_modes: ['low', 'high', 'auto'],
-      default_model: 'deepseek-v4.1-flash'
+      default_model: 'nemotron-3.5-lightning-free'
     },
     cline: {
       name: 'Cline CLI',

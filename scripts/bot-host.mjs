@@ -2,22 +2,43 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { TelegramApi, TelegramError, isSendableMedia } from './lib/tg-api.mjs';
 import { chunkForTelegram } from './lib/tg-copy-code.mjs';
 import { formatWorkingHeadline, ctxLimitFor } from './lib/tg-progress.mjs';
 import { Throttle } from './lib/tg-throttle.mjs';
+import {
+  sessionKey,
+  resolveSession,
+  getSession,
+  setTx,
+  handoffSession,
+  abortSession,
+  checkpointSession,
+  statusForTelegram,
+  defaultTmuxRunner,
+  ensureTmuxWorkView,
+  disableTmuxObserver,
+  createObserver,
+} from './lib/work-session.mjs';
+import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
 import { recordFailure } from './lib/failure-log.mjs';
 import {
   runOpencode,
+  runWithModelFailover,
+  failoverModels,
   listModels,
   listAgents,
   listModelsVerbose,
   buildOpencodeEnv,
   humanizeRunError,
   isTimeoutError,
+  isQuotaOrLimitError,
+  extractLogError,
 } from './lib/agent-opencode.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
@@ -28,15 +49,25 @@ import {
   formatFreeLabel,
   CLINE_FREE_MODELS,
   GEMINI_MODELS,
+  GEMINI_TO_OPENCODE,
   toModelRef,
 } from './lib/freemodels.mjs';
+import {
+  loadFreeLaneLedger,
+  annotateFreemodelEntries,
+  isFreemodelEntryDepleted,
+  buildAllowanceTextForBots,
+  renderFreeLaneTableHtml,
+  ensureBotLedger,
+  stampDepleted,
+  freemodelRefToRoute,
+} from './lib/free-lanes.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
   BOT_COMMANDS,
   toTelegramCommands,
   assertValidCommands,
-  isFreeModel,
   parseAgentList,
   parseModelsVerbose,
   modelKeyboard,
@@ -236,8 +267,12 @@ function saveOffset(id, offset) {
 
 function effective(config, prefs, chatId) {
   const p = prefs.get(chatId) || {};
+  const storedModel = p.model || config.agent.model;
+  const legacyGemini = String(storedModel || '').startsWith('gemini:')
+    ? GEMINI_TO_OPENCODE[String(storedModel).slice('gemini:'.length)]
+    : null;
   return {
-    model: p.model || config.agent.model,
+    model: legacyGemini || storedModel,
     agent: p.agent || config.agent.defaultAgent,
     variant: p.variant || config.agent.variant,
   };
@@ -294,11 +329,91 @@ async function getAgents(config, caches) {
   return caches.agents;
 }
 
-async function getFreeModels(caches) {
-  if (!caches.free) {
-    caches.free = buildFreeModelList();
+async function getFreeModels(caches, config) {
+  const location = workLocation();
+  if (!caches.free || caches.freeLocation !== location) {
+    caches.free = buildFreeModelList({
+      location,
+      env: process.env,
+      opencodeBin: config?.agent?.opencodeBin,
+      clineBin: config?.agent?.clineBin,
+    });
+    caches.freeLocation = location;
   }
   return caches.free;
+}
+
+/**
+ * Per-bot free-lane ledger (consolidated from the Grok router tracker).
+ * Each bot id owns its dir — quota is per-account/host, so bot A never
+ * reads bot B's stamps. Seeded from the repo pref doc on first use.
+ * Never throws; falls back to pref order when the ledger is missing.
+ */
+function getLedger(botId) {
+  try {
+    const ensured = ensureBotLedger(botId || 'default');
+    const loaded = loadFreeLaneLedger({ stateDir: ensured.dir });
+    if (loaded.table) return { ...loaded, dir: ensured.dir };
+    return { table: null, session: {}, tablePath: null, sessionPath: null, source: 'empty', dir: ensured.dir };
+  } catch {
+    return { table: null, session: {}, tablePath: null, sessionPath: null, source: 'empty', dir: null };
+  }
+}
+
+function getAnnotatedFreeModels(caches, botId) {
+  const base = caches.free || buildFreeModelList({ location: workLocation() });
+  caches.free = base;
+  const { table, session, source } = getLedger(botId);
+  if (!table) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
+  return { entries: base, annotated: annotateFreemodelEntries(base, table, session), table, session, source };
+}
+
+/**
+ * Auto-track: stamp a run's quota failure into the bot's OWN ledger (the
+ * automation behind "empty/rate-limit stamps Reset"). Uses the
+ * small=true-filtered error so cosmetic title-agent failures never deplete
+ * a lane. Best-effort — never throws, never blocks the chat.
+ */
+function trackRunQuota({ botId, modelRef, result }) {
+  try {
+    if (!result || result.aborted) return null;
+    const text = String(result.finalText || '').trim();
+    const filtered = extractLogError(result.stderr || '') || String(result.lastError || '');
+    if (text || !filtered || !isQuotaOrLimitError(filtered)) return null;
+    const { provider, model } = freemodelRefToRoute(modelRef || '');
+    if (!provider || !model || provider === 'gemini') return null;
+    const { dir } = ensureBotLedger(botId || 'default');
+    const stamped = stampDepleted({ stateDir: dir, provider, model, errText: filtered });
+    if (stamped.stamped) console.log(`[free-lanes] ${botId}: stamped ${stamped.keys.join(', ')} from quota error`);
+    return stamped.stamped ? stamped : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Send raw HTML (router parity for the <code> grid) — NOT via the markdown converter. */
+async function sendHtml(api, chatId, html) {
+  const body = String(html || '');
+  if (body.length <= 4000) {
+    await api.sendMessage(chatId, body, { parse_mode: 'HTML' });
+    return;
+  }
+  let i = 0;
+  while (i < body.length) {
+    await api.sendMessage(chatId, body.slice(i, i + 4000), { parse_mode: 'HTML' });
+    i += 4000;
+  }
+}
+
+function formatFreemodelWithDepletion(entries, annotated, { current, location } = {}) {
+  const selectable = annotated.filter((a) => a.selectable !== false);
+  const base = formatFreeModelText(entries, { current, location });
+  const depleted = selectable.filter((a) => a.depleted);
+  if (!depleted.length) return `${base}\n\nAllowance: all selectable lanes look available (per-host ledger). /allowance for Reset in times.`;
+  const lines = depleted.map((d) => `❌ ${d.label} — depleted (reset in ${d.resetIn || 'unknown'})`);
+  const next = selectable.find((a) => !a.depleted);
+  if (next) lines.push(`Next up: ${next.label}`);
+  return `${base}\n\nAllowance (per-host ledger):\n${lines.join('\n')}\n\n/allowance for full table.`;
 }
 
 export class ProgressRenderer {
@@ -593,6 +708,107 @@ async function noteUsage({ chatId, result, eff, config, caches, totals, lastUsag
   return formatUsage(raw);
 }
 
+/**
+ * BOT-19 live /tx wiring: shared work-view toggle per (location, chat,
+ * workspace) session. Exported for unit tests; the `tx` command case below
+ * delegates here. Replies are plain text (already secret-scrubbed by
+ * statusForTelegram).
+ */
+export function workLocation() {
+  if (process.env.BOT_LOCATION) return process.env.BOT_LOCATION;
+  return os.homedir() === '/root' ? 'mobile' : 'vps';
+}
+
+export async function handleTxCommand({ api, config, chatId, arg, tmux = defaultTmuxRunner }) {
+  const location = workLocation();
+  const id = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+  const sub = String(arg || '').trim().toLowerCase();
+  if (sub === 'on') {
+    const lane = config.agent.kind || 'opencode';
+    let session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane });
+    if (session.lane !== lane) session = handoffSession(id, lane) || session;
+    const created = ensureTmuxWorkView(session, { tmux });
+    if (!created.ok) {
+      await api.sendMessage(chatId, `Shared work view unavailable: could not create \`${created.target}\` without replacing an existing tmux session.`);
+      return;
+    }
+    setTx(id, true);
+  } else if (sub === 'off') {
+    const session = getSession(id);
+    if (session) disableTmuxObserver(session, { tmux });
+    setTx(id, false);
+  } else if (sub === 'help') {
+    await api.sendMessage(chatId, 'Usage: /tx on|off|status|debug|help — shared work-view for this chat.');
+    return;
+  } else if (sub !== '' && sub !== 'status' && sub !== 'debug') {
+    await api.sendMessage(chatId, 'Usage: /tx on|off|status|debug|help — shared work-view for this chat.');
+    return;
+  }
+  const view = statusForTelegram(id, { tmux });
+  if (!view) {
+    await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
+    return;
+  }
+  const observer = view.probe?.observerLive
+    ? `Observer: live on \`${view.probe.target}\``
+    : view.probe?.surface === 'terminal'
+      ? 'Observer: unavailable — use /tx on to create the live observer'
+      : 'Live attach: unavailable for this execution surface';
+  const lines = [
+    `*Shared work view:* ${view.tx ? 'ON' : 'OFF'}`,
+    `Session: \`${view.id}\``,
+    `Lane: \`${view.lane}\` (${view.state})`,
+    observer,
+  ];
+  if (sub === 'debug') {
+    lines.push(`Events: ${view.probe?.events ? 'structured observer stream available' : 'unavailable'}`);
+    lines.push(`Debug: ${view.probe?.observerLive ? 'live pane verified' : 'no verified observer pane'}`);
+  } else if (view.probe?.attach) {
+    lines.push(`Attach: \`tmux attach -t ${view.probe.target}\``);
+  }
+  await api.sendMessage(chatId, lines.join('\n'));
+}
+
+// V-30.5 /resume — prints the current ticket packet straight from the bug
+// store (bugctl queue → packet). Read-only: no second state store, no chat
+// scrollback. `/resume n` = card #n; bare /resume = the queue's next open card.
+const execFileP = promisify(execFile);
+const BUGCTL_BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bugctl.mjs');
+
+async function runBugctl(args) {
+  const { stdout } = await execFileP(process.execPath, [BUGCTL_BIN, ...args], {
+    timeout: 8000,
+    encoding: 'utf8',
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  return String(stdout || '');
+}
+
+async function resumePacketText(rawArg) {
+  const wanted = String(rawArg || '').replace(/^#/, '').trim();
+  let id = wanted;
+  if (!id) {
+    let queue;
+    try {
+      queue = JSON.parse(await runBugctl(['queue', '--json']));
+    } catch (e) {
+      return 'Bug store unreachable (bug API down or not local to this host). /resume needs the store — retry later or use /resume <n> once it is back.';
+    }
+    const rows = Array.isArray(queue?.rows) ? queue.rows : [];
+    if (!rows.length) return 'Bug queue is empty — no open ticket to resume. Use /resume <n> for a specific card.';
+    id = String(rows[0].public_n ?? '').trim();
+    if (!id) return 'Queue returned a card without a number — use /resume <n>.';
+  }
+  let packet;
+  try {
+    packet = (await runBugctl(['packet', `--id=#${id}`, '--format=text'])).trim();
+  } catch (e) {
+    return `Bug store unreachable for #${id} (bug API down or not local to this host). ${String(e?.message || '').slice(0, 120)}`;
+  }
+  if (!packet) return `No packet content for #${id}.`;
+  return `Current ticket packet — #${id}\n\n${packet}\n\n/resume ${id} reprints this packet.`;
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
   const eff = effective(config, prefs, chatId);
 
@@ -603,6 +819,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
 
     case 'status': {
+      const location = workLocation();
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+      const work = statusForTelegram(workId);
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
         platform: config.agent.kind || 'opencode',
@@ -618,6 +837,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           lock: lockHolder(),
         },
         health,
+        extras: work
+          ? [
+              `work session: ${work.id} (${work.state})`,
+              `observer: ${work.probe?.observerLive ? 'live' : work.probe?.surface === 'terminal' ? 'offline' : 'unavailable'}`,
+              `controller: ${config.agent.kind || 'opencode'}`,
+              `debug: ${work.probe?.events ? 'structured events' : 'unavailable'}`,
+            ]
+          : ['work session: none', 'observer: unavailable', `controller: ${config.agent.kind || 'opencode'}`, 'debug: structured events'],
       });
       await api.sendMessage(chatId, formatStatusPlain(snap));
       return;
@@ -691,7 +918,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, 'Could not read the model list from opencode.');
           return;
         }
-        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists free models from opencode + cline + gemini.`, {
+        await api.sendMessage(chatId, `Select a model (current: ${eff.model}):\nTip: /freemodel lists this host's locally available free models.`, {
           reply_markup: modelKeyboard(models),
         });
         return;
@@ -719,14 +946,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       if (ref.surface === 'gemini') {
-        if (!GEMINI_MODELS.includes(ref.id)) {
-          await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /freemodel to pick from the free list.`);
+        const migrated = GEMINI_TO_OPENCODE[ref.id];
+        if (!GEMINI_MODELS.includes(ref.id) || !migrated) {
+          await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /freemodel to pick a locally available model.`);
           return;
         }
-        const stored = toModelRef('gemini', ref.id);
-        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
+        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: migrated });
         savePrefs(config.id, prefs);
-        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
+        await api.sendMessage(chatId, `Model set to ${formatFreeLabel(migrated)} for this chat.`);
         return;
       }
       const models = await getModels(config, caches);
@@ -746,17 +973,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'free': {
-      const models = await getModels(config, caches);
-      const free = models.filter(isFreeModel);
-      if (!models.length) {
-        await api.sendMessage(chatId, 'Could not read the model list from opencode.');
+      const entries = await getFreeModels(caches, config);
+      if (!entries.length) {
+        await api.sendMessage(chatId, 'No locally available free models found on this host.');
         return;
       }
-      if (!free.length) {
-        await api.sendMessage(chatId, 'No free models found.');
-        return;
-      }
-      await sendChunked(api, chatId, formatModelList(sortModelsFreeFirst(free).slice(0, free.length)));
+      await sendChunked(api, chatId, formatFreeModelText(entries, { current: eff.model, location: workLocation() }));
       return;
     }
 
@@ -767,17 +989,49 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'freemodel': {
-      const entries = await getFreeModels(caches);
+      const entries = await getFreeModels(caches, config);
       if (!entries.length) {
         await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
         return;
       }
-      await api.sendMessage(chatId, formatFreeModelText(entries, { current: eff.model }), {
+      const { annotated } = getAnnotatedFreeModels(caches, config.id);
+      const selectable = annotated.filter((a) => a.selectable !== false);
+      const available = selectable.filter((a) => !a.depleted);
+      const keyboardEntries = available.length ? available : selectable;
+      await api.sendMessage(chatId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() }), {
         reply_markup: modelKeyboard(
-          entries.map((entry) => entry.label),
+          keyboardEntries.map((entry) => entry.label),
           { kind: 'fm' },
         ),
       });
+      return;
+    }
+
+    case 'allowance': {
+      const arg = String(cmd.args || '').trim().toLowerCase();
+      const route = freemodelRefToRoute(eff.model || '');
+      if (arg === 'table' || arg === 'html' || arg === 'grid') {
+        try {
+          const { tablePath, sessionPath, table, dir } = getLedger(config.id);
+          if (!table) {
+            await api.sendMessage(chatId, 'Allowance: no free-lane ledger found. Use /freemodel to list free models.');
+            return;
+          }
+          const outDir = path.join(os.tmpdir(), `bot-host-allowance-${config.id}`);
+          const render = renderFreeLaneTableHtml({ tablePath, sessionPath, outDir });
+          await api.sendMessage(chatId, `Free-lane allowance table — ${render.lanes} lanes, ${render.buckets} buckets (per-bot ledger). Sending HTML grid…`);
+          await api.sendMediaFile(chatId, render.htmlPath);
+          return;
+        } catch (e) {
+          const route2 = freemodelRefToRoute(eff.model || '');
+          await sendHtml(api, chatId, buildAllowanceTextForBots({ stateDir: getLedger(config.id).dir, provider: route2.provider, model: route2.model, location: workLocation() }));
+          return;
+        }
+      }
+      // Router parity: raw HTML grid text (screenshot), NOT the markdown converter.
+      await sendHtml(api, chatId, buildAllowanceTextForBots({
+        stateDir: getLedger(config.id).dir, provider: route.provider, model: route.model, location: workLocation(),
+      }));
       return;
     }
 
@@ -850,6 +1104,57 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // already gone
       }
       await api.sendMessage(chatId, 'Aborting the running request...');
+      const workId = sessionKey({ location: workLocation(), chat: String(chatId), workspace: config.agent.workspace });
+      abortSession(workId, { transcriptRef: sessions.get(chatId) || null });
+      return;
+    }
+
+    case 'debug': {
+      const location = workLocation();
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+      const view = statusForTelegram(workId);
+      if (!view) {
+        await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
+        return;
+      }
+      await api.sendMessage(chatId, [
+        `Work session: \`${view.id}\``,
+        `Lane: \`${view.lane}\` (${view.state})`,
+        `Observer: ${view.probe?.observerLive ? `live on \`${view.probe.target}\`` : view.probe?.surface === 'terminal' ? 'not running' : 'unavailable'}`,
+        'Events: structured observer stream',
+        'Controller: existing agent child',
+      ].join('\n'));
+      return;
+    }
+
+    case 'handoff': {
+      if (running.get(chatId)) {
+        await api.sendMessage(chatId, 'A request is running. Finish or /abort it before checkpointing the work session.');
+        return;
+      }
+      const location = workLocation();
+      const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+      const session = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: config.agent.kind || 'opencode' });
+      const checkpoint = checkpointSession(workId, { handoffRef: 'manual' });
+      if (!checkpoint) {
+        await api.sendMessage(chatId, 'Could not checkpoint the work session.');
+        return;
+      }
+      await api.sendMessage(chatId, `Handoff checkpoint saved for \`${session.id}\`. The workspace and session were preserved.`);
+      return;
+    }
+
+    case 'tx': {
+      await handleTxCommand({ api, config, chatId, arg: cmd.args });
+      return;
+    }
+
+    case 'resume': {
+      if (running.get(chatId)) {
+        await api.sendMessage(chatId, 'A request is running. Finish or /abort it before resuming a ticket.');
+        return;
+      }
+      await api.sendMessage(chatId, await resumePacketText(cmd.args));
       return;
     }
 
@@ -912,11 +1217,14 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       return;
     }
     if (kind === 'fmp') {
-      const entries = await getFreeModels(caches);
+      const entries = await getFreeModels(caches, config);
       const eff = effective(config, prefs, chatId);
-      await api.editMessageText(chatId, messageId, formatFreeModelText(entries, { current: eff.model }), {
+      const { annotated } = getAnnotatedFreeModels(caches, config.id);
+      const selectable = annotated.filter((a) => a.selectable !== false);
+      const available = selectable.filter((a) => !a.depleted);
+      await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() }), {
         reply_markup: modelKeyboard(
-          entries.map((entry) => entry.label),
+          (available.length ? available : selectable).map((entry) => entry.label),
           { page: Number(value) || 0, kind: 'fm' },
         ),
       });
@@ -924,11 +1232,21 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       return;
     }
     if (kind === 'fm') {
-      const entries = await getFreeModels(caches);
+      const entries = await getFreeModels(caches, config);
       const entry =
         entries.find((e) => e.label === value || e.ref === value) || entries[Number(value)];
       if (!entry) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /freemodel again' });
+        return;
+      }
+      const { table, session, dir } = getLedger(config.id);
+      if (table && isFreemodelEntryDepleted(entry, table, session)) {
+        const { annotated } = getAnnotatedFreeModels(caches, config.id);
+        const hit = annotated.find((a) => a.ref === entry.ref);
+        const next = annotated.find((a) => a.selectable !== false && !a.depleted);
+        await api.answerCallbackQuery(query.id, { text: `Depleted (reset in ${hit?.resetIn || 'unknown'}) — pick ${next?.label || 'another lane'}` });
+        const route = freemodelRefToRoute(entry.ref);
+        await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation() })}`);
         return;
       }
       prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: entry.ref });
@@ -1027,6 +1345,50 @@ async function collectInboundMedia(api, message, config) {
   return saved;
 }
 
+/**
+ * BOT-9 live failover wiring for the main message path: run the prompt on
+ * the chat's effective model, falling back to the bot default on retryable
+ * failures (quota/unfunded/5xx — never timeout/abort, per defaultIsRetryable).
+ * The switch posts a user-visible line. A single-model chain behaves exactly
+ * like a direct runOpencode call. Exported for unit tests.
+ */
+export function fanoutProgressEvent({ renderer, observer, event, context = {} }) {
+  try { renderer?.onEvent(event); } catch {}
+  try { observer?.onEvent(event, context); } catch {}
+}
+
+export async function runOpencodeWithFailover({ api, chatId, prompt, models, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, ...runArgs }) {
+  let attempt = 0;
+  const { result } = await runWithModelFailover({
+    models,
+    makeRun: async (model) => {
+      attempt += 1;
+      if (typeof onAttemptStart === 'function') {
+        try { onAttemptStart({ model, attempt }); } catch {}
+      }
+      const attemptResult = await runOpencode({ prompt, model, ...runArgs });
+      if (typeof onAttemptComplete === 'function') {
+        try { onAttemptComplete({ model, attempt, result: attemptResult, aborted: Boolean(isAborted()) }); } catch {}
+      }
+      return attemptResult;
+    },
+    onSwitch: ({ from, to, reason }) => {
+      const line = `🔀 *${from}* failed (${String(reason || 'error').slice(0, 200)}) — switching to *${to}*…`;
+      try {
+        if (typeof onSwitchNotify === 'function') {
+          onSwitchNotify(line);
+        } else {
+          const p = api.sendMessage(chatId, line);
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
+      } catch {
+        // a UI hiccup must never break failover
+      }
+    },
+  });
+  return result;
+}
+
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
@@ -1076,6 +1438,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       recordRunStart(config.id, { chatId, messageId: msgId, startedAt: runStartedAt, pid: process.pid });
     },
   });
+  let observer = null;
+  let observerContext = null;
+  let observerTerminalWritten = false;
   try {
     await renderer.start();
     const eff = effective(config, prefs, chatId);
@@ -1105,8 +1470,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const promptWithMedia = media.length ? buildInboundPrompt(prompt, media) : prompt;
 
     const ref = parseModelRef(eff.model);
-    // Gemini is a keyed single-shot lane (no tools/session/plan/agent): same
-    // prompt and renderer, no workspace wiring.
+    const location = workLocation();
+    const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace });
+    const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
+    let workSession = resolveSession({ location, chat: String(chatId), workspace: config.agent.workspace, lane: workLane });
+    if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
+    try { observer = createObserver(workSession); } catch {}
+    observerContext = { model: ref.id, attempt: 1, surface: ref.surface, provider: ref.surface };
+    const onObserverEvent = (event) => fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+    const writeObserverTerminal = (result) => {
+      if (observerTerminalWritten) return;
+      observerTerminalWritten = true;
+      if (observer) observer.write(running.get(chatId)?.aborted ? 'aborted' : result?.finalText ? 'run_complete' : 'failed', result || {}, observerContext);
+    };
+    if (observer && workLane !== 'opencode') observer.write('run_start', {}, observerContext);
+
     const result =
       ref.surface === 'gemini'
         ? await runGemini({
@@ -1124,28 +1502,44 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
               workspace: config.agent.workspace,
               timeoutMs: config.agent.timeoutMs,
               clineBin: config.agent.clineBin,
-              onEvent: (event) => renderer.onEvent(event),
+              onEvent: onObserverEvent,
               onSpawn: (child) => running.set(chatId, { child, aborted: false }),
               env: chatEnv(api, chatId),
             })
-          : await runOpencode({
-            prompt: promptWithMedia,
-            model: eff.model,
-            variant: eff.variant,
-            workspace: config.agent.workspace,
-            thinking: config.agent.thinking,
-            timeoutMs: config.agent.timeoutMs,
-            opencodeBin: config.agent.opencodeBin,
-            onEvent: (event) => renderer.onEvent(event),
-            onSpawn: (child) => running.set(chatId, { child, aborted: false }),
-            extraArgs,
-            env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
-          });
+          : await runOpencodeWithFailover({
+             api,
+             chatId,
+             prompt: promptWithMedia,
+             models: failoverModels(eff.model, config.agent.model),
+             variant: eff.variant,
+             workspace: config.agent.workspace,
+             thinking: config.agent.thinking,
+             timeoutMs: config.agent.timeoutMs,
+             opencodeBin: config.agent.opencodeBin,
+             onEvent: onObserverEvent,
+             onSpawn: (child) => running.set(chatId, { child, aborted: false }),
+             onAttemptStart: ({ model, attempt }) => {
+               observerTerminalWritten = false;
+               observerContext = { model, attempt, surface: 'opencode', provider: 'opencode' };
+               if (observer) observer.write('run_start', {}, observerContext);
+             },
+             onAttemptComplete: ({ result: attemptResult, aborted }) => {
+               observerTerminalWritten = true;
+               if (observer) observer.write(aborted ? 'aborted' : attemptResult?.finalText ? 'run_complete' : 'failed', attemptResult || {}, observerContext);
+             },
+             isAborted: () => Boolean(running.get(chatId)?.aborted),
+             extraArgs,
+             env: { ...opencodeEnv(config), ...chatEnv(api, chatId) },
+           });
+    if (workLane !== 'opencode') writeObserverTerminal(result);
 
     if (result.sessionID) {
       sessions.set(chatId, result.sessionID);
       saveSessions(config.id, sessions);
     }
+    // Auto-track (screenshot footer): a quota/rate-limit failure stamps Reset
+    // into this bot's OWN free-lane ledger so /allowance goes ❌ with a time.
+    trackRunQuota({ botId: config.id, modelRef: eff.model, result });
     if (running.get(chatId)?.aborted) {
       renderer.status = 'aborted';
       await renderer.deliver('Aborted.');
@@ -1160,6 +1554,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       await renderer.finish(result, { footer: usageText });
     }
   } catch (err) {
+    if (observer && !observerTerminalWritten) {
+      observerTerminalWritten = true;
+      observer.write('failed', {}, observerContext || {});
+    }
     await api.sendMessage(chatId, `Error: ${err.message}`).catch(() => {});
   } finally {
     renderer.stopTyping();
@@ -1323,6 +1721,13 @@ async function main() {
 
   const registryPath = resolveRegistryPath(args.registry, REPO_ROOT);
   const registry = loadRegistry(registryPath);
+  // BOT-17 lane contract enforced at startup: a registry that names an
+  // agent/model/process as a bot must never boot a poller. Fail loud.
+  const laneViolations = checkRegistry(registry);
+  if (laneViolations.length) {
+    console.error(`[bot-host] lane-contract violations:\n- ${laneViolations.join('\n- ')}\nRefusing to start.`);
+    process.exit(1);
+  }
   const bot = getBot(registry, args.id);
   const config = normalizeConfig(bot, { defaultWorkspace: REPO_ROOT });
   if (config.runtime !== 'bot-host' && config.runtime !== 'device') {

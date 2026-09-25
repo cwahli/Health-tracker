@@ -6,14 +6,29 @@
  * Executes specific end-to-end user journeys (meal, biomarker, onboarding)
  * using headless Chromium, automatically capturing screenshots and structured
  * bug diagnostic reports on failure.
+ *
+ * V-30.3 ticket mode: reads a card's packet, runs its repro command/criteria,
+ * uploads the §4.6 evidence bundle to R2 (repro.txt, run.log, before.png,
+ * expected.md, result.json — keys only, never host paths), and writes the
+ * verdict through `bugctl repro`. Exit 0 from the command = defect reproduced
+ * (confirmed); non-zero = not reproducible (failed). It never fixes, dispatches,
+ * or posts verify.
  * 
  * Usage:
  *   node scripts/qa-runner.mjs --journey=meal [--url=http://localhost:3000] [--save-bug]
+ *   node scripts/qa-runner.mjs --ticket=<#n> [--command="<shell>"] [--url=...] [--by=qa_meal]
  */
 
 import { chromium } from 'playwright';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '..');
+const BUGCTL = path.join(REPO_ROOT, 'scripts', 'bugctl.mjs');
 
 const args = process.argv.slice(2);
 function getArg(name, defaultValue) {
@@ -30,6 +45,9 @@ function getArg(name, defaultValue) {
 const journey = getArg('journey', 'meal');
 const baseUrl = getArg('url', process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://health-tracking.duckdns.org');
 const outputDir = getArg('output-dir', path.join(process.cwd(), 'qa-evidence'));
+const ticket = getArg('ticket', null);
+const reproCommand = getArg('command', null);
+const byActor = getArg('by', 'qa_meal');
 
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
@@ -257,4 +275,247 @@ function analyzeSuggestedFix(journey, errorMsg, consoleErrors) {
   return `Review latest commit changes affecting ${journey} components.`;
 }
 
-run();
+// ---------------------------------------------------------------------------
+// V-30.3 ticket mode — reproduce a card, upload the §4.6 bundle, post verdict
+// ---------------------------------------------------------------------------
+
+/** Load KEY=VALUE lines from a dotenv file into process.env without overriding. */
+function loadEnvFile(file) {
+  try {
+    if (!fs.existsSync(file)) return;
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!m) continue;
+      const key = m[1];
+      let val = m[2].trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+      if (process.env[key] === undefined && val) process.env[key] = val;
+    }
+  } catch { /* env file unreadable — caller decides */ }
+}
+
+/** Upload one artifact to R2 under bugs/<tag_id>/<ts>-<kind>.<ext>; returns the key or null. */
+async function uploadR2Key(key, body, contentType) {
+  if (process.env.CLOUDFLARE_R2_ACCESS_KEY_ID === undefined) {
+    loadEnvFile(path.join(REPO_ROOT, '.env'));
+    loadEnvFile(path.join(os.homedir(), '.hermes', '.env'));
+  }
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY;
+  if (!account || !accessKeyId || !secretAccessKey) return null;
+  try {
+    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+    const s3 = new S3Client({
+      region: 'auto',
+      endpoint: `https://${account}.r2.cloudflarestorage.com`,
+      credentials: { accessKeyId, secretAccessKey },
+    });
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.CLOUDFLARE_R2_BUCKET_NAME || 'health-tracker-photos',
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }));
+    return key;
+  } catch (e) {
+    console.warn(`[QA Runner] R2 upload failed for ${key}: ${e.message}`);
+    return null;
+  }
+}
+
+const R2_CONTENT_TYPES = {
+  'repro.txt': 'text/plain; charset=utf-8',
+  'run.log': 'text/plain; charset=utf-8',
+  'expected.md': 'text/markdown; charset=utf-8',
+  'result.json': 'application/json',
+  'before.png': 'image/png',
+};
+
+/** Best-effort evidence screenshot: load the app (demo login if offered), full-page shot. */
+async function captureBefore(filePath) {
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+    });
+    const page = await context.newPage();
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    const demoBtn = page.locator('#demo-login-btn');
+    const homeTab = page.locator('#nav-tab-home');
+    for (let i = 0; i < 20; i++) {
+      if (await homeTab.isVisible().catch(() => false)) break;
+      if (await demoBtn.isVisible().catch(() => false)) {
+        await demoBtn.click().catch(() => {});
+        await homeTab.waitFor({ state: 'attached', timeout: 25000 }).catch(() => {});
+        break;
+      }
+      await page.waitForTimeout(1000);
+    }
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: filePath, fullPage: true });
+    return true;
+  } catch (e) {
+    console.warn(`[QA Runner] before.png capture failed: ${e.message}`);
+    return false;
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+/** Resolve a card id (#n or tag id) to its packet JSON via bugctl. No chat, no memory — disk/API only. */
+function loadPacket(idRaw) {
+  const res = spawnSync(process.execPath, [BUGCTL, 'packet', '--id', idRaw, '--json'], {
+    encoding: 'utf8',
+    cwd: REPO_ROOT,
+    timeout: 60000,
+  });
+  try {
+    const parsed = JSON.parse(res.stdout || '');
+    if (parsed && !parsed.error) return parsed;
+    return { error: parsed?.error || `packet lookup failed (exit ${res.status})` };
+  } catch {
+    return { error: `packet lookup failed: ${(res.stderr || res.stdout || '').slice(0, 300)}` };
+  }
+}
+
+async function runTicket() {
+  const idRaw = String(ticket).replace(/^#/, '');
+  console.log(`[QA Runner] ticket mode: #${idRaw} against ${baseUrl}`);
+
+  const packet = loadPacket(idRaw);
+  if (packet.error || !packet.defect) {
+    console.error(`[QA Runner] cannot load packet for #${idRaw}: ${packet.error || 'packet has no defect — pack it first'}`);
+    process.exit(2);
+  }
+  const tagId = String(packet.tag_id || idRaw);
+  const publicN = packet.public_n || idRaw;
+
+  const command = String(reproCommand || (packet.repro && packet.repro.command) || '').trim();
+  if (!command) {
+    console.error(`[QA Runner] card #${publicN} carries no repro command — pass --command="<shell>". Criteria: ${packet.defect.criteria}`);
+    process.exit(2);
+  }
+
+  const ts = Date.now();
+  const evDir = path.join(outputDir, 'repro', tagId);
+  fs.mkdirSync(evDir, { recursive: true });
+  const file = (name) => path.join(evDir, `${ts}-${name}`);
+
+  // repro.txt — exact command + env + params (§4.6)
+  fs.writeFileSync(file('repro.txt'), [
+    `card: #${publicN} (${tagId})`,
+    `title: ${packet.title || ''}`,
+    `command: ${command}`,
+    `cwd: ${process.cwd()}`,
+    `url: ${baseUrl}`,
+    `bug_api_base: ${process.env.BUG_API_BASE || 'http://127.0.0.1:3000'}`,
+    `criteria: ${packet.defect.criteria}`,
+    `at: ${new Date(ts).toISOString()}`,
+    '',
+  ].join('\n'));
+
+  // expected.md — the card's expected state + criteria (§4.6)
+  fs.writeFileSync(file('expected.md'), [
+    '# Expected', '', String(packet.defect.expected || ''), '',
+    '## Criteria', '', String(packet.defect.criteria || ''), '',
+    '## Observed (report)', '', String(packet.defect.observed || ''), '',
+  ].join('\n'));
+
+  // Run the repro command: exit 0 = defect reproduced (confirmed), non-zero = failed.
+  console.log(`[QA Runner] running: ${command}`);
+  const t0 = Date.now();
+  const run = spawnSync('bash', ['-lc', command], {
+    encoding: 'utf8',
+    timeout: 300000,
+    cwd: process.cwd(),
+    env: process.env,
+  });
+  const exitCode = run.status === null || run.status === undefined ? 124 : run.status;
+  const runLogText = [
+    `$ ${command}`,
+    `exit_code: ${exitCode}`,
+    `wall_ms: ${Date.now() - t0}`,
+    `verdict_rule: exit 0 = reproduced (confirmed), non-zero = not reproducible (failed)`,
+    '--- stdout + stderr ---',
+    (run.stdout || '') + (run.stderr || ''),
+    '',
+  ].join('\n');
+  fs.writeFileSync(file('run.log'), runLogText);
+
+  const shotOk = await captureBefore(file('before.png'));
+  const verdict = exitCode === 0 ? 'confirmed' : 'failed';
+  console.log(`[QA Runner] verdict: ${verdict} (exit ${exitCode}, before.png ${shotOk ? 'captured' : 'MISSING'})`);
+
+  // Upload the bundle — keys only, host paths are never evidence (§4.6).
+  const prefix = `bugs/${tagId}/${ts}`;
+  const kinds = ['repro.txt', 'run.log', 'expected.md', ...(shotOk ? ['before.png'] : [])];
+  const keys = {};
+  for (const kind of kinds) {
+    const key = await uploadR2Key(`${prefix}-${kind}`, fs.readFileSync(file(kind)), R2_CONTENT_TYPES[kind]);
+    if (key) keys[kind] = key;
+  }
+  const runLogKey = keys['run.log'];
+  if (!runLogKey) {
+    console.error(`[QA Runner] R2 upload unavailable (missing CLOUDFLARE_R2_* env) — verdict NOT posted: a host path is not evidence. Local bundle: ${evDir}`);
+    process.exit(3);
+  }
+
+  const result = {
+    card: `#${publicN}`,
+    tag_id: tagId,
+    title: packet.title || null,
+    verdict,
+    exit_code: exitCode,
+    command,
+    criteria: packet.defect.criteria,
+    r2_prefix: prefix,
+    artifacts: keys,
+    screenshot: Boolean(shotOk),
+    by: byActor,
+    at: new Date().toISOString(),
+  };
+  fs.writeFileSync(file('result.json'), JSON.stringify(result, null, 2));
+  const resultKey = await uploadR2Key(`${prefix}-result.json`, fs.readFileSync(file('result.json')), R2_CONTENT_TYPES['result.json']);
+  if (resultKey) keys['result.json'] = resultKey;
+
+  // Write the verdict through bugctl (which re-runs repro --check before POST).
+  const postArgs = [
+    BUGCTL, 'repro', '--id', idRaw,
+    '--status', verdict,
+    '--command', command,
+    '--exit-code', String(exitCode),
+    '--run-log', runLogKey,
+    '--by', byActor,
+    '--json',
+  ];
+  if (keys['before.png']) postArgs.push('--before', keys['before.png']);
+  const post = spawnSync(process.execPath, postArgs, { encoding: 'utf8', cwd: REPO_ROOT, timeout: 60000 });
+  process.stdout.write(post.stdout || '');
+  if (post.stderr) process.stderr.write(post.stderr);
+  if (post.status !== 0) {
+    console.error(`[QA Runner] bugctl repro failed (exit ${post.status}) — verdict not persisted`);
+    process.exit(post.status || 1);
+  }
+
+  // One reply line for the ticket room, then STOP (no fix, no dispatch, no verify).
+  const line = verdict === 'confirmed'
+    ? `reproduced #${publicN} — exit 0; run.log ${runLogKey}; before.png ${keys['before.png'] || 'n/a'}; result.json ${keys['result.json'] || `${prefix}-result.json (local)`}`
+    : `not reproducible #${publicN} — exit ${exitCode}; run.log ${runLogKey}; result.json ${keys['result.json'] || `${prefix}-result.json (local)`}`;
+  console.log(`[QA Runner] ${line}`);
+  process.exit(0);
+}
+
+if (ticket) {
+  runTicket().catch((e) => {
+    console.error('[QA Runner] ticket run failed:', e.message);
+    process.exit(1);
+  });
+} else {
+  run();
+}

@@ -1,0 +1,12 @@
+{
+  "comment": "BOT-16: one soul line per capability, composed between bots/soul.md and bots/soul.<profile>.md. Keep every line to a single line.",
+  "profiles": {
+    "default": [],
+    "bug_ticket": ["You are the steward for the canonical bug list; skill source: scripts/skills/common/bug-ticket/SKILL.md."],
+    "meal_audit": ["You self-serve through the meal-audit-engine skill."],
+    "qa_meal": ["You preload only the qa-meal-journey skill."],
+    "orchestrator": ["You preload only the orchestrator-dispatcher skill.", "You post status. You never run a coder yourself."],
+    "qa_biomarker": ["You preload no journey skill until this profile has its own token."],
+    "qa_onboarding": ["You preload no journey skill until this profile has its own token."]
+  }
+}

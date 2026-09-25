@@ -17,6 +17,7 @@
  *           --check          validate payload only (schema + single-defect + criteria + fingerprint); no HTTP
  *           --split <file>   multi-item report JSON → { ok, card, split[] } (one card + split list)
  *   repro   --id N --status S [--command CMD] [--exit-code N] [--run-log L]
+ *           --check          validate verdict only (validateRepro vocabulary + artifacts); no HTTP
  *   plan    --id N --hyp H --files a.ts,b.ts --gates g1,g2
  *   attempt --id N --hyp H --file F --test T --result R [--line L] [--applied]
  *   verify  --id N --result green|red --command CMD [--evidence e1,e2]
@@ -24,7 +25,10 @@
  *   duplicate --id N --of TAG
  *   unblock --id N [--reason R]
  *   evidence --id N --summary S [--job-id J]
- *   next | list | show --id N | packet --id N [--format text] | state --id N | queue [--state S]
+ *   next | list [--state S] | show --id N | packet --id N [--format text] | state --id N | queue [--state S]
+ *   curate --id N --expected-revision R --reason WHY [--title T] [--class C] [--surface S] [--component C --expected E --criteria R]
+ *   handoff --id N --expected-revision R --reason WHY
+
  *   flush          replay the offline queue
  *   help
  *
@@ -34,7 +38,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packCheck, splitMultiItemReport, isVagueReport, fingerprint } from './lib/bug-pack.mjs';
+import { packCheck, splitMultiItemReport, isVagueReport, fingerprint, reproCheck } from './lib/bug-pack.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -131,17 +135,36 @@ function appendJournal(publicN, op) {
   fs.appendFileSync(file, JSON.stringify(row) + '\n');
 }
 
+// V-30.4 live proof: block/unblock (and other PATCH ops) return the legacy
+// work_item shape without top-level public_n — deriving it from now.public_id
+// keeps their journal rows from being silently dropped.
+function journalPub(r) {
+  if (r?.public_n != null) return r.public_n;
+  const pid = r?.now?.public_id;
+  if (pid != null && String(pid).startsWith('#')) return Number(String(pid).slice(1)) || undefined;
+  return undefined;
+}
+
+// V-30.4: only WRITES queue when the API is unavailable. A queued read
+// (packet/queue/next/list/show/state) can never be replayed by `flush` — it
+// would keep `bugctl flush` red forever. Reads fail loud instead.
+const WRITE_OPS = new Set([
+  'create', 'pack', 'defect', 'repro', 'plan', 'attempt', 'verify', 'close',
+  'claim', 'duplicate', 'unblock', 'block', 'evidence', 'curate', 'handoff',
+]);
+
 async function withFallback(op, args, fn) {
+  const isWrite = WRITE_OPS.has(op?.op);
   try {
     const result = await fn();
     if (result.status === 401 || result.status === 503) {
-      appendQueue(op);
-      return { ...result.json, queued: true, queue_path: QUEUE_PATH };
+      if (isWrite) appendQueue(op);
+      return { ...result.json, ...(isWrite ? { queued: true, queue_path: QUEUE_PATH } : {}) };
     }
     return result.json;
   } catch (e) {
-    appendQueue(op);
-    return { error: String(e?.message || e), queued: true, queue_path: QUEUE_PATH };
+    if (isWrite) appendQueue(op);
+    return { error: String(e?.message || e), ...(isWrite ? { queued: true, queue_path: QUEUE_PATH } : {}) };
   }
 }
 
@@ -242,8 +265,6 @@ async function main() {
     }
 
     case 'repro': {
-      const id = resolveId(args);
-      if (!id) fail('--id required', args);
       const body = {
         status: args.status,
         command: args.command,
@@ -255,8 +276,20 @@ async function main() {
         actual: args.actual,
         by: args.by,
       };
-      const r = await withFallback({ op: 'repro', id, ...body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/repro`, body));
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'repro', tag_id: r.tag_id, state: r.state, flags: r.flags, repro_status: body.status });
+      const chk = reproCheck(body);
+      if (args.check) {
+        out(chk.ok ? { ok: true, check: 'repro', value: chk.value } : chk, args);
+        if (!chk.ok) process.exit(1);
+        break;
+      }
+      if (!chk.ok) {
+        out({ ...chk, hint: 'bugctl repro --check failed — fix verdict before POST' }, args);
+        process.exit(1);
+      }
+      const id = resolveId(args);
+      if (!id) fail('--id required', args);
+      const r = await withFallback({ op: 'repro', id, ...chk.value }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/repro`, chk.value));
+      if (r.ok && r.state) appendJournal(r.public_n, { op: 'repro', tag_id: r.tag_id, state: r.state, flags: r.flags, repro_status: chk.value.status });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -295,7 +328,7 @@ async function main() {
       };
       const r = await withFallback({ op: 'attempt', id, ...body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/attempts`, body));
       if (r.ok && r.state) {
-        const pub = r.public_n || (r.now?.public_id ? Number(String(r.now.public_id).replace('#', '')) : undefined);
+        const pub = journalPub(r);
         appendJournal(pub, { op: 'attempt', tag_id: r.tag_id || id, state: r.state, flags: r.flags, hyp: body.hyp, result: body.result });
       }
       out(r, args);
@@ -315,7 +348,7 @@ async function main() {
         by: args.by,
       };
       const r = await withFallback({ op: 'verify', id, ...body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/verify`, body));
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'verify', tag_id: r.tag_id, state: r.state, flags: r.flags, result: body.result });
+      if (r.state) appendJournal(journalPub(r), { op: 'verify', tag_id: r.tag_id, state: r.state, flags: r.flags, result: body.result });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -328,7 +361,7 @@ async function main() {
       const r = await withFallback({ op: 'claim', id, assignee: args.assignee }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { assignee: args.assignee })
       );
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'claim', tag_id: r.tag_id, state: r.state, assignee: args.assignee });
+      if (r.state) appendJournal(journalPub(r), { op: 'claim', tag_id: r.tag_id, state: r.state, assignee: args.assignee });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -342,7 +375,7 @@ async function main() {
       const r = await withFallback({ op: 'duplicate', id, of }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { duplicate_of: of })
       );
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'duplicate', tag_id: r.tag_id, state: r.state, flags: r.flags, of });
+      if (r.state) appendJournal(journalPub(r), { op: 'duplicate', tag_id: r.tag_id, state: r.state, flags: r.flags, of });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -357,7 +390,7 @@ async function main() {
           reset_burns: args['reset-burns'] === true || args['reset-burns'] === 'true',
         })
       );
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'unblock', tag_id: r.tag_id, state: r.state, flags: r.flags });
+      if (r.state) appendJournal(journalPub(r), { op: 'unblock', tag_id: r.tag_id, state: r.state, flags: r.flags });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -370,7 +403,7 @@ async function main() {
       const r = await withFallback({ op: 'block', id, reason }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, { blocked_reason: reason, queue: 'blocked' })
       );
-      if (r.ok && r.state) appendJournal(r.public_n, { op: 'block', tag_id: r.tag_id, state: r.state, flags: r.flags, reason });
+      if (r.state) appendJournal(journalPub(r), { op: 'block', tag_id: r.tag_id, state: r.state, flags: r.flags, reason });
       out(r, args);
       if (r.error && !r.queued) process.exit(1);
       break;
@@ -394,6 +427,46 @@ async function main() {
       break;
     }
 
+    case 'curate':
+    case 'edit':
+    case 'rewrite': {
+      const id = resolveId(args);
+      if (!id) fail('--id required', args);
+      const body = {
+        op: cmd === 'rewrite' ? 'rewrite' : cmd === 'edit' ? 'edit' : String(args.op || 'review'),
+        expected_revision: Number(args['expected-revision'] ?? args.expected_revision),
+        reason: args.reason,
+        title: args.title,
+        class: args.class,
+        surface: args.surface,
+        assignee: args.assignee,
+        component: args.component,
+        expected: args.expected,
+        criteria: args.criteria,
+      };
+      const r = await withFallback({ op: 'curate', id, payload: body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/curation`, body));
+      if (r.receipt) appendJournal(journalPub(r), { op: body.op, tag_id: r.tag_id || id, state: r.state, receipt: r.receipt });
+      out(r, args);
+      if (r.error && !r.queued) process.exit(1);
+      break;
+    }
+
+    case 'handoff': {
+      const id = resolveId(args);
+      if (!id) fail('--id required', args);
+      const body = {
+        op: 'handoff',
+        expected_revision: Number(args['expected-revision'] ?? args.expected_revision),
+        reason: args.reason,
+        assignee: 'orchestrator',
+      };
+      const r = await withFallback({ op: 'handoff', id, payload: body }, args, () => api('POST', `/api/bugs/${encodeURIComponent(id)}/curation`, body));
+      if (r.receipt) appendJournal(journalPub(r), { op: 'handoff', tag_id: r.tag_id || id, state: r.state, receipt: r.receipt });
+      out(r, args);
+      if (r.error && !r.queued) process.exit(1);
+      break;
+    }
+
     case 'next': {
       const r = await withFallback({ op: 'next' }, args, () => api('GET', `/api/bugs/next?mode=${encodeURIComponent(args.mode || '')}${args.n ? `&n=${args.n}` : ''}`));
       out(r, args);
@@ -405,9 +478,9 @@ async function main() {
       if (args.state) qs.set('state', args.state);
       if (args.assignee) qs.set('assignee', args.assignee);
       if (args.surface) qs.set('surface', args.surface);
-      const r = await withFallback({ op: 'list', ...Object.fromEntries(qs) }, args, () => api('GET', `/api/bugs/queue?${qs}`));
-      if (r.queue) {
-        out({ count: r.queue.length, rows: r.queue.map((q) => ({ n: q.public_n, state: q.state, title: q.title, assignee: q.assignee, surface: q.surface })) }, args);
+      const r = await withFallback({ op: 'list', ...Object.fromEntries(qs) }, args, () => api('GET', `/api/bugs/list?${qs}`));
+      if (r.rows) {
+        out({ source: r.source, count: r.count ?? r.rows.length, generated_at: r.generated_at, rows: r.rows }, args);
       } else out(r, args);
       break;
     }
@@ -435,12 +508,15 @@ async function main() {
       const id = resolveId(args);
       if (!id) fail('--id required', args);
       const fmt = args.format ? `?format=${encodeURIComponent(args.format)}` : '';
-      const r = await withFallback({ op: 'packet', id, format: args.format }, args, () =>
-        api('GET', `/api/bugs/${encodeURIComponent(id)}/packet${fmt}`)
-      );
-      if (args.format === 'text' && typeof r === 'string') process.stdout.write(r + '\n');
-      else if (args.format === 'text' && r.packet) process.stdout.write(r.packet + '\n');
-      else out(r, args);
+      // V-30.4: a packet READ is never queued — withFallback would leave an
+      // unflushable op in the offline queue (flush counts it failed forever).
+      // The dispatcher needs a live read; writes still queue via withFallback.
+      const r = await api('GET', `/api/bugs/${encodeURIComponent(id)}/packet${fmt}`);
+      const payload = r.json;
+      if (args.format === 'text' && typeof payload === 'string') process.stdout.write(payload + '\n');
+      else if (args.format === 'text' && payload && payload.packet) process.stdout.write(payload.packet + '\n');
+      else out(payload, args);
+      if (payload && payload.error && !r.ok) process.exit(1);
       break;
     }
 
@@ -474,7 +550,8 @@ async function main() {
           else if (op === 'duplicate') res = await api('PATCH', `/api/bugs/${encodeURIComponent(rest.id)}`, { duplicate_of: rest.of });
           else if (op === 'unblock') res = await api('PATCH', `/api/bugs/${encodeURIComponent(rest.id)}`, { blocked_reason: null });
           else if (op === 'block') res = await api('PATCH', `/api/bugs/${encodeURIComponent(rest.id)}`, { blocked_reason: rest.reason, queue: 'blocked' });
-          else if (op === 'evidence') res = await api('POST', `/api/bugs/${encodeURIComponent(rest.id)}/attach`, rest);
+           else if (op === 'evidence') res = await api('POST', `/api/bugs/${encodeURIComponent(rest.id)}/attach`, rest);
+           else if (op === 'curate' || op === 'handoff') res = await api('POST', `/api/bugs/${encodeURIComponent(rest.id)}/curation`, rest.payload || rest);
           else {
             failed++;
             remaining.push(line);

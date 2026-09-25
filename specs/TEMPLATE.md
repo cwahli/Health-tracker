@@ -23,6 +23,26 @@ gate:
 ## Goal
 <one sentence; checkable>
 
+## Understanding (what this bug is NOT) — V-30.4 anti-patch field
+- Mechanism: <the actual cause, one sentence — not a restatement of the symptom>
+- Not this: <the tempting wrong-thing fix(s), and why they are wrong>
+- Evidence: <before.png key / run.log key / repro command from the card>
+- Non-goal: <one explicit thing this change must NOT do>
+
+## Layer (pick ONE; siblings are frozen) — V-30.4 anti-patch field
+- Layer: <display | calc | data>
+- Frozen: <the other two layers — out of scope by construction; cross-layer sprawl is a reject>
+
+## Forbidden patch (named) — V-30.4 anti-patch field
+- No symptom-hide: <name the cosmetic patch that would paint this green>
+- No new feature flag
+- No renamed locator (test ids like `#nav-tab-health` stay stable)
+- No second merge/write path
+
+## Two-sided fixture (prove structure, not symptom)
+- Broken input → correct output: <fixture / test name>
+- Adjacent input → unchanged: <regression guard that proves nothing else moved>
+
 ## In scope
 - …
 

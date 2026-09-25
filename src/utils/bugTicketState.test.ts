@@ -10,8 +10,11 @@ import {
 import {
   BUG_STATE_NAMES,
   bugState,
+  curationSnapshot,
+  applyCuration,
   evaluateReproVerdicts,
   projectBugState,
+  validateCuration,
   validateDefect,
   validatePlan,
   validateRepro,
@@ -48,6 +51,53 @@ function withAttempt(item: BugWorkItem, a: BugAttempt, extra?: Partial<BugCommit
   return { ...item, commits: [...item.commits, commit] };
 }
 
+describe('card stewardship', () => {
+  it('creates a revisioned receipt for a safe edit', () => {
+    const item = base({
+      defect: { component: 'HomeTab', observed: 'shows 7.700000000000001', expected: '7.7', criteria: 'one decimal' },
+    });
+    const result = applyCuration(item, {
+      op: 'edit',
+      expected_revision: 0,
+      reason: 'clarify expected display',
+      expected: '7.7g',
+    }, '2026-09-24T00:00:00.000Z');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.revision).toBe(1);
+    expect(result.value.defect?.observed).toBe(item.defect?.observed);
+    expect(result.value.defect?.expected).toBe('7.7g');
+    expect(result.value.curation_events).toHaveLength(1);
+    expect(result.before_hash).not.toBe(result.after_hash);
+  });
+
+  it('rejects evidence and stale revisions', () => {
+    const item = base({ defect: { component: 'HomeTab', observed: 'observed', expected: 'expected', criteria: 'criteria' }, revision: 2 });
+    expect(validateCuration({ op: 'edit', expected_revision: 2, reason: 'x', observed: 'changed' })).toMatchObject({ ok: false });
+    expect(applyCuration(item, { op: 'review', expected_revision: 1, reason: 'stale' })).toMatchObject({ ok: false });
+  });
+
+  it('archives without deleting the card or its history', () => {
+    const item = base({ defect: { component: 'E2E', observed: 'observed', expected: 'expected', criteria: 'criteria' } });
+    const result = applyCuration(item, { op: 'archive', expected_revision: 0, reason: 'disposable live test' }, '2026-09-25T00:00:00.000Z');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.archived_at).toBe('2026-09-25T00:00:00.000Z');
+    expect(result.value.curation_events).toHaveLength(1);
+    expect(result.value.defect).toEqual(item.defect);
+  });
+
+  it('creates an explicit current orchestrator handoff', () => {
+    const item = base({ defect: { component: 'HomeTab', observed: 'observed', expected: 'expected', criteria: 'criteria' } });
+    const result = applyCuration(item, { op: 'handoff', expected_revision: 0, reason: 'reviewed', assignee: 'orchestrator' }, '2026-09-24T00:00:00.000Z');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.handoff).toMatchObject({ to: 'orchestrator', status: 'ready', revision: 1 });
+    expect(result.value.assignee).toBe('orchestrator');
+    expect(curationSnapshot(result.value).revision).toBe(1);
+  });
+});
+
 describe('bugState — S-C-lite projection', () => {
   it('exposes exactly the 5 lite state names', () => {
     expect(BUG_STATE_NAMES).toEqual(['new', 'packed', 'in_fix', 'verifying', 'done']);
@@ -66,6 +116,11 @@ describe('bugState — S-C-lite projection', () => {
       defect: { component: 'LogChat', observed: 'x', expected: 'y', criteria: 'z' },
     });
     expect(bugState(item).state).toBe('packed');
+  });
+
+  it('vague card with repro needed exposes needs_repro', () => {
+    const item = base({ repro: { status: 'needed' } });
+    expect(bugState(item)).toMatchObject({ state: 'new', flags: { needs_repro: true } });
   });
 
   it('defect + repro.status=needed → packed + needs_repro flag', () => {
