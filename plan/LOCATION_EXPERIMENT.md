@@ -182,9 +182,13 @@ only A additionally needs the swap itself.
 
 | gate | result |
 |---|---|
-| `scripts/assert-work-session.mjs` | 47 pass / 0 fail |
-| `scripts/assert-session-key.test.mjs` (new) | 24 pass / 0 fail |
+| `scripts/assert-work-session.mjs` | 50 pass / 0 fail (view-lifecycle expectations moved `work-vps` → `work-view`) |
+| `scripts/assert-work-view.test.mjs` (new, guard 11) | 13 pass / 0 fail |
+| `scripts/assert-session-key.test.mjs` (new) | 24 pass / 0 fail on a host-shaped checkout (2 env-coupled fails on foreign checkouts: no `external-2` folder, no VM path) |
 | `scripts/assert-worker-relay.test.mjs` | 31 pass / 0 fail |
+| `scripts/assert-swap-guards.test.mjs` (new, guards 4–8) | 64 pass / 0 fail |
+| `scripts/assert-swap-pack.test.mjs` (new, guard 9) | 35 pass / 0 fail |
+| `scripts/assert-poller-lease.test.mjs` (new, guard 10) | 21 pass / 0 fail |
 | `tests/work-session.test.ts` + `tests/bot-host.test.ts` (vitest) | 176 pass / 0 fail |
 | master scorecard | 947 pass / 4 fail — all 4 pre-existing (scout retry backoff ×2, journey-guard spec ambiguity, biomarker M31), none touching sessions |
 
@@ -206,6 +210,18 @@ cross-location identity test added.
    `ensureTmuxWorkView`) is proven in the harness but nothing in the product
    performs it. B's `reconcileWorkViewForLane` must rebuild `viewCommand` when
    `opencodeSessionId` changes, not only when `viewMode`/`lane` change.
+   Status 2026-09-26: the library half landed (`WORK_VIEW_SESSION`,
+   `workViewTarget`, `repointWorkView`, `sessionName` override in
+   `scripts/lib/work-session.mjs`, sensors 50/0 + 13/0) — the product wiring
+   half is still open.
+5. **Guard 11 mechanism decision (open).** This doc prescribes a
+   `viewLocation` field with `tmuxSessionFor` derived from it; the landed
+   library instead fixes the swap view at `work-view` with an opt-in
+   `sessionName` override. Both split the view location from the chat
+   location — pick exactly one before writing the wiring in item 2, or the
+   two mechanisms will fight. Recommendation: the fixed name (smaller,
+   sensor-proven, no store-shape change); the `viewLocation` field only if a
+   second concurrent view per chat is ever needed.
 3. **Live proof on Telegram** — the sensors above are process-level; the plan's
    live proof is still owed.
 4. **Rebase — done.** `agent/session-key` is now `origin/main` (`18cbd58`) plus
