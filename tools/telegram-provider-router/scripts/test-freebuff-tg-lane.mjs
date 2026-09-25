@@ -58,9 +58,24 @@ const owner = (pid) => {
   return p;
 };
 const DEAD_PID = 4000000000; // never alive
-const fetchBalance = (balance) => async () => ({
-  json: async () => ({ remainingBalance: balance, next_quota_reset: "2026-10-16T00:00:00Z" }),
-});
+// Freebucks POOL stub: /api/v1/freebuff/session (NOT /api/v1/usage — the wallet
+// is a different currency and read 0 while the pool had 10/25).
+const fetchBalance = (poolRemaining) => async (url) => {
+  const u = String(url || "");
+  if (!u.includes("/api/v1/freebuff/session")) return { ok: false, status: 404, json: async () => ({}) };
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      accessTier: "limited",
+      freebucks: {
+        balance: poolRemaining,
+        daily: { limit: 25, spent: 25 - poolRemaining, remaining: poolRemaining, resetAt: "2026-09-26T17:00:00.000Z" },
+        wallet: { balance: 0 },
+      },
+    }),
+  };
+};
 const noSleep = async () => {};
 const baseEnv = { FREEBUFF_TG_LANE: "1" };
 const fastTimeouts = { taskPromptMs: 200, workingAppearMs: 200, totalMs: 500, pollMs: 5, quietMs: 20 };
@@ -74,11 +89,13 @@ tests.push(["gate off by default", () => {
   eq(freebuffLaneEnabled({ FREEBUFF_TG_LANE: "1" }), true, "1 → on");
 }]);
 
-tests.push(["isZeroHrModel", () => {
-  ok(isZeroHrModel("z-ai/glm-5.3-flash"), "glm picker id");
-  ok(isZeroHrModel("xiaomi/mimo-v2.6-flash"), "mimo picker id");
-  ok(isZeroHrModel("GLM 5.3 Flash (0/hr)"), "0/hr label");
-  eq(isZeroHrModel("deepseek/deepseek-v4.1-flash"), false, "deepseek 5/hr");
+tests.push(["isZeroHrModel: only the published 0-FB model, not the old 0/hr claims", () => {
+  // Corrected 2026-09-25 from freebucks.prices: space-bunny-alpha is 0;
+  // GLM 5.3 is 5 FB and mimo-v2.6 is not published, so neither is "free".
+  ok(isZeroHrModel("stealth/space-bunny-alpha"), "space bunny alpha is 0 FB");
+  ok(isZeroHrModel("Space Bunny Alpha · free · 0 FB"), "0 FB label");
+  eq(isZeroHrModel("z-ai/glm-5.3-flash"), false, "GLM 5.3 costs 5 FB, not 0");
+  eq(isZeroHrModel("xiaomi/mimo-v2.6-flash"), false, "mimo-v2.6 not published");
   eq(isZeroHrModel(""), false, "empty");
 }]);
 
@@ -87,17 +104,21 @@ tests.push(["stripChrome drops TUI lines, keeps reply", () => {
   eq(JSON.stringify(out), JSON.stringify(["The fix is in auth.js"]), "reply only");
 }]);
 
-tests.push(["pickerChoiceFor finds menu digits", () => {
-  const menu = ["Select a model:", "  1) Muse 2.1 (45/hr)", "  2) GLM 5.3 Flash (0/hr)"];
+tests.push(["pickerChoiceFor matches on model words, needs 2+ shared tokens", () => {
+  const menu = ["Select a model:", "  1) Muse 2.1 (45/hr)", "  2) GLM 5.3 Flash (0/hr)", "  3) Space Bunny Alpha (0/hr)"];
   eq(pickerChoiceFor(menu, "z-ai/glm-5.3-flash"), "2", "glm → 2");
-  eq(pickerChoiceFor(menu, "deepseek/deepseek-v4.1-flash"), "", "no deepseek entry → default Enter");
+  eq(pickerChoiceFor(menu, "stealth/space-bunny-alpha"), "3", "space bunny → 3");
+  eq(pickerChoiceFor(menu, "deepseek/deepseek-v4-flash"), "", "no deepseek entry → default Enter");
+  // One shared word must NOT be enough (would pick Muse for muse-spark).
+  eq(pickerChoiceFor(["  1) Muse 2.1 (45/hr)"], "meta/muse-spark-1.3-contributor"), "", "single-word match refused");
   eq(pickerChoiceFor(["Enter a coding task"], "z-ai/glm-5.3-flash"), "", "no menu → default Enter");
 }]);
 
-tests.push(["readFreebucksBalance parses stub usage", async () => {
-  const r = await readFreebucksBalance({ fetchFn: fetchBalance(0), credsPath: creds() });
-  eq(r.balance, 0, "balance");
-  eq(r.resetAt, "2026-10-16T00:00:00Z", "reset");
+tests.push(["readFreebucksBalance reads the POOL endpoint, not the wallet", async () => {
+  const r = await readFreebucksBalance({ fetchFn: fetchBalance(10), credsPath: creds() });
+  eq(r.balance, 10, "pool remaining (wallet 0 must not be used)");
+  eq(r.walletBalance, 0, "wallet reported separately");
+  eq(r.resetAt, "2026-09-26T17:00:00.000Z", "pool daily reset, not the Oct wallet reset");
   const missing = await readFreebucksBalance({ fetchFn: fetchBalance(5), credsPath: join(DIR, "nope.json") });
   eq(missing.error, "not signed in", "missing creds");
 }]);
@@ -128,7 +149,7 @@ tests.push(["balance 0 + paid model → honest empty, no session spawned", async
     sleep: noSleep, timeouts: fastTimeouts,
   });
   eq(r.ok, false, "not ok");
-  ok(/balance is 0/i.test(r.text), "names the empty balance");
+  ok(/pool is empty/i.test(r.text), "names the empty pool");
   eq(calls, 0, "no tmux spawned");
 }]);
 
@@ -175,7 +196,7 @@ tests.push(["balance probe failure → honest, no session", async () => {
 
 tests.push(["full stub run with menu pick → reply extracted, session killed, lock freed", async () => {
   const TASK = "Enter a coding task";
-  const MENU = ["Select a model:", "  1) Muse 2.1 (45/hr)", "  2) GLM 5.3 Flash (0/hr)", TASK].join("\n");
+  const MENU = ["Select a model:", "  1) Muse 2.1 (45/hr)", "  2) GLM 5.3 Flash (0/hr)", "  3) Space Bunny Alpha (0/hr)", TASK].join("\n");
   const REPLY = ["fix auth", "The fix is in auth.js line 42", "Restart the service after editing"].join("\n");
   let phase = "task";
   let killed = 0;
@@ -188,7 +209,7 @@ tests.push(["full stub run with menu pick → reply extracted, session killed, l
     if (sub === "send-keys") {
       const last = argv[argv.length - 1];
       if (phase === "task" && last === "Enter") phase = "menu";
-      else if (phase === "menu" && last === "2") phase = "picked";
+      else if (phase === "menu" && last === "3") phase = "picked";
       else if (phase === "picked" && last === "Enter") phase = "waitFresh";
       else if (argv.includes("-l")) phase = "working";
       else if (phase === "working" && last === "Enter") phase = "replyWait";
@@ -205,15 +226,15 @@ tests.push(["full stub run with menu pick → reply extracted, session killed, l
     return { stdout: "", code: 0 };
   };
   const r = await runFreebuffLane({
-    prompt: "fix auth", model: "z-ai/glm-5.3-flash", session: "tg-fb-test", env: baseEnv,
-    fetchFn: fetchBalance(0), credsPath: creds(), ownerPath: owner(DEAD_PID),
+    prompt: "fix auth", model: "stealth/space-bunny-alpha", session: "tg-fb-test", env: baseEnv,
+    fetchFn: fetchBalance(10), credsPath: creds(), ownerPath: owner(DEAD_PID),
     exec, sleep: noSleep, timeouts: { ...fastTimeouts, totalMs: 2000 },
   });
   eq(r.ok, true, `lane ok (${r.text.slice(0, 80)})`);
   ok(r.text.includes("The fix is in auth.js line 42"), "reply line kept");
   ok(!/working\.\.\.|Enter a coding task/.test(r.text), "no chrome in reply");
   ok(!r.text.split("\n").includes("fix auth"), "prompt echo dropped");
-  ok(seen.some((s) => /(^|\s)2$/.test(s)), "menu digit typed for GLM");
+  ok(seen.some((s) => /(^|\s)3$/.test(s)), "menu digit 3 typed for Space Bunny Alpha");
   eq(killed, 2, "pre-kill + finally kill");
   // lock freed: an immediate second run reaches the balance gate (fails there, not busy)
   const r2 = await runFreebuffLane({
@@ -221,7 +242,7 @@ tests.push(["full stub run with menu pick → reply extracted, session killed, l
     fetchFn: fetchBalance(0), credsPath: creds(), ownerPath: owner(DEAD_PID),
     exec, sleep: noSleep, timeouts: fastTimeouts,
   });
-  ok(/balance is 0/i.test(r2.text), "second run not stuck busy");
+  ok(/pool is empty/i.test(r2.text), "second run not stuck busy");
 }]);
 
 tests.push(["no working activity → timeout verdict + cleanup", async () => {
