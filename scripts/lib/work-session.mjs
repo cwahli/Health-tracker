@@ -1,8 +1,9 @@
 /**
  * Shared work sessions for BOT-19.
  *
- * A work session is created on demand per active (location, chat, workspace)
- * — never permanently per bot. `tx on` enables the shared work view; `tx
+ * A work session is created on demand per active (chat, project) — never
+ * permanently per bot, and never per machine: the chat moves between locations
+ * and has to find the same row there. `tx on` enables the shared work view; `tx
  * off` hides it without stopping work. Generic debug/handoff/abort work for
  * every bot and backend.
  *
@@ -171,9 +172,33 @@ export function sessionsPath() {
   return process.env.WORK_SESSIONS || path.join(os.homedir(), '.hermes', 'work-sessions.json');
 }
 
-/** Session key: location + chat + workspace. Never the bot id. */
-export function sessionKey({ location = '', chat = '', workspace = '' } = {}) {
-  return [String(location), String(chat), String(workspace)].join('|');
+/**
+ * The project a workspace belongs to.
+ *
+ * The key must never name a machine. The same chat on the VM and on the
+ * notebook holds the same project at different absolute paths
+ * (/home/ubuntu/src/Health-tracker vs /root/Health-tracker), so a path in
+ * the key makes the session unfindable the moment the location changes.
+ * An external project keeps its number, the website checkout is project 1.
+ */
+export function projectIdForWorkspace(workspace = '') {
+  const ws = String(workspace || '').replace(/\/+$/, '');
+  const external = ws.match(/projects\/(external-\d+)/);
+  if (external) return external[1];
+  const base = ws.split('/').pop() || '';
+  if (/^health-tracker$/i.test(base)) return 'health-tracker';
+  return ws;
+}
+
+/**
+ * Session key: chat + project. Never the location, the machine path, or the
+ * bot id — the chat moves between locations and has to keep its session.
+ *
+ * `location` is accepted and ignored so existing call sites stay valid;
+ * `workspace` only supplies the project when `project` is not given.
+ */
+export function sessionKey({ chat = '', project = '', workspace = '', location = '' } = {}) {
+  return [String(chat), String(project) || projectIdForWorkspace(workspace)].join('|');
 }
 
 /** tmux session per physical location; workstream maps to a window. */
@@ -215,9 +240,9 @@ function saveStore(store, storePath = sessionsPath()) {
  * Resolve the session for (location, chat, workspace), creating it on
  * demand. Returns the session record.
  */
-export function resolveSession({ location = '', chat = '', workspace = '', lane = 'opencode' } = {}, storePath = sessionsPath()) {
+export function resolveSession({ location = '', chat = '', workspace = '', project = '', lane = 'opencode' } = {}, storePath = sessionsPath()) {
   const store = loadStore(storePath);
-  const key = sessionKey({ location, chat, workspace });
+  const key = sessionKey({ chat, project, workspace });
   if (!store.sessions[key]) {
     const now = new Date().toISOString();
     store.sessions[key] = {

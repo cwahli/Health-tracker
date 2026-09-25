@@ -4,8 +4,8 @@
  *
  * Proves shared work-session observability in code:
  *  1. work-session.mjs exports the tx/status/debug/handoff/abort surface.
- *  2. Sessions resolve on demand per (location, chat, workspace) — never
- *     permanently per bot (no bot key in the session id).
+ *  2. Sessions resolve on demand per (chat, project) — never per location
+ *     and never permanently per bot (no bot key, no machine path in the id).
  *  3. tx on/off toggles observation without touching state or lane.
  *  4. The debug probe has one shape for every backend; terminal lanes
  *     report attach honestly, API lanes report attach:false with an
@@ -121,10 +121,14 @@ const lifecycleTmux = (args) => {
   return false;
 };
 
-// 2. On-demand sessions keyed without any bot id.
+// 2. On-demand sessions keyed without any bot id, and without a location:
+//    the chat moves between hosts and has to find the same row there.
 const s1 = resolveSession({ location: 'vps', chat: 'qa_meal', workspace: '/home/ubuntu/src/Health-tracker', lane: 'opencode' }, tmpStore);
 check('resolve creates the session', s1.state === 'active' && s1.tx === false);
-check('session id carries no bot key', !/bot/i.test(s1.id) && s1.id === 'vps|qa_meal|/home/ubuntu/src/Health-tracker');
+check('session id carries no bot key', !/bot/i.test(s1.id) && s1.id === 'qa_meal|health-tracker');
+const s1Moved = resolveSession({ location: 'collab', chat: 'qa_meal', workspace: '/root/Health-tracker' }, tmpStore);
+check('the same chat and project resolve on another location', s1Moved.id === s1.id && s1Moved.createdAt === s1.createdAt,
+  `${s1.id} vs ${s1Moved.id}`);
 const s1b = resolveSession({ location: 'vps', chat: 'qa_meal', workspace: '/home/ubuntu/src/Health-tracker' }, tmpStore);
 check('re-resolve returns the same session', s1b.createdAt === s1.createdAt);
 check('unknown session reads null', getSession('nowhere|no|pe', tmpStore) === null);
