@@ -11,7 +11,7 @@ import {
 
 describe('laneFor', () => {
   it('describes every dispatch backend', () => {
-    for (const backend of ['opencode', 'cline', 'grok', 'agy', 'gemini', 'human']) {
+    for (const backend of ['opencode', 'cline', 'grok', 'agy', 'freebuff', 'gemini', 'human']) {
       expect(laneFor(backend).backend).toBe(backend);
     }
   });
@@ -39,6 +39,8 @@ describe('degraded markings', () => {
     expect(LANES.opencode.degraded).toEqual([]);
     expect(LANES.human.degraded).toEqual([]);
   });
+
+  // freebuff lane rows + laneSupports probe: tests/lane-contract-freebuff.test.ts (R-15)
 });
 
 describe('roles', () => {

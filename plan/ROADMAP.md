@@ -56,6 +56,25 @@ B0 / B7.4–7.6 / B8.0 / Q-8.6 / F-10.8 / Q-9 / F-11.2–11.3 / Q-4 / Q-10 are *
 
 **Q-11 and Q-13 are done** (App.tsx 350 / 14 KB, `Header.tsx` 690 / 28.8 KB, `BiomarkerDictionaryModal.tsx` 3,725 / 180 KB — see the entries below). The only remaining >200 KB file is **`LogChat.tsx`** (340 KB / 6,474 lines, under its 6,500 ceiling after extraction).
 
+## R-15 — omni-agent lanes (charter; executes AFTER R-14.1)
+
+**Blocked on R-14.1 completion** (or an explicit human reorder). Destination journey: bot-code. Goal: "all agents usable across all bots" — every backend that can run a turn headlessly is first-class in the lane contract, every backend that cannot is declared honestly as degraded, and any lane may fill any role (specify/implement/verify) within its declared capabilities. Packet: `specs/active/r15-omni-agent-lanes.md`.
+
+**Landed on main (contract preparation, no live-bot changes):**
+- `scripts/lib/lane-contract.mjs` declares a `freebuff` lane — `degraded: ['resume', 'headless']` — plus the pure probe `laneSupports(lane, capability)`; `headless` is the formal "can this backend take a one-shot script prompt today" test (opencode/cline/grok/gemini/human: yes; freebuff: no today).
+- Router (`tools/telegram-provider-router/src/index.js`) derives its Freebuff status text from the lane state instead of claiming "Freebuff is not a TG lane": the lane exists behind `FREEBUFF_TG_LANE=1` (experimental, tmux-scrape, single-flight), default off; `/freemodel` bucket lines and the disabled-path reply now state terminal-only + headless:no honestly. The upstream self-heal probe (retries `freebuff --help` and adopts a future `chat` verb) is kept.
+
+**Definition of done (three parts):**
+1. Every dispatch backend is a lane row with tools/session/degraded truthfully declared (no hidden special cases, no invented capabilities).
+2. A backend that cannot run headless is visibly degraded — dispatchers check `laneSupports(backend,'headless')` before selecting, and UI status strings come from the lane table.
+3. Any lane can fill any role on any bot within declared caps — acceptance matrix (below) has evidence for every non-degraded cell.
+
+**Acceptance matrix (fill evidence pointers when R-15 executes):** for each lane in {opencode, cline, grok, agy, freebuff, gemini, human} × each role in {specify, implement, verify}: one live or stubbed receipt proving the role ran through that lane on at least one bot, or an explicit `isDegraded` citation for why the cell is N/A.
+
+**Upstream watch (no code):** re-probe `freebuff --help` when the CLI moves past 0.0.197. If a `run`/`serve`/`acp`-style verb appears, Freebuff graduates by **shrinking its degraded list** (drop `headless`) — never by pinning a version string; `laneSupports('freebuff','headless')` flipping to true is the only switch dispatchers need.
+
+**Do not (inherited from Current work):** no registry rows for agents/models/processes; no new bot ids; no second bug pipeline; no moving pollers between machines; do not restart BOT-24 packets 1–4 or touch R-14.1 files to "fit" this charter.
+
 ## BOT-24 — location-scoped `/freemodel` + allowance (IN PROGRESS — do not restart)
 
 **Rule:** `/freemodel` is a property of the worker that is actually running the turn, never a global catalog. R-14.1 does not replace this list. A depleted lane uses the next equivalent row on that same worker. A location change happens only when that list is empty (R-14.1 card 6). Do not reopen packets 1–3. The live matrix below is still the bar before anyone marks BOT-24 DONE. Each VM, phone/proot, and Collab host has its own installed tools, credentials, provider catalog, and quota. The list may show Cline, Token Harbor, Freebuff, Gemini-through-OpenCode, or omit them when that host cannot run or authenticate them. Never infer availability from another host's list or shared pref document.

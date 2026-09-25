@@ -395,7 +395,9 @@ function allFreeLanesDepletedMessage(fromProvider, fromModel) {
   const soon = table ? soonestResetAmongDepleted(table, state) : null;
   const sticky = `${fromProvider}/${fromModel}`;
   // Never claim "everything is dead": Freebuff stays usable in the terminal
-  // while the Telegram chat lanes are empty (Freebuff is not a TG lane).
+  // while the Telegram chat lanes are empty. Lane contract (R-15): freebuff is
+  // degraded ['resume','headless'] — terminal/TUI-only today; the experimental
+  // TG lane exists behind FREEBUFF_TG_LANE=1 (runFreebuffLane).
   // Names/prices come from the ledger (synced from the published catalog) so
   // the Stop never repeats a stale or invented model.
   const fbSignedIn = freebuffCredsOk();
@@ -403,9 +405,12 @@ function allFreeLanesDepletedMessage(fromProvider, fromModel) {
     .slice(0, 3)
     .map((m) => m.label)
     .join(", ");
+  const fbLaneNote = freebuffLaneEnabled(process.env)
+    ? "Its experimental Telegram lane is ON (FREEBUFF_TG_LANE=1)."
+    : "Its Telegram lane is off by default (FREEBUFF_TG_LANE=1 enables it); the CLI has no headless one-shot.";
   const fbOffer = fbSignedIn
     ? `Freebuff is still usable in the terminal on this box${fbTop ? `: ${fbTop}` : ""} — open a terminal and run ` +
-      "`freebuff`, or use the Freebuff taps in /freemodel."
+      "`freebuff`. " + fbLaneNote
     : "Freebuff would also be usable in the terminal, but this box is not signed in — run `freebuff` in a terminal to sign in.";
   const reset =
     soon?.label
@@ -1058,7 +1063,7 @@ function allowanceBucketSection() {
     }
     if (b.id === "freebuff-freebucks") {
       lines.push(
-        `· ${b.label} [shared] — ${freebuffCredsOk() ? "signed in" : "not signed in"} · UI only / terminal · reset ${b.resetHint}`
+        `· ${b.label} [shared] — ${freebuffCredsOk() ? "signed in" : "not signed in"} · terminal-only (headless: no${freebuffLaneEnabled(process.env) ? ", TG lane on" : ""}) · reset ${b.resetHint}`
       );
       continue;
     }
@@ -1970,10 +1975,14 @@ async function runFreebuff(prompt, opts = {}) {
       }
     }
     return (
-      "Freebuff is signed in on this box, but its CLI is interactive-only (no Telegram one-shot chat).\n" +
+      "Freebuff is signed in on this box, but its lane is degraded for chat: " +
+      "no headless one-shot and no session resume (terminal/TUI only).\n" +
       `Selected model: \`${model}\`\n\n` +
-      "For Telegram, use /freemodel → OpenCode Muse, Token Harbor, or Cline.\n" +
-      "Keep Freebuff for terminal coding sessions."
+      "For Telegram, use /freemodel → OpenCode, Token Harbor, or Cline.\n" +
+      "Keep Freebuff for terminal coding sessions" +
+      (freebuffLaneEnabled(process.env)
+        ? ", or retry here — the experimental TG lane is ON."
+        : " (FREEBUFF_TG_LANE=1 enables the experimental TG lane).")
     );
   } finally {
     clearInterval(pulse);
