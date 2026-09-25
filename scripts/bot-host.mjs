@@ -28,7 +28,7 @@ import {
 import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
 import { recordFailure, loadFailures } from './lib/failure-log.mjs';
-import { providerReadiness, setupGaps } from './lib/setup-gaps.mjs';
+import { providerReadiness, setupGaps, setServiceUnit } from './lib/setup-gaps.mjs';
 import {
   runOpencode,
   runWithModelFailover,
@@ -404,7 +404,9 @@ function makeCaches() {
  * Cached with the model list: credentials do not change between turns, and the
  * check is local (env var, binary, auth file) so it costs nothing to repeat.
  */
-export function hostReadiness(caches) {
+export function hostReadiness(caches, botId = 'vm') {
+  // The fix text names the service to restart, so it must name THIS bot's.
+  setServiceUnit(botId);
   if (caches.readiness) return caches.readiness;
   caches.readiness = providerReadiness({
     env: process.env,
@@ -1450,7 +1452,8 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'setup': {
       // The allowance surfaces now say a lane "needs TOKEN_HARBOR_API_KEY".
       // This is where that turns into the command that fixes it.
-      const readiness = hostReadiness(caches);
+      caches.readiness = null;
+      const readiness = hostReadiness(caches, config.id);
       const gaps = setupGaps(readiness);
       const host = workLocation();
       if (!gaps.length) {

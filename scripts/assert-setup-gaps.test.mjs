@@ -94,6 +94,16 @@ try {
   check('it prints the fix for each gap', /fix: \$\{g\.fix\}/.test(src));
   check('it says what is blocked while unfixed', /not offered in \/freemodel until the credential is present/.test(src));
   check('readiness is cached with the model list', /caches\.readiness/.test(src));
+  check('the fix names the service of the bot asking', /setServiceUnit\(botId\)/.test(src));
+  check('/setup re-reads readiness for its own bot', /caches\.readiness = null;\s*\n\s*const readiness = hostReadiness\(caches, config\.id\)/.test(src));
+
+  // and the hint really follows the bot
+  const { setServiceUnit } = await import('./lib/setup-gaps.mjs');
+  setServiceUnit('vm2');
+  const r2 = providerReadiness({ env, home, location: 'vps', clineReady: () => true });
+  check('a vm2 gap says restart bot-host@vm2', /bot-host@vm2/.test(String(r2.cloudflare.fix)));
+  setServiceUnit('vm');
+  check('a vm gap says restart bot-host@vm', /bot-host@vm[^2]/.test(String(r2.cloudflare.fix)));
 } finally {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
   fs.rmSync(home, { recursive: true, force: true });

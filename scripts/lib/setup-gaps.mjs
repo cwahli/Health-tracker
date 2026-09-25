@@ -28,7 +28,17 @@ function hasEnv(env, name) {
 }
 
 function envFileLine(env, name) {
-  return `printf '\\n${name}=…\\n' >> ~/${ENV_FILE}   # then: sudo systemctl restart bot-host@vm`;
+  return `printf '\\n${name}=…\\n' >> ~/${ENV_FILE}   # then: sudo systemctl restart bot-host@${serviceUnit()}`;
+}
+
+/** The service that must restart for a credential change to take effect. */
+let _serviceUnit = 'vm';
+export function setServiceUnit(id) {
+  _serviceUnit = String(id || 'vm').replace(/[^a-z0-9_-]/gi, '') || 'vm';
+  return _serviceUnit;
+}
+function serviceUnit() {
+  return _serviceUnit;
 }
 
 function binaryOnPath(env, bin) {
