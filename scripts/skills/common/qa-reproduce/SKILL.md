@@ -10,7 +10,7 @@ version: 1.0.0
 Pick one card, run its check, upload the evidence bundle, post the verdict, reply one line, STOP.
 
 ### What you DO:
-1. Boot from disk, never memory: `node scripts/bugctl.mjs queue --assignee=qa_meal --state=needs_repro --json` (also works: `--state=packed`).
+1. Boot from the canonical server-backed list, never memory: `node scripts/bugctl.mjs list --assignee=qa_meal --state=needs_repro --json` (also works: `--state=packed`). Use `queue` only for the open-queue view.
 2. Read the card: `node scripts/bugctl.mjs packet --id <n> --json` — defect (observed/expected/criteria) + fingerprint.
 3. Write ONE repro command from the card's criteria — a shell command that exits **0 when the defect is reproduced** and non-zero when it is not. Prefer an existing named check; for UI cards use `scripts/qa-runner.mjs` with a selector/text assertion. Never "read the code and see it looks fine".
 4. Preflight the verdict shape: `node scripts/bugctl.mjs repro --check --status <s> --command ... --exit-code ... --run-log ...` must exit 0 before any POST.

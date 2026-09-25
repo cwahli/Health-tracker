@@ -15,6 +15,8 @@ import {
   mapLegacyStatus,
   type BugAttempt,
   type BugCommit,
+  type BugCurationEvent,
+  type BugHandoff,
   type BugRepro,
   type BugWorkItem,
 } from './bugWorkItem';
@@ -169,7 +171,7 @@ export function bugState(item: BugWorkItem): BugTicketState {
 
   if (blockedReason) flags.blocked_reason = blockedReason;
 
-  if (item.defect && item.repro?.status === 'needed') flags.needs_repro = true;
+  if (item.repro?.status === 'needed') flags.needs_repro = true;
   if (item.repro && (item.repro.status === 'failed' || item.repro.status === 'ambiguous')) {
     flags.not_reproducible = true;
   }
@@ -234,6 +236,100 @@ export function projectBugState(item: BugWorkItem): { item: BugWorkItem; ticket:
 }
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+function curationHash(value: unknown): string {
+  const text = JSON.stringify(value);
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+export function curationSnapshot(item: BugWorkItem, titleOverride?: string | null) {
+  return {
+    revision: Number(item.revision || 0),
+    title: titleOverride === undefined ? item.bug : titleOverride,
+    bug: item.bug,
+    class: item.class,
+    surface: item.surface,
+    assignee: item.assignee,
+    defect: item.defect || null,
+  };
+}
+
+const CURATION_FIELDS = new Set(['op', 'expected_revision', 'reason', 'title', 'class', 'surface', 'assignee', 'component', 'expected', 'criteria']);
+const FORBIDDEN_CURATION_FIELDS = new Set(['observed', 'defect', 'repro', 'repro_verdicts', 'plan', 'verify', 'attempts', 'burns', 'commits', 'current_evidence', 'queue', 'state', 'done', 'remaining', 'parked', 'blocked_reason', 'duplicate_of']);
+
+export function validateCuration(body: any): ValidationResult<any> {
+  if (!body || typeof body !== 'object') return { ok: false, error: 'curation body required' };
+  const forbidden = Object.keys(body).find((key) => FORBIDDEN_CURATION_FIELDS.has(key));
+  if (forbidden) return { ok: false, error: `curation cannot change ${forbidden}` };
+  const unknown = Object.keys(body).find((key) => !CURATION_FIELDS.has(key));
+  if (unknown) return { ok: false, error: `curation field not allowed: ${unknown}` };
+  const op = String(body.op || 'review');
+  if (!['review', 'edit', 'rewrite', 'handoff'].includes(op)) return { ok: false, error: `unsupported curation op: ${op}` };
+  const expectedRevision = Number(body.expected_revision);
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return { ok: false, error: 'expected_revision is required' };
+  const reason = String(body.reason || '').trim();
+  if (!reason) return { ok: false, error: 'curation reason is required' };
+  if (op === 'handoff' && String(body.assignee || '') !== 'orchestrator') return { ok: false, error: 'handoff assignee must be orchestrator' };
+  const value: any = { op, expected_revision: expectedRevision, reason };
+  for (const key of ['title', 'class', 'surface', 'assignee', 'component', 'expected', 'criteria']) {
+    if (body[key] !== undefined) value[key] = body[key] === null ? null : String(body[key]).trim();
+  }
+  if (value.title === '') return { ok: false, error: 'title cannot be empty' };
+  if (value.assignee && !['bug_ticket', 'qa_meal', 'qa_biomarker', 'qa_onboarding', 'orchestrator', 'human'].includes(value.assignee)) return { ok: false, error: `unknown assignee: ${value.assignee}` };
+  return { ok: true, value };
+}
+
+export function applyCuration(item: BugWorkItem, body: any, now = new Date().toISOString()) {
+  const validated = validateCuration(body);
+  if (!validated.ok) return validated as { ok: false; error: string };
+  const input = validated.value;
+  const currentRevision = Number(item.revision || 0);
+  if (input.op === 'handoff' && !item.defect) return { ok: false, error: 'handoff requires a packed defect' };
+  if (currentRevision !== input.expected_revision) return { ok: false, error: `stale revision: expected ${input.expected_revision}, current ${currentRevision}` };
+  const beforeHash = curationHash(curationSnapshot(item));
+  const next: BugWorkItem = {
+    ...item,
+    defect: item.defect ? { ...item.defect } : item.defect,
+    revision: currentRevision + 1,
+    curation_events: [...(item.curation_events || [])],
+  };
+  if (input.class !== undefined) next.class = input.class || undefined;
+  if (input.surface !== undefined) next.surface = (input.surface || undefined) as any;
+  if (input.assignee !== undefined) next.assignee = (input.assignee || undefined) as any;
+  if (item.defect) {
+    if (input.component !== undefined) next.defect!.component = input.component || item.defect.component;
+    if (input.expected !== undefined) next.defect!.expected = input.expected || item.defect.expected;
+    if (input.criteria !== undefined) next.defect!.criteria = input.criteria || item.defect.criteria;
+  }
+  if (input.op !== 'handoff') delete next.handoff;
+  const afterHash = curationHash(curationSnapshot(next, input.title));
+  const event: BugCurationEvent = {
+    id: `${now}-${currentRevision + 1}`,
+    at: now,
+    actor: 'bug_ticket',
+    op: input.op,
+    reason: input.reason,
+    from_revision: currentRevision,
+    to_revision: currentRevision + 1,
+    before_hash: beforeHash,
+    after_hash: afterHash,
+  };
+  next.curation_events!.push(event);
+  if (input.op === 'handoff') {
+    const handoff: BugHandoff = {
+      from: 'bug_ticket',
+      to: 'orchestrator',
+      revision: next.revision!,
+      at: now,
+      packet_hash: afterHash,
+      status: 'ready',
+    };
+    next.handoff = handoff;
+  }
+  return { ok: true, value: next, title: input.title, event, before_hash: beforeHash, after_hash: afterHash };
+}
 
 /** Validate a posted defect artifact (exactly the Single Verifiable Defect shape). */
 export function validateDefect(body: any): ValidationResult<NonNullable<BugWorkItem['defect']>> {

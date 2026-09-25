@@ -118,6 +118,27 @@ export type BugReplyTo = {
   profile?: string;
 };
 
+export type BugCurationEvent = {
+  id: string;
+  at: string;
+  actor: string;
+  op: 'review' | 'edit' | 'rewrite' | 'handoff' | 'archive' | 'supersede';
+  reason: string;
+  from_revision: number;
+  to_revision: number;
+  before_hash: string;
+  after_hash: string;
+};
+
+export type BugHandoff = {
+  from: 'bug_ticket';
+  to: 'orchestrator';
+  revision: number;
+  at: string;
+  packet_hash: string;
+  status: 'ready' | 'consumed' | 'invalidated';
+};
+
 export type BugWorkItem = {
   public_n: number;
   bug: string;
@@ -150,6 +171,9 @@ export type BugWorkItem = {
   blocked_by?: string[];
   duplicate_of?: string;
   blocked_reason?: string;
+  revision?: number;
+  curation_events?: BugCurationEvent[];
+  handoff?: BugHandoff;
   /** Derived S-C-lite state (projected by bugState(); never agent-set). */
   state?: string;
 };

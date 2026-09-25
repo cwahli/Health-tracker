@@ -239,7 +239,7 @@
       "name": "Bug Ticket Bot",
       "runtime": "hermes",
       "enabled": true,
-      "notes": "V-30.2 packer, enabled after one live E2E reply (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2). Never links orchestrator-dispatcher.",
+      "notes": "V-30.2 steward/packer, enabled after one live E2E reply (session 20260924_162828_f191298f, TG msgs 8/12/14/16, packed card #2). Owns the canonical server-backed list, reviews/edits cards with revision receipts, and hands off to orchestrator; never links orchestrator-dispatcher.",
       "telegram": {
         "tokenEnv": "HERMES_BUG_TICKET_TOKEN",
         "allowedUserIds": [

@@ -506,8 +506,7 @@ routing ones. Collapse them:
 `new → packed → in_fix → verifying → done`, plus flags `needs_repro` (assignee = QA),
 `not_reproducible`, `blocked_reason`, `duplicate_of`.
 
-Same bookkeeping, fewer names to teach an agent, identical TG messages ("Packed #21 → QA's
-turn"). Cost: `bugctl queue --assignee=qa_meal` filters on a flag rather than a state.
+Same bookkeeping, fewer names to teach an agent, identical TG messages ("Packed #21 → QA's turn"). Cost: `bugctl list --assignee=qa_meal` filters the canonical list on a flag rather than a state.
 
 Human-only actions (unchanged from today): park a line, split a line to a sibling card, unblock,
 decide a severity dispute, promote to a golden fixture.
@@ -529,14 +528,12 @@ Zero-new-bots alternative: fold the packer into the collab bot or the orchestrat
 (§8 item 4): intake must not own dispatch, and a human-reported Home/Health bug should not have
 to arrive in a QA bot's chat.
 
-**1. Bug Ticket Agent — the packer** (new; Hermes profile `bug_ticket`, TG handle e.g.
-`@Bug_ticket_bot`)
+**1. Bug Ticket Steward / packer** (new; Hermes profile `bug_ticket`, TG handle e.g.
+`@Bug_ticket_bot`). The steward owns the canonical list, reviews and safely curates cards, then hands a current revision to the orchestrator.
 
 - Triggers: `bug <free text>`, a photo/screenshot with a caption, `/newbug`, `/ticket <n>`,
   or an inbound ticket from any QA bot.
-- Reads: `bugctl queue --state=new --json` and the returned packet/defect fingerprints; there is no
-  `bugctl find` command in the V-30.1/V-30.2 CLI. Add a real `find` command only if the handoff
-  needs a separate query; otherwise the packer filters the queue result by fingerprint.
+- **Canonical list:** every agent reads `bugctl list --json`; the steward owns review/curation and explicit handoff. `list` includes card identity, state, queue, assignee, revision, review, handoff, defect, and timestamps. `queue` is only the open-queue view. There is no `bugctl find` command in the V-30.1/V-30.2 CLI. Add a real `find` command only if the handoff needs a separate query; otherwise the packer filters the canonical list by fingerprint.
 - Must produce **one** of: `packed` (single defect), `needs_repro` (unclear), or
   `duplicate` (merged). Never all three; never a bundled card.
 - Forbidden: editing `src/`, running coders, `done`, bundling >1 discrepancy
@@ -592,14 +589,9 @@ one write path. **No new token, no new daemon, no new soul.**
 
 **3. Orchestrator** (`orchestrator`)
 
-- Trigger: `packed` with `repro.needed=false`, or `reproduced`.
-- Must produce: `plan` block (hypothesis, files, **named gate commands** from
-  `docs/agent/DOMAIN_REGRESSION_MAP.md`), then dispatch
-  `run-coding-dispatch.sh --ticket=#21` (per-card, not free text), then verify + close.
-- Forbidden: editing code itself; calling `done` without the named gate; retrying a line in
-  `burns[]`; letting a coder cascade silently (`--cascade` stays opt-in).
-- Gate: `run-coding-dispatch.sh` writes attempt rows and refuses to start when the card is
-  `blocked` or `done`.
+- Trigger: `packed` with a current steward handoff (`handoff.to=orchestrator`, `handoff.status=ready`, and `handoff.revision=revision`).
+- Must produce: `plan` block (hypothesis, files, **named gate commands** from `docs/agent/DOMAIN_REGRESSION_MAP.md`), then dispatch `run-coding-dispatch.sh --ticket=#21` (per-card, not free text), then hand off to verification.
+- Forbidden: editing code itself; calling `done` without the named gate; retrying a line in `burns[]`; letting a coder cascade silently (`--cascade` stays opt-in).
 
 **4. Verifier.** The QA profile can verify **only** cards it did not fix; the coder and
 orchestrator can never verify their own fix. Where the surface has a journey, run it *and*
@@ -607,7 +599,7 @@ the ticket gate; where it does not (Home visual), the verify artifact is a fresh
 the named vitest that covers the calculation.
 
 **5. Human.** Unblock, park, split, promote, severity disputes — surfaced as a pinned
-"🧍 Needs human" list generated from `bugctl queue --state=blocked`.
+"🧍 Needs human" list generated from `bugctl list --state=blocked`.
 
 **Unchanged roles:** `run-coding-dispatch.sh` stays the OS harness (detach, locks,
 heartbeat, rollback, commit/push, deploy wait); `review-failures.mjs` stays the lane
@@ -696,7 +688,7 @@ Offline fallback: append to `~/.hermes/bot-attempts.jsonl` (same discipline as
   re-derivable → `/new` is safe at any moment.
 - **Skills hold procedure, cards hold state.** Keep souls/skills short
   (`plan/BOT_ROLES.md:9`); never put ticket state into `MEMORY.md`.
-- **Boot sequence for every bot:** `bugctl queue --assignee=<bot>` — not `MEMORY.md`. The
+- **Boot sequence for every bot:** `bugctl list --assignee=<bot>` (the canonical list) — not `MEMORY.md`. The
   only facts worth keeping in memory (≤2,200 chars) are: tickets live in `issue_tags`,
   read/write them with `bugctl`, plus the three laws.
 - **`/resume`** prints the current card's packet JSON; per-chat sessions already exist in
@@ -737,7 +729,7 @@ qa (progress)  -> "⏳ Running meal journey… (12s)"            (typing pulse p
 qa (verdict)   -> reproduced + artifact keys -> pings @Orchestrator
 orchestrator   -> plan + dispatch + deploy wait + verify (status lines every 2m)
 verify         -> "✅ #21 done — gate <command> green"  |  ❌ + blocked card
-human          -> pinned list from `bugctl queue --state=blocked`
+human          -> pinned list from `bugctl list --state=blocked`
 ```
 
 ---
@@ -760,9 +752,9 @@ checker · `failure-log.mjs` + `review-failures.mjs` · `standing.json` /
 
 | File | Change |
 |---|---|
-| `src/utils/bugWorkItem.ts` | add `surface`, `source`, `idem_key`, `defect`, `repro`, `plan`, `verify`, `assignee`, `reply_to`, `blocked_by`, `duplicate_of`; per-state `instruction`; extend `buildStartPayload` / `formatContinuePrompt`. New module `src/utils/bugTicketState.ts` (the `bugState()` projection, §4.3.4) + `src/utils/bugTicketState.test.ts`; **extend** `mapLegacyStatus()` rather than replacing it |
-| `serverBugSnapshot.ts` | artifact endpoints `POST /api/bugs/:tagId/{defect,repro,plan,verify}` (each validated, then `bugState()` projected and persisted — there is **no agent-settable state route**), `GET /api/bugs/queue?state=&assignee=&surface=` (ready queue + `blocked_by`), `GET /api/bugs/:tagId/packet` (`?format=text`); fix **A-f1** ordering; add the token guard (**A-f5**). **Packer-only boundary (§6.2 audit follow-up, documented + tested):** `validateDefect()` enforces the required fields only; the single-defect/fingerprint rules live solely at `bugctl pack --check` (`scripts/lib/bug-pack.mjs`) and are proven against the committed fixture by `assert-bug-pack.mjs` — the server does **not** duplicate `looksBundled`/`splitMultiItemReport` (asserted by that gate). |
-| `scripts/bugctl.mjs` | **V-30.1/V-30.2/V-30.3 landed; V-30.4 landed.** Thin HTTP client + offline JSONL queue: `next, list, show, packet, pack, repro, plan, claim, attempt, state, evidence, duplicate, unblock, queue` — `--json` everywhere. `pack --check` (V-30.2) and `repro --check` (V-30.3) validate the `validateRepro` vocabulary/artifacts and run **before** every POST. V-30.4: a packet **read** never enters the offline queue (`WRITE_OPS`-gated `withFallback` — a queued read can never be replayed and would keep `flush` red forever); `case 'packet'` calls `api()` directly and exits non-OK loud. Writes (`plan/attempt/block/...`) still queue offline. V-30.5 must add `/resume` only if it is a Telegram command, not a second state store. |
+| `src/utils/bugWorkItem.ts` | add `surface`, `source`, `idem_key`, `defect`, `repro`, `plan`, `verify`, `assignee`, `reply_to`, `blocked_by`, `duplicate_of`, `revision`, `curation_events`, and `handoff`; per-state `instruction`; extend `buildStartPayload` / `formatContinuePrompt`. New module `src/utils/bugTicketState.ts` (the `bugState()` projection, curation reducer, §4.3.4) + `src/utils/bugTicketState.test.ts`; **extend** `mapLegacyStatus()` rather than replacing it |
+| `serverBugSnapshot.ts` | artifact endpoints `POST /api/bugs/:tagId/{defect,repro,plan,verify}` (each validated, then `bugState()` projected and persisted — there is **no agent-settable state route**), `GET /api/bugs/list` (canonical all-card list), `GET /api/bugs/queue?state=&assignee=&surface=` (open queue), `POST /api/bugs/:tagId/curation` (allowlisted revisioned steward review/edit/rewrite/handoff with receipt), `GET /api/bugs/:tagId/packet` (`?format=text`); fix **A-f1** ordering; add the token guard (**A-f5**). **Packer-only boundary (§6.2 audit follow-up, documented + tested):** `validateDefect()` enforces the required fields only; the single-defect/fingerprint rules live solely at `bugctl pack --check` (`scripts/lib/bug-pack.mjs`) and are proven against the committed fixture by `assert-bug-pack.mjs` — the server does **not** duplicate `looksBundled`/`splitMultiItemReport` (asserted by that gate). |
+| `scripts/bugctl.mjs` | **Canonical list/steward client.** `list` is the one all-card read (`source=canonical-bug-list`); `queue` is the open-queue filter. `curate`/`edit`/`rewrite` send expected revision + reason and return persisted receipts; `handoff` creates the current orchestrator handoff. Existing `pack`, `repro`, `claim`, `duplicate`, `plan`, `attempt`, `verify`, and offline queue remain separate. |
 | `scripts/run-coding-dispatch.sh` | **V-30.4 landed:** `--ticket=#n` packet-driven dispatch (legacy `--task=` unchanged). Ticket mode: live `bugctl packet` read (fail-fast exit 2 offline), `bug-dispatch.mjs` idempotency guard **before detach** (refuses `in_fix`/`verifying`/`done`/blocked/not-repro/duplicate/no-defect → exit 3), plan artifact posted **before detach** (spec `allowed_files`/`gate`, else the defect component's real file), attempt `start` row post-lock (→ `in_fix`), attempt `committed` + `applied=true` on push (→ `verifying`), failure paths end in attempt `failed:` + `bugctl block --reason` (cascade, single-tool, and abort-trap), `--burned=false` on every bookkeeping row, prompt carries packet + repro + plan + locked spec + verification contract (author ≠ verifier; dispatcher never posts verify), pushes `agent/dispatch-*` never main. |
 | `scripts/lib/bug-dispatch.mjs` | **V-30.4 new (pure, no HTTP):** `dispatchGuard` (idempotency + same-run lock exception), `categoryFor` (surface → category), `specPathFor`/`parseSpec` (locked spec frontmatter), `planFromPacket` (hypothesis/files/gates, default named gate), CLI `guard\|category\|spec-path\|plan-args` for the dispatcher. |
 | `scripts/assert-bug-dispatch.mjs` + `src/utils/bugDispatchFlow.test.ts` | **V-30.4 new named gate:** wiring/contract asserts (49 checks) + the committed scratch fixture proving `packed → in_fix → verifying → done`, failed dispatch keeps `blocked_reason`, and double-dispatch refusal — no production card is the test fixture. |
@@ -1057,7 +1049,7 @@ human go. V-30.2's code landed, but its P9 token + E2E closure is still a human 
 | **P5** | Owner of `not_reproducible` | packer decides close vs `blocked_reason=needs_info` · orchestrator triages | packer | V-30.2 | ✅ **Packer** — decides close or writes `blocked_reason=needs_info`; the orchestrator never re-opens the free-text hop |
 | **P6** | Repro depth | command + `run.log` + screenshot per card · committed Playwright test per ticket | shallow now; Promote path later | V-30.3 | ✅ **Shallow now** — command + `run.log` + screenshot; committed Playwright test only via a later Promote |
 | **P7** | QA profile wake policy | wake `qa_biomarker` / `qa_onboarding` on the first Health/profile repro · `qa_meal` covers all surfaces for now | on demand — keep them asleep until needed | V-30.3 | ✅ **On demand** — keep `qa_biomarker`/`qa_onboarding` asleep until the first Health/profile repro needs them |
-| **P8** | Backlog artifact | generated `bug-backlog.md` · `bugctl queue` + `docs/agent/BUG_QUEUE.md` | generated | V-30.5 | ✅ **Generated** — `bug-backlog.md` generated from the store (keeps the human habit) |
+| **P8** | Backlog artifact | generated `bug-backlog.md` · `bugctl list` + `docs/agent/BUG_QUEUE.md` | generated | V-30.5 | ✅ **Generated** — `bug-backlog.md` generated from the store (keeps the human habit) |
 | **P9** | Human: create the packer token | BotFather → `HERMES_BUG_TICKET_TOKEN` → master `tokens.env` → `sync-bot-tokens.mjs` | required before the V-30.2 E2E proof | V-30.2 | ✅ **Approved, human step** — create in V-30.2 via BotFather → `HERMES_BUG_TICKET_TOKEN` → master `tokens.env` → `sync-bot-tokens.mjs` |
 | **P10** | Channel model | one ticket room with per-surface topics · per-agent chats with `reply_to` routing | ticket room | V-30.2 / V-30.4 | ✅ **Ticket room** — one ticket room with per-surface topics; per-card `reply_to` routing |
 
@@ -1107,7 +1099,7 @@ until their explicit human go.
 - **P7 — QA wake policy: on demand.** `qa_biomarker`/`qa_onboarding` stay asleep until the
   first Health/profile repro needs them.
 - **P8 — backlog artifact: generated.** `bug-backlog.md` generated from the store
-  (keeps the human habit); `bugctl queue` is the machine view.
+  (keeps the human habit); `bugctl list` is the machine view.
 - **P9 — packer token: approved human step.** Created inside V-30.2 via BotFather →
   `HERMES_BUG_TICKET_TOKEN` → master `tokens.env` → `sync-bot-tokens.mjs`; the V-30.2 E2E
   reply through the new token gates `enabled: true`.
@@ -1137,7 +1129,7 @@ re-sync the roadmap status strings.
 5. **Write-endpoint auth (P3 — decided: token header).** Shared `BUG_API_TOKEN` header on `/api/bugs/*` writes
    vs VPS-local-only writes over a private bridge (nothing public at all).
 6. **Backlog artifact (P8 — decided: generated).** Generated `bug-backlog.md` (keeps the human habit)
-   vs retire it for `bugctl queue` + a `docs/agent/BUG_QUEUE.md` snapshot.
+   vs retire it for `bugctl list` + a `docs/agent/BUG_QUEUE.md` snapshot.
 7. **States (P2 — decided: S-C-lite).** Derived `bugState()` projection with the 5-name vocabulary
    (§4.3.5); rejected: full 11-name S-C (§4.3.4, kept as the internal mapping) and declared
    states (S-A/S-B, rejected with reasons in §4.3.2).
@@ -1186,9 +1178,9 @@ live on the VPS/gateway, which can reach the live site. `bugctl` is a thin fetch
 | # | Who | Command / call | State after |
 |---|---|---|---|
 | 0 | you | TG message + photo to `@Bug_ticket_bot` | — |
-| 1 | packer | `bugctl queue --json` → fingerprint miss; upload photo to R2 key `bugs/<tag>/…-before.png`; `bugctl create --title … --surface home --class CLONE_UI`; `bugctl pack --check …`; `bugctl pack --id <tag> …` | `POST /api/bugs` + the defect write → card **#21** *projects* to `packed` with `needs_repro` if `repro.status=needed` is posted |
+| 1 | packer | `bugctl list --json` → fingerprint miss; upload photo to R2 key `bugs/<tag>/…-before.png`; `bugctl create --title … --surface home --class CLONE_UI`; `bugctl pack --check …`; `bugctl pack --id <tag> …` | `POST /api/bugs` + the defect write → card **#21** *projects* to `packed` with `needs_repro` if `repro.status=needed` is posted |
 | 2 | packer | `bugctl pack --check` (1 defect ✓ criteria ✓ fingerprint ✓) → TG: `✅ Packed #21 → needs_repro @qa_meal` + `⏳ Waiting for @qa_meal…` | `packed` with `needs_repro` flag |
-| 3 | `qa_meal` | `bugctl queue --assignee=qa_meal --state=needs_repro` → `bugctl packet --id 21` → runs the check → uploads `repro.txt`, `run.log`, `before.png`, `expected.md`, `result.json` → `bugctl repro --id 21 …` | `repro.status=confirmed`; TG pings @Orchestrator |
+| 3 | `qa_meal` | `bugctl list --assignee=qa_meal --state=needs_repro` → `bugctl packet --id 21` → runs the check → uploads `repro.txt`, `run.log`, `before.png`, `expected.md`, `result.json` → `bugctl repro --id 21 …` | `repro.status=confirmed`; TG pings @Orchestrator |
 | 4 | orchestrator | `bugctl packet --id 21` → `bugctl plan --id 21 …` → `run-coding-dispatch.sh --ticket=#21 --tool=opencode` (dispatch reads the packet, writes attempt rows on start/end, tsc, commit+push, deploy wait) | `in_fix → verifying` |
 | 5 | `qa_meal` | re-runs the **same** repro and posts `bugctl verify --id 21 --result green --command … --evidence …` | **`done`** (`status=fixed`) |
 
