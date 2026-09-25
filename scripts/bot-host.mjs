@@ -71,6 +71,7 @@ import {
   stampDepleted,
   freemodelRefToRoute,
   usableTurnLanes,
+  projectLanes,
   soonestResetAmongDepleted,
   isConnectionFailure,
   stampCooldown,
@@ -479,7 +480,7 @@ function getAnnotatedFreeModels(caches, botId) {
   caches.free = base;
   const { table, session, source } = getLedger(botId);
   if (!table) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
-  return { entries: base, annotated: annotateFreemodelEntries(base, table, session), table, session, source };
+  return { entries: base, annotated: annotateFreemodelEntries(base, table, session, { location: workLocation() }), table, session, source };
 }
 
 /**
@@ -1916,7 +1917,18 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now() } = {
   if (!table || !Array.isArray(table.lanes) || !table.lanes.length) {
     return { models: legacy, skipped: [], fromLedger: false };
   }
-  const { lanes, skipped } = usableTurnLanes(table, ledger.session || {}, { now });
+  // The same projection /allowance and /freemodel read, so the walk can only
+  // offer what those two surfaces call selectable.
+  const projection = projectLanes(table, ledger.session || {}, { now, location: botId });
+  const lanes = projection.filter((r) => r.selectable).map((r) => ({ provider: r.provider, model: r.model, pref: r.pref, family: r.family, label: r.label }));
+  const skipped = projection.filter((r) => !r.selectable).map((r) => ({
+    provider: r.provider,
+    model: r.model,
+    label: r.label,
+    why: r.reason,
+    until: r.resetAt,
+    resetLabel: r.resetLabel,
+  }));
 
   // The registry owns what to run; the ledger owns what may be tried next. A
   // configured model the ledger has never heard of is still the first choice —

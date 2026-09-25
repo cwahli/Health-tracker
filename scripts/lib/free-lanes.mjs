@@ -379,6 +379,78 @@ export function nextAvailableRoutes(table, session, {
 }
 
 /**
+ * The one projection every allowance surface reads.
+ *
+ * /allowance, /freemodel and the turn's lane choice used to answer three
+ * different questions from the same ledger: /allowance listed table rows,
+ * /freemodel listed discovered catalog models, and the turn walked a filtered
+ * copy. A route could therefore be ❌ in one surface and selectable in another,
+ * which is what the two bots' /allowance output showed. One projection, one
+ * verdict per lane:
+ *
+ *   selectable  - a Telegram turn may use it right now
+ *   terminalOnly- visible, never selectable (Freebuff and friends)
+ *   ended       - a promotion finished; never offered again
+ *   depleted    - stamped until resetAt
+ *   reason      - human wording, so a surface never invents its own
+ *
+ * Quota stays per worker: the caller passes its own session. The lane CATALOG
+ * is shared, the stamps are not.
+ */
+export function projectLanes(table, session, { now = Date.now(), labelFn = defaultResetLabel, location = "" } = {}) {
+  const t = overlayLiveQuota(table || {}, session || {}, { now, labelFn });
+  // An ended lane stays VISIBLE with a verdict. Dropping it made a model the
+  // user still remembers simply vanish from /allowance, and left /freemodel
+  // with no row to say "this one is over". Every lane with a route is projected;
+  // whether it may be used is the verdict, not its presence.
+  const rows = [...(t.lanes || [])]
+    .filter((l) => l && l.provider && l.model)
+    .sort((a, b) => (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  return rows.map((lane) => {
+    const provider = String(lane.provider || "");
+    const model = String(lane.model || "");
+    const ref = toModelRefShim(provider, model);
+    const status = String(lane.status || "").toLowerCase();
+    const live = liveRecForLane(lane, session || {}, now);
+    const until = live?.depletedUntil || (lane.nextResetAt ? Date.parse(lane.nextResetAt) : NaN);
+    const resetAt = Number.isFinite(until) ? until : null;
+    const terminalOnly = lane.tg === false;
+    const ended = status === "ended" || laneIsEnded(lane);
+    const depleted = Boolean(live) || status === "depleted";
+    let reason = "";
+    if (ended) reason = "promotion ended, never offered again";
+    else if (depleted) reason = `depleted until ${resetAt ? labelFn(resetAt, live?.countdownHint || lane.countdownHint) : "reset"}`;
+    else if (terminalOnly) reason = "terminal only, not selectable from chat";
+    else reason = "available";
+    return {
+      ref,
+      provider,
+      model,
+      pref: lane.pref,
+      family: lane.family || null,
+      bucket: lane.bucket || null,
+      label: lane.label || model,
+      plan: String(provider || "").slice(0, 2).toUpperCase(),
+      location,
+      ended,
+      depleted,
+      terminalOnly,
+      selectable: !ended && !depleted && !terminalOnly,
+      resetAt,
+      resetLabel: depleted && resetAt ? labelFn(resetAt, live?.countdownHint || lane.countdownHint) : null,
+      reason,
+    };
+  });
+}
+
+/** toModelRef lives in freemodels; a local shim keeps this module standalone. */
+function toModelRefShim(provider, model) {
+  if (provider === "cline") return `cline:${model}`;
+  if (provider === "gemini") return `gemini:${model}`;
+  return model;
+}
+
+/**
  * Every lane a turn may actually use on this host, in preference order.
  *
  * The turn path used to walk a fixed two-entry list (the chat's model, then
@@ -757,6 +829,9 @@ export function shortModelName(lane) {
 
 function laneIsEnded(lane) {
   const st = String(lane?.status || "").toLowerCase();
+  // status "ended" is how a finished promotion is recorded in the table; without
+  // it here, /allowance kept listing a lane the walk refused to touch.
+  if (st === "ended") return true;
   if (st === "unavailable") return true;
   const blob = `${lane?.note || ""} ${lane?.notes || ""} ${lane?.nextReset || ""} ${lane?.resetRule || ""}`;
   return /promotion\s+ended|ended\s+promotion|no longer free|free promotion ended/i.test(blob);
@@ -774,6 +849,46 @@ function laneInAllowanceTable(lane) {
   const provider = String(lane.provider || "").toLowerCase();
   const bucket = String(lane.bucket || "").toLowerCase();
   return provider === "freebuff" || bucket.includes("freebuff");
+}
+
+/**
+ * The /allowance table, from projected rows. Same columns as the router's
+ * table: Model, Plan, Reset in — and the same ✅/❌ verdicts, with a reason
+ * line under the table instead of a different rule per surface.
+ */
+function renderProjectedAllowance(rows, { provider = "", model = "" } = {}) {
+  const active = `${provider}/${model}`;
+  const lines = [];
+  const head = ["Model", "Plan", "Reset in"];
+  const body = rows.map((r) => {
+    const mark = r.selectable ? "✅" : "❌";
+    const label = r.model.replace(/^.*\//, (m) => m).replace(/^[a-z]+\//, "");
+    const name = `${mark} ${r.label || label}`;
+    const reset = r.selectable ? "—" : r.resetLabel || (r.ended ? "ended" : "—");
+    return [name, r.plan, reset];
+  });
+  const widths = head.map((h, i) => Math.max(dispWidth(h), ...body.map((b) => dispWidth(b[i]))));
+  const fmt = (cells) => cells.map((c, i) => pad(c, widths[i])).join(" ").trimEnd();
+  lines.push(fmt(head));
+  lines.push("-".repeat(Math.max(...widths.map((w) => w + 1)) - 1));
+  for (const cells of body) lines.push(fmt(cells));
+  const next = rows.find((r) => r.selectable);
+  if (next) lines.push("", `Next up: ${next.label} · ${next.plan} · ${next.ref}`);
+  const blocked = rows.filter((r) => !r.selectable && r.reason && r.reason !== "available");
+  if (blocked.length) {
+    lines.push("");
+    for (const r of blocked.slice(0, 4)) lines.push(`· ${r.label}: ${r.reason}`);
+  }
+  if (active) {
+    const on = rows.find((r) => `${r.provider}/${r.model}` === active || r.ref === active);
+    if (on) lines.push("", `Active route: ${on.label} · ${on.plan}${on.selectable ? '' : ` (${on.reason})`}`);
+  }
+  return lines.join("\n");
+}
+
+function pad(text, width) {
+  const gap = width - dispWidth(text);
+  return gap > 0 ? `${text}${" ".repeat(gap)}` : text;
 }
 
 /** Display width for Telegram monospace (emoji ≈ 2 cells). */
@@ -1035,20 +1150,38 @@ export function isFreemodelEntryDepleted(entry, table, session, { now = Date.now
 }
 
 /** Annotate bot-host /freemodel entries with { depleted, resetIn, laneLabel }. */
-export function annotateFreemodelEntries(entries, table, session, { now = Date.now() } = {}) {
+export function annotateFreemodelEntries(entries, table, session, { now = Date.now(), location = "" } = {}) {
+  // One projection decides the verdict, so /freemodel cannot offer a lane that
+  // /allowance is showing as ended, terminal-only or depleted.
+  const projection = projectLanes(table, session, { now, location });
+  const byRef = new Map(projection.map((r) => [r.ref, r]));
   return (entries || []).map((e) => {
     const ref = typeof e === "string" ? e : e?.ref || "";
     const lane = routeCandidates(ref)
       .map((route) => table?.lanes?.find((l) => laneMatchesRoute(l, route.provider, route.model)))
       .find(Boolean) || null;
-    const depleted = isFreemodelEntryDepleted(e, table, session, { now });
+    const verdict = byRef.get(ref)
+      || projection.find((r) => r.provider === routeCandidates(ref)[0]?.provider
+        && String(r.model).replace(/^[^/]+\//, '') === String(routeCandidates(ref)[0]?.model || '').replace(/^[^/]+\//, ''));
+    const depleted = verdict ? verdict.depleted : isFreemodelEntryDepleted(e, table, session, { now });
     let resetIn = "-";
     try {
       const routeHit = liveRecForRoutes(routeCandidates(ref), session, now);
       const at = lane?.nextResetAt || lane?.cooldownUntil || routeHit?.rec?.depletedUntil || null;
       resetIn = depleted ? formatResetIn(at, now) : "-";
     } catch {}
-    return { ...e, depleted, resetIn, laneLabel: lane?.label || null };
+    return {
+      ...e,
+      depleted,
+      resetIn,
+      laneLabel: lane?.label || null,
+      // the same three verdicts /allowance renders, on the same rows
+      ended: Boolean(verdict?.ended),
+      terminalOnly: Boolean(verdict?.terminalOnly),
+      inLedger: Boolean(verdict),
+      selectable: verdict ? verdict.selectable : !depleted,
+      reason: verdict?.reason || (verdict ? '' : 'not in this ledger'),
+    };
   });
 }
 
@@ -1068,7 +1201,14 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
     const sess = provider && model
       ? { ...session, provider, models: { ...(session?.models || {}), [provider]: model } }
       : session;
-    const body = formatCompactAllowanceChat(table, sess, { now, labelFn });
+    // Rendered from the same projection /freemodel and the turn's walk read, so
+    // a lane cannot be ❌ here and selectable there. Rows the projection drops
+    // (ended, or a terminal-only row that is not in the table) are not invented
+    // back here.
+    const projection = projectLanes(table, sess, { now, labelFn, location });
+    const body = projection.length
+      ? renderProjectedAllowance(projection, { provider, model })
+      : formatCompactAllowanceChat(table, sess, { now, labelFn });
     const prefix = location ? `Host: ${location} · own provider credentials and quota\n\n` : '';
     return prefix + (source === "pref-doc-fallback"
       ? `${body}\n\n(note: per-bot ledger not yet stamped — pref order only until first quota hit)`
