@@ -259,6 +259,33 @@ try {
   })());
   fs.rmSync(thDir, { recursive: true, force: true });
 
+  // 6d. The two commands must agree, row for row, on the same lane. They did not:
+  // /allowance ticked a terminal-only Freebuff lane green (laneIsUsable only knows
+  // the table's own status) while /freemodel, reading the projection, marked the
+  // same row not usable. And the fold added a second Freebuff row because the
+  // model key stripped one path segment while Freebuff's ref carries two
+  // (`freebuff/deepseek/deepseek-v4.1-flash`), so the same lane was listed twice.
+  const twinFreebuff = withCatalogLanes(
+    { version: 3, lanes: [{ pref: 1, provider: 'freebuff', model: 'deepseek/deepseek-v4.1-flash', status: 'available', tg: false, label: 'Freebuff DeepSeek V4.1 Flash' }] },
+    [{ ref: 'freebuff/deepseek/deepseek-v4.1-flash', label: 'freebuff:deepseek/deepseek-v4.1-flash (terminal-only)', selectable: false }],
+  );
+  check('a ref with two vendor segments is not folded in twice', twinFreebuff.added.length === 0 && twinFreebuff.table.lanes.length === 1,
+    JSON.stringify(twinFreebuff.table.lanes.map((l) => l.model)));
+  check('and the two providers stay distinct models', withCatalogLanes(
+    { version: 3, lanes: [{ pref: 1, provider: 'tokenharbor', model: 'tokenharbor/mimo-v2.5:free', status: 'available', tg: true, label: 'MiMo V2.5' }] },
+    [{ ref: 'opencode/mimo-v2.5-free' }],
+  ).added.length === 1);
+  const fbTable = { version: 3, buckets: {}, lanes: [
+    { pref: 1, provider: 'opencode', model: 'opencode/zen', status: 'available', tg: true, label: 'Zen' },
+    { pref: 2, provider: 'freebuff', model: 'deepseek/deepseek-v4.1-flash', status: 'available', tg: false, label: 'Freebuff DeepSeek' },
+  ] };
+  const fbRows = projectLanes(fbTable, {});
+  check('a terminal-only lane is not selectable in the projection', fbRows.find((r) => r.label === 'Freebuff DeepSeek')?.selectable === false);
+  const fbText = buildAllowanceTextForBots({ stateDir: (() => { const d = ensureBotLedger('vm').dir; fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(fbTable, null, 2)); return d; })() });
+  check('/allowance does not tick a terminal-only lane green', !/✅[^\n]*Freebuff/.test(fbText), fbText.split('\n').filter((l) => /Freebuff/.test(l)).join(' | '));
+  check('/allowance says why it is not usable', /terminal only/.test(fbText));
+  check('/freemodel marks the same lane not usable', /❌/.test(fbText) && /Freebuff/.test(fbText));
+
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel renders the annotated rows, not the raw catalog', /const rows = \(entries \|\| \[\]\)\.map\(verdictOf\)/.test(botSrc));

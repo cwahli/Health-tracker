@@ -1043,7 +1043,12 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
       blocked.push(verdict);
       continue;
     }
-    const ok = laneIsUsable(l);
+    // The mark follows the projection when there is one. laneIsUsable() only knows
+    // the table's own status, so a terminal-only lane — Freebuff — was ticked green
+    // here while /freemodel, reading the same projection, marked it not usable. Two
+    // commands, two verdicts for one row. The projection already carries the reason
+    // ("terminal only, not selectable from chat").
+    const ok = verdict ? verdict.selectable : laneIsUsable(l);
     const name = shortModelName(l);
     const plan = planCodeForLane(l);
     const resetIn = formatResetIn(laneResetAt(l, t), now);
@@ -1145,7 +1150,15 @@ export function candidateRouterStateDirs(explicit) {
  * two and delete a real lane, so only the prefix goes.
  */
 function modelKey(s) {
-  return String(s || "").trim().toLowerCase().replace(/^[^/]*\//, "").replace(/\s+/g, " ");
+  // The LAST path segment, not the first. A ref can carry more than one vendor
+  // segment — Freebuff's is `freebuff/deepseek/deepseek-v4.1-flash` — and stripping
+  // only the first left the catalog entry and the ledger row as two different keys,
+  // so the fold added a second Freebuff row and /allowance listed the same terminal
+  // lane twice. Punctuation is still preserved, so `mimo-v2.5-free` (OpenCode) and
+  // `mimo-v2.5:free` (Token Harbor) stay two models.
+  const raw = String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const segs = raw.split("/").filter(Boolean);
+  return segs.length ? segs[segs.length - 1] : raw;
 }
 
 /**
