@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveClineBin } from './agent-cline.mjs';
 import { resolveOpencodeBin } from './agent-opencode.mjs';
+import * as setupGapsModule from './setup-gaps.mjs';
 
 export const CLINE_FREE_MODELS = [
   'cline-free/deepseek-v4.1-flash',
@@ -108,21 +109,42 @@ export function formatFreeLabel(ref) {
   return `${id.replace('/', ':')} (free)`;
 }
 
-export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env } = {}) {
+/**
+ * Is a keyed provider wired up on this host?
+ *
+ * Split out because two callers need the same answer: the model list, which must
+ * decide whether a row may be offered, and the list builder, which must decide
+ * whether to keep the row at all. They disagreed once — the list read
+ * CLOUDFLARE_API_TOKEN while the bots use CLOUDFLARE_WORKERS_AI_TOKEN — and the
+ * Cloudflare models vanished from /freemodel on a host whose key worked.
+ */
+export function specialProviderReadiness({ authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env } = {}) {
+  const auth = readJson(authPath || defaultPaths(home).authPath);
+  const authorized = auth && typeof auth === 'object' ? new Set(Object.keys(auth)) : null;
+  return {
+    tokenharbor: Boolean(authorized?.has('tokenharbor') || hasValue(env, ['TH_KEY', 'TOKEN_HARBOR_KEY', 'TOKEN_HARBOR_API_KEY', 'TOKENHARBOR_API_KEY'])),
+    cloudflare: Boolean(authorized?.has('cloudflare') || hasValue(env, ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_API_KEY', 'CF_API_TOKEN', 'CLOUDFLARE_WORKERS_AI_TOKEN', 'CLOUDFLARE_WORKERS_AI_API_TOKEN'])),
+  };
+}
+
+export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env, includeUnready = false } = {}) {
   const paths = defaultPaths(home);
   const cache = readJson(modelsCachePath || paths.modelsCachePath);
   const auth = readJson(authPath || paths.authPath);
   if (!cache || typeof cache !== 'object') return [];
   const authorized = auth && typeof auth === 'object' ? new Set(Object.keys(auth)) : null;
-  const tokenHarborReady = authorized?.has('tokenharbor') || hasValue(env, ['TH_KEY', 'TOKEN_HARBOR_KEY', 'TOKEN_HARBOR_API_KEY', 'TOKENHARBOR_API_KEY']);
-  const cloudflareReady = authorized?.has('cloudflare') || hasValue(env, ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_API_KEY', 'CF_API_TOKEN']);
+  const { tokenharbor: tokenHarborReady, cloudflare: cloudflareReady } = specialProviderReadiness({ authPath, readJson, home, env });
   const refs = [];
   for (const [provider, entry] of Object.entries(cache)) {
     const providerName = provider.toLowerCase();
     const specialReady = providerName === 'tokenharbor' ? tokenHarborReady : providerName === 'cloudflare' ? cloudflareReady : false;
+    const specialProvider = providerName === 'tokenharbor' || providerName === 'cloudflare';
     if (authorized && !authorized.has(provider) && !specialReady) continue;
-    if (providerName === 'tokenharbor' && !tokenHarborReady) continue;
-    if (providerName === 'cloudflare' && !cloudflareReady) continue;
+    // A provider that is present but not wired up used to be dropped from the
+    // list entirely, which is the opposite of useful: the user could not tell a
+    // missing key from a model that does not exist. It is listed with a verdict
+    // instead, so it sits at the bottom as not-selectable until it is set up.
+    if (specialProvider && !specialReady && !includeUnready) continue;
     const models = entry && typeof entry === 'object' ? entry.models : null;
     if (!models || typeof models !== 'object') continue;
     for (const [id, spec] of Object.entries(models)) {
@@ -167,17 +189,14 @@ export function clineReady({ location = '', env = process.env, home = os.homedir
 }
 
 export function freebuffReady({ env = process.env, home = os.homedir(), readJson = defaultReadJson } = {}) {
-  const command = commandAvailable('freebuff', { env }) || commandAvailable('manicode', { env });
-  if (!command) return false;
-  const candidates = [
-    path.join(home, '.config', 'manicode', 'credentials.json'),
-    '/home/box/.config/manicode/credentials.json',
-  ];
-  return candidates.some((file) => {
-    const data = readJson(file);
-    const auth = data?.default || data || {};
-    return Boolean(auth.authToken || auth.token || auth.accessToken);
-  });
+  // One answer per question. This used to require the `freebuff`/`manicode`
+  // binary to be on PATH *and* a credentials file to exist, while /setup's check
+  // only looked for the file. On this host the bot's PATH has no manicode, so
+  // /setup said "signed in" and /freemodel said "pending setup/sign-in" for the
+  // same provider, in the same minute. The credential lookup is now the shared
+  // one, so the two surfaces cannot disagree about whether Freebuff is signed in.
+  const { findFreebuffCredentials } = setupGapsModule;
+  return findFreebuffCredentials({ env, home }).ok === true;
 }
 
 function entry(ref, { surface, tool, provider, selectable = true, location = '', note = '', pendingAction = '' } = {}) {
@@ -226,9 +245,19 @@ export function buildFreeModelList(opts = {}) {
       : 'Install the Cline CLI and sign in on this host.', location));
   }
   if (opencodeAvailable) {
-    const opencodeRefs = listFreeOpenCode({ ...opts, env, home });
+    const opencodeRefs = listFreeOpenCode({ ...opts, env, home, includeUnready: true });
+    const keyedReady = specialProviderReadiness({ ...opts, env, home });
     for (const ref of opencodeRefs) {
-      entries.push(entry(ref, { surface: 'opencode', tool: 'opencode', location }));
+      // A keyed provider that is present but not wired up stays in the list as a
+      // row with a verdict, rather than being dropped. The user then sees which
+      // models exist and what is missing, instead of a silent gap.
+      const vendor = String(ref).split('/')[0].toLowerCase();
+      const notReady = vendor === 'tokenharbor' && !keyedReady.tokenharbor
+        ? 'Token Harbor is not configured on this host (/setup)'
+        : vendor === 'cloudflare' && !keyedReady.cloudflare
+          ? 'Cloudflare Workers AI is not configured on this host (/setup)'
+          : '';
+      entries.push(entry(ref, { surface: 'opencode', tool: 'opencode', location, selectable: !notReady, note: notReady }));
     }
     const geminiRefs = listGeminiOpenCode({ ...opts, env, home });
     for (const ref of geminiRefs) {

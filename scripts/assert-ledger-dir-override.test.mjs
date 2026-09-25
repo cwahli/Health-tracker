@@ -71,11 +71,44 @@ try {
   const realView = usableTurnLanes(realTable, {}, { now });
   check('the real ledger still says it is available', realView.lanes.some((l) => l.model === 'zen/muse'));
 
+  // 4b. The lane CATALOGUE is the HOST's; only the quota session is a worker's.
+  // Each bot used to read its own private copy of free-lane-table.json, and those
+  // copies drift: live on 2026-09-25 vm's had decayed to a 7-lane stub with no
+  // updatedAt while vm2's still had 17, so one command answered 43 rows on one bot
+  // and 50 on the other. The table now comes from the router's state, the session
+  // from the directory the caller named.
+  const { loadFreeLaneLedger: loadLedger, candidateRouterStateDirs } = await import('./lib/free-lanes.mjs');
+  const hostDir = candidateRouterStateDirs(dir).find((d) => d !== dir);
+  const loaded = loadLedger({ stateDir: dir });
+  if (hostDir && fs.existsSync(path.join(hostDir, 'free-lane-table.json'))) {
+    check('the lane table comes from the host, not a private copy', loaded.tablePath === path.join(hostDir, 'free-lane-table.json'), loaded.tablePath);
+  } else {
+    check('no host table on this host, so a private copy is the only table (a proof host)', true);
+  }
+  check('the quota session is still the caller\'s own directory', loaded.sessionPath === path.join(dir, 'session.json'), loaded.sessionPath);
+
   // 5. The knob is narrow: no shared-default shape.
+  //
+  // Changed 2026-09-25, deliberately. This used to assert that the string
+  // "shared-free-lanes" appeared nowhere in the file, which was a proxy for "no
+  // shared default ledger" — the rule from the pre-card1 work that was never
+  // landed. A host-account quota store was added since: Cline, Gemini, Token
+  // Harbor and Cloudflare are reached with ONE key for this host, so their daily
+  // caps are the same for vm and vm2, and vm was showing a lane as spent while vm2
+  // offered it. The store holds host-account routes only.
+  //
+  // So the invariant is now stated directly instead of by substring: the per-bot
+  // ledger is still the default and still per-bot, and the shared store cannot
+  // carry an opencode lane — that is what would turn it into a shared ledger.
   const src = fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8');
-  check('there is no shared-free-lanes default', !/shared-free-lanes/.test(src));
+  check('the per-bot ledger is still the default, one dir per bot id', /bot-host", String\(botId \|\| "default"\)/.test(src));
   check('the override is documented as a single directory', /names ONE directory for this process/.test(src));
-  check('the bot ids still differ by default', /bot-host", String\(botId \|\| "default"\)/.test(src));
+  const shared = (src.match(/HOST_ACCOUNT_PROVIDERS = new Set\(\[([^\]]*)\]\)/) || [])[1] || '';
+  check('the host-account set is cline, gemini, tokenharbor and cloudflare',
+    /cline/.test(shared) && /gemini/.test(shared) && /tokenharbor/.test(shared) && /cloudflare/.test(shared) && !/opencode/.test(shared), shared);
+  check('opencode is excluded from the shared store by an explicit test', /HOST_ACCOUNT_PROVIDERS\.has\(p\)/.test(src) && /return false;/.test(src));
+  check('a shared stamp is only written for a host-account route', /if \(isHostAccountRoute\(provider, model\)\)/.test(src));
+  check('the shared dir is overridable so a proof cannot touch real state', /FREE_LANES_SHARED_DIR/.test(src));
 } finally {
   if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
   if (oldOverride === undefined) delete process.env.FREE_LANES_DIR; else process.env.FREE_LANES_DIR = oldOverride;

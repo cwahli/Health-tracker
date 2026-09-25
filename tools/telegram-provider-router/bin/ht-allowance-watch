@@ -39,10 +39,21 @@
  */
 "use strict";
 
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const { spawnSync } = require("child_process");
+// This file is loaded as ESM: the nearest package.json declares "type": "module",
+// so an extensionless file with `require()` in it died at startup with
+// "require is not defined in ES module scope". The service crash-looped on that
+// from 2026-09-25 11:11, so the watcher that keeps every lane's allowance current
+// was not running at all, and nothing in the tests noticed because the unit tests
+// cover the shared core (allowance-watch-core.cjs), never this wrapper.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+
+// The shared core is deliberately CommonJS (.cjs) and is loaded by path, so the
+// require of it still needs a require — createRequire gives ESM one.
+const requireCjs = createRequire(import.meta.url);
 
 const HOME = os.homedir();
 const ROUTER_DIR = process.env.HT_ROUTER_DIR || path.join(HOME, ".config", "telegram-opencode", "router");
@@ -53,7 +64,7 @@ const LIVE_CORE = path.join(ROUTER_DIR, "src", "allowance-watch-core.cjs");
 // ---- shared unit-tested core (repo first, live synced copy as fallback) ----
 function loadCore() {
   for (const p of [process.env.HT_CORE_PATH, REPO_CORE, LIVE_CORE]) {
-    if (p) { try { return require(p); } catch {} }
+    if (p) { try { return requireCjs(p); } catch {} }
   }
   console.error("fatal: allowance-watch-core.cjs not found (repo or live router)");
   process.exit(1);

@@ -143,6 +143,32 @@ export function isConnectionFailure(msg) {
   return CONNECTION_ERRNO_RE.test(text) || CONNECTION_WORDING_RE.test(text);
 }
 
+/**
+ * Token Harbor's free allowance is one shared, rolling ~7-day value bar, not a
+ * per-model daily cap. That is the Grok router's model and the table says so on
+ * every Token Harbor row (`resetRule: "rolling ~7-day value bar"`), with all six
+ * rows sharing the `tokenharbor-free` bucket so one empty bar empties all of them.
+ *
+ * When the bar is spent the vendor answers `402` with "balance is at $0" and no
+ * countdown. The generic fallback stamped 6 hours, which is a guess borrowed from
+ * a daily provider: on a weekly bar it re-probed four times a day against an
+ * allowance that will not refill until the week turns over, and the row showed a
+ * confident "6h" that was never true. Cloudflare's daily bar already had a case
+ * of its own; this is the same treatment for the weekly one.
+ */
+export const TOKEN_HARBOR_WEEKLY_BAR_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** A Token Harbor value-bar exhaustion: 402, or the balance wording it returns. */
+export function isTokenHarborBarExhausted(msg) {
+  const text = String(msg || "");
+  // Token Harbor must be named in the text. A bare 402 means "payment required"
+  // to whichever provider sent it, and treating every 402 as a weekly bar would
+  // hand a 7-day cooldown to providers whose allowance is not weekly at all. The
+  // vendor's own body names it: "Your Token Harbor balance is at $0".
+  if (!/token\s*harbor/i.test(text)) return false;
+  return /\b402\b/.test(text) || /balance[^.]{0,40}\$?0\b/i.test(text);
+}
+
 /** How long a connection failure keeps a lane out of the walk. */
 export const CONNECTION_FAILED_COOLDOWN_MS = 10 * 60 * 1000;
 
@@ -787,7 +813,12 @@ export function planCodeForLane(lane) {
   // shared `tokenharbor-free` bucket, so they share one public plan code.
   if (provider === "tokenharbor") return "TH";
   if (provider === "opencode" && (model.includes("tokenharbor/") || bucket.includes("tokenharbor"))) return "TH";
-  if (provider === "opencode") return "OC";
+  // Gemini is keyed, not free-tier, but it is a lane with its own allowance: a
+  // 429 or RESOURCE_EXHAUSTED is stamped and reset like any other. Labelling it
+  // "OC" hid which provider the row belonged to, the same mistake the tokenharbor
+  // rows above had.
+  if (provider === "gemini" || model.includes("gemini-") || /^google\//.test(model)) return "GM";
+  if (provider === "opencode" || provider.startsWith("opencode-")) return "OC";
   return (provider || "?").slice(0, 6).toUpperCase();
 }
 
@@ -1005,9 +1036,13 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const lines = [
     "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
   ];
+  // The rows are canonicalAllowanceLanes() — the same list /freemodel renders. This
+  // loop used to walk the ordered table with only the Token Harbor pair collapsed,
+  // so a vendor twin (`opencode/space-bunny-free` and `opencode-go/space-bunny-free`
+  // are one model) printed twice here while /freemodel counted it once. One list.
   const blocked = [];
-  for (const l of ordered) {
-    const verdict = rows ? rows.find((r) => laneKey(r.lane) === laneKey(l)) : null;
+  for (const l of canonicalAllowanceLanes({ table: t, lanes: ordered, session, now, labelFn })) {
+    const verdict = rows ? rows.find((r) => laneKey(r.lane) === laneKey(l.lane)) || l : l;
     // A lane whose provider has no credential on this host cannot be counted,
     // so it leaves the table entirely rather than sitting in it as a mystery
     // row. It is listed underneath with the variable it needs.
@@ -1015,10 +1050,19 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
       blocked.push(verdict);
       continue;
     }
-    const ok = laneIsUsable(l);
+    // The mark follows the projection when there is one. laneIsUsable() only knows
+    // the table's own status, so a terminal-only lane — Freebuff — was ticked green
+    // here while /freemodel, reading the same projection, marked it not usable. Two
+    // commands, two verdicts for one row. The projection already carries the reason
+    // ("terminal only, not selectable from chat").
+    const ok = verdict ? verdict.selectable : laneIsUsable(l);
     const name = shortModelName(l);
     const plan = planCodeForLane(l);
-    const resetIn = formatResetIn(laneResetAt(l, t), now);
+    // The reset comes from the projection when there is one. laneResetAt() only
+    // reads the table, and a per-worker stamp's reset lives in that worker's session
+    // record — so a depleted row showed "❌" with "Reset in —", the mark without the
+    // time, once the catalogue moved to the host's table.
+    const resetIn = formatResetIn(verdict?.resetAt ?? laneResetAt(l, t), now);
     const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${resetIn}`;
     lines.push((ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>");
   }
@@ -1046,6 +1090,16 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   if (fb) {
     lines.push("Freebuff: " + escHtml(shortModelName(fb)) + " ready (~1h Freebucks) — terminal only; use it promptly.");
   }
+  // Token Harbor's free models share ONE rolling ~7-day value bar, which is what
+  // the table's own resetRule says on every TH row and what the shared
+  // `tokenharbor-free` bucket enforces. So an empty bar takes all the TH rows down
+  // together and they return together — it is not five separate models running
+  // out, and it needs no purchase to come back. Stated once, here, because the
+  // rows alone look like five independent lanes.
+  if ((t.lanes || []).some((l) => planCodeForLane(l) === "TH")) {
+    lines.push("Token Harbor: one shared rolling ~7-day value bar — when it empties all TH rows go at once and return together.");
+  }
+
   if (blocked.length) {
     lines.push("");
     lines.push("Not counted on this host (no credential — cannot run):");
@@ -1099,6 +1153,177 @@ export function candidateRouterStateDirs(explicit) {
   return [...new Set(out.filter(Boolean))];
 }
 
+/**
+ * Identity of a model for matching across surfaces: the vendor prefix is not part
+ * of it, everything else is. `opencode/space-bunny-free` and
+ * `opencode-go/space-bunny-free` are one model; `mimo-v2.5-free` and
+ * `mimo-v2.5:free` are two. Normalising punctuation away as well would merge those
+ * two and delete a real lane, so only the prefix goes.
+ */
+function modelKey(s) {
+  // The LAST path segment, not the first. A ref can carry more than one vendor
+  // segment — Freebuff's is `freebuff/deepseek/deepseek-v4.1-flash` — and stripping
+  // only the first left the catalog entry and the ledger row as two different keys,
+  // so the fold added a second Freebuff row and /allowance listed the same terminal
+  // lane twice. Punctuation is still preserved, so `mimo-v2.5-free` (OpenCode) and
+  // `mimo-v2.5:free` (Token Harbor) stay two models.
+  const raw = String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const segs = raw.split("/").filter(Boolean);
+  return segs.length ? segs[segs.length - 1] : raw;
+}
+
+/**
+ * THE row list. Both /allowance and /freemodel render this, so they cannot
+ * disagree about how many models there are or which ones are usable.
+ *
+ * It did not used to be shared: each command deduplicated on its own — the table
+ * collapsed the Token Harbor pair for display, the catalog side collapsed vendor
+ * twins and the two Gemini spellings — and two hand-rolled notions of "the same
+ * model" drifted by one row for four rounds of fixes. One function, one list.
+ *
+ * The rules, all of them the router's: the Token Harbor tools path and the
+ * chat-only path are one shared `tokenharbor-free` bar and appear once; a lane
+ * whose provider has no credential on this host is not a row here (it is reported
+ * as a gap instead, with the variable it needs); and identity is the plan code, so
+ * `google/gemini-…` and `gemini:gemini-…` are one model, as are `opencode/x` and
+ * `opencode-go/x`.
+ */
+export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "" } = {}) {
+  if (!table || !Array.isArray(table.lanes)) return [];
+  const projection = projectLanes(table, session, { now, location, readiness });
+  const byLane = new Map(projection.map((r) => [laneKey(r.lane), r]));
+  const kept = [];
+  const seen = new Set();
+  // `lanes` lets the caller hand in its own order — /allowance promotes the chat's
+  // own lane to the top before calling, and that promotion has to survive the
+  // filtering and the dedupe, or the current lane stops being row one.
+  const source = Array.isArray(lanes) && lanes.length ? lanes : table.lanes;
+  for (const lane of dedupeTokenHarborLanes(source.filter((l) => l && l.provider && l.model))) {
+    const verdict = byLane.get(laneKey(lane));
+    if (verdict && verdict.needsSetup) continue;
+    const model = modelKey(lane.model);
+    const key = model ? `${planCodeForLane(lane)}|${model}` : `${laneKey(lane)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(verdict || { lane, ref: toModelRefShim(lane.provider, lane.model), provider: lane.provider, model: lane.model, label: lane.label || lane.model, plan: planCodeForLane(lane), selectable: true, depleted: false, ended: false, terminalOnly: lane.tg === false });
+  }
+  return kept;
+}
+
+/**
+ * Add a ledger row for every catalogued model that has none.
+ *
+ * The two surfaces drew their rows from different places: /freemodel from the
+ * catalog (buildFreeModelList) and /allowance from the ledger table. A model the
+ * catalog knew but the table did not — every Gemini row, and any provider added
+ * to the catalog after the table was last written — therefore appeared in one
+ * list and not the other, and had no row for the watcher to stamp, so its
+ * allowance could never be tracked. Live on 2026-09-25: /freemodel offered 43
+ * models of which 38 had no ledger row at all, and /allowance showed no Gemini
+ * whatsoever.
+ *
+ * So the catalog is folded into the table at read time. Rows are appended after
+ * the existing ones, which is what puts a model with no balance or no credential
+ * at the bottom of the list instead of dropping it: the projection's own verdicts
+ * (`needsSetup`, `terminalOnly`, `depleted`) then decide the tick, and the
+ * watcher can stamp these rows like any other.
+ *
+ * Existing rows are never rewritten and nothing is removed, so a stamp, a reset
+ * time or a family's position cannot be lost by a catalog refresh.
+ */
+export function withCatalogLanes(table, entries = [], { now = Date.now() } = {}) {
+  if (!table || !Array.isArray(table.lanes)) return { table, added: [] };
+  const lanes = [...table.lanes];
+  let nextPref = lanes.reduce((m, l) => Math.max(m, Number(l.pref) || 0), 0);
+  const added = [];
+  // The same model reaches the catalog under more than one surface prefix:
+  // `opencode/space-bunny-free`, `opencode-go/space-bunny-free` and
+  // `cline:cline-free/kat-coder-pro` all name a model the table may already carry
+  // under its own path. Matching on provider+model therefore folded in a second
+  // row for it and the table showed the same model twice under two plan codes, so
+  // the model id is compared with the vendor prefix and the surface stripped.
+  const known = new Set(lanes.map((l) => modelKey(l.model)).filter(Boolean));
+  for (const entry of entries || []) {
+    const ref = typeof entry === "string" ? entry : entry?.ref || "";
+    if (!ref) continue;
+    // A pending-signin placeholder is not a model; it is the absence of one, and
+    // it is already reported as a gap by /setup.
+    if (typeof entry === "object" && entry && (entry.status === "pending-signin" || /^pending:/.test(ref))) continue;
+    for (const route of routeCandidates(ref)) {
+      const key = modelKey(route.model);
+      if (!key || known.has(key)) continue;
+      known.add(key);
+      nextPref += 1;
+      const terminalOnly = typeof entry === "object" && entry ? entry.selectable === false : false;
+      // The table's own labels are short human names ("Space Bunny", "MiMo V2.6"),
+      // and the renderer sizes its columns from them. The catalog's label is written
+      // for /freemodel, so the surface prefix and the "(free)" suffix come off:
+      // `opencode:big pickle (free)` reads as `big pickle`, not `opencode/big-pic`.
+      const rawLabel = (typeof entry === "object" && entry?.label) || "";
+      const cleanLabel = rawLabel
+        .replace(/^[a-z][a-z0-9-]*:\s*/i, "")
+        .replace(/\s*\(free\)\s*$/i, "")
+        .trim();
+      const lane = {
+        pref: nextPref,
+        provider: route.provider,
+        model: route.model,
+        label: cleanLabel || shortModelName(route.model) || route.model,
+        // `available` means "not known to be spent". The projection is what refuses
+        // to offer it — a missing credential, a terminal-only tool or a live
+        // depletion record each turn the row into its own honest verdict, and a
+        // row stamped by the watcher flips this to `depleted` on its own.
+        status: "available",
+        ...(terminalOnly ? { tg: false } : {}),
+        fromCatalog: true,
+        addedAt: isoZ(now),
+      };
+      lanes.push(lane);
+      added.push(lane);
+    }
+  }
+  return { table: added.length ? { ...table, lanes } : table, added };
+}
+
+/**
+ * Catalog entries for lane rows the catalog does not mention.
+ *
+ * withCatalogLanes goes one way — catalog into the table — and that is enough for
+ * /allowance. It is not enough for /freemodel: a model that lives only in the
+ * ledger, which is where the Token Harbor, Cloudflare and Freebuff rows come from
+ * (they are not in the OpenCode models cache the catalog reads), had no entry and
+ * so was never offered as a tap target even though /allowance listed it. Live on
+ * 2026-09-25: five Token Harbor and Cloudflare rows were in the table and in
+ * /allowance, and absent from /freemodel entirely.
+ *
+ * So the other direction is needed too, and the result is the union the user asked
+ * for: every model either surface knows about, listed once.
+ */
+export function entriesFromLanes(table, entries = []) {
+  if (!table || !Array.isArray(table.lanes)) return [];
+  const known = new Set((entries || []).map((e) => modelKey(typeof e === "string" ? e : e?.ref || "")).filter(Boolean));
+  const out = [];
+  for (const lane of table.lanes) {
+    if (!lane || !lane.model) continue;
+    const key = modelKey(lane.model);
+    if (!key || known.has(key)) continue;
+    known.add(key);
+    out.push({
+      ref: toModelRefShim(lane.provider, lane.model),
+      label: lane.label || lane.model,
+      surface: lane.provider,
+      tool: lane.provider,
+      provider: effectiveProviderOf(lane),
+      // A terminal-only tool stays visible with its verdict rather than being
+      // offered as something to tap.
+      selectable: lane.tg !== false,
+      location: "",
+      ...(lane.tg === false ? { note: "terminal-only" } : {}),
+    });
+  }
+  return out;
+}
+
 /** Minimal table built from the repo pref doc when no live ledger exists. */
 export function tableFromPreferenceDoc(prefDoc) {
   const lanes = Array.isArray(prefDoc?.lanes) ? prefDoc.lanes : [];
@@ -1130,14 +1355,31 @@ export function tableFromPreferenceDoc(prefDoc) {
  * { table, session, tablePath, sessionPath, source }. Source is one of
  * `live-state`, `pref-doc-fallback`, or `empty` (no ledger found).
  */
-export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionPath = null } = {}) {
+export function loadFreeLaneLedger({ stateDir = null, tablePath = null, sessionPath = null, catalogEntries = null } = {}) {
   const dirs = candidateRouterStateDirs(stateDir);
-  for (const dir of dirs) {
+  // The lane CATALOGUE is the host's, not a worker's. It is one table, owned by the
+  // router state and stamped by the allowance watcher, and every bot on the host must
+  // read that one — otherwise the bots drift apart and each shows a different list.
+  // Live on 2026-09-25: vm's private copy had decayed to a 7-lane stub with no
+  // updatedAt while vm2's still had 17, so the same command answered 43 rows on one
+  // bot and 50 on the other.
+  //
+  // What IS per-worker is the quota session: which lanes this worker has spent. So
+  // the table comes from the first host-wide directory that has one, and the session
+  // always comes from the directory the caller named. A FREE_LANES_DIR proof still
+  // works, because a stamp in the copy is read from the copy.
+  const hostFirst = tablePath ? dirs : [...dirs.filter((d) => d !== stateDir), ...(stateDir ? [stateDir] : [])];
+  for (const dir of hostFirst) {
     const tPath = tablePath || join(dir, "free-lane-table.json");
-    const sPath = sessionPath || join(dir, "session.json");
     const table = readJson(tPath);
     if (table && Array.isArray(table.lanes)) {
-      return { table, session: readJson(sPath) || {}, tablePath: tPath, sessionPath: sPath, source: "live-state" };
+      // Fold the catalog in so /allowance shows the same rows /freemodel offers,
+      // including models the table predates. Without this the two lists disagree
+      // and a catalogued model has no row for the watcher to stamp.
+      const merged = catalogEntries ? withCatalogLanes(table, catalogEntries).table : table;
+      const sDir = stateDir || dir;
+      const sPath = sessionPath || join(sDir, "session.json");
+      return { table: merged, session: readSessionWithSharedQuota(sDir), tablePath: tPath, sessionPath: sPath, source: "live-state" };
     }
   }
   // Fallback: repo pref doc → all-available table so /allowance still shows order.
@@ -1211,9 +1453,29 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
     const lane = routeCandidates(ref)
       .map((route) => table?.lanes?.find((l) => laneMatchesRoute(l, route.provider, route.model)))
       .find(Boolean) || null;
+    // The same model on two vendor prefixes is one ledger row, so a bullet that
+    // names the second prefix must resolve to that row instead of reporting "no
+    // ledger row" for a model whose allowance is right there in the table. Live on
+    // 2026-09-25: `opencode-go:space-bunny-free` was listed with no ledger row
+    // while `opencode:space bunny free` carried it.
+    const twin = lane || (table?.lanes || []).find((l) => {
+      const k = modelKey(routeCandidates(ref)[0]?.model || "");
+      return k && modelKey(l.model) === k;
+    }) || null;
+    const refRoute = routeCandidates(ref)[0];
+    // Match by model identity, not by string shape. A lane's ref is not always
+    // spelled the way the catalog spells it — the Freebuff lane's projection ref is
+    // `deepseek/deepseek-v4.1-flash` with no provider prefix at all, while the
+    // catalog entry is `freebuff/deepseek/deepseek-v4.1-flash` — so an exact ref
+    // lookup missed it and the row fell back to "available". That is how a
+    // terminal-only lane came back tappable in /freemodel while /allowance marked
+    // it not usable. Same model, one row, one verdict.
+    const byModelIdentity = new Map(projection.map((r) => [modelKey(r.model), r]));
     const verdict = byRef.get(ref)
-      || projection.find((r) => r.provider === routeCandidates(ref)[0]?.provider
-        && String(r.model).replace(/^[^/]+\//, '') === String(routeCandidates(ref)[0]?.model || '').replace(/^[^/]+\//, ''));
+      || (twin ? byModelIdentity.get(modelKey(twin.model)) : null)
+      || byModelIdentity.get(modelKey(refRoute?.model || ""))
+      || projection.find((r) => r.provider === refRoute?.provider
+        && String(r.model).replace(/^[^/]+\//, '') === String(refRoute?.model || '').replace(/^[^/]+\//, ''));
     const depleted = verdict ? verdict.depleted : isFreemodelEntryDepleted(e, table, session, { now });
     let resetIn = "-";
     try {
@@ -1225,7 +1487,7 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
       ...e,
       depleted,
       resetIn,
-      laneLabel: lane?.label || null,
+      laneLabel: (twin || lane)?.label || null,
       // the same three verdicts /allowance renders, on the same rows
       ended: Boolean(verdict?.ended),
       terminalOnly: Boolean(verdict?.terminalOnly),
@@ -1243,8 +1505,8 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
  * Pass the chat's effective provider/model so the `Active route` + `Next up`
  * lines are chat-aware (bot-host has no sticky session like the router).
  */
-export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null } = {}) {
-  const { table, session, source } = loadFreeLaneLedger({ stateDir });
+export function buildAllowanceTextForBots({ stateDir = null, provider = "", model = "", location = "", now = Date.now(), labelFn = defaultResetLabel, readiness = null, catalogEntries = null } = {}) {
+  const { table, session, source } = loadFreeLaneLedger({ stateDir, catalogEntries });
   if (!table) {
     return "Allowance: no shared free-lane ledger found (router state + pref doc missing). Use /freemodel to list free models.";
   }
@@ -1379,6 +1641,81 @@ export function stampCooldown({ stateDir, provider, model, errText, kind = "conn
   });
 }
 
+/**
+ * Providers whose quota belongs to the host's account, not to one bot.
+ *
+ * Cline, Gemini, Token Harbor and Cloudflare are all reached with one key for
+ * this host — the same key for every bot-host bot — so their daily caps and rate
+ * limits are host-wide. A depletion one bot hits is true for all of them. Live on
+ * 2026-09-25: vm recorded Cline's real "Daily free limit reached" 429 and showed
+ * the model ❌ with a reset, while vm2, on the same account and the same host,
+ * showed it ✅ and would have walked into the same 429.
+ *
+ * OpenCode is deliberately NOT here. Its free lanes are per-chat stickies and its
+ * per-model counters are what a bot earns by using them, so those stamps stay
+ * per-bot. Freebuff is terminal-only and never walked.
+ */
+const HOST_ACCOUNT_PROVIDERS = new Set(["cline", "gemini", "tokenharbor", "cloudflare"]);
+
+/** True when this route's quota is the host account's, shared by every bot. */
+export function isHostAccountRoute(provider, model = "") {
+  const p = String(provider || "").toLowerCase();
+  if (HOST_ACCOUNT_PROVIDERS.has(p)) return true;
+  if (p === "opencode") {
+    const m = String(model || "").toLowerCase();
+    return m.includes("tokenharbor/") || m.includes("cloudflare/") || m.includes("gemini");
+  }
+  return false;
+}
+
+/**
+ * Host-shared quota dir, beside the per-bot ones.
+ *
+ * FREE_LANES_SHARED_DIR overrides it, for the same reason FREE_LANES_DIR exists:
+ * a live proof must be able to run against copies and leave the real ledgers
+ * byte-identical, and a test must never write to the host's shared state.
+ */
+export function resolveSharedLedgerDir() {
+  const override = String(process.env.FREE_LANES_SHARED_DIR || "").trim();
+  if (override) {
+    mkdirSync(override, { recursive: true });
+    return override;
+  }
+  const home = process.env.HOME || process.env.USERPROFILE || osHomedirFallback();
+  const dir = join(home, ".local", "state", "bot-host", "shared-free-lanes");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * The session a bot should read: its own, plus the host account's stamps.
+ *
+ * The per-bot file stays the record of what that bot did; the shared file is the
+ * record of what the account has left. A host-account key is taken from the shared
+ * file when it is there, because that is the wider truth, and the bot's own copy is
+ * kept for its own history.
+ */
+export function readSessionWithSharedQuota(stateDir) {
+  const own = stateDir ? readJson(join(stateDir, "session.json")) || {} : {};
+  if (!stateDir) return own;
+  let shared = {};
+  try {
+    shared = readJson(join(resolveSharedLedgerDir(), "session.json")) || {};
+  } catch {}
+  const ownQuota = { ...(own.quota || {}) };
+  const sharedQuota = shared.quota || {};
+  if (!Object.keys(sharedQuota).length) return own;
+  const quota = { ...ownQuota };
+  for (const [key, rec] of Object.entries(sharedQuota)) {
+    const route = routeCandidates(key.replace(/^bucket:/, ""))[0] || {};
+    if (!isHostAccountRoute(route.provider, route.model)) continue;
+    // The shared record is authoritative for a host account: it was written by
+    // whichever bot actually hit the limit, and it describes all of them.
+    quota[key] = { ...rec, sharedFrom: "host-account" };
+  }
+  return { ...own, quota };
+}
+
 export function stampDepleted({ stateDir, provider, model, errText, depletedUntil = null, countdownHint = "", kind = "limit-unknown", now = Date.now() } = {}) {
   try {
     const err = String(errText || "").slice(0, 300);
@@ -1391,7 +1728,10 @@ export function stampDepleted({ stateDir, provider, model, errText, depletedUnti
     const table = readJson(tablePath);
     if (!table || !Array.isArray(table.lanes)) return { stamped: false, reason: "ledger table unreadable" };
     const lane = (table.lanes || []).find((l) => laneMatchesRoute(l, provider, model));
-    const until = Number(depletedUntil) > now ? Number(depletedUntil) : now + 6 * 3600 * 1000;
+    const barEmpty = isTokenHarborBarExhausted(errText);
+    const until = Number(depletedUntil) > now
+      ? Number(depletedUntil)
+      : now + (barEmpty ? TOKEN_HARBOR_WEEKLY_BAR_MS : 6 * 3600 * 1000);
     const session = readJson(sessionPath) || {};
     session.quota = session.quota || {};
     const keys = lane ? quotaKeysForLane(lane) : [`${provider}/${model}`].filter((k) => k !== "/");
@@ -1408,8 +1748,23 @@ export function stampDepleted({ stateDir, provider, model, errText, depletedUnti
       };
     }
     writeJsonAtomic(sessionPath, session);
+    // A host account's limit is every bot's limit, so the stamp also goes to the
+    // shared file. Without this the bot that did not hit the 429 keeps offering the
+    // model, and the two lists disagree about a cap that is objectively the same.
+    let shared = false;
+    if (isHostAccountRoute(provider, model)) {
+      try {
+        const sharedDir = resolveSharedLedgerDir();
+        const sharedPath = join(sharedDir, "session.json");
+        const sharedSession = readJson(sharedPath) || {};
+        sharedSession.quota = sharedSession.quota || {};
+        for (const key of keys) sharedSession.quota[key] = session.quota[key];
+        writeJsonAtomic(sharedPath, sharedSession);
+        shared = true;
+      } catch {}
+    }
     const sync = syncFreeLaneTableFromSession({ tablePath, session, now });
-    return { stamped: true, keys, tableChanges: sync.changes || [] };
+    return { stamped: true, keys, shared, tableChanges: sync.changes || [] };
   } catch (e) {
     return { stamped: false, reason: String(e?.message || e).slice(0, 160) };
   }

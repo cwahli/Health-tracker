@@ -30,6 +30,22 @@ try {
   check('a provider with its key is ready', r.tokenharbor.ready === false || r.gemini.ready === true);
   check('gemini is ready with a key', r.gemini.ready === true);
   check('tokenharbor names the exact variable', r.tokenharbor.needs === 'TOKEN_HARBOR_API_KEY');
+  // 1b. A present Token Harbor key is not a promise that a turn runs. Found live
+  // on 2026-09-25: the key was correct and authenticating, the account had $0, and
+  // every completion came back 402 while /setup said "ready". Token Harbor exposes
+  // no balance endpoint (all /v1 billing paths 404), so the note has to say so —
+  // the walk records the 402, but /setup must not promise a working lane.
+  const thKeyed = providerReadiness({ env: { PATH: process.env.PATH, GEMINI_API_KEY: 'k', TOKEN_HARBOR_API_KEY: 'thk_live_test' }, home, location: 'vps', clineReady: () => true });
+  check('a keyed tokenharbor reads ready', thKeyed.tokenharbor.ready === true);
+  check('but is not reported as a gap', !setupGaps(thKeyed).some((g) => g.provider === 'tokenharbor'));
+  // Token Harbor's free models share ONE rolling ~7-day value bar (the table's own
+  // resetRule, enforced by the shared `tokenharbor-free` bucket). An earlier version
+  // of this note told the user their balance was not API-visible and to top up at
+  // the dashboard — which misread a weekly bar that refills on its own as a
+  // missing payment, and sent the user to spend money to fix a weekly allowance.
+  check('its note describes the shared weekly value bar', /rolling ~7-day value bar/.test(String(thKeyed.tokenharbor.note || '')));
+  check('and says the lanes return together on the weekly reset', /weekly reset/.test(String(thKeyed.tokenharbor.note || '')));
+  check('and does not tell the user to buy anything', !/top up|add money|balance is not API-visible|dashboard/i.test(String(thKeyed.tokenharbor.note || '')), String(thKeyed.tokenharbor.note || ''));
   check('cloudflare names the exact variable', r.cloudflare.needs === 'CLOUDFLARE_WORKERS_AI_TOKEN');
   check('the fix is copy-pasteable and says where', /common\.env/.test(String(r.cloudflare.fix)) && /systemctl restart/.test(String(r.cloudflare.fix)));
   check('freebuff points at its own command', r.freebuff.command === '/unlock');
@@ -50,6 +66,21 @@ try {
   const routerSrc = fs.readFileSync(path.join(HERE, '..', 'tools', 'telegram-provider-router', 'src', 'index.js'), 'utf8');
   check('the router no longer pins freebuff creds to another home', !/\/home\/box\/\.config\/manicode/.test(routerSrc));
   check('the router resolves the path per host', /FREEBUFF_CREDS[\s\S]{0,120}homedir\(\)/.test(routerSrc));
+
+  // 1c. One answer per question. freebuffReady used to require the CLI on PATH as
+  // well as a credentials file, while /setup only looked for the file, so the two
+  // surfaces disagreed about the same provider in the same minute: /setup said
+  // "signed in" and /freemodel said "pending setup/sign-in" on this host.
+  const { freebuffReady, buildFreeModelList } = await import('./lib/freemodels.mjs');
+  check('freebuffReady and /setup agree that this host is signed in',
+    freebuffReady({ env: { PATH: process.env.PATH }, home: '/home/ubuntu' }) === findFreebuffCredentials({ env: {}, home: '/home/ubuntu' }).ok,
+    `${freebuffReady({ env: { PATH: process.env.PATH }, home: '/home/ubuntu' })} vs ${findFreebuffCredentials({ env: {}, home: '/home/ubuntu' }).ok}`);
+  check('a host with no freebuff credentials reads as not ready',
+    freebuffReady({ env: { PATH: process.env.PATH }, home: '/tmp/definitely-not-here' }) === false);
+  const hostList = buildFreeModelList({ location: 'vps', env: { PATH: process.env.PATH }, home: '/home/ubuntu' });
+  check('so /freemodel does not offer a pending placeholder for a signed-in freebuff',
+    !hostList.some((e) => e.status === 'pending-signin' && e.tool === 'freebuff'),
+    JSON.stringify(hostList.filter((e) => e.status === 'pending-signin').map((e) => e.tool)));
 
   // 2. SetupGaps lists exactly the not-ready ones.
   const gaps = setupGaps(r).map((g) => g.provider).sort();

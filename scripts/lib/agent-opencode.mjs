@@ -53,9 +53,17 @@ export function buildOpencodeEnv({
   }
   const env = {};
   if (Object.keys(content).length > 1) env.OPENCODE_CONFIG_CONTENT = JSON.stringify(content);
-  if (runtimeEnv.GEMINI_API_KEY && !runtimeEnv.GOOGLE_GENERATIVE_AI_API_KEY) {
-    env.GOOGLE_GENERATIVE_AI_API_KEY = runtimeEnv.GEMINI_API_KEY;
-  }
+  // opencode's `google` provider reads GOOGLE_GENERATIVE_AI_API_KEY, not
+  // GEMINI_API_KEY, so a Gemini lane reached through the CLI needs the key under
+  // that name or the run comes back "API key is missing".
+  //
+  // Both spellings are passed through deliberately. Only aliasing
+  // GEMINI_API_KEY meant that an operator who set the name opencode actually wants
+  // got neither the alias nor their own value forwarded — and since the project
+  // child env is filtered to an allowlist, the key was dropped and Gemini broke
+  // with nothing pointing at the cause.
+  if (runtimeEnv.GOOGLE_GENERATIVE_AI_API_KEY) env.GOOGLE_GENERATIVE_AI_API_KEY = runtimeEnv.GOOGLE_GENERATIVE_AI_API_KEY;
+  else if (runtimeEnv.GEMINI_API_KEY) env.GOOGLE_GENERATIVE_AI_API_KEY = runtimeEnv.GEMINI_API_KEY;
   return env;
 }
 

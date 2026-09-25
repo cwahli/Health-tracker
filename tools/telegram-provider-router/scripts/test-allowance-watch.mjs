@@ -14,6 +14,9 @@ import { createRequire } from "module";
 import fs from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { spawnSync } from "child_process";
+
+const ROUTER_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL_DIR = join(HERE, "..");
@@ -92,7 +95,60 @@ t("C3 probeCli maps vendor output to available/depleted/uncertain", () => {
   eq(core.probeCli(silent, "opencode", [], 1000).status, "uncertain", "no output → uncertain");
 });
 
+// The wrapper is what actually runs, and for 11 hours on 2026-09-25 it did not: the
+// nearest package.json declares "type": "module", the wrapper was CommonJS, and the
+// service crash-looped on "require is not defined in ES module scope" — so nothing
+// was probing or re-stamping any lane. The unit tests below cover the shared core
+// (.cjs) and never loaded the wrapper, which is why it rotted unnoticed. A syntax
+// check is enough to catch that class: it resolves the module type the same way
+// node does at startup.
+t("C0 the wrapper is loadable as the module type node will use", () => {
+  const wrapper = join(ROUTER_DIR, "bin", "ht-allowance-watch");
+  const src = fs.readFileSync(wrapper, "utf8");
+  ok(!/^const .* = require\(/m.test(src), "no bare require() left in the wrapper");
+  ok(/createRequire\(import\.meta\.url\)/.test(src), "the CommonJS core is loaded through createRequire");
+  const check = spawnSync("node", ["--check", wrapper], { encoding: "utf8" });
+  eq(check.status, 0, `node --check on the wrapper: ${(check.stderr || "").trim().split("\n")[0] || "ok"}`);
+  const pkg = JSON.parse(fs.readFileSync(join(ROUTER_DIR, "package.json"), "utf8"));
+  ok(pkg.type === "module", `package.json declares type: ${pkg.type}`);
+});
+
+// A lane with no probe kind can never be detected as spent or seen to renew, so a
+// provider that lands in the table without one is a provider whose allowance is
+// frozen. Gemini rows arrive from the catalog; they must be probeable.
+t("C3b every provider that can sit in the table has a probe kind", () => {
+  const kind = (lane) => core.pickProbeKind(lane).kind;
+  eq(kind({ provider: "opencode", model: "opencode/muse-spark-1.3-contributor-free" }), "opencode", "opencode probed");
+  eq(kind({ provider: "cline", model: "cline-free/deepseek-v4.1-flash" }), "cline", "cline probed");
+  eq(kind({ provider: "tokenharbor", model: "deepseek-v4.1-flash:free" }), "tokenharbor", "tokenharbor probed");
+  eq(kind({ provider: "opencode", model: "cloudflare/@cf/qwen/qwen3.8-27b" }), "cloudflare", "cloudflare probed");
+  eq(kind({ provider: "gemini", model: "gemini-3.8-flash" }), "opencode", "gemini probed through opencode");
+  eq(kind({ provider: "opencode", model: "google/gemini-3.8-flash" }), "opencode", "gemini via opencode path probed");
+  eq(kind({ provider: "freebuff", model: "deepseek/deepseek-v4.1-flash" }), "skip", "freebuff stays unprobed (terminal)");
+});
+
 // ---------------------------------------------------------------- C4/C5 parsing
+// Token Harbor's free models share one rolling ~7-day value bar, and an empty bar
+// answers 402 with no countdown. The generic fallback stamped 6h — a daily
+// provider's number on a weekly one — so the watcher re-probed four times a day
+// against an allowance that cannot refill until the week turns over, and the row
+// showed a reset time that was never going to arrive.
+t("C3c a Token Harbor 402 stamps the weekly bar, not a 6h guess", () => {
+  const body = "HTTP 402 {'message': \"Your Token Harbor balance is at $0. Top up at https://tokenharbor.ai/dashboard to keep using paid models.\"}";
+  const dep = core.depletionUntilFromText(body);
+  near(dep.until - Date.now(), 7 * 24 * 3600 * 1000, 60000, "a 7-day window");
+  eq(dep.kind, "allowance-empty", "an empty allowance, not an unknown limit");
+  ok(core.isTokenHarborBarExhausted(body), "recognised");
+  ok(/7-day/.test(dep.hint || ""), "the hint says it is the weekly bar");
+
+  // A bare 402 belongs to whichever provider sent it. Handing it a 7-day window
+  // would freeze a daily provider for a week.
+  ok(!core.isTokenHarborBarExhausted("HTTP 402 payment required"), "a bare 402 is not Token Harbor's");
+  const cf = core.depletionUntilFromText("HTTP 402 payment required");
+  ok(cf.until - Date.now() <= 7 * 3600 * 1000, "a bare 402 keeps the 6h default");
+  ok(!core.isTokenHarborBarExhausted("Error 429: Rate limit exceeded"), "a 429 is not a bar exhaustion");
+});
+
 t("C4 countdown parse: 'Try again in 23h 15m' and future ISO stamps", () => {
   const cd = core.parseCountdownHint("Daily free model limit reached. Try again in 23h 15m.");
   ok(cd.countdownParsed, "countdown parsed");

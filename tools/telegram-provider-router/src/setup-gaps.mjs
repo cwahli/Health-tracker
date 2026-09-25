@@ -124,7 +124,19 @@ export function providerReadiness({ env = process.env, home = os.homedir(), loca
   }
 
   if (hasEnv(env, 'TOKEN_HARBOR_API_KEY')) {
-    out.tokenharbor = { ready: true, needs: null, fix: null, command: null, note: 'quota is dashboard-only' };
+    // The key being present does not mean a turn can run right now, and the reason
+    // is not a missing credential. Token Harbor's free models share one rolling
+    // ~7-day value bar (the table's own resetRule, enforced by the shared
+    // `tokenharbor-free` bucket): when the bar is empty the vendor answers 402 and
+    // every TH row comes back together a week later. No API exposes the bar, so
+    // readiness is the key being wired up, and the bar is reported by /allowance.
+    out.tokenharbor = {
+      ready: true,
+      needs: null,
+      fix: null,
+      command: null,
+      note: 'key accepted — free models share one rolling ~7-day value bar; when it empties every Token Harbor lane pauses together and returns on the weekly reset (/allowance shows the state)',
+    };
   } else {
     out.tokenharbor = {
       ready: false,
@@ -198,7 +210,10 @@ export function laneSetup(provider, readiness = providerReadiness()) {
   if (!row) return { needsSetup: false, unknown: true, reason: null };
   if (row.ready === true) return { needsSetup: false, unknown: false, reason: null };
   if (row.ready === 'unknown') return { needsSetup: false, unknown: true, reason: null };
-  return { needsSetup: true, unknown: false, reason: `needs ${row.needs}` };
+  // Name the variable when the row knows it, and still say something useful when it
+  // does not. "needs undefined" is what a partial readiness object produced, and it
+  // is the one string that tells the user nothing about what to do.
+  return { needsSetup: true, unknown: false, reason: row.needs ? `needs ${row.needs}` : `${provider || 'provider'} is not set up on this host` };
 }
 
 function providerOf(provider) {
