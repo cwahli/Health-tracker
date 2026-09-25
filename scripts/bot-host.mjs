@@ -69,6 +69,7 @@ import {
   isFreemodelEntryDepleted,
   buildAllowanceTextForBots,
   withCatalogLanes,
+  entriesFromLanes,
   renderFreeLaneTableHtml,
   ensureBotLedger,
   stampDepleted,
@@ -496,21 +497,25 @@ function getLedger(botId) {
 }
 
 function getAnnotatedFreeModels(caches, botId) {
-  const base = caches.free || buildFreeModelList({ location: workLocation() });
-  caches.free = base;
+  const catalog = caches.free || buildFreeModelList({ location: workLocation() });
+  caches.free = catalog;
   // The table is folded with the catalog first, so a model the catalog knows but
   // the table predates (every Gemini row) gets a lane row and a verdict here
-  // instead of being reported as "not in this ledger" and marked selectable.
+  // instead of being reported as "not in this ledger" and marked selectable. The
+  // fold then runs again over the union, so a model that lives only in the ledger
+  // — the Token Harbor, Cloudflare and Freebuff rows, none of which are in the
+  // OpenCode models cache the catalog reads — is offered here too. One list.
   const loaded = getLedger(botId);
-  const { table: merged, added } = withCatalogLanes(loaded.table, base);
-  if (!merged) return { entries: base, annotated: base.map((e) => ({ ...e, depleted: false })), source: 'empty' };
+  let merged = withCatalogLanes(loaded.table, catalog).table;
+  if (!merged) return { entries: catalog, annotated: catalog.map((e) => ({ ...e, depleted: false })), source: 'empty' };
+  const base = [...catalog, ...entriesFromLanes(merged, catalog)];
+  merged = withCatalogLanes(merged, base).table;
   return {
     entries: base,
     annotated: annotateFreemodelEntries(base, merged, loaded.session, { location: workLocation(), readiness: hostReadiness(caches) }),
     table: merged,
     session: loaded.session,
     source: loaded.source,
-    addedFromCatalog: added.length,
   };
 }
 

@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { projectLanes, annotateFreemodelEntries, buildAllowanceTextForBots, ensureBotLedger, stampDepleted, withCatalogLanes } from './lib/free-lanes.mjs';
+import { projectLanes, annotateFreemodelEntries, buildAllowanceTextForBots, ensureBotLedger, stampDepleted, withCatalogLanes, entriesFromLanes } from './lib/free-lanes.mjs';
 import { selectTurnLanes } from './bot-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -106,6 +106,28 @@ try {
     { readiness: { tokenharbor: { ready: false }, cloudflare: { ready: false }, cline: { ready: true }, opencode: { ready: true }, gemini: { ready: true }, freebuff: { ready: true } } });
   check('a provider with no credential is listed, not dropped', noKey.length === 1);
   check('and is not selectable, with a reason that names the fix', noKey[0].selectable === false && /not set up|needs \S/.test(noKey[0].reason) && !/undefined/.test(noKey[0].reason), noKey[0].reason);
+
+  // 1d. The union runs both ways. withCatalogLanes folds the catalog into the
+  // table; entriesFromLanes lists the rows the catalog never mentions. Live on
+  // 2026-09-25 the five Token Harbor and Cloudflare rows lived only in the ledger:
+  // /allowance showed them and /freemodel could not offer them at all.
+  const ledgerOnly = { version: 3, lanes: [
+    { pref: 1, provider: 'opencode', model: 'opencode/muse-spark-1.3-contributor-free', status: 'available', tg: true, label: 'Muse 1.3' },
+    { pref: 2, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', status: 'available', tg: true, label: 'DeepSeek V4.1' },
+    { pref: 3, provider: 'opencode', model: 'cloudflare/@cf/qwen/qwen3.8-27b', status: 'available', tg: true, label: 'Qwen3.8 27B' },
+    { pref: 4, provider: 'freebuff', model: 'deepseek/deepseek-v4.1-flash', status: 'available', tg: false, label: 'DeepSeek V4.1' },
+  ] };
+  const catalog2 = [{ ref: 'opencode/muse-spark-1.3-contributor-free', label: 'Muse 1.3' }];
+  const fromLanes = entriesFromLanes(ledgerOnly, catalog2);
+  check('a tokenharbor row the catalog never mentions becomes an entry', fromLanes.some((e) => /deepseek-v4.1-flash/.test(e.ref)), JSON.stringify(fromLanes.map((e) => e.ref)));
+  check('a cloudflare row too', fromLanes.some((e) => /@cf\/qwen/.test(e.ref)));
+  check('a terminal-only lane is listed but not offered as a tap target', fromLanes.find((e) => /freebuff|deepseek\/deepseek/.test(e.ref))?.selectable === false);
+  check('a row the catalog already has is not listed twice', !fromLanes.some((e) => /muse-spark/.test(e.ref)));
+  const union = [...catalog2, ...fromLanes];
+  const bothWays = withCatalogLanes(ledgerOnly, union).table;
+  check('after both directions every row has a lane', annotateFreemodelEntries(union, bothWays, {}).every((a) => a.inLedger === true),
+    JSON.stringify(annotateFreemodelEntries(union, bothWays, {}).filter((a) => !a.inLedger).map((a) => a.ref)));
+  check('and the same rows come back out of the table', bothWays.lanes.length === ledgerOnly.lanes.length + 0, `${bothWays.lanes.length} vs ${ledgerOnly.lanes.length}`);
 
   // 2. Quota marks a lane, and only for the worker whose session says so.
   const now = Date.now();

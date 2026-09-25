@@ -61,6 +61,21 @@ try {
   check('the router no longer pins freebuff creds to another home', !/\/home\/box\/\.config\/manicode/.test(routerSrc));
   check('the router resolves the path per host', /FREEBUFF_CREDS[\s\S]{0,120}homedir\(\)/.test(routerSrc));
 
+  // 1c. One answer per question. freebuffReady used to require the CLI on PATH as
+  // well as a credentials file, while /setup only looked for the file, so the two
+  // surfaces disagreed about the same provider in the same minute: /setup said
+  // "signed in" and /freemodel said "pending setup/sign-in" on this host.
+  const { freebuffReady, buildFreeModelList } = await import('./lib/freemodels.mjs');
+  check('freebuffReady and /setup agree that this host is signed in',
+    freebuffReady({ env: { PATH: process.env.PATH }, home: '/home/ubuntu' }) === findFreebuffCredentials({ env: {}, home: '/home/ubuntu' }).ok,
+    `${freebuffReady({ env: { PATH: process.env.PATH }, home: '/home/ubuntu' })} vs ${findFreebuffCredentials({ env: {}, home: '/home/ubuntu' }).ok}`);
+  check('a host with no freebuff credentials reads as not ready',
+    freebuffReady({ env: { PATH: process.env.PATH }, home: '/tmp/definitely-not-here' }) === false);
+  const hostList = buildFreeModelList({ location: 'vps', env: { PATH: process.env.PATH }, home: '/home/ubuntu' });
+  check('so /freemodel does not offer a pending placeholder for a signed-in freebuff',
+    !hostList.some((e) => e.status === 'pending-signin' && e.tool === 'freebuff'),
+    JSON.stringify(hostList.filter((e) => e.status === 'pending-signin').map((e) => e.tool)));
+
   // 2. SetupGaps lists exactly the not-ready ones.
   const gaps = setupGaps(r).map((g) => g.provider).sort();
   check('gaps exclude the ready providers', !gaps.includes('gemini') && !gaps.includes('opencode') && !gaps.includes('cline'));

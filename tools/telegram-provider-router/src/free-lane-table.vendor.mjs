@@ -1188,6 +1188,46 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
   return { table: added.length ? { ...table, lanes } : table, added };
 }
 
+/**
+ * Catalog entries for lane rows the catalog does not mention.
+ *
+ * withCatalogLanes goes one way — catalog into the table — and that is enough for
+ * /allowance. It is not enough for /freemodel: a model that lives only in the
+ * ledger, which is where the Token Harbor, Cloudflare and Freebuff rows come from
+ * (they are not in the OpenCode models cache the catalog reads), had no entry and
+ * so was never offered as a tap target even though /allowance listed it. Live on
+ * 2026-09-25: five Token Harbor and Cloudflare rows were in the table and in
+ * /allowance, and absent from /freemodel entirely.
+ *
+ * So the other direction is needed too, and the result is the union the user asked
+ * for: every model either surface knows about, listed once.
+ */
+export function entriesFromLanes(table, entries = []) {
+  if (!table || !Array.isArray(table.lanes)) return [];
+  const modelKey = (s) => String(s || "").toLowerCase().replace(/^[^/]*\//, "").replace(/[^a-z0-9.]/g, "");
+  const known = new Set((entries || []).map((e) => modelKey(typeof e === "string" ? e : e?.ref || "")).filter(Boolean));
+  const out = [];
+  for (const lane of table.lanes) {
+    if (!lane || !lane.model) continue;
+    const key = modelKey(lane.model);
+    if (!key || known.has(key)) continue;
+    known.add(key);
+    out.push({
+      ref: toModelRefShim(lane.provider, lane.model),
+      label: lane.label || lane.model,
+      surface: lane.provider,
+      tool: lane.provider,
+      provider: effectiveProviderOf(lane),
+      // A terminal-only tool stays visible with its verdict rather than being
+      // offered as something to tap.
+      selectable: lane.tg !== false,
+      location: "",
+      ...(lane.tg === false ? { note: "terminal-only" } : {}),
+    });
+  }
+  return out;
+}
+
 /** Minimal table built from the repo pref doc when no live ledger exists. */
 export function tableFromPreferenceDoc(prefDoc) {
   const lanes = Array.isArray(prefDoc?.lanes) ? prefDoc.lanes : [];

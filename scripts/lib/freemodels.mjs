@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveClineBin } from './agent-cline.mjs';
 import { resolveOpencodeBin } from './agent-opencode.mjs';
+import * as setupGapsModule from './setup-gaps.mjs';
 
 export const CLINE_FREE_MODELS = [
   'cline-free/deepseek-v4.1-flash',
@@ -188,17 +189,14 @@ export function clineReady({ location = '', env = process.env, home = os.homedir
 }
 
 export function freebuffReady({ env = process.env, home = os.homedir(), readJson = defaultReadJson } = {}) {
-  const command = commandAvailable('freebuff', { env }) || commandAvailable('manicode', { env });
-  if (!command) return false;
-  const candidates = [
-    path.join(home, '.config', 'manicode', 'credentials.json'),
-    '/home/box/.config/manicode/credentials.json',
-  ];
-  return candidates.some((file) => {
-    const data = readJson(file);
-    const auth = data?.default || data || {};
-    return Boolean(auth.authToken || auth.token || auth.accessToken);
-  });
+  // One answer per question. This used to require the `freebuff`/`manicode`
+  // binary to be on PATH *and* a credentials file to exist, while /setup's check
+  // only looked for the file. On this host the bot's PATH has no manicode, so
+  // /setup said "signed in" and /freemodel said "pending setup/sign-in" for the
+  // same provider, in the same minute. The credential lookup is now the shared
+  // one, so the two surfaces cannot disagree about whether Freebuff is signed in.
+  const { findFreebuffCredentials } = setupGapsModule;
+  return findFreebuffCredentials({ env, home }).ok === true;
 }
 
 function entry(ref, { surface, tool, provider, selectable = true, location = '', note = '', pendingAction = '' } = {}) {
