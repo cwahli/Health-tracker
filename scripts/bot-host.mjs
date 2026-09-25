@@ -217,6 +217,29 @@ function loadMap(id, file) {
   return new Map(Object.entries(readJson(path.join(stateDir(id), file), {})));
 }
 
+/**
+ * A chat's stored prefs, whichever way the key was written.
+ *
+ * JSON object keys are always strings, so every map rebuilt by loadMap is
+ * keyed "6218257274", while the code looks the row up with the numeric chatId.
+ * Inside one process the numeric key it just wrote still matches; after a
+ * restart it does not, and the chat silently falls back to the bot default
+ * model. That is how @VM_19485_bot ran opencode/nemotron for a chat that had
+ * chosen Cline. Same for the setter, so the next write does not fork the row.
+ */
+function prefFor(prefs, chatId) {
+  if (!prefs) return {};
+  return prefs.get(chatId) || prefs.get(String(chatId)) || {};
+}
+function setPref(prefs, chatId, patch) {
+  const next = { ...prefFor(prefs, chatId), ...patch };
+  for (const key of [...prefs.keys()]) {
+    if (String(key) === String(chatId)) prefs.delete(key);
+  }
+  prefs.set(chatId, next);
+  return next;
+}
+
 function saveMap(id, file, map) {
   writeJson(path.join(stateDir(id), file), Object.fromEntries(map));
 }
@@ -290,7 +313,7 @@ function saveOffset(id, offset) {
 }
 
 function effective(config, prefs, chatId) {
-  const p = prefs.get(chatId) || {};
+  const p = prefFor(prefs, chatId);
   const storedModel = p.model || config.agent.model;
   const legacyGemini = String(storedModel || '').startsWith('gemini:')
     ? GEMINI_TO_OPENCODE[String(storedModel).slice('gemini:'.length)]
@@ -1006,7 +1029,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         capabilities: { compact: true, costTracking: true, backends: false },
         effective: eff,
         session: sessions.get(chatId) ? { id: sessions.get(chatId) } : null,
-        handoff: Boolean((prefs.get(chatId) || {}).handoff),
+        handoff: Boolean((prefFor(prefs, chatId)).handoff),
         usage: lastUsage?.get(chatId) || null,
         totals: totals?.get(chatId) || null,
         runtime: {
@@ -1030,7 +1053,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 
     case 'build':
     case 'plan':
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), agent: cmd.name });
+      setPref(prefs, chatId, { agent: cmd.name });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Agent set to ${cmd.name} for this chat.`);
       return;
@@ -1077,7 +1100,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, `Compact failed (${result.lastError || `exit ${result.code}`}) — session kept as-is.`);
         } else {
           const brief = result.finalText.trim().slice(0, 2000);
-          prefs.set(chatId, { ...(prefs.get(chatId) || {}), handoff: brief });
+          setPref(prefs, chatId, { handoff: brief });
           savePrefs(config.id, prefs);
           sessions.delete(chatId);
           saveSessions(config.id, sessions);
@@ -1108,11 +1131,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       if (cmd.args === 'reset') {
-        const current = prefs.get(chatId) || {};
+        const current = prefFor(prefs, chatId);
         delete current.model;
         delete current.variant;
-        if (Object.keys(current).length) prefs.set(chatId, current);
-        else prefs.delete(chatId);
+        setPref(prefs, chatId, current);
+        if (Object.keys(prefFor(prefs, chatId)).length === 0) prefs.delete(chatId);
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model reset to ${config.agent.model}.`);
         return;
@@ -1124,7 +1147,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           return;
         }
         const stored = toModelRef('cline', ref.id);
-        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: stored });
+        setPref(prefs, chatId, { model: stored });
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model set to ${formatFreeLabel(stored)} for this chat.`);
         return;
@@ -1135,7 +1158,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           await api.sendMessage(chatId, `Unknown gemini model: ${ref.id}\nUse /freemodel to pick a locally available model.`);
           return;
         }
-        prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: migrated });
+        setPref(prefs, chatId, { model: migrated });
         savePrefs(config.id, prefs);
         await api.sendMessage(chatId, `Model set to ${formatFreeLabel(migrated)} for this chat.`);
         return;
@@ -1150,7 +1173,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, `Unknown model: ${cmd.args}\nUse /model to pick from the list or /freemodel for free models.`);
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: target });
+      setPref(prefs, chatId, { model: target });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Model set to ${target} for this chat.`);
       return;
@@ -1236,7 +1259,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, `Unknown agent: ${target}\nUse /agent to pick from the list.`);
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), agent: target });
+      setPref(prefs, chatId, { agent: target });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Agent set to ${target} for this chat.`);
       return;
@@ -1262,7 +1285,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, `Unknown level: ${target}\nUse /thinking to pick from the list.`);
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), variant: target });
+      setPref(prefs, chatId, { variant: target });
       savePrefs(config.id, prefs);
       await api.sendMessage(chatId, `Thinking level set to ${target}.`);
       return;
@@ -1590,7 +1613,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /model again' });
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), model });
+      setPref(prefs, chatId, { model });
       savePrefs(config.id, prefs);
       const variants = await getVariants(config, caches, model);
       if (variants.length) {
@@ -1638,7 +1661,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         await sendHtml(api, chatId, `That lane is depleted (reset in ${hit?.resetIn || 'unknown'}).\nNext up: ${next ? `${next.label} (${next.ref})` : 'none — wait for reset'}\n\n${buildAllowanceTextForBots({ stateDir: dir, provider: route.provider, model: route.model, location: workLocation() })}`);
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), model: entry.ref });
+      setPref(prefs, chatId, { model: entry.ref });
       savePrefs(config.id, prefs);
       if (entry.surface === 'opencode') {
         const variants = await getVariants(config, caches, entry.ref);
@@ -1670,7 +1693,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /agent again' });
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), agent: agent.name });
+      setPref(prefs, chatId, { agent: agent.name });
       savePrefs(config.id, prefs);
       await api.editMessageText(chatId, messageId, `Agent set to ${agent.name}.`, {
         reply_markup: CLEAR_KEYBOARD,
@@ -1697,7 +1720,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         await api.answerCallbackQuery(query.id, { text: 'Expired, run /thinking again' });
         return;
       }
-      prefs.set(chatId, { ...(prefs.get(chatId) || {}), variant });
+      setPref(prefs, chatId, { variant });
       savePrefs(config.id, prefs);
       await api.editMessageText(chatId, messageId, `Thinking level set to ${variant} for ${eff.model}.`, {
         reply_markup: CLEAR_KEYBOARD,
@@ -1937,7 +1960,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       providerLabel: providerLabelForModel(eff.model),
       modelLabel: eff.model || '',
     });
-    const handoff = prefs.get(chatId)?.handoff || '';
+    const handoff = prefFor(prefs, chatId).handoff || '';
     const quotedPrompt = buildQuotedPrompt(text, message.reply_to_message);
     const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${quotedPrompt}` : quotedPrompt;
     const blocked = liveClaims()
@@ -2142,9 +2165,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     } else {
       const usageText = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
       if (handoff) {
-        const kept = prefs.get(chatId) || {};
+        const kept = prefFor(prefs, chatId);
         delete kept.handoff;
-        prefs.set(chatId, kept);
+        setPref(prefs, chatId, kept);
         savePrefs(config.id, prefs);
       }
       await renderer.finish(displayResult, { footer: usageText });
