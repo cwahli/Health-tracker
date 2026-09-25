@@ -211,6 +211,9 @@ try {
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel renders the annotated rows, not the raw catalog', /const rows = \(entries \|\| \[\]\)\.map\(verdictOf\)/.test(botSrc));
+  check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
+  check('a pending placeholder is dropped when the ledger has rows for that provider',
+    /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));
   check('/freemodel marks blocked rows instead of hiding the reason', /Not selectable right now:/.test(botSrc));
   const codeOnly = botSrc.split('\n').filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//')).join('\n');
   check('/freemodel no longer claims everything is available', !/all selectable lanes look available/.test(codeOnly));

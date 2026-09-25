@@ -70,6 +70,7 @@ import {
   buildAllowanceTextForBots,
   withCatalogLanes,
   entriesFromLanes,
+  effectiveProviderOf,
   renderFreeLaneTableHtml,
   ensureBotLedger,
   stampDepleted,
@@ -508,7 +509,19 @@ function getAnnotatedFreeModels(caches, botId) {
   const loaded = getLedger(botId);
   let merged = withCatalogLanes(loaded.table, catalog).table;
   if (!merged) return { entries: catalog, annotated: catalog.map((e) => ({ ...e, depleted: false })), source: 'empty' };
-  const base = [...catalog, ...entriesFromLanes(merged, catalog)];
+  const base = [
+    // A "pending setup/sign-in" placeholder for a provider the ledger already has
+    // rows for is simply wrong: those models exist and are reachable, they are just
+    // reached through a different surface than the OpenCode models cache. It showed
+    // up as "tokenharbor (pending setup/sign-in)" on a host whose Token Harbor key
+    // worked and whose /allowance listed five Token Harbor models.
+    ...catalog.filter((e) => {
+      if (!e || e.status !== 'pending-signin') return true;
+      const tool = String(e.tool || '').toLowerCase();
+      return !merged.lanes.some((l) => String(l.provider || '').toLowerCase() === tool || String(effectiveProviderOf(l) || '').toLowerCase() === tool);
+    }),
+    ...entriesFromLanes(merged, catalog),
+  ];
   merged = withCatalogLanes(merged, base).table;
   return {
     entries: base,
@@ -1419,12 +1432,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'freemodel': {
-      const entries = await getFreeModels(caches, config);
+      // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
+      // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
+      // Rendering the catalog alone listed 42 models and none of them were the ones
+      // /allowance was showing for those providers.
+      const { entries, annotated } = getAnnotatedFreeModels(caches, config.id);
       if (!entries.length) {
         await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
         return;
       }
-      const { annotated } = getAnnotatedFreeModels(caches, config.id);
       const selectable = annotated.filter((a) => a.selectable !== false);
       const available = selectable.filter((a) => !a.depleted);
       const keyboardEntries = available.length ? available : selectable;
