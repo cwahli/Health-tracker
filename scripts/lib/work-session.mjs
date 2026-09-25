@@ -497,8 +497,15 @@ export function repointWorkView({ target, command, expect = '', tmux = defaultTm
     if (!tmux(['send-keys', '-t', keep.id, command, 'Enter'])) return outcome;
     outcome.method = 'send-keys';
   }
-  const screen = tmux(['capture-pane', '-t', target, '-p']);
-  outcome.verified = typeof screen === 'string' && (expect === '' || screen.includes(expect));
+  // A respawned pane needs a beat before the new tool paints: poll the
+  // capture briefly rather than failing on the first blank frame.
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    const screen = tmux(['capture-pane', '-t', target, '-p']);
+    outcome.verified = typeof screen === 'string' && (expect === '' || screen.includes(expect));
+    if (outcome.verified || Date.now() >= deadline) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
   outcome.ok = outcome.verified;
   return outcome;
 }

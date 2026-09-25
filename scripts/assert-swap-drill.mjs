@@ -35,6 +35,7 @@ const { runOnWorker } = await import(path.join(HERE, 'bot-host.mjs'));
 const { armRoute, confirmRoute, rollbackRoute, routeState, needsCanary, validateCanaryResult } =
   await import(path.join(HERE, 'lib', 'worker-routing.mjs'));
 const { recordWorkerConnected } = await import(path.join(HERE, 'lib', 'worker-presence.mjs'));
+const { repointWorkView } = await import(path.join(HERE, 'lib', 'work-session.mjs'));
 
 let pass = 0;
 let fail = 0;
@@ -201,6 +202,35 @@ try {
   check('all 9 honest swaps kept the same conversation', continuity === 9, `${continuity}/9`);
   check('exactly one rollback happened, then the route re-armed', rolledBack === 1 && rearmed === 1);
   check('the conversation row never forked', sessionRow === SESSION_ID, sessionRow);
+
+  // the view follows the swap: same stable target, re-pointed in place on a
+  // REAL isolated tmux server (not the fake runner the unit sensor uses).
+  const hasTmux = spawnSync('tmux', ['-V'], { encoding: 'utf8' }).status === 0;
+  if (!hasTmux) {
+    console.log('NOTE  no tmux on this machine — view section skipped, conversation proof above stands');
+  } else {
+    const SOCK = 'swapdrill';
+    const tmux = (...args) => spawnSync('tmux', ['-L', SOCK, ...args], { encoding: 'utf8' });
+    tmux('kill-server');
+    const target = 'work-view:ws-drill';
+    const created = tmux('new-session', '-d', '-s', 'work-view', '-n', 'ws-drill',
+      'bash', '-c', 'echo OLD-TOOL-MARKER; sleep 120');
+    check('the pre-swap view exists with the old tool on screen', created.status === 0);
+    const moved = repointWorkView({
+      target,
+      command: `bash -c 'echo NEW-TOOL-MARKER; sleep 120'`,
+      expect: 'NEW-TOOL-MARKER',
+      tmux: (args) => {
+        const r = tmux(...args);
+        return args[0] === 'list-panes' || args[0] === 'capture-pane' ? r.stdout : r.status === 0;
+      },
+    });
+    check('repoint moves the real view to the current tool',
+      moved.ok === true && moved.verified === true && moved.method === 'respawn-pane', moved.method || '');
+    const screen = tmux('capture-pane', '-t', target, '-p').stdout || '';
+    check('the stable target now shows the current tool', screen.includes('NEW-TOOL-MARKER'));
+    tmux('kill-server');
+  }
 } finally {
   cleanup();
 }
