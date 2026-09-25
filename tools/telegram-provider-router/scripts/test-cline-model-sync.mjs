@@ -18,7 +18,7 @@ const TOOL_DIR = join(HERE, "..");
 const require = createRequire(import.meta.url);
 const core = require(join(TOOL_DIR, "src", "allowance-watch-core.cjs"));
 const mod = await import(pathToFileURL(join(TOOL_DIR, "src", "cline-model-sync.js")).href);
-const { isClineDeadModel, normalizeClineModelId, prettifyClineLabel, planLaneUpsert, CLINE_BUCKET } = mod;
+const { isClineDeadModel, normalizeClineModelId, prettifyClineLabel, planLaneUpsert, freeModelIdsFromCatalog, looksFreeId, CLINE_BUCKET } = mod;
 
 let passed = 0;
 const failures = [];
@@ -138,6 +138,48 @@ await t("update+depleted on an existing lane keeps pref and siblings available",
   eq(p.lane.pref, 2, "pref still 2");
   eq(p.lane.status, "depleted", "depleted");
   eq(t0.lanes[2].status, "available", "opencode lane never touched");
+});
+
+await t("cross-provider tail collision: a Cline id never matches the Token Harbor lane", () => {
+  const t0 = table(); // pref 1 opencode muse, pref 6 cline deepseek
+  t0.lanes.push({ pref: 5, provider: "tokenharbor", model: "tokenharbor/muse-spark-1.3-contributor:free", bucket: "tokenharbor-free", status: "depleted" });
+  t0.lanes.push({ pref: 3, provider: "tokenharbor", model: "tokenharbor/deepseek-v4.1-flash:free", bucket: "tokenharbor-free", status: "depleted" });
+  // Same tails, different provider: the Cline lane must win, TH untouched.
+  const p1 = planLaneUpsert(t0, { model: "cline-free/muse-spark-1.3-contributor", probe: probe("available", "OK") });
+  eq(p1.index, 0, "matched the Cline lane (pref 2), not TH pref 5");
+  eq(p1.lane.provider, "cline", "provider cline");
+  const p2 = planLaneUpsert(t0, { model: "cline-free/deepseek-v4.1-flash", probe: probe("available", "OK") });
+  eq(p2.index, 1, "matched the Cline deepseek lane (pref 6), not TH pref 3");
+  eq(p2.lane.provider, "cline", "provider cline");
+  // A model only TH has must enroll as a NEW Cline lane, never hijack TH.
+  const p3 = planLaneUpsert(t0, { model: "mimo-v2.6-flash", probe: probe("available", "OK") });
+  eq(p3.action, "new", "new Cline lane");
+  eq(p3.lane.provider, "cline", "provider cline");
+  eq(t0.lanes.filter((l) => l.provider === "tokenharbor").length, 2, "TH lanes never removed/reused");
+});
+
+await t("catalog: free set parsed, ids kept verbatim (incl. non-'free' modelType)", () => {
+  // Real 2026-09-25 payload shape. Note `stealth/space-bunny-alpha` is a FREE
+  // lane whose modelType has no "free" — the catalog is the authority.
+  const payload = {
+    free: [
+      { id: "stealth/space-bunny-alpha", name: "space-bunny-alpha", description: "Blazing-fast inference with 1M context" },
+      { id: "cline-free/mimo-v2.6-flash", name: "Mimo V2.6 Flash" },
+      { id: "cline-free/deepseek-v4.1-flash", name: "Deepseek-v4.1-Flash" },
+      { id: "cline-free/gemini-3.8-flash", name: "Gemini 3.8 Flash" },
+      { id: "cline-free/muse-spark-1.3-contributor", name: "Muse Spark 1.3 Contributor" },
+    ],
+    recommended: [{ id: "grok-4.7", name: "grok-4.7 NEW" }],
+  };
+  const out = freeModelIdsFromCatalog(payload);
+  eq(out.length, 5, "5 free models");
+  eq(out[0].id, "stealth/space-bunny-alpha", "non-'free' modelType kept verbatim");
+  eq(out[3].id, "cline-free/gemini-3.8-flash", "gemini free id");
+  ok(!out.some((m) => m.id === "grok-4.7"), "recommended (paid) list NOT enrolled");
+  eq(freeModelIdsFromCatalog({}).length, 0, "empty payload → no candidates");
+  eq(freeModelIdsFromCatalog(null).length, 0, "null payload → no candidates");
+  eq(looksFreeId("stealth/space-bunny-alpha"), false, "name guard says not-free (hence catalog mode)");
+  eq(looksFreeId("cline-free/gemini-3.8-flash"), true, "cline-free passes the manual guard");
 });
 
 console.log("");
