@@ -49,6 +49,9 @@ const {
   sessionKey,
   tmuxSessionFor,
   tmuxWindowFor,
+  WORK_VIEW_SESSION,
+  workViewTarget,
+  repointWorkView,
   resolveSession,
   getSession,
   setTx,
@@ -64,6 +67,11 @@ const {
   scrubSecrets,
   statusForTelegram,
 } = await import(new URL(`file://${libPath.replace(/\\/g, '/')}`).href);
+
+check('the swap view has one stable session name', WORK_VIEW_SESSION === 'work-view', String(WORK_VIEW_SESSION));
+check('the stable view target keeps the chat window',
+  workViewTarget('qa_meal|health-tracker') === `work-view:${tmuxWindowFor('qa_meal|health-tracker')}`);
+check('repoint is exported for the swap path', typeof repointWorkView === 'function');
 
 for (const fn of ['resolveSession', 'setTx', 'setWorkView', 'handoffSession', 'abortSession', 'ensureTmuxWorkView', 'debugProbe', 'sessionStatus', 'statusForTelegram']) {
   check(`exports ${fn}`, typeof ({ resolveSession, setTx, setWorkView, handoffSession, abortSession, ensureTmuxWorkView, debugProbe, sessionStatus, statusForTelegram })[fn] === 'function');
@@ -152,32 +160,32 @@ const apiProbe = debugProbe('gemini', { session: s1, tmux: noTmux });
 check('API lane honestly reports attach:false with an event view',
   apiProbe.surface === 'api' && apiProbe.attach === false && apiProbe.events === true && apiProbe.observerLive === false);
 
-const createdView = ensureTmuxWorkView({ ...s1, lane: 'opencode' }, { tmux: lifecycleTmux });
-const expectedTarget = `work-vps:${tmuxWindowFor(s1.id)}`;
+const createdView = ensureTmuxWorkView({ ...s1, lane: 'opencode' }, { tmux: lifecycleTmux, sessionName: WORK_VIEW_SESSION });
+const expectedTarget = `work-view:${tmuxWindowFor(s1.id)}`;
 check('/tx on can create the exact session and workstream window',
   createdView.ok === true && createdView.created === true && createdView.target === expectedTarget && createdView.observerPane);
 const firstCreateCount = lifecycleCalls.length;
-const reusedView = ensureTmuxWorkView({ ...s1, lane: 'opencode' }, { tmux: lifecycleTmux });
+const reusedView = ensureTmuxWorkView({ ...s1, lane: 'opencode' }, { tmux: lifecycleTmux, sessionName: WORK_VIEW_SESSION });
 check('repeated /tx on reuses the exact observer pane',
   reusedView.ok === true && reusedView.created === false && reusedView.observerPane === createdView.observerPane && lifecycleCalls.length > firstCreateCount);
 check('tmux lifecycle contains no destructive replacement command',
   lifecycleCalls.flat().every((arg) => !/kill-session|kill-window|respawn-pane|send-keys/.test(String(arg))));
-const termProbe = debugProbe('opencode', { session: s1, tmux: lifecycleTmux });
+const termProbe = debugProbe('opencode', { session: s1, tmux: lifecycleTmux, sessionName: WORK_VIEW_SESSION });
 check('terminal lane reports verified observer liveness',
-  termProbe.surface === 'terminal' && termProbe.attach === true && termProbe.observerLive === true && termProbe.tmuxSession === 'work-vps');
+  termProbe.surface === 'terminal' && termProbe.attach === true && termProbe.observerLive === true && termProbe.tmuxSession === 'work-view');
 const tuiCommand = "'opencode' attach 'http://127.0.0.1:4096' --dir '/home/ubuntu/src/Health-tracker' --session 'ses_test'";
 const tuiSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-tui', viewMode: 'tui', viewCommand: tuiCommand };
-const tuiTarget = `work-vps:${tmuxWindowFor(tuiSession.id)}`;
-const initialTuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux });
+const tuiTarget = `work-view:${tmuxWindowFor(tuiSession.id)}`;
+const initialTuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux, sessionName: WORK_VIEW_SESSION });
 addLifecyclePane(tuiTarget, 'bash');
-const tuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux, solo: true });
+const tuiView = ensureTmuxWorkView(tuiSession, { tmux: lifecycleTmux, solo: true, sessionName: WORK_VIEW_SESSION });
 check('stored interactive TUI command owns the exact workstream pane',
   initialTuiView.ok === true && tuiView.ok === true && tuiView.observerPane && tuiView.removedPanes.length === 1 && lifecycleCalls.some((args) => args[0] === 'new-window' && args.at(-1) === tuiCommand));
 const migrationSession = { ...s1, id: 'vps|qa_meal|/home/ubuntu/src/Health-tracker-migrate' };
 const migrationWindow = tmuxWindowFor(migrationSession.id);
-lifecycleSessions.get('work-vps').add(migrationWindow);
-addLifecyclePane(`work-vps:${migrationWindow}`, 'bash');
-const migratedView = ensureTmuxWorkView(migrationSession, { tmux: lifecycleTmux });
+lifecycleSessions.get('work-view').add(migrationWindow);
+addLifecyclePane(`work-view:${migrationWindow}`, 'bash');
+const migratedView = ensureTmuxWorkView(migrationSession, { tmux: lifecycleTmux, sessionName: WORK_VIEW_SESSION });
 check('legacy blank window migrates non-destructively',
   migratedView.ok === true && migratedView.migrated === true && lifecycleCalls.some((args) => args[0] === 'split-window'));
 const observer = createObserver(s1, { root: observerRoot, now: () => '2026-09-24T00:00:00.000Z' });
@@ -188,7 +196,7 @@ const observerBody = fs.readFileSync(observer.path, 'utf8');
 const observerRecords = observerBody.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
 check('observer path is private and hashed', !observer.path.includes(s1.id) && (fs.statSync(observerRoot).mode & 0o777) === 0o700 && (fs.statSync(observer.path).mode & 0o777) === 0o600);
 check('observer projection carries sanitized full activity', observerRecords.some((record) => record.kind === 'thinking' && record.content === 'private reasoning') && observerRecords.some((record) => record.kind === 'tool' && record.content.includes('src/index.ts')) && observerRecords.some((record) => record.kind === 'text' && record.content === 'final answer') && !observerBody.includes('do-not-log'));
-const stopped = disableTmuxObserver(s1, { tmux: lifecycleTmux });
+const stopped = disableTmuxObserver(s1, { tmux: lifecycleTmux, sessionName: WORK_VIEW_SESSION });
 check('/tx off stops only the exact observer pane', stopped.ok === true && stopped.stopped === true && lifecycleCalls.some((args) => args[0] === 'kill-pane' && args[2] === createdView.observerPane));
 let apiTmuxCalls = 0;
 const apiView = ensureTmuxWorkView({ ...s1, lane: 'gemini' }, { tmux: () => { apiTmuxCalls += 1; return false; } });
