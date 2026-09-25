@@ -748,7 +748,14 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location } 
   const rows = [];
   for (const e of entries || []) {
     const v = verdictOf(e);
-    const k = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
+    // Provider AND model. Keying on the model name alone merged Cline's
+    // `deepseek-v4.1-flash` with Freebuff's — same last path segment, entirely
+    // different accounts — and one of them silently disappeared from the list. The
+    // pair that genuinely is one lane is the Token Harbor one, and there the
+    // effective provider is the same on both paths, which is what collapses it.
+    const provider = String(v.effectiveProvider || v.provider || (v.lane ? planCodeForLane(v.lane) : '')).toLowerCase();
+    const model = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
+    const k = model ? `${provider}|${model}` : '';
     if (k && seenModel.has(k)) continue;
     if (k) seenModel.add(k);
     rows.push(v);

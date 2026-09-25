@@ -322,6 +322,10 @@ try {
   check('/allowance applies the router\'s Token Harbor display dedupe', /dedupeTokenHarborLanes\(ordered\)/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
   const fmSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel counts one entry per model', /const seenModel = new Set\(\)/.test(fmSrc) && /seenModel\.has\(k\)/.test(fmSrc));
+  // Provider AND model: keying on the model name alone merged Cline's
+  // `deepseek-v4.1-flash` with Freebuff's — same last segment, different accounts —
+  // and one of them vanished from the list.
+  check('and the key carries the provider as well as the model', /const provider = String\(v\.effectiveProvider/.test(fmSrc) && /`\$\{provider\}\|\$\{model\}`/.test(fmSrc));
   const twinLanes = { version: 3, buckets: {}, lanes: [
     { pref: 5, provider: 'opencode', model: 'tokenharbor/deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'OpenCode Token Harbor DeepSeek V4.1 Flash free' },
     { pref: 7, provider: 'tokenharbor', model: 'deepseek-v4.1-flash:free', bucket: 'tokenharbor-free', status: 'available', tg: true, label: 'Token Harbor chat DeepSeek V4.1 Flash free' },
