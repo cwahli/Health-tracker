@@ -33,6 +33,7 @@ import {
   forgetChatSid,
   ensureChatsMap,
 } from "./chat-sessions.js";
+import { prepareInboundMedia } from "./inbound-media-adapter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -3452,9 +3453,9 @@ bot.command("new", async (ctx) => {
   }
 });
 
-bot.on("message:text", async (ctx) => {
+bot.on(["message:text", "message:photo", "message:document"], async (ctx) => {
   if (!gate(ctx)) return;
-  const text = ctx.message.text;
+  const text = String(ctx.message.text ?? ctx.message.caption ?? "");
   if (text.startsWith("/")) return; // other commands
   // D) Record every received text immediately; lastUserText only advances when
   // dispatch actually starts, so 409 storms can't leave a stale "Last task".
@@ -3499,9 +3500,25 @@ bot.on("message:text", async (ctx) => {
       return;
     }
   }
+  const inbound = await prepareInboundMedia({
+    api: ctx.api,
+    message: ctx.message,
+    text,
+    chatId: ctx.chat.id,
+    workspace: WORKSPACE,
+    token: TOKEN,
+  });
+  if (inbound.selected && !inbound.paths.length) {
+    await ctx.reply("Could not download the Telegram attachment. Please send it again.");
+    return;
+  }
+  if (inbound.failures) {
+    await ctx.reply(`Downloaded ${inbound.paths.length} of ${inbound.selected} attachment(s); continuing with the available file(s).`).catch(() => {});
+  }
+  const prompt = inbound.prompt;
   state.busy = true;
   state.busySince = new Date().toISOString();
-  state.lastUserText = text.slice(0, 1000);
+  state.lastUserText = prompt.slice(0, 1000);
   state.lastChatId = ctx.chat.id;
   state.lastError = null;
   dispatchActive = true;
@@ -3526,7 +3543,7 @@ bot.on("message:text", async (ctx) => {
           ctx.api.editMessageText(ctx.chat.id, thinking.message_id, card.slice(0, 3500)).catch(() => {});
         }, 5000);
   try {
-    const reply = await dispatch(text, {
+    const reply = await dispatch(prompt, {
       chatId: ctx.chat.id,
 
       onProgress: async (msg) => {
