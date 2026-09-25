@@ -1,0 +1,41 @@
+{
+  "id": "C2",
+  "date": "2026-06-05",
+  "batchSize": 8,
+  "history": {
+    "hba1c": [{ "date": "2024-04-04", "value": 39, "unit": "mmol/mol" }]
+  },
+  "message": "Here are my June 2026 results. Please file them and tell me what they mean for me.",
+  "rows": [
+    { "id": "r01", "printed": "HbA1c (IFCC)", "value": 40, "unit": "mmol/mol", "date": "2026-06-05" },
+    { "id": "r02", "printed": "Calculated LDL cholesterol", "value": 4.3, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r03", "printed": "HDL cholesterol", "value": 1.2, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r04", "printed": "Triglycerides", "value": 2.1, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r05", "printed": "Total cholesterol", "value": 6.5, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r06", "printed": "ApoB", "value": 90, "unit": "mg/dL", "date": "2026-06-05" },
+    { "id": "r07", "printed": "ApoA1", "value": 1.4, "unit": "g/L", "date": "2026-06-05" },
+    { "id": "r08", "printed": "eGFR (CKD-EPI)", "value": 80, "unit": "mL/min/1.73m2", "date": "2026-06-05" },
+    { "id": "r09", "printed": "Serum creatinine", "value": 100, "unit": "umol/L", "date": "2026-06-05" },
+    { "id": "r10", "printed": "Serum ALT", "value": 41, "unit": "U/L", "date": "2026-06-05" },
+    { "id": "r11", "printed": "AST", "value": 27, "unit": "U/L", "date": "2026-06-05" },
+    { "id": "r12", "printed": "Gamma GT", "value": 35, "unit": "U/L", "date": "2026-06-05" },
+    { "id": "r13", "printed": "Haemoglobin", "value": 166, "unit": "g/L", "date": "2026-06-05" },
+    { "id": "r14", "printed": "Hematocrit", "value": 0.48, "unit": "L/L", "date": "2026-06-05" },
+    { "id": "r15", "printed": "Total white cell count", "value": 5.7, "unit": "10*9/L", "date": "2026-06-05" },
+    { "id": "r16", "printed": "Platelets", "value": 227, "unit": "10*9/L", "date": "2026-06-05" },
+    { "id": "r17", "printed": "Serum albumin", "value": 46, "unit": "g/L", "date": "2026-06-05" },
+    { "id": "r18", "printed": "Total protein", "value": 81, "unit": "g/L", "date": "2026-06-05" },
+    { "id": "r19", "printed": "Lp(a)", "value": 90, "unit": "nmol/L", "date": "2026-06-05" },
+    { "id": "r20", "printed": "Homocysteine", "value": 12, "unit": "umol/L", "date": "2026-06-05" },
+    { "id": "r21", "printed": "PSA", "value": 1.41, "unit": "ug/L", "date": "2026-06-05" },
+    { "id": "r22", "printed": "Serum sodium", "value": 143, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r23", "printed": "Serum potassium", "value": 4.3, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r24", "printed": "Serum calcium", "value": 2.47, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r25", "printed": "Adjusted calcium", "value": 2.37, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r26", "printed": "Inorganic phosphate", "value": 1.12, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r27", "printed": "Alkaline phosphatase", "value": 39, "unit": "U/L", "date": "2026-06-05" },
+    { "id": "r28", "printed": "Globulin", "value": 35, "unit": "g/L", "date": "2026-06-05" },
+    { "id": "r29", "printed": "Non-HDL cholesterol", "value": 5, "unit": "mmol/L", "date": "2026-06-05" },
+    { "id": "r30", "printed": "Ferritin", "value": 85, "unit": "ug/L", "date": "2026-06-05" }
+  ]
+}

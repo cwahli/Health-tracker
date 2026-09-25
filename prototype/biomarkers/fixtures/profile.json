@@ -1,0 +1,8 @@
+{
+  "age": 43,
+  "gender": "male",
+  "ethnicity": "Chinese",
+  "heightCm": 178,
+  "weightKg": 78,
+  "unitPreference": "SI"
+}

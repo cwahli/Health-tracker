@@ -1,0 +1,2281 @@
+{
+  "id": "C2",
+  "dry": false,
+  "insightSize": 20,
+  "draftSize": 12,
+  "turns": [
+    {
+      "turn": 1,
+      "kind": "hit",
+      "ids": [
+        "r01",
+        "r02",
+        "r03",
+        "r04",
+        "r05",
+        "r06",
+        "r07",
+        "r08",
+        "r09",
+        "r10",
+        "r11",
+        "r12",
+        "r13",
+        "r14",
+        "r15",
+        "r16",
+        "r17",
+        "r18"
+      ],
+      "ms": 4039,
+      "n": 18,
+      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"r01\",\n      \"medicalInsight\": \"Your HbA1c is currently Elevated at 40 mmol/mol for a 43-year-old Chinese male, showing a slight upward trend from 39 to 40.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r02\",\n      \"medicalInsight\": \"Your LDL-C is Very High at 4.3 mmol/L for a 43-year-old Chinese male.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r03\",\n      \"medicalInsight\": \"Your HDL-C is Optimal at 1.2 mmol/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r04\",\n      \"medicalInsight\": \"Your Triglycerides are Elevated at 2.1 mmol/L for a 43-year-old Chinese male.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r05\",\n      \"medicalInsight\": \"Your Total Cholesterol is Very High at 6.5 mmol/L for a 43-year-old Chinese male.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r06\",\n      \"medicalInsight\": \"Your ApoB is Optimal at 90 mg/dL.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r07\",\n      \"medicalInsight\": \"Your ApoA1 is Optimal at 1.4 g/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r08\",\n      \"medicalInsight\": \"Your eGFR is Mildly Decreased (CKD G2) at 80 mL/min/1.73m² for a 43-year-old Chinese male.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r09\",\n      \"medicalInsight\": \"Your Creatinine is Optimal at 100 umol/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r10\",\n      \"medicalInsight\": \"Your ALT (SGPT) is Elevated at 41 U/L for a 43-year-old Chinese male.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r11\",\n      \"medicalInsight\": \"Your AST (SGOT) is Optimal at 27 U/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r12\",\n      \"medicalInsight\": \"Your Gamma GT (GGT) is Optimal at 35 U/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r13\",\n      \"medicalInsight\": \"Your Hemoglobin is Optimal at 166 g/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r14\",\n      \"medicalInsight\": \"Your Hematocrit is Optimal at 0.48 L/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r15\",\n      \"medicalInsight\": \"Your White Blood Cell count is Optimal at 5.7 10*9/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r16\",\n      \"medicalInsight\": \"Your Platelets are Optimal at 227 10*9/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r17\",\n      \"medicalInsight\": \"Your Serum Albumin is Optimal at 46 g/L.\",\n      \"customRangeOverlay\": null\n    },\n    {\n      \"id\": \"r18\",\n      \"medicalInsight\": \"Your Total Protein is Elevated at 81 g/L for a 43-year-old Chinese male.\",\n      \"customRangeOverlay\": null\n    }\n  ]\n}",
+      "rows": [
+        {
+          "id": "r01",
+          "medicalInsight": "Your HbA1c is currently Elevated at 40 mmol/mol for a 43-year-old Chinese male, showing a slight upward trend from 39 to 40.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r02",
+          "medicalInsight": "Your LDL-C is Very High at 4.3 mmol/L for a 43-year-old Chinese male.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r03",
+          "medicalInsight": "Your HDL-C is Optimal at 1.2 mmol/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r04",
+          "medicalInsight": "Your Triglycerides are Elevated at 2.1 mmol/L for a 43-year-old Chinese male.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r05",
+          "medicalInsight": "Your Total Cholesterol is Very High at 6.5 mmol/L for a 43-year-old Chinese male.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r06",
+          "medicalInsight": "Your ApoB is Optimal at 90 mg/dL.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r07",
+          "medicalInsight": "Your ApoA1 is Optimal at 1.4 g/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r08",
+          "medicalInsight": "Your eGFR is Mildly Decreased (CKD G2) at 80 mL/min/1.73m² for a 43-year-old Chinese male.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r09",
+          "medicalInsight": "Your Creatinine is Optimal at 100 umol/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r10",
+          "medicalInsight": "Your ALT (SGPT) is Elevated at 41 U/L for a 43-year-old Chinese male.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r11",
+          "medicalInsight": "Your AST (SGOT) is Optimal at 27 U/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r12",
+          "medicalInsight": "Your Gamma GT (GGT) is Optimal at 35 U/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r13",
+          "medicalInsight": "Your Hemoglobin is Optimal at 166 g/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r14",
+          "medicalInsight": "Your Hematocrit is Optimal at 0.48 L/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r15",
+          "medicalInsight": "Your White Blood Cell count is Optimal at 5.7 10*9/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r16",
+          "medicalInsight": "Your Platelets are Optimal at 227 10*9/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r17",
+          "medicalInsight": "Your Serum Albumin is Optimal at 46 g/L.",
+          "customRangeOverlay": null
+        },
+        {
+          "id": "r18",
+          "medicalInsight": "Your Total Protein is Elevated at 81 g/L for a 43-year-old Chinese male.",
+          "customRangeOverlay": null
+        }
+      ]
+    },
+    {
+      "turn": 2,
+      "kind": "miss",
+      "ids": [
+        "r19",
+        "r20",
+        "r21",
+        "r22",
+        "r23",
+        "r24",
+        "r25",
+        "r26",
+        "r27",
+        "r28",
+        "r29",
+        "r30"
+      ],
+      "ms": 5437,
+      "n": 12,
+      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"r19\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"lp_a\",\n        \"name\": \"Lipoprotein (a)\",\n        \"unit\": \"nmol/L\",\n        \"aliases\": [\"Lp(a)\"],\n        \"normalRange\": \"<75\",\n        \"description\": \"A type of lipoprotein that carries cholesterol in the blood, elevated levels are an independent risk factor for cardiovascular disease.\",\n        \"riskCategories\": [\"cardiovascular\"]\n      }\n    },\n    {\n      \"id\": \"r20\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"homocysteine\",\n        \"name\": \"Homocysteine\",\n        \"unit\": \"umol/L\",\n        \"aliases\": [\"Homocysteine\"],\n        \"normalRange\": \"5-15\",\n        \"description\": \"An amino acid in the blood associated with cardiovascular health and B-vitamin status.\",\n        \"riskCategories\": [\"cardiovascular\", \"metabolic\"]\n      }\n    },\n    {\n      \"id\": \"r21\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"psa\",\n        \"name\": \"Prostate Specific Antigen\",\n        \"unit\": \"ug/L\",\n        \"aliases\": [\"PSA\"],\n        \"normalRange\": \"0-4.0\",\n        \"description\": \"A protein produced by the prostate gland, used as a screening tool for prostate conditions.\",\n        \"riskCategories\": [\"prostate\"]\n      }\n    },\n    {\n      \"id\": \"r22\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_sodium\",\n        \"name\": \"Serum Sodium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Sodium\"],\n        \"normalRange\": \"135-145\",\n        \"description\": \"An electrolyte crucial for fluid balance, nerve function, and muscle contraction.\",\n        \"riskCategories\": [\"electrolyte\", \"metabolic\"]\n      }\n    },\n    {\n      \"id\": \"r23\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_potassium\",\n        \"name\": \"Serum Potassium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Potassium\"],\n        \"normalRange\": \"3.5-5.0\",\n        \"description\": \"An electrolyte essential for proper heart, muscle, and nerve function.\",\n        \"riskCategories\": [\"electrolyte\", \"cardiovascular\"]\n      }\n    },\n    {\n      \"id\": \"r24\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"serum_calcium\",\n        \"name\": \"Serum Calcium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Calcium\"],\n        \"normalRange\": \"2.10-2.55\",\n        \"description\": \"A mineral vital for bone health, nerve signaling, and muscle function.\",\n        \"riskCategories\": [\"bone\", \"metabolic\"]\n      }\n    },\n    {\n      \"id\": \"r25\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"adjusted_calcium\",\n        \"name\": \"Adjusted Calcium\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Corrected Calcium\"],\n        \"normalRange\": \"2.10-2.55\",\n        \"description\": \"Calcium level adjusted for serum albumin concentration to reflect true active calcium.\",\n        \"riskCategories\": [\"bone\", \"metabolic\"]\n      }\n    },\n    {\n      \"id\": \"r26\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"inorganic_phosphate\",\n        \"name\": \"Inorganic Phosphate\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Phosphate\", \"Phosphorus\"],\n        \"normalRange\": \"0.80-1.50\",\n        \"description\": \"A mineral important for bone mineralization, energy production, and cellular function.\",\n        \"riskCategories\": [\"bone\", \"metabolic\"]\n      }\n    },\n    {\n      \"id\": \"r27\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"alkaline_phosphatase\",\n        \"name\": \"Alkaline Phosphatase\",\n        \"unit\": \"U/L\",\n        \"aliases\": [\"ALP\"],\n        \"normalRange\": \"40-129\",\n        \"description\": \"An enzyme found mostly in the liver and bones, used to evaluate liver and bone disorders.\",\n        \"riskCategories\": [\"liver\", \"bone\"]\n      }\n    },\n    {\n      \"id\": \"r28\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"globulin\",\n        \"name\": \"Globulin\",\n        \"unit\": \"g/L\",\n        \"aliases\": [\"Serum Globulin\"],\n        \"normalRange\": \"20-35\",\n        \"description\": \"A group of proteins in the blood that includes antibodies and transport proteins.\",\n        \"riskCategories\": [\"immune\", \"liver\"]\n      }\n    },\n    {\n      \"id\": \"r29\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"non_hdl_cholesterol\",\n        \"name\": \"Non-HDL Cholesterol\",\n        \"unit\": \"mmol/L\",\n        \"aliases\": [\"Non-HDL\"],\n        \"normalRange\": \"<3.4\",\n        \"description\": \"Total cholesterol minus HDL, representing all atherogenic particles in circulation.\",\n        \"riskCategories\": [\"cardiovascular\"]\n      }\n    },\n    {\n      \"id\": \"r30\",\n      \"match\": \"none\",\n      \"writeTarget\": \"pending\",\n      \"key\": null,\n      \"newCatalogDraft\": {\n        \"suggestedKey\": \"ferritin\",\n        \"name\": \"Ferritin\",\n        \"unit\": \"ug/L\",\n        \"aliases\": [\"Serum Ferritin\"],\n        \"normalRange\": \"30-300\",\n        \"description\": \"A blood protein that contains iron, serving as the primary marker for body iron stores.\",\n        \"riskCategories\": [\"hematology\", \"metabolic\"]\n      }\n    }\n  ]\n}",
+      "rows": [
+        {
+          "id": "r19",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "lp_a",
+            "name": "Lipoprotein (a)",
+            "unit": "nmol/L",
+            "aliases": [
+              "Lp(a)"
+            ],
+            "normalRange": "<75",
+            "description": "A type of lipoprotein that carries cholesterol in the blood, elevated levels are an independent risk factor for cardiovascular disease.",
+            "riskCategories": [
+              "cardiovascular"
+            ]
+          }
+        },
+        {
+          "id": "r20",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "homocysteine",
+            "name": "Homocysteine",
+            "unit": "umol/L",
+            "aliases": [
+              "Homocysteine"
+            ],
+            "normalRange": "5-15",
+            "description": "An amino acid in the blood associated with cardiovascular health and B-vitamin status.",
+            "riskCategories": [
+              "cardiovascular",
+              "metabolic"
+            ]
+          }
+        },
+        {
+          "id": "r21",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "psa",
+            "name": "Prostate Specific Antigen",
+            "unit": "ug/L",
+            "aliases": [
+              "PSA"
+            ],
+            "normalRange": "0-4.0",
+            "description": "A protein produced by the prostate gland, used as a screening tool for prostate conditions.",
+            "riskCategories": [
+              "prostate"
+            ]
+          }
+        },
+        {
+          "id": "r22",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "serum_sodium",
+            "name": "Serum Sodium",
+            "unit": "mmol/L",
+            "aliases": [
+              "Sodium"
+            ],
+            "normalRange": "135-145",
+            "description": "An electrolyte crucial for fluid balance, nerve function, and muscle contraction.",
+            "riskCategories": [
+              "electrolyte",
+              "metabolic"
+            ]
+          }
+        },
+        {
+          "id": "r23",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "serum_potassium",
+            "name": "Serum Potassium",
+            "unit": "mmol/L",
+            "aliases": [
+              "Potassium"
+            ],
+            "normalRange": "3.5-5.0",
+            "description": "An electrolyte essential for proper heart, muscle, and nerve function.",
+            "riskCategories": [
+              "electrolyte",
+              "cardiovascular"
+            ]
+          }
+        },
+        {
+          "id": "r24",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "serum_calcium",
+            "name": "Serum Calcium",
+            "unit": "mmol/L",
+            "aliases": [
+              "Calcium"
+            ],
+            "normalRange": "2.10-2.55",
+            "description": "A mineral vital for bone health, nerve signaling, and muscle function.",
+            "riskCategories": [
+              "bone",
+              "metabolic"
+            ]
+          }
+        },
+        {
+          "id": "r25",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "adjusted_calcium",
+            "name": "Adjusted Calcium",
+            "unit": "mmol/L",
+            "aliases": [
+              "Corrected Calcium"
+            ],
+            "normalRange": "2.10-2.55",
+            "description": "Calcium level adjusted for serum albumin concentration to reflect true active calcium.",
+            "riskCategories": [
+              "bone",
+              "metabolic"
+            ]
+          }
+        },
+        {
+          "id": "r26",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "inorganic_phosphate",
+            "name": "Inorganic Phosphate",
+            "unit": "mmol/L",
+            "aliases": [
+              "Phosphate",
+              "Phosphorus"
+            ],
+            "normalRange": "0.80-1.50",
+            "description": "A mineral important for bone mineralization, energy production, and cellular function.",
+            "riskCategories": [
+              "bone",
+              "metabolic"
+            ]
+          }
+        },
+        {
+          "id": "r27",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "alkaline_phosphatase",
+            "name": "Alkaline Phosphatase",
+            "unit": "U/L",
+            "aliases": [
+              "ALP"
+            ],
+            "normalRange": "40-129",
+            "description": "An enzyme found mostly in the liver and bones, used to evaluate liver and bone disorders.",
+            "riskCategories": [
+              "liver",
+              "bone"
+            ]
+          }
+        },
+        {
+          "id": "r28",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "globulin",
+            "name": "Globulin",
+            "unit": "g/L",
+            "aliases": [
+              "Serum Globulin"
+            ],
+            "normalRange": "20-35",
+            "description": "A group of proteins in the blood that includes antibodies and transport proteins.",
+            "riskCategories": [
+              "immune",
+              "liver"
+            ]
+          }
+        },
+        {
+          "id": "r29",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "non_hdl_cholesterol",
+            "name": "Non-HDL Cholesterol",
+            "unit": "mmol/L",
+            "aliases": [
+              "Non-HDL"
+            ],
+            "normalRange": "<3.4",
+            "description": "Total cholesterol minus HDL, representing all atherogenic particles in circulation.",
+            "riskCategories": [
+              "cardiovascular"
+            ]
+          }
+        },
+        {
+          "id": "r30",
+          "match": "none",
+          "writeTarget": "pending",
+          "key": null,
+          "newCatalogDraft": {
+            "suggestedKey": "ferritin",
+            "name": "Ferritin",
+            "unit": "ug/L",
+            "aliases": [
+              "Serum Ferritin"
+            ],
+            "normalRange": "30-300",
+            "description": "A blood protein that contains iron, serving as the primary marker for body iron stores.",
+            "riskCategories": [
+              "hematology",
+              "metabolic"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "classified": [
+    {
+      "id": "r01",
+      "printed": "HbA1c (IFCC)",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "hba1c",
+      "status": "Elevated"
+    },
+    {
+      "id": "r02",
+      "printed": "Calculated LDL cholesterol",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "ldl",
+      "status": "Very High"
+    },
+    {
+      "id": "r03",
+      "printed": "HDL cholesterol",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "hdl",
+      "status": "Optimal"
+    },
+    {
+      "id": "r04",
+      "printed": "Triglycerides",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "triglycerides",
+      "status": "Elevated"
+    },
+    {
+      "id": "r05",
+      "printed": "Total cholesterol",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "total_cholesterol",
+      "status": "Very High"
+    },
+    {
+      "id": "r06",
+      "printed": "ApoB",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "apob",
+      "status": "Optimal"
+    },
+    {
+      "id": "r07",
+      "printed": "ApoA1",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "apoa1",
+      "status": "Optimal"
+    },
+    {
+      "id": "r08",
+      "printed": "eGFR (CKD-EPI)",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "egfr",
+      "status": "Mildly Decreased (CKD G2)"
+    },
+    {
+      "id": "r09",
+      "printed": "Serum creatinine",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "creatinine",
+      "status": "Optimal"
+    },
+    {
+      "id": "r10",
+      "printed": "Serum ALT",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "alt",
+      "status": "Elevated"
+    },
+    {
+      "id": "r11",
+      "printed": "AST",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "ast",
+      "status": "Optimal"
+    },
+    {
+      "id": "r12",
+      "printed": "Gamma GT",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "gamma_gt",
+      "status": "Optimal"
+    },
+    {
+      "id": "r13",
+      "printed": "Haemoglobin",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "hemoglobin",
+      "status": "Optimal"
+    },
+    {
+      "id": "r14",
+      "printed": "Hematocrit",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "hematocrit",
+      "status": "Optimal"
+    },
+    {
+      "id": "r15",
+      "printed": "Total white cell count",
+      "match": "alias",
+      "writeTarget": "observation",
+      "key": "wbc",
+      "status": "Optimal"
+    },
+    {
+      "id": "r16",
+      "printed": "Platelets",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "platelets",
+      "status": "Optimal"
+    },
+    {
+      "id": "r17",
+      "printed": "Serum albumin",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "serum_albumin",
+      "status": "Optimal"
+    },
+    {
+      "id": "r18",
+      "printed": "Total protein",
+      "match": "key",
+      "writeTarget": "observation",
+      "key": "total_protein",
+      "status": "Elevated"
+    },
+    {
+      "id": "r19",
+      "printed": "Lp(a)",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r20",
+      "printed": "Homocysteine",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r21",
+      "printed": "PSA",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r22",
+      "printed": "Serum sodium",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r23",
+      "printed": "Serum potassium",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r24",
+      "printed": "Serum calcium",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r25",
+      "printed": "Adjusted calcium",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r26",
+      "printed": "Inorganic phosphate",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r27",
+      "printed": "Alkaline phosphatase",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r28",
+      "printed": "Globulin",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r29",
+      "printed": "Non-HDL cholesterol",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    },
+    {
+      "id": "r30",
+      "printed": "Ferritin",
+      "match": "none",
+      "writeTarget": "pending",
+      "key": null,
+      "status": ""
+    }
+  ],
+  "templates": [
+    {
+      "id": "r01",
+      "printed": "HbA1c (IFCC)",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "HbA1c",
+      "key": "hba1c",
+      "alias": [
+        "hba1cc",
+        "glycatedhaemoglobin",
+        "hemoglobin_a1c_mmol_mol",
+        "hba1c_mmol_mol",
+        "hemoglobin_a1c"
+      ],
+      "normalRange": "20 - 41",
+      "unit": "mmol/mol",
+      "description": "Average blood glucose levels over the past 2-3 months.",
+      "riskCategories": [
+        "Metabolic"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Elevated (Diabetes): >= 48; Elevated: >= 39; Normal: >= 20; Elevated (Diabetes): >= 6.5; Elevated: >= 5.7",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your HbA1c is currently Elevated at 40 mmol/mol for a 43-year-old Chinese male, showing a slight upward trend from 39 to 40.",
+      "historicalLogs": [
+        {
+          "date": "2024-04-04",
+          "value": 39,
+          "unit": "mmol/mol"
+        },
+        {
+          "date": "2026-06-05",
+          "value": 40,
+          "unit": "mmol/mol"
+        }
+      ],
+      "currentEvaluationStatus": "Elevated",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r02",
+      "printed": "Calculated LDL cholesterol",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "LDL-C",
+      "key": "ldl",
+      "alias": [
+        "ldlc",
+        "ldlcholesterol",
+        "calculatedldlcholesterol",
+        "calculatedldl",
+        "calculated_ldl_cholesterol_mmol_l",
+        "calculated_ldl_cholesterol"
+      ],
+      "normalRange": "< 2.6",
+      "unit": "mmol/L",
+      "description": "Low-Density Lipoprotein, the \"bad\" cholesterol driving plaque.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Very High: > 3.4; Elevated: > 2.6; Optimal: <= 2.6",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your LDL-C is Very High at 4.3 mmol/L for a 43-year-old Chinese male.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 4.3,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Very High",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r03",
+      "printed": "HDL cholesterol",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "HDL-C",
+      "key": "hdl",
+      "alias": [
+        "hdlc",
+        "hdlcholesterol",
+        "serum_hdl_cholesterol",
+        "serum_hdl_cholesterol_mmol_l"
+      ],
+      "normalRange": "0.9 - 1.7",
+      "unit": "mmol/L",
+      "description": "High-Density Lipoprotein, the \"good\" cholesterol removing excess lipids.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your HDL-C is Optimal at 1.2 mmol/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 1.2,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r04",
+      "printed": "Triglycerides",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Triglycerides",
+      "key": "triglycerides",
+      "alias": [
+        "trig",
+        "serum_triglycerides",
+        "serum_triglycerides_mmol_l"
+      ],
+      "normalRange": "< 1.7",
+      "unit": "mmol/L",
+      "description": "Type of fat in the blood used for energy storage.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Very High: >= 5.6; Elevated: >= 1.7; Optimal: < 1.7",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Triglycerides are Elevated at 2.1 mmol/L for a 43-year-old Chinese male.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 2.1,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Elevated",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r05",
+      "printed": "Total cholesterol",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Total Cholesterol",
+      "key": "total_cholesterol",
+      "alias": [
+        "cholesterol",
+        "serumtotalcholesterol",
+        "serum_cholesterol"
+      ],
+      "normalRange": "Aim under 5.0",
+      "unit": "mmol/L",
+      "description": "Total amount of cholesterol in the blood.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Very High: > 6.2; Elevated: > 5; Optimal: <= 5",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Total Cholesterol is Very High at 6.5 mmol/L for a 43-year-old Chinese male.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 6.5,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Very High",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r06",
+      "printed": "ApoB",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "ApoB",
+      "key": "apob",
+      "alias": [],
+      "normalRange": "under 90",
+      "unit": "mg/dL",
+      "description": "Apolipoprotein B, the best indicator of atherogenic particle count.",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Very High: > 110; Elevated: > 90; Optimal: <= 90",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your ApoB is Optimal at 90 mg/dL.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 90,
+          "unit": "mg/dL"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r07",
+      "printed": "ApoA1",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "ApoA1",
+      "key": "apoa1",
+      "alias": [
+        "apolipoprotein_a1",
+        "apolipoproteina1",
+        "apoa_1",
+        "apolipoprotein_a_1",
+        "apo_a1",
+        "apoa1_g_l"
+      ],
+      "normalRange": "1.19 - 2.40",
+      "unit": "g/L",
+      "description": "Apolipoprotein A1, the primary protein constituent of HDL particles that mediates reverse cholesterol transport.",
+      "riskCategories": [
+        "Cardiovascular"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your ApoA1 is Optimal at 1.4 g/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 1.4,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r08",
+      "printed": "eGFR (CKD-EPI)",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "eGFR",
+      "key": "egfr",
+      "alias": [
+        "egfrmlmin173m2",
+        "egfrmlmin173",
+        "egfr_ml_min_1_73m2",
+        "egfr_mlmin173m2"
+      ],
+      "normalRange": "over 90",
+      "unit": "mL/min/1.73m²",
+      "description": "Estimated Glomerular Filtration Rate, showing kidney health.",
+      "riskCategories": [
+        "Kidney"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "[All patients] Decreased (CKD G3): < 60; Mildly Decreased (CKD G2): < 90; Optimal: >= 90",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your eGFR is Mildly Decreased (CKD G2) at 80 mL/min/1.73m² for a 43-year-old Chinese male.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 80,
+          "unit": "mL/min/1.73m2"
+        }
+      ],
+      "currentEvaluationStatus": "Mildly Decreased (CKD G2)",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r09",
+      "printed": "Serum creatinine",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "Creatinine",
+      "key": "creatinine",
+      "alias": [
+        "serumcreatinine",
+        "serumcreatinineumoll",
+        "serum_creatinine_umol_l",
+        "serum_creatinine"
+      ],
+      "normalRange": "44 - 106",
+      "unit": "umol/L",
+      "description": "A waste product from muscle breakdown, filtered by kidneys.",
+      "riskCategories": [
+        "Kidney"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Creatinine is Optimal at 100 umol/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 100,
+          "unit": "umol/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r10",
+      "printed": "Serum ALT",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "ALT (SGPT)",
+      "key": "alt",
+      "alias": [
+        "sgpt",
+        "alanine_aminotransferase",
+        "serum_alt_level_u_l",
+        "serum_alt_level"
+      ],
+      "normalRange": "10 - 40",
+      "unit": "U/L",
+      "description": "Alanine Aminotransferase, an enzyme found mostly in the liver.",
+      "riskCategories": [
+        "Liver"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your ALT (SGPT) is Elevated at 41 U/L for a 43-year-old Chinese male.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 41,
+          "unit": "U/L"
+        }
+      ],
+      "currentEvaluationStatus": "Elevated",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r11",
+      "printed": "AST",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "AST (SGOT)",
+      "key": "ast",
+      "alias": [
+        "sgot",
+        "aspartate_aminotransferase",
+        "ast_serum_level_u_l",
+        "ast_serum_level"
+      ],
+      "normalRange": "10 - 40",
+      "unit": "U/L",
+      "description": "Aspartate Aminotransferase, an enzyme found in liver and muscle.",
+      "riskCategories": [
+        "Liver"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your AST (SGOT) is Optimal at 27 U/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 27,
+          "unit": "U/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r12",
+      "printed": "Gamma GT",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Gamma GT (GGT)",
+      "key": "gamma_gt",
+      "alias": [
+        "ggt",
+        "gamma_glutamyl_transferase",
+        "gamma_glutamyl_transpeptidase",
+        "gammagt",
+        "gammaglutamyltransferase",
+        "gammaglutamyltranspeptidase",
+        "serum_gamma_gt_level",
+        "serum_ggt_level"
+      ],
+      "normalRange": "9 - 48",
+      "unit": "U/L",
+      "description": "Gamma-Glutamyl Transferase, a sensitive enzyme marker for biliary tract function, hepatic stress, and alcohol intake.",
+      "riskCategories": [
+        "Liver"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Gamma GT (GGT) is Optimal at 35 U/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 35,
+          "unit": "U/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r13",
+      "printed": "Haemoglobin",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "Hemoglobin",
+      "key": "hemoglobin",
+      "alias": [
+        "haemoglobin",
+        "hgb",
+        "hb",
+        "hemoglobin_g_l",
+        "haemoglobinestimation",
+        "haemoglobin_estimation",
+        "haemoglobin_estimation_hb",
+        "haemoglobin_hb",
+        "hemoglobingl",
+        "hemoglobingdl",
+        "haemoglobingl",
+        "haemoglobingdl"
+      ],
+      "normalRange": "120 - 175",
+      "unit": "g/L",
+      "description": "Oxygen-carrying protein in red blood cells.",
+      "riskCategories": [
+        "Hematology"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Hemoglobin is Optimal at 166 g/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 166,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r14",
+      "printed": "Hematocrit",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Hematocrit",
+      "key": "hematocrit",
+      "alias": [],
+      "normalRange": "0.36 - 0.50",
+      "unit": "L/L",
+      "description": "The proportion of blood made up of red blood cells.",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Hematocrit is Optimal at 0.48 L/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 0.48,
+          "unit": "L/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r15",
+      "printed": "Total white cell count",
+      "match": "alias",
+      "writeTarget": "observation",
+      "biomarkerName": "White Blood Cell (WBC)",
+      "key": "wbc",
+      "alias": [
+        "whitebloodcell",
+        "total_white_cell_count",
+        "total_white_cell_count_10_9_l",
+        "white_blood_cell_count"
+      ],
+      "normalRange": "4.5 - 11.0",
+      "unit": "K/uL",
+      "description": "Total white blood cell count for immune function.",
+      "riskCategories": [
+        "Hematology"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your White Blood Cell count is Optimal at 5.7 10*9/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 5.7,
+          "unit": "10*9/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r16",
+      "printed": "Platelets",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Platelets",
+      "key": "platelets",
+      "alias": [
+        "plateletcount",
+        "platelet",
+        "platelet_count_10_9_l",
+        "platelet_count"
+      ],
+      "normalRange": "150 - 450",
+      "unit": "K/uL",
+      "description": "Cells responsible for blood clotting and wound repair.",
+      "riskCategories": [
+        "Hematology"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Platelets are Optimal at 227 10*9/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 227,
+          "unit": "10*9/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r17",
+      "printed": "Serum albumin",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Serum Albumin",
+      "key": "serum_albumin",
+      "alias": [
+        "albumin",
+        "serumalbumin",
+        "serum_albumin_g_l"
+      ],
+      "normalRange": "35 - 50",
+      "unit": "g/L",
+      "description": "Main protein produced by the liver, keeping fluid balance in vessels.",
+      "riskCategories": [
+        "Liver",
+        "Kidney"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Serum Albumin is Optimal at 46 g/L.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 46,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "Optimal",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r18",
+      "printed": "Total protein",
+      "match": "key",
+      "writeTarget": "observation",
+      "biomarkerName": "Total Protein",
+      "key": "total_protein",
+      "alias": [
+        "serumtotalprotein",
+        "serum_total_protein_g_l",
+        "serum_total_protein"
+      ],
+      "normalRange": "60 - 80",
+      "unit": "g/L",
+      "description": "Measures the total amount of protein in your blood.",
+      "riskCategories": [
+        "Liver",
+        "Kidney"
+      ],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "Your Total Protein is Elevated at 81 g/L for a 43-year-old Chinese male.",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 81,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "Elevated",
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r19",
+      "printed": "Lp(a)",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Lp(a)",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "nmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 90,
+          "unit": "nmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "lp_a",
+        "name": "Lipoprotein (a)",
+        "unit": "nmol/L",
+        "aliases": [
+          "Lp(a)"
+        ],
+        "normalRange": "<75",
+        "description": "A type of lipoprotein that carries cholesterol in the blood, elevated levels are an independent risk factor for cardiovascular disease.",
+        "riskCategories": [
+          "cardiovascular"
+        ]
+      }
+    },
+    {
+      "id": "r20",
+      "printed": "Homocysteine",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Homocysteine",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "umol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 12,
+          "unit": "umol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "homocysteine",
+        "name": "Homocysteine",
+        "unit": "umol/L",
+        "aliases": [
+          "Homocysteine"
+        ],
+        "normalRange": "5-15",
+        "description": "An amino acid in the blood associated with cardiovascular health and B-vitamin status.",
+        "riskCategories": [
+          "cardiovascular",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r21",
+      "printed": "PSA",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "PSA",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "ug/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 1.41,
+          "unit": "ug/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "psa",
+        "name": "Prostate Specific Antigen",
+        "unit": "ug/L",
+        "aliases": [
+          "PSA"
+        ],
+        "normalRange": "0-4.0",
+        "description": "A protein produced by the prostate gland, used as a screening tool for prostate conditions.",
+        "riskCategories": [
+          "prostate"
+        ]
+      }
+    },
+    {
+      "id": "r22",
+      "printed": "Serum sodium",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Serum sodium",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 143,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "serum_sodium",
+        "name": "Serum Sodium",
+        "unit": "mmol/L",
+        "aliases": [
+          "Sodium"
+        ],
+        "normalRange": "135-145",
+        "description": "An electrolyte crucial for fluid balance, nerve function, and muscle contraction.",
+        "riskCategories": [
+          "electrolyte",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r23",
+      "printed": "Serum potassium",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Serum potassium",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 4.3,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "serum_potassium",
+        "name": "Serum Potassium",
+        "unit": "mmol/L",
+        "aliases": [
+          "Potassium"
+        ],
+        "normalRange": "3.5-5.0",
+        "description": "An electrolyte essential for proper heart, muscle, and nerve function.",
+        "riskCategories": [
+          "electrolyte",
+          "cardiovascular"
+        ]
+      }
+    },
+    {
+      "id": "r24",
+      "printed": "Serum calcium",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Serum calcium",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 2.47,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "serum_calcium",
+        "name": "Serum Calcium",
+        "unit": "mmol/L",
+        "aliases": [
+          "Calcium"
+        ],
+        "normalRange": "2.10-2.55",
+        "description": "A mineral vital for bone health, nerve signaling, and muscle function.",
+        "riskCategories": [
+          "bone",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r25",
+      "printed": "Adjusted calcium",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Adjusted calcium",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 2.37,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "adjusted_calcium",
+        "name": "Adjusted Calcium",
+        "unit": "mmol/L",
+        "aliases": [
+          "Corrected Calcium"
+        ],
+        "normalRange": "2.10-2.55",
+        "description": "Calcium level adjusted for serum albumin concentration to reflect true active calcium.",
+        "riskCategories": [
+          "bone",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r26",
+      "printed": "Inorganic phosphate",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Inorganic phosphate",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 1.12,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "inorganic_phosphate",
+        "name": "Inorganic Phosphate",
+        "unit": "mmol/L",
+        "aliases": [
+          "Phosphate",
+          "Phosphorus"
+        ],
+        "normalRange": "0.80-1.50",
+        "description": "A mineral important for bone mineralization, energy production, and cellular function.",
+        "riskCategories": [
+          "bone",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r27",
+      "printed": "Alkaline phosphatase",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Alkaline phosphatase",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "U/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 39,
+          "unit": "U/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "alkaline_phosphatase",
+        "name": "Alkaline Phosphatase",
+        "unit": "U/L",
+        "aliases": [
+          "ALP"
+        ],
+        "normalRange": "40-129",
+        "description": "An enzyme found mostly in the liver and bones, used to evaluate liver and bone disorders.",
+        "riskCategories": [
+          "liver",
+          "bone"
+        ]
+      }
+    },
+    {
+      "id": "r28",
+      "printed": "Globulin",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Globulin",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "g/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 35,
+          "unit": "g/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "globulin",
+        "name": "Globulin",
+        "unit": "g/L",
+        "aliases": [
+          "Serum Globulin"
+        ],
+        "normalRange": "20-35",
+        "description": "A group of proteins in the blood that includes antibodies and transport proteins.",
+        "riskCategories": [
+          "immune",
+          "liver"
+        ]
+      }
+    },
+    {
+      "id": "r29",
+      "printed": "Non-HDL cholesterol",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Non-HDL cholesterol",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "mmol/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 5,
+          "unit": "mmol/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "non_hdl_cholesterol",
+        "name": "Non-HDL Cholesterol",
+        "unit": "mmol/L",
+        "aliases": [
+          "Non-HDL"
+        ],
+        "normalRange": "<3.4",
+        "description": "Total cholesterol minus HDL, representing all atherogenic particles in circulation.",
+        "riskCategories": [
+          "cardiovascular"
+        ]
+      }
+    },
+    {
+      "id": "r30",
+      "printed": "Ferritin",
+      "match": "none",
+      "writeTarget": "pending",
+      "biomarkerName": "Ferritin",
+      "key": null,
+      "alias": [],
+      "normalRange": "",
+      "unit": "ug/L",
+      "description": "",
+      "riskCategories": [],
+      "notUsed": false,
+      "customRangePopulation": "",
+      "customRangeOverlay": null,
+      "medicalInsight": "",
+      "historicalLogs": [
+        {
+          "date": "2026-06-05",
+          "value": 85,
+          "unit": "ug/L"
+        }
+      ],
+      "currentEvaluationStatus": "",
+      "newCatalogDraft": {
+        "suggestedKey": "ferritin",
+        "name": "Ferritin",
+        "unit": "ug/L",
+        "aliases": [
+          "Serum Ferritin"
+        ],
+        "normalRange": "30-300",
+        "description": "A blood protein that contains iron, serving as the primary marker for body iron stores.",
+        "riskCategories": [
+          "hematology",
+          "metabolic"
+        ]
+      }
+    }
+  ],
+  "filled": [
+    {
+      "id": "r01",
+      "op": "add",
+      "printed": "HbA1c (IFCC)",
+      "value": 40,
+      "unit": "mmol/mol",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "hba1c",
+      "writeTarget": "observation",
+      "medicalInsight": "Your HbA1c is currently Elevated at 40 mmol/mol for a 43-year-old Chinese male, showing a slight upward trend from 39 to 40.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r02",
+      "op": "add",
+      "printed": "Calculated LDL cholesterol",
+      "value": 4.3,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "ldl",
+      "writeTarget": "observation",
+      "medicalInsight": "Your LDL-C is Very High at 4.3 mmol/L for a 43-year-old Chinese male.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r03",
+      "op": "add",
+      "printed": "HDL cholesterol",
+      "value": 1.2,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "hdl",
+      "writeTarget": "observation",
+      "medicalInsight": "Your HDL-C is Optimal at 1.2 mmol/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r04",
+      "op": "add",
+      "printed": "Triglycerides",
+      "value": 2.1,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "triglycerides",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Triglycerides are Elevated at 2.1 mmol/L for a 43-year-old Chinese male.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r05",
+      "op": "add",
+      "printed": "Total cholesterol",
+      "value": 6.5,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "total_cholesterol",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Total Cholesterol is Very High at 6.5 mmol/L for a 43-year-old Chinese male.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r06",
+      "op": "add",
+      "printed": "ApoB",
+      "value": 90,
+      "unit": "mg/dL",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "apob",
+      "writeTarget": "observation",
+      "medicalInsight": "Your ApoB is Optimal at 90 mg/dL.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r07",
+      "op": "add",
+      "printed": "ApoA1",
+      "value": 1.4,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "apoa1",
+      "writeTarget": "observation",
+      "medicalInsight": "Your ApoA1 is Optimal at 1.4 g/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r08",
+      "op": "add",
+      "printed": "eGFR (CKD-EPI)",
+      "value": 80,
+      "unit": "mL/min/1.73m2",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "egfr",
+      "writeTarget": "observation",
+      "medicalInsight": "Your eGFR is Mildly Decreased (CKD G2) at 80 mL/min/1.73m² for a 43-year-old Chinese male.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r09",
+      "op": "add",
+      "printed": "Serum creatinine",
+      "value": 100,
+      "unit": "umol/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "creatinine",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Creatinine is Optimal at 100 umol/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r10",
+      "op": "add",
+      "printed": "Serum ALT",
+      "value": 41,
+      "unit": "U/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "alt",
+      "writeTarget": "observation",
+      "medicalInsight": "Your ALT (SGPT) is Elevated at 41 U/L for a 43-year-old Chinese male.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r11",
+      "op": "add",
+      "printed": "AST",
+      "value": 27,
+      "unit": "U/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "ast",
+      "writeTarget": "observation",
+      "medicalInsight": "Your AST (SGOT) is Optimal at 27 U/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r12",
+      "op": "add",
+      "printed": "Gamma GT",
+      "value": 35,
+      "unit": "U/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "gamma_gt",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Gamma GT (GGT) is Optimal at 35 U/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r13",
+      "op": "add",
+      "printed": "Haemoglobin",
+      "value": 166,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "hemoglobin",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Hemoglobin is Optimal at 166 g/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r14",
+      "op": "add",
+      "printed": "Hematocrit",
+      "value": 0.48,
+      "unit": "L/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "hematocrit",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Hematocrit is Optimal at 0.48 L/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r15",
+      "op": "add",
+      "printed": "Total white cell count",
+      "value": 5.7,
+      "unit": "10*9/L",
+      "date": "2026-06-05",
+      "match": "alias",
+      "key": "wbc",
+      "writeTarget": "observation",
+      "medicalInsight": "Your White Blood Cell count is Optimal at 5.7 10*9/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r16",
+      "op": "add",
+      "printed": "Platelets",
+      "value": 227,
+      "unit": "10*9/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "platelets",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Platelets are Optimal at 227 10*9/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r17",
+      "op": "add",
+      "printed": "Serum albumin",
+      "value": 46,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "serum_albumin",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Serum Albumin is Optimal at 46 g/L.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r18",
+      "op": "add",
+      "printed": "Total protein",
+      "value": 81,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "key",
+      "key": "total_protein",
+      "writeTarget": "observation",
+      "medicalInsight": "Your Total Protein is Elevated at 81 g/L for a 43-year-old Chinese male.",
+      "customRangeOverlay": null,
+      "newCatalogDraft": null
+    },
+    {
+      "id": "r19",
+      "op": "add",
+      "printed": "Lp(a)",
+      "value": 90,
+      "unit": "nmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "lp_a",
+        "name": "Lipoprotein (a)",
+        "unit": "nmol/L",
+        "aliases": [
+          "Lp(a)"
+        ],
+        "normalRange": "<75",
+        "description": "A type of lipoprotein that carries cholesterol in the blood, elevated levels are an independent risk factor for cardiovascular disease.",
+        "riskCategories": [
+          "cardiovascular"
+        ]
+      }
+    },
+    {
+      "id": "r20",
+      "op": "add",
+      "printed": "Homocysteine",
+      "value": 12,
+      "unit": "umol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "homocysteine",
+        "name": "Homocysteine",
+        "unit": "umol/L",
+        "aliases": [
+          "Homocysteine"
+        ],
+        "normalRange": "5-15",
+        "description": "An amino acid in the blood associated with cardiovascular health and B-vitamin status.",
+        "riskCategories": [
+          "cardiovascular",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r21",
+      "op": "add",
+      "printed": "PSA",
+      "value": 1.41,
+      "unit": "ug/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "psa",
+        "name": "Prostate Specific Antigen",
+        "unit": "ug/L",
+        "aliases": [
+          "PSA"
+        ],
+        "normalRange": "0-4.0",
+        "description": "A protein produced by the prostate gland, used as a screening tool for prostate conditions.",
+        "riskCategories": [
+          "prostate"
+        ]
+      }
+    },
+    {
+      "id": "r22",
+      "op": "add",
+      "printed": "Serum sodium",
+      "value": 143,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "serum_sodium",
+        "name": "Serum Sodium",
+        "unit": "mmol/L",
+        "aliases": [
+          "Sodium"
+        ],
+        "normalRange": "135-145",
+        "description": "An electrolyte crucial for fluid balance, nerve function, and muscle contraction.",
+        "riskCategories": [
+          "electrolyte",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r23",
+      "op": "add",
+      "printed": "Serum potassium",
+      "value": 4.3,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "serum_potassium",
+        "name": "Serum Potassium",
+        "unit": "mmol/L",
+        "aliases": [
+          "Potassium"
+        ],
+        "normalRange": "3.5-5.0",
+        "description": "An electrolyte essential for proper heart, muscle, and nerve function.",
+        "riskCategories": [
+          "electrolyte",
+          "cardiovascular"
+        ]
+      }
+    },
+    {
+      "id": "r24",
+      "op": "add",
+      "printed": "Serum calcium",
+      "value": 2.47,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "serum_calcium",
+        "name": "Serum Calcium",
+        "unit": "mmol/L",
+        "aliases": [
+          "Calcium"
+        ],
+        "normalRange": "2.10-2.55",
+        "description": "A mineral vital for bone health, nerve signaling, and muscle function.",
+        "riskCategories": [
+          "bone",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r25",
+      "op": "add",
+      "printed": "Adjusted calcium",
+      "value": 2.37,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "adjusted_calcium",
+        "name": "Adjusted Calcium",
+        "unit": "mmol/L",
+        "aliases": [
+          "Corrected Calcium"
+        ],
+        "normalRange": "2.10-2.55",
+        "description": "Calcium level adjusted for serum albumin concentration to reflect true active calcium.",
+        "riskCategories": [
+          "bone",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r26",
+      "op": "add",
+      "printed": "Inorganic phosphate",
+      "value": 1.12,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "inorganic_phosphate",
+        "name": "Inorganic Phosphate",
+        "unit": "mmol/L",
+        "aliases": [
+          "Phosphate",
+          "Phosphorus"
+        ],
+        "normalRange": "0.80-1.50",
+        "description": "A mineral important for bone mineralization, energy production, and cellular function.",
+        "riskCategories": [
+          "bone",
+          "metabolic"
+        ]
+      }
+    },
+    {
+      "id": "r27",
+      "op": "add",
+      "printed": "Alkaline phosphatase",
+      "value": 39,
+      "unit": "U/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "alkaline_phosphatase",
+        "name": "Alkaline Phosphatase",
+        "unit": "U/L",
+        "aliases": [
+          "ALP"
+        ],
+        "normalRange": "40-129",
+        "description": "An enzyme found mostly in the liver and bones, used to evaluate liver and bone disorders.",
+        "riskCategories": [
+          "liver",
+          "bone"
+        ]
+      }
+    },
+    {
+      "id": "r28",
+      "op": "add",
+      "printed": "Globulin",
+      "value": 35,
+      "unit": "g/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "globulin",
+        "name": "Globulin",
+        "unit": "g/L",
+        "aliases": [
+          "Serum Globulin"
+        ],
+        "normalRange": "20-35",
+        "description": "A group of proteins in the blood that includes antibodies and transport proteins.",
+        "riskCategories": [
+          "immune",
+          "liver"
+        ]
+      }
+    },
+    {
+      "id": "r29",
+      "op": "add",
+      "printed": "Non-HDL cholesterol",
+      "value": 5,
+      "unit": "mmol/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "non_hdl_cholesterol",
+        "name": "Non-HDL Cholesterol",
+        "unit": "mmol/L",
+        "aliases": [
+          "Non-HDL"
+        ],
+        "normalRange": "<3.4",
+        "description": "Total cholesterol minus HDL, representing all atherogenic particles in circulation.",
+        "riskCategories": [
+          "cardiovascular"
+        ]
+      }
+    },
+    {
+      "id": "r30",
+      "op": "add",
+      "printed": "Ferritin",
+      "value": 85,
+      "unit": "ug/L",
+      "date": "2026-06-05",
+      "match": "none",
+      "key": null,
+      "writeTarget": "pending",
+      "medicalInsight": "",
+      "customRangeOverlay": null,
+      "newCatalogDraft": {
+        "suggestedKey": "ferritin",
+        "name": "Ferritin",
+        "unit": "ug/L",
+        "aliases": [
+          "Serum Ferritin"
+        ],
+        "normalRange": "30-300",
+        "description": "A blood protein that contains iron, serving as the primary marker for body iron stores.",
+        "riskCategories": [
+          "hematology",
+          "metabolic"
+        ]
+      }
+    }
+  ],
+  "score": {
+    "pass": true,
+    "fails": [],
+    "known": 18,
+    "unknown": 12,
+    "turns": 2
+  }
+}
