@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const HERMES_DIR = process.env.HERMES_DIR || path.join(os.homedir(), '.hermes');
 const STATE_FILE = path.join(HERMES_DIR, 'tool_allowances.json');
@@ -88,7 +89,7 @@ function ensureDir() {
   }
 }
 
-function loadState() {
+export function loadState() {
   ensureDir();
   try {
     if (fs.existsSync(STATE_FILE)) {
@@ -160,7 +161,7 @@ function saveState(state) {
   }
 }
 
-function isBinaryInstalled(toolName) {
+export function isBinaryInstalled(toolName) {
   const binaryMap = {
     opencode: ['opencode', path.join(os.homedir(), '.opencode/bin/opencode')],
     cline: ['cline', path.join(os.homedir(), '.local/bin/cline'), '/usr/local/bin/cline'],
@@ -180,7 +181,7 @@ function isBinaryInstalled(toolName) {
   return false;
 }
 
-function refreshCooldowns(state) {
+export function refreshCooldowns(state) {
   const now = Date.now();
   let changed = false;
 
@@ -202,7 +203,7 @@ function refreshCooldowns(state) {
   }
 }
 
-function pickTool(options = {}) {
+export function pickTool(options = {}) {
   const state = loadState();
   refreshCooldowns(state);
 
@@ -264,7 +265,7 @@ function pickTool(options = {}) {
   };
 }
 
-function reportResult(toolName, status, meta = {}) {
+export function reportResult(toolName, status, meta = {}) {
   const state = loadState();
   refreshCooldowns(state);
 
@@ -350,6 +351,9 @@ function parseArg(flag, defaultValue = null) {
   return defaultValue;
 }
 
+// CLI entry point — exported so scripts/probe-tool-allowance.mjs can share the
+// vocabulary while imports of this module stay side-effect free.
+function main() {
 if (command === 'pick-tool') {
   const preferred = parseArg('preferred');
   const category = parseArg('category');
@@ -504,3 +508,7 @@ if (command === 'pick-tool') {
 } else {
   console.log('Usage: node scripts/tool-allowance.mjs <status|list-agents|list-models|pick-tool|report-result|probe> [options]');
 }
+}
+
+const isMainModule = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMainModule) main();
