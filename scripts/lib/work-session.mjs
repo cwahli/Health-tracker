@@ -8,7 +8,10 @@
  * every bot and backend.
  *
  * Physical mapping: one location maps to one tmux session; each workstream
- * maps to a window inside it. Lane changes keep the work session with a
+ * maps to a window inside it. Card 6c adds the stable swap view: a single
+ * `work-view` session whose pane is re-targeted in place after a location
+ * swap, so the view follows the chat while the session row already does.
+ * Lane changes keep the work session with a
  * handoff record; abort preserves the transcript reference. Anything shown
  * toward Telegram passes through the scrubbed view — no raw secrets.
  *
@@ -207,6 +210,19 @@ export function tmuxSessionFor(location) {
   return `work-${slug || 'local'}`;
 }
 
+/**
+ * Card 6c stable view name. A swap must move the VIEW, not just the session
+ * row — and a tmux session cannot travel between machines — so the swap view
+ * carries no location slug at all. repointWorkView() re-targets this same
+ * session in place after every swap.
+ */
+export const WORK_VIEW_SESSION = 'work-view';
+
+/** Stable view target for a chat: the shared session plus its workstream window. */
+export function workViewTarget(sessionId) {
+  return `${WORK_VIEW_SESSION}:${tmuxWindowFor(sessionId)}`;
+}
+
 export function tmuxWindowFor(sessionId) {
   const raw = String(sessionId ?? '');
   const slug = raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 28) || 'run';
@@ -377,11 +393,11 @@ function observerPaneFor(target, logPath, tmux, expected = observerCommand(logPa
   return panes.find((pane) => pane.command === expected || pane.command === normalized) || null;
 }
 
-export function disableTmuxObserver(session, { tmux = defaultTmuxRunner } = {}) {
+export function disableTmuxObserver(session, { tmux = defaultTmuxRunner, sessionName = tmuxSessionFor(session?.location) } = {}) {
   if (!session) return { ok: false, stopped: false, pane: null };
   const lane = laneFor(session.lane);
   if (lane.kind !== 'cli' || !session) return { ok: false, stopped: false, pane: null };
-  const tmuxSession = tmuxSessionFor(session.location);
+  const tmuxSession = sessionName;
   const tmuxWindow = tmuxWindowFor(session.id);
   const target = `${tmuxSession}:${tmuxWindow}`;
   const logPath = observerLogPath(session);
@@ -401,9 +417,9 @@ function keepOnlyTmuxPane(target, keepPaneId, tmux) {
   return removed;
 }
 
-export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner, solo = false } = {}) {
+export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner, solo = false, sessionName = tmuxSessionFor(session?.location) } = {}) {
   const lane = laneFor(session?.lane);
-  const tmuxSession = tmuxSessionFor(session?.location);
+  const tmuxSession = sessionName;
   const tmuxWindow = tmuxWindowFor(session?.id);
   const target = `${tmuxSession}:${tmuxWindow}`;
   const logPath = observerLogPath(session);
@@ -447,13 +463,54 @@ export function ensureTmuxWorkView(session, { tmux = defaultTmuxRunner, solo = f
 }
 
 /**
+ * Card 6c: re-target the stable work view after a location swap.
+ *
+ * The tmux session itself never moves between machines — it cannot. What
+ * moves is the VIEW: the stale tool pane inside the same `work-view` target
+ * is replaced in place, so the target keeps showing the current tool instead
+ * of the previous host's screen. This function only reads the view
+ * (list-panes, capture-pane) and re-targets one pane (kill-pane for stale
+ * siblings, respawn-pane with a send-keys fallback for the kept pane).
+ * Anything that would destroy or fork the view instead of moving it is
+ * forbidden here.
+ *
+ * @param target `work-view:<window>` from workViewTarget().
+ * @param command the live tool command the pane must run after the swap.
+ * @param expect substring the captured pane must show (the current tool).
+ */
+export function repointWorkView({ target, command, expect = '', tmux = defaultTmuxRunner } = {}) {
+  const outcome = { ok: false, target: target || null, pane: null, method: null, removedPanes: [], verified: false };
+  if (!target || !command) return outcome;
+  const list = tmux(['list-panes', '-t', target, '-F', '#{pane_id}\t#{pane_start_command}']);
+  if (typeof list !== 'string') return outcome;
+  const panes = parseObserverPanes(list);
+  const [keep, ...stale] = panes;
+  if (!keep) return outcome; // no pane to re-target: create the view with /tx on first
+  outcome.pane = keep.id;
+  for (const pane of stale) {
+    if (tmux(['kill-pane', '-t', pane.id])) outcome.removedPanes.push(pane.id);
+  }
+  if (tmux(['respawn-pane', '-k', '-t', keep.id, command])) {
+    outcome.method = 'respawn-pane';
+  } else {
+    tmux(['send-keys', '-t', keep.id, 'C-c']);
+    if (!tmux(['send-keys', '-t', keep.id, command, 'Enter'])) return outcome;
+    outcome.method = 'send-keys';
+  }
+  const screen = tmux(['capture-pane', '-t', target, '-p']);
+  outcome.verified = typeof screen === 'string' && (expect === '' || screen.includes(expect));
+  outcome.ok = outcome.verified;
+  return outcome;
+}
+
+/**
  * The same debug/status probe for every backend. Terminal lanes (cli kind)
  * attach through the location's tmux session; API lanes honestly report an
  * event/debug view with attach:false. Shape never varies by backend.
  */
-export function debugProbe(backend, { session = null, tmux = defaultTmuxRunner } = {}) {
+export function debugProbe(backend, { session = null, tmux = defaultTmuxRunner, sessionName = session ? tmuxSessionFor(session.location) : null } = {}) {
   const lane = laneFor(backend);
-  const tmuxSession = session ? tmuxSessionFor(session.location) : null;
+  const tmuxSession = session ? sessionName : null;
   const tmuxWindow = session ? tmuxWindowFor(session.id) : null;
   const target = tmuxSession && tmuxWindow ? `${tmuxSession}:${tmuxWindow}` : null;
   const observerLog = session && lane.kind === 'cli' ? observerLogPath(session) : null;
