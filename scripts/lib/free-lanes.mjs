@@ -139,6 +139,22 @@ export function liveRecForLane(lane, session, now = Date.now()) {
   return null;
 }
 
+/**
+ * Live session quota record for a /freemodel entry's own route candidates —
+ * no table lane row required. A freshly stamped route (e.g. a catalog model
+ * the pref-doc table never listed) must still read as depleted with its reset
+ * clock instead of silently showing available.
+ */
+export function liveRecForRoutes(candidates, session, now = Date.now()) {
+  for (const route of candidates || []) {
+    const key = route?.provider && route?.model ? `${route.provider}/${route.model}` : null;
+    if (!key) continue;
+    const rec = session?.quota?.[key];
+    if (liveQuotaRec(rec, now) && recIsAuthoritative(rec)) return { key, rec };
+  }
+  return null;
+}
+
 /** Human reset label (UTC ISO + Jakarta clock), mirrors src/index.js resetHumanLabel. */
 export function defaultResetLabel(untilMs, hint) {
   const iso = isoZ(untilMs);
@@ -921,6 +937,8 @@ export function isFreemodelEntryDepleted(entry, table, session, { now = Date.now
     const ref = typeof entry === "string" ? entry : entry?.ref || entry?.model || "";
     const candidates = routeCandidates(ref);
     if (!candidates.length || candidates.some((route) => route.provider === "gemini")) return false;
+    // A stamped route with no table lane row still counts (route-key fallback).
+    if (liveRecForRoutes(candidates, session, now)) return true;
     const lane = candidates.map((route) => table.lanes.find((l) => laneMatchesRoute(l, route.provider, route.model))).find(Boolean);
     if (!lane) return false;
     if (liveRecForLane(lane, session, now)) return true;
@@ -941,7 +959,8 @@ export function annotateFreemodelEntries(entries, table, session, { now = Date.n
     const depleted = isFreemodelEntryDepleted(e, table, session, { now });
     let resetIn = "-";
     try {
-      const at = lane?.nextResetAt || lane?.cooldownUntil || null;
+      const routeHit = liveRecForRoutes(routeCandidates(ref), session, now);
+      const at = lane?.nextResetAt || lane?.cooldownUntil || routeHit?.rec?.depletedUntil || null;
       resetIn = depleted ? formatResetIn(at, now) : "-";
     } catch {}
     return { ...e, depleted, resetIn, laneLabel: lane?.label || null };
