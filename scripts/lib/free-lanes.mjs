@@ -1141,7 +1141,12 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
   // under its own path. Matching on provider+model therefore folded in a second
   // row for it and the table showed the same model twice under two plan codes, so
   // the model id is compared with the vendor prefix and the surface stripped.
-  const modelKey = (s) => String(s || "").toLowerCase().replace(/^[^/]*\//, "").replace(/[^a-z0-9.]/g, "");
+  // Only the vendor prefix is stripped, and the model id keeps its own characters.
+  // Normalising punctuation away as well merged two genuinely different lanes:
+  // Token Harbor's `mimo-v2.5:free` and OpenCode's `mimo-v2.5-free` reduced to the
+  // same key, so the OpenCode lane was dropped from the table. `opencode/x` and
+  // `opencode-go/x` are the same model and must still collapse.
+  const modelKey = (s) => String(s || "").trim().toLowerCase().replace(/^[^/]*\//, "").replace(/\s+/g, " ");
   const known = new Set(lanes.map((l) => modelKey(l.model)).filter(Boolean));
   for (const entry of entries || []) {
     const ref = typeof entry === "string" ? entry : entry?.ref || "";
@@ -1201,7 +1206,12 @@ export function withCatalogLanes(table, entries = [], { now = Date.now() } = {})
  */
 export function entriesFromLanes(table, entries = []) {
   if (!table || !Array.isArray(table.lanes)) return [];
-  const modelKey = (s) => String(s || "").toLowerCase().replace(/^[^/]*\//, "").replace(/[^a-z0-9.]/g, "");
+  // Only the vendor prefix is stripped, and the model id keeps its own characters.
+  // Normalising punctuation away as well merged two genuinely different lanes:
+  // Token Harbor's `mimo-v2.5:free` and OpenCode's `mimo-v2.5-free` reduced to the
+  // same key, so the OpenCode lane was dropped from the table. `opencode/x` and
+  // `opencode-go/x` are the same model and must still collapse.
+  const modelKey = (s) => String(s || "").trim().toLowerCase().replace(/^[^/]*\//, "").replace(/\s+/g, " ");
   const known = new Set((entries || []).map((e) => modelKey(typeof e === "string" ? e : e?.ref || "")).filter(Boolean));
   const out = [];
   for (const lane of table.lanes) {

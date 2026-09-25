@@ -94,6 +94,16 @@ try {
   check('a folded gemini row is selectable', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.selectable === true);
   check('a folded gemini row is planned as GM', foldedRows.find((r) => r.model === 'google/gemini-3.8-flash')?.plan === 'GM');
   check('a vendor-prefixed opencode lane is planned as OC', foldedRows.find((r) => /space-bunny-free$/.test(r.model))?.plan === 'OC');
+  // The same base name reached through two different providers is two lanes, not
+  // one. Token Harbor's `mimo-v2.5:free` and OpenCode's `mimo-v2.5-free` differ by
+  // punctuation, and a key that normalised punctuation away dropped a real lane.
+  const twoProviders = withCatalogLanes(
+    { version: 3, lanes: [{ pref: 1, provider: 'tokenharbor', model: 'tokenharbor/mimo-v2.5:free', status: 'available', tg: true, label: 'MiMo V2.5 TH' }] },
+    [{ ref: 'opencode/mimo-v2.5-free', label: 'opencode:mimo v2.5 free (free)' }],
+  );
+  check('a tokenharbor row and an opencode row for the same base name both survive',
+    twoProviders.table.lanes.length === 2 && twoProviders.added.length === 1,
+    JSON.stringify(twoProviders.table.lanes.map((l) => l.model)));
   // The same model under two vendor prefixes must not become two rows.
   const twice = withCatalogLanes({ version: 3, lanes: [] }, [
     { ref: 'opencode/space-bunny-free' },
