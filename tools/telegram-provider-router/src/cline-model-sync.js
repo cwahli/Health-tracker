@@ -35,6 +35,37 @@ export function isClineDeadModel(output) {
   );
 }
 
+/**
+ * Free-model ids from the CLI's own recommended-models catalog
+ * (GET https://api.cline.bot/api/v1/ai/cline/recommended-models, bearer =
+ * ~/.cline/data/settings/providers.json accessToken).
+ *
+ * This is the discovery source the TUI reads — the one place Cline publishes
+ * its free set, so "which free models exist" is answered without scraping the
+ * screen. Trust the CATALOG, not the id text: free ids do NOT have to contain
+ * "free" (e.g. `stealth/space-bunny-alpha` is a free lane), which is why the
+ * name-based guard only applies to manually supplied ids.
+ */
+export const CLINE_CATALOG_URL = "https://api.cline.bot/api/v1/ai/cline/recommended-models";
+
+export function freeModelIdsFromCatalog(payload) {
+  const free = Array.isArray(payload?.free) ? payload.free : [];
+  const out = [];
+  const seen = new Set();
+  for (const m of free) {
+    const id = normalizeClineModelId(m?.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name: String(m?.name || id), description: String(m?.description || "").slice(0, 120) });
+  }
+  return out;
+}
+
+/** Manual ids only: refuse anything not obviously free (a probe is a real run). */
+export function looksFreeId(id) {
+  return /free/i.test(String(id || ""));
+}
+
 /** Normalize a user-supplied id to lane form, or "" when invalid. */
 export function normalizeClineModelId(raw) {
   const m = String(raw || "").trim();
@@ -74,7 +105,13 @@ export function planLaneUpsert(table, { model, probe }) {
   const out = String(probe?.output || "");
   if (isClineDeadModel(out)) return { action: "skip-dead", index: -1, lane: null, reason: `${id}: promotion ended / unknown` };
   const lanes = Array.isArray(table?.lanes) ? table.lanes : [];
-  const found = lanes.findIndex((l) => tail(l?.model) === tail(id));
+  // Provider-scoped match: `cline-free/mimo-v2.6-flash` and
+  // `tokenharbor/mimo-v2.6-flash:free` share a tail but are different lanes
+  // with separate buckets. A tail-only match let a Cline probe overwrite the
+  // Token Harbor lane's status (caught by dry-run 2026-09-25).
+  const found = lanes.findIndex(
+    (l) => String(l?.provider || "").toLowerCase() === "cline" && tail(l?.model) === tail(id)
+  );
   if (probe?.status === "uncertain") {
     return { action: "skip-uncertain", index: found, lane: found >= 0 ? lanes[found] : null, reason: `${id}: probe uncertain, status kept` };
   }

@@ -5,20 +5,30 @@
  *   node scripts/sync-cline-models.mjs --models cline-free/foo,bar --dry-run
  *   node scripts/sync-cline-models.mjs --models ... --apply [--table P] [--session P]
  *
- * The Cline CLI exposes no model catalog, so candidates come from the Cline
- * dashboard (comma list). Each candidate gets ONE cheap probe
- * (`cline -m <id> -c <workspace> "reply OK "`, 90s) and the ledger is
- * upserted from the result (see src/cline-model-sync.js for the rules).
+ * The Cline CLI exposes no model catalog command, but its TUI reads one:
+ * GET /api/v1/ai/cline/recommended-models (bearer = accessToken in
+ * ~/.cline/data/settings/providers.json). `--catalog` uses it, so
+ * "which free models exist" is answered automatically:
+ *
+ *   node scripts/sync-cline-models.mjs --catalog --dry-run
+ *   node scripts/sync-cline-models.mjs --catalog --apply
+ *   node scripts/sync-cline-models.mjs --models cline-free/foo,bar --apply
+ *
+ * Each candidate gets ONE cheap probe (`cline -m <id> -c <workspace>
+ * "reply OK "`, 90s) and the ledger is upserted from the result (see
+ * src/cline-model-sync.js for the rules). Free-ness comes from the CATALOG in
+ * --catalog mode (ids need not contain "free": `stealth/space-bunny-alpha` is
+ * a free lane); the name-based guard applies only to manual --models ids.
  * Everything downstream is then automatic: ledger-driven /freemodel
  * candidates, watcher re-probes, shared-bucket failover.
  *
  * Safety: dry-run by default (prints the plan, probes included, writes
  * nothing). --apply backs up table+session (.bak-<stamp>) and writes
- * atomically (tmp+rename). Non-free-looking ids are refused unless
- * --include-paid (a probe IS a real run — never spend blindly). Never
- * deletes lanes, never reorders pref. Never prints secrets.
+ * atomically (tmp+rename). Never deletes lanes, never reorders pref. Never
+ * prints secrets.
  *
- * Env: HT_ROUTER_DIR (ledger), HT_WORKSPACE (probe cwd).
+ * Env: HT_ROUTER_DIR (ledger), HT_WORKSPACE (probe cwd),
+ *      CLINE_ACCESS_TOKEN (else read from providers.json).
  */
 import { createRequire } from "module";
 import { spawnSync } from "child_process";
@@ -30,6 +40,9 @@ import {
   normalizeClineModelId,
   planLaneUpsert,
   prettifyClineLabel,
+  freeModelIdsFromCatalog,
+  looksFreeId,
+  CLINE_CATALOG_URL,
 } from "../src/cline-model-sync.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -49,10 +62,40 @@ const has = (name) => process.argv.includes(name);
 
 function usage(fail = false) {
   console.error(
-    "usage: node scripts/sync-cline-models.mjs --models id1,id2 [--apply] [--table P] [--session P]\n" +
-      "       [--timeout-ms N] [--include-paid]   (dry-run unless --apply)"
+    "usage: node scripts/sync-cline-models.mjs --catalog [--apply]\n" +
+      "       node scripts/sync-cline-models.mjs --models id1,id2 [--apply]\n" +
+      "       [--table P] [--session P] [--timeout-ms N] [--include-paid]\n" +
+      "  (dry-run unless --apply)  --catalog reads the live free-model catalog"
   );
   process.exit(fail ? 2 : 1);
+}
+
+/** Cline access token: env override, else the CLI's own settings file. */
+function clineToken() {
+  const envTok = process.env.CLINE_ACCESS_TOKEN;
+  if (envTok) return envTok;
+  for (const p of [
+    process.env.CLINE_SETTINGS_PATH,
+    join(homedir(), ".cline", "data", "settings", "providers.json"),
+  ]) {
+    if (!p) continue;
+    const d = readJson(p);
+    const a = d?.providers?.cline?.settings?.auth;
+    if (a?.accessToken || a?.token) return a.accessToken || a.token;
+  }
+  return "";
+}
+
+/** Live free-model catalog (the same source the TUI model selector reads). */
+async function fetchFreeCatalog() {
+  const token = clineToken();
+  if (!token) throw new Error("no Cline access token (set CLINE_ACCESS_TOKEN)");
+  const r = await fetch(CLINE_CATALOG_URL, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!r.ok) throw new Error(`catalog HTTP ${r.status}`);
+  return freeModelIdsFromCatalog(await r.json());
 }
 
 function readJson(p) {
@@ -84,8 +127,9 @@ const isoZ = (ms) => {
 };
 
 async function main() {
+  const catalogMode = has("--catalog");
   const modelsRaw = arg("--models", "");
-  if (!modelsRaw) usage(true);
+  if (!catalogMode && !modelsRaw) usage(true);
   const apply = has("--apply");
   const tablePath = arg("--table", join(ROUTER_DIR, "state", "free-lane-table.json"));
   const sessionPath = arg("--session", join(ROUTER_DIR, "state", "session.json"));
@@ -99,17 +143,30 @@ async function main() {
   }
   const session = readJson(sessionPath) || {};
   const nowIso = isoZ(Date.now());
-  const ids = [...new Set(String(modelsRaw).split(",").map((s) => s.trim()).filter(Boolean))];
+  // Catalog mode trusts the published free set (ids need not say "free");
+  // manual mode keeps the name guard so a typo can't spend a paid run.
+  let candidates;
+  if (catalogMode) {
+    candidates = await fetchFreeCatalog();
+    console.log(`catalog: ${candidates.length} free model(s) published by Cline`);
+  } else {
+    candidates = [...new Set(String(modelsRaw).split(",").map((s) => s.trim()).filter(Boolean))].map((id) => ({
+      id,
+      name: id,
+    }));
+  }
 
   const lines = [];
   let changed = 0;
-  for (const raw of ids) {
+  let labelFixed = 0;
+  for (const cand of candidates) {
+    const raw = cand.id;
     const id = normalizeClineModelId(raw);
     if (!id) {
       lines.push(`- ${raw}: SKIP invalid id (want modelType/model)`);
       continue;
     }
-    if (!/free/i.test(id) && !includePaid) {
+    if (!catalogMode && !looksFreeId(id) && !includePaid) {
       lines.push(`- ${id}: SKIP not free-looking (pass --include-paid to probe a paid id)`);
       continue;
     }
@@ -125,6 +182,16 @@ async function main() {
     const created = plan.action === "new";
     const target = created ? plan.lane : tbl.lanes[plan.index];
     const desc = created ? `NEW pref ${plan.lane.pref}` : `UPDATE pref ${target.pref}`;
+    // Normalize the label on every enrollment, not just new lanes: older rows
+    // carried router-era text ("Cline Muse Spark 1.3 contributor free") while
+    // freshly enrolled rows used the short form — /allowance then showed two
+    // different naming styles for the same provider.
+    const niceLabel = cand.name && !/free/i.test(cand.name) ? `${cand.name} free` : prettifyClineLabel(id);
+    if (target.label !== niceLabel) {
+      target.label = niceLabel;
+      labelFixed++;
+      changed++;
+    }
     if (res.status === "available") {
       Object.assign(target, {
         status: "available",
@@ -142,10 +209,7 @@ async function main() {
     }
     // depleted: one policy via the shared core (countdown honoured, else TTLs)
     const dep = core.depletionUntilFromText(res.output);
-    if (created) {
-      target.label = target.label || prettifyClineLabel(id);
-      tbl.lanes.push(target);
-    }
+    if (created) tbl.lanes.push(target);
     core.stampDepleted(tbl, session, [target], null, {
       until: dep.until,
       hint: dep.hint || core.parseCountdownHint(res.output).hint,
@@ -178,7 +242,9 @@ async function main() {
   tbl.updatedAt = nowIso;
   writeAtomic(tablePath, tbl);
   writeAtomic(sessionPath, session);
-  console.log(`\napplied ${changed} lane change(s). Backups: .bak-${stamp}`);
+  console.log(
+    `\napplied ${changed} lane change(s)${labelFixed ? ` (${labelFixed} label normalized)` : ""}. Backups: .bak-${stamp}`
+  );
 }
 
 main().catch((e) => {
