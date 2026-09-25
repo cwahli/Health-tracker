@@ -27,10 +27,10 @@ export const GEMINI_MODELS = [
 ];
 
 export const GEMINI_TO_OPENCODE = {
-  'gemini/gemini-3.7-flash': 'opencode/gemini-3.7-flash',
-  'gemini/gemini-3.8-flash': 'opencode/gemini-3.8-flash',
-  'gemini/gemini-3.1-pro': 'opencode/gemini-3.1-pro',
-  'gemini/gemini-3.5-flash-lite': 'opencode/gemini-3.5-flash-lite',
+  'gemini/gemini-3.7-flash': 'google/gemini-3.7-flash',
+  'gemini/gemini-3.8-flash': 'google/gemini-3.8-flash',
+  'gemini/gemini-3.1-pro': 'google/gemini-3.1-pro',
+  'gemini/gemini-3.5-flash-lite': 'google/gemini-3.5-flash-lite',
 };
 
 export const GEMINI_MODEL_NOTES = {
@@ -104,7 +104,7 @@ export function formatFreeLabel(ref) {
   }
   if (surface === 'gemini') return `gemini:${id.replace(/^gemini\//, '')} (moved to opencode)`;
   if (/^freebuff\//i.test(ref)) return `Freebuff:${id.replace(/^freebuff\//, '')} (terminal-only)`;
-  if (/^opencode\/gemini-/i.test(ref)) return `opencode:${id.replace(/^opencode\/gemini-/i, 'gemini ').replace(/-/g, ' ')} (keyed)`;
+  if (/^(?:opencode|google)\/gemini-/i.test(ref)) return `opencode:${id.replace(/^(?:opencode|google)\/gemini-/i, 'gemini ').replace(/-/g, ' ')} (keyed)`;
   return `${id.replace('/', ':')} (free)`;
 }
 
@@ -142,11 +142,12 @@ export function listGeminiOpenCode({ modelsCachePath, authPath, readJson = defau
   const googleReady = Boolean(auth && typeof auth === 'object' && Object.keys(auth).some((k) => /^google(-|$)/i.test(k)))
     || hasValue(env, ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_API_KEYS']);
   if (!googleReady) return [];
-  const models = cache.opencode?.models || {};
+  const models = cache.google?.models || {};
+  const allowed = new Set(GEMINI_MODELS.map((id) => id.replace(/^gemini\//, '')));
   return Object.keys(models)
-    .filter((id) => /^gemini-/i.test(id))
+    .filter((id) => allowed.has(id))
     .sort()
-    .map((id) => `opencode/${id}`);
+    .map((id) => `google/${id}`);
 }
 
 export function clineReady({ location = '', env = process.env, home = os.homedir(), clineBin, readJson = defaultReadJson, platform = process.platform } = {}) {
@@ -231,7 +232,7 @@ export function buildFreeModelList(opts = {}) {
     }
     const geminiRefs = listGeminiOpenCode({ ...opts, env, home });
     for (const ref of geminiRefs) {
-      entries.push(entry(ref, { surface: 'opencode', tool: 'opencode', provider: 'opencode', location, note: 'Gemini API through OpenCode' }));
+      entries.push(entry(ref, { surface: 'opencode', tool: 'opencode', provider: 'gemini', location, note: 'Gemini API through OpenCode' }));
     }
     if (!opencodeRefs.some((ref) => ref.startsWith('tokenharbor/') || ref.startsWith('opencode/tokenharbor/'))) {
       entries.push(pendingEntry('tokenharbor', 'Configure the Token Harbor provider and sign in on this host; its quota is separate.', location));
@@ -258,8 +259,8 @@ export function formatFreeModelText(entries, { current, location = '' } = {}) {
   const list = Array.isArray(entries) ? entries : [];
   const selectable = list.filter((entry) => entry.selectable !== false);
   const countProvider = (provider) => selectable.filter((entry) => entry.provider === provider).length;
-  const countOpencode = selectable.filter((entry) => entry.tool === 'opencode' && entry.provider !== 'tokenharbor' && !/^opencode\/gemini-/i.test(entry.ref)).length;
-  const countGemini = selectable.filter((entry) => /^opencode\/gemini-/i.test(entry.ref)).length;
+  const countOpencode = selectable.filter((entry) => entry.tool === 'opencode' && entry.provider !== 'tokenharbor' && !/^(?:opencode|google)\/gemini-/i.test(entry.ref)).length;
+  const countGemini = selectable.filter((entry) => /^(?:opencode|google)\/gemini-/i.test(entry.ref)).length;
   const where = location || list[0]?.location || 'this host';
   const parts = [
     ['opencode', countOpencode],
@@ -283,7 +284,7 @@ export function formatFreeModelText(entries, { current, location = '' } = {}) {
     lines.push(...pending.map((entry) => `• ${entry.tool}: ${entry.pendingAction}`));
   }
   if (countProvider('cline')) lines.push('', 'Cline is listed only when its local CLI and auth are usable; its daily caps are per host.');
-  if (list.some((entry) => String(entry.ref || '').match(/^opencode\/gemini-/i))) lines.push('Gemini is exposed through OpenCode, not as a standalone bot surface.');
+  if (list.some((entry) => String(entry.ref || '').match(/^(?:opencode|google)\/gemini-/i))) lines.push('Gemini is exposed through OpenCode, not as a standalone bot surface.');
   if (list.some((entry) => entry.surface === 'freebuff' && entry.selectable !== false)) lines.push('Freebuff is shown for visibility but is terminal-only and is not a Telegram tap target.');
   return lines.join('\n');
 }

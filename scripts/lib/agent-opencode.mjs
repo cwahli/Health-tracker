@@ -20,6 +20,7 @@ export function buildOpencodeEnv({
   sharedSkills,
   playwrightOutputDir,
   smallModel,
+  runtimeEnv = process.env,
 } = {}) {
   const content = { $schema: 'https://opencode.ai/config.json' };
   // opencode uses a separate "small" model for session titles and other
@@ -49,8 +50,12 @@ export function buildOpencodeEnv({
       },
     };
   }
-  if (Object.keys(content).length <= 1) return {};
-  return { OPENCODE_CONFIG_CONTENT: JSON.stringify(content) };
+  const env = {};
+  if (Object.keys(content).length > 1) env.OPENCODE_CONFIG_CONTENT = JSON.stringify(content);
+  if (runtimeEnv.GEMINI_API_KEY && !runtimeEnv.GOOGLE_GENERATIVE_AI_API_KEY) {
+    env.GOOGLE_GENERATIVE_AI_API_KEY = runtimeEnv.GEMINI_API_KEY;
+  }
+  return env;
 }
 
 export function resolveOpencodeBin(explicit) {
