@@ -418,9 +418,17 @@ try {
   // "ling-3.0-flash-f" in a 16-column name.
   const nameSrc = lanesSrc;
   check('a "-free" suffix on the model id is stripped, not left to eat the column',
-    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /const W_MODEL = 20/.test(nameSrc));
-  check('and the name column is wide enough for the longest free model name',
-    /const W_MODEL = 20;/.test(nameSrc));
+    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /const W_MODEL = MODEL_NAME_MAX/.test(nameSrc));
+  // One cap for the column and for shortModelName(). Two numbers is how a 20-char
+  // cap in a 24-char column still cut "nemotron-3.5-lightning" to
+  // "nemotron-3.5-lightni" and "trinity-large-preview" to "trinity-large-previe".
+  check('the name column and the name cap are the same number',
+    /export const MODEL_NAME_MAX = 24;/.test(nameSrc) && /s\.length > MODEL_NAME_MAX \? s\.slice\(0, MODEL_NAME_MAX\)/.test(nameSrc));
+  check('and no two distinct models render the same name', (() => {
+    const names = ['ling-3.0-flash-fin', 'ling-3.0-flash', 'nemotron-3.5-lightning', 'trinity-large-preview']
+      .map((n) => n.padEnd(24, ' ').slice(0, 24).trim());
+    return new Set(names).size === names.length;
+  })());
 
   // R-16: the supersession order comes from the catalog's Ranked picks, from one
   // home, so /allowance and /freemodel cannot drop different models again.

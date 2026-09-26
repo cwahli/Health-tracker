@@ -902,7 +902,9 @@ export function shortModelName(lane) {
   if (/deepseek-v4-flash|deepseek-v4(?!\.1)/i.test(m)) return "DeepSeek V4";
   if (/glm-4\.7/i.test(m)) return "GLM 4.7 Flash";
   if (/glm-5\.3/i.test(m)) return "GLM 5.3 Flash";
-  return s.length > 20 ? s.slice(0, 20) : s;
+  // The cap is the table's name-column width, not a second number: a 20-char cap
+  // in a 24-char column still cut "nemotron-3.5-lightning" to "nemotron-3.5-lightni".
+  return s.length > MODEL_NAME_MAX ? s.slice(0, MODEL_NAME_MAX) : s;
 }
 
 function laneIsEnded(lane) {
@@ -1034,9 +1036,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     : usable;
   const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
-  // 20 columns, not 16: the two "ling-3.0-flash" variants are 15 and 18 characters
-  // and at 16 they were indistinguishable in the list.
-  const W_MODEL = 20;
+  const W_MODEL = MODEL_NAME_MAX;
   const W_PLAN = 6;
   const W_RESET = 8;
   const header = `${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}Reset in`;
@@ -1303,6 +1303,13 @@ export function laneScoreFromCatalog(lane) {
     return null;
   }
 }
+
+/**
+ * The name column's width, and the cap shortModelName() truncates to — one number,
+ * because two numbers is how a 20-char cap in a 24-char column came to cut
+ * "nemotron-3.5-lightning" mid-word.
+ */
+export const MODEL_NAME_MAX = 24;
 
 /**
  * The three tier groups, in the order both surfaces render them.

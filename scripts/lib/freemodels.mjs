@@ -105,7 +105,11 @@ export function formatFreeLabel(ref) {
   }
   if (surface === 'gemini') return `gemini:${id.replace(/^gemini\//, '')} (moved to opencode)`;
   if (/^freebuff\//i.test(ref)) return `Freebuff:${id.replace(/^freebuff\//, '')} (terminal-only)`;
-  if (/^(?:opencode|google)\/gemini-/i.test(ref)) return `opencode:${id.replace(/^(?:opencode|google)\/gemini-/i, 'gemini ').replace(/-/g, ' ')} (keyed)`;
+  // The "(keyed)" suffix said how the row is reached — through the shared Gemini
+  // key — and in a 20-column name column it is what got cut, printing
+  // "gemini 3.8 flash (ke". The Plan column already says GM, and the row's note
+  // carries how it is reached, so the name is just the name.
+  if (/^(?:opencode|google)\/gemini-/i.test(ref)) return `opencode:${id.replace(/^(?:opencode|google)\/gemini-/i, 'gemini ').replace(/-/g, ' ')}`;
   return `${id.replace('/', ':')} (free)`;
 }
 
