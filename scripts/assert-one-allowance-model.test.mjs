@@ -443,6 +443,18 @@ try {
   const botSrc = read('bot-host.mjs');
   // The rows are the canonical list in the canonical tier-group order — the same
   // helper /allowance groups with — not a second ordering of the same models.
+  // The breakdown has to match, not just the order: the keyboard carries a heading
+  // row per group with the same label and count /allowance prints above the section,
+  // from the same groupRowsByTier() result.
+  check('/freemodel heads each tier group with the same label and count',
+    /buttons\.push\(\{ text: `\$\{g\.label\} \(\$\{g\.rows\.length\}\)`, data: 'noop', header: true \}\)/.test(botSrc));
+  check('and a heading is a real noop, not a model named noop',
+    /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
+  check('the body carries the same breakdown as one line',
+    /function tierBreakdown\(groups, sep\)/.test(botSrc) && /tierBreakdown\(tierGroups, ' · '\)/.test(botSrc));
+  check('and the per-button tier word is gone, now that the heading says it',
+    !/tierWord/.test(botSrc));
+
   check('/freemodel renders the canonical list, not the raw catalog',
     /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\);/.test(botSrc) && /groupRowsByTier\(canonical \|\| \[\]\)/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));

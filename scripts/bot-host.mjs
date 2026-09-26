@@ -816,6 +816,12 @@ async function sendHtml(api, chatId, html) {
  * `returns.buttons` is the keyboard, built from the same projection /allowance
  * renders, so the two commands cannot disagree about a row.
  */
+/** The same groups /allowance heads its sections with, as one readable line. */
+function tierBreakdown(groups, sep) {
+  const parts = (groups || []).filter((g) => g.rows.length).map((g) => `${g.label} ${g.rows.length}`);
+  return parts.length > 1 ? parts.join(sep) : '';
+}
+
 function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
@@ -883,6 +889,7 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     listed.length
       ? `Total: ${listed.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''}${needsSetup.length ? ` · ${needsSetup.length} need setup` : ''} · current: ${current || 'default'}`
       : 'No free models are installed and authenticated on this host.',
+    tierBreakdown(tierGroups, ' · '),
   ];
   // One short footer line — never a second per-model list.
   const footer = [];
@@ -909,6 +916,13 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   const seen = new Set();
   const buttons = [];
   for (const g of tierGroups) {
+    // A keyboard has no subheadings, so the breakdown is a row of its own: the same
+    // label and the same count /allowance prints above the group, from the same
+    // groupRowsByTier() result. `noop` is the callback the router already uses for a
+    // non-actionable keyboard row, and the tap handler answers it silently.
+    if (tierGroups.length > 1) {
+      buttons.push({ text: `${g.label} (${g.rows.length})`, data: 'noop', header: true });
+    }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
     const tag = r.plan || (r.lane ? planCodeForLane(r.lane) : '');
@@ -919,8 +933,9 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     // The tier rides on the button as well as in the order, because a keyboard has
     // no subheadings: `coding` / `light` / `unranked` is the only way the split is
     // visible here, and it is the same word /allowance prints above the group.
-    const tierWord = { high: 'coding', light: 'light', unlisted: 'unranked' }[g.tier] || 'unranked';
-    const rated = `${tag ? tag + ': ' : ''}${label} · ${tierWord} · ${scoreLabelFor(r.lane?.model || r.model || r.ref || '')}`;
+    // The group header above the row says the tier, so the button carries only what
+    // the row cannot inherit: the plan code and the bakeoff label.
+    const rated = `${tag ? tag + ': ' : ''}${label} · ${scoreLabelFor(r.lane?.model || r.model || r.ref || '')}`;
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
