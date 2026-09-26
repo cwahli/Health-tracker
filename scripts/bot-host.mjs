@@ -97,6 +97,8 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
+import { recordTurn, storeStatus, flushTurns } from './lib/turn-store.mjs';
+import { ensureTurnLog, makeSends, writerFor } from './lib/google-writer.mjs';
 // R-16: the score on a button is the bakeoff ledger's own verdict, and the tier
 // is the catalog's. Both live in the catalogs, so there is no ratings table here
 // to drift from them. A model with no ledger row renders "unranked".
@@ -224,6 +226,45 @@ function printConfig(config, registryPath) {
   console.log(`registry: ${registryPath}`);
   console.log(JSON.stringify(config, null, 2));
 }
+
+/**
+ * Store flush loop (G-1). Runs on its own timer, never in the message path.
+ *
+ * A turn spools and returns; this drains the spool in the background. The interval
+ * is deliberately unhurried: Drive and Sheets both rate-limit, and a queue that
+ * retries harder than the API forgives turns a slow provider into data loss.
+ */
+function startStoreFlusher(config) {
+  const tick = async () => {
+    if (storeFlushBusy) return;
+    storeFlushBusy = true;
+    try {
+      const status = storeStatus(config.id);
+      if (!status.pending) return;
+      const writer = await writerFor(process.env);
+      if (!writer.ok) {
+        storeFlushNote = writer.reason || 'store not ready';
+        return;
+      }
+      const report = await flushTurns(config.id, makeSends(writer, process.env));
+      storeFlushNote = report.failed
+        ? `${report.sent} sent, ${report.failed} failed — ${report.firstError}`
+        : `${report.sent} sent`;
+      if (report.sent) storeFlushNote = `${storeFlushNote} at ${new Date().toISOString().slice(11, 19)}Z`;
+    } catch (err) {
+      storeFlushNote = `flush error: ${String(err && err.message ? err.message : err).slice(0, 120)}`;
+    } finally {
+      storeFlushBusy = false;
+    }
+  };
+  const timer = setInterval(tick, STORE_FLUSH_MS);
+  timer.unref?.();
+  return { timer, tick };
+}
+
+let storeFlushBusy = false;
+let storeFlushNote = '';
+const STORE_FLUSH_MS = Number(process.env.GOOGLE_STORE_FLUSH_MS || 120000);
 
 function stateDir(id) {
   const dir = path.join(HOME, '.local', 'state', 'bot-host', id);
@@ -1748,6 +1789,47 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'store': {
+      // G-1's face in the chat. The store is a background concern, so the honest
+      // thing is to let a human ask how it is doing and force a drain on demand —
+      // rather than discovering a broken queue from a missing row days later.
+      const sub = String(args[0] || 'status').toLowerCase();
+      const status = storeStatus(config.id);
+      if (sub === 'flush') {
+        const writer = await writerFor(process.env, { force: true });
+        if (!writer.ok) {
+          await api.sendMessage(chatId, `<b>Store</b> — cannot flush: ${escapeHtml(writer.reason || 'not enrolled')}`, { parse_mode: 'HTML' });
+          return;
+        }
+        await api.sendMessage(chatId, '<b>Store</b> — flushing…', { parse_mode: 'HTML' });
+        const report = await flushTurns(config.id, makeSends(writer, process.env), { limit: 200 });
+        const after = storeStatus(config.id);
+        const lines = [
+          '<b>Store flush</b>',
+          `sent: ${report.sent} · failed: ${report.failed} · still queued: ${after.pending}`,
+          report.firstError ? `first error: ${escapeHtml(report.firstError.slice(0, 200))}` : '',
+          `identity: ${escapeHtml(writer.kind)}${writer.account ? ` (${escapeHtml(writer.account)})` : ''}`,
+        ].filter(Boolean);
+        await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'HTML' });
+        return;
+      }
+      const writer = await writerFor(process.env);
+      const rows = status.pending
+        ? Object.entries(status.byKind).map(([k, v]) => `${k}: ${v}`).join(' · ')
+        : 'nothing queued';
+      const lines = [
+        '<b>Google store</b>',
+        `queued: ${status.pending}${status.pending ? ` (${rows})` : ''}`,
+        `oldest: ${status.oldest ? escapeHtml(status.oldest) : '—'}`,
+        `identity: ${writer.ok ? escapeHtml(`${writer.kind}${writer.account ? ` · ${writer.account}` : ''}`) : `not ready — ${escapeHtml(writer.reason || '')}`}`,
+        storeFlushNote ? `last flush: ${escapeHtml(storeFlushNote)}` : '',
+        `spool: ${escapeHtml(status.dir)}`,
+        '',
+        '/store flush — drain the queue now',
+      ].filter(Boolean);
+      await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'HTML' });
+      return;
+    }
     case 'freemodel': {
       // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
       // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
@@ -2669,6 +2751,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   let observer = null;
   let observerContext = null;
   let observerTerminalWritten = false;
+  // G-1 store facts. Declared out here because `result` and `displayResult` live
+  // inside the try, and the record happens in the finally — where a turn that threw
+  // must still be recorded. `turnStartedAt` doubles as the turn id, so a retry of
+  // the same turn spools under the same name and stays idempotent.
+  const turnStartedAt = Date.now();
+  const storeFacts = { bot: config.id, chat: chatId, location: process.env.LOCATION || '', at: new Date(turnStartedAt).toISOString() };
   try {
     await renderer.start();
     const eff = effective(config, prefs, chatId);
@@ -2721,6 +2809,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const location = desiredLocation(prefs, chatId) || workLocation();
     const workId = sessionKey({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id });
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
+    // G-1: everything about this turn that is already decided, recorded now rather
+    // than at the end. Turns return early in plenty of ways — a held remote route, an
+    // abort, a preflight refusal — and those are exactly the turns worth having in the
+    // log. The outcome is filled in later, where the result is in scope.
+    Object.assign(storeFacts, {
+      project: activeProject?.id || '',
+      role: activeProject?.activeRole || '',
+      model: eff.model || '',
+      lane: workLane,
+      location: location || storeFacts.location,
+      prompt: String(quotedPrompt || text || '').slice(0, 2000),
+      turnId: `${config.id}-${chatId}-${turnStartedAt}`,
+      outcome: 'started',
+    });
     let workSession = resolveSession({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id, lane: workLane });
     if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
     // A recorded TUI server can die while the session row lives on. Attaching
@@ -3012,6 +3114,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // BOT-25 error log: a terminal lane failure opens (or bumps) a record;
     // the next clean run on the lane auto-closes it. Operator aborts are
     // never errors. Best-effort — never breaks the chat.
+    // The result is in scope here, so the early capture is refined rather than
+    // replaced — a turn that reached this point keeps its project/lane/prompt and
+    // gains an outcome, an answer and a duration.
+    Object.assign(storeFacts, {
+      model: lastAttemptModel || eff.model || storeFacts.model,
+      outcome: running.get(chatId)?.aborted ? 'aborted'
+        : String(result?.finalText || '').trim() ? 'answered'
+          : String(result?.lastError || '').trim() ? 'error' : 'empty',
+      ms: Date.now() - turnStartedAt,
+      answer: String(result?.finalText || '').slice(0, 4000),
+      note: String(displayResult?.lastError || result?.lastError || '').slice(0, 200),
+    });
     try {
       if (!running.get(chatId)?.aborted) {
         if (String(result?.finalText || '').trim()) {
@@ -3053,6 +3167,24 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     busy.delete(chatId);
     releaseFiles(claimed, claimId);
     recordRunFinish(config.id, chatId);
+    // G-1: a real finished turn is what the store exists to record. This is the
+    // only place it is written, it runs on every outcome (answered, empty, failed,
+    // aborted), and it cannot throw or await: a Google outage must not cost the
+    // chat its answer, and a turn must not wait on an API that can take minutes
+    // while Google's front door serves it a challenge page.
+    try {
+      // A turn that returned early still gets an honest outcome rather than the
+      // 'started' placeholder it was born with.
+      if (storeFacts.outcome === 'started') {
+        storeFacts.outcome = running.get(chatId)?.aborted ? 'aborted' : 'held';
+        storeFacts.ms = Date.now() - turnStartedAt;
+      }
+      recordTurn(storeFacts);
+    } catch (err) {
+      // A store that cannot record must be visible, not silent: /store shows the
+      // spool depth, and the turn above already reached the chat.
+      console.error(`[store] turn not recorded: ${String(err && err.message ? err.message : err).slice(0, 160)}`);
+    }
   }
 }
 
@@ -3269,6 +3401,9 @@ async function main() {
   process.once('SIGTERM', giveLeaseBack);
   process.once('SIGINT', giveLeaseBack);
   setInterval(() => renewPollerLease({ key: config.id, host: workLocation(), pid: process.pid }), 60_000).unref();
+  // G-1: drain the Google spool in the background. Started once per bot, beside the
+  // lease renewer, so a store outage never has a path into a chat turn.
+  startStoreFlusher(config);
 
   const token = resolveToken(bot);
   const api = new TelegramApi(token);
