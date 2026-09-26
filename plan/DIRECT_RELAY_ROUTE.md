@@ -41,7 +41,7 @@ unchanged (sensor-proven backward compatible).
 A token-guarded staging relay already answers the public internet, proven end
 to end, for devices to onboard against today:
 
-- Relay: `/home/ubuntu/dev/relay-auth` @ `agent/r16-scorecard`, port **8891**,
+- Relay: `/home/ubuntu/dev/relay-auth` @ `agent/relay-auth`, port **8891**,
   loopback-bound, `WORKER_RELAY_TOKEN` from `~/.config/bot-host/relay.env`
   (0600). Own store (`/tmp/relay-staging-home`) — shares nothing with the
   production relay on 8890.
@@ -55,11 +55,9 @@ to end, for devices to onboard against today:
   `node <repo>/scripts/worker-agent.mjs --host=<mobile|collab|grok>
   --relay=https://health-tracking.duckdns.org/relay-staging
   --relay-token=$WORKER_RELAY_TOKEN`
-  (branch `agent/r16-scorecard`).
+  (branch `agent/relay-auth` — main's worker has no token headers yet).
 
 ## Production rollout (atomic — do not do half of it)
-=======
-## Rollout (atomic — do not do half of it)
 
 Half-rolled-out is worse than not started: a public route without a token
 exposes session exports; a token without restarted workers 401s the live
