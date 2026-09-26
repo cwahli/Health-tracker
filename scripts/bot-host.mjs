@@ -83,7 +83,7 @@ import {
   groupRowsByTier,
   rowCopy,
   fitCopy,
-  enSpace,
+  headingCopy,
   shortModelName,
   buildAllowanceTextForBots,
   escHtml,
@@ -943,7 +943,7 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // groupRowsByTier() result. `noop` is the callback the router already uses for a
     // non-actionable keyboard row, and the tap handler answers it silently.
     if (tierGroups.length > 1) {
-      buttons.push({ text: enSpace(fitCopy(`${g.label} (${g.rows.length})`)), data: 'noop', header: true });
+      buttons.push({ text: headingCopy(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -961,17 +961,18 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // number at all — never a neighbour's.
     const model = r.lane?.model || r.model || r.ref || '';
     // The button says what the /allowance row says, through the same copy function,
-    // at the same width: mark, name, plan, benchmark, reset, finished to 72
-    // characters with a dash. A button is no longer a second, shorter vocabulary for
-    // a row that already exists.
+    // in the same column order and the same widths: mark, name (30), plan (2),
+    // reset (15), benchmark (7), finished to 72 characters with a dash — the length
+    // the reader counts on a screenshot. A button is no longer a second, shorter
+    // vocabulary for a row that already exists.
     const name = shortModelName(r.lane || { label });
     const rawReset = String(r.resetIn || r.resetLabel || '');
     const resetSource = r.resetAt ?? (/^\d{4}-\d{2}-\d{2}/.test(rawReset) ? rawReset : null);
-    const rated = enSpace(rowCopy({
+    const rated = fitCopy(rowCopy({
       mark: unusableOf(r) ? '❌' : '✅',
       name,
       plan: tag,
-      score: benchmarkLabel(model),
+      score: benchmarkLabel(model) || '—',
       resetIn: resetSource ? formatResetIn(resetSource, now) : (rawReset && rawReset !== '-' ? rawReset : '—'),
     }));
     const key = `${tag}|${label}`;
@@ -1910,7 +1911,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         reply_markup: modelKeyboard(body.buttons, {
           kind: 'fm',
           all: true,
-          footer: { text: enSpace(fitCopy('Cancel — keep current model')), callback_data: 'noop' },
+          footer: { text: headingCopy('Cancel — keep current model'), callback_data: 'noop' },
         }),
       });
       return;

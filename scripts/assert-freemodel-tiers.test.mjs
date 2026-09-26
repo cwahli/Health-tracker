@@ -5,9 +5,10 @@
  * The /freemodel keyboard renders the one canonical list: the catalogs' tier
  * order (coding-agent capable, unlisted, light) with a heading per group and one
  * button per row, each button the /allowance row copy — mark, short name, plan,
- * benchmark, reset, finished to 72 display cells ending in `-` and filled with
- * EN SPACEs so a centring client lands every edge on the same x. A keyboard has
- * no subheadings, so the heading row and the order are where the split is visible.
+ * reset, benchmark, finished to 72 characters ending in `-` and filled with
+ * ASCII spaces, so every button in the keyboard is the same length in the unit
+ * the reader counts. A keyboard has no subheadings, so the heading row and the
+ * order are where the split is visible.
  *
  * Proves against the real formatter with synthetic rows (no Telegram, no ledger,
  * no quota). Exit 0 on all pass; exit 1 with FAIL lines otherwise.
@@ -35,7 +36,7 @@ console.log('assert-freemodel-tiers (QS-6/QS-7)\n');
 
 const host = await import(path.join(__dirname, 'bot-host.mjs'));
 const { scoreLabelFor, tierForModel, benchmarkLabel } = await import(path.join(__dirname, 'lib', 'free-catalogs.mjs'));
-const { groupRowsByTier, dispWidth, enSpace, fitCopy, COPY_WIDTH, shortModelName } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
+const { groupRowsByTier, headingCopy, COPY_WIDTH, shortModelName } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
 const { formatFreemodelWithDepletion } = host;
 check('the formatter is exported for the sensor', typeof formatFreemodelWithDepletion === 'function');
 
@@ -73,26 +74,25 @@ const seenHeadings = [];
 for (const g of groups) {
   const heading = btnText(btns[cursor]);
   seenHeadings.push(heading);
-  if (heading !== enSpace(fitCopy(`${g.label} (${g.rows.length})`))) orderOk = false;
+  if (heading !== headingCopy(`${g.label} (${g.rows.length})`)) orderOk = false;
   cursor += 1;
   for (const r of g.rows) {
-    // the button is EN SPACE filled, so the expectation is filled too
-    if (!btnText(btns[cursor]).includes(enSpace(nameOf(r)))) orderOk = false;
+    if (!btnText(btns[cursor]).includes(nameOf(r))) orderOk = false;
     cursor += 1;
   }
 }
 check('the buttons follow the catalog tier order, head by head', orderOk && cursor === btns.length,
   seenHeadings.map((h) => h.split('(')[0].trim()).join(' → '));
 
-// 3. every model button is the table's copy: 72 display cells, dash last, the mark
-// at cell 0, EN SPACE fill and no ASCII space anywhere in the label.
+// 3. every model button is the table's copy: 72 characters, dash last, the mark
+// at index 0, ASCII spaces as the fill and no U+2002 anywhere in the label.
 const modelBtns = btns.filter((b) => !b.header && b.data !== 'noop');
 const shapeBad = modelBtns
-  .filter((b) => dispWidth(b.text) !== COPY_WIDTH || !b.text.endsWith('-') || !/^[✅❌]/.test(b.text) || b.text.includes(' ') || !b.text.includes(enSpace(' ')))
+  .filter((b) => b.text.length !== COPY_WIDTH || !b.text.endsWith('-') || !/^[✅❌]/.test(b.text) || !b.text.includes(' ') || b.text.includes('\u2002'))
   .map((b) => b.text);
-check('every row button is 72 cells, dash last, EN SPACE filled', shapeBad.length === 0, shapeBad.slice(0, 2).join(' | '));
+check('every row button is 72 characters, dash last, ASCII filled', shapeBad.length === 0, shapeBad.slice(0, 2).join(' | '));
 check('the heading rows are finished the same way',
-  btns.filter((b) => b.data === 'noop').every((b) => dispWidth(b.text) === COPY_WIDTH && b.text.endsWith('-') && !b.text.includes(' ')));
+  btns.filter((b) => b.data === 'noop').every((b) => b.text.length === COPY_WIDTH && b.text.endsWith('-') && b.text.includes(' ') && !b.text.includes('\u2002')));
 
 // 4. the benchmark on the button is the catalog's own string, or nothing.
 const scoreBad = rows
@@ -110,9 +110,9 @@ check('an unpublished benchmark shows the em dash, never a neighbour\'s number',
 // 5. depleted and terminal rows are rendered, but marked and never counted usable.
 check('depleted and terminal rows stay out of usable',
   out.usable.length === 3 && out.unusable.length === 2
-  && btnText(buttonFor(rows[3])).startsWith('❌'.concat(enSpace(' ')))
-  && btnText(buttonFor(rows[4])).startsWith('❌'.concat(enSpace(' ')))
-  && btnText(buttonFor(rows[0])).startsWith('✅'.concat(enSpace(' '))),
+  && btnText(buttonFor(rows[3])).startsWith('❌ ')
+  && btnText(buttonFor(rows[4])).startsWith('❌ ')
+  && btnText(buttonFor(rows[0])).startsWith('✅ '),
   `${out.usable.length} usable / ${out.unusable.length} not usable`);
 
 // 6. the keyboard: one object per row, route in data, headings a real noop.

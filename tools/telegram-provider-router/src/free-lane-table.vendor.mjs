@@ -954,24 +954,6 @@ export function dispWidth(s) {
   return w;
 }
 
-function padDisp(s, n) {
-  const x = String(s ?? "");
-  const w = dispWidth(x);
-  if (w >= n) {
-    // trim by codepoints until width fits
-    let out = "";
-    let used = 0;
-    for (const ch of x) {
-      const cw = dispWidth(ch);
-      if (used + cw > n) break;
-      out += ch;
-      used += cw;
-    }
-    return out + " ".repeat(Math.max(0, n - used));
-  }
-  return x + " ".repeat(n - w);
-}
-
 export function escHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -1014,32 +996,84 @@ export function orderLikeWalk(lanes, currentModel) {
 }
 
 /**
+ * The name column, and the cap shortModelName() cuts to — one number, because a
+ * cap wider than the column pushes the plan code one letter right, and a cap
+ * narrower than the column cut two different models to the same string. The
+ * reader's spec: the name field is exactly 30 characters on every button.
+ */
+export const MODEL_NAME_MAX = 30;
+
+/**
  * The copy width every list line is finished to.
  *
- * 72 display cells, with a `-` in the last cell: the dash is what makes the width
- * exact, because trailing spaces are trimmed by some clients and by Telegram's own
+ * 72 with a `-` in the last position: the dash is what makes the length exact,
+ * because trailing spaces are trimmed by some clients and by Telegram's own
  * rendering, so a line padded only with spaces is not reliably 72 anywhere. The
  * dash is content, so the length holds.
  *
- * Display cells, not characters: ✅/❌ is one character and two cells, and a line
- * finished by character count ran one cell long in a monospace block — the header
- * and the rows had different right edges.
+ * Two units share the number, because the two surfaces are counted differently:
+ * a keyboard button is counted in characters — that is what the reader counts
+ * when they say every button is the same length — and the monospace table is
+ * counted in display cells, because ✅/❌ is one character and two cells and a
+ * row finished by character count ends one cell past a header that has no mark.
+ * fitCopy finishes for the first, fitCells for the second.
  */
 export const COPY_WIDTH = 72;
 
-/** The mark column: ✅/❌ plus the space after it. */
-const MARK_W = 2;
+/** The plan column: two characters — CF CL OC TH FB GM. */
+export const W_PLAN = 2;
+
+/** The reset column: how long until this lane's bar refills. */
+export const W_EXPIRY = 15;
+
+/** The benchmark column: `AA39.5`, `AA~41`, or the em dash when none is published. */
+export const W_SCORE = 7;
+
+/** The mark column: the ✅/❌ glyph plus the space after it — 1 character, 2 cells. */
+export const MARK_CHARS = 2;
+export const MARK_CELLS = 3;
 
 /**
- * Pad (or trim) any line to exactly COPY_WIDTH display cells, ending in a `-`.
- *
- * The width is counted in display cells (see dispWidth) so a row carrying ✅ and a
- * header carrying no mark finish to the same edge — by character count they differ
- * by one, and the block's right edge went ragged by that one cell.
+ * Pad (or trim) to exactly n *characters* — the unit the keyboard counts in.
+ * Column content is ASCII (short model names, plan codes, `12h 34`, `AA39.5`), so
+ * characters and display cells are the same number inside a column; the only
+ * width anomaly in the block is the ✅/❌ mark, and the two finishers below each
+ * account for it in their own unit.
+ */
+function padChars(s, n) {
+  const x = String(s ?? "");
+  if (x.length > n) return x.slice(0, n);
+  return x + " ".repeat(n - x.length);
+}
+
+/**
+ * Finish a line for an inline keyboard button: exactly COPY_WIDTH characters,
+ * ending in a `-`. Counted in characters because that is the length the reader
+ * specified for every button, and because the client lays a proportional-font
+ * label out in characters.
  */
 export function fitCopy(line) {
-  const raw = String(line ?? '');
-  let out = '';
+  const raw = String(line ?? "");
+  let out = "";
+  let n = 0;
+  for (const ch of raw) {
+    if (n + 1 > COPY_WIDTH - 1) break;
+    out += ch;
+    n += 1;
+  }
+  out += " ".repeat(COPY_WIDTH - 1 - n);
+  return `${out}-`;
+}
+
+/**
+ * Finish a line for the monospace table: exactly COPY_WIDTH display cells,
+ * ending in a `-`. The mark is two cells, so a row and a header of the same
+ * character count end one cell apart — counted in cells they share an edge, and
+ * the block reads as a rectangle instead of a staircase.
+ */
+export function fitCells(line) {
+  const raw = String(line ?? "");
+  let out = "";
   let w = 0;
   for (const ch of raw) {
     const cw = dispWidth(ch);
@@ -1047,41 +1081,41 @@ export function fitCopy(line) {
     out += ch;
     w += cw;
   }
-  out += ' '.repeat(COPY_WIDTH - 1 - w);
+  out += " ".repeat(COPY_WIDTH - 1 - w);
   return `${out}-`;
 }
 
-/** U+2002 EN SPACE: a space that is as wide as a letter in a proportional font. */
-export const EN_SPACE = '\u2002';
-
 /**
- * The button fill: every ASCII space in a finished line becomes an EN SPACE.
- *
- * An inline keyboard button is centred by the client in a *proportional* font, so
- * a line's left and right edges land wherever its rendered width puts them. A row
- * padded with ASCII spaces is half spaces and half letters, and how wide it renders
- * depends on how many of each it happens to contain: a header made only of letters
- * and spaces rendered ~70px narrower than the rows in the same keyboard, and two
- * rows of the same 72 characters landed their ✅ at different x. That is the drift
- * the reader sees as "buttons not aligned".
- *
- * An EN SPACE is one cell here and about a letter's width there, so a line finished
- * to 72 cells renders at close to one width no matter how its letters and spaces
- * are mixed — the centring then puts every button's first glyph and its trailing
- * dash at the same x. Only the keyboard uses it: the chat table is monospace, where
- * ASCII spaces already line up and an EN SPACE may not be one cell.
+ * The columns of a row, in the reader's order: the name in 30 characters, two
+ * spaces, the plan in 2, one space, the reset in 15, two spaces, the benchmark
+ * in 7. One builder for both surfaces, so neither can pick a different order or a
+ * different width for the same column — that drift is how a button and its own
+ * row stopped lining up.
  */
-export function enSpace(line) {
-  return String(line ?? '').replace(/ /g, EN_SPACE);
+export function colsCopy({ name = "", plan = "", resetIn = "—", score = "" } = {}) {
+  return `${padChars(name, MODEL_NAME_MAX)}  ${padChars(plan, W_PLAN)} ${padChars(resetIn, W_EXPIRY)}  ${padChars(score, W_SCORE)}`;
 }
 
 /**
- * One row of the list, as the copy both surfaces show: mark, name, plan, benchmark
- * and reset, finished to COPY_WIDTH. The allowance table and the /freemodel buttons
- * call this, so a button and its row cannot say different things at different widths.
+ * One row as both surfaces print it: the mark, one space, then the columns.
+ * Raw — no width finishing — because the keyboard counts characters and the table
+ * counts cells, and only the mark (one character, two cells) tells them apart.
+ * Every caller finishes the line in the unit it renders in: fitCopy for a button,
+ * fitCells for the monospace table. The allowance table and the /freemodel
+ * keyboard call this, so a button and its row cannot say different things.
  */
 export function rowCopy({ mark = " ", name = "", plan = "", score = "", resetIn = "—" } = {}) {
-  return fitCopy(`${mark} ${padDisp(name, MODEL_NAME_MAX)}${padDisp(plan, 5)}${padDisp(score, 7)}${padDisp(resetIn, 8)}`);
+  return `${mark} ${colsCopy({ name, plan, resetIn, score })}`;
+}
+
+/**
+ * A non-row button — a tier heading, or the Cancel row — on the same footing as
+ * the rows: indented by the mark column so its text starts where a name starts,
+ * and finished to the same COPY_WIDTH characters. A keyboard has no subheadings,
+ * so these rows are where the split between groups is visible.
+ */
+export function headingCopy(text) {
+  return fitCopy(`${" ".repeat(MARK_CHARS)}${text}`);
 }
 
 /**
@@ -1121,24 +1155,22 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     : usable;
   const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
-  const W_MODEL = MODEL_NAME_MAX;
-  const W_PLAN = 5;
-  // The external benchmark, where the catalog publishes one. A "~" marks an
-  // estimate, and a model with no published figure gets an em dash rather than a
-  // neighbour's number — the same rule the catalog states and the sensor checks.
-  const W_SCORE = 7;
-  const W_RESET = 8;
   // One width for every line in the block, so it reads as a flush-left rectangle
   // with a straight right edge. Without it the rows end wherever their content ends
   // — "AA48   —" against "AA39.5 —" — and the eye reads the ragged edge as ragged
   // alignment even though every line starts in the same column.
-  // The ✅/❌ mark is a column, not a decoration in front of one: two glyphs, then
-  // the name, then the columns, and the whole line finished to COPY_WIDTH by
-  // fitCopy so every line in the block is the same length and starts at the same
-  // column. The same copy is what a /freemodel button carries, so the button and the
-  // row say the same thing at the same width.
-  const header = fitCopy(`${" ".repeat(MARK_W)}${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}${padDisp("AA", W_SCORE)}Reset in`);
-  const sep = fitCopy(`${" ".repeat(MARK_W)}${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_SCORE)}${"-".repeat(W_RESET)}`);
+  // The ✅/❌ mark is a column, not a decoration in front of one: it is two cells,
+  // plus the space after it, so the header, the rule and the tier headings carry
+  // MARK_CELLS spaces to start where a row's name starts. The columns themselves
+  // come from colsCopy() — the same builder the /freemodel buttons use — and every
+  // line is finished to COPY_WIDTH cells by fitCells, so the block shares one right
+  // edge as well as one left edge. The same copy is what a button carries, so the
+  // button and the row say the same thing at the same width.
+  // The header labels name the columns in the same two/fifteen/seven-character
+  // widths the rows use — "Plan" cannot fit in a two-character column beside
+  // CF/CL/OC/TH, so the label is the code's own length: PL.
+  const header = fitCells(`${" ".repeat(MARK_CELLS)}${colsCopy({ name: "Model", plan: "PL", resetIn: "Reset in", score: "AA" })}`);
+  const sep = fitCells(`${" ".repeat(MARK_CELLS)}${colsCopy({ name: "-".repeat(MODEL_NAME_MAX), plan: "-".repeat(W_PLAN), resetIn: "-".repeat(W_EXPIRY), score: "-".repeat(W_SCORE) })}`);
   const nl = "\n";
   // No <code> spans of its own: the whole message goes out inside one block, and a
   // nested span is escaped into visible "&lt;code&gt;" text.
@@ -1178,7 +1210,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // time, once the catalogue moved to the host's table.
     const resetIn = formatResetIn(verdict?.resetAt ?? laneResetAt(l, t), now);
     const score = benchmarkLabel(l.model || l) || "—";
-    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: rowCopy({ mark: ok ? "✅" : "❌", name, plan, score, resetIn }) });
+    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: fitCells(rowCopy({ mark: ok ? "✅" : "❌", name, plan, score, resetIn })) });
   }
   // One subheading per tier group, in the catalog's order, with the group's own
   // count in it. A group with no rows gets no heading, and /freemodel groups the
@@ -1190,7 +1222,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // Indented by the mark column so every line in the block starts at the same left
     // edge — a heading flush against column 0 while every row starts two glyphs in
     // reads as misalignment even though the columns are right.
-    if (tierGroups.length > 1) lines.push(fitCopy(`${" ".repeat(2)}${g.label} (${mine.length})`));
+    if (tierGroups.length > 1) lines.push(fitCells(`${" ".repeat(MARK_CELLS)}${g.label} (${mine.length})`));
     for (const r of mine) lines.push(r.line);
   }
   // /freemodel embeds exactly these lines and nothing below them, so the two
@@ -1407,13 +1439,6 @@ export function laneScoreFromCatalog(lane) {
     return null;
   }
 }
-
-/**
- * The name column's width, and the cap shortModelName() truncates to — one number,
- * because two numbers is how a 20-char cap in a 24-char column came to cut
- * "nemotron-3.5-lightning" mid-word.
- */
-export const MODEL_NAME_MAX = 24;
 
 /**
  * The three tier groups, in the order both surfaces render them.

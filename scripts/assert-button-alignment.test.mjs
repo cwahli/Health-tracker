@@ -1,25 +1,34 @@
-// The /freemodel keyboard is a table rendered in a proportional font.
+// The /freemodel keyboard is a table, and the reader counts it in characters.
 //
-// Every button must finish to the same width (COPY_WIDTH display cells, `-` in the
-// last cell), carry the mark at cell 0, give the name the same column for every
-// row, and be filled with EN SPACEs rather than ASCII spaces. Telegram centres a
-// button's label, so a line whose rendered width depends on its letter/space mix
-// lands its first glyph and its trailing dash at a different x on every row — the
-// reader's screenshot showed the ticks staggered and the dashes ragged, with the
-// header (letters and spaces only) ~70px narrower than the rows. EN SPACE is one
-// cell here and about a letter wide in the client, so a 72-cell line renders at
-// close to one width however its content mixes, and the centring then agrees.
+// The spec they gave, in their own words: the name field is exactly 30
+// characters, two spaces, the plan in 2, one space, the expiry in 15, two
+// spaces, the benchmark in a fixed width, then the fill, then a `-` — and the
+// character length of every button is the same. This gate pins that: one column
+// builder, fixed offsets, one finish, 72 characters on every button including
+// the tier headings and the Cancel row, ASCII spaces as the fill (the EN SPACE
+// fill of the previous attempt made the client middle-elide labels into `…`).
+//
+// The monospace /allowance table shares the same column builder and finishes by
+// display cells instead, because ✅/❌ is one character and two cells — that
+// split is asserted here too, so neither surface can drift back into the other's
+// unit.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   rowCopy,
+  colsCopy,
   fitCopy,
-  enSpace,
-  EN_SPACE,
+  fitCells,
+  headingCopy,
   dispWidth,
   COPY_WIDTH,
   MODEL_NAME_MAX,
+  W_PLAN,
+  W_EXPIRY,
+  W_SCORE,
+  MARK_CHARS,
+  MARK_CELLS,
 } from './lib/free-lanes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,19 +51,35 @@ const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
 const fl = read('lib/free-lanes.mjs');
 const botSrc = read('bot-host.mjs');
 
-// --- the helpers themselves ---
-check('fitCopy finishes a line by display width, not by character count',
-  /const cw = dispWidth\(ch\)/.test(fl)
-  && /if \(w \+ cw > COPY_WIDTH - 1\) break;/.test(fl)
-  && /out \+= ' '\.repeat\(COPY_WIDTH - 1 - w\)/.test(fl)
-  && /return `\$\{out\}-`;/.test(fl));
-check('enSpace replaces every ASCII space with EN SPACE',
-  enSpace('a b') === `a${EN_SPACE}b` && EN_SPACE === '\u2002');
-check('dispWidth counts the mark as two cells',
+// --- the reader's spec, as numbers ---
+check('the name column is exactly 30 characters', MODEL_NAME_MAX === 30, String(MODEL_NAME_MAX));
+check('the plan column is 2, the reset 15, the benchmark 7',
+  W_PLAN === 2 && W_EXPIRY === 15 && W_SCORE === 7,
+  `${W_PLAN}/${W_EXPIRY}/${W_SCORE}`);
+check('the mark column is 2 characters and 3 display cells',
+  MARK_CHARS === 2 && MARK_CELLS === 3 && dispWidth('✅') === 2);
+check('dispWidth still counts the mark as two cells',
   dispWidth('✅') === 2 && dispWidth('ab') === 2 && dispWidth('a✅b') === 4);
 
+// --- the two finishers, each in its own unit ---
+check('fitCopy finishes a line by CHARACTER count (the unit the reader counts)',
+  /export function fitCopy\(line\) \{/.test(fl)
+  && /if \(n \+ 1 > COPY_WIDTH - 1\) break;/.test(fl)
+  && /out \+= " "\.repeat\(COPY_WIDTH - 1 - n\);/.test(fl)
+  && fitCopy('a').length === COPY_WIDTH
+  && fitCopy('y'.repeat(400)).length === COPY_WIDTH);
+check('fitCells finishes a line by DISPLAY CELLS, for the monospace table',
+  /export function fitCells\(line\) \{/.test(fl)
+  && /const cw = dispWidth\(ch\)/.test(fl)
+  // the mark is one character but two cells, so the two units disagree by exactly one here
+  && fitCells('✅').length === COPY_WIDTH - 1
+  && dispWidth(fitCells('✅')) === COPY_WIDTH
+  && dispWidth(fitCells('ab')) === COPY_WIDTH);
+check('the EN SPACE fill is gone from the helpers and from the keyboard',
+  !/EN_SPACE|enSpace/.test(fl) && !/EN_SPACE|enSpace/.test(botSrc));
+
 // --- a keyboard's worth of rows, the shapes the reader actually saw ---
-const row = (over = {}) => enSpace(rowCopy({
+const row = (over = {}) => fitCopy(rowCopy({
   mark: '✅',
   name: 'Muse 1.3 Cont',
   plan: 'OC',
@@ -69,50 +94,69 @@ const rows = [
   row({ name: 'gemini 3.8 flash', plan: 'GM', score: 'AA41.2' }),
   row({ name: 'GLM 4.7 Flash', plan: 'CF', score: '—' }),
   row({ name: 'Space Bunny', plan: 'OC', score: '—' }),
+  row({ name: 'x'.repeat(60), plan: 'LONGPROVIDER', resetIn: 'y'.repeat(40), score: 'AA100.5555' }),
 ];
-check('every row finishes to COPY_WIDTH display cells',
-  rows.every((r) => dispWidth(r) === COPY_WIDTH),
-  rows.map((r) => String(dispWidth(r))).join(','));
-check('every row starts with a mark and ends with the dash',
-  rows.every((r) => /^[✅❌]/.test(r) && r.endsWith('-')));
-check('no ASCII space survives in a button: the fill is EN SPACE',
-  rows.every((r) => !r.includes(' ')));
+check('every row is exactly COPY_WIDTH characters, ending in the dash',
+  rows.every((r) => r.length === COPY_WIDTH && r.endsWith('-')),
+  rows.map((r) => String(r.length)).join(','));
+check('every row starts with a mark',
+  rows.every((r) => /^[✅❌]/.test(r)));
+check('the fill is ASCII spaces — no U+2002 survives',
+  rows.every((r) => r.includes(' ') && !r.includes('\u2002')),
+  rows.filter((r) => r.includes('\u2002')).length + ' rows still filled');
 
-const headers = [
-  enSpace(fitCopy('Coding-agent capable (11)')),
-  enSpace(fitCopy('Light · docs/inventory (19)')),
-  enSpace(fitCopy('Cancel — keep current model')),
-];
-check('a heading and the cancel row finish to the same width',
-  headers.every((h) => dispWidth(h) === COPY_WIDTH && h.endsWith('-')),
-  headers.map((h) => String(dispWidth(h))).join(','));
-
-// The columns, not just the outline: the plan code must begin at the same display
-// cell whatever the name above it was, or the table's columns drift inside the
-// button even when the button itself is the right length.
-const planAt = (r) => {
-  const i = r.indexOf('ZZ');
-  let w = 0;
-  for (const ch of r.slice(0, i)) w += dispWidth(ch);
-  return w;
-};
-const planRows = ['MiMo V2.6', 'gemini 3.8 flash', 'Space Bunny'].map((name) => row({ name, plan: 'ZZ' }));
-check('the plan column starts at the same cell for every name',
-  new Set(planRows.map(planAt)).size === 1 && planAt(planRows[0]) === 3 + MODEL_NAME_MAX,
-  planRows.map((r) => String(planAt(r))).join(','));
+// The columns, not just the outline: each column must begin at the character
+// index the spec puts it at, whatever the content above it was, or the table
+// drifts inside the button even when the button is the right length.
+//   mark(1) + space(1) + name(30) + 2 = plan at 34
+//   plan(2) + space(1) = reset at 37, reset(15) + 2 = benchmark at 54
+const OFFSET = { name: 2, plan: 2 + MODEL_NAME_MAX + 2, reset: 2 + MODEL_NAME_MAX + 2 + W_PLAN + 1, score: 2 + MODEL_NAME_MAX + 2 + W_PLAN + 1 + W_EXPIRY + 2 };
+const probe = fitCopy(rowCopy({ mark: '❌', name: 'N'.repeat(60), plan: 'ZZZZZZ', resetIn: 'R'.repeat(40), score: 'SSSSSSS' }));
+check('the name column starts at character 2 and is 30 wide',
+  probe.slice(OFFSET.name, OFFSET.name + MODEL_NAME_MAX) === 'N'.repeat(MODEL_NAME_MAX)
+  && probe.slice(OFFSET.name + MODEL_NAME_MAX, OFFSET.plan) === '  ',
+  JSON.stringify(probe.slice(0, OFFSET.plan + 2)));
+check('the plan column starts at 34 and is 2 wide',
+  probe.slice(OFFSET.plan, OFFSET.plan + W_PLAN) === 'ZZ' && probe[OFFSET.plan + W_PLAN] === ' ',
+  `at ${OFFSET.plan}: ${JSON.stringify(probe.slice(OFFSET.plan, OFFSET.plan + 4))}`);
+check('the reset column starts at 37 and is 15 wide',
+  probe.slice(OFFSET.reset, OFFSET.reset + W_EXPIRY) === 'R'.repeat(W_EXPIRY)
+  && probe.slice(OFFSET.reset + W_EXPIRY, OFFSET.score) === '  ',
+  JSON.stringify(probe.slice(OFFSET.reset, OFFSET.score + 2)));
+check('the benchmark column starts at 54 and is 7 wide',
+  probe.slice(OFFSET.score, OFFSET.score + W_SCORE) === 'SSSSSSS' && probe[OFFSET.score + W_SCORE] === ' ',
+  JSON.stringify(probe.slice(OFFSET.score, OFFSET.score + 9)));
+check('every row puts every column at the same character index',
+  rows.every((r) => {
+    const p = fitCopy(rowCopy({ mark: ' ', name: 'zzz', plan: 'YY', score: 'AA1', resetIn: '1h' }));
+    return p.slice(OFFSET.plan, OFFSET.plan + 2) === 'YY' && p.length === COPY_WIDTH;
+  }));
+check('a heading and the cancel row finish to the same length as a row',
+  [headingCopy('Coding-agent capable (11)'), headingCopy('Light · docs/inventory (19)'), headingCopy('Cancel — keep current model')]
+    .every((h) => h.length === COPY_WIDTH && h.endsWith('-') && h.startsWith('  ')),
+  [headingCopy('Coding-agent capable (11)').length, headingCopy('Cancel — keep current model').length].join(','));
+check('the monospace table finishes in cells, so a row and its header share an edge',
+  (() => {
+    const header = fitCells(`${' '.repeat(MARK_CELLS)}${colsCopy({ name: 'Model', plan: 'PL', resetIn: 'Reset in', score: 'AA' })}`);
+    const rowLine = fitCells(rowCopy({ mark: '❌', name: 'Cline Muse 1.3 Cont', plan: 'CL', score: 'AA48.5', resetIn: '2h 31' }));
+    return dispWidth(header) === COPY_WIDTH && dispWidth(rowLine) === COPY_WIDTH;
+  })());
 
 // --- bot-host builds the keyboard that way ---
-check('the keyboard imports the EN SPACE fill', /  enSpace,/.test(botSrc));
-check('a row is the /allowance copy, EN SPACE filled',
-  /const rated = enSpace\(rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
-check('a group heading is EN SPACE filled', /text: enSpace\(fitCopy\(/.test(botSrc));
-check('the cancel row is the same width as the rows',
-  /text: enSpace\(fitCopy\('Cancel — keep current model'\)\)/.test(botSrc));
+check('the keyboard imports the heading helper and no EN SPACE fill',
+  /  headingCopy,/.test(botSrc) && !/enSpace/.test(botSrc));
+check('a row is the /allowance copy, finished by characters',
+  /const rated = fitCopy\(rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
+check('a group heading is the same length as a row', /text: headingCopy\(/.test(botSrc));
+check('the cancel row is the same length as the rows',
+  /text: headingCopy\('Cancel — keep current model'\)/.test(botSrc));
 check('the button name comes from the same helper as the table',
   /shortModelName\(r\.lane \|\| \{ label \}\)/.test(botSrc));
 check('the reset is the compact countdown, never an absolute timestamp',
   /formatResetIn\(resetSource, now\)/.test(botSrc)
   && !/resetIn: r\.resetIn \|\| r\.resetLabel/.test(botSrc));
+check('an unpublished benchmark prints the em dash, never an empty column',
+  /score: benchmarkLabel\(model\) \|\| '—'/.test(botSrc));
 
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
