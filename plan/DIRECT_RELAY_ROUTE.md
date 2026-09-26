@@ -32,7 +32,28 @@ unchanged (sensor-proven backward compatible).
 - `scripts/bot-host.mjs` `runOnWorker`: `relayToken` param (env default) for
   the pack PUT.
 
-## Rollout (atomic — do not do half of it)
+## Staging is LIVE (2026-09-26, no production touched)
+
+A token-guarded staging relay already answers the public internet, proven end
+to end, for devices to onboard against today:
+
+- Relay: `/home/ubuntu/dev/relay-auth` @ `agent/relay-auth`, port **8891**,
+  loopback-bound, `WORKER_RELAY_TOKEN` from `~/.config/bot-host/relay.env`
+  (0600). Own store (`/tmp/relay-staging-home`) — shares nothing with the
+  production relay on 8890.
+- Public route: `https://health-tracking.duckdns.org/relay-staging/*` → Caddy
+  → 127.0.0.1:8891 (Caddyfile validated + reloaded; main site verified 200).
+- Proven 2026-09-26: anonymous → 401 on every guarded route; health → 200;
+  a worker over **public HTTPS + token** registered with real machine identity;
+  a full job roundtrip came back with the worker's own ledger. Test workers
+  removed afterwards; presence clean.
+- Device start lines (token handed out of band, never in chat):
+  `node <repo>/scripts/worker-agent.mjs --host=<mobile|collab|grok>
+  --relay=https://health-tracking.duckdns.org/relay-staging
+  --relay-token=$WORKER_RELAY_TOKEN`
+  (branch `agent/relay-auth` — main's worker has no token headers yet).
+
+## Production rollout (atomic — do not do half of it)
 
 Half-rolled-out is worse than not started: a public route without a token
 exposes session exports; a token without restarted workers 401s the live
