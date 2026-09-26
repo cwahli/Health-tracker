@@ -951,24 +951,6 @@ export function dispWidth(s) {
   return w;
 }
 
-function padDisp(s, n) {
-  const x = String(s ?? "");
-  const w = dispWidth(x);
-  if (w >= n) {
-    // trim by codepoints until width fits
-    let out = "";
-    let used = 0;
-    for (const ch of x) {
-      const cw = dispWidth(ch);
-      if (used + cw > n) break;
-      out += ch;
-      used += cw;
-    }
-    return out + " ".repeat(Math.max(0, n - used));
-  }
-  return x + " ".repeat(n - w);
-}
-
 export function escHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -1011,17 +993,42 @@ export function orderLikeWalk(lanes, currentModel) {
 }
 
 /**
+ * The name column, and the cap shortModelName() cuts to — one number, because a
+ * cap wider than the column pushes the plan code one letter right, and a cap
+ * narrower than the column cut two different models to the same string. The
+ * reader's spec: the name field is exactly 30 characters on every button.
+ */
+export const MODEL_NAME_MAX = 30;
+
+/**
  * The copy width every list line is finished to.
  *
- * 72 characters, with a `-` in the last cell: the dash is what makes the width
- * exact, because trailing spaces are trimmed by some clients and by Telegram's own
+ * 72 with a `-` in the last position: the dash is what makes the length exact,
+ * because trailing spaces are trimmed by some clients and by Telegram's own
  * rendering, so a line padded only with spaces is not reliably 72 anywhere. The
  * dash is content, so the length holds.
+ *
+ * Two units share the number, because the two surfaces are counted differently:
+ * a keyboard button is counted in characters — that is what the reader counts
+ * when they say every button is the same length — and the monospace table is
+ * counted in display cells, because ✅/❌ is one character and two cells and a
+ * row finished by character count ends one cell past a header that has no mark.
+ * fitCopy finishes for the first, fitCells for the second.
  */
 export const COPY_WIDTH = 72;
 
-/** The mark column: ✅/❌ plus the space after it. */
-const MARK_W = 2;
+/** The plan column: two characters — CF CL OC TH FB GM. */
+export const W_PLAN = 2;
+
+/** The reset column: how long until this lane's bar refills. */
+export const W_EXPIRY = 15;
+
+/** The benchmark column: `AA39.5`, `AA~41`, or the em dash when none is published. */
+export const W_SCORE = 7;
+
+/** The mark column: the ✅/❌ glyph plus the space after it — 1 character, 2 cells. */
+export const MARK_CHARS = 2;
+export const MARK_CELLS = 3;
 
 /**
  * Pad (or trim) to exactly n *characters* — the unit the keyboard counts in.
@@ -1037,16 +1044,14 @@ function padChars(s, n) {
 }
 
 /**
- * Pad (or trim) any line to exactly COPY_WIDTH characters, ending in a `-`.
- *
- * The outer fill counts *characters*, not display columns, because "72 char" is how
- * a reader counts and how Telegram sizes a button. The columns inside a row are
- * still padded by display width, so the names, plans and scores line up. The two
- * differ by one on a row carrying ✅, which occupies two columns and one character.
+ * Finish a line for an inline keyboard button: exactly COPY_WIDTH characters,
+ * ending in a `-`. Counted in characters because that is the length the reader
+ * specified for every button, and because the client lays a proportional-font
+ * label out in characters.
  */
 export function fitCopy(line) {
-  const raw = String(line ?? '');
-  let out = '';
+  const raw = String(line ?? "");
+  let out = "";
   let n = 0;
   for (const ch of raw) {
     if (n + 1 > COPY_WIDTH - 1) break;
@@ -1058,10 +1063,10 @@ export function fitCopy(line) {
 }
 
 /**
- * Pad (or trim) any line to exactly COPY_WIDTH *display cells*, for the
- * monospace table. fitCopy counts characters (the unit buttons need); a ✅/❌
- * mark is one character and two cells, so a character-exact table row renders
- * one cell too wide. A trailing dash is preserved as the terminator.
+ * Finish a line for the monospace table: exactly COPY_WIDTH display cells,
+ * ending in a `-`. The mark is two cells, so a row and a header of the same
+ * character count end one cell apart — counted in cells they share an edge, and
+ * the block reads as a rectangle instead of a staircase.
  */
 export function fitCells(line) {
   const raw = String(line ?? "");
@@ -1355,21 +1360,22 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     : usable;
   const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
-  const W_MODEL = MODEL_NAME_MAX;
-  // Shared column widths (W_PLAN/W_EXPIRY/W_SCORE) and order (name/plan/reset/
-  // score): the header, the rows and the buttons all read the same numbers, so
-  // no surface can drift into its own layout again.
   // One width for every line in the block, so it reads as a flush-left rectangle
   // with a straight right edge. Without it the rows end wherever their content ends
   // — "AA48   —" against "AA39.5 —" — and the eye reads the ragged edge as ragged
   // alignment even though every line starts in the same column.
-  // The ✅/❌ mark is a column, not a decoration in front of one: two glyphs, then
-  // the name, then the columns, and the whole line finished to COPY_WIDTH by
-  // fitCopy so every line in the block is the same length and starts at the same
-  // column. The same copy is what a /freemodel button carries, so the button and the
-  // row say the same thing at the same width.
-  const header = fitCells(`${" ".repeat(MARK_CELLS)}${colsCopy({ name: "Model", plan: "Plan", resetIn: "Reset in", score: "AA" })}-`);
-  const sep = fitCells(`${" ".repeat(MARK_CELLS)}${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_EXPIRY)}${"-".repeat(W_SCORE)}-`);
+  // The ✅/❌ mark is a column, not a decoration in front of one: it is two cells,
+  // plus the space after it, so the header, the rule and the tier headings carry
+  // MARK_CELLS spaces to start where a row's name starts. The columns themselves
+  // come from colsCopy() — the same builder the /freemodel buttons use — and every
+  // line is finished to COPY_WIDTH cells by fitCells, so the block shares one right
+  // edge as well as one left edge. The same copy is what a button carries, so the
+  // button and the row say the same thing at the same width.
+  // The header labels name the columns in the same two/fifteen/seven-character
+  // widths the rows use — "Plan" cannot fit in a two-character column beside
+  // CF/CL/OC/TH, so the label is the code's own length: PL.
+  const header = fitCells(`${" ".repeat(MARK_CELLS)}${colsCopy({ name: "Model", plan: "PL", resetIn: "Reset in", score: "AA" })}`);
+  const sep = fitCells(`${" ".repeat(MARK_CELLS)}${colsCopy({ name: "-".repeat(MODEL_NAME_MAX), plan: "-".repeat(W_PLAN), resetIn: "-".repeat(W_EXPIRY), score: "-".repeat(W_SCORE) })}`);
   const nl = "\n";
   // No <code> spans of its own: the whole message goes out inside one block, and a
   // nested span is escaped into visible "&lt;code&gt;" text.
@@ -1421,7 +1427,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // Indented by the mark column so every line in the block starts at the same left
     // edge — a heading flush against column 0 while every row starts two glyphs in
     // reads as misalignment even though the columns are right.
-    if (tierGroups.length > 1) lines.push(fitCells(`${" ".repeat(2)}${g.label} (${mine.length})`));
+    if (tierGroups.length > 1) lines.push(fitCells(`${" ".repeat(MARK_CELLS)}${g.label} (${mine.length})`));
     for (const r of mine) lines.push(r.line);
   }
   // /freemodel embeds exactly these lines and nothing below them, so the two
@@ -1638,18 +1644,6 @@ export function laneScoreFromCatalog(lane) {
     return null;
   }
 }
-
-/**
- * The reader's column spec, as numbers — one place, because two numbers is how
- * a 20-char cap in a 24-char column came to cut "nemotron-3.5-lightning"
- * mid-word: name(30) + 2 + plan(2) + 3 + reset(15) + 2 + score(7).
- */
-export const MODEL_NAME_MAX = 30;
-export const W_PLAN = 2;
-export const W_EXPIRY = 15;
-export const W_SCORE = 7;
-export const MARK_CHARS = 2;
-export const MARK_CELLS = 3;
 
 /**
  * The three tier groups, in the order both surfaces render them.

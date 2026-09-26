@@ -1,6 +1,6 @@
 # Bot work — the only file to load
 
-Read this, then stop. Do not load `plan/ROADMAP.md`, `plan/BOT_ROLES.md`, `plan/RELIABILITY.md`, `plan/BUG_TICKET_PIPELINE.md` past §6.2, or `AI_HANDOVER.md` past its first heading.
+Read this, then the files named under Next code. Do not load `plan/BOT_ROLES.md`, `plan/RELIABILITY.md`, `plan/BUG_TICKET_PIPELINE.md` past §6.2, or `AI_HANDOVER.md` past its first heading. From `plan/ROADMAP.md` read only Current work and R-16.
 
 ## Ticket flow (roles, not bots)
 
@@ -20,7 +20,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 
 **BOT-23 is DONE 2026-09-24.** Journey investigation & pre-dispatch regression gate. Investigated recent broken meal/portion journey; added `scripts/lib/dev-regression.mjs` and `scripts/assert-dev-regression.mjs` (17/17 tests passing); wired pre-dispatch dev regression & blast radius verification into `scripts/run-coding-dispatch.sh` `check_git_and_tsc()`. Rule L1 blast-radius violations reject uncommitted edits immediately; UI edits require `node scripts/assert-shell-smoke.mjs` (Playwright) to pass before commit/push.
 
-**Next code is R-14.1, one card at a time, in `plan/R14_1_AGENT_PLAN.md`.** BOT-13, BOT-15, BOT-16, BOT-17, BOT-18, BOT-19, BOT-20, BOT-21, BOT-22, and BOT-23 are DONE. Do not start them again. V-30.1–V-30.5 are DONE. Do not reopen them. Residuals that are not this work: BOT-9 propagation/smoke, BOT-11 T-matrix rows. They wait until the R-14.1 live cards are closed.
+**One sequence.** Now: `plan/R14_1_AGENT_PLAN.md`, one card at a time. Product shape: `plan/LOCATION_AGNOSTIC_AGENTS.md`. Then TUI steps 1–4 in `plan/TUI_IMPLEMENTATION.md` (proposal `TG_Tui_Proposal1.md`, not `Tui_proposal2b.md`). Then fill `plan/ROADMAP.md` R-16 rows QS-1–QS-15. That table is the only live scorecard. The card list and the TUI S rows are checkpoints inside it. Then BOT-24's remaining packets. Then R-15. Do not start a later phase early, and do not put two agents on `bot-host.mjs`, `free-lanes.mjs`, or `work-session.mjs`. BOT-13 through BOT-23 and V-30.1–V-30.5 are DONE. BOT-9 and BOT-11 wait until phase 1 is closed.
 
 **BOT-18 is DONE 2026-09-24.** Lease `{chatId, messageId, startedAt, pid}` written on run start and updated on progress create; boot sweep edits orphaned messages to `restarted mid-run — send it again` and appends `crash-pending` row; Telegram 409 conflict exits `process.exit(1)`. Tests: 119/119 green.
 
@@ -32,6 +32,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 - One defect per card. The script starts the coder. The Orchestrator profile only posts status.
 - The card closes when `verify.method` is `named_test` or `manual` and `verify.result` is `green`. A green journey stays `verifying`. `bugState` enforces this (`JOURNEY_GREEN_DOES_NOT_CLOSE`).
 - Do not push the coder's commit onto `origin/main`. Open a PR from `agent/<area>`.
+- Every commit ends with `Agent: <model and version> (<thinking level>)`. Example: `Agent: Grok 4.7 (High)`. The name is the model and version the provider shows. The parentheses are the thinking level (`High`, `max`, `low`). Set `AGENT_IDENTITY` to that text without the `Agent:` prefix when a tool commits for you. A commit without the line is rejected. Once per clone: `git config core.hooksPath scripts/git-hooks`.
 - BOT-1 through BOT-23 are history. V-30.1 through V-30.5 are history. CB-6 as written (push to `origin/main`) is superseded. Do not resume CB-7 or CB-8.
 
 ## Do not

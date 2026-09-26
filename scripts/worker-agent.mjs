@@ -8,6 +8,12 @@
  *
  *   node scripts/worker-agent.mjs --host=mobile --relay=https://<vm-host>/relay
  *
+ * Remote-operator recipe (a worker on a phone / notebook / other hostile
+ * network): export NODE_OPTIONS=--dns-result-order=ipv4first before starting
+ * — carrier networks blackhole IPv6 and every 25s relay long-poll dies on it
+ * exactly the way Telegram long-polls did on mobile (see TG_POLL_TIMEOUT in
+ * bot-host.mjs). Prefer short, fast-failing polls over long holds there.
+ *
  * A drill / proof stand-in runs with --standin (or WORKER_STANDIN=1). It is
  * labeled in presence as a test worker, and /location says so out loud — a
  * stand-in must never silently pass as the physical device its host name
@@ -15,6 +21,12 @@
  *
  * It keeps its own free-lane ledger, so a turn that runs here spends THIS
  * machine's allowance and stamps THIS machine's ledger. The VM never writes it.
+ *
+ * Live view: every opencode onEvent is POSTed to the relay (/jobs/event) as a
+ * small sanitized record, so the bot-host can stream tool use into the TG
+ * chat while the turn runs — the TG-native replacement for tailing a tmux
+ * pane. A TG /abort lands as an aborted flag on the job (/jobs/abort); the
+ * worker polls it and SIGKILLs the opencode child.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -48,8 +60,15 @@ const STANDIN =
   process.argv.includes('--standin') ||
   String(arg('standin', process.env.WORKER_STANDIN || '')).trim() === '1' ||
   String(arg('standin', '')).trim().toLowerCase() === 'true';
-// Which machine this is, so the sender can tell a stand-in from the device
-// and the canary can refuse a job that came from the wrong one.
+// A pid is only meaningful to a relay on the SAME machine (it checks
+// liveness with kill(pid, 0) in its own pid namespace). A worker dialing a
+// relay on another box reports --no-pid (WORKER_NO_PID=1): its heartbeat TTL
+// is the liveness signal, and a stale number must not fail presence.
+const SEND_PID = !(
+  process.argv.includes('--no-pid') ||
+  String(arg('no-pid', process.env.WORKER_NO_PID || '')).trim() === '1' ||
+  String(arg('no-pid', '')).trim().toLowerCase() === 'true'
+);
 const MACHINE = { hostname: os.hostname(), platform: os.platform(), arch: os.arch() };
 const LEDGER = ensureBotLedger(`worker-${HOST}`);
 
@@ -61,7 +80,7 @@ async function post(route, body) {
   const res = await fetch(`${RELAY}${route}`, {
     method: 'POST',
     headers: authHeaders({ 'content-type': 'application/json' }),
-    body: JSON.stringify({ host: HOST, pid: process.pid, detail: DETAIL, cwd: process.cwd(), machine: MACHINE, standin: STANDIN, ...body }),
+    body: JSON.stringify({ host: HOST, pid: SEND_PID ? process.pid : null, detail: DETAIL, cwd: process.cwd(), machine: MACHINE, standin: STANDIN, ...body }),
   });
   return res.json().catch(() => ({}));
 }
@@ -203,17 +222,68 @@ async function runJob(job) {
   const env = buildChildEnv({ mode: envMode || 'project' });
   const resume = await resumeSession(job.sessionId);
   log(`running ${job.id} on ${model || 'default'} in ${workspace}${resume.sessionId ? ` (session ${resume.sessionId} via ${resume.from})` : ''}`);
+  // Live view: stream a small sanitized copy of every progress event to the
+  // relay; the bot-host polls them into the TG chat. Fire-and-forget per
+  // event (never await in the hot path), and only the renderable kinds —
+  // the relay caps count + bytes per job as the backstop.
+  let liveChild = null;
+  let liveAborted = false;
+  const emitLive = (event) => {
+    try {
+      const kind = String(event?.kind || '');
+      if (!['tool', 'reasoning', 'text', 'error', 'step_finish'].includes(kind)) return;
+      const record = { kind };
+      if (event.tool != null) record.tool = String(event.tool).slice(0, 100);
+      if (event.status != null) record.status = String(event.status).slice(0, 60);
+      if (event.text != null) record.text = String(event.text).slice(0, 2000);
+      if (event.message != null) record.message = String(event.message).slice(0, 2000);
+      if (event.input != null) record.input = String(typeof event.input === 'string' ? event.input : JSON.stringify(event.input)).slice(0, 2000);
+      if (event.output != null) record.output = String(typeof event.output === 'string' ? event.output : JSON.stringify(event.output)).slice(0, 2000);
+      if (event.tokens != null && Number.isFinite(Number(event.tokens))) record.tokens = Number(event.tokens);
+      fetch(`${RELAY}/jobs/event`, {
+        method: 'POST',
+        headers: authHeaders({ 'content-type': 'application/json' }),
+        body: JSON.stringify({ jobId: job.id, event: record }),
+      }).catch(() => {});
+    } catch {
+      // event pressure must never fail the turn
+    }
+  };
+  // /abort from TG lands on the job row; poll it and kill the child. The
+  // opencode run itself is non-interactive, so abort is SIGKILL, not a prompt.
+  const abortPoll = setInterval(async () => {
+    try {
+      const res = await fetch(`${RELAY}/jobs/${encodeURIComponent(job.id)}/status`, { headers: authHeaders() });
+      const body = await res.json().catch(() => ({}));
+      if (body?.aborted && !liveAborted) {
+        liveAborted = true;
+        log(`${job.id} flagged aborted — killing opencode child`);
+        try { liveChild?.kill('SIGKILL'); } catch {}
+      }
+    } catch {
+      // a missed poll is retried on the next tick
+    }
+  }, 2000);
   try {
     const result = String(model || '').startsWith('cline:')
-      ? await runCline({ prompt, model: model.slice('cline:'.length), workspace, env, envMode })
-      : await runOpencode({ prompt, model, workspace, env, envMode, sessionId: resume.sessionId, timeoutMs: 900000 });
+      ? await runCline({
+          prompt, model: model.slice('cline:'.length), workspace, env, envMode,
+          onEvent: emitLive,
+          onSpawn: (child) => { liveChild = child; },
+        })
+      : await runOpencode({
+          prompt, model, workspace, env, envMode, sessionId: resume.sessionId, timeoutMs: 900000,
+          onEvent: emitLive,
+          onSpawn: (child) => { liveChild = child; },
+        });
     stampHere(model, result);
+    const noText = !String(result?.finalText || '').trim();
     return {
       jobId: job.id,
       text: String(result?.finalText || ''),
       code: Number(result?.code ?? 0),
       model,
-      error: String(result?.lastError || '').slice(0, 400),
+      error: liveAborted && noText ? 'aborted from Telegram (/abort)' : String(result?.lastError || '').slice(0, 400),
       ledger: LEDGER.dir,
       machine: MACHINE,
       // Back to the VM so the next turn on any host resumes the same thread.
@@ -229,7 +299,7 @@ async function runJob(job) {
       text: '',
       code: 1,
       model,
-      error: String(err?.message || err).slice(0, 400),
+      error: liveAborted ? 'aborted from Telegram (/abort)' : String(err?.message || err).slice(0, 400),
       ledger: LEDGER.dir,
       machine: MACHINE,
       sessionID: String(resume.sessionId || ''),
@@ -237,6 +307,8 @@ async function runJob(job) {
       workspace,
       packApplied,
     };
+  } finally {
+    clearInterval(abortPoll);
   }
 }
 

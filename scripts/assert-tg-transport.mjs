@@ -98,6 +98,7 @@ const { TelegramApi } = await import(
   const src = read('scripts/bot-host.mjs');
   check('bot-host keeps the 409 loud exit', src.includes('409 Conflict') && src.includes('Exiting.'));
   check('bot-host keeps the 429 throttle pause', src.includes('throttle.pause(err.retryAfter)'));
+  check('the long-poll hold is env-overridable, default 30', /timeout: Number\(process\.env\.TG_POLL_TIMEOUT\) \|\| 30/.test(src));
 }
 
 console.log(`\n${pass} pass, ${fail} fail`);

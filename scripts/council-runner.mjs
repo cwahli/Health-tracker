@@ -64,15 +64,52 @@ export function getCouncilPhases(projectId = 'external-1') {
   });
 }
 
+/**
+ * Where a workspace keeps its outputs. `result/` is the current layout;
+ * `output/` is the previous one. New layout wins when both exist; old workspaces
+ * keep working untouched.
+ */
+export function resultDir(workspace) {
+  const next = path.join(workspace, 'result');
+  if (fs.existsSync(next) && fs.statSync(next).isDirectory()) return next;
+  return path.join(workspace, 'output');
+}
+
+/** File lookup across the current layout with old-layout fallback. */
+export function findInWorkspace(workspace, ...candidates) {
+  for (const rel of candidates) {
+    const full = path.join(workspace, rel);
+    try {
+      if (fs.existsSync(full) && fs.statSync(full).isFile()) return rel;
+    } catch { /* unreadable entry is not a match */ }
+  }
+  return '';
+}
+
 export function readWorkspaceContext(workspace) {
   const context = {};
   if (!fs.existsSync(workspace)) return context;
-  const files = fs.readdirSync(workspace);
-  for (const f of files) {
-    const full = path.join(workspace, f);
-    if (fs.statSync(full).isFile() && f.endsWith('.md')) {
-      context[f] = fs.readFileSync(full, 'utf8');
+  // Root files (old layout) plus the current layout's case/ and working/ trees,
+  // keyed by relative path so same-named files cannot collide silently.
+  const readFile = (rel) => {
+    try {
+      context[rel] = fs.readFileSync(path.join(workspace, rel), 'utf8');
+    } catch { /* listed but unreadable: skip, do not fail the turn */ }
+  };
+  for (const f of fs.readdirSync(workspace)) {
+    if (f.endsWith('.md')) {
+      try {
+        if (fs.statSync(path.join(workspace, f)).isFile()) readFile(f);
+      } catch { /* ignore */ }
     }
+  }
+  for (const dir of ['case', 'working']) {
+    const abs = path.join(workspace, dir);
+    let entries = [];
+    try {
+      entries = fs.statSync(abs).isDirectory() ? fs.readdirSync(abs) : [];
+    } catch { /* absent dir: nothing to add */ }
+    for (const f of entries) if (f.endsWith('.md')) readFile(path.join(dir, f));
   }
   return context;
 }
@@ -81,10 +118,11 @@ export function getCouncilStatus(projectId = 'external-1') {
   const proj = KNOWN_PROJECTS[projectId];
   if (!proj) return { error: `Unknown project: ${projectId}` };
   const workspace = proj.workspace;
-  const outDir = path.join(workspace, 'output');
+  const outDir = resultDir(workspace);
 
   const files = fs.existsSync(workspace) ? fs.readdirSync(workspace) : [];
   const outputs = fs.existsSync(outDir) ? fs.readdirSync(outDir) : [];
+  const has = (...rels) => rels.some((r) => files.includes(r) || Boolean(findInWorkspace(workspace, r)));
 
   const phasesList = getCouncilPhases(projectId);
   const phases = phasesList.map((p) => {
@@ -102,13 +140,13 @@ export function getCouncilStatus(projectId = 'external-1') {
     name: proj.name,
     workspace,
     gdriveFolder: proj.gdriveFolder,
-    hasInputFacts: files.includes('01_Case_Facts_and_Timeline.md'),
-    hasEvidenceLedger: files.includes('02_Evidence_and_Metric_Ledger.md'),
+    hasInputFacts: has('01_Case_Facts_and_Timeline.md', 'case/01_Case_Facts_and_Timeline.md'),
+    hasEvidenceLedger: has('02_Evidence_and_Metric_Ledger.md', 'case/02_Evidence_and_Metric_Ledger.md'),
     phases,
     deliverablesReady:
-      files.includes('A_Executive_1-on-1_Talking_Points.md') &&
-      files.includes('B_Formal_Performance_Rating_Rebuttal.md') &&
-      files.includes('C_30_60_90_Performance_Alignment_Plan.md'),
+      has('A_Executive_1-on-1_Talking_Points.md', 'working/A_Executive_1-on-1_Talking_Points.md') &&
+      has('B_Formal_Performance_Rating_Rebuttal.md', 'working/B_Formal_Performance_Rating_Rebuttal.md') &&
+      has('C_30_60_90_Performance_Alignment_Plan.md', 'working/C_30_60_90_Performance_Alignment_Plan.md'),
   };
 }
 
@@ -156,7 +194,7 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
 
   seedProjectWorkspace(projectId);
   const workspace = proj.workspace;
-  const outDir = path.join(workspace, 'output');
+  const outDir = resultDir(workspace);
   fs.mkdirSync(outDir, { recursive: true });
 
   const context = readWorkspaceContext(workspace);
@@ -179,13 +217,18 @@ export async function runFullCouncil(projectId = 'external-1', onProgress = cons
     const outFile = path.join(outDir, phase.file);
     fs.writeFileSync(outFile, output, 'utf8');
     results[phase.id] = output;
-    onProgress(`✅ [Completed] ${phase.title} -> saved to output/${phase.file}`);
+    onProgress(`✅ [Completed] ${phase.title} -> saved to ${path.relative(workspace, outDir)}/${phase.file}`);
   }
 
-  // Update the master templates in the workspace with compiled deliverables
-  const talkingPoints = path.join(workspace, 'A_Executive_1-on-1_Talking_Points.md');
-  const rebuttal = path.join(workspace, 'B_Formal_Performance_Rating_Rebuttal.md');
-  const plan = path.join(workspace, 'C_30_60_90_Performance_Alignment_Plan.md');
+  // Update the master templates in the workspace with compiled deliverables.
+  // Working drafts live in working/ in the current layout; fall back to root.
+  const at = (name) => {
+    const hit = findInWorkspace(workspace, path.join('working', name), name);
+    return hit ? path.join(workspace, hit) : path.join(workspace, 'working', name);
+  };
+  const talkingPoints = at('A_Executive_1-on-1_Talking_Points.md');
+  const rebuttal = at('B_Formal_Performance_Rating_Rebuttal.md');
+  const plan = at('C_30_60_90_Performance_Alignment_Plan.md');
 
   onProgress(`📦 Final deliverables verified in workspace: ${workspace}`);
   return {

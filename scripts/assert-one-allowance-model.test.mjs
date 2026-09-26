@@ -430,7 +430,7 @@ try {
   // "ling-3.0-flash-f" in a 16-column name.
   const nameSrc = lanesSrc;
   check('a "-free" suffix on the model id is stripped, not left to eat the column',
-    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /const W_MODEL = MODEL_NAME_MAX/.test(nameSrc));
+    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /padChars\(name, MODEL_NAME_MAX\)/.test(nameSrc));
   // One cap for the column and for shortModelName(). Two numbers is how a 20-char
   // cap in a 24-char column still cut "nemotron-3.5-lightning" to
   // "nemotron-3.5-lightni" and "trinity-large-preview" to "trinity-large-previe".
@@ -573,16 +573,19 @@ try {
   check('every copy ends in a dash: 72 characters for a button, 72 cells for a line', (() => {
     const fl = read('lib/free-lanes.mjs');
     return /export const COPY_WIDTH = 72;/.test(fl)
+      && /export function fitCopy\(line\) \{/.test(fl)
       && /if \(n \+ 1 > COPY_WIDTH - 1\) break;/.test(fl)
+      && /export function fitCells\(line\) \{/.test(fl)
+      && /const cw = dispWidth\(ch\)/.test(fl)
       && /return `\$\{out\}-`;/.test(fl)
-      && /export function fitCells\(/.test(fl);
+      && !/EN_SPACE|enSpace/.test(fl);
   })());
   check('and the list is not repeated in the /freemodel message', !/tableForBody/.test(botSrc));
   check('the old space padding is gone with it', !/LEFT_PAD/.test(botSrc) && !/leftAlign/.test(botSrc));
   check('a button still carries the benchmark score', /score: benchmarkLabel\(model\)/.test(botSrc));
 
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
-  check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
+  check('a button is labelled the way /allowance labels the row', /shortModelName\(r\.lane \|\| \{ label \}\)/.test(botSrc));
   // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven
   // taps of "Next" to see the list, which is what the router's single list avoids.
   check('the keyboard is not paged', /all: true/.test(botSrc) && /kind: 'fm',\s*all: true/.test(botSrc.replace(/\s+/g, ' ')));

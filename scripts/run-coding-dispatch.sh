@@ -972,14 +972,21 @@ self_committed_changes() {
 
 commit_fix() {
   local msg="$1"
+  case "${AGENT_IDENTITY:-}" in
+    *\ \(*\)) ;;
+    *)
+      echo "[Dispatcher] AGENT_IDENTITY must be the model, version, and thinking level, e.g. AGENT_IDENTITY='Grok 4.7 (High)'."
+      return 1
+      ;;
+  esac
   if git -C "$CODER_DIR" config user.email >/dev/null 2>&1; then
-    git -C "$CODER_DIR" commit -m "$msg"
+    git -C "$CODER_DIR" commit -m "$msg" -m "Agent: $AGENT_IDENTITY"
   else
     GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-cwahli}" \
     GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-cwahli@users.noreply.github.com}" \
     GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-cwahli}" \
     GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-cwahli@users.noreply.github.com}" \
-    git -C "$CODER_DIR" commit -m "$msg"
+    git -C "$CODER_DIR" commit -m "$msg" -m "Agent: $AGENT_IDENTITY"
   fi
 }
 
@@ -1085,6 +1092,12 @@ Reverting this attempt's uncommitted changes..."
     if [ "$run_branch" = "main" ] || [ -z "$run_branch" ]; then
       run_branch="agent/dispatch-${DISPATCH_AREA}"
       git -C "$CODER_DIR" checkout -b "$run_branch" 2>/dev/null || true
+    fi
+    if [ -n "${BASE_HEAD:-}" ]; then
+      if ! "$REPO_DIR/scripts/check-agent-identity.sh" --range "${BASE_HEAD}..HEAD"; then
+        tg_msg "⚠️ *[Orchestrator]* \`$BUG_ID\` has a commit with no agent identity. Each commit needs \`Agent: <model and version> (<thinking level>)\`, e.g. \`Agent: Grok 4.7 (High)\`."
+        return 1
+      fi
     fi
     if ! git -C "$CODER_DIR" push -u origin "$run_branch"; then
       echo "[Dispatcher] Error: git push $run_branch failed."

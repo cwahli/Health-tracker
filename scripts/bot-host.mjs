@@ -25,6 +25,7 @@ import {
   ensureTmuxWorkView,
   disableTmuxObserver,
   createObserver,
+  scrubSecrets,
   WORK_VIEW_SESSION,
   workViewTarget,
   repointWorkView,
@@ -98,6 +99,8 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
+import { recordTurn, storeStatus, flushTurns } from './lib/turn-store.mjs';
+import { ensureTurnLog, makeSends, writerFor } from './lib/google-writer.mjs';
 // R-16: the score on a button is the bakeoff ledger's own verdict, and the tier
 // is the catalog's. Both live in the catalogs, so there is no ratings table here
 // to drift from them. A model with no ledger row renders "unranked".
@@ -105,6 +108,8 @@ import { scoreLabelFor, benchmarkLabel, walkTierRank, tierForModel } from './lib
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
+  isAddressedToUs,
+  chatKind,
   BOT_COMMANDS,
   toTelegramCommands,
   assertValidCommands,
@@ -225,6 +230,45 @@ function printConfig(config, registryPath) {
   console.log(`registry: ${registryPath}`);
   console.log(JSON.stringify(config, null, 2));
 }
+
+/**
+ * Store flush loop (G-1). Runs on its own timer, never in the message path.
+ *
+ * A turn spools and returns; this drains the spool in the background. The interval
+ * is deliberately unhurried: Drive and Sheets both rate-limit, and a queue that
+ * retries harder than the API forgives turns a slow provider into data loss.
+ */
+function startStoreFlusher(config) {
+  const tick = async () => {
+    if (storeFlushBusy) return;
+    storeFlushBusy = true;
+    try {
+      const status = storeStatus(config.id);
+      if (!status.pending) return;
+      const writer = await writerFor(process.env);
+      if (!writer.ok) {
+        storeFlushNote = writer.reason || 'store not ready';
+        return;
+      }
+      const report = await flushTurns(config.id, makeSends(writer, process.env));
+      storeFlushNote = report.failed
+        ? `${report.sent} sent, ${report.failed} failed — ${report.firstError}`
+        : `${report.sent} sent`;
+      if (report.sent) storeFlushNote = `${storeFlushNote} at ${new Date().toISOString().slice(11, 19)}Z`;
+    } catch (err) {
+      storeFlushNote = `flush error: ${String(err && err.message ? err.message : err).slice(0, 120)}`;
+    } finally {
+      storeFlushBusy = false;
+    }
+  };
+  const timer = setInterval(tick, STORE_FLUSH_MS);
+  timer.unref?.();
+  return { timer, tick };
+}
+
+let storeFlushBusy = false;
+let storeFlushNote = '';
+const STORE_FLUSH_MS = Number(process.env.GOOGLE_STORE_FLUSH_MS || 120000);
 
 function stateDir(id) {
   const dir = path.join(HOME, '.local', 'state', 'bot-host', id);
@@ -612,7 +656,7 @@ export function attemptFailureText(result) {
  * It never falls back to running locally: the caller decides whether to hold
  * the turn (guard 5) rather than silently spending this machine's allowance.
  */
-export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3, packRoot = '', relayToken = process.env.WORKER_RELAY_TOKEN || '' } = {}) {
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3, packRoot = '', relayToken = process.env.WORKER_RELAY_TOKEN || '', onJob = null, onEvent = null } = {}) {
   // Guard 4: presence → relay → workspace → session, each named, first failure
   // wins, so a bad target is caught before a job exists — not after a worker
   // has claimed it.
@@ -658,6 +702,13 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
   }
   const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode, canary, packId });
   console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}${canary ? ' (canary)' : ''}`);
+  // Let the caller register the run (abort map) and stream live events (TG
+  // headline + watch feed + observer) while the turn runs elsewhere.
+  if (typeof onJob === 'function') {
+    try { onJob({ jobId: job.id }); } catch {
+      // registration must never break the hand-off
+    }
+  }
   const deadline = Date.now() + timeoutMs;
   const budget = Math.max(1000, Math.ceil(timeoutMs / Math.max(1, attempts)));
   let lastError = `worker ${host} did not answer in time`;
@@ -665,7 +716,12 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
   for (let attempt = 1; attempt <= Math.max(1, attempts); attempt++) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    const done = await awaitJob(job.id, { timeoutMs: Math.min(budget, remaining) });
+    const done = await awaitJobWithEventPump(job.id, {
+      timeoutMs: Math.min(budget, remaining),
+      relay,
+      relayToken,
+      ...(typeof onEvent === 'function' ? { onEvent } : {}),
+    });
     if (done?.result) {
       return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null, attempts: attempt, packManifest };
     }
@@ -960,13 +1016,18 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // 72 characters rendered anywhere from 386px to 465px and half the keyboard
     // lost its middle. rowWidth() puts every column at a fixed em offset and
     // every button at COPY_UNITS (24em = 408px), the tier heading's own width.
-    // A button is no longer a second, shorter vocabulary for a row that already
-    // exists.
+    // The name goes through shortModelName — the same helper the table's Name
+    // column uses — because the raw label carries the surface prefix ("OpenCode
+    // Muse Spark 1.3 Cont"), which truncated to a different cut per row and put
+    // the plan code against a different letter every time. The reset is the
+    // compact countdown, never the absolute label: `resetLabel` is a full
+    // timestamp, and fifteen characters of it read "2026-09-26T1".
+    const name = shortModelName(r.lane || { label });
     const rawReset = String(r.resetIn || r.resetLabel || '');
     const resetSource = r.resetAt ?? (/^\d{4}-\d{2}-\d{2}/.test(rawReset) ? rawReset : null);
     const rated = rowWidth({
       mark: unusableOf(r) ? '❌' : '✅',
-      name: shortModelName(r.lane || { label }),
+      name,
       plan: tag,
       score: benchmarkLabel(model) || '—',
       resetIn: resetSource ? formatResetIn(resetSource, now) : (rawReset && rawReset !== '-' ? rawReset : '—'),
@@ -995,6 +1056,206 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
 /** Usable rows the ledger has no record for: honest, not hidden. */
 function missingCount(rows) {
   return rows.filter((r) => r.inLedger === false).length;
+}
+
+/**
+ * TG-native live work view (replaces tmux tail for the phone).
+ *
+ * Why this exists: tmux `work-view` is host-local — it cannot cross the
+ * VM<->phone relay, needs a terminal to attach, and is invisible from the TG
+ * chat. The event channel (worker POSTs /jobs/event, bot-host GETs
+ * /jobs/<id>/events) carries the same onEvent stream the local run already
+ * fans out to the headline + observer log, so remote turns are no longer a
+ * black box that only delivers final text.
+ *
+ * Three pieces, all additive:
+ * - watch pref per chat (`/watch on|off`): verbose thinking + per-tool feed.
+ *   The throttled headline stays always; the feed is opt-in so a chatty turn
+ *   does not spam a quiet chat.
+ * - formatLiveEvent(): one TG-safe chunk per tool/reasoning/error/step
+ *   event. Secrets are scrubbed (same scrubSecrets as the observer view) and
+ *   input/output are clipped — a tool argument must never leak a token or
+ *   flood the chat. Partial text is skipped: it accumulates into the final
+ *   answer, which is delivered whole, so streaming it too would double-post.
+ * - follow-up queue: a message sent while busy queues (max 5) instead of
+ *   being rejected; the turn loop drains it as new turns on the same
+ *   session. /abort clears the current run; /new clears the queue too.
+ * - /tui: opens a real terminal for THIS conversation as a Telegram Mini App.
+ *   ttyd serves a PTY, the cloudflared wrapper publishes its public URL to a
+ *   state file, and /tui reads it (empty = tunnel down, say so). There is no
+ *   /web any more: `opencode web` is a chat client rather than a terminal, and
+ *   it fought the WebView three separate ways (Basic auth it cannot answer, a
+ *   project list held in browser storage, no stable deep link).
+ */
+
+export const MAX_FOLLOWUPS = 5;
+const followupQueues = new Map();
+// The tunnel URL this process last handed out. A quick tunnel's hostname changes
+// on every reconnect, so this is how /tui knows an older button is now dead.
+let lastMiniappUrl = '';
+
+export function watchOn(prefs, chatId) {
+  return prefFor(prefs, chatId)?.watch === true;
+}
+
+export function setWatch(prefs, chatId, on) {
+  setPref(prefs, chatId, { watch: Boolean(on) });
+}
+
+export function queuedFollowups(chatId) {
+  return followupQueues.get(String(chatId)) || [];
+}
+
+export function queueFollowup(chatId, text) {
+  const key = String(chatId);
+  const queue = followupQueues.get(key) || [];
+  if (queue.length >= MAX_FOLLOWUPS) return null;
+  queue.push(String(text));
+  followupQueues.set(key, queue);
+  return queue.length;
+}
+
+export function shiftFollowup(chatId) {
+  const key = String(chatId);
+  const queue = followupQueues.get(key) || [];
+  const next = queue.shift() || null;
+  if (queue.length) followupQueues.set(key, queue);
+  else followupQueues.delete(key);
+  return next;
+}
+
+export function clearFollowups(chatId) {
+  followupQueues.delete(String(chatId));
+}
+
+/** One short TG-safe line per live event. Null = nothing worth posting. */
+export function formatLiveEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  const kind = String(event.kind || '');
+  if (kind === 'tool') {
+    const tool = String(event.tool || 'tool').slice(0, 80);
+    const status = String(event.status || '').slice(0, 40);
+    const input = String(event.input || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    const output = String(event.output || '').replace(/\s+/g, ' ').trim().slice(0, 800);
+    const bits = [status ? `🔧 ${tool} (${status})` : `🔧 ${tool}`];
+    if (input) bits.push(`in: ${input}`);
+    if (output) bits.push(`out: ${output}`);
+    return scrubSecrets(bits.join('\n')).slice(0, 1200);
+  }
+  if (kind === 'reasoning' && String(event.text || '').trim()) {
+    // Full live thinking (the headline only carries the compressed gist).
+    // Capped per event; a long think streams as several 🧠 messages.
+    return scrubSecrets(`🧠 ${String(event.text).replace(/\s+/g, ' ').trim()}`).slice(0, 1500);
+  }
+  if (kind === 'error') {
+    return scrubSecrets(`❌ ${String(event.message || 'error').replace(/\s+/g, ' ').trim().slice(0, 400)}`).slice(0, 900);
+  }
+  if (kind === 'step_finish') {
+    const tokens = Number(event.tokens);
+    return Number.isFinite(tokens) && tokens > 0 ? `▫️ step done — ${tokens} tokens` : null;
+  }
+  // Partial text is skipped on purpose: it accumulates into the final answer,
+  // which is delivered whole at the end — streaming it too would double-post
+  // every reply for watchers.
+  return null;
+}
+
+/** Relay live-channel helpers: same bearer token as the job hand-off. */
+function relayAuthHeaders(token = process.env.WORKER_RELAY_TOKEN || '') {
+  const t = String(token || '');
+  return t ? { authorization: `Bearer ${t}` } : {};
+}
+
+export async function fetchRelayEvents(relay, jobId, after = 0, { token = process.env.WORKER_RELAY_TOKEN || '' } = {}) {
+  try {
+    const res = await fetch(`${relayUrl({ url: relay })}/jobs/${encodeURIComponent(jobId)}/events?after=${Number(after) || 0}`, {
+      headers: relayAuthHeaders(token),
+    });
+    if (!res.ok) return { events: [], nextAfter: Number(after) || 0, done: false, aborted: false };
+    const body = await res.json().catch(() => ({}));
+    return {
+      events: Array.isArray(body?.events) ? body.events : [],
+      nextAfter: Number(body?.nextAfter ?? after) || 0,
+      done: Boolean(body?.done),
+      aborted: Boolean(body?.aborted),
+    };
+  } catch {
+    return { events: [], nextAfter: Number(after) || 0, done: false, aborted: false };
+  }
+}
+
+export async function postRelayAbort(relay, jobId, { token = process.env.WORKER_RELAY_TOKEN || '' } = {}) {
+  try {
+    const res = await fetch(`${relayUrl({ url: relay })}/jobs/abort`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...relayAuthHeaders(token) },
+      body: JSON.stringify({ jobId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * awaitJob plus the live event pump: while the worker runs the turn elsewhere,
+ * poll the relay event channel and fan each new event out through onEvent
+ * (headline + observer + watch feed). Without onEvent this is plain awaitJob —
+ * zero behavior change for callers that do not stream.
+ */
+export async function awaitJobWithEventPump(jobId, { timeoutMs = 600000, pollMs = 1000, relay = '', relayToken = '', onEvent = null } = {}) {
+  if (typeof onEvent !== 'function') return awaitJob(jobId, { timeoutMs, pollMs });
+  const deadline = Date.now() + timeoutMs;
+  let after = 0;
+  for (;;) {
+    const job = getJob(jobId);
+    if (job?.doneAt) return job;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return getJob(jobId)?.doneAt ? getJob(jobId) : null;
+    const feed = await fetchRelayEvents(relay, jobId, after, { token: relayToken });
+    after = feed.nextAfter;
+    for (const ev of feed.events) {
+      try { await onEvent(ev); } catch {
+        // a renderer hiccup must never break the wait
+      }
+    }
+    const recheck = getJob(jobId);
+    if (recheck?.doneAt) return recheck;
+    await new Promise((r) => setTimeout(r, Math.min(1500, remaining)));
+  }
+}
+
+/**
+ * Post one verbose feed line when /watch is on. Best-effort: a feed hiccup
+ * must never break the turn. Uses chunkForTelegram so a long tool argument
+ * splits exactly like a final answer does.
+ */
+export async function postLiveFeed(api, chatId, event) {
+  const line = formatLiveEvent(event);
+  if (!line) return;
+  try {
+    for (const p of chunkForTelegram(line)) {
+      await api.sendMessage(chatId, p.text, p.extra);
+    }
+  } catch {
+    // feed failures stay silent; the headline + final answer carry the turn
+  }
+}
+
+/** Phone-hosted opencode web UI (Mini App test): the cloudflared wrapper
+ * publishes the current public URL here; /web reads it into a web_app
+ * button. Empty = the tunnel is down (it restarts itself; say so). */
+export function miniappUrlFile() {
+  return process.env.MINIAPP_URL_FILE || '/data/data/com.termux/files/home/.phone-miniapp-url';
+}
+
+export function readMiniappUrl(file = miniappUrlFile()) {
+  try {
+    const url = String(fs.readFileSync(file, 'utf8')).trim();
+    return /^https:\/\/[A-Za-z0-9.-]+(\/.*)?$/.test(url) ? url : '';
+  } catch {
+    return '';
+  }
 }
 
 export class ProgressRenderer {
@@ -1056,6 +1317,32 @@ export class ProgressRenderer {
     }
     this.startedAt = Date.now();
     this._startTyping();
+  }
+
+  /**
+   * Post the headline immediately (status: starting) instead of waiting for
+   * the model's first thinking/tool event. A slow lane can take a minute to
+   * emit anything, and until then the chat stares at bare typing with no
+   * proof the turn started. Call after setHeadline so the first paint already
+   * names the right provider + model. Never throws — a failed create just
+   * falls back to the old lazy path (first event creates it).
+   */
+  async announce() {
+    if (this.dryRun || this.messageId != null || this.creating || Date.now() < this.createRetryAt) return;
+    this.creating = true;
+    try {
+      const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
+      if (result?.message_id != null) {
+        this.messageId = result.message_id;
+        if (typeof this.onMessageId === 'function') {
+          try { this.onMessageId(this.messageId); } catch {}
+        }
+      } else {
+        this.createRetryAt = Date.now() + 5000;
+      }
+    } finally {
+      this.creating = false;
+    }
   }
 
   _startTyping() {
@@ -1752,6 +2039,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'new':
       sessions.delete(chatId);
       saveSessions(config.id, sessions);
+      clearFollowups(chatId);
       await api.sendMessage(chatId, 'Started a fresh session.');
       return;
 
@@ -1886,6 +2174,47 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'store': {
+      // G-1's face in the chat. The store is a background concern, so the honest
+      // thing is to let a human ask how it is doing and force a drain on demand —
+      // rather than discovering a broken queue from a missing row days later.
+      const sub = String(args[0] || 'status').toLowerCase();
+      const status = storeStatus(config.id);
+      if (sub === 'flush') {
+        const writer = await writerFor(process.env, { force: true });
+        if (!writer.ok) {
+          await api.sendMessage(chatId, `<b>Store</b> — cannot flush: ${escapeHtml(writer.reason || 'not enrolled')}`, { parse_mode: 'HTML' });
+          return;
+        }
+        await api.sendMessage(chatId, '<b>Store</b> — flushing…', { parse_mode: 'HTML' });
+        const report = await flushTurns(config.id, makeSends(writer, process.env), { limit: 200 });
+        const after = storeStatus(config.id);
+        const lines = [
+          '<b>Store flush</b>',
+          `sent: ${report.sent} · failed: ${report.failed} · still queued: ${after.pending}`,
+          report.firstError ? `first error: ${escapeHtml(report.firstError.slice(0, 200))}` : '',
+          `identity: ${escapeHtml(writer.kind)}${writer.account ? ` (${escapeHtml(writer.account)})` : ''}`,
+        ].filter(Boolean);
+        await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'HTML' });
+        return;
+      }
+      const writer = await writerFor(process.env);
+      const rows = status.pending
+        ? Object.entries(status.byKind).map(([k, v]) => `${k}: ${v}`).join(' · ')
+        : 'nothing queued';
+      const lines = [
+        '<b>Google store</b>',
+        `queued: ${status.pending}${status.pending ? ` (${rows})` : ''}`,
+        `oldest: ${status.oldest ? escapeHtml(status.oldest) : '—'}`,
+        `identity: ${writer.ok ? escapeHtml(`${writer.kind}${writer.account ? ` · ${writer.account}` : ''}`) : `not ready — ${escapeHtml(writer.reason || '')}`}`,
+        storeFlushNote ? `last flush: ${escapeHtml(storeFlushNote)}` : '',
+        `spool: ${escapeHtml(status.dir)}`,
+        '',
+        '/store flush — drain the queue now',
+      ].filter(Boolean);
+      await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'HTML' });
+      return;
+    }
     case 'freemodel': {
       // The union, not the raw catalog: getAnnotatedFreeModels folds the ledger's
       // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
@@ -2056,11 +2385,72 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           }
         }, 3000);
       } catch {
-        // already gone
+        // already gone (remote turns have no local child — the relay flag below does it)
+      }
+      // Remote turn: the worker polls the aborted flag and SIGKILLs its own
+      // opencode child. Fire-and-forget — the worker's own poll is the kill.
+      if (active.jobId) {
+        postRelayAbort(active.relay || '', active.jobId).catch(() => {});
       }
       await api.sendMessage(chatId, 'Aborting the running request...');
       const workId = sessionKey({ location: workLocation(), chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       abortSession(workId, { transcriptRef: sessions.get(chatId) || null });
+      return;
+    }
+
+    case 'watch': {
+      const sub = String(cmd.args || '').trim().toLowerCase();
+      if (sub === 'on') {
+        setWatch(prefs, chatId, true);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '👁 Live feed ON — thinking (🧠) + every tool call (🔧 with in/out) post here while a turn runs. /watch off to mute.');
+        return;
+      }
+      if (sub === 'off') {
+        setWatch(prefs, chatId, false);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '👁 Live tool feed OFF — the working headline still updates. /watch on to re-enable.');
+        return;
+      }
+      const on = watchOn(prefs, chatId);
+      await api.sendMessage(chatId, `👁 Live tool feed is ${on ? 'ON' : 'OFF'}. Usage: /watch on|off — thinking + per-tool lines in this chat while a turn runs (the working headline always updates).`);
+      return;
+    }
+
+    case 'tui': {
+      // The actual TUI: ttyd serves a real PTY and mounts it under the same
+      // tunnel and the same login, so this is a terminal you type into from
+      // inside Telegram. It attaches to THIS chat's opencode session in THIS
+      // checkout (resolved per attach by tui-attach.sh), so it is the same
+      // conversation, not a second agent — which is why a message you send
+      // here shows up there.
+      //
+      // There is deliberately no /web any more. `opencode web` is a chat client,
+      // not a terminal, and every attempt to make it useful from a phone hit a
+      // wall that was the app's own doing: HTTP Basic auth a WebView cannot
+      // answer, a project list kept in browser storage so a fresh WebView opens
+      // empty, and no deep link that survives a tunnel hostname change. The TUI
+      // covers the same ground and is strictly better on a phone; browsing older
+      // sessions is a /sessions picker away inside the TUI itself.
+      const tuiUrl = readMiniappUrl();
+      if (!tuiUrl) {
+        await api.sendMessage(chatId, '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.');
+        return;
+      }
+      // A quick tunnel's hostname changes on every reconnect, so a button sent
+      // in an older message opens a tunnel that no longer exists and the WebView
+      // fails with nothing to explain it. Say so rather than let the tap look
+      // broken.
+      const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
+      lastMiniappUrl = tuiUrl;
+      await api.sendMessage(chatId, [
+        moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
+        '⌨️ *opencode TUI* — a real terminal, driven by touch, attached to *this* conversation in `/root/Health-tracker`.',
+        'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.',
+        'It refuses to attach while I am mid-turn — two agents writing one session corrupts it. First tap asks for the password once.',
+      ].filter(Boolean).join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/tui/` } }]] },
+      });
       return;
     }
 
@@ -2340,7 +2730,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
   }
 }
 
-async function handleCallback({ api, config, prefs, caches, query }) {
+async function handleCallback({ api, config, prefs, caches, running = null, query }) {
   const chatId = query.message?.chat?.id;
   const messageId = query.message?.message_id;
   const userId = Number(query.from?.id);
@@ -2516,6 +2906,39 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         reply_markup: CLEAR_KEYBOARD,
       });
       await api.answerCallbackQuery(query.id, { text: variant });
+      return;
+    }
+    // Live-view controls (sent with every turn's control line): Abort kills
+    // the run exactly like /abort; Watch toggles the per-tool feed.
+    if (kind === 'abort') {
+      const active = running?.get(chatId);
+      if (!active) {
+        await api.answerCallbackQuery(query.id, { text: 'Nothing is running' });
+        return;
+      }
+      active.aborted = true;
+      await abortOpencodeSession({ serverUrl: active.serverUrl, sessionId: active.opencodeSessionId }).catch(() => false);
+      try {
+        active.child.kill('SIGTERM');
+        setTimeout(() => {
+          try { active.child.kill('SIGKILL'); } catch {}
+        }, 3000);
+      } catch {
+        // remote turns have no local child — the relay flag below does it
+      }
+      if (active.jobId) postRelayAbort(active.relay || '', active.jobId).catch(() => {});
+      await api.answerCallbackQuery(query.id, { text: 'Aborting…' });
+      await api.sendMessage(chatId, 'Aborting the running request...').catch(() => {});
+      return;
+    }
+    if (kind === 'watch') {
+      const on = String(value || '').toLowerCase() === 'on';
+      setWatch(prefs, chatId, on);
+      savePrefs(config.id, prefs);
+      await api.answerCallbackQuery(query.id, { text: on ? 'Tool feed on' : 'Tool feed off' });
+      await api.editMessageText(chatId, messageId, `👁 Live tool feed ${on ? 'ON' : 'OFF'} — ${on ? 'thinking + every tool call post here while a turn runs.' : 'muted; the working headline still updates.'}`, {
+        reply_markup: CLEAR_KEYBOARD,
+      }).catch(() => {});
       return;
     }
     await api.answerCallbackQuery(query.id);
@@ -2775,11 +3198,76 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
   return result;
 }
 
-async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message }) {
+/**
+ * Is the TUI holding this conversation right now?
+ *
+ * The TUI is the same opencode session the bot answers in, so a chat turn and
+ * an attached terminal cannot both write it. tui-attach.sh publishes a lease
+ * with a heartbeat; a lease older than TUI_LEASE_MAX_AGE_MS is treated as
+ * free, because the alternative — a phone that dies holding a lease — would
+ * block the chat permanently with no way to clear it.
+ */
+const TUI_LEASE_MAX_AGE_MS = 90_000;
+
+function tuiLeasePath(botId) {
+  return path.join(stateDir(botId), 'tui-lease.json');
+}
+
+export function tuiHoldsConversation(botId, sessionId) {
+  let lease;
+  try {
+    lease = JSON.parse(fs.readFileSync(tuiLeasePath(botId), 'utf8'));
+  } catch {
+    return false; // no lease, or unreadable: nobody is holding it
+  }
+  const heartbeat = Number(lease?.heartbeat || 0);
+  if (!heartbeat || Date.now() - heartbeat > TUI_LEASE_MAX_AGE_MS) return false;
+  const held = String(lease?.session || '');
+  const wanted = String(sessionId || '');
+  // A lease with no session id predates the id, so treat it as "the chat is
+  // held" rather than guessing. A lease for a *different* session is not ours
+  // to block.
+  return !held || !wanted || held === wanted;
+}
+
+const tuiDrainTimers = new Map();
+
+/**
+ * Run whatever was queued while the TUI held the conversation, once it lets go.
+ * The queue itself is already bounded (MAX_FOLLOWUPS); this only has to notice
+ * the lease clearing, which nothing else is watching for.
+ */
+function scheduleTuiQueueDrain(ctx) {
+  const chatId = String(ctx.message.chat.id);
+  if (tuiDrainTimers.has(chatId)) return;
+  const deadline = Date.now() + 30 * 60 * 1000;
+  const tick = async () => {
+    if (ctx.busy.has(ctx.message.chat.id) || Date.now() > deadline) {
+      tuiDrainTimers.delete(chatId);
+      return;
+    }
+    if (tuiHoldsConversation(ctx.config.id, ctx.sessions.get(ctx.message.chat.id))) {
+      setTimeout(tick, 15_000).unref?.();
+      return;
+    }
+    tuiDrainTimers.delete(chatId);
+    if (shiftFollowup(chatId) == null) return;
+    await api.sendMessage(chatId, '▶️ TUI released the conversation — running what you queued.').catch(() => {});
+    await handleMessage({ ...ctx, message: { ...ctx.message, text: shiftFollowup(chatId) || '' }, depth: 1 });
+  };
+  tuiDrainTimers.set(chatId, setTimeout(tick, 15_000));
+}
+
+async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
   if (!config.telegram.allowedUserIds.includes(userId)) {
     console.warn(`[${config.id}] ignored message from unauthorized user ${userId}`);
+    return;
+  }
+  // Five bots can share one group only if each answers solely when addressed.
+  // Direct chats skip this entirely: everything there is for this bot.
+  if (chatKind(message) === 'group' && !isAddressedToUs(message, config.me)) {
     return;
   }
   const text = (message.text || message.caption || '').trim();
@@ -2793,7 +3281,43 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }
 
   if (busy.has(chatId)) {
-    await api.sendMessage(chatId, 'Still working on the previous request. Send /abort to cancel or /new to reset.');
+    // Direct phone interaction: a message sent mid-run queues as a follow-up
+    // turn instead of being rejected. Commands still run (handled above), so
+    // /abort cancels the current run while the queue stays queued.
+    if (hasMedia) {
+      await api.sendMessage(chatId, 'Still working — photos/files cannot queue, please resend them when this turn finishes (/abort to cancel it).');
+      return;
+    }
+    if (!text) return;
+    const pos = queueFollowup(chatId, text);
+    if (pos == null) {
+      await api.sendMessage(chatId, `Follow-up queue is full (${MAX_FOLLOWUPS}). Send /abort to cancel the current run, or wait.`);
+      return;
+    }
+    await api.sendMessage(chatId, `⏳ Queued as follow-up #${pos} — runs when the current turn finishes. Send /abort to cancel the current run (the queue stays).`);
+    return;
+  }
+
+  // The TUI holds this same conversation while a terminal client is attached,
+  // so a message typed here would race a second writer on one session. Defer
+  // instead: queue it, and say plainly why. tui-attach.sh holds that lease with
+  // a heartbeat, so a phone that dies mid-session does not block the chat
+  // forever — an expired heartbeat reads as free.
+  if (tuiHoldsConversation(config.id, sessions.get(chatId))) {
+    if (hasMedia) {
+      await api.sendMessage(chatId, 'The TUI has this conversation open right now, and photos/files cannot queue. Send it from the terminal, or close the TUI and resend here.');
+      return;
+    }
+    const pos = queueFollowup(chatId, text);
+    if (pos == null) {
+      await api.sendMessage(chatId, `The TUI has this conversation, and the follow-up queue is full (${MAX_FOLLOWUPS}). Close the TUI and resend.`);
+      return;
+    }
+    await api.sendMessage(chatId, [
+      `⌨️ Queued as follow-up #${pos} — you are in the TUI on this same conversation, so I held it rather than write to it from two places.`,
+      'It runs by itself when you close the TUI (or send /abort in there to let go).',
+    ].join('\n'));
+    scheduleTuiQueueDrain({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message });
     return;
   }
 
@@ -2844,6 +3368,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   let observer = null;
   let observerContext = null;
   let observerTerminalWritten = false;
+  // G-1 store facts. Declared out here because `result` and `displayResult` live
+  // inside the try, and the record happens in the finally — where a turn that threw
+  // must still be recorded. `turnStartedAt` doubles as the turn id, so a retry of
+  // the same turn spools under the same name and stays idempotent.
+  const turnStartedAt = Date.now();
+  const storeFacts = { bot: config.id, chat: chatId, location: process.env.LOCATION || '', at: new Date(turnStartedAt).toISOString() };
   try {
     await renderer.start();
     const eff = effective(config, prefs, chatId);
@@ -2854,6 +3384,24 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       providerLabel: providerLabelForModel(eff.model),
       modelLabel: eff.model || '',
     });
+    // Paint the headline now (starting… 0s) so the chat sees the turn begin
+    // at once; the old lazy path left only bare typing until the first
+    // model event, which on a slow lane looks stuck.
+    await renderer.announce().catch(() => {});
+    // Phone controls for the run: Abort kills it like /abort, Watch toggles
+    // the per-tool feed. Best-effort and stateless — taps after the run ends
+    // just answer what is true then ("nothing running" / pref flip).
+    {
+      const watchNow = watchOn(prefs, chatId);
+      await api.sendMessage(chatId, `🎛 Run controls — ⏹ aborts this turn, 👁 toggles the per-tool feed (now ${watchNow ? 'ON' : 'OFF'}).`, {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '⏹ Abort', callback_data: 'abort' },
+            { text: watchNow ? '👁 Watch off' : '👁 Watch on', callback_data: watchNow ? 'watch:off' : 'watch:on' },
+          ]],
+        },
+      }).catch(() => {});
+    }
     const handoff = prefFor(prefs, chatId).handoff || '';
     const quotedPrompt = buildQuotedPrompt(text, message.reply_to_message);
     const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${quotedPrompt}` : quotedPrompt;
@@ -2896,6 +3444,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const location = desiredLocation(prefs, chatId) || workLocation();
     const workId = sessionKey({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id });
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
+    // G-1: everything about this turn that is already decided, recorded now rather
+    // than at the end. Turns return early in plenty of ways — a held remote route, an
+    // abort, a preflight refusal — and those are exactly the turns worth having in the
+    // log. The outcome is filled in later, where the result is in scope.
+    Object.assign(storeFacts, {
+      project: activeProject?.id || '',
+      role: activeProject?.activeRole || '',
+      model: eff.model || '',
+      lane: workLane,
+      location: location || storeFacts.location,
+      prompt: String(quotedPrompt || text || '').slice(0, 2000),
+      turnId: `${config.id}-${chatId}-${turnStartedAt}`,
+      outcome: 'started',
+    });
     let workSession = resolveSession({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id, lane: workLane });
     if (workSession.lane !== workLane) workSession = handoffSession(workId, workLane) || workSession;
     // A recorded TUI server can die while the session row lives on. Attaching
@@ -2930,7 +3492,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     if (workSession.viewMode !== 'tui' && sessions.get(chatId)) extraArgs.push('--session', sessions.get(chatId));
     try { observer = createObserver(workSession); } catch {}
     observerContext = { model: eff.model, attempt: 1, surface: ref.surface, provider: ref.surface };
-    const onObserverEvent = (event) => fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+    // Local fanout: headline + observer log always; thinking + per-tool TG
+    // feed only when /watch is on for this chat. The feed is fire-and-forget
+    // — a send hiccup must never break the run.
+    const onObserverEvent = (event) => {
+      fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+      if (watchOn(prefs, chatId)) postLiveFeed(api, chatId, event).catch(() => {});
+    };
     let lastAttemptModel = eff.model;
     const runSurfaceModel = (model) => {
       const candidate = parseModelRef(model);
@@ -3002,6 +3570,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         );
         return { done: true, held: true, reason: `route failed: ${why}`, handed: null };
       }
+      // Remote live view: the worker streams its onEvent records to the relay
+      // while the turn runs there. Fan each one through the same local
+      // fanout (headline + observer log) plus the watch feed when enabled —
+      // a remote turn looks exactly like a local one in this chat.
+      // Register the run first so /abort (and the Abort button) reaches it
+      // via the relay flag; the entry is cleared in the finally block.
+      // `wantCanary` is this function's parameter, not a route lookup: the
+      // caller decides whether this hop is a canary.
+      const onRemoteEvent = (event) => {
+        if (running.get(chatId)?.aborted) return;
+        fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+        if (watchOn(prefs, chatId)) postLiveFeed(api, chatId, event).catch(() => {});
+      };
+      if (observer) observer.write('run_start', {}, observerContext);
       const handed = await runOnWorker({
         host,
         prompt: finalPrompt,
@@ -3014,7 +3596,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         canary: wantCanary,
         preflightFull: wantCanary,
         packRoot: wantCanary ? effectiveWorkspace : '',
+        onJob: ({ jobId }) => running.set(chatId, { child: null, aborted: false, jobId, relay: '' }),
+        onEvent: onRemoteEvent,
       });
+      observerTerminalWritten = true;
+      if (observer) {
+        const wasAborted = Boolean(running.get(chatId)?.aborted);
+        observer.write(wasAborted ? 'aborted' : handed?.text ? 'run_complete' : 'failed', handed || {}, observerContext);
+      }
       if (handed?.preflight) {
         // Stale-session repair (decision 1b): a ghost thread id fails preflight
         // with session-404, which would hold every future remote turn forever.
@@ -3269,6 +3858,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // BOT-25 error log: a terminal lane failure opens (or bumps) a record;
     // the next clean run on the lane auto-closes it. Operator aborts are
     // never errors. Best-effort — never breaks the chat.
+    // The result is in scope here, so the early capture is refined rather than
+    // replaced — a turn that reached this point keeps its project/lane/prompt and
+    // gains an outcome, an answer and a duration.
+    Object.assign(storeFacts, {
+      model: lastAttemptModel || eff.model || storeFacts.model,
+      outcome: running.get(chatId)?.aborted ? 'aborted'
+        : String(result?.finalText || '').trim() ? 'answered'
+          : String(result?.lastError || '').trim() ? 'error' : 'empty',
+      ms: Date.now() - turnStartedAt,
+      answer: String(result?.finalText || '').slice(0, 4000),
+      note: String(displayResult?.lastError || result?.lastError || '').slice(0, 200),
+    });
     try {
       if (!running.get(chatId)?.aborted) {
         if (String(result?.finalText || '').trim()) {
@@ -3323,6 +3924,39 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     busy.delete(chatId);
     releaseFiles(claimed, claimId);
     recordRunFinish(config.id, chatId);
+    // G-1: a real finished turn is what the store exists to record. This is the
+    // only place it is written, it runs on every outcome (answered, empty, failed,
+    // aborted), and it cannot throw or await: a Google outage must not cost the
+    // chat its answer, and a turn must not wait on an API that can take minutes
+    // while Google's front door serves it a challenge page.
+    try {
+      // A turn that returned early still gets an honest outcome rather than the
+      // 'started' placeholder it was born with.
+      if (storeFacts.outcome === 'started') {
+        storeFacts.outcome = running.get(chatId)?.aborted ? 'aborted' : 'held';
+        storeFacts.ms = Date.now() - turnStartedAt;
+      }
+      recordTurn(storeFacts);
+    } catch (err) {
+      // A store that cannot record must be visible, not silent: /store shows the
+      // spool depth, and the turn above already reached the chat.
+      console.error(`[store] turn not recorded: ${String(err && err.message ? err.message : err).slice(0, 160)}`);
+    }
+    // Drain one queued follow-up as its own turn (depth-guarded; the queue
+    // itself is capped at MAX_FOLLOWUPS). busy is free again, so the recursive
+    // call runs the full turn path — headline, feed, failover, finish — and
+    // records its own turn in the store above.
+    if (depth < MAX_FOLLOWUPS) {
+      const next = shiftFollowup(chatId);
+      if (next) {
+        await api.sendMessage(chatId, `▶️ Running queued follow-up (${queuedFollowups(chatId).length} left in queue)…`).catch(() => {});
+        await handleMessage({
+          api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy,
+          message: { ...message, text: next, caption: undefined },
+          depth: depth + 1,
+        });
+      }
+    }
   }
 }
 
@@ -3358,7 +3992,9 @@ async function runLoop({ api, config }) {
   while (running_) {
     let updates;
     try {
-      updates = await api.getUpdates({ offset, timeout: 30, allowedUpdates: ['message', 'callback_query'] });
+      // Shorter holds survive hostile networks (phone radio, NAT timeouts):
+      // TG_POLL_TIMEOUT=10 on mobile. Default 30 everywhere else.
+      updates = await api.getUpdates({ offset, timeout: Number(process.env.TG_POLL_TIMEOUT) || 30, allowedUpdates: ['message', 'callback_query'] });
       health.okAt = Date.now();
       health.errAt = 0;
       health.err = '';
@@ -3379,7 +4015,7 @@ async function runLoop({ api, config }) {
       saveOffset(config.id, offset);
       if (update.callback_query) {
         track(
-          handleCallback({ api, config, prefs, caches, query: update.callback_query }).catch((err) => {
+          handleCallback({ api, config, prefs, caches, running, query: update.callback_query }).catch((err) => {
             console.error(`[${config.id}] callback handler error: ${err.message}`);
           }),
         );
@@ -3537,6 +4173,9 @@ async function main() {
   process.once('SIGTERM', giveLeaseBack);
   process.once('SIGINT', giveLeaseBack);
   setInterval(() => renewPollerLease({ key: config.id, host: workLocation(), pid: process.pid }), 60_000).unref();
+  // G-1: drain the Google spool in the background. Started once per bot, beside the
+  // lease renewer, so a store outage never has a path into a chat turn.
+  startStoreFlusher(config);
 
   const token = resolveToken(bot);
   const api = new TelegramApi(token);
@@ -3567,6 +4206,9 @@ async function main() {
     }
   }
   console.log(`[${config.id}] connected as @${me.username}`);
+// Group addressing needs to know who this process is. Without it, five bots in
+// one group would all answer everything.
+config.me = { id: Number(me.id) || 0, username: String(me.username || '') };
   try {
     assertValidCommands(BOT_COMMANDS);
     await api.call('setMyCommands', { commands: toTelegramCommands() });

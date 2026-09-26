@@ -7,7 +7,8 @@
  * machine, and posts the result back.
  *
  * Store: ~/.hermes/worker-jobs/<jobId>.json
- *   { id, host, prompt, model, project, role, workspace, sessionId, createdAt, claimedAt, doneAt, result }
+ *   { id, host, prompt, model, project, role, workspace, sessionId, createdAt, claimedAt, doneAt, result,
+ *     events, aborted, abortedAt }
  * `workspace` travels as a project id (health-tracker, external-2), never as a
  * machine path: /home/ubuntu/src/Health-tracker is this machine's checkout and
  * means nothing on the notebook that claims the job. `sessionId` is the
@@ -15,6 +16,16 @@
  * turn loses its history on the far side.
  * A job is claimed once. A worker that dies holding a claim does not strand the
  * turn: claimLeaseMs decides when the job may be handed to somebody else.
+ *
+ * Live view (TG-native, replaces tmux tail): while the worker runs the turn it
+ * POSTs sanitized progress events (tool/thinking/error/step) to the relay via
+ * appendJobEvent(). The bot-host polls readJobEvents() while awaiting the
+ * result and fans each event out to the TG headline, the verbose watch feed,
+ * and the observer log. Events are capped (count + bytes) so a chatty turn
+ * cannot grow the job file without bound. `aborted` lets /abort (and the Abort
+ * inline button) reach a remote turn: the VM posts /jobs/abort, and the worker
+ * — which cannot read this store, it is the VM's — polls the relay's
+ * /jobs/<id>/status every couple of seconds and SIGKILLs its opencode child.
  */
 
 import fs from 'node:fs';
@@ -23,6 +34,10 @@ import path from 'node:path';
 import { projectIdForWorkspace } from './work-session.mjs';
 
 export const DEFAULT_LEASE_MS = 5 * 60 * 1000;
+
+/** Live-event channel bounds: a chatty turn must not grow the job file. */
+export const MAX_JOB_EVENTS = 500;
+export const MAX_JOB_EVENT_CHARS = 2000;
 
 export function jobsDir(home = os.homedir()) {
   return path.join(home, '.hermes', 'worker-jobs');
@@ -82,6 +97,9 @@ export function enqueueJob(job, { home = os.homedir(), now = Date.now() } = {}) 
     claimedAt: null,
     doneAt: null,
     result: null,
+    events: [],
+    aborted: false,
+    abortedAt: null,
   };
   write(jobPath(id, home), row);
   return row;
@@ -167,6 +185,72 @@ export function completeJob(id, result, { home = os.homedir(), now = Date.now() 
 export function getJob(id, { home = os.homedir() } = {}) {
   const file = jobPath(id, home);
   return file ? read(file) : null;
+}
+
+/**
+ * Append one sanitized live event to a claimed job. Only the small,
+ * renderable kinds travel (tool/reasoning/text/error/step_finish); anything
+ * else is dropped. Returns { ok, seq } where seq is the event index the
+ * poller passes back as `after`. Never throws — a full or missing job is a
+ * silent no-op so event pressure can never fail the turn itself.
+ */
+export function appendJobEvent(id, event, { home = os.homedir(), now = Date.now() } = {}) {
+  const file = jobPath(id, home);
+  if (!file) return { ok: false, reason: 'bad job id' };
+  const job = read(file);
+  if (!job || job.doneAt) return { ok: false, reason: 'unknown or finished job' };
+  const kind = String(event?.kind || '');
+  if (!['tool', 'reasoning', 'text', 'error', 'step_finish', 'run_start'].includes(kind)) {
+    return { ok: false, reason: `unsupported event kind: ${kind || '(none)'}` };
+  }
+  const clip = (v, max = MAX_JOB_EVENT_CHARS) => String(v ?? '').slice(0, max);
+  const clean = { kind, at: new Date(now).toISOString() };
+  if (event.tool != null) clean.tool = clip(event.tool, 100);
+  if (event.status != null) clean.status = clip(event.status, 60);
+  if (event.text != null) clean.text = clip(event.text);
+  if (event.message != null) clean.message = clip(event.message);
+  if (event.input != null) clean.input = clip(typeof event.input === 'string' ? event.input : JSON.stringify(event.input));
+  if (event.output != null) clean.output = clip(typeof event.output === 'string' ? event.output : JSON.stringify(event.output));
+  if (event.tokens != null && Number.isFinite(Number(event.tokens))) clean.tokens = Number(event.tokens);
+  if (!Array.isArray(job.events)) job.events = [];
+  job.events.push(clean);
+  while (job.events.length > MAX_JOB_EVENTS) job.events.shift();
+  write(file, job);
+  return { ok: true, seq: job.events.length };
+}
+
+/**
+ * Read events appended after index `after` (0-based count). Returns
+ * { events, nextAfter, done, aborted } so the poller fans out only what is
+ * new and stops when the job is done or aborted.
+ */
+export function readJobEvents(id, { after = 0, home = os.homedir() } = {}) {
+  const job = getJob(id, { home });
+  if (!job) return { events: [], nextAfter: Number(after) || 0, done: false, aborted: false };
+  const events = Array.isArray(job.events) ? job.events : [];
+  const from = Math.max(0, Number(after) || 0);
+  return {
+    events: events.slice(from),
+    nextAfter: events.length,
+    done: Boolean(job.doneAt),
+    aborted: Boolean(job.aborted),
+  };
+}
+
+/** Flag a claimed job as aborted. The worker polls this and kills its child. */
+export function abortJob(id, { home = os.homedir(), now = Date.now() } = {}) {
+  const file = jobPath(id, home);
+  if (!file) return null;
+  const job = read(file);
+  if (!job || job.doneAt) return null;
+  job.aborted = true;
+  job.abortedAt = new Date(now).toISOString();
+  write(file, job);
+  return job;
+}
+
+export function isJobAborted(id, { home = os.homedir() } = {}) {
+  return Boolean(getJob(id, { home })?.aborted);
 }
 
 /** Wait for a job's result. Resolves null on timeout. */

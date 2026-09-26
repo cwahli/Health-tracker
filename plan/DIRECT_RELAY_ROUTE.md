@@ -1,6 +1,8 @@
 # Direct relay route — one uniform solution for mobile / collab / grok
 
 Status: code + sensor on `agent/r16-scorecard`, staging live (see below), production rollout pending. The live
+=======
+Status: code + sensor on `agent/relay-auth`, **not yet rolled out**. The live
 relay still binds loopback with no token; nothing below has touched it.
 
 ## Why this shape
@@ -20,6 +22,8 @@ stays open for monitoring. No token configured = old loopback behavior,
 unchanged (sensor-proven backward compatible).
 
 ## Code (on `agent/r16-scorecard`, sensor `assert-relay-auth` 12/0)
+=======
+## Code (on `agent/relay-auth`, sensor `assert-relay-auth` 12/0)
 
 - `scripts/worker-relay.mjs`: `WORKER_RELAY_TOKEN` / `--relay-token`; every
   route except `GET /health` answers 401 without it (timing-safe compare,
@@ -54,6 +58,8 @@ to end, for devices to onboard against today:
   (branch `agent/r16-scorecard`).
 
 ## Production rollout (atomic — do not do half of it)
+=======
+## Rollout (atomic — do not do half of it)
 
 Half-rolled-out is worse than not started: a public route without a token
 exposes session exports; a token without restarted workers 401s the live
@@ -131,6 +137,11 @@ stand-ins. Do all of these in one window, announced:
   its Colab engines; Qwen/vLLM lanes stay under the notebook's own `/switch`
   system (the worker only runs opencode/cline turns). Re-run cells 1–2 every
   fresh runtime; cell 3 anytime to check in.
+=======
+  clone branch, creds, start worker; dies on idle/timeout (~12h). Keep secrets
+  in Colab secrets, never in cells. Same start command with `--host=collab`.
+  Expect to re-run setup each session; presence going stale is normal, not an
+  incident.
 - **grok (location TBD):** whichever box runs the Grok side gets the identical
   client bundle (`--host=grok`, same relay URL + token). First open question
   is placement — answer that, the rest is copy-paste.

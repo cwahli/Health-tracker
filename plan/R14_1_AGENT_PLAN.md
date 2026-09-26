@@ -195,6 +195,6 @@ The location change inside step 5 must also cover a host that has no allowance l
 
 Run cards 1 through 8, including 6b and 6c, again in order on one restarted `bot-host@vm`, and paste one evidence block per card. The author of any of those patches does not run this pass. Card 6's router half is part of this pass. A missing 6b or 6c block means the feature is not ready.
 
-The feature is ready for the user only when these eleven blocks are in the ticket and every negative check passed: cards 1, 2, 3, 4, 5, 6, 6b, 6c, 7, 8, and the card 9 rerun. Until then the user-facing status is: not ready to test.
+These cards are checkpoints. They are not a scorecard. Paste the evidence into `plan/ROADMAP.md` R-16, rows QS-1–QS-15. That table is the only done gate. Do not mark this file complete on its own.
 
 Drive stays the local folder until the user names the Google account. Do not open that work in these cards.
