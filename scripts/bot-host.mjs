@@ -93,7 +93,7 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
-import { ratingSuffix } from './lib/model-ratings.mjs';
+import { ratingSuffix, groupForModel } from './lib/model-ratings.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -2320,11 +2320,26 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   const currentSkipped = skipped.find(sameRoute);
   const fallbackLanes = lanes.filter((l) => !sameRoute(l));
 
-  if (!model && !fallbackLanes.length) {
+  // Coding lanes first, light ones last. The bot exists to write code, so a turn
+  // that fails over from a coding model must not land on a light one while a coding
+  // lane is still free — the list was ordered by pref alone, and a light model with
+  // a low pref number would take over the turn. Light lanes stay reachable as a last
+  // resort, because failing a turn outright is worse than a weaker answer, and
+  // `degradedToLight` says when that is what happened.
+  const groupOf = (m) => groupForModel(m || '');
+  const rank = (l) => {
+    const g = groupOf(l.model);
+    return g === 'coding' ? 0 : g === 'light' ? 2 : 1;
+  };
+  const orderedLanes = [...fallbackLanes].sort((a, b) => rank(a) - rank(b) || (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  const currentGroup = model ? groupOf(freemodelRefToRoute(model).model || model) : 'unknown';
+  const codingLeft = orderedLanes.filter((l) => rank(l) === 0).length;
+
+  if (!model && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
     return { models: [], skipped, fromLedger: true, exhausted: true, displaced: null, chose: null, soonest };
   }
-  if (model && currentSkipped && !fallbackLanes.length) {
+  if (model && currentSkipped && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
     return {
       models: [],
@@ -2339,15 +2354,22 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
 
   const models = [];
   if (model && !currentSkipped) models.push(model);
-  for (const lane of fallbackLanes) models.push(toModelRef(lane.provider, lane.model));
+  for (const lane of orderedLanes) models.push(toModelRef(lane.provider, lane.model));
   if (!models.length) models.push(fallback);
+  const unique = [...new Set(models.filter(Boolean))];
   return {
-    models: [...new Set(models.filter(Boolean))],
+    models: unique,
     skipped,
     fromLedger: true,
     exhausted: false,
     displaced: currentSkipped || null,
     chose: models[0] || null,
+    // A coding turn that can only be served by a light lane, and the chat's own
+    // group, so the failover notice can say what happened instead of the reader
+    // wondering why the answer got worse.
+    currentGroup,
+    degradedToLight: currentGroup === 'coding' && codingLeft === 0 && unique.length > 1,
+    codingAvailable: codingLeft,
   };
 }
 
@@ -2657,6 +2679,16 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
         : laneChoice.displaced.why;
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
+      // A coding turn that can only be served by a light model is said out loud.
+      // Silently answering with a weaker model is how a coding task starts failing
+      // in ways nobody notices until the code is wrong.
+      if (laneChoice.degradedToLight) {
+        console.log(`[${config.id}] no coding lane left; degraded to a light model (${laneChoice.chose})`);
+        await api.sendMessage(
+          chatId,
+          `⚠️ \`${eff.model}\` is ${laneChoice.displaced.why}, and no coding lane is free right now — this turn runs on the light model \`${laneChoice.chose}\`. Code may be weaker than usual.`
+        ).catch(() => {});
+      }
     }
     // A location that names another machine runs there, on that machine's
     // allowance. This VM does not stamp for it.

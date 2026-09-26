@@ -91,6 +91,9 @@ export const BENCHMARKS = {
   'ling-3.0-tiny-free': { group: 'light', why: 'Ling family, "Compact MoE … responsive agents, instruction following"; below 3.0 Flash' },
   'trinity-large-preview-free': { group: 'light', why: '131K context, the smallest in the list, and no description; "Large" notwithstanding' },
   'gemini-3.7-flash': { group: 'light', why: 'between Gemini 3.5 Flash Lite (AA 22) and 3.8 Flash (AA 41.2); no score of its own' },
+  'mimo-v2.6': { group: 'coding', why: 'the version this host actually runs; its 2.5 sibling is classified from AA 41 for the 2.6 Flash sibling, so the family is coding' },
+  'deepseek-v4.1': { group: 'coding', why: 'the Token Harbor row for DeepSeek V4.1 Flash, AA 39.5' },
+  'muse-spark-1.3-contributor': { group: 'light', why: 'not a coding model by any published measure, and the handover records it hanging and failing with insufficient funds; kept out of the coding pool' },
   'big-pickle': { group: 'light', why: 'AA ~30 (the scorecard calls it its least certain cell), text-only, and the handover records that only --variant low replies' },
 };
 
