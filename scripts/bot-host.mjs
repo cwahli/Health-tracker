@@ -83,6 +83,7 @@ import {
   canonicalAllowanceLanes,
   groupRowsByTier,
   allowanceTableLines,
+  escHtml,
   formatResetIn,
   renderFreeLaneTableHtml,
   ensureBotLedger,
@@ -972,7 +973,13 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     buttons.push({ text: leftAlign(`${unusableOf(r) ? '❌ ' : ''}${rated}`), data: route, ref: route });
   }
   }
-  return { text: lines.join('\n'), buttons, rows, usable, unusable };
+  // The plain lines are escaped here and the shared table arrives already escaped,
+  // because the message now goes out with parse_mode HTML — which is what turns the
+  // table monospace and left-aligned. Without the parse mode the <code> tags showed
+  // up as literal text, and without escaping a label containing & or < would fail the
+  // whole send.
+  const body = lines.map((l) => (String(l).includes('<code>') ? l : escHtml(l))).join('\n');
+  return { text: body, buttons, rows, usable, unusable };
 }
 
 /** Usable rows the ledger has no record for: honest, not hidden. */
@@ -1722,6 +1729,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       });
       // One keyboard with every model, no paging, and the router's cancel row.
       await api.sendMessage(chatId, body.text, {
+        // HTML, not Markdown: the table is a <code> block, which is the only
+        // left-aligned column-true rendering Telegram has, and Markdown has no
+        // equivalent that keeps columns.
+        parse_mode: 'HTML',
         reply_markup: modelKeyboard(body.buttons, {
           kind: 'fm',
           all: true,
@@ -2204,6 +2215,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         location: workLocation(),
         tableForBody: pgTable ? allowanceTableLines(pgTable, pgSession, { location: workLocation(), rows: annotated.filter(Boolean) }) : '',
       }), {
+        parse_mode: 'HTML',
         reply_markup: modelKeyboard(
           (available.length ? available : selectable).map((entry) => ({ text: entry.label, data: entry.ref })),
           { page: Number(value) || 0, kind: 'fm' },

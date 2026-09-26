@@ -969,7 +969,7 @@ function padDisp(s, n) {
   return x + " ".repeat(n - w);
 }
 
-function escHtml(s) {
+export function escHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

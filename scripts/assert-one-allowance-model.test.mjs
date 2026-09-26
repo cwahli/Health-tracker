@@ -510,6 +510,12 @@ try {
   check('/freemodel prints the same table /allowance prints', /allowanceTableLines\(fmTable, fmSession/.test(botSrc));
   check('and it is the shared helper, not a second renderer', /export function allowanceTableLines/.test(read('lib/free-lanes.mjs')));
   check('the table helper is the table only, so nothing is embedded twice', /if \(tableOnly\) return lines\.join/.test(read('lib/free-lanes.mjs')));
+  // The table is only monospace if the message is sent as HTML, and the plain lines
+  // around it must be escaped or a label with & or < fails the whole send. Both of
+  // these were live bugs: the tags showed up as literal text.
+  check('/freemodel sends the table as HTML, which is what makes it monospace', /parse_mode: 'HTML'/.test(botSrc) && /<code>/.test(read('lib/free-lanes.mjs')));
+  check('and the plain lines are escaped, the table left alone', /String\(l\)\.includes\('<code>'\) \? l : escHtml\(l\)/.test(botSrc));
+
   check('button labels are padded left, and say why that is cosmetic',
     /const LEFT_PAD = '\\u00a0\\u00a0'/.test(botSrc) && /no alignment field/.test(botSrc) && /leftAlign\(/.test(botSrc));
   check('a button still carries the benchmark score', /const bench = benchmarkLabel\(model\)/.test(botSrc) && /\$\{bench \? ` · \$\{bench\}` : ''\}/.test(botSrc));
