@@ -75,6 +75,9 @@ export function enqueueJob(job, { home = os.homedir(), now = Date.now() } = {}) 
     workspace: String(job.workspaceId || projectIdForWorkspace(job.workspace || '')),
     sessionId: String(job.sessionId || ''),
     envMode: String(job.envMode || 'project'),
+    canary: Boolean(job.canary),
+    packId: String(job.packId || ''),
+    attempts: 0,
     createdAt: new Date(now).toISOString(),
     claimedAt: null,
     doneAt: null,
@@ -82,6 +85,26 @@ export function enqueueJob(job, { home = os.homedir(), now = Date.now() } = {}) 
   };
   write(jobPath(id, home), row);
   return row;
+}
+
+/**
+ * Put an unfinished job back on the queue under the SAME id (guard 8).
+ * Only a transient failure earns this: a job that already produced a result is
+ * never reopened, and a job that is still claimed is left to its claim — the
+ * caller decides that by asking for it after the claim expired.
+ */
+export function requeueJob(id, { home = os.homedir(), now = Date.now(), reason = '' } = {}) {
+  const file = jobPath(id, home);
+  if (!file) return null;
+  const job = read(file);
+  if (!job || job.doneAt) return null;
+  job.claimedAt = null;
+  job.claimedBy = null;
+  job.attempts = Number(job.attempts || 0) + 1;
+  job.requeuedAt = new Date(now).toISOString();
+  if (reason) job.requeueReason = String(reason);
+  write(file, job);
+  return job;
 }
 
 /** The oldest unclaimed, unexpired job for a host, marked claimed. */

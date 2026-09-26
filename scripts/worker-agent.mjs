@@ -22,6 +22,7 @@ import { buildChildEnv } from './lib/child-env.mjs';
 import { ensureBotLedger, stampDepleted, isConnectionFailure, freemodelRefToRoute } from './lib/free-lanes.mjs';
 import { isQuotaOrLimitError } from './lib/agent-opencode.mjs';
 import { workspaceForId } from './lib/project-registry.mjs';
+import { applyPack } from './lib/swap-pack.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (name, fallback) => {
@@ -42,7 +43,7 @@ async function post(route, body) {
   const res = await fetch(`${RELAY}${route}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ host: HOST, pid: process.pid, detail: DETAIL, ...body }),
+    body: JSON.stringify({ host: HOST, pid: process.pid, detail: DETAIL, cwd: process.cwd(), ...body }),
   });
   return res.json().catch(() => ({}));
 }
@@ -131,9 +132,55 @@ async function resumeSession(sessionId) {
   return { sessionId: '', resumed: false, from: 'missing' };
 }
 
+/**
+ * Guard 9: fetch the sender's changed files and write them into this
+ * workspace — every file re-hashed against the manifest first, a path that
+ * would leave the workspace refused, and nothing applied if any file is off.
+ * A pack that cannot be fetched is reported, not fatal: the turn still runs.
+ */
+async function applyJobPack(packId, workspace) {
+  try {
+    const res = await fetch(`${RELAY}/packs/${encodeURIComponent(packId)}`);
+    if (res.status === 404) return { ok: false, reason: 'pack is not on the relay' };
+    if (!res.ok) return { ok: false, reason: `relay answered ${res.status}` };
+    const payload = await res.json();
+    return applyPack(workspace, payload);
+  } catch (err) {
+    return { ok: false, reason: String(err?.message || err) };
+  }
+}
+
 async function runJob(job) {
   const { model, prompt, envMode } = job;
-  const workspace = workspaceForId(job.workspace, { host: HOST }) || HERE;
+  // Guard 4: a project id that resolves to nothing here is a named failure,
+  // not a quiet run in this worker's own directory — the whole point of the
+  // job carrying an id instead of a path is that the path is this machine's.
+  const workspace = workspaceForId(job.workspace, { host: HOST });
+  if (!workspace) {
+    const error = `workspace_unresolved: no directory for project "${job.workspace}" on ${HOST}`;
+    log(`${job.id} refused: ${error}`);
+    return {
+      jobId: job.id,
+      text: '',
+      code: 1,
+      model: model || '',
+      error,
+      ledger: LEDGER.dir,
+      sessionID: '',
+      resumedFrom: '',
+      workspace: '',
+    };
+  }
+  let packApplied = 0;
+  if (job.packId) {
+    const applied = await applyJobPack(job.packId, workspace);
+    if (applied.ok) {
+      packApplied = applied.applied.length;
+      log(`pack ${job.packId}: ${applied.reason}`);
+    } else {
+      log(`pack ${job.packId} refused: ${applied.reason}`);
+    }
+  }
   const env = buildChildEnv({ mode: envMode || 'project' });
   const resume = await resumeSession(job.sessionId);
   log(`running ${job.id} on ${model || 'default'} in ${workspace}${resume.sessionId ? ` (session ${resume.sessionId} via ${resume.from})` : ''}`);
@@ -153,6 +200,7 @@ async function runJob(job) {
       sessionID: String(result?.sessionID || resume.sessionId || ''),
       resumedFrom: resume.from,
       workspace,
+      packApplied,
     };
   } catch (err) {
     log(`job ${job.id} failed:`, String(err?.stack || err?.message || err).slice(0, 500));
@@ -166,6 +214,7 @@ async function runJob(job) {
       sessionID: String(resume.sessionId || ''),
       resumedFrom: resume.from,
       workspace,
+      packApplied,
     };
   }
 }
