@@ -2693,9 +2693,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       return;
     }
     if (laneChoice.displaced) {
-      const why = laneChoice.displaced.resetLabel
-        ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
-        : laneChoice.displaced.why;
+      // The ledger's reason usually already carries its own reset stamp
+      // ("depleted until 2026-09-26T11:59:11Z (from vendor countdown …)"), so
+      // appending the reset label again produced "… until X until X".
+      const stamp = laneChoice.displaced.resetLabel;
+      const reason = String(laneChoice.displaced.why || '');
+      const why = stamp && !reason.includes(stamp) ? `${reason} until ${stamp}` : reason;
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
       // QS-2: "the same prompt completes on the next lane with a user-visible
       // switch line naming failed lane -> next lane". The walk did exactly that
