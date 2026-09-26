@@ -243,9 +243,19 @@ check('appends are RAW + INSERT_ROWS so no cell is edited in place', () => {
   return /valueInputOption: 'RAW'/.test(LIB) && /insertDataOption: 'INSERT_ROWS'/.test(LIB);
 });
 
-check('the module never issues a PUT or PATCH (nothing is overwritten)', () => {
-  const methods = [...LIB.matchAll(/method: '(\w+)'/g)].map((m) => m[1]);
-  return !methods.includes('PUT') && !methods.includes('PATCH');
+check('the only PATCH is a rename: exactly one, and its body is { name } alone', () => {
+  const patches = [...LIB.matchAll(/method: 'PATCH'/g)].length;
+  const nameOnly = [...LIB.matchAll(/method: 'PATCH',\s*\n\s*token,\s*\n\s*body: \{ name: clean \}/g)].length;
+  return patches === 1 && nameOnly === 1;
+});
+
+check('nothing is ever replaced: no PUT, and no upload onto an existing file id', () => {
+  const puts = [...LIB.matchAll(/method: 'PUT'/g)].length;
+  return puts === 0 && !/files\/\$\{[^}]+\}\/upload/.test(LIB);
+});
+
+check('a rename cannot smuggle other fields (name is sanitized and length-capped)', () => {
+  return /replace\(\/\[\\\\\/\\r\\n\\t\]\/g, '-'\)/.test(LIB) && /\.slice\(0, 200\)/.test(LIB);
 });
 
 check('no googleapis dependency is introduced', () => {
@@ -263,6 +273,20 @@ check('the probe imports no write function (zero-burn is structural)', () => {
 
 check('the probe cannot write even if it wanted (no POST/PUT in its own source)', () => {
   return !/method: '(POST|PUT|PATCH|DELETE)'/.test(PROBE) && !/createFile\(|appendRows\(/.test(PROBE);
+});
+
+check('the probe detects the ownership wall without writing (driveId present = shared drive)', () => {
+  return /fields=[^`]*driveId/.test(PROBE) && /a service account cannot own files here/.test(PROBE);
+});
+
+check('the plan records the ownership constraint and the forced identity choice', () => {
+  const plan = fs.readFileSync(path.join(HERE, '..', 'plan', 'GOOGLE_WORKSPACE_PLAN.md'), 'utf8');
+  return /storage quota/.test(plan) && /Shared Drive/.test(plan) && /BLOCKING/.test(plan);
+});
+
+check('the live board exists and refuses to claim green while rows are red', () => {
+  const board = fs.readFileSync(path.join(HERE, '..', 'plan', 'GOOGLE_STORE_LIVE_MATRIX.md'), 'utf8');
+  return /NOT GREEN/.test(board) && /G-10/.test(board) && /not started/.test(board);
 });
 
 check('the probe says how many writes it made', () => {
@@ -285,6 +309,60 @@ check('the store is not wired into the app origin (no second app data path)', ()
   };
   if (fs.existsSync(lib)) walk(lib);
   return hits.length === 0;
+});
+
+// ------------------------------------------------- the live scorecard's laws
+
+const CARD = fs.readFileSync(path.join(HERE, 'google-store-scorecard.mjs'), 'utf8');
+const RELAY = fs.readFileSync(path.join(HERE, 'worker-relay.mjs'), 'utf8');
+
+check('the scorecard only deletes ids it created in this run', () => {
+  return /refusing to delete an id this run did not create/.test(CARD) && /created\.(files|docs|sheets)\.has\(id\)/.test(CARD);
+});
+
+check('a delete is proven by a later read saying missing, not by the delete call', () => {
+  return /back\.missing/.test(CARD) && /404 as expected/.test(CARD);
+});
+
+check('the scorecard proves the keyless caller really has no credential', () => {
+  return /delete keyless\[k\]/.test(CARD) && /still holds a credential/.test(CARD);
+});
+
+check('the scorecard spawns its own relay on a spare port (production relay untouched)', () => {
+  return /freePort/.test(CARD) && /worker-relay\.mjs/.test(CARD) && /--relay-token=/.test(CARD);
+});
+
+check('the scorecard picture is a real PNG, not a text file with a .png name', () => {
+  return /0x89, 0x50, 0x4e, 0x47/.test(CARD) && /pngChunk\('IDAT'/.test(CARD) && /crc32/.test(CARD);
+});
+
+check('the relay store route resolves the folder itself and never takes one from the caller', () => {
+  // A caller that could send a folder id could name any folder; the body must not
+  // contain a folder field, and the folder must come from the relay's own env.
+  return /const folder = \(ready\.folders \|\| \{\}\)\[project\]/.test(RELAY)
+    && !/body\?\.folder|body\.folder/.test(RELAY);
+});
+
+check('the relay store route sits behind the token guard', () => {
+  return RELAY.indexOf('relay token required') < RELAY.indexOf('POST /store');
+});
+
+check('the relay refuses an unenrolled project by name rather than defaulting', () => {
+  return /no Google folder enrolled on this relay/.test(RELAY) && /enrolled: Object\.keys/.test(RELAY);
+});
+
+check('the relay never returns key material or a token in a receipt', () => {
+  const block = RELAY.slice(RELAY.indexOf('POST /store'), RELAY.indexOf('POST /connect'));
+  return !/private_key|access_token/.test(block);
+});
+
+check('folderFor() is the single way a caller resolves its folder', () => {
+  return /export function folderFor/.test(LIB) && /folderFor\(ready, 'health-tracker'\)/.test(CARD);
+});
+
+check('loadHostEnv() is shared by the probe and the scorecard (one env rule)', () => {
+  const PROBE_ENV = fs.readFileSync(path.join(HERE, 'probe-google-store.mjs'), 'utf8');
+  return /loadHostEnv/.test(PROBE_ENV) && /loadHostEnv/.test(CARD) && !/os\.homedir/.test(PROBE_ENV);
 });
 
 console.log(`\n${passed} pass, ${failed} fail`);

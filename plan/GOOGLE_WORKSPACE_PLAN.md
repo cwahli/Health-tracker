@@ -58,9 +58,13 @@ one JSON key. Reasons:
   same mechanism as today): they get the *folder ID* for their project, never the key
   path and never the key. A turn that cannot name its folder cannot reach another
   project's data, exactly as an external turn today cannot touch the website repo.
-- Sheets the agents write are **append-only** for the service account where the API
-  allows (no delete scope granted at all). Docs it generates live in one folder the
-  account owns.
+- Sheets rows are **append-only by construction** (only `values:append` is
+  implemented). One correction to an earlier draft of this plan: there is **no
+  separate delete scope** on Drive/Sheets/Docs. An identity that can create in a
+  folder can also delete from it, so the guardrail is *folder scoping plus audit
+  and read-back*, not a narrower scope. Anything the account can write, it can
+  destroy — which is why the scorecard's delete leg is also the blast-radius proof.
+- Docs the agents generate live in the project's own Docs tree, one per generator.
 - Rotation: new key → drop into host config → restart unit → zero-burn probe (G-0
   script) → delete old key in Google Cloud console. Documented below as G-5 exit step.
 
@@ -87,10 +91,11 @@ project id and a sensor pins the trap.
 | Cloud project | `food-search-502514` ("Food search") |
 | Service account | `doc-api@food-search-502514.iam.gserviceaccount.com` (no project roles) |
 | Key file (VPS) | `~/.config/bot-host/google-fleet-key.json`, `-rw-------`, owner `ubuntu` |
-| Root folder | Drive folder "Project" — `1KB7r2kj6znFj2YjcSapQchiH5sBaYJKa`, shared Editor |
+| Root folder | Drive folder **"Projects"** — `1KB7r2kj6znFj2YjcSapQchiH5sBaYJKa`, shared Editor. It is a **My Drive** folder, which is what makes writes impossible for a service account (§1b). |
 | Host env | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_FOLDER_HEALTH_TRACKER` in `~/.config/bot-host/common.env` |
-| **G-0 probe** | **PASS** — `node scripts/probe-google-store.mjs` → `READY`, token minted, folder listed (0 objects), **0 writes** |
-| G-0 sensor | `node scripts/assert-google-store.test.mjs` → **35 pass, 0 fail** (stubbed fetch; the real key is never read by a test) |
+| **G-0 probe** | Credential half **PASS** (token minted, folder listed, 0 writes). Now **NOT READY** on `write ownership` — see §1b. |
+| G-0 sensor | `node scripts/assert-google-store.test.mjs` → **48 pass, 0 fail** (stubbed fetch; the real key is never read by a test) |
+| **Live scorecard** | `node scripts/google-store-scorecard.mjs` → **3 green / 0 partial / 11 red**, all reds = §1b ownership. Board: [GOOGLE_STORE_LIVE_MATRIX.md](./GOOGLE_STORE_LIVE_MATRIX.md) |
 
 One lesson worth keeping: the first probe run printed `NOT READY` with a *working*
 credential. The honest red row ("credential present, but no `GOOGLE_FOLDER_<project>`
@@ -98,6 +103,41 @@ configured") is what made the cause findable — a thrown error would have hidde
 
 
 ---
+
+## 1b. File ownership — the constraint that decides the identity (BLOCKER, found live)
+
+The first live scorecard run on 2026-09-26 was **3 green / 11 red**, and every red
+had one cause. Drive says this about the create:
+
+```text
+403 Service Accounts do not have storage quota.
+    Leverage shared drives, or use OAuth delegation instead.
+    reason: storageQuotaExceeded
+```
+
+Drive also reports `canAddChildren: true` for that same folder, so the folder
+permission is genuinely fine — the failure is **ownership**. A file is owned by
+whoever created it, and a service account owns nothing and has no storage quota,
+so it can *read* a folder it was given Editor on and cannot *put* anything in it.
+`ownedByMe: false`, `driveId: undefined` → the folder is a **My Drive** folder.
+
+So the identity choice is not a preference; it is forced by the account type:
+
+| Option | Needs | Result |
+|---|---|---|
+| **A. Shared Drive (Team Drive)** + service account as member | A **Google Workspace** account (business/edu). Personal @gmail.com **cannot** create a shared drive. | The drive owns created files, so the service account writes as itself. Keeps the no-OAuth, key-file design. |
+| **B. One user identity** (single OAuth client + refresh token for the human, used by every agent) | Works with a personal account. One consent screen, once. | Files are owned by the human, so writes work. Loses "no OAuth anywhere"; keeps "one credential, no per-bot consent". |
+| **C. Domain-wide delegation** | Workspace + admin. | Heaviest. Not needed unless per-user impersonation is required. |
+
+`scripts/probe-google-store.mjs` now checks this **without writing**: a My Drive
+folder has no `driveId`, and the probe reports `write ownership: a service account
+cannot own files here` as a red row. A READY credential with an unwriteable target
+is exactly the failure a zero-burn probe exists to catch early.
+
+**Until this is resolved, G-1's write legs cannot go green and no agent should be
+enrolled.** Everything else (plan, client, probe, sensor, relay route, scorecard)
+is identity-agnostic: switching is a credential source in the host env, not a
+rewrite.
 
 ## 2. Data model — what goes where
 
@@ -125,11 +165,13 @@ days to Drive and note it in the Doc. Exactly one writer role per spreadsheet;
 everyone else appends.
 
 **Docs (generated, never hand-edited by agents):**
-- Per-project weekly rollup (turns, quota events, bakeoff additions, open questions),
-  generated on vps from Sheets + disk, written by the single designated writer bot
-  (`vm2` default; recorded in the plan when accepted). Humans edit freely; the next
-  generation never overwrites human sections (append-only sections, or a generated
-  section delimited by markers).
+- Per-location weekly rollup: **one generated Doc per generating location** (e.g.
+  `2026-W40-rollup-vps`, `…-grok`), plus one shared **index Doc** that links them.
+  Every location may generate; nothing needs a designated writer, and two
+  generators can never clobber each other because they write different documents.
+  Humans and agents edit freely; a generation only ever *appends* at the document
+  end (`insertText` at `endIndex`), so a human section is never overwritten. A
+  sensor pins that insertion shape.
 - QS/R-14.1 evidence snapshots on demand (`/evidence` → Doc link in chat).
 
 **What does NOT go to Google:** secrets/keys (host config only), full prompt contents
@@ -231,6 +273,12 @@ honesty rule as depleted lanes.
 
 ## 7. Decisions needed (human)
 
+0. **BLOCKING — pick the identity:** can your Google account create a **Shared
+   Drive** (that means a Google Workspace business/edu account)? If yes → option
+   A, keep the service account, and I will have you create one shared drive and
+   add `doc-api@…` as a member. If it is a personal @gmail.com → option B, one
+   user identity with a refresh token, and I will add that credential source.
+   Everything else in this plan is already built and waiting.
 1. **Google account to own the Cloud project** (a shared/team account, not personal).
 2. **Folder sharing model**: one top folder per project shared with the service
    account (recommended), or one folder total with subfolders.

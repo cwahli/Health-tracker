@@ -25,6 +25,8 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const TOKEN_TTL_MS = 45 * 60 * 1000; // Google tokens live an hour; refresh well before.
 const CLOCK_SKEW_S = 30;
@@ -39,8 +41,11 @@ const API = {
   token: 'https://oauth2.googleapis.com/token',
   drive: 'https://www.googleapis.com/drive/v3',
   driveUpload: 'https://www.googleapis.com/upload/drive/v3',
-  sheets: 'https://www.googleapis.com/v1/spreadsheets',
-  docs: 'https://www.googleapis.com/v1/documents',
+  // Sheets and Docs live on their own hosts. www.googleapis.com answers these
+  // paths with an HTML 404, which reads like a missing file rather than a wrong
+  // host — a trap worth naming.
+  sheets: 'https://sheets.googleapis.com/v1/spreadsheets',
+  docs: 'https://docs.googleapis.com/v1/documents',
 };
 
 export const MIME = {
@@ -123,6 +128,61 @@ export function serviceAccountFromEnv(env = process.env) {
   }
 
   return { ok: true, key, email: key.client_email, projectId: key.project_id || '', source };
+}
+
+/**
+ * Read the host's env the way the service does.
+ *
+ * The bots load `~/.config/bot-host/{common,<botId>}.env` through systemd's
+ * `EnvironmentFile`, so a probe or a scorecard run from a plain shell would
+ * otherwise report "no credential" for a store the live bot is using. The same
+ * files are read here — with the same quote-stripping rule and the same
+ * `[A-Za-z_][A-Za-z0-9_]*` name rule, which is why a hyphenated `GOOGLE_FOLDER_*`
+ * is invisible — and the sources are returned so the caller can print which env
+ * it judged.
+ */
+export function loadHostEnv(botId = '', base = process.env, { home = os.homedir(), apply = true } = {}) {
+  const env = { ...base };
+  const sources = ['process env'];
+  const files = [`${home}/.config/bot-host/common.env`];
+  if (botId) files.push(`${home}/.config/bot-host/${botId}.env`);
+  for (const file of files) {
+    let text = '';
+    try {
+      if (!fs.existsSync(file)) continue;
+      text = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    sources.push(path.basename(file));
+    for (const line of text.split('\n')) {
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!m) continue;
+      const value = m[2].trim().replace(/^["'](.*)["']$/, '$1');
+      if (!value) continue;
+      env[m[1]] = value;
+      // Spawned children (opencode, a relay) inherit process.env, not this
+      // object, so a caller that wants them to see the service's credential has
+      // to have it in the real environment too.
+      if (apply) process.env[m[1]] = value;
+    }
+  }
+  return { env, sources };
+}
+
+/**
+ * Resolve the folder a surface may write for one project.
+ *
+ * `GOOGLE_FOLDER_ID` is the single-folder default; `GOOGLE_FOLDER_<PROJECT>` is
+ * the per-project map. A caller that reads `ready.folder` alone and forgets the
+ * map sends an empty parent and gets a Drive 404 for "." — so every caller
+ * resolves through here instead.
+ */
+export function folderFor(ready, projectId = 'health-tracker') {
+  const explicit = String(ready?.folder || '').trim();
+  if (explicit) return explicit;
+  const key = String(projectId || '').trim();
+  return String(ready?.folders?.[key] || '').trim();
 }
 
 const FOLDER_VAR = /^GOOGLE_FOLDER_([A-Z0-9_]+)$/;
@@ -212,7 +272,20 @@ async function request(url, { method = 'GET', token = '', body, headers = {}, at
     });
     const text = await res.text();
     if (res.ok) return { ok: true, status: res.status, json: text ? JSON.parse(text) : {} };
-    lastErr = `HTTP ${res.status} ${redact(text).slice(0, 300)}`;
+    // Prefer the API's own message over the body: a wrong-host 404 returns HTML,
+    // and a board that prints HTML tells the reader nothing.
+    let detail;
+    try {
+      const parsed = JSON.parse(text);
+      detail = parsed?.error?.message || redact(text).replace(/\s+/g, ' ').trim().slice(0, 240);
+    } catch {
+      // A wrong host or an abuse interstitial answers with an HTML page. Printing
+      // the page helps nobody; the host and the status are the useful facts.
+      detail = /^\s*</.test(text)
+        ? `non-JSON error page from ${new URL(url).host}`
+        : redact(text).replace(/\s+/g, ' ').trim().slice(0, 240);
+    }
+    lastErr = `HTTP ${res.status} ${detail}`;
     // 401/403 on a fresh token is a real answer (scope or share missing); retrying
     // the same request just burns quota. 429/5xx are worth one more try.
     if (res.status < 500 && res.status !== 429) break;
@@ -247,6 +320,88 @@ export function forgetToken() {
  * "the same" turn produce two distinct rows, and a retry of the same turn produces
  * the same name — which is what makes the write idempotent.
  */
+/**
+ * Drive: upload a binary object (a picture from a phone, a rendered chart).
+ *
+ * Separate from `createFile` because a picture is bytes, not a markdown string,
+ * and because the multipart body for binary must not be line-ending-mangled the
+ * way a text part is.
+ */
+export async function uploadBinary(folderId, name, bytes, { mimeType = 'image/png' } = {}, token) {
+  const boundary = 'fleetstorebin';
+  const meta = JSON.stringify({ name, parents: [folderId], mimeType });
+  const head = Buffer.from(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+    'utf8',
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+  const res = await fetch(`${API.driveUpload}/files?uploadType=multipart&fields=${encodeURIComponent('id,name,mimeType,size,webViewLink')}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body: Buffer.concat([head, Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes), tail]),
+  });
+  const text = await res.text();
+  if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status} ${redact(text).slice(0, 300)}` };
+  return { ok: true, id: JSON.parse(text).id, file: JSON.parse(text) };
+}
+
+/**
+ * Drive: read one object's metadata. `expectMissing` turns "deleted" into a
+ * positive answer — a delete is only proven when a later read says 404, not when
+ * the delete call returned 200.
+ */
+export async function getFile(fileId, token) {
+  const res = await request(`${API.drive}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent('id,name,mimeType,size,modifiedTime,parents,trashed')}`, { token });
+  if (res.ok) return { ok: true, missing: false, file: res.json };
+  return { ok: res.status === 404, missing: res.status === 404, status: res.status, error: res.error || '' };
+}
+
+export async function listChildren(folderId, token) {
+  const res = await listFolder(folderId, token, { pageSize: 100, fields: 'files(id,name,mimeType,size)' });
+  if (!res.ok) return res;
+  return { ok: true, files: res.json.files || [] };
+}
+
+/**
+ * Drive: rename an existing object.
+ *
+ * The one PATCH this module is allowed to make, and the payload is exactly
+ * `{ name }` — a rename changes a label, never content. Replacing bytes would be
+ * `files/{id}/upload` against an existing id, which is the shape the fleet does
+ * not use: artifacts are written once, under a content-addressed name, and a
+ * second write is a second object.
+ */
+export async function renameFile(fileId, name, token) {
+  const clean = String(name || '').replace(/[\\/\r\n\t]/g, '-').trim().slice(0, 200);
+  if (!clean) return { ok: false, error: 'empty name' };
+  const res = await request(`${API.drive}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent('id,name,modifiedTime')}`, {
+    method: 'PATCH',
+    token,
+    body: { name: clean },
+  });
+  if (!res.ok) return res;
+  return { ok: true, id: res.json.id, name: res.json.name, modifiedTime: res.json.modifiedTime };
+}
+
+/** Drive: delete an object permanently. */
+export async function deleteFile(fileId, token) {
+  const res = await request(`${API.drive}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE', token });
+  return { ok: res.ok, status: res.status, error: res.error || '' };
+}
+
+/** Sheets: delete the whole spreadsheet (the scorecard's own test objects only). */
+export async function deleteSheet(sheetId, token) {
+  const res = await request(`${API.sheets}/${encodeURIComponent(sheetId)}`, { method: 'DELETE', token });
+  return { ok: res.ok, status: res.status, error: res.error || '' };
+}
+
+/** Sheets: read one spreadsheet's metadata (used to prove create/delete). */
+export async function getSheet(sheetId, token) {
+  const res = await request(`${API.sheets}/${encodeURIComponent(sheetId)}?fields=${encodeURIComponent('spreadsheetId,properties.title,sheets.properties')}`, { token });
+  if (res.ok) return { ok: true, missing: false, sheet: res.json };
+  return { ok: res.status === 404, missing: res.status === 404, status: res.status, error: res.error || '' };
+}
+
 export function objectName({ at, location, chat, turnId, slug = '' }) {
   const stamp = String(at || '').replace(/[^0-9]/g, '').slice(0, 14) || String(Date.now());
   // Collapse runs of dots as well as punctuation: Drive tolerates `..` in a name,

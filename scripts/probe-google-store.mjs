@@ -16,9 +16,6 @@
  *   node scripts/probe-google-store.mjs --json     # machine-readable
  */
 
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import process from 'node:process';
 
 import {
@@ -26,7 +23,9 @@ import {
   accessToken,
   forgetToken,
   googleReady,
+  folderFor,
   listFolder,
+  loadHostEnv,
   redact,
   serviceAccountFromEnv,
 } from './lib/google-store.mjs';
@@ -35,44 +34,21 @@ const BOT_ID = process.env.BOT_ID || process.argv.find((a) => a.startsWith('--bo
 const LOCATION = process.env.LOCATION || 'vps';
 const JSON_OUT = process.argv.includes('--json');
 
-/**
- * The service reads its credentials from ~/.config/bot-host/{common,<id>}.env.
- * A probe run from a plain shell would report "no credential" for a provider the
- * live bot is using, so the same files are read here with systemd EnvironmentFile
- * quote-stripping, and the sources are printed so the output says which env it
- * judged.
- */
-function loadHostEnv() {
-  const home = os.homedir();
-  const env = { ...process.env };
-  const envSources = ['process env'];
-  for (const file of [`${home}/.config/bot-host/common.env`, `${home}/.config/bot-host/${BOT_ID}.env`]) {
-    let text = '';
-    try {
-      if (!fs.existsSync(file)) continue;
-      text = fs.readFileSync(file, 'utf8');
-    } catch {
-      continue;
-    }
-    envSources.push(path.basename(file));
-    for (const line of text.split('\n')) {
-      const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-      if (!m) continue;
-      const value = m[2].trim().replace(/^["'](.*)["']$/, '$1');
-      if (value) {
-        env[m[1]] = value;
-        process.env[m[1]] = value;
-      }
-    }
-  }
-  return { env, envSources };
-}
-
 const rows = [];
 const row = (field, value, state) => rows.push({ field, value: String(value), state });
 
+/** Drive metadata reads never throw here: a red row must explain itself. */
+async function metajsonSafe(res) {
+  try {
+    const text = await res.text();
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {};
+  }
+}
+
 async function main() {
-  const { env, envSources } = loadHostEnv();
+  const { env, sources: envSources } = loadHostEnv(BOT_ID);
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
   const sa = serviceAccountFromEnv(env);
@@ -82,13 +58,13 @@ async function main() {
   row('bot', BOT_ID, 'info');
   row('location', LOCATION, 'info');
   row('env sources', envSources.join(', '), 'info');
-  row('credential', ready.ready ? `ok (${redact(ready.source)})` : `MISSING — ${redact(ready.reason)}`, ready.ready ? 'pass' : 'fail');
+  // Bracket notation on purpose: `obj?.health-tracker` parses as `(obj?.health) - tracker`.
+  const folder = folderFor(ready, 'health-tracker');
+  const credOk = ready.ready && Boolean(folder);
+  row('credential', credOk ? `ok (${redact(ready.source)})` : `MISSING — ${redact(ready.reason || 'no folder enrolled')}`, credOk ? 'pass' : 'fail');
   row('service account', sa.ok ? sa.email : 'unreadable', sa.ok ? 'pass' : 'fail');
   row('scopes', Object.keys(SCOPES).join(' '), 'info');
 
-  // Bracket notation on purpose: `obj?.health-tracker` parses as `(obj?.health) - tracker`.
-  const named = ready.folders?.['health-tracker'] || ready.folders?.['health_tracker'] || '';
-  const folder = ready.folder || named || '';
   row('folder id', folder ? `${folder.slice(0, 8)}…` : 'none', folder ? 'pass' : 'fail');
   const others = Object.entries(ready.folders || {});
   if (others.length) row('folders', others.map(([k, v]) => `${k}=${String(v).slice(0, 8)}…`).join(' '), 'pass');
@@ -117,6 +93,30 @@ async function main() {
 
   row('sheets', tokenOk ? 'token holds spreadsheet scope; first tab created in G-1 (this probe writes nothing)' : 'no token', tokenOk ? 'pass' : 'skip');
   row('docs', tokenOk ? 'token holds documents scope; first Doc generated in G-4 (this probe writes nothing)' : 'no token', tokenOk ? 'pass' : 'skip');
+
+  // The one thing a read *can* prove, and the thing that silently breaks every
+  // write: Drive reports `canAddChildren: true` for a folder shared with a
+  // service account and then refuses the create with 403 "Service Accounts do
+  // not have storage quota". A file is owned by whoever created it, and a
+  // service account owns nothing, so writes only work inside a *shared drive*,
+  // where the drive owns the file. That is visible without writing: a My Drive
+  // folder has no `driveId`.
+  if (tokenOk && folder) {
+    const tok2 = await accessToken(sa, { scopes: Object.values(SCOPES) });
+    const meta = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folder)}?fields=${encodeURIComponent('id,name,driveId,ownedByMe,capabilities(canAddChildren)')}`, {
+      headers: { Authorization: `Bearer ${tok2.token}` },
+    });
+    const j = await metajsonSafe(meta);
+    const shared = Boolean(j.driveId);
+    row('folder name', j.name || 'unreadable', 'info');
+    row('folder is a shared drive', shared ? `yes (${j.driveId})` : 'NO — My Drive folder', shared ? 'pass' : 'fail');
+    row('write ownership', shared
+      ? 'the drive owns created files, so a service account can create'
+      : 'a service account cannot own files here — writes will 403 (needs a shared drive)', shared ? 'pass' : 'fail');
+  } else {
+    row('folder is a shared drive', 'not attempted', 'skip');
+  }
+
   row('writes this run', '0 (zero-burn by construction)', 'pass');
 
   forgetToken();
