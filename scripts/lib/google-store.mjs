@@ -1,0 +1,350 @@
+/**
+ * google-store.mjs — one Drive/Sheets/Docs client for every agent surface.
+ *
+ * Why this shape:
+ *
+ *  - Service account, not per-bot OAuth. Headless hosts (vps, grok, collab) cannot
+ *    run a consent flow, and DATA_PLANE.md forbids adding a second OAuth stack to
+ *    the app. A service account is a key file, like the provider keys the bots
+ *    already hold, so it needs no UX and no per-bot re-consent.
+ *  - No `googleapis` dependency. That package drags in the OAuth client machinery
+ *    this fleet will never use. The JWT grant is a signed assertion plus one POST
+ *    to the token endpoint, which is all a service account needs.
+ *  - Folder-scoped by configuration, not by hope. The account's access comes from
+ *    Drive folder shares; this module is told folder IDs and never asked for
+ *    "my" root. A surface that is not configured says so (see `googleReady`).
+ *
+ * Isolation, per R-14.1 card 3: the credential is read from the *host* environment.
+ * An external-project turn gets `GOOGLE_FOLDER_<PROJECT>` and not the key path
+ * (see `googleReady`'s `childEnv`), so a turn that cannot name its folder cannot
+ * reach another project's data.
+ *
+ * Redaction is a hard rule, not a convention: nothing in this file returns or logs
+ * key material, and `redact` is applied to any error text that could carry a token.
+ */
+
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const TOKEN_TTL_MS = 45 * 60 * 1000; // Google tokens live an hour; refresh well before.
+const CLOCK_SKEW_S = 30;
+
+export const SCOPES = {
+  drive: 'https://www.googleapis.com/auth/drive',
+  spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
+  documents: 'https://www.googleapis.com/auth/documents',
+};
+
+const API = {
+  token: 'https://oauth2.googleapis.com/token',
+  drive: 'https://www.googleapis.com/drive/v3',
+  driveUpload: 'https://www.googleapis.com/upload/drive/v3',
+  sheets: 'https://www.googleapis.com/v1/spreadsheets',
+  docs: 'https://www.googleapis.com/v1/documents',
+};
+
+export const MIME = {
+  folder: 'application/vnd.google-apps.folder',
+  doc: 'application/vnd.google-apps.document',
+  sheet: 'application/vnd.google-apps.spreadsheet',
+  md: 'text/markdown',
+  json: 'application/json',
+  text: 'text/plain',
+};
+
+let cached = null; // { token, expiresAt } — module scope so a turn pays the grant once.
+
+/** Strip anything that looks like credential material out of text bound for a log. */
+export function redact(value) {
+  if (value === undefined || value === null) return value;
+  return String(value)
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[redacted private key]')
+    .replace(/"private_key"\s*:\s*"[^"]*"/g, '"private_key":"[redacted]"')
+    .replace(/\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[redacted jwt]')
+    .replace(/\bya29\.[A-Za-z0-9._-]+/g, '[redacted token]')
+    .replace(/(Bearer|Authorization:\s*)\s*[A-Za-z0-9._-]{20,}/gi, '$1 [redacted]');
+}
+
+/**
+ * Load and validate the service account from a host environment.
+ *
+ * `GOOGLE_SERVICE_ACCOUNT_JSON` is a *path*. Inline JSON is accepted so a secret
+ * manager can hand over the document itself, but the path is the documented shape:
+ * a key on disk can be chmod 600, an env blob cannot.
+ */
+export function serviceAccountFromEnv(env = process.env) {
+  const file = String(env.GOOGLE_SERVICE_ACCOUNT_JSON || '').trim();
+  const inline = String(env.GOOGLE_SERVICE_ACCOUNT_JSON_INLINE || '').trim();
+
+  let raw = '';
+  let source = '';
+  if (file) {
+    source = file;
+    try {
+      if (!fs.existsSync(file)) {
+        return { ok: false, reason: `GOOGLE_SERVICE_ACCOUNT_JSON points at a missing file (${file})`, source };
+      }
+      // A key readable by other users is a leak waiting to be found; say so before
+      // the grant, not after a security review.
+      try {
+        const mode = fs.statSync(file).mode & 0o777;
+        if (mode & 0o077) {
+          return { ok: false, reason: `service account file is mode ${mode.toString(8).padStart(3, '0')} (must be 600)`, source };
+        }
+      } catch {
+        /* stat is best-effort; a missing mode check is not a failure */
+      }
+      raw = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      return { ok: false, reason: `cannot read service account file: ${redact(err.message)}`, source };
+    }
+  } else if (inline) {
+    source = 'inline';
+    raw = inline;
+  } else {
+    return { ok: false, reason: 'no GOOGLE_SERVICE_ACCOUNT_JSON path in this environment', source: '' };
+  }
+
+  let key;
+  try {
+    key = JSON.parse(raw);
+  } catch (err) {
+    return { ok: false, reason: `service account JSON does not parse: ${redact(err.message)}`, source };
+  }
+
+  if (key.type !== 'service_account') {
+    return { ok: false, reason: `not a service account (type=${key.type || 'missing'})`, source };
+  }
+  if (!key.private_key || !/-----BEGIN PRIVATE KEY-----/.test(key.private_key)) {
+    return { ok: false, reason: 'private_key missing or not a PEM', source };
+  }
+  if (!key.client_email) {
+    return { ok: false, reason: 'client_email missing', source };
+  }
+
+  return { ok: true, key, email: key.client_email, projectId: key.project_id || '', source };
+}
+
+const FOLDER_VAR = /^GOOGLE_FOLDER_([A-Z0-9_]+)$/;
+
+/**
+ * Read the folder map out of a host environment.
+ *
+ * The variable is `GOOGLE_FOLDER_<PROJECT_IN_UPPER_UNDERSCORE>`, not the project id:
+ * systemd's EnvironmentFile accepts `[A-Za-z_][A-Za-z0-9_]*` only, so a hyphen in
+ * the name makes systemd drop the line *silently* and the surface looks
+ * unconfigured with no error anywhere. The underscore form is mapped back to the
+ * project id here so callers still speak `health-tracker`.
+ */
+export function foldersFromEnv(env = process.env) {
+  const out = {};
+  for (const [k, v] of Object.entries(env)) {
+    const m = k.match(FOLDER_VAR);
+    if (!m) continue;
+    const id = String(v || '').trim().replace(/^["']|["']$/g, '');
+    if (id) out[m[1].toLowerCase().replace(/_/g, '-')] = id;
+  }
+  return out;
+}
+
+/**
+ * The honest per-location readiness answer, in the shape `/setup` already speaks.
+ * Missing pieces are named; nothing is inferred from another host.
+ */
+export function googleReady(env = process.env) {
+  const sa = serviceAccountFromEnv(env);
+  if (!sa.ok) return { ready: false, reason: sa.reason, source: sa.source, email: '', folder: '' };
+  const folders = foldersFromEnv(env);
+  const folderId = String(env.GOOGLE_FOLDER_ID || '').trim().replace(/^["']|["']$/g, '');
+  if (!folderId && Object.keys(folders).length === 0) {
+    return { ready: false, reason: 'credential present, but no GOOGLE_FOLDER_<project> configured', source: sa.source, email: sa.email, folder: '' };
+  }
+  return {
+    ready: true,
+    reason: '',
+    source: sa.source,
+    email: sa.email,
+    projectId: sa.projectId,
+    folder: folderId || '',
+    folders,
+  };
+}
+
+/**
+ * The child env an external-project turn is allowed to see: the folder to write,
+ * never the path to the key. This is the card-3 boundary in code.
+ */
+export function googleChildEnv(env, projectId) {
+  const key = String(projectId || '').trim();
+  const folder = (foldersFromEnv(env)[key] || '').trim();
+  if (!folder) return { ok: false, reason: `no Google folder configured for project ${key || '(none)'}` };
+  return { ok: true, env: { GOOGLE_FOLDER_ID: folder, GOOGLE_PROJECT: key } };
+}
+
+const b64url = (buf) => Buffer.from(buf).toString('base64url');
+
+/** Build the signed JWT assertion a service-account grant requires. */
+export function buildAssertion(key, { scopes = Object.values(SCOPES), now = Date.now() } = {}) {
+  const issued = Math.floor(now / 1000);
+  const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claims = b64url(JSON.stringify({
+    iss: key.client_email,
+    scope: scopes.join(' '),
+    aud: key.token_uri || API.token,
+    iat: issued - CLOCK_SKEW_S,
+    exp: issued + 3600,
+  }));
+  const signature = crypto.sign('RSA-SHA256', Buffer.from(`${header}.${claims}`), key.private_key);
+  return `${header}.${claims}.${b64url(signature)}`;
+}
+
+async function request(url, { method = 'GET', token = '', body, headers = {}, attempts = 3 } = {}) {
+  let lastErr = '';
+  for (let i = 0; i < attempts; i += 1) {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...headers,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (res.ok) return { ok: true, status: res.status, json: text ? JSON.parse(text) : {} };
+    lastErr = `HTTP ${res.status} ${redact(text).slice(0, 300)}`;
+    // 401/403 on a fresh token is a real answer (scope or share missing); retrying
+    // the same request just burns quota. 429/5xx are worth one more try.
+    if (res.status < 500 && res.status !== 429) break;
+    await new Promise((r) => setTimeout(r, 250 * 2 ** i));
+  }
+  return { ok: false, status: 0, error: lastErr || 'request failed' };
+}
+
+/** Mint (or reuse) an access token for the service account. */
+export async function accessToken(sa, opts = {}) {
+  const now = Date.now();
+  if (!opts.force && cached && cached.expiresAt > now) return { ok: true, token: cached.token, cached: true };
+  const assertion = buildAssertion(sa.key, { scopes: opts.scopes, now });
+  const res = await request(API.token, {
+    method: 'POST',
+    body: { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion },
+  });
+  if (!res.ok) return { ok: false, error: res.error || 'token grant failed' };
+  cached = {
+    token: res.json.access_token,
+    expiresAt: now + Math.min(Number(res.json.expires_in || 3600) * 1000 - CLOCK_SKEW_S * 1000, TOKEN_TTL_MS),
+  };
+  return { ok: true, token: cached.token, cached: false };
+}
+
+export function forgetToken() {
+  cached = null;
+}
+
+/**
+ * Deterministic, never-colliding object name. Two agents on two locations writing
+ * "the same" turn produce two distinct rows, and a retry of the same turn produces
+ * the same name — which is what makes the write idempotent.
+ */
+export function objectName({ at, location, chat, turnId, slug = '' }) {
+  const stamp = String(at || '').replace(/[^0-9]/g, '').slice(0, 14) || String(Date.now());
+  // Collapse runs of dots as well as punctuation: Drive tolerates `..` in a name,
+  // but a name is also logged, pasted into a shell, and used in a local cache
+  // path, and `../..` surviving sanitization is the kind of thing that bites later.
+  const clean = (p) => String(p)
+    .replace(/[^A-Za-z0-9_.-]+/g, '-')
+    .replace(/\.{2,}/g, '.')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 60);
+  const parts = [stamp, clean(location || 'unknown') || 'unknown', clean(chat || 'nochat') || 'nochat', clean(turnId || 'noturn') || 'noturn'];
+  const tail = clean(slug);
+  return `${parts.join('-')}${tail ? `-${tail}` : ''}`;
+}
+
+export function monthTab(at) {
+  const d = new Date(at || Date.now());
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}`;
+}
+
+/** Drive: list one page of a folder. Read-only, so the probe can use it freely. */
+export async function listFolder(folderId, token, { pageSize = 10, fields = 'files(id,name,mimeType,modifiedTime,size)' } = {}) {
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+  const url = `${API.drive}/files?q=${q}&pageSize=${pageSize}&fields=${encodeURIComponent(fields)}&orderBy=modifiedTime desc`;
+  return request(url, { token });
+}
+
+export async function createFile(folderId, name, { mimeType = MIME.md, content = '' } = {}, token) {
+  const boundary = 'fleetstore';
+  const meta = { name, parents: [folderId], mimeType };
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(meta),
+    `--${boundary}`,
+    `Content-Type: ${mimeType}`,
+    '',
+    content,
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+  const res = await fetch(`${API.driveUpload}/files?uploadType=multipart&fields=${encodeURIComponent('id,name,mimeType,webViewLink')}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  const text = await res.text();
+  if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status} ${redact(text).slice(0, 300)}` };
+  return { ok: true, id: JSON.parse(text).id, file: JSON.parse(text) };
+}
+
+/** Drive: create a Google Doc, optionally seeded, and file it in the folder. */
+export async function createDoc(folderId, title, { body = '' } = {}, token) {
+  const res = await request(`${API.drive}/files`, {
+    method: 'POST',
+    token,
+    body: { name: title, parents: [folderId], mimeType: MIME.doc },
+  });
+  if (!res.ok) return res;
+  const id = res.json.id;
+  if (body) {
+    const seeded = await appendDocText(id, body, token);
+    if (!seeded.ok) return { ok: false, status: seeded.status, error: `doc created (${id}) but seed failed: ${seeded.error}`, id };
+  }
+  return { ok: true, id, title, webViewLink: res.json.webViewLink || `https://docs.google.com/document/d/${id}/edit` };
+}
+
+export async function appendDocText(docId, text, token) {
+  const end = await request(`${API.docs}/documents/${docId}`, { token, });
+  if (!end.ok) return end;
+  const body = end.json.body?.content || [];
+  const last = body[body.length - 1];
+  const index = last?.endIndex || 1;
+  return request(`${API.docs}/documents/${docId}:batchUpdate`, {
+    method: 'POST',
+    token,
+    body: { requests: [{ insertText: { location: { index }, text: `\n${text}` } }] },
+  });
+}
+
+/** Sheets: create the spreadsheet once. Later tabs are the writer's job. */
+export async function createSheet(title, { tabName = 'turn_log' } = {}, token) {
+  return request(`${API.sheets}`, {
+    method: 'POST',
+    token,
+    body: { properties: { title }, sheets: [{ properties: { title: tabName } }] },
+  });
+}
+
+/** Sheets: append rows. Appending is the only write shape this fleet uses. */
+export async function appendRows(sheetId, tab, rows, token) {
+  const body = { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', range: `${tab}!A1`, values: rows };
+  return request(`${API.sheets}/${sheetId}/values/${tab}:append`, { method: 'POST', token, body });
+}
+
+export async function readTab(sheetId, tab, token, { range = `${tab}!A1:Z200` } = {}) {
+  return request(`${API.sheets}/${sheetId}/values/${encodeURIComponent(range)}`, { token });
+}
