@@ -940,7 +940,7 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   const buttons = [];
   for (const g of tierGroups) {
     // A keyboard has no subheadings, so the breakdown is a row of its own: the same
-    // label and the same count /allowance prints above the group, from the same
+    // label and the same count /allowance prints above the section, from the same
     // groupRowsByTier() result. `noop` is the callback the router already uses for a
     // non-actionable keyboard row, and the tap handler answers it silently.
     if (tierGroups.length > 1) {
@@ -949,29 +949,21 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
     const tag = r.plan || (r.lane ? planCodeForLane(r.lane) : '');
-    // The benchmark score rides on the button, so the choice is made with the number
-    // in front of you rather than from memory. Unscored models get nothing — the
-    // scorecard covers about half the reachable free models, and a missing number is
-    // honest where a borrowed one would not be.
-    // The tier rides on the button as well as in the order, because a keyboard has
-    // no subheadings: `coding` / `light` / `unranked` is the only way the split is
-    // visible here, and it is the same word /allowance prints above the group.
     // The group header above the row says the tier, so the button carries what the row
     // cannot inherit: the plan code, the external benchmark where one is published,
     // and the bakeoff ledger's own verdict. A model with no published figure gets no
     // number at all — never a neighbour's.
     const model = r.lane?.model || r.model || r.ref || '';
     // The button says what the /allowance row says, through the same copy function,
-    // in the same column order and the same widths: mark, name (30), plan (2),
-    // reset (15), benchmark (7), finished to 72 characters with a dash — the length
-    // the reader counts on a screenshot. A button is no longer a second, shorter
-    // vocabulary for a row that already exists.
-    const name = shortModelName(r.lane || { label });
+    // at the same width: mark, name, plan, benchmark, reset, finished to 72
+    // characters with a dash. A button is no longer a second, shorter vocabulary for
+    // a row that already exists. The reset is the compact countdown, never an
+    // absolute timestamp: a full ISO date eats the column and breaks the edge.
     const rawReset = String(r.resetIn || r.resetLabel || '');
     const resetSource = r.resetAt ?? (/^\d{4}-\d{2}-\d{2}/.test(rawReset) ? rawReset : null);
     const rated = fitCopy(rowCopy({
       mark: unusableOf(r) ? '❌' : '✅',
-      name,
+      name: shortModelName(r.lane || { label }),
       plan: tag,
       score: benchmarkLabel(model) || '—',
       resetIn: resetSource ? formatResetIn(resetSource, now) : (rawReset && rawReset !== '-' ? rawReset : '—'),

@@ -430,10 +430,11 @@ try {
   // "ling-3.0-flash-f" in a 16-column name.
   const nameSrc = lanesSrc;
   check('a "-free" suffix on the model id is stripped, not left to eat the column',
-    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /padChars\(name, MODEL_NAME_MAX\)/.test(nameSrc));
+    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /const W_MODEL = MODEL_NAME_MAX/.test(nameSrc));
   // One cap for the column and for shortModelName(). Two numbers is how a 20-char
   // cap in a 24-char column still cut "nemotron-3.5-lightning" to
   // "nemotron-3.5-lightni" and "trinity-large-preview" to "trinity-large-previe".
+  // The reader's spec widened both to 30 together.
   check('the name column and the name cap are the same number',
     /export const MODEL_NAME_MAX = 30;/.test(nameSrc) && /s\.length > MODEL_NAME_MAX \? s\.slice\(0, MODEL_NAME_MAX\)/.test(nameSrc));
   check('and no two distinct models render the same name', (() => {
@@ -459,7 +460,7 @@ try {
   // row per group with the same label and count /allowance prints above the section,
   // from the same groupRowsByTier() result.
   check('/freemodel heads each tier group with the same label and count',
-    /buttons\.push\(\{ text: headingCopy\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
+    /buttons\.push\(\{ text: fitCopy\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
   check('and a heading is a real noop, not a model named noop',
     /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
   check('the body carries the same breakdown as one line',
@@ -501,7 +502,7 @@ try {
   // bakeoff label — or "unranked" when the ledger has no row for that model.
   // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
-    /const rated = fitCopy\(rowCopy\(\{/.test(botSrc)
+    /const rated = rowCopy\(\{/.test(botSrc)
     && /mark: unusableOf\(r\) \? '❌' : '✅'/.test(botSrc),
     botSrc.match(/buttons\.push\(\{[^\n]*/)?.[0] || 'not found');
   // Telegram caps callback_data at 64 bytes, and it used to carry the label — so
@@ -532,7 +533,7 @@ try {
     const region = botSrc.split('\n').slice(0, 130).join('\n');
     const imported = new Set((region.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
     const helpers = ['buildAllowanceTextForBots', 'formatCompactAllowanceChat', 'canonicalAllowanceLanes', 'groupRowsByTier',
-      'rowCopy', 'fitCopy', 'headingCopy', 'shortModelName', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',
+      'rowCopy', 'fitCopy', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',
       'formatResetIn', 'soonestResetAmongDepleted', 'ensureBotLedger', 'renderFreeLaneTableHtml', 'usableTurnLanes',
       'stampDepleted', 'freemodelRefToRoute', 'isConnectionFailure', 'stampCooldown'];
     const missing = helpers.filter((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(botSrc) && !new RegExp(`\\b${fn}\\b`).test(region));
@@ -550,10 +551,10 @@ try {
   // outside, a row was two glyphs wider than the header and the edge went ragged.
   check('every line of the block is finished to the copy width', (() => {
     const src = read('lib/free-lanes.mjs');
-    return /const header = fitCells\(/.test(src)
-      && /const sep = fitCells\(/.test(src)
-      && /lines\.push\(fitCells\(/.test(src)
-      && /line: fitCells\(rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(src);
+    return /const header = fitCopy\(/.test(src)
+      && /const sep = fitCopy\(/.test(src)
+      && /lines\.push\(fitCopy\(/.test(src)
+      && /rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(src);
   })());
   check('and the message ends with the terminator', /lines\.push\('-'\)/.test(botSrc));
 
@@ -564,26 +565,21 @@ try {
   check('and the renderer emits no nested code spans', !/<code>.*escHtml\(header\)/.test(read('lib/free-lanes.mjs')) && /const lines = \[header \+ nl \+ sep\]/.test(read('lib/free-lanes.mjs')));
 
   // One copy, one width: the row /allowance prints is the label the /freemodel button
-  // carries, both built by the same colsCopy() columns — the table finished to 72
-  // display cells, the button to 72 characters (the unit the reader counts), each
-  // ending in a dash so a button and its row are one string, not two vocabularies.
-  check('the button label is the /allowance row copy', /const rated = fitCopy\(rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
-  check('every copy ends in a dash: 72 characters for a button, 72 cells for a line', (() => {
+  // carries, both finished to 72 characters with a dash, so a button and its row are
+  // the same string rather than two vocabularies.
+  check('the button label is the /allowance row copy', /const rated = rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
+  check('every copy is exactly 72 characters ending in a dash', (() => {
     const fl = read('lib/free-lanes.mjs');
     return /export const COPY_WIDTH = 72;/.test(fl)
-      && /export function fitCopy\(line\) \{/.test(fl)
-      && /if \(n \+ 1 > COPY_WIDTH - 1\) break;/.test(fl)
-      && /export function fitCells\(line\) \{/.test(fl)
-      && /const cw = dispWidth\(ch\)/.test(fl)
-      && /return `\$\{out\}-`;/.test(fl)
-      && !/EN_SPACE|enSpace/.test(fl);
+      && /const body = raw\.length >= COPY_WIDTH - 1 \? raw\.slice\(0, COPY_WIDTH - 1\)/.test(fl)
+      && /return `\$\{body\}-`;/.test(fl);
   })());
   check('and the list is not repeated in the /freemodel message', !/tableForBody/.test(botSrc));
   check('the old space padding is gone with it', !/LEFT_PAD/.test(botSrc) && !/leftAlign/.test(botSrc));
   check('a button still carries the benchmark score', /score: benchmarkLabel\(model\)/.test(botSrc));
 
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
-  check('a button is labelled the way /allowance labels the row', /shortModelName\(r\.lane \|\| \{ label \}\)/.test(botSrc));
+  check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
   // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven
   // taps of "Next" to see the list, which is what the router's single list avoids.
   check('the keyboard is not paged', /all: true/.test(botSrc) && /kind: 'fm',\s*all: true/.test(botSrc.replace(/\s+/g, ' ')));

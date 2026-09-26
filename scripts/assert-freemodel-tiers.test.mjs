@@ -36,7 +36,7 @@ console.log('assert-freemodel-tiers (QS-6/QS-7)\n');
 
 const host = await import(path.join(__dirname, 'bot-host.mjs'));
 const { scoreLabelFor, tierForModel, benchmarkLabel } = await import(path.join(__dirname, 'lib', 'free-catalogs.mjs'));
-const { groupRowsByTier, headingCopy, COPY_WIDTH, shortModelName } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
+const { groupRowsByTier, fitCopy, COPY_WIDTH } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
 const { formatFreemodelWithDepletion } = host;
 check('the formatter is exported for the sensor', typeof formatFreemodelWithDepletion === 'function');
 
@@ -58,9 +58,9 @@ const btns = out.buttons;
 const btnText = (b) => (typeof b === 'string' ? b : b.text);
 const refOf = (r) => r.lane?.model || r.model || r.ref || '';
 const labelOf = (r) => r.laneLabel || r.label;
-// The button carries the table's short name, so the order is checked against
-// what the row actually prints, not the raw label it was given.
-const nameOf = (r) => shortModelName(r.lane || { label: labelOf(r) });
+// Buttons print the row label, so the order is checked against what each row
+// actually prints, not an internal id.
+const nameOf = (r) => labelOf(r);
 
 // 2. order: the keyboard follows the catalogs' own grouping, one heading per
 // non-empty group with the same label and count /allowance prints above it.
@@ -74,7 +74,7 @@ const seenHeadings = [];
 for (const g of groups) {
   const heading = btnText(btns[cursor]);
   seenHeadings.push(heading);
-  if (heading !== headingCopy(`${g.label} (${g.rows.length})`)) orderOk = false;
+  if (heading !== fitCopy(`${g.label} (${g.rows.length})`)) orderOk = false;
   cursor += 1;
   for (const r of g.rows) {
     if (!btnText(btns[cursor]).includes(nameOf(r))) orderOk = false;
