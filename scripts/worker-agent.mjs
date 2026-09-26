@@ -37,6 +37,11 @@ const arg = (name, fallback) => {
 
 const HOST = arg('host', process.env.WORKER_HOST || 'mobile');
 const RELAY = arg('relay', process.env.WORKER_RELAY_URL || 'http://127.0.0.1:8890');
+// Direct-route auth, mirroring the relay: same bearer token the relay was
+// started with (env or flag). Absent on both ends, everything works exactly
+// as before; set on only one end, that end refuses loudly.
+const RELAY_TOKEN = String(arg('relay-token', process.env.WORKER_RELAY_TOKEN || ''));
+const authHeaders = (extra = {}) => (RELAY_TOKEN ? { ...extra, authorization: `Bearer ${RELAY_TOKEN}` } : extra);
 const DETAIL = arg('detail', `${os.hostname()} ${os.platform()}`);
 // Labeled test worker, never the physical device. Bare --standin counts.
 const STANDIN =
@@ -55,7 +60,7 @@ function log(...parts) {
 async function post(route, body) {
   const res = await fetch(`${RELAY}${route}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: authHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({ host: HOST, pid: process.pid, detail: DETAIL, cwd: process.cwd(), machine: MACHINE, standin: STANDIN, ...body }),
   });
   return res.json().catch(() => ({}));
@@ -108,7 +113,7 @@ async function sessionIsHere(sessionId) {
 async function importSessionFromRelay(sessionId) {
   let res;
   try {
-    res = await fetch(`${RELAY}/sessions/${encodeURIComponent(sessionId)}/export`);
+    res = await fetch(`${RELAY}/sessions/${encodeURIComponent(sessionId)}/export`, { headers: authHeaders() });
   } catch (err) {
     log(`relay unreachable for ${sessionId}:`, String(err?.message || err).slice(0, 120));
     return false;
@@ -153,7 +158,7 @@ async function resumeSession(sessionId) {
  */
 async function applyJobPack(packId, workspace) {
   try {
-    const res = await fetch(`${RELAY}/packs/${encodeURIComponent(packId)}`);
+    const res = await fetch(`${RELAY}/packs/${encodeURIComponent(packId)}`, { headers: authHeaders() });
     if (res.status === 404) return { ok: false, reason: 'pack is not on the relay' };
     if (!res.ok) return { ok: false, reason: `relay answered ${res.status}` };
     const payload = await res.json();
@@ -245,7 +250,7 @@ async function loop() {
   const beat = setInterval(() => { post('/heartbeat', {}).catch(() => {}); }, 30000);
   for (;;) {
     try {
-      const res = await fetch(`${RELAY}/jobs/next?host=${encodeURIComponent(HOST)}&wait=25000`);
+      const res = await fetch(`${RELAY}/jobs/next?host=${encodeURIComponent(HOST)}&wait=25000`, { headers: authHeaders() });
       if (res.status === 204) continue;
       const { job } = await res.json();
       if (!job) continue;
