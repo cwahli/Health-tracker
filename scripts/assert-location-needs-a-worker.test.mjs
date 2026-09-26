@@ -92,13 +92,13 @@ try {
   check('the turn path asks whether the host is local', /if \(!isLocalHost\(location\)\) \{/.test(src));
   check('a remote turn goes through runOnWorker', /await runOnWorker\(\{/.test(src));
   check('the remote turn carries the project, role and workspace', /project: isExternalTurn \? activeProject\.id : 'health-tracker'/.test(src) && /role: activeRole \|\| ''/.test(src) && /workspace: effectiveWorkspace/.test(src));
-  check('the reply names the host that ran it', /host: \$\{location\}/.test(src));
+  check('the reply names the host that ran it', /host: \$\{host\}/.test(src) || /host: \$\{location\}/.test(src));
   // Disclosed change (guards 4-5): an unreachable host used to fall through to
   // a local run on this machine's allowance. It now holds the turn, by name.
   const bot = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check(
     'a worker with no live connection holds the turn instead of running locally',
-    /if \(!remoteStatus\.reachable\)[\s\S]{0,300}setBlockedLocation\(chatId, location/.test(bot) &&
+    /if \(!remoteStatus\.reachable\)[\s\S]{0,300}setBlockedLocation\(chatId, (location|host)/.test(bot) &&
       !/if \(!status\.reachable\) return null;/.test(bot)
   );
 } finally {
