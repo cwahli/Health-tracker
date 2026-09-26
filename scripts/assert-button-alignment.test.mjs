@@ -109,8 +109,8 @@ check('the fill is ASCII spaces — no U+2002 survives',
 // index the spec puts it at, whatever the content above it was, or the table
 // drifts inside the button even when the button is the right length.
 //   mark(1) + space(1) + name(30) + 2 = plan at 34
-//   plan(2) + space(1) = reset at 37, reset(15) + 2 = benchmark at 54
-const OFFSET = { name: 2, plan: 2 + MODEL_NAME_MAX + 2, reset: 2 + MODEL_NAME_MAX + 2 + W_PLAN + 1, score: 2 + MODEL_NAME_MAX + 2 + W_PLAN + 1 + W_EXPIRY + 2 };
+//   plan(2) + 3 spaces = reset at 39, reset(15) + 2 = benchmark at 56
+const OFFSET = { name: 2, plan: 2 + MODEL_NAME_MAX + 2, reset: 2 + MODEL_NAME_MAX + 2 + W_PLAN + 3, score: 2 + MODEL_NAME_MAX + 2 + W_PLAN + 3 + W_EXPIRY + 2 };
 const probe = fitCopy(rowCopy({ mark: '❌', name: 'N'.repeat(60), plan: 'ZZZZZZ', resetIn: 'R'.repeat(40), score: 'SSSSSSS' }));
 check('the name column starts at character 2 and is 30 wide',
   probe.slice(OFFSET.name, OFFSET.name + MODEL_NAME_MAX) === 'N'.repeat(MODEL_NAME_MAX)
@@ -119,11 +119,14 @@ check('the name column starts at character 2 and is 30 wide',
 check('the plan column starts at 34 and is 2 wide',
   probe.slice(OFFSET.plan, OFFSET.plan + W_PLAN) === 'ZZ' && probe[OFFSET.plan + W_PLAN] === ' ',
   `at ${OFFSET.plan}: ${JSON.stringify(probe.slice(OFFSET.plan, OFFSET.plan + 4))}`);
-check('the reset column starts at 37 and is 15 wide',
+check('the plan code sits three spaces clear of the countdown, never beside it',
+  probe.slice(OFFSET.plan + W_PLAN, OFFSET.reset) === '   ' && OFFSET.reset === 39,
+  JSON.stringify(probe.slice(OFFSET.plan, OFFSET.reset + 2)));
+check('the reset column starts at 39 and is 15 wide',
   probe.slice(OFFSET.reset, OFFSET.reset + W_EXPIRY) === 'R'.repeat(W_EXPIRY)
   && probe.slice(OFFSET.reset + W_EXPIRY, OFFSET.score) === '  ',
   JSON.stringify(probe.slice(OFFSET.reset, OFFSET.score + 2)));
-check('the benchmark column starts at 54 and is 7 wide',
+check('the benchmark column starts at 56 and is 7 wide',
   probe.slice(OFFSET.score, OFFSET.score + W_SCORE) === 'SSSSSSS' && probe[OFFSET.score + W_SCORE] === ' ',
   JSON.stringify(probe.slice(OFFSET.score, OFFSET.score + 9)));
 check('every row puts every column at the same character index',

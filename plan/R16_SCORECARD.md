@@ -88,7 +88,7 @@ unreliable. The 20:34 duplicate was stopped; pid 757798 remains the single polle
 | `probe-free-lanes.mjs` (zero burn, vps host) | exit 0 |
 | `assert-r16-failover.test.mjs` | 26/0 |
 | `assert-freemodel-tiers.test.mjs` | 10/0 (restored: the file had been lost in a merge, rewritten against the current button format) |
-| `assert-button-alignment.test.mjs` | 24/0 (new: the reader's spec — name 30 / plan 2 / reset 15 / benchmark 7 by character offset, every button exactly 72 characters ending in `-`, ASCII fill with no U+2002, and the monospace table still finished to 72 display cells) |
+| `assert-button-alignment.test.mjs` | 25/0 (new: the reader's spec — name 30 / plan 2 / reset 15 / benchmark 7 by character offset at 2/34/39/56, plan three spaces clear of the countdown, every button exactly 72 characters ending in `-`, ASCII fill with no U+2002, and the monospace table still finished to 72 display cells) |
 | live `/freemodel` keyboard (`dump_buttons.py`) | exit 0 — 33 buttons, distinct character lengths `[72]`, columns at 2/34/37/54, no EN SPACE, no provider prefix |
 | live `/allowance` table (`dump_allowance.py`) | exit 0 — 34 lines, distinct display widths `[72]`, header `Model … PL … Reset in … AA` |
 | `assert-cooldown-and-dead-ends.test.mjs` | 47/0 |
