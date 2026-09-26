@@ -449,7 +449,7 @@ try {
   // row per group with the same label and count /allowance prints above the section,
   // from the same groupRowsByTier() result.
   check('/freemodel heads each tier group with the same label and count',
-    /buttons\.push\(\{ text: fitCopy\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
+    /buttons\.push\(\{ text: enSpace\(fitCopy\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\)\), data: 'noop', header: true \}\)/.test(botSrc));
   check('and a heading is a real noop, not a model named noop',
     /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
   check('the body carries the same breakdown as one line',
@@ -491,7 +491,7 @@ try {
   // bakeoff label — or "unranked" when the ledger has no row for that model.
   // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
-    /const rated = rowCopy\(\{/.test(botSrc)
+    /const rated = enSpace\(rowCopy\(\{/.test(botSrc)
     && /mark: unusableOf\(r\) \? '❌' : '✅'/.test(botSrc),
     botSrc.match(/buttons\.push\(\{[^\n]*/)?.[0] || 'not found');
   // Telegram caps callback_data at 64 bytes, and it used to carry the label — so
@@ -522,7 +522,7 @@ try {
     const region = botSrc.split('\n').slice(0, 130).join('\n');
     const imported = new Set((region.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
     const helpers = ['buildAllowanceTextForBots', 'formatCompactAllowanceChat', 'canonicalAllowanceLanes', 'groupRowsByTier',
-      'rowCopy', 'fitCopy', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',
+      'rowCopy', 'fitCopy', 'enSpace', 'shortModelName', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',
       'formatResetIn', 'soonestResetAmongDepleted', 'ensureBotLedger', 'renderFreeLaneTableHtml', 'usableTurnLanes',
       'stampDepleted', 'freemodelRefToRoute', 'isConnectionFailure', 'stampCooldown'];
     const missing = helpers.filter((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(botSrc) && !new RegExp(`\\b${fn}\\b`).test(region));
@@ -556,19 +556,21 @@ try {
   // One copy, one width: the row /allowance prints is the label the /freemodel button
   // carries, both finished to 72 characters with a dash, so a button and its row are
   // the same string rather than two vocabularies.
-  check('the button label is the /allowance row copy', /const rated = rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
-  check('every copy is exactly 72 characters ending in a dash', (() => {
+  check('the button label is the /allowance row copy', /const rated = enSpace\(rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
+  check('every copy is exactly 72 display cells ending in a dash', (() => {
     const fl = read('lib/free-lanes.mjs');
     return /export const COPY_WIDTH = 72;/.test(fl)
-      && /const body = raw\.length >= COPY_WIDTH - 1 \? raw\.slice\(0, COPY_WIDTH - 1\)/.test(fl)
-      && /return `\$\{body\}-`;/.test(fl);
+      && /const cw = dispWidth\(ch\)/.test(fl)
+      && /if \(w \+ cw > COPY_WIDTH - 1\) break;/.test(fl)
+      && /out \+= ' '\.repeat\(COPY_WIDTH - 1 - w\)/.test(fl)
+      && /return `\$\{out\}-`;/.test(fl);
   })());
   check('and the list is not repeated in the /freemodel message', !/tableForBody/.test(botSrc));
   check('the old space padding is gone with it', !/LEFT_PAD/.test(botSrc) && !/leftAlign/.test(botSrc));
   check('a button still carries the benchmark score', /score: benchmarkLabel\(model\)/.test(botSrc));
 
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
-  check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
+  check('a button is labelled the way /allowance labels the row', /shortModelName\(r\.lane \|\| \{ label \}\)/.test(botSrc));
   // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven
   // taps of "Next" to see the list, which is what the router's single list avoids.
   check('the keyboard is not paged', /all: true/.test(botSrc) && /kind: 'fm',\s*all: true/.test(botSrc.replace(/\s+/g, ' ')));

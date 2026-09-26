@@ -86,18 +86,20 @@ unreliable. The 20:34 duplicate was stopped; pid 757798 remains the single polle
 |---|---|
 | `check-capability-propagation.mjs` | 26 capabilities, 0 failures (QS-12) |
 | `probe-free-lanes.mjs` (zero burn, vps host) | exit 0 |
-| `assert-r16-failover.test.mjs` | 25/0 |
-| `assert-freemodel-tiers.test.mjs` | 10/0 |
+| `assert-r16-failover.test.mjs` | 26/0 |
+| `assert-freemodel-tiers.test.mjs` | 10/0 (restored: the file had been lost in a merge, rewritten against the current button format) |
+| `assert-button-alignment.test.mjs` | 14/0 (new: every /freemodel button is 72 display cells, dash last, EN SPACE fill, mark at cell 0) |
 | `assert-cooldown-and-dead-ends.test.mjs` | 47/0 |
-| `assert-one-allowance-model.test.mjs` | 125/0 |
+| `assert-one-allowance-model.test.mjs` | 147/0 |
 | `assert-setup-gaps.test.mjs` | 63/0 |
 | `assert-lane-contract.mjs` | 33/0 |
 | `assert-model-failover.mjs` | 10/0 |
-| `assert-worker-relay.test.mjs` | 32/0 |
+| `assert-worker-relay.test.mjs` | 34/0 |
 | `assert-session-key.test.mjs` | 24/0 |
 | `assert-work-session.mjs` | 50/0 |
-| `assert-location-needs-a-worker.test.mjs` | 36/0 (2 stale regex literals retargeted to the `location`→`host` rename; pass meaning unchanged) |
-| `assert-allowance-walk.test.mjs` | **38/1** — `an exhausted host is told nothing ran` (open on `agent/r14-card-1`, not this branch) |
+| `assert-location-needs-a-worker.test.mjs` | 52/0 (2 stale regex literals retargeted to the `location`→`host` rename; pass meaning unchanged) |
+| `assert-allowance-walk.test.mjs` | 43/0 — the QS-9 exhausted-host wording checks pass on this branch |
+| `npx vitest run tests/bot-host.test.ts scripts/assert-spec-diff.test.mjs` | 150/0; `npx tsc --noEmit` clean |
 
 ## Score
 

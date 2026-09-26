@@ -83,6 +83,8 @@ import {
   groupRowsByTier,
   rowCopy,
   fitCopy,
+  enSpace,
+  shortModelName,
   buildAllowanceTextForBots,
   escHtml,
   formatResetIn,
@@ -941,7 +943,7 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // groupRowsByTier() result. `noop` is the callback the router already uses for a
     // non-actionable keyboard row, and the tap handler answers it silently.
     if (tierGroups.length > 1) {
-      buttons.push({ text: fitCopy(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
+      buttons.push({ text: enSpace(fitCopy(`${g.label} (${g.rows.length})`)), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -962,13 +964,16 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // at the same width: mark, name, plan, benchmark, reset, finished to 72
     // characters with a dash. A button is no longer a second, shorter vocabulary for
     // a row that already exists.
-    const rated = rowCopy({
+    const name = shortModelName(r.lane || { label });
+    const rawReset = String(r.resetIn || r.resetLabel || '');
+    const resetSource = r.resetAt ?? (/^\d{4}-\d{2}-\d{2}/.test(rawReset) ? rawReset : null);
+    const rated = enSpace(rowCopy({
       mark: unusableOf(r) ? '❌' : '✅',
-      name: label,
+      name,
       plan: tag,
       score: benchmarkLabel(model),
-      resetIn: r.resetIn || r.resetLabel || '—',
-    });
+      resetIn: resetSource ? formatResetIn(resetSource, now) : (rawReset && rawReset !== '-' ? rawReset : '—'),
+    }));
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1905,7 +1910,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         reply_markup: modelKeyboard(body.buttons, {
           kind: 'fm',
           all: true,
-          footer: { text: 'Cancel — keep current model', callback_data: 'noop' },
+          footer: { text: enSpace(fitCopy('Cancel — keep current model')), callback_data: 'noop' },
         }),
       });
       return;

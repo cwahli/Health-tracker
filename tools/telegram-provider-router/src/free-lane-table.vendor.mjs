@@ -932,7 +932,7 @@ function laneInAllowanceTable(lane) {
 }
 
 /** Display width for Telegram monospace (emoji ≈ 2 cells). */
-function dispWidth(s) {
+export function dispWidth(s) {
   let w = 0;
   for (const ch of String(s ?? "")) {
     const cp = ch.codePointAt(0);
@@ -1016,10 +1016,14 @@ export function orderLikeWalk(lanes, currentModel) {
 /**
  * The copy width every list line is finished to.
  *
- * 72 characters, with a `-` in the last cell: the dash is what makes the width
+ * 72 display cells, with a `-` in the last cell: the dash is what makes the width
  * exact, because trailing spaces are trimmed by some clients and by Telegram's own
  * rendering, so a line padded only with spaces is not reliably 72 anywhere. The
  * dash is content, so the length holds.
+ *
+ * Display cells, not characters: ✅/❌ is one character and two cells, and a line
+ * finished by character count ran one cell long in a monospace block — the header
+ * and the rows had different right edges.
  */
 export const COPY_WIDTH = 72;
 
@@ -1027,17 +1031,48 @@ export const COPY_WIDTH = 72;
 const MARK_W = 2;
 
 /**
- * Pad (or trim) any line to exactly COPY_WIDTH characters, ending in a `-`.
+ * Pad (or trim) any line to exactly COPY_WIDTH display cells, ending in a `-`.
  *
- * The outer fill counts *characters*, not display columns, because "72 char" is how
- * a reader counts and how Telegram sizes a button. The columns inside a row are
- * still padded by display width, so the names, plans and scores line up. The two
- * differ by one on a row carrying ✅, which occupies two columns and one character.
+ * The width is counted in display cells (see dispWidth) so a row carrying ✅ and a
+ * header carrying no mark finish to the same edge — by character count they differ
+ * by one, and the block's right edge went ragged by that one cell.
  */
 export function fitCopy(line) {
   const raw = String(line ?? '');
-  const body = raw.length >= COPY_WIDTH - 1 ? raw.slice(0, COPY_WIDTH - 1) : raw + ' '.repeat(COPY_WIDTH - 1 - raw.length);
-  return `${body}-`;
+  let out = '';
+  let w = 0;
+  for (const ch of raw) {
+    const cw = dispWidth(ch);
+    if (w + cw > COPY_WIDTH - 1) break;
+    out += ch;
+    w += cw;
+  }
+  out += ' '.repeat(COPY_WIDTH - 1 - w);
+  return `${out}-`;
+}
+
+/** U+2002 EN SPACE: a space that is as wide as a letter in a proportional font. */
+export const EN_SPACE = '\u2002';
+
+/**
+ * The button fill: every ASCII space in a finished line becomes an EN SPACE.
+ *
+ * An inline keyboard button is centred by the client in a *proportional* font, so
+ * a line's left and right edges land wherever its rendered width puts them. A row
+ * padded with ASCII spaces is half spaces and half letters, and how wide it renders
+ * depends on how many of each it happens to contain: a header made only of letters
+ * and spaces rendered ~70px narrower than the rows in the same keyboard, and two
+ * rows of the same 72 characters landed their ✅ at different x. That is the drift
+ * the reader sees as "buttons not aligned".
+ *
+ * An EN SPACE is one cell here and about a letter's width there, so a line finished
+ * to 72 cells renders at close to one width no matter how its letters and spaces
+ * are mixed — the centring then puts every button's first glyph and its trailing
+ * dash at the same x. Only the keyboard uses it: the chat table is monospace, where
+ * ASCII spaces already line up and an EN SPACE may not be one cell.
+ */
+export function enSpace(line) {
+  return String(line ?? '').replace(/ /g, EN_SPACE);
 }
 
 /**
