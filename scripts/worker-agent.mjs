@@ -8,6 +8,12 @@
  *
  *   node scripts/worker-agent.mjs --host=mobile --relay=https://<vm-host>/relay
  *
+ * Remote-operator recipe (a worker on a phone / notebook / other hostile
+ * network): export NODE_OPTIONS=--dns-result-order=ipv4first before starting
+ * — carrier networks blackhole IPv6 and every 25s relay long-poll dies on it
+ * exactly the way Telegram long-polls did on mobile (see TG_POLL_TIMEOUT in
+ * bot-host.mjs). Prefer short, fast-failing polls over long holds there.
+ *
  * A drill / proof stand-in runs with --standin (or WORKER_STANDIN=1). It is
  * labeled in presence as a test worker, and /location says so out loud — a
  * stand-in must never silently pass as the physical device its host name
