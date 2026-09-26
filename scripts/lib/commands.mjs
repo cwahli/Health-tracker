@@ -61,13 +61,58 @@ export function assertValidCommands(commands = BOT_COMMANDS) {
   return true;
 }
 
-export function parseCommand(text) {
-  const raw = String(text ?? '').trim();
-  if (!raw.startsWith('/')) return null;
-  const [head, ...rest] = raw.split(/\s+/);
-  const name = head.slice(1).toLowerCase().replace(/@[A-Za-z0-9_]+$/, '');
-  return { name, args: rest.join(' ').trim(), raw };
+  export function parseCommand(text) {
+    const raw = String(text ?? '').trim();
+    if (!raw.startsWith('/')) return null;
+    const [head, ...rest] = raw.split(/\s+/);
+    const name = head.slice(1).toLowerCase().replace(/@[A-Za-z0-9_]+$/, '');
+    return { name, args: rest.join(' ').trim(), raw };
+  }
+
+/**
+ * Group-chat addressing: which bot (if any) owns this message.
+ *
+ * Five bots in one group must never all answer everything — that is 5x quota
+ * burn and five overlapping replies. So in a group a bot acts only when it is
+ * *addressed*: a command suffixed with its name (`/project@vm_19485_bot`), an
+ * @mention of it in the entities, or a reply to one of its own messages. A bare
+ * command or plain text in a group belongs to no one, by Telegram convention and
+ * by this rule. Direct chats are unaffected: everything there is addressed.
+ */
+export function chatKind(message) {
+  const t = String(message?.chat?.type || 'private');
+  return t === 'group' || t === 'supergroup' ? 'group' : 'direct';
 }
+
+export function commandSuffix(text) {
+  const m = String(text ?? '').trim().match(/^\/\S+@([A-Za-z0-9_]+)/);
+  return m ? m[1].toLowerCase() : '';
+}
+
+export function mentionsUs(message, username) {
+  const want = String(username || '').replace(/^@/, '').toLowerCase();
+  if (!want) return false;
+  for (const e of message?.entities || []) {
+    if (e?.type !== 'mention') continue;
+    const text = String(message?.text || '');
+    const mention = text.slice(e.offset, e.offset + e.length).replace(/^@/, '').toLowerCase();
+    if (mention === want) return true;
+  }
+  return false;
+}
+
+  export function isAddressedToUs(message, self) {
+    if (chatKind(message) !== 'group') return true;
+    const username = String(self?.username || '').replace(/^@/, '').toLowerCase();
+    const id = Number(self?.id) || 0;
+    const suffix = commandSuffix(message?.text || message?.caption || '');
+    // A command suffixed for a *different* bot is explicitly not ours, even if our
+    // name also appears somewhere in the text.
+    if (suffix) return username ? suffix === username : true;
+    if (username && mentionsUs(message, username)) return true;
+    if (id && Number(message?.reply_to_message?.from?.id) === id) return true;
+    return false;
+  }
 
 export function parseAgentList(text) {
   const seen = new Set();

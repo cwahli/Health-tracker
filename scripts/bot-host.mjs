@@ -108,6 +108,8 @@ import { scoreLabelFor, benchmarkLabel, walkTierRank, tierForModel } from './lib
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
+  isAddressedToUs,
+  chatKind,
   BOT_COMMANDS,
   toTelegramCommands,
   assertValidCommands,
@@ -3036,6 +3038,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     console.warn(`[${config.id}] ignored message from unauthorized user ${userId}`);
     return;
   }
+  // Five bots can share one group only if each answers solely when addressed.
+  // Direct chats skip this entirely: everything there is for this bot.
+  if (chatKind(message) === 'group' && !isAddressedToUs(message, config.me)) {
+    return;
+  }
   const text = (message.text || message.caption || '').trim();
   const hasMedia = selectInboundMedia(message).length > 0;
   if (!text && !hasMedia) return;
@@ -3852,6 +3859,9 @@ async function main() {
     }
   }
   console.log(`[${config.id}] connected as @${me.username}`);
+// Group addressing needs to know who this process is. Without it, five bots in
+// one group would all answer everything.
+config.me = { id: Number(me.id) || 0, username: String(me.username || '') };
   try {
     assertValidCommands(BOT_COMMANDS);
     await api.call('setMyCommands', { commands: toTelegramCommands() });
