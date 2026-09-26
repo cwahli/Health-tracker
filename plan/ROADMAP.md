@@ -31,11 +31,17 @@ Do **not** open `archive/`, `plan/archive/`, `FOOD.md` Part A/B, or old F-9 pack
 
 ---
 
-## Current work — R-14.1 cards, then blocked product IDs (2026-09-25)
+## Current work — one sequence (2026-09-26)
 
-**Next bot code is R-14.1, one card at a time.** Load [plan/R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md) and stop. The product shape is [plan/LOCATION_AGNOSTIC_AGENTS.md](./LOCATION_AGNOSTIC_AGENTS.md). R-14.1 is **not** complete. `assert-external-projects.test.mjs` never sends a Telegram command. Do not mark the row done from it.
+These are one plan. Do not start a later phase while an earlier phase is open. Do not give two agents the same file (`scripts/bot-host.mjs`, `scripts/lib/free-lanes.mjs`, `scripts/lib/work-session.mjs`).
 
-**TUI is a separate open track.** Proposal: [TG_Tui_Proposal1.md](../TG_Tui_Proposal1.md). Steps and the eleven-row live scorecard: [plan/TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md). Do not implement [Tui_proposal2b.md](../Tui_proposal2b.md) in its own order. Steps 1 and 2 can start now. Step 5 does not start until the allowance walk selects the next lane after a 429. The TUI scorecard is not the website master scorecard.
+1. **Now — R-14.1.** Cards in [R14_1_AGENT_PLAN.md](./R14_1_AGENT_PLAN.md), product shape [LOCATION_AGNOSTIC_AGENTS.md](./LOCATION_AGNOSTIC_AGENTS.md). This builds the spine: one poller per token, `/location` only when a worker is connected, `/project` and `/role`, the allowance stamp, the next lane on the same worker, the disk pack, and `work-view`. Registry asserts do not close it.
+2. **Then — TUI steps 1–4.** [TUI_IMPLEMENTATION.md](./TUI_IMPLEMENTATION.md) rows S1–S8. Proposal: [TG_Tui_Proposal1.md](../TG_Tui_Proposal1.md). Do not follow [Tui_proposal2b.md](../Tui_proposal2b.md). This attaches a screen to the spine. It does not invent a second location switch. The TUI scorecard is not the website master scorecard.
+3. **Then — one live exam.** [R-16](#r-16--cross-location-quota-resilience-scorecard-charter-executes-after-r-141) QS-1–QS-12 and TUI rows S9–S11 are the same pass. TUI step 5 does not define its own roam. R-16 does not define a second stamper. Evidence is pasted once and counts for both.
+4. **Then — BOT-24's remaining packets.** The shared `/freemodel` and `/allowance` projection. QS-8 is that proof. Do not start those packets during phase 1.
+5. **Then — R-15.** Omni lanes, after the exam is green. It does not add a bot.
+
+**Not in this sequence.** F-13.2 stays blocked on a live T2 capture. L-5, D-3, D-5, D-6, and D-10 stay human-blocked. CB-6 is superseded. CB-7, CB-8, and V-17 do not start. Website shipped rows stay shipped.
 
 **Frozen. Do not bring these back** because the chat can now point at another worker:
 
@@ -255,7 +261,7 @@ Contact model is **A**: OpenCode master **self-serves** meal-audit via shared sk
 
 **Do not** dual-poll one Telegram token (VPS + phone, or Hermes + bot-host). **Do not** restart `hermes-gateway` from this track unless a named V-28/V-29 task says so. **Do not** run `bot-host@android` on the VPS. Restart phone bot: `setsid nohup ~/start-mobile-opencode-bot.sh </dev/null >/dev/null 2>&1 &` (android: `~/start-android-opencode-bot.sh`, legacy).
 
-Do **not** start: putting curator back on Analyze, reopening FDC, **R-13.4** Worker rewrite, god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, **paying to unpause Supabase**, **R2 photo deletes before D-1**. **R-5** is superseded by Track D (D1 is already primary). **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is LIVE on VPS-2 since 2026-09-20. **Track D D-1** is DONE 2026-09-25 (unpaid; 402 lifted; dated log in DATA_PLANE.md). **Track D D-5** is `blocked_human` until V-16. **L-5** stays human until a locale is named. **R-14.1 is the only open bot feature.** Do not reopen BOT-1–BOT-23, V-30, CB-6–CB-8, or a new bot per place. Do not install Antigravity. Do not push a coder commit to `origin/main`.  
+Do **not** start: putting curator back on Analyze, reopening FDC, **R-13.4** Worker rewrite, god-file rewrite to look done, a Commercial Cooking Critic LLM, a 10-case live replay queue, **L-5**, **Q-9** rewrite binge, inventing a catalog primitive, Cloud Run, deleting Render, **production SQLite on the VPS**, dual-write D1+SQLite, dropping Firebase Auth, **paying to unpause Supabase**, **R2 photo deletes before D-1**. **R-5** is superseded by Track D (D1 is already primary). **R-13.0** is agent preflight (PASS); **R-13.1 / Track V** is LIVE on VPS-2 since 2026-09-20. **Track D D-1** is DONE 2026-09-25 (unpaid; 402 lifted; dated log in DATA_PLANE.md). **Track D D-5** is `blocked_human` until V-16. **L-5** stays human until a locale is named. **Only phase 1 (R-14.1) is open for code.** TUI steps 1–4, the R-16 exam, BOT-24's remaining packets, and R-15 wait, in that order. Do not reopen BOT-1–BOT-23, V-30, CB-6–CB-8, or a new bot per place. Do not install Antigravity. Do not push a coder commit to `origin/main`.  
 F-10 lives here + [FOOD.md](./FOOD.md) Process. Track V lives here + [VPS2_MOBILE_DEV.md](./VPS2_MOBILE_DEV.md). Track D lives here + [DATA_PLANE.md](./DATA_PLANE.md).
 
 ---

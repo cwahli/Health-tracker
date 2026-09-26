@@ -64,7 +64,7 @@ Negative-check output:
 
 ## Step 5 — quota walk, then roam
 
-Do not start this step until rows S1–S8 are green.
+Do not start this step until phase 1 (R-14.1) and rows S1–S8 are green. This step is the R-16 exam in `plan/ROADMAP.md`, not a second roam. S9–S11 are rows of that same pass.
 
 **Change.** A quota or rate-limit error writes `depletedUntil` through the existing `trackRunQuota` / `stampDepleted` path and the chat selects the next selectable lane on that same worker. The raw `INFERENCE_CAP_ERROR` JSON is not the reply. An `ended` promotion is never offered. A connection failure gets one retry, then a cooldown. Only an empty selectable list changes location. The pack is the files on disk. If another lane still has allowance it may write the short summary. If none do, the disk pack is sent and the reply says the summary was not written. The dead lane is not called.
 
