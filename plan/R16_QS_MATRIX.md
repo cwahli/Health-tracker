@@ -77,6 +77,15 @@ Secrets are never pasted here; the probe prints credential *presence* only.
   says `Dead`; `solar-pro4` is unlisted because its only row is a Freebuff (terminal-only) row.
 - Walk order is `high → unlisted → light` (`assert-allowance-walk` 42 checks), light lanes stay
   reachable, and a degraded turn is announced.
+- The split is **visible**, not just ordered: `/allowance` prints a subheading per group with the
+  group's own count (`Coding-agent capable (18)` / `Not in the catalog (1)` /
+  `Light · docs/inventory (11)`), and `/freemodel` carries the same word on each button
+  (`coding` / `light` / `unranked`) because a keyboard has no subheadings. Both surfaces call one
+  `groupRowsByTier()`, so order and membership cannot differ. Live 30 == 30 on both bots.
+- The per-model tiers live in `FREE_CODING_TOOLS_CATALOG.md` as a **Model tiers** table, one row
+  per model with its basis, and the catalog's reading rules are written into the file: a lock
+  outranks a tier (DeepSeek V4 Forbidden, GLM 5.3 Flash Dead, Freebuff rows terminal-only), a
+  ranked pick is a tier, and an unmeasured model is `light` rather than `high`.
 
 ### QS-7 — benchmark score on `/freemodel`, "unranked" when absent 🟢
 
