@@ -41,10 +41,15 @@ const API = {
   token: 'https://oauth2.googleapis.com/token',
   drive: 'https://www.googleapis.com/drive/v3',
   driveUpload: 'https://www.googleapis.com/upload/drive/v3',
-  // Sheets and Docs live on their own hosts. www.googleapis.com answers these
-  // paths with an HTML 404, which reads like a missing file rather than a wrong
-  // host — a trap worth naming.
-  sheets: 'https://sheets.googleapis.com/v1/spreadsheets',
+  // Sheets and Docs live on their own hosts; www.googleapis.com answers these paths
+  // with an HTML page, which reads like a missing file rather than a wrong host.
+  //
+  // The Sheets version is not cosmetic: from this host `sheets.googleapis.com/v1/…`
+  // returns a bot-challenge HTML page (400, text/html) for *every* call, while
+  // `/v4/…` returns ordinary JSON for the same request. The live scorecard found
+  // this, and a sensor now pins v4 so a well-meaning "modernise to v1" cannot
+  // reintroduce it.
+  sheets: 'https://sheets.googleapis.com/v4/spreadsheets',
   docs: 'https://docs.googleapis.com/v1/documents',
 };
 
@@ -349,8 +354,12 @@ export function buildAssertion(key, { scopes = Object.values(SCOPES), now = Date
   return `${header}.${claims}.${b64url(signature)}`;
 }
 
-async function request(url, { method = 'GET', token = '', body, headers = {}, attempts = 3 } = {}) {
+async function request(url, { method = 'GET', token = '', body, headers = {}, attempts = 4 } = {}) {
   let lastErr = '';
+  // The status has to survive the early break. Dropping it turns every honest 404
+  // into an indistinguishable "status 0", which is how a *successful* delete came
+  // to be reported as a file that was still there.
+  let lastStatus = 0;
   for (let i = 0; i < attempts; i += 1) {
     const res = await fetch(url, {
       method,
@@ -376,13 +385,34 @@ async function request(url, { method = 'GET', token = '', body, headers = {}, at
         ? `non-JSON error page from ${new URL(url).host}`
         : redact(text).replace(/\s+/g, ' ').trim().slice(0, 240);
     }
+    lastStatus = res.status;
     lastErr = `HTTP ${res.status} ${detail}`;
+    // A challenge page is Google's front door answering a bot heuristic instead of
+    // the API — an HTML body where JSON belongs. It is transient (measured: a
+    // window where 10/10 Sheets/Docs writes were challenged, then 6/6 passing with
+    // the same requests seconds later), so it is retried like a 429 rather than
+    // reported as a permanent refusal. Without this, one bad minute marks a
+    // working capability as broken.
+    const challenged = /non-JSON error page/.test(detail);
     // 401/403 on a fresh token is a real answer (scope or share missing); retrying
-    // the same request just burns quota. 429/5xx are worth one more try.
-    if (res.status < 500 && res.status !== 429) break;
-    await new Promise((r) => setTimeout(r, 250 * 2 ** i));
+    // the same request just burns quota. 429/5xx/challenges are worth another try.
+    if (!challenged && res.status < 500 && res.status !== 429) break;
+    // A challenge window lasts long enough that a 250ms-style backoff walks
+    // straight into it (measured: 7.5s of retries all challenged, then the same
+    // request passing). The waits below outlast a window instead. This is a
+    // background write, never a chat turn — the spool exists so a slow API cannot
+    // hold a reply.
+    await new Promise((r) => setTimeout(r, challenged ? [5000, 15000, 45000][i] || 45000 : 500 * 2 ** i));
   }
-  return { ok: false, status: 0, error: lastErr || 'request failed' };
+  if (/non-JSON error page/.test(lastErr)) {
+    return {
+      ok: false,
+      status: lastStatus,
+      error: `${lastErr} (Google served a bot-challenge page instead of an API response; this host is being rate-challenged for this method — retry later, it clears on its own)`,
+      challenged: true,
+    };
+  }
+  return { ok: false, status: lastStatus, error: lastErr || 'request failed' };
 }
 
 /**
@@ -522,10 +552,18 @@ export async function deleteFile(fileId, token) {
   return { ok: res.ok, status: res.status, error: res.error || '' };
 }
 
-/** Sheets: delete the whole spreadsheet (the scorecard's own test objects only). */
+/**
+ * Sheets: delete a spreadsheet.
+ *
+ * Through **Drive**, deliberately, not `spreadsheets.delete`. A spreadsheet is a
+ * Drive file with a Sheets MIME type, and Drive is the API that reliably answers
+ * from this host: `spreadsheets.delete` is answered with a bot-challenge page,
+ * while `drive.files.delete` returns 204 and the Drive read-back confirms the file
+ * is gone. One identity, one delete path — and the file is created through Drive
+ * too, so create and delete agree on what a sheet is.
+ */
 export async function deleteSheet(sheetId, token) {
-  const res = await request(`${API.sheets}/${encodeURIComponent(sheetId)}`, { method: 'DELETE', token });
-  return { ok: res.ok, status: res.status, error: res.error || '' };
+  return deleteFile(sheetId, token);
 }
 
 /** Sheets: read one spreadsheet's metadata (used to prove create/delete). */
@@ -606,11 +644,15 @@ export async function createDoc(folderId, title, { body = '' } = {}, token) {
 }
 
 export async function appendDocText(docId, text, token) {
-  const end = await request(`${API.docs}/documents/${docId}`, { token, });
+  const end = await request(`${API.docs}/documents/${docId}`, { token });
   if (!end.ok) return end;
   const body = end.json.body?.content || [];
   const last = body[body.length - 1];
-  const index = last?.endIndex || 1;
+  // The last element is the body's closing sectionBreak, and its endIndex is the
+  // exclusive end of the body — an insert there is rejected with
+  // "Index N must be less than the end index". Appending means inserting just
+  // before it, which is also what keeps human-written text above the addition.
+  const index = Math.max(1, (last?.endIndex || 2) - 1);
   return request(`${API.docs}/documents/${docId}:batchUpdate`, {
     method: 'POST',
     token,
@@ -618,21 +660,60 @@ export async function appendDocText(docId, text, token) {
   });
 }
 
-/** Sheets: create the spreadsheet once. Later tabs are the writer's job. */
-export async function createSheet(title, { tabName = 'turn_log' } = {}, token) {
-  return request(`${API.sheets}`, {
+/**
+ * Sheets: create a spreadsheet **inside the project folder**.
+ *
+ * Not through `spreadsheets.create`: that endpoint has no parent parameter, so a
+ * spreadsheet made that way lands in the creator's My Drive root — outside the
+ * folder the whole plan scopes writes to. Drive's file create accepts the Sheets
+ * MIME type and a parent, so the file is created where it belongs, and the default
+ * tab is renamed to the store's tab name in one follow-up call.
+ */
+export async function createSheet(folderId, title, { tabName = 'turn_log' } = {}, token) {
+  const res = await request(`${API.drive}/files?fields=${encodeURIComponent('id,name,mimeType,webViewLink')}`, {
     method: 'POST',
     token,
-    body: { properties: { title }, sheets: [{ properties: { title: tabName } }] },
+    body: { name: title, parents: [folderId], mimeType: MIME.sheet },
+  });
+  if (!res.ok) return res;
+  const id = res.json.id;
+  const renamed = await renameFirstTab(id, tabName, token);
+  return { ok: true, spreadsheetId: id, title: res.json.name, tab: renamed.ok ? tabName : 'Sheet1', tabWarning: renamed.ok ? '' : renamed.error };
+}
+
+/** Rename a spreadsheet's first sheet, so the store's tab name is the real one. */
+export async function renameFirstTab(sheetId, title, token) {
+  const read = await request(`${API.sheets}/${encodeURIComponent(sheetId)}?fields=${encodeURIComponent('sheets.properties')}`, { token });
+  if (!read.ok) return read;
+  const first = (read.json.sheets || [])[0];
+  if (!first) return { ok: false, error: 'spreadsheet has no sheets' };
+  if (first.properties?.title === title) return { ok: true };
+  const res = await request(`${API.sheets}/${encodeURIComponent(sheetId)}:batchUpdate`, {
+    method: 'POST',
+    token,
+    body: { requests: [{ updateSheetProperties: { properties: { sheetId: first.properties.sheetId, title }, fields: 'title' } }] },
+  });
+  return res.ok ? { ok: true } : res;
+}
+
+/**
+ * Sheets: append rows. Appending is the only write shape this fleet uses.
+ *
+ * `valueInputOption` and `insertDataOption` are **query parameters** on
+ * `spreadsheets.values.append`, not fields of the request body. Sent in the body,
+ * the API rejects the whole call with "Unknown name \"valueInputOption\" at
+ * 'data'" — which is how the live scorecard found it.
+ */
+export async function appendRows(sheetId, tab, rows, token) {
+  const range = `${tab}!A1`;
+  const qs = `?valueInputOption=RAW&insertDataOption=INSERT_ROWS&includeValuesInResponse=false`;
+  return request(`${API.sheets}/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(range)}:append${qs}`, {
+    method: 'POST',
+    token,
+    body: { values: rows },
   });
 }
 
-/** Sheets: append rows. Appending is the only write shape this fleet uses. */
-export async function appendRows(sheetId, tab, rows, token) {
-  const body = { valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', range: `${tab}!A1`, values: rows };
-  return request(`${API.sheets}/${sheetId}/values/${tab}:append`, { method: 'POST', token, body });
-}
-
 export async function readTab(sheetId, tab, token, { range = `${tab}!A1:Z200` } = {}) {
-  return request(`${API.sheets}/${sheetId}/values/${encodeURIComponent(range)}`, { token });
+  return request(`${API.sheets}/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(range)}`, { token });
 }
