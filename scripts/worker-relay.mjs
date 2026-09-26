@@ -38,6 +38,25 @@ import {
 } from './lib/worker-presence.mjs';
 import { claimJob, completeJob, pendingCount } from './lib/worker-jobs.mjs';
 import { savePack, loadPack, PACK_BODY_MAX } from './lib/swap-pack.mjs';
+import {
+  SCOPES,
+  accessToken,
+  appendDocText,
+  appendRows,
+  createDoc,
+  createSheet,
+  deleteFile,
+  deleteSheet,
+  forgetToken,
+  getFile,
+  getSheet,
+  googleReady,
+  listChildren,
+  redact,
+  renameFile,
+  serviceAccountFromEnv,
+  uploadBinary,
+} from './lib/google-store.mjs';
 
 const arg = (name, fallback) => {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -150,6 +169,97 @@ const server = http.createServer(async (req, res) => {
   // body parsing, any opencode call.
   if (!authorized(req)) {
     return send(res, 401, { error: 'relay token required' });
+  }
+
+  // The Google store, on behalf of a location that holds no credential. A phone
+  // has no key and never will, so the write happens here and the caller gets a
+  // receipt (file id, row range) it can show in chat. The boundary is the same
+  // one an external turn gets in-process: the caller sends a *project*, never a
+  // folder id, so a caller cannot name a folder this host has not enrolled.
+  if (route === 'GET /store/health') {
+    const ready = googleReady(process.env);
+    return send(res, ready.ready ? 200 : 503, {
+      ok: ready.ready,
+      relay: os.hostname(),
+      pid: process.pid,
+      account: ready.email || '',
+      reason: redact(ready.reason || ''),
+      projects: Object.keys(ready.folders || {}),
+    });
+  }
+
+  if (route === 'POST /store') {
+    const body = await readBody(req);
+    if (body?.__overflow) return send(res, 413, { error: `store request exceeds ${MAX_BODY} bytes` });
+    const op = String(body?.op || '').trim();
+    const project = String(body?.project || '').trim();
+    const ready = googleReady(process.env);
+    if (!ready.ready) return send(res, 503, { error: `relay has no Google store: ${redact(ready.reason)}`, op, project });
+    const folder = (ready.folders || {})[project];
+    if (!folder) {
+      return send(res, 400, {
+        error: `project ${project || '(none)'} has no Google folder enrolled on this relay`,
+        op,
+        enrolled: Object.keys(ready.folders || {}),
+      });
+    }
+    const tok = await accessToken(serviceAccountFromEnv(process.env), { scopes: Object.values(SCOPES) });
+    if (!tok.ok) return send(res, 502, { error: `relay token grant failed: ${redact(tok.error || '')}`, op, project });
+    const id = String(body?.id || '').trim();
+    const name = String(body?.name || '').trim();
+    const out = { ok: true, op, project, folder: `${String(folder).slice(0, 8)}…`, via: `relay:${os.hostname()}`, at: new Date().toISOString() };
+    try {
+      if (op === 'createPicture') {
+        const bytes = Buffer.from(String(body?.base64 || ''), 'base64');
+        if (!bytes.length) return send(res, 400, { error: 'createPicture needs base64 bytes', op });
+        if (bytes.length > 2 * 1024 * 1024) return send(res, 413, { error: 'picture exceeds 2 MB', op });
+        const r = await uploadBinary(folder, name || 'picture.png', bytes, { mimeType: String(body?.mimeType || 'image/png') }, tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id: r.id, name: r.file?.name, size: r.file?.size, error: redact(r.error || '') });
+      }
+      if (op === 'createDoc') {
+        const r = await createDoc(folder, name || 'doc', { body: String(body?.text || '') }, tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id: r.id, name: r.title, link: r.webViewLink, error: redact(r.error || '') });
+      }
+      if (op === 'createSheet') {
+        const r = await createSheet(name || 'sheet', { tabName: String(body?.tab || 'turn_log') }, tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id: r.spreadsheetId, name: r.properties?.title, error: redact(r.error || '') });
+      }
+      if (op === 'rename') {
+        if (!id) return send(res, 400, { error: 'rename needs an id', op });
+        const r = await renameFile(id, name, tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id, name: r.name, error: redact(r.error || '') });
+      }
+      if (op === 'appendDoc') {
+        if (!id) return send(res, 400, { error: 'appendDoc needs an id', op });
+        const r = await appendDocText(id, String(body?.text || ''), tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id, error: redact(r.error || '') });
+      }
+      if (op === 'appendRows') {
+        if (!id) return send(res, 400, { error: 'appendRows needs an id', op });
+        const rows = Array.isArray(body?.rows) ? body.rows : [];
+        if (!rows.length) return send(res, 400, { error: 'appendRows needs rows', op });
+        const r = await appendRows(id, String(body?.tab || 'turn_log'), rows, tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id, range: r.json?.updates?.updatedRange, rows: rows.length, error: redact(r.error || '') });
+      }
+      if (op === 'delete') {
+        if (!id) return send(res, 400, { error: 'delete needs an id', op });
+        const kind = String(body?.kind || 'file');
+        const r = kind === 'sheet' ? await deleteSheet(id, tok.token) : await deleteFile(id, tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id, kind, error: redact(r.error || '') });
+      }
+      if (op === 'get') {
+        if (!id) return send(res, 400, { error: 'get needs an id', op });
+        const r = String(body?.kind || 'file') === 'sheet' ? await getSheet(id, tok.token) : await getFile(id, tok.token);
+        return send(res, 200, { ...out, ok: r.ok, id, missing: Boolean(r.missing), name: r.file?.name || r.sheet?.properties?.title, error: redact(r.error || '') });
+      }
+      if (op === 'list') {
+        const r = await listChildren(folder, tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, count: r.files?.length || 0, files: (r.files || []).map((f) => ({ id: f.id, name: f.name })), error: redact(r.error || '') });
+      }
+      return send(res, 400, { error: `unknown store op: ${op || '(none)'}`, ops: ['createPicture', 'createDoc', 'createSheet', 'rename', 'appendDoc', 'appendRows', 'delete', 'get', 'list'] });
+    } catch (err) {
+      return send(res, 502, { ok: false, op, project, error: redact(err && err.message ? err.message : err) });
+    }
   }
 
   if (route === 'POST /connect') {
