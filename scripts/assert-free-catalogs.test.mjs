@@ -25,7 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bakeoffVerdict, catalogFacts, modelIdOf, scoreLabelFor, tierForModel, walkTierRank, CATALOG_FILES } from './lib/free-catalogs.mjs';
+import { bakeoffVerdict, benchmarkFor, benchmarkLabel, catalogFacts, modelIdOf, scoreLabelFor, tierForModel, walkTierRank, CATALOG_FILES } from './lib/free-catalogs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -127,6 +127,36 @@ check('the module is importable with no catalogs at all', (() => {
     return false;
   }
 })());
+
+// 11. The external benchmark figures you asked to see again. The rules that keep
+// them honest are the catalog's: a number carries a source and a checked date, an
+// estimate is marked, and no published figure means no number at all.
+console.log('  -- external benchmarks (catalog Benchmarks table) --');
+check('a published figure comes with a source and a checked date', (() => {
+  for (const m of ['deepseek-v4.1-flash', 'muse-spark-1.3-contributor', 'ling-3.0-flash-free', 'minimax-m3-free']) {
+    const b = benchmarkFor(m);
+    if (!b.published || !b.source || !b.checked) return false;
+  }
+  return true;
+})());
+check('an estimate is marked with ~', /~/.test(benchmarkLabel('big-pickle')) && /~/.test(benchmarkLabel('laguna-s-2.1')) && /~/.test(benchmarkLabel('mimo-v2.6')));
+check('a measured figure carries no ~', benchmarkLabel('deepseek-v4.1-flash') === 'AA39.5' && benchmarkLabel('muse-spark-1.3-contributor') === 'AA48');
+check('no published figure means no number, not a zero and not a neighbour\'s',
+  benchmarkLabel('ox-alpha-free') === '' && benchmarkLabel('space-bunny-free') === '' && benchmarkLabel('kimi-k2.5-free') === '');
+check('ox-alpha says why it has none', /no (AA|artificial analysis)|No AA/i.test(String(benchmarkFor('ox-alpha-free').other || '')));
+check('the live pages overrode the older scorecard numbers',
+  benchmarkFor('ling-3.0-flash-free').aa === 25 && benchmarkFor('minimax-m3-free').aa === 29 && benchmarkFor('nemotron-3.5-lightning-free').aa === 14);
+check('a benchmark never decides a tier', (() => {
+  // Nemotron 3.5 Lightning scores 14 and Ling 3.0 Flash 25; both are light, and
+  // Space Bunny has no figure at all and is high. Placement follows the basis
+  // column, not the number.
+  return tierForModel('nemotron-3.5-lightning-free').tier === 'light'
+    && tierForModel('ling-3.0-flash-free').tier === 'light'
+    && tierForModel('space-bunny-free').tier === 'high'
+    && tierForModel('muse-spark-1.3-contributor').tier === 'high';
+})());
+check('the benchmark reaches both surfaces from the one table', /benchmarkLabel\(/.test(fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8'))
+  && /benchmarkLabel\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
 
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

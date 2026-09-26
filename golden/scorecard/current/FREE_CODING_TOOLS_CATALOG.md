@@ -110,6 +110,58 @@ Not listed on purpose: `grok-code` (coding by name, but it is not a `-free` mode
 place on a free list), and every model this table does not name — unlisted means unranked, which
 renders as `unranked` and sorts between the two tiers, never as a guess.
 
+## Benchmarks (external — informational, never a tier basis)
+
+**What this table is for.** You asked where the benchmark rating went: it went when the
+in-code ratings table was deleted, because R-16 says the score *shown* comes from the bakeoff
+ledger. These are the external published numbers, kept here in the catalog so there is still
+exactly one place a number can come from, and shown next to the bakeoff label rather than
+instead of it.
+
+**The metric.** Unless a row says otherwise, the number is **Artificial Analysis Intelligence
+Index v4.3** — a composite of 10 evals (AA-Briefcase, GDPval-AA v2, AutomationBench-AA,
+Terminal-Bench 4.0, SciCode, HLE, GDP.pdf, CritPt, AA-Omniscience, AA-LCR v1.1). Only v4.3
+figures are comparable to each other; earlier index versions are not, which is why Nemotron 3
+Super's older 36 is not a v4.3 number and its row is an estimate.
+
+**The rules.**
+- Every figure carries its **source** and the date it was checked. A number with no source is
+  not printed.
+- `~` means an estimate from a measured relative, never a measurement.
+- **No published figure means no number.** Not zero, not a neighbour's score, not a guess.
+  `ox-alpha` has no Artificial Analysis or LMArena entry at all, and its circulating
+  DeepSWE numbers come from a 10-task slice and a disputed full run — so its row says so.
+- These numbers **do not place a model in a tier.** The tier comes from the Model tiers table
+  above, on stated capability. A benchmark is evidence you can argue with, not a ranking we
+  invented; that separation is why a 48 can sit beside a 29 and both be right.
+
+| Model | AA Index v4.3 | Other published figures | Source | Checked |
+|---|---|---|---|---|
+| Muse Spark 1.3 | 48 | — | artificialanalysis.ai, AA v4.3 | 2026-09-23 |
+| DeepSeek V4.1 Flash | 39.5 | — | AA v4.3 via `qa-evidence/model-comparison.json` | 2026-09-23 |
+| Qwen 3.8 Flash | 39.9 | — | AA v4.3 via the scorecard | 2026-09-23 |
+| GLM 5.3 Flash | 42 | DeepSWE v1.1 63.4 (vendor-reported) | artificialanalysis.ai | 2026-09-26 |
+| Gemini 3.8 Flash | 41.2 | — | AA v4.3 via the scorecard | 2026-09-23 |
+| Gemini 3.5 Flash Lite | 22.0 | — | AA v4.3 via the scorecard | 2026-09-23 |
+| MiMo V2.6 Flash | ~41 (est.) | Pro sibling 46.3 measured; Flash not published | scorecard | 2026-09-23 |
+| MiniMax M3 | 29 | — | artificialanalysis.ai model comparison | 2026-09-26 |
+| Ling 3.0 Flash | 25 (AA's own estimate) | Ling 3.0 Tiny / 2.6 Flash: no figure | artificialanalysis.ai model comparison | 2026-09-26 |
+| Nemotron 3 Ultra | 23 | — | artificialanalysis.ai model comparison | 2026-09-26 |
+| Nemotron 3.5 Lightning | 14 | — | artificialanalysis.ai (BF16 serving) | 2026-09-26 |
+| Nemotron 3 Super | ~18 (est.) | older index ≈ 36 — NOT v4.3, not comparable | scorecard | 2026-09-23 |
+| Laguna S 2.1 | ~26 (est.) | SWE Atlas 46.2, Terminal-Bench 2.1 70.2 | scorecard | 2026-09-23 |
+| Big Pickle | ~30 (est., band 25–35) | SWE Atlas 50.8% (self-reported, single trial) | scorecard | 2026-09-23 |
+| Solar Pro 4 | 28 | — | scorecard | 2026-09-23 |
+| LongCat 2.0 | 20 | — | scorecard | 2026-09-23 |
+| GLM 5.2 | 34 | — | scorecard | 2026-09-23 |
+| ox-alpha · x-preview-f | **no published figure** | DeepSWE ~63% full-set community run (attribution disputed); Kingbench 87.5; a 96.6% Terminal-Bench 2.1 claim has no methodology attached. No AA and no LMArena entry. | community forensics, Aug 2026 | 2026-09-26 |
+| Space Bunny · KAT Coder Pro · North Mini Code · Hy3 · Kimi K2.5 · Ring 2.6 1T · Trinity Large Preview · Qwen 3.8 27B · GLM 4.7 Flash | **no published figure** | none found on AA, LMArena or a vendor card | searched 2026-09-26 | 2026-09-26 |
+
+**Discrepancies worth knowing about**, because they are why this table has a *Checked* column:
+the repo scorecard (2026-09-23) says Ling 3.0 Flash 21, MiniMax M3 30 and Nemotron 3.5
+Lightning 13; Artificial Analysis' own pages now say 25 (its own estimate), 29 and 14. The
+live pages win, and the scorecard should be corrected to match.
+
 ## Tools × free models (expandable)
 
 | Tool | How to connect | Free models (usable) | Cap / estimate | Data / caveats | Verified |
@@ -163,6 +215,7 @@ Authenticated against `https://www.codebuff.com/api/v1/freebuff/session` after C
 ## Changelog
 | Date | Change |
 |---|---|
+| 2026-09-26 | Benchmarks table added (external AA Intelligence Index v4.3 + other published figures, each with source and checked date). Shown beside the bakeoff label; still never a tier basis |
 | 2026-09-26 | Model tiers table added (high/light per model) so `/freemodel` and `/allowance` can group the list; tiers read from this file, never from code |
 | 2026-09-16 | Freebuff live verify: 100 Freebucks full tier; DeepSeek 15/hr (~6.7h); ads on |
 | 2026-09-16 | Initial catalog: OpenCode, Cline, Token Harbor, Freebuff; ranked picks; Freebucks country table |

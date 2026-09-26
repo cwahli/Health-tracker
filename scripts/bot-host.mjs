@@ -97,7 +97,7 @@ import {
 // R-16: the score on a button is the bakeoff ledger's own verdict, and the tier
 // is the catalog's. Both live in the catalogs, so there is no ratings table here
 // to drift from them. A model with no ledger row renders "unranked".
-import { scoreLabelFor, walkTierRank, tierForModel } from './lib/free-catalogs.mjs';
+import { scoreLabelFor, benchmarkLabel, walkTierRank, tierForModel } from './lib/free-catalogs.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -933,9 +933,13 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     // The tier rides on the button as well as in the order, because a keyboard has
     // no subheadings: `coding` / `light` / `unranked` is the only way the split is
     // visible here, and it is the same word /allowance prints above the group.
-    // The group header above the row says the tier, so the button carries only what
-    // the row cannot inherit: the plan code and the bakeoff label.
-    const rated = `${tag ? tag + ': ' : ''}${label} · ${scoreLabelFor(r.lane?.model || r.model || r.ref || '')}`;
+    // The group header above the row says the tier, so the button carries what the row
+    // cannot inherit: the plan code, the external benchmark where one is published,
+    // and the bakeoff ledger's own verdict. A model with no published figure gets no
+    // number at all — never a neighbour's.
+    const model = r.lane?.model || r.model || r.ref || '';
+    const bench = benchmarkLabel(model);
+    const rated = `${tag ? tag + ': ' : ''}${label}${bench ? ` · ${bench}` : ''} · ${scoreLabelFor(model)}`;
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);

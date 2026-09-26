@@ -355,6 +355,90 @@ export function tierForModel(ref) {
 }
 
 /**
+ * The external published benchmark figures for a model, read from the catalog's
+ * Benchmarks table. Never a tier basis — the Model tiers table decides that — and
+ * never a number the table does not carry: a model with no published figure comes
+ * back as `{ published: false }` so the caller prints nothing rather than a
+ * neighbour's score.
+ */
+export function benchmarkFor(ref) {
+  const id = modelIdOf(ref);
+  const { text, file } = readCatalog('catalog');
+  const none = { published: false, aa: null, other: null, source: file || CATALOG_FILES.catalog, checked: null };
+  if (!id || !text) return none;
+  const table = tableByHeader(text, 'AA Index v4.3');
+  if (!table) return none;
+  const cModel = table.header.indexOf('model');
+  const cAa = table.header.indexOf('aa index v4.3');
+  const cOther = table.header.indexOf('other published figures');
+  const cSource = table.header.indexOf('source');
+  const cChecked = table.header.indexOf('checked');
+  // The last row is a catch-all listing every model with no figure; matching it is
+  // how those models are answered honestly instead of falling through.
+  const hits = [];
+  for (const cells of table.rows) {
+    const cell = String(cells[cModel] || '');
+    if (!cell) continue;
+    const names = cell.split(/·|,/).map((x) => x.trim()).filter(Boolean);
+    for (const n of names) {
+      // Same ladder the tier table uses: the catalog writes the family
+      // ("MiMo V2.6 Flash") where the ledger carries the provider's suffixes
+      // (`mimo-v2.6`, `mimo-v2.6-flash-free`), and a curated table can be trusted
+      // with a looser match than prose.
+      let score = matchScore(n, id);
+      if (!score) {
+        const stems = [
+          String(id).replace(/-(free|contributor|preview|rc|beta)$/, ''),
+          String(id).replace(/-(free|contributor|preview|rc|beta)$/, '').replace(/-(flash|pro|omni|lite|ultra|super|tiny|fin)$/i, ''),
+        ];
+        for (const st of stems) {
+          if (!st || st === id) continue;
+          const m = matchScore(n, st);
+          if (m) { score = 1; break; }
+        }
+      }
+      if (!score) {
+        // The other direction: the catalog carries a tier word the ledger id omits,
+        // so "MiMo V2.6" is the row written "MiMo V2.6 Flash". Only a known tier word
+        // may follow, or this would match any longer model name.
+        const lh = loose(n);
+        const li = loose(id);
+        if (li.length >= 5 && lh.startsWith(li) && /^(flash|pro|omni|lite|ultra|super|tiny|fin|preview|max|high|instruct)/.test(lh.slice(li.length))) {
+          score = 1;
+        }
+      }
+      if (score) hits.push({ score, cells, cell });
+    }
+  }
+  if (!hits.length) return none;
+  const best = Math.max(...hits.map((h) => h.score));
+  const win = hits.find((h) => h.score === best);
+  const rawAa = String(win.cells[cAa] || '').trim();
+  const source = String(win.cells[cSource] || '').trim();
+  const checked = String(win.cells[cChecked] || '').trim();
+  const none2 = /no published figure|none found|no figure/i.test(rawAa);
+  if (none2) return { published: false, aa: null, other: String(win.cells[cOther] || '').trim() || null, source, checked, via: win.cell };
+  // "~41 (est.)" -> 41 with estimated: true; "25 (AA's own estimate)" -> 25 estimated too.
+  const num = rawAa.match(/\d+(?:\.\d+)?/);
+  return {
+    published: true,
+    aa: num ? Number(num[0]) : null,
+    estimated: /~/.test(rawAa) || /estimate/i.test(rawAa),
+    other: String(win.cells[cOther] || '').trim() || null,
+    source,
+    checked,
+    via: win.cell,
+  };
+}
+
+/** The short label a button or row carries: `AA39.5`, `AA~41`, or nothing. */
+export function benchmarkLabel(ref) {
+  const b = benchmarkFor(ref);
+  if (!b.published || typeof b.aa !== 'number') return '';
+  return `AA${b.estimated ? '~' : ''}${b.aa}`;
+}
+
+/**
  * The catalog's rank for a model (1 is the top pick), or null when the catalog
  * does not rank it. This is the only ordering signal the repository has that is
  * about model quality, and it is the one R-16 points at.
@@ -395,5 +479,21 @@ export function scoreLabelFor(ref) {
 export function catalogFacts(ref) {
   const b = bakeoffVerdict(ref);
   const t = tierForModel(ref);
-  return { id: modelIdOf(ref), score: b.label, ranked: b.ranked, waves: b.waves, last: b.last, tier: t.tier, tierWhy: t.why, source: b.source, tierSource: t.source };
+  const bench = benchmarkFor(ref);
+  return {
+    id: modelIdOf(ref),
+    score: b.label,
+    ranked: b.ranked,
+    waves: b.waves,
+    last: b.last,
+    tier: t.tier,
+    tierWhy: t.why,
+    source: b.source,
+    tierSource: t.source,
+    benchmark: bench.published ? bench.aa : null,
+    benchmarkLabel: benchmarkLabel(ref),
+    benchmarkEstimated: Boolean(bench.estimated),
+    benchmarkSource: bench.source,
+    benchmarkChecked: bench.checked,
+  };
 }

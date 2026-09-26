@@ -140,7 +140,9 @@ try {
     const dataRows = ranked.split('\n').filter((l) => /^(✅|❌)/.test(l));
     const offsets = dataRows.map((l) => l.search(/(?:^|\s)(OC|CL|TH|CF|FB)(?:\s|$)/));
     check('every row aligns its Plan column', offsets.length > 1 && new Set(offsets).size === 1);
-    check('and the header aligns with them', /Model\s+Plan\s+Reset in/.test(ranked.replace(/<\/?code>/g, '')));
+    // The header names every column the rows carry, including the external
+    // benchmark column that was added back at the owner's request.
+    check('and the header aligns with them', /Model\s+Plan\s+AA\s+Reset in/.test(ranked.replace(/<\/?code>/g, '')));
   } finally {
     fs.rmSync(rankDir, { recursive: true, force: true });
   }

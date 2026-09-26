@@ -24,7 +24,7 @@
  * python3 render. Safe to import from tests (point TG_ROUTER_STATE_DIR at a
  * throwaway dir; nothing here touches the live box unless asked to).
  */
-import { catalogScore, tierForModel } from './free-catalogs.mjs';
+import { catalogScore, tierForModel, benchmarkLabel } from './free-catalogs.mjs';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -1034,10 +1034,14 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
   const W_MODEL = MODEL_NAME_MAX;
-  const W_PLAN = 6;
+  const W_PLAN = 5;
+  // The external benchmark, where the catalog publishes one. A "~" marks an
+  // estimate, and a model with no published figure gets an em dash rather than a
+  // neighbour's number — the same rule the catalog states and the sensor checks.
+  const W_SCORE = 7;
   const W_RESET = 8;
-  const header = `${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}Reset in`;
-  const sep = `${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_RESET)}`;
+  const header = `${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}${padDisp("AA", W_SCORE)}Reset in`;
+  const sep = `${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_SCORE)}${"-".repeat(W_RESET)}`;
   const nl = "\n";
   const lines = [
     "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
@@ -1076,7 +1080,8 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // record — so a depleted row showed "❌" with "Reset in —", the mark without the
     // time, once the catalogue moved to the host's table.
     const resetIn = formatResetIn(verdict?.resetAt ?? laneResetAt(l, t), now);
-    const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${resetIn}`;
+    const score = benchmarkLabel(l.model || l) || "—";
+    const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${padDisp(score, W_SCORE)}${resetIn}`;
     rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: (ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>" });
   }
   // One subheading per tier group, in the catalog's order, with the group's own
