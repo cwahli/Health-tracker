@@ -24,6 +24,7 @@
  * python3 render. Safe to import from tests (point TG_ROUTER_STATE_DIR at a
  * throwaway dir; nothing here touches the live box unless asked to).
  */
+import { ratingForModel } from './model-ratings.mjs';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -878,6 +879,12 @@ export function shortModelName(lane) {
     .replace(/\s+contributor\s+/i, " Cont ")
     .replace(/\s+free\s*$/i, "")
     .replace(/\s+free\b/i, "")
+    // "-free" is a suffix on the model id, not a word, and leaving it on ate four
+    // of the columns the name had left. "ling-3.0-flash-fin-free" and
+    // "ling-3.0-flash-free" then truncated to the same 16 columns and printed as
+    // two identical rows, one of them untellable from the other.
+    .replace(/-free$/i, "")
+    .replace(/-free\b/i, "")
     .replace(/\s+/g, " ")
     .trim();
   const m = String(lane?.model || "");
@@ -1024,7 +1031,9 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     : usable;
   const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
-  const W_MODEL = 16;
+  // 20 columns, not 16: the two "ling-3.0-flash" variants are 15 and 18 characters
+  // and at 16 they were indistinguishable in the list.
+  const W_MODEL = 20;
   const W_PLAN = 6;
   const W_RESET = 8;
   const header = `${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}Reset in`;
@@ -1258,7 +1267,25 @@ function modelKey(s) {
  * `google/gemini-…` and `gemini:gemini-…` are one model, as are `opencode/x` and
  * `opencode-go/x`.
  */
-export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "", scoreOf = null, supersede = true } = {}) {
+/**
+ * Score for the supersession rule, read from the benchmark table. A newer version
+ * only replaces an older one when it is not worse: without a score every pair looks
+ * like "newer and unscored beats older and unscored", so a newer but weaker model
+ * would win on version alone.
+ */
+export function laneScoreFromRatings(lane) {
+  try {
+    const r = ratingForModel(lane?.model || '');
+    if (!r) return null;
+    if (typeof r.aa === 'number') return r.aa;
+    if (typeof r.swe === 'number') return r.swe;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "", scoreOf = laneScoreFromRatings, supersede = true } = {}) {
   if (!table || !Array.isArray(table.lanes)) return [];
   const projection = projectLanes(table, session, { now, location, readiness });
   const byLane = new Map(projection.map((r) => [laneKey(r.lane), r]));

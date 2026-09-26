@@ -27,6 +27,15 @@ const MIRRORS = [
     marker: '// === VENDORED FROM scripts/lib/inbound-media.mjs — DO NOT EDIT ===',
   },
   {
+    // free-lanes.mjs imports this for the supersession score, for the same reason
+    // setup-gaps is mirrored below: the router ships standalone, so every import
+    // free-lanes.mjs makes has to resolve inside its src/. Without it the router
+    // cannot import free-lane-table.vendor.mjs at all.
+    src: join(ROOT, 'scripts', 'lib', 'model-ratings.mjs'),
+    dest: join(ROOT, 'tools', 'telegram-provider-router', 'src', 'model-ratings.mjs'),
+    marker: '// === VENDORED FROM scripts/lib/model-ratings.mjs — DO NOT EDIT ===',
+  },
+  {
     // free-lanes.mjs imports this for the per-provider setup verdict, and the
     // router ships standalone, so the import has to resolve inside its src/.
     // Without this mirror the router's own test suite cannot even import
