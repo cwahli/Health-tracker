@@ -165,6 +165,15 @@ The service account is now redundant for writing (it can still read). Once the u
 identity is proven, its key should be removed from the host and the account deleted
 in the console — one fewer credential, one fewer thing to rotate.
 
+### Retired 2026-09-26 (host side)
+
+`~/.config/bot-host/google-fleet-key.json` is shredded and the
+`GOOGLE_SERVICE_ACCOUNT_JSON` line is out of `common.env`. The probe stays `READY`
+as `user`, the sensor stays green, and the code keeps the SA fallback for any host
+that only ever holds a service account. **Still open, console side:** delete the
+`doc-api@…` service account itself (IAM & Admin → Service Accounts → delete), which
+no host can do — it needs a click.
+
 ## 2. Data model — what goes where
 
 **Drive (files, content-addressed names, never overwritten):**
