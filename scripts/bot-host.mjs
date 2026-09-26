@@ -812,7 +812,7 @@ async function sendHtml(api, chatId, html) {
  * `returns.buttons` is the keyboard, built from the same projection /allowance
  * renders, so the two commands cannot disagree about a row.
  */
-function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null } = {}) {
+function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
     const a = byRef.get(e?.ref);
@@ -824,12 +824,16 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   // command used to run its own dedupe over the catalog, and two notions of "the
   // same model" drifted by one row for four rounds. One list, one count.
   const rows = canonical || [];
-  // A catalogued model with no lane row at all is still reported, never dropped.
-  const inList = new Set(rows.map((r) => String(r.model || r.ref || '').toLowerCase().split('/').filter(Boolean).pop()));
+  // A catalogued model with no lane row AT ALL is still reported, never dropped.
+  // The test is against the TABLE, not against the canonical list: a superseded
+  // model (an older version whose family now has a newer one) is in the table and
+  // deliberately absent from the list, and re-adding it from here put 13 models
+  // back — /freemodel said 49 rows while /allowance said 30.
+  const inTable = new Set((tableLanes || []).map((l) => String(l?.model || '').toLowerCase().split('/').filter(Boolean).pop()).filter(Boolean));
   for (const e of entries || []) {
     const v = verdictOf(e);
     const m = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
-    if (m && !inList.has(m)) rows.push(v);
+    if (m && !inTable.has(m)) rows.push(v);
   }
   const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
   const usable = rows.filter((r) => !unusableOf(r));
@@ -1637,6 +1641,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         current: eff.model,
         location: workLocation(),
         canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
+        tableLanes: (fmTable && fmTable.lanes) || [],
       });
       // One keyboard with every model, no paging, and the router's cancel row.
       await api.sendMessage(chatId, body.text, {

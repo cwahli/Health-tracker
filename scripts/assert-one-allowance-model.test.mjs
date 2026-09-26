@@ -392,6 +392,15 @@ try {
   const stampedText = buildAllowanceTextForBots({ stateDir: (() => { const d = ensureBotLedger('vm').dir; fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(stamped, null, 2)); fs.writeFileSync(path.join(d, 'session.json'), JSON.stringify(sess, null, 2)); return d; })() });
   check('a depleted row shows its reset time from the session record', /Muse 1\.3[^\n]*\d+h/.test(stampedText), stampedText.split('\n').filter((l)=>/Muse/.test(l)).join(' | '));
 
+  // 6i. A superseded model must not come back through the "no lane row" path. The
+  // canonical list drops an older version whose family has a newer one, but that
+  // model IS in the table — so a re-add loop keyed on the list instead of the table
+  // put 13 models back and /freemodel said 49 rows while /allowance said 30.
+  const paritySrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
+  check('the re-add is keyed on the table, not on the canonical list',
+    /const inTable = new Set/.test(paritySrc) && /!inTable\.has\(m\)/.test(paritySrc) && !/inList/.test(paritySrc));
+  check('and the handler passes the table lanes through', /tableLanes: \(fmTable && fmTable\.lanes\) \|\| \[\]/.test(paritySrc));
+
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel renders the canonical list, not the raw catalog', /const rows = canonical \|\| \[\];/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
