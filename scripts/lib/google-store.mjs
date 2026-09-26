@@ -624,24 +624,19 @@ export async function updateFileContent(fileId, bytes, mimeType, { appProperties
   const boundary = 'fleetstoremirror';
   const meta = {};
   if (appProperties && typeof appProperties === 'object') meta.appProperties = appProperties;
-  const body = [
-    `--${boundary}`,
-    'Content-Type: application/json; charset=UTF-8',
-    '',
-    JSON.stringify(meta),
-    `--${boundary}`,
-    `Content-Type: ${mimeType}`,
-    '',
-    Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes || ''), 'utf8'),
-    `--${boundary}--`,
-    '',
-  ];
-  // Buffer.concat: the text parts are utf8, the middle part is raw bytes.
-  const parts = body.map((p, i) => (i === 7 ? p : Buffer.from(p, 'utf8')));
+  const head = Buffer.from(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+    'utf8',
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+  // The middle part stays raw bytes: joining text around a binary part as strings
+  // would mangle it, and concatenating Buffers without the CRLF framing above
+  // produces the "malformed multipart body" the API answers with.
+  const content = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes || ''), 'utf8');
   const res = await fetch(`${API.driveUpload}/files/${encodeURIComponent(fileId)}?uploadType=multipart&fields=${encodeURIComponent('id,modifiedTime')}`, {
     method: 'PATCH',
     headers: clientHeaders({ Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` }),
-    body: Buffer.concat(parts),
+    body: Buffer.concat([head, content, tail]),
   });
   const out = await res.text();
   if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status} ${shortError(out)}` };
