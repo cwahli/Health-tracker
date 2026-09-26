@@ -1079,6 +1079,7 @@ const followupQueues = new Map();
 // The tunnel URL this process last handed out. A quick tunnel's hostname changes
 // on every reconnect, so this is how /web knows an older button is now dead.
 let lastMiniappUrl = '';
+let lastWebHintAt = 0;
 
 export function watchOn(prefs, chatId) {
   return prefFor(prefs, chatId)?.watch === true;
@@ -2293,12 +2294,38 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // with a blank WebView. Say so rather than let the tap look broken.
       const moved = lastMiniappUrl && lastMiniappUrl !== miniUrl;
       lastMiniappUrl = miniUrl;
+      // A fresh WebView carries no project list, and the "add project" hint is
+      // the only thing that saves the user a dead end — but say it once, not on
+      // every tap of a button they have already used.
+      const moved2 = lastWebHintAt && Date.now() - lastWebHintAt < 6 * 60 * 60 * 1000;
+      lastWebHintAt = Date.now();
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /web button is dead — use this one.' : null,
-        '🖥 *opencode web terminal* — the phone-hosted full session view with its own input box, the same workspace the bot runs in.',
-        'First tap asks for the work-session password once; the WebView remembers it.',
+        '🖥 *opencode web* — the phone-hosted session list, messages and tool calls.',
+        'First tap asks for the password once.',
+        moved2 ? '' : `Then tap *Add project* and enter \`${config.agent.workspace}\` — the WebView keeps its project list in browser storage, so a fresh one starts empty even though the server has every session. Once it is added, your conversations are here.`,
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '🖥 Open opencode web', web_app: { url: miniUrl } }]] },
+      });
+      return;
+    }
+
+    case 'tui': {
+      // The actual TUI, not the web UI: ttyd serves a real PTY and mounts it
+      // under the same tunnel and the same login, so this is a terminal you
+      // type into from inside Telegram. It runs in its own git worktree
+      // (/root/tui) so it cannot fight the checkout this bot writes to.
+      const tuiUrl = readMiniappUrl();
+      if (!tuiUrl) {
+        await api.sendMessage(chatId, '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.');
+        return;
+      }
+      await api.sendMessage(chatId, [
+        '⌨️ *opencode TUI* — a real terminal, driven by touch, running in its own worktree at `/root/tui` so it never collides with this chat\'s checkout.',
+        'It runs inside tmux, so you can close the Mini App and reopen it and keep your place. Tap the screen once if the keyboard does not come up on its own.',
+        'First tap asks for the password once.',
+      ].join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/tui/` } }]] },
       });
       return;
     }
