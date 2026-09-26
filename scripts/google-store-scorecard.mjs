@@ -57,7 +57,7 @@ import {
   objectName,
   redact,
   renameFile,
-  serviceAccountFromEnv,
+  identityFromEnv,
   uploadBinary,
 } from './lib/google-store.mjs';
 
@@ -431,15 +431,15 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const sa = serviceAccountFromEnv(env);
-  const tok = await accessToken(sa, { scopes: Object.values(SCOPES) });
+  const who = identityFromEnv(env);
+  const tok = await accessToken(who, { scopes: Object.values(SCOPES) });
   if (!tok.ok) {
     console.log(`\n  google store scorecard — TOKEN FAILED\n\n  ${redact(tok.error || '')}\n`);
     process.exitCode = 1;
     return;
   }
   token = tok.token;
-  ev('boot', `account ${sa.email}`, `token ${tok.cached ? 'cached' : 'minted'}`);
+  ev('boot', `acting as ${who.email} (${who.kind})`, `token ${tok.cached ? 'cached' : 'minted'}`);
 
   const needsRelay = rows.some((r) => wanted(r.id) && r.where.includes('keyless'));
   if (needsRelay) {

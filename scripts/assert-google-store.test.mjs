@@ -365,5 +365,65 @@ check('loadHostEnv() is shared by the probe and the scorecard (one env rule)', (
   return /loadHostEnv/.test(PROBE_ENV) && /loadHostEnv/.test(CARD) && !/os\.homedir/.test(PROBE_ENV);
 });
 
+// ------------------------------------------------- the user identity (option B)
+
+const AUTH = fs.readFileSync(path.join(HERE, 'google-authorize.mjs'), 'utf8');
+
+check('accessToken dispatches on identity kind, so no call site branches', () => {
+  return /identity\?\.kind === 'user'/.test(LIB) && /grant_type: 'refresh_token'/.test(LIB) && /jwt-bearer/.test(LIB);
+});
+
+check('a user bundle is refused unless it is mode 600', () => {
+  return /user credential file is mode/.test(LIB);
+});
+
+check('a bundle with no refresh_token is refused with the fix, not a stack', () => {
+  return /no refresh_token in the credential bundle/.test(LIB) && /google-authorize\.mjs/.test(LIB);
+});
+
+check('a user identity wins when both credentials are present', () => {
+  // A service account that cannot write must never be the live identity just
+  // because it is listed first.
+  const fn = LIB.slice(LIB.indexOf('export function identityFromEnv'), LIB.indexOf('export function googleReady'));
+  return /const user = userIdentityFromEnv/.test(fn) && /if \(user\.ok\) return user/.test(fn);
+});
+
+check('only a service account is told it needs a shared drive', () => {
+  return /writesNeedSharedDrive: true/.test(LIB) && !/writesNeedSharedDrive: true[\s\S]{0,400}kind: 'user'/.test(LIB);
+});
+
+check('an invalid_grant is explained as a fixable cause', () => {
+  return /invalid_grant/.test(LIB) && /re-run scripts\/google-authorize\.mjs/.test(LIB);
+});
+
+check('the authorizer asks for offline access and re-consent (else no refresh token)', () => {
+  return /access_type.*offline/.test(AUTH) && /prompt.*consent/.test(AUTH);
+});
+
+check('the authorizer checks the OAuth state parameter', () => {
+  return /state/.test(AUTH) && /state mismatch/.test(AUTH);
+});
+
+check('the authorizer never prints a refresh token or client secret', () => {
+  const printed = [...AUTH.matchAll(/say\(([^)]*)\)/g)].map((m) => m[1]).join(' ');
+  return !/refresh_token\b(?!.*present)/.test(printed.replace(/refresh   :.*/, '')) && !/client_secret/.test(printed);
+});
+
+check('the authorizer verifies with a read (about.get), never a write', () => {
+  return /drive\/v3\/about/.test(AUTH) && !/files\?uploadType|values\/.*append|spreadsheets'\, \{/.test(AUTH);
+});
+
+check('the authorizer writes the bundle at 600 and says so', () => {
+  return /mode: 0o600/.test(AUTH) && /chmodSync\(BUNDLE, 0o600\)/.test(AUTH);
+});
+
+check('the probe reports which identity is live and whether it has storage', () => {
+  return /row\('identity'/.test(PROBE) && /row\('drive quota'/.test(PROBE);
+});
+
+check('the scorecard and relay resolve an identity, not a service account', () => {
+  return /identityFromEnv/.test(CARD) && /identityFromEnv/.test(RELAY) && !/serviceAccountFromEnv/.test(CARD);
+});
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

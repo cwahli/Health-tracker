@@ -211,20 +211,111 @@ export function foldersFromEnv(env = process.env) {
  * The honest per-location readiness answer, in the shape `/setup` already speaks.
  * Missing pieces are named; nothing is inferred from another host.
  */
-export function googleReady(env = process.env) {
+/**
+ * The user-identity credential (option B, plan §1b).
+ *
+ * A service account cannot own files, so on a personal Google account the store
+ * needs an identity that has storage: one human's OAuth grant, used by every
+ * agent. This is *not* per-bot OAuth — there is one consent, one credential
+ * bundle, one rotation, and no agent ever sees a client secret.
+ *
+ * The bundle is written by `scripts/google-authorize.mjs` and holds the refresh
+ * token plus the client id/secret that minted it. It is a path in the env, mode
+ * 600, exactly like the service-account key it replaces.
+ */
+export function userIdentityFromEnv(env = process.env) {
+  const file = String(env.GOOGLE_USER_CREDENTIALS_JSON || '').trim();
+  const inline = String(env.GOOGLE_USER_CREDENTIALS_JSON_INLINE || '').trim();
+  let raw = '';
+  let source = '';
+  if (file) {
+    source = file;
+    try {
+      if (!fs.existsSync(file)) return { ok: false, reason: `GOOGLE_USER_CREDENTIALS_JSON points at a missing file (${file})`, source };
+      try {
+        const mode = fs.statSync(file).mode & 0o777;
+        if (mode & 0o077) return { ok: false, reason: `user credential file is mode ${mode.toString(8).padStart(3, '0')} (must be 600)`, source };
+      } catch { /* best effort */ }
+      raw = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      return { ok: false, reason: `cannot read user credential file: ${redact(err.message)}`, source };
+    }
+  } else if (inline) {
+    source = 'inline';
+    raw = inline;
+  } else {
+    return { ok: false, reason: 'no GOOGLE_USER_CREDENTIALS_JSON path in this environment', source: '' };
+  }
+
+  let doc;
+  try {
+    doc = JSON.parse(raw);
+  } catch (err) {
+    return { ok: false, reason: `user credential JSON does not parse: ${redact(err.message)}`, source };
+  }
+  if (!doc.refresh_token) return { ok: false, reason: 'no refresh_token in the credential bundle (re-run scripts/google-authorize.mjs)', source };
+  if (!doc.client_id) return { ok: false, reason: 'no client_id in the credential bundle', source };
+  const scopes = Array.isArray(doc.scopes) && doc.scopes.length ? doc.scopes : Object.values(SCOPES);
+  return {
+    ok: true,
+    kind: 'user',
+    source,
+    email: doc.account || '',
+    clientId: doc.client_id,
+    clientSecret: doc.client_secret || '',
+    refreshToken: doc.refresh_token,
+    scopes,
+    obtainedAt: doc.obtained_at || '',
+  };
+}
+
+/**
+ * One resolver for "who is this surface acting as".
+ *
+ * Both identities satisfy the same contract, so every call site (probe, scorecard,
+ * relay) asks for an identity and never branches on the credential type. A user
+ * identity is preferred when both are present: a service account can read a
+ * My Drive folder but cannot write to it, so keeping it as the live identity would
+ * leave the fleet permanently half-enabled.
+ */
+export function identityFromEnv(env = process.env) {
+  const user = userIdentityFromEnv(env);
+  if (user.ok) return user;
   const sa = serviceAccountFromEnv(env);
-  if (!sa.ok) return { ready: false, reason: sa.reason, source: sa.source, email: '', folder: '' };
+  if (sa.ok) {
+    return {
+      ok: true,
+      kind: 'service_account',
+      source: sa.source,
+      email: sa.email,
+      projectId: sa.projectId,
+      key: sa.key,
+      // A service account owns nothing, so it needs a shared drive to write
+      // (plan §1b). Naming that here means every caller inherits the constraint
+      // instead of rediscovering it as a 403.
+      writesNeedSharedDrive: true,
+      scopes: Object.values(SCOPES),
+    };
+  }
+  return { ok: false, kind: 'none', reason: user.reason, source: user.source || sa.source, email: '' };
+}
+
+export function googleReady(env = process.env) {
+  const who = identityFromEnv(env);
   const folders = foldersFromEnv(env);
   const folderId = String(env.GOOGLE_FOLDER_ID || '').trim().replace(/^["']|["']$/g, '');
+  if (!who.ok) return { ready: false, reason: who.reason, source: who.source, email: '', kind: 'none', folder: '' };
   if (!folderId && Object.keys(folders).length === 0) {
-    return { ready: false, reason: 'credential present, but no GOOGLE_FOLDER_<project> configured', source: sa.source, email: sa.email, folder: '' };
+    return { ready: false, reason: 'credential present, but no GOOGLE_FOLDER_<project> configured', source: who.source, email: who.email, kind: who.kind, folder: '' };
   }
   return {
     ready: true,
     reason: '',
-    source: sa.source,
-    email: sa.email,
-    projectId: sa.projectId,
+    source: who.source,
+    kind: who.kind,
+    email: who.email,
+    projectId: who.projectId || '',
+    writesNeedSharedDrive: Boolean(who.writesNeedSharedDrive),
     folder: folderId || '',
     folders,
   };
@@ -294,11 +385,52 @@ async function request(url, { method = 'GET', token = '', body, headers = {}, at
   return { ok: false, status: 0, error: lastErr || 'request failed' };
 }
 
-/** Mint (or reuse) an access token for the service account. */
-export async function accessToken(sa, opts = {}) {
+/**
+ * Mint (or reuse) an access token for whichever identity this surface holds.
+ *
+ * One entry point, two grants: a service account signs a JWT assertion, a user
+ * identity presents its refresh token. Callers do not branch, which is what keeps
+ * the probe, the scorecard and the relay identical whether the fleet runs on a
+ * Workspace shared drive or on one human's grant.
+ */
+export async function accessToken(identity, opts = {}) {
   const now = Date.now();
-  if (!opts.force && cached && cached.expiresAt > now) return { ok: true, token: cached.token, cached: true };
-  const assertion = buildAssertion(sa.key, { scopes: opts.scopes, now });
+  if (!opts.force && cached && cached.expiresAt > now && (!opts.scopes || cached.kind === (identity?.kind || 'service_account'))) {
+    return { ok: true, token: cached.token, cached: true, kind: cached.kind };
+  }
+  const scopes = opts.scopes || identity?.scopes || Object.values(SCOPES);
+
+  if (identity?.kind === 'user' || (!identity?.key && identity?.refreshToken)) {
+    const body = {
+      grant_type: 'refresh_token',
+      refresh_token: identity.refreshToken,
+      client_id: identity.clientId,
+    };
+    // A desktop-app client has a secret; a public one does not. Send it only if
+    // the bundle carries it, since sending an empty value is an error, not a
+    // fallback.
+    if (identity.clientSecret) body.client_secret = identity.clientSecret;
+    const res = await request(API.token, { method: 'POST', body });
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: res.error || 'refresh grant failed',
+        // The two failures that actually happen, named: a revoked grant and an
+        // expired one (an app left in "Testing" status expires refresh tokens
+        // after 7 days). Both are fixed by re-running the authorizer.
+        hint: /invalid_grant/.test(res.error || '') ? 're-run scripts/google-authorize.mjs (grant revoked, expired, or the consent app is in Testing status)' : '',
+      };
+    }
+    cached = {
+      token: res.json.access_token,
+      kind: 'user',
+      expiresAt: now + Math.max(60_000, Number(res.json.expires_in || 3600) * 1000 - CLOCK_SKEW_S * 1000),
+    };
+    return { ok: true, token: cached.token, cached: false, kind: 'user' };
+  }
+
+  if (!identity?.key) return { ok: false, error: 'no usable identity (neither a service account key nor a user refresh token)' };
+  const assertion = buildAssertion(identity.key, { scopes, now });
   const res = await request(API.token, {
     method: 'POST',
     body: { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion },
@@ -306,9 +438,10 @@ export async function accessToken(sa, opts = {}) {
   if (!res.ok) return { ok: false, error: res.error || 'token grant failed' };
   cached = {
     token: res.json.access_token,
+    kind: 'service_account',
     expiresAt: now + Math.min(Number(res.json.expires_in || 3600) * 1000 - CLOCK_SKEW_S * 1000, TOKEN_TTL_MS),
   };
-  return { ok: true, token: cached.token, cached: false };
+  return { ok: true, token: cached.token, cached: false, kind: 'service_account' };
 }
 
 export function forgetToken() {
