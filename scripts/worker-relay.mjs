@@ -29,6 +29,7 @@
  */
 import http from 'node:http';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import {
   KNOWN_HOSTS,
@@ -46,6 +47,26 @@ const arg = (name, fallback) => {
 const PORT = Number(arg('port', process.env.WORKER_RELAY_PORT || 8890));
 const BIND = arg('host', process.env.WORKER_RELAY_BIND || '127.0.0.1');
 const MAX_BODY = 256 * 1024;
+// Direct-route auth: when a token is configured, every route except the
+// monitoring /health check requires `Authorization: Bearer <token>`. The relay
+// holds session exports and pack contents, so a publicly reachable relay must
+// never serve anonymously. Unset keeps the old loopback behavior (with a loud
+// warning) so existing single-machine deploys keep working.
+const RELAY_TOKEN = String(arg('relay-token', process.env.WORKER_RELAY_TOKEN || ''));
+if (!RELAY_TOKEN) console.log('[relay] WARNING: no relay token configured — set WORKER_RELAY_TOKEN before exposing this port');
+
+function authorized(req) {
+  if (!RELAY_TOKEN) return true;
+  const header = String(req.headers['authorization'] || '');
+  const got = header.startsWith('Bearer ') ? header.slice(7) : '';
+  try {
+    const a = Buffer.from(got);
+    const b = Buffer.from(RELAY_TOKEN);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 function send(res, code, payload) {
   const body = JSON.stringify(payload ?? {});
@@ -122,6 +143,13 @@ const server = http.createServer(async (req, res) => {
       pending: pendingCount(),
       workers: KNOWN_HOSTS.map((h) => ({ host: h, ...workerStatus(h) })),
     });
+  }
+
+  // Everything past /health needs the bearer token when one is configured.
+  // An unauthenticated caller learns nothing: 401 before any routing, any
+  // body parsing, any opencode call.
+  if (!authorized(req)) {
+    return send(res, 401, { error: 'relay token required' });
   }
 
   if (route === 'POST /connect') {

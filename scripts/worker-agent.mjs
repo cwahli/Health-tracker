@@ -37,14 +37,26 @@ const arg = (name, fallback) => {
 
 const HOST = arg('host', process.env.WORKER_HOST || 'mobile');
 const RELAY = arg('relay', process.env.WORKER_RELAY_URL || 'http://127.0.0.1:8890');
+// Direct-route auth, mirroring the relay: same bearer token the relay was
+// started with (env or flag). Absent on both ends, everything works exactly
+// as before; set on only one end, that end refuses loudly.
+const RELAY_TOKEN = String(arg('relay-token', process.env.WORKER_RELAY_TOKEN || ''));
+const authHeaders = (extra = {}) => (RELAY_TOKEN ? { ...extra, authorization: `Bearer ${RELAY_TOKEN}` } : extra);
 const DETAIL = arg('detail', `${os.hostname()} ${os.platform()}`);
 // Labeled test worker, never the physical device. Bare --standin counts.
 const STANDIN =
   process.argv.includes('--standin') ||
   String(arg('standin', process.env.WORKER_STANDIN || '')).trim() === '1' ||
   String(arg('standin', '')).trim().toLowerCase() === 'true';
-// Which machine this is, so the sender can tell a stand-in from the device
-// and the canary can refuse a job that came from the wrong one.
+// A pid is only meaningful to a relay on the SAME machine (it checks
+// liveness with kill(pid, 0) in its own pid namespace). A worker dialing a
+// relay on another box reports --no-pid (WORKER_NO_PID=1): its heartbeat TTL
+// is the liveness signal, and a stale number must not fail presence.
+const SEND_PID = !(
+  process.argv.includes('--no-pid') ||
+  String(arg('no-pid', process.env.WORKER_NO_PID || '')).trim() === '1' ||
+  String(arg('no-pid', '')).trim().toLowerCase() === 'true'
+);
 const MACHINE = { hostname: os.hostname(), platform: os.platform(), arch: os.arch() };
 const LEDGER = ensureBotLedger(`worker-${HOST}`);
 
@@ -55,8 +67,8 @@ function log(...parts) {
 async function post(route, body) {
   const res = await fetch(`${RELAY}${route}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ host: HOST, pid: process.pid, detail: DETAIL, cwd: process.cwd(), machine: MACHINE, standin: STANDIN, ...body }),
+    headers: authHeaders({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ host: HOST, pid: SEND_PID ? process.pid : null, detail: DETAIL, cwd: process.cwd(), machine: MACHINE, standin: STANDIN, ...body }),
   });
   return res.json().catch(() => ({}));
 }
@@ -108,7 +120,7 @@ async function sessionIsHere(sessionId) {
 async function importSessionFromRelay(sessionId) {
   let res;
   try {
-    res = await fetch(`${RELAY}/sessions/${encodeURIComponent(sessionId)}/export`);
+    res = await fetch(`${RELAY}/sessions/${encodeURIComponent(sessionId)}/export`, { headers: authHeaders() });
   } catch (err) {
     log(`relay unreachable for ${sessionId}:`, String(err?.message || err).slice(0, 120));
     return false;
@@ -153,7 +165,7 @@ async function resumeSession(sessionId) {
  */
 async function applyJobPack(packId, workspace) {
   try {
-    const res = await fetch(`${RELAY}/packs/${encodeURIComponent(packId)}`);
+    const res = await fetch(`${RELAY}/packs/${encodeURIComponent(packId)}`, { headers: authHeaders() });
     if (res.status === 404) return { ok: false, reason: 'pack is not on the relay' };
     if (!res.ok) return { ok: false, reason: `relay answered ${res.status}` };
     const payload = await res.json();
@@ -245,7 +257,7 @@ async function loop() {
   const beat = setInterval(() => { post('/heartbeat', {}).catch(() => {}); }, 30000);
   for (;;) {
     try {
-      const res = await fetch(`${RELAY}/jobs/next?host=${encodeURIComponent(HOST)}&wait=25000`);
+      const res = await fetch(`${RELAY}/jobs/next?host=${encodeURIComponent(HOST)}&wait=25000`, { headers: authHeaders() });
       if (res.status === 204) continue;
       const { job } = await res.json();
       if (!job) continue;
