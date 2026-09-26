@@ -139,6 +139,13 @@ check('the walk orders coding lanes before light ones',
   /rank\(a\) - rank\(b\)/.test(botWalkSrc) && /walkTierRank/.test(botWalkSrc));
 check('a light lane is still reachable as a last resort',
   /degradedToLight/.test(botWalkSrc) && !/codingLeft === 0\) return/.test(botWalkSrc));
+// QS-2 wants the switch visible in the chat, not only in the log: the walk
+// displaced a depleted lane on 2026-09-26 06:51Z, answered on the next lane, and
+// the chat was told nothing.
+check('a displaced lane is announced to the chat, not just logged',
+  /this turn ran on \\`\$\{laneChoice\.chose\}\\` instead/.test(botWalkSrc));
+check('and that line quotes the ledger reason, never a raw provider envelope',
+  /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = stamp && !reason\.includes\(stamp\)/.test(botWalkSrc));
 check('and the turn is told when it dropped to a light model',
   /no coding lane is free right now/.test(botWalkSrc));
 // The tier is the catalog's, so what is asserted here is that the walk reads the

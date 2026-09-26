@@ -474,6 +474,10 @@ try {
   // BUTTON_DATA_INVALID. The payload is the route, and a route that still cannot
   // fit degrades to a position rather than to a broken button.
   check('callback_data carries the route, never the label', /data: route/.test(botSrc) && /callback_data: data/.test(read('lib/commands.mjs')));
+  // Every row is an array of buttons. Returning a bare button object instead is
+  // `expected an Array of InlineKeyboardButton`, which is what the first attempt
+  // at this fix did.
+  check('and every keyboard row is an array of buttons', /return \[\{ text, callback_data: data \}\];/.test(read('lib/commands.mjs')));
   check('and a payload that cannot fit degrades to a position', /LIMIT = 64/.test(read('lib/commands.mjs')) && /`\$\{kind\}:#\$\{i\}`/.test(read('lib/commands.mjs')));
   check('the tap resolves a route first, then a position, then a label',
     /a\.ref === value/.test(botSrc) && /startsWith\('#'\)/.test(botSrc));

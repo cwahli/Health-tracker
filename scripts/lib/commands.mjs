@@ -159,7 +159,7 @@ export function modelKeyboard(models, { page = 0, pageSize = 8, kind = 'm', all 
     // Too long for Telegram: fall back to a position in this keyboard, which the
     // handler resolves against the same ordered list it rendered.
     const data = Buffer.byteLength(payload, 'utf8') <= LIMIT ? payload : `${kind}:#${i}`;
-    return { text, callback_data: data };
+    return [{ text, callback_data: data }];
   });
   if (all) {
     if (footer) rows.push([footer]);
