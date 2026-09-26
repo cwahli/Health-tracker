@@ -396,9 +396,10 @@ try {
   // canonical list drops an older version whose family has a newer one, but that
   // model IS in the table — so a re-add loop keyed on the list instead of the table
   // put 13 models back and /freemodel said 49 rows while /allowance said 30.
+  const paritySrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('the re-add is keyed on the table, not on the canonical list',
-    /const inTable = new Set/.test(botSrc) && /!inTable\.has\(m\)/.test(botSrc) && !/inList/.test(botSrc));
-  check('and the handler passes the table lanes through', /tableLanes: \(fmTable && fmTable\.lanes\) \|\| \[\]/.test(botSrc));
+    /const inTable = new Set/.test(paritySrc) && /!inTable\.has\(m\)/.test(paritySrc) && !/inList/.test(paritySrc));
+  check('and the handler passes the table lanes through', /tableLanes: \(fmTable && fmTable\.lanes\) \|\| \[\]/.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
