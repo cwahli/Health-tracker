@@ -81,8 +81,9 @@ import {
   planCodeForLane,
   canonicalAllowanceLanes,
   groupRowsByTier,
-  rowCopy,
-  fitCopy,
+  rowWidth,
+  headingWidth,
+  shortModelName,
   buildAllowanceTextForBots,
   escHtml,
   formatResetIn,
@@ -825,7 +826,7 @@ function tierBreakdown(groups, sep) {
   return parts.length > 1 ? parts.join(sep) : '';
 }
 
-function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
+export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
     const a = byRef.get(e?.ref);
@@ -932,7 +933,7 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     // groupRowsByTier() result. `noop` is the callback the router already uses for a
     // non-actionable keyboard row, and the tap handler answers it silently.
     if (tierGroups.length > 1) {
-      buttons.push({ text: fitCopy(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
+      buttons.push({ text: headingWidth(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -942,16 +943,28 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     // and the bakeoff ledger's own verdict. A model with no published figure gets no
     // number at all — never a neighbour's.
     const model = r.lane?.model || r.model || r.ref || '';
-    // The button says what the /allowance row says, through the same copy function,
-    // at the same width: mark, name, plan, benchmark, reset, finished to 72
-    // characters with a dash. A button is no longer a second, shorter vocabulary for
-    // a row that already exists.
-    const rated = rowCopy({
+    // The button says what the /allowance row says, in the same column order —
+    // mark, name, plan, three spaces, countdown, benchmark — but padded by
+    // *rendered width* instead of by character count: the client fits pixels in a
+    // proportional font and middle-elides whatever passes its ~415px cut-off, so
+    // 72 characters rendered anywhere from 386px to 465px and half the keyboard
+    // lost its middle. rowWidth() puts every column at a fixed em offset and
+    // every button at COPY_UNITS (24em = 408px), the tier heading's own width.
+    // The name goes through shortModelName — the same helper the table's Name
+    // column uses — because the raw label carries the surface prefix ("OpenCode
+    // Muse Spark 1.3 Cont"), which truncated to a different cut per row and put
+    // the plan code against a different letter every time. The reset is the
+    // compact countdown, never the absolute label: `resetLabel` is a full
+    // timestamp, and fifteen characters of it read "2026-09-26T1".
+    const name = shortModelName(r.lane || { label });
+    const rawReset = String(r.resetIn || r.resetLabel || '');
+    const resetSource = r.resetAt ?? (/^\d{4}-\d{2}-\d{2}/.test(rawReset) ? rawReset : null);
+    const rated = rowWidth({
       mark: unusableOf(r) ? '❌' : '✅',
-      name: label,
+      name,
       plan: tag,
-      score: benchmarkLabel(model),
-      resetIn: r.resetIn || r.resetLabel || '—',
+      score: benchmarkLabel(model) || '—',
+      resetIn: resetSource ? formatResetIn(resetSource, now) : (rawReset && rawReset !== '-' ? rawReset : '—'),
     });
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
@@ -1780,7 +1793,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         reply_markup: modelKeyboard(body.buttons, {
           kind: 'fm',
           all: true,
-          footer: { text: 'Cancel — keep current model', callback_data: 'noop' },
+          footer: { text: headingWidth('Cancel — keep current model'), callback_data: 'noop' },
         }),
       });
       return;
