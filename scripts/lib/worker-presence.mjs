@@ -9,7 +9,11 @@
  * phone or the notebook.
  *
  * Store: ~/.hermes/workers/<host>.json
- *   { host, pid, detail, connectedAt, lastSeen }
+ *   { host, pid, detail, cwd, machine, standin, connectedAt, lastSeen }
+ * `machine` is { hostname, platform, arch } as reported by the worker itself;
+ * a presence row without one is from an old worker and must not satisfy a
+ * canary. `standin` marks a labeled test worker: it answers presence, but it
+ * is not the physical device the host name suggests.
  * A record is stale (treated as gone) when lastSeen is older than TTL_MS, or
  * when it names a local pid that is no longer alive.
  */
@@ -61,10 +65,22 @@ function readJson(file) {
   }
 }
 
+/** Human line for the machine a worker reported, for /location and /status. */
+export function machineLabel(machine) {
+  const m = machine && typeof machine === 'object' ? machine : {};
+  const host = String(m.hostname || '').trim();
+  const plat = String(m.platform || '').trim();
+  const arch = String(m.arch || '').trim();
+  if (!host && !plat && !arch) return 'unknown machine';
+  const what = [plat, arch].filter(Boolean).join('/');
+  return `${host || 'unknown host'}${what ? ` (${what})` : ''}`;
+}
+
 /** Called by the relay that accepted a worker's outbound connection. */
-export function recordWorkerConnected({ host, pid = null, detail = '', cwd = '', home = os.homedir(), now = Date.now() } = {}) {
+export function recordWorkerConnected({ host, pid = null, detail = '', cwd = '', machine = null, standin = null, home = os.homedir(), now = Date.now() } = {}) {
   const file = presencePath(host, home);
   const prev = readJson(file) || {};
+  const m = machine && typeof machine === 'object' ? machine : prev.machine && typeof prev.machine === 'object' ? prev.machine : null;
   const row = {
     host: String(host || '').trim().toLowerCase(),
     pid: pid ?? null,
@@ -73,6 +89,21 @@ export function recordWorkerConnected({ host, pid = null, detail = '', cwd = '',
     // this project have a directory here?" for a machine whose paths are not
     // this machine's.
     cwd: String(cwd || prev.cwd || '').slice(0, 400),
+    // Which machine answered: { hostname, platform, arch }. Kept across
+    // heartbeats that omit it, so an old worker's row is not wiped blank by
+    // its own heartbeat — it stays "unknown machine" until it reports one.
+    machine: m
+      ? {
+          hostname: String(m.hostname || '').slice(0, 200),
+          platform: String(m.platform || '').slice(0, 40),
+          arch: String(m.arch || '').slice(0, 40),
+        }
+      : null,
+    // Labeled test worker (drill / proof stand-in), not the physical device.
+    // Sticky once set: a stand-in's heartbeats keep saying so, and a row is
+    // only unmarked by an explicit standin:false from the worker itself —
+    // never by a heartbeat that merely omits the field.
+    standin: standin === null || standin === undefined ? prev.standin === true : standin === true,
     connectedAt: prev.connectedAt || new Date(now).toISOString(),
     lastSeen: new Date(now).toISOString(),
   };
@@ -96,29 +127,31 @@ export function clearWorker(host, home = os.homedir()) {
 }
 
 /**
- * @returns {{host: string, reachable: boolean, reason: string, lastSeen: string|null, ageMs: number|null}}
+ * @returns {{host: string, reachable: boolean, reason: string, lastSeen: string|null, ageMs: number|null, machine: object|null, standin: boolean}}
  */
 export function workerStatus(host, { home = os.homedir(), now = Date.now(), ttlMs = TTL_MS } = {}) {
   const h = String(host || '').trim().toLowerCase();
   if (isLocalHost(h, { home })) {
-    return { host: h, reachable: true, reason: 'this machine runs the poller', lastSeen: null, ageMs: 0 };
+    return { host: h, reachable: true, reason: 'this machine runs the poller', lastSeen: null, ageMs: 0, machine: null, standin: false };
   }
   const row = readJson(presencePath(h, home));
   if (!row || !row.lastSeen) {
-    return { host: h, reachable: false, reason: 'no worker has connected', lastSeen: null, ageMs: null };
+    return { host: h, reachable: false, reason: 'no worker has connected', lastSeen: null, ageMs: null, machine: null, standin: false };
   }
+  const machine = row.machine && typeof row.machine === 'object' ? row.machine : null;
+  const standin = row.standin === true;
   const lastMs = Date.parse(row.lastSeen);
   const ageMs = Number.isFinite(lastMs) ? Math.max(0, now - lastMs) : null;
   if (ageMs === null) {
-    return { host: h, reachable: false, reason: 'worker record has no usable timestamp', lastSeen: row.lastSeen, ageMs: null };
+    return { host: h, reachable: false, reason: 'worker record has no usable timestamp', lastSeen: row.lastSeen, ageMs: null, machine, standin };
   }
   if (ageMs > ttlMs) {
-    return { host: h, reachable: false, reason: `worker silent for ${Math.round(ageMs / 1000)}s`, lastSeen: row.lastSeen, ageMs };
+    return { host: h, reachable: false, reason: `worker silent for ${Math.round(ageMs / 1000)}s`, lastSeen: row.lastSeen, ageMs, machine, standin };
   }
   if (row.pid && !alive(row.pid)) {
-    return { host: h, reachable: false, reason: `worker pid ${row.pid} is gone`, lastSeen: row.lastSeen, ageMs };
+    return { host: h, reachable: false, reason: `worker pid ${row.pid} is gone`, lastSeen: row.lastSeen, ageMs, machine, standin };
   }
-  return { host: h, reachable: true, reason: 'worker connected', lastSeen: row.lastSeen, ageMs };
+  return { host: h, reachable: true, reason: 'worker connected', lastSeen: row.lastSeen, ageMs, machine, standin };
 }
 
 /** The directory the worker reported when it connected; '' if it never did. */
