@@ -48,6 +48,52 @@ export const RATING_ALIASES = {
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
 };
 
+/**
+ * Public benchmark results for models the scorecard does not cover.
+ *
+ * These are a DIFFERENT scale and are kept in their own fields on purpose:
+ * `swe` is SWE-bench Verified % resolved and `tb` is Terminal-Bench, while `aa` is
+ * the scorecard's Artificial Analysis Intelligence Index. Printing 78.8 under an
+ * "AA" label would be a category error — the two are not comparable, and the
+ * button shows which is which.
+ *
+ * Grouped by what the evidence says, and `why` is kept so a later reader can see
+ * the basis rather than having to trust the label. "unscored" is not evidence of
+ * weakness: space-bunny has no published score but is the one model the fleet is
+ * told to fall back to, and it answers on this box.
+ */
+export const BENCHMARKS = {
+  'glm-5-free': { swe: 77.8, tb: 56.2, group: 'coding', why: 'Z.ai GLM-5: SWE-bench Verified 77.8 (best open-weights), Terminal-Bench 2.0 56.2, AA Index 50' },
+  'glm-4.7-free': { swe: 73.8, group: 'coding', why: 'Z.ai GLM-5 comparison table: SWE-bench Verified 73.8' },
+  'kimi-k2.5-free': { swe: 76.8, group: 'coding', why: 'Z.ai comparison table: SWE-bench Verified 76.8; K2.6 sibling scores 80.2' },
+  'qwen3.6-plus-free': { swe: 78.8, tb: 61.6, group: 'coding', why: 'Alibaba: SWE-bench Verified 78.8, Terminal-Bench 2.0 61.6, LiveCodeBench v6 87.1' },
+  'deepseek-v4-flash-free': { group: 'coding', why: 'same family as DeepSeek V4.1 Flash (AA 39.5); cache says "enhanced agentic capabilities". Weak on long autonomous loops' },
+  'mimo-v2.5-free': { group: 'coding', why: 'cache: "omni model for text, image, video, audio, and agents"; MiMo 2.6 sibling scores AA 41' },
+  'mimo-v2-pro-free': { group: 'coding', why: 'MiMo Pro tier, 1M context; Flash sibling AA 41, Pro measured 46.3' },
+  'mimo-v2-flash-free': { group: 'coding', why: 'MiMo Flash tier, same family as the AA 41 sibling' },
+  'mimo-v2-omni-free': { group: 'coding', why: 'MiMo omni tier, same family as the AA 41 sibling' },
+  'north-mini-code-free': { group: 'coding', why: 'cache: "Cohere coding model for practical software engineering and agentic edits"' },
+  'hy3-free': { group: 'coding', why: 'cache: "Tencent Hy reasoning model for coding, instruction following, and agent tasks"' },
+  'hy3-preview-free': { group: 'coding', why: 'same Hy family as hy3-free; no description of its own' },
+  'minimax-m2.1-free': { group: 'coding', why: 'MiniMax M2 family is positioned for agentic coding; no published score found' },
+  'minimax-m2.5-free': { group: 'coding', why: 'MiniMax M2 family is positioned for agentic coding; no published score found' },
+  'space-bunny-free': { group: 'coding', why: 'UNSCORED but operationally verified: plan/ROADMAP + BOT_ROLES make it the fleet fallback on "insufficient funds", and it answers on this box. Cache: "reasoning model for coding, agentic tasks, tool use", 1M ctx' },
+  'ox-alpha-free': { group: 'coding', why: 'cache: "Stealth reasoning model for coding, agentic tasks, and tool use", 1M ctx. No published score' },
+  'x-preview-f-free': { group: 'coding', why: 'cache: "Stealth reasoning model for coding, agentic tasks, and tool use", 1M ctx. No published score' },
+  'ring-2.6-1t-free': { group: 'coding', why: '1T-parameter open-weights tier; no published score and no description' },
+  'grok-code': { group: 'coding', why: 'coding by name. NOT named -free, so it has no place in a free list' },
+  'kat-coder-pro': { group: 'coding', why: 'Cline free coding model by name; no published score' },
+  'deepseek-v4': { group: 'coding', why: 'Token Harbor row for the same DeepSeek V4 family (V4.1 Flash = AA 39.5)' },
+  'qwen3.8-27b': { group: 'coding', why: 'Cloudflare-hosted Qwen 3.8 at 27B; Qwen3.8 Flash scores AA 39.9 and 27B is the larger tier' },
+  'glm-4.7-flash': { group: 'coding', why: 'Cloudflare-hosted GLM 4.7; SWE-bench Verified 73.8 for the family' },
+  'ling-2.6-flash-free': { group: 'light', why: 'Ling family: AA 21 for 3.0 Flash, described as low-latency assistance and extraction' },
+  'ling-3.0-flash-free': { group: 'light', why: 'AA 21 — "Efficient model for low-latency assistance, extraction, and routine automation"' },
+  'ling-3.0-tiny-free': { group: 'light', why: 'Ling family, "Compact MoE … responsive agents, instruction following"; below 3.0 Flash' },
+  'trinity-large-preview-free': { group: 'light', why: '131K context, the smallest in the list, and no description; "Large" notwithstanding' },
+  'gemini-3.7-flash': { group: 'light', why: 'between Gemini 3.5 Flash Lite (AA 22) and 3.8 Flash (AA 41.2); no score of its own' },
+  'big-pickle': { group: 'light', why: 'AA ~30 (the scorecard calls it its least certain cell), text-only, and the handover records that only --variant low replies' },
+};
+
 let cache = null;
 
 function loadScorecard() {
@@ -95,23 +141,47 @@ function modelIdOf(ref) {
 export function ratingForModel(ref) {
   const id = modelIdOf(ref);
   if (!id) return null;
+  const extra = BENCHMARKS[id] || null;
   const alias = RATING_ALIASES[id];
-  if (!alias) return null;
+  if (!alias) return extra ? { aa: null, ...extra } : null;
   const { rows, found } = loadScorecard();
-  if (!found || !rows.length) return null;
+  if (!found || !rows.length) return extra ? { aa: null, ...extra } : null;
   const want = alias.replace(/[`*]/g, '').replace(/\(you\)/i, '').trim().toLowerCase();
   const hit = rows.find((r) => r.key === want)
     // The base model shares the variant's score ("Base Ling 3.0 Flash = 21").
     || rows.find((r) => want.startsWith(r.key) || r.key.startsWith(want));
-  if (!hit) return null;
-  return { score: hit.score, estimated: hit.estimated, name: hit.label };
+  if (!hit) return extra ? { aa: null, ...extra } : null;
+  return { aa: hit.score, estimated: hit.estimated, name: hit.label, ...(extra || {}) };
 }
 
-/** `· AA 48` for a button, or '' when unscored. */
+/**
+ * Which group a model belongs to: coding or light.
+ *
+ * The rule is the scorecard's own where it has a number — AA >= 35 is coding, below
+ * is light — and the recorded evidence everywhere else. "unknown" is a real answer
+ * and is deliberately not collapsed into either side.
+ */
+export function groupForModel(ref) {
+  const id = modelIdOf(ref);
+  if (!id) return 'unknown';
+  const r = ratingForModel(id);
+  const curated = BENCHMARKS[id]?.group;
+  if (curated) return curated;
+  if (typeof r?.aa === 'number') return r.aa >= 35 ? 'coding' : 'light';
+  return 'unknown';
+}
+
+/**
+ * ` · AA48` / ` · SWE78.8` for a button, or '' when there is nothing to show.
+ * The two scales are labelled separately and never merged into one number.
+ */
 export function ratingSuffix(ref) {
   const r = ratingForModel(ref);
   if (!r) return '';
-  return ` · AA${r.estimated ? '~' : ''}${r.score}`;
+  const bits = [];
+  if (typeof r.aa === 'number') bits.push(`AA${r.estimated ? '~' : ''}${r.aa}`);
+  if (typeof r.swe === 'number') bits.push(`SWE${r.swe}`);
+  return bits.length ? ` · ${bits.join(' ')}` : '';
 }
 
 /** Every alias, resolved — used by the sensor to prove the table still matches. */
