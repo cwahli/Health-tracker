@@ -3031,6 +3031,66 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
   return result;
 }
 
+/**
+ * Is the TUI holding this conversation right now?
+ *
+ * The TUI is the same opencode session the bot answers in, so a chat turn and
+ * an attached terminal cannot both write it. tui-attach.sh publishes a lease
+ * with a heartbeat; a lease older than TUI_LEASE_MAX_AGE_MS is treated as
+ * free, because the alternative — a phone that dies holding a lease — would
+ * block the chat permanently with no way to clear it.
+ */
+const TUI_LEASE_MAX_AGE_MS = 90_000;
+
+function tuiLeasePath(botId) {
+  return path.join(stateDir(botId), 'tui-lease.json');
+}
+
+export function tuiHoldsConversation(botId, sessionId) {
+  let lease;
+  try {
+    lease = JSON.parse(fs.readFileSync(tuiLeasePath(botId), 'utf8'));
+  } catch {
+    return false; // no lease, or unreadable: nobody is holding it
+  }
+  const heartbeat = Number(lease?.heartbeat || 0);
+  if (!heartbeat || Date.now() - heartbeat > TUI_LEASE_MAX_AGE_MS) return false;
+  const held = String(lease?.session || '');
+  const wanted = String(sessionId || '');
+  // A lease with no session id predates the id, so treat it as "the chat is
+  // held" rather than guessing. A lease for a *different* session is not ours
+  // to block.
+  return !held || !wanted || held === wanted;
+}
+
+const tuiDrainTimers = new Map();
+
+/**
+ * Run whatever was queued while the TUI held the conversation, once it lets go.
+ * The queue itself is already bounded (MAX_FOLLOWUPS); this only has to notice
+ * the lease clearing, which nothing else is watching for.
+ */
+function scheduleTuiQueueDrain(ctx) {
+  const chatId = String(ctx.message.chat.id);
+  if (tuiDrainTimers.has(chatId)) return;
+  const deadline = Date.now() + 30 * 60 * 1000;
+  const tick = async () => {
+    if (ctx.busy.has(ctx.message.chat.id) || Date.now() > deadline) {
+      tuiDrainTimers.delete(chatId);
+      return;
+    }
+    if (tuiHoldsConversation(ctx.config.id, ctx.sessions.get(ctx.message.chat.id))) {
+      setTimeout(tick, 15_000).unref?.();
+      return;
+    }
+    tuiDrainTimers.delete(chatId);
+    if (shiftFollowup(chatId) == null) return;
+    await api.sendMessage(chatId, '▶️ TUI released the conversation — running what you queued.').catch(() => {});
+    await handleMessage({ ...ctx, message: { ...ctx.message, text: shiftFollowup(chatId) || '' }, depth: 1 });
+  };
+  tuiDrainTimers.set(chatId, setTimeout(tick, 15_000));
+}
+
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
@@ -3068,6 +3128,29 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       return;
     }
     await api.sendMessage(chatId, `⏳ Queued as follow-up #${pos} — runs when the current turn finishes. Send /abort to cancel the current run (the queue stays).`);
+    return;
+  }
+
+  // The TUI holds this same conversation while a terminal client is attached,
+  // so a message typed here would race a second writer on one session. Defer
+  // instead: queue it, and say plainly why. tui-attach.sh holds that lease with
+  // a heartbeat, so a phone that dies mid-session does not block the chat
+  // forever — an expired heartbeat reads as free.
+  if (tuiHoldsConversation(config.id, sessions.get(chatId))) {
+    if (hasMedia) {
+      await api.sendMessage(chatId, 'The TUI has this conversation open right now, and photos/files cannot queue. Send it from the terminal, or close the TUI and resend here.');
+      return;
+    }
+    const pos = queueFollowup(chatId, text);
+    if (pos == null) {
+      await api.sendMessage(chatId, `The TUI has this conversation, and the follow-up queue is full (${MAX_FOLLOWUPS}). Close the TUI and resend.`);
+      return;
+    }
+    await api.sendMessage(chatId, [
+      `⌨️ Queued as follow-up #${pos} — you are in the TUI on this same conversation, so I held it rather than write to it from two places.`,
+      'It runs by itself when you close the TUI (or send /abort in there to let go).',
+    ].join('\n'));
+    scheduleTuiQueueDrain({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message });
     return;
   }
 

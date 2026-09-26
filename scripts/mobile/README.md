@@ -62,11 +62,22 @@ survive the shell that launched them.
   because ttyd's `--check-origin` and its WebSocket handshake both depend on
   seeing values that agree with the socket they arrive on.
 - **`tui-attach.sh` resolves the session per attach**, because the bot rewrites
-  its session per chat and `/new` moves it. It also refuses to attach while the
-  bot holds a lease on that session, and kills a tmux session left over from a
-  different one — `new-session -A` ignores its command when the session exists,
-  and the tmux server outlives ttyd, so without that the first attach is stuck
-  on whatever it was born with.
+  its session per chat and `/new` moves it. It also kills a tmux session left
+  over from a different one — `new-session -A` ignores its command when the
+  session exists, and the tmux server outlives ttyd, so without that the first
+  attach is stuck on whatever it was born with.
+- **One writer at a time, in both directions, because the TUI *is* the chat's
+  session.** The first cut refused to attach while the bot held a turn's lease,
+  which dead-ended the user at exactly the moment they open the terminal: while
+  chatting. It is now the other way round:
+  - *bot turn in flight* → the TUI prints "attaching as soon as it finishes",
+    polls, and attaches when the lease clears (up to `TUI_WAIT_SECONDS`).
+  - *terminal attached* → `tui-attach.sh` publishes `tui-lease.json` with a
+    15s heartbeat, and the bot **queues** chat messages instead of racing it,
+    then drains the queue when the terminal lets go.
+  - The heartbeat is what makes this recoverable: a lease older than 90s reads
+    as free, so a phone that dies holding one cannot block the chat for good.
+
 
 ## Reinstalling on a new phone
 

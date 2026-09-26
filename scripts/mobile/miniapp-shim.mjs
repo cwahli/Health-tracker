@@ -259,8 +259,15 @@ const TUI_CHROME = `
   function place(el) {
     var s = el.style;
     s.position = 'fixed';
-    s.top = 'calc(env(safe-area-inset-top, 0px) + 6px)';
+    // Bottom, not top. A terminal's first lines are content, and a fixed
+    // top-right bar sits straight on top of them — which is exactly how the
+    // "busy" notice ended up sliced in half. The bottom edge is only the
+    // keyboard and, once it is up, nothing worth reading.
+    s.bottom = 'calc(env(safe-area-inset-bottom, 0px) + 6px)';
+    s.left = '50%';
+    s.transform = 'translateX(-50%)';
     s.zIndex = 2147483647;
+    s.opacity = '0.92';
     return el;
   }
   function add(label, title, fn) {
@@ -299,10 +306,20 @@ const TUI_CHROME = `
     if (document.getElementById('tg-chrome')) return;
     var wrap = document.createElement('div');
     wrap.id = 'tg-chrome';
+    // Fades out of the way once the terminal is being used, and comes back on
+    // a tap near where it lives — otherwise it permanently covers the status
+    // line and whatever the prompt is saying.
+    wrap.style.transition = 'opacity 400ms ease';
+    var hide = function () { wrap.style.opacity = '0'; };
+    var show = function () { wrap.style.opacity = '0.92'; };
+    wrap.addEventListener('click', function (ev) { ev.stopPropagation(); if (wrap.style.opacity === '0') show(); });
+    document.addEventListener('keydown', hide, true);
+    document.addEventListener('touchstart', hide, true);
     wrap.appendChild(add('⛶', 'Fullscreen', fullscreen));
     wrap.appendChild(add('⌨', 'Show keyboard', keyboard));
     wrap.appendChild(add('✕', 'Close', close));
     document.body.appendChild(place(wrap));
+    setTimeout(hide, 6000);
   }
   if (document.body) mount();
   else document.addEventListener('DOMContentLoaded', mount);
