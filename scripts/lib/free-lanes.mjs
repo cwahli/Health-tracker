@@ -1083,14 +1083,19 @@ export function fitCells(line) {
 }
 
 /**
- * The columns of a row, in the reader's order: the name in 30 characters, two
- * spaces, the plan in 2, one space, the reset in 15, two spaces, the benchmark
- * in 7. One builder for both surfaces, so neither can pick a different order or a
- * different width for the same column — that drift is how a button and its own
- * row stopped lining up.
+ * The columns of a row, in the reader's order and widths: the name in 30, two
+ * spaces, the plan in 2, THREE spaces, the reset in 15, two spaces, the
+ * benchmark in 7. One builder for both surfaces, so neither can pick a different
+ * order or a different width for the same column — that drift is how a button and
+ * its own row stopped lining up.
+ *
+ * The gap after the plan code is three, not one: with a single space the reader
+ * saw `OC 5h 36` and read the countdown as part of the plan. Columns start at
+ * character 2 (name), 34 (plan), 39 (reset), 56 (benchmark), and the row is 63
+ * characters before the finisher pads it to 72 with a dash last.
  */
 export function colsCopy({ name = "", plan = "", resetIn = "—", score = "" } = {}) {
-  return `${padChars(name, MODEL_NAME_MAX)}  ${padChars(plan, W_PLAN)} ${padChars(resetIn, W_EXPIRY)}  ${padChars(score, W_SCORE)}`;
+  return `${padChars(name, MODEL_NAME_MAX)}  ${padChars(plan, W_PLAN)}   ${padChars(resetIn, W_EXPIRY)}  ${padChars(score, W_SCORE)}`;
 }
 
 /**
