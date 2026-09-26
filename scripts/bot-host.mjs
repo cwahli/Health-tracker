@@ -2697,6 +2697,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
         : laneChoice.displaced.why;
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
+      // QS-2: "the same prompt completes on the next lane with a user-visible
+      // switch line naming failed lane -> next lane". The walk did exactly that
+      // on 2026-09-26 06:51Z — displaced the depleted cline lane, answered on the
+      // OpenCode lane — and told the chat nothing, only the log. The lane a person
+      // chose and the lane that actually ran were silently different, which is the
+      // same class of silence as the raw-JSON specimen this row exists to kill.
+      //
+      // `why` is the ledger's own reason ("depleted until <stamp>"), never a raw
+      // provider envelope, so this line cannot become the failure QS-2 forbids.
+      if (!laneChoice.degradedToLight) {
+        await api.sendMessage(
+          chatId,
+          `🔀 \`${eff.model}\` is ${why} — this turn ran on \`${laneChoice.chose}\` instead.`,
+        ).catch(() => {});
+      }
       // A coding turn that can only be served by a light model is said out loud.
       // Silently answering with a weaker model is how a coding task starts failing
       // in ways nobody notices until the code is wrong.
