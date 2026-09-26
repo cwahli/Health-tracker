@@ -93,7 +93,10 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
-import { ratingSuffix, groupForModel } from './lib/model-ratings.mjs';
+// R-16: the score on a button is the bakeoff ledger's own verdict, and the tier
+// is the catalog's. Both live in the catalogs, so there is no ratings table here
+// to drift from them. A model with no ledger row renders "unranked".
+import { scoreLabelFor, walkTierRank, tierForModel } from './lib/free-catalogs.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -907,7 +910,7 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     // in front of you rather than from memory. Unscored models get nothing — the
     // scorecard covers about half the reachable free models, and a missing number is
     // honest where a borrowed one would not be.
-    const rated = `${tag ? tag + ': ' : ''}${label}${ratingSuffix(r.lane?.model || r.model || r.ref || '')}`;
+    const rated = `${tag ? tag + ': ' : ''}${label} · ${scoreLabelFor(r.lane?.model || r.model || r.ref || '')}`;
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -2326,14 +2329,14 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   // a low pref number would take over the turn. Light lanes stay reachable as a last
   // resort, because failing a turn outright is worse than a weaker answer, and
   // `degradedToLight` says when that is what happened.
-  const groupOf = (m) => groupForModel(m || '');
-  const rank = (l) => {
-    const g = groupOf(l.model);
-    return g === 'coding' ? 0 : g === 'light' ? 2 : 1;
-  };
+  // Tier order comes from the catalog (QS-6): high first, then models the
+  // catalog does not rank, then light. Light lanes stay reachable as a last
+  // resort, and the reply says so when a coding turn ends up on one.
+  const rank = (l) => walkTierRank(l.model);
   const orderedLanes = [...fallbackLanes].sort((a, b) => rank(a) - rank(b) || (Number(a.pref) || 0) - (Number(b.pref) || 0));
-  const currentGroup = model ? groupOf(freemodelRefToRoute(model).model || model) : 'unknown';
+  const currentGroup = (tierForModel(freemodelRefToRoute(model).model || model).tier) || 'unlisted';
   const codingLeft = orderedLanes.filter((l) => rank(l) === 0).length;
+  const lightLeft = orderedLanes.filter((l) => rank(l) === 2).length;
 
   if (!model && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
@@ -2368,8 +2371,9 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     // group, so the failover notice can say what happened instead of the reader
     // wondering why the answer got worse.
     currentGroup,
-    degradedToLight: currentGroup === 'coding' && codingLeft === 0 && unique.length > 1,
+    degradedToLight: currentGroup === 'high' && codingLeft === 0 && unique.length > 1,
     codingAvailable: codingLeft,
+    lightAvailable: lightLeft,
   };
 }
 

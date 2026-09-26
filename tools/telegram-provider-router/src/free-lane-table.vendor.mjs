@@ -27,7 +27,7 @@
  * python3 render. Safe to import from tests (point TG_ROUTER_STATE_DIR at a
  * throwaway dir; nothing here touches the live box unless asked to).
  */
-import { ratingForModel } from './model-ratings.mjs';
+import { catalogScore } from './free-catalogs.mjs';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -1271,24 +1271,23 @@ function modelKey(s) {
  * `opencode-go/x`.
  */
 /**
- * Score for the supersession rule, read from the benchmark table. A newer version
- * only replaces an older one when it is not worse: without a score every pair looks
- * like "newer and unscored beats older and unscored", so a newer but weaker model
- * would win on version alone.
+ * Score for the supersession rule, read from the catalog's Ranked picks.
+ *
+ * A newer version replaces an older one only when the catalog does not rank the
+ * newer one lower. The rule used to be able to promote a newer model on version
+ * alone, which is how a newer-but-worse model would have won; with the catalog
+ * rank as the ordering, "not worse" is a fact about the catalog rather than an
+ * assumption about versions.
  */
-export function laneScoreFromRatings(lane) {
+export function laneScoreFromCatalog(lane) {
   try {
-    const r = ratingForModel(lane?.model || '');
-    if (!r) return null;
-    if (typeof r.aa === 'number') return r.aa;
-    if (typeof r.swe === 'number') return r.swe;
-    return null;
+    return catalogScore(lane?.model || '');
   } catch {
     return null;
   }
 }
 
-export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "", scoreOf = laneScoreFromRatings, supersede = true } = {}) {
+export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "", scoreOf = laneScoreFromCatalog, supersede = true } = {}) {
   if (!table || !Array.isArray(table.lanes)) return [];
   const projection = projectLanes(table, session, { now, location, readiness });
   const byLane = new Map(projection.map((r) => [laneKey(r.lane), r]));
