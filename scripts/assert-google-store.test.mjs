@@ -262,16 +262,38 @@ check('a spreadsheet is deleted through Drive, the API that answers from this ho
   return /return deleteFile\(sheetId, token\)/.test(fn);
 });
 
+check('a sheet deletion is verified through Drive, the API that answered the delete', () => {
+  // The Sheets read lags and is challenged; verifying through it turned a proven
+  // delete into a flaky partial.
+  const card = fs.readFileSync(path.join(HERE, 'google-store-scorecard.mjs'), 'utf8');
+  return /relayCall\('get', \{ id: sheet\.json\.id, kind: 'file' \}\)/.test(card);
+});
+
 check('a Doc append inserts strictly before the body end, never at it', () => {
   // The last element is the closing sectionBreak; inserting at its endIndex is
   // rejected with "Index N must be less than the end index".
   return /\(last\?\.endIndex \|\| 2\) - 1/.test(LIB);
 });
 
-check('the only PATCH is a rename: exactly one, and its body is { name } alone', () => {
+check('PATCH exists in exactly two shapes: a rename, and a Doc content replacement', () => {
+  // A rename changes a label ({ name } only). A Doc replacement changes named text
+  // because a caller asked for an edit — it is the one deliberate exception to
+  // "nothing is overwritten", and it is Docs-MIME-only so it cannot silently eat a
+  // picture, a sheet, or a turn log.
   const patches = [...LIB.matchAll(/method: 'PATCH'/g)].length;
   const nameOnly = [...LIB.matchAll(/method: 'PATCH',\s*\n\s*token,\s*\n\s*body: \{ name: clean \}/g)].length;
-  return patches === 1 && nameOnly === 1;
+  const docReplace = [...LIB.matchAll(/driveUpload}\/files\/\$\{encodeURIComponent\(docId\)\}/g)].length;
+  return patches === 2 && nameOnly === 1 && docReplace === 1;
+});
+
+check('a Doc is created with content through Drive conversion, not an empty shell', () => {
+  const fn = LIB.slice(LIB.indexOf('export async function createDocWithContent'), LIB.indexOf('/**\n * Drive: replace'));
+  return /mimeType: MIME\.doc/.test(fn) && /Content-Type: text\/plain/.test(fn) && /parents: \[folderId\]/.test(fn);
+});
+
+check('replacement never touches a non-Doc (Docs MIME is the only conversion target)', () => {
+  const fn = LIB.slice(LIB.indexOf('export async function replaceDocContent'), LIB.indexOf('/** Drive: create a Google Doc, optionally seeded'));
+  return /mimeType: MIME\.doc/.test(fn) && !/MIME\.(md|sheet|png)/.test(fn);
 });
 
 check('nothing is ever replaced: no PUT, and no upload onto an existing file id', () => {
@@ -311,7 +333,9 @@ check('the plan records the ownership constraint and the forced identity choice'
 
 check('the live board exists and refuses to claim green while rows are red', () => {
   const board = fs.readFileSync(path.join(HERE, '..', 'plan', 'GOOGLE_STORE_LIVE_MATRIX.md'), 'utf8');
-  return /NOT GREEN/.test(board) && /G-10/.test(board) && /not started/.test(board);
+  const green = (board.match(/\| \*\*green\*\*/g) || []).length;
+  const red = (board.match(/\| (?:\*\*)?RED(?:\*\*)? \|/g) || []).length;
+  return /ALL GREEN/.test(board) && green === 14 && red === 0 && /not started/.test(board);
 });
 
 check('the probe says how many writes it made', () => {

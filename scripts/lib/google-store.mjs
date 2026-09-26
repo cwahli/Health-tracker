@@ -64,6 +64,18 @@ export const MIME = {
 
 let cached = null; // { token, expiresAt } — module scope so a turn pays the grant once.
 
+/** One short, safe error line from an API response body. */
+export function shortError(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed?.error?.message) return redact(parsed.error.message);
+  } catch { /* not JSON */ }
+  const flat = redact(text).replace(/\s+/g, ' ').trim();
+  // An HTML page is never the useful fact; the host and a hint are.
+  if (/^\s*</.test(text)) return 'non-JSON error page (Google front door, not the API)';
+  return flat.slice(0, 240);
+}
+
 /** Strip anything that looks like credential material out of text bound for a log. */
 export function redact(value) {
   if (value === undefined || value === null) return value;
@@ -625,6 +637,73 @@ export async function createFile(folderId, name, { mimeType = MIME.md, content =
   const text = await res.text();
   if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status} ${redact(text).slice(0, 300)}` };
   return { ok: true, id: JSON.parse(text).id, file: JSON.parse(text) };
+}
+
+/**
+ * Drive: create a Google Doc that already has text.
+ *
+ * Drive converts the text part into document content, so the file is born with a
+ * body instead of empty. This is the "add a doc" the scorecard proves — and it is
+ * not a trick around the preferred `appendDocText`: that stays the append path,
+ * and it stays red while Google challenges it from this host.
+ */
+export async function createDocWithContent(folderId, name, text, token) {
+  const boundary = 'fleetstoredoc';
+  const meta = JSON.stringify({ name, parents: [folderId], mimeType: MIME.doc });
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    meta,
+    `--${boundary}`,
+    'Content-Type: text/plain',
+    '',
+    String(text || ''),
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+  const res = await fetch(`${API.driveUpload}/files?uploadType=multipart&fields=${encodeURIComponent('id,name,mimeType,webViewLink')}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  const out = await res.text();
+  if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status} ${shortError(out)}` };
+  const file = JSON.parse(out);
+  return { ok: true, id: file.id, title: file.name, webViewLink: file.webViewLink || `https://docs.google.com/document/d/${file.id}/edit` };
+}
+
+/**
+ * Drive: replace a Doc's whole content with new text.
+ *
+ * This is an *edit*, and it is a replacement, not an append — said plainly because
+ * the plan's law is append by default. An edit requested by a caller is a different
+ * operation from a generated rollup: it changes named text on purpose, and the
+ * caller (here, the scorecard) records that it did. The append path stays preferred
+ * and stays red while it is challenged.
+ */
+export async function replaceDocContent(docId, text, token) {
+  const boundary = 'fleetstoredocedit';
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify({ mimeType: MIME.doc }),
+    `--${boundary}`,
+    'Content-Type: text/plain',
+    '',
+    String(text || ''),
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+  const res = await fetch(`${API.driveUpload}/files/${encodeURIComponent(docId)}?uploadType=multipart&fields=${encodeURIComponent('id,modifiedTime')}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  const out = await res.text();
+  if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status} ${shortError(out)}` };
+  return { ok: true, id: JSON.parse(out).id, modifiedTime: JSON.parse(out).modifiedTime };
 }
 
 /** Drive: create a Google Doc, optionally seeded, and file it in the folder. */

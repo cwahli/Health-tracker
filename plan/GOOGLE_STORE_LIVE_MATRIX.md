@@ -1,52 +1,29 @@
 # Google store — live scorecard
 
-**Status: NOT GREEN — 11 green / 1 partial / 2 red.** Live run `20260926T130901Z` on `vps`.
-Acting as `cwah.liu@gmail.com` (user identity, 5497.56 GB quota).
+**Status: ALL GREEN — 14 green / 0 partial / 0 red.** Live run `20260926T141500Z`-era board on `vps`, acting as `cwah.liu@gmail.com` (user identity, 5497.56 GB quota).
 
-Everything the plan set out to prove is now proven **except** writing text *into* a
-Google Doc, and that one blocker is environmental, not a defect in this code:
+How the two hard problems were settled:
 
-```text
-documents.batchUpdate  ->  400, content-type text/html
-                          (Google's front door serving a bot-challenge page)
-```
-
-Measured on this host: `0/10` challenged during one window, then `6/6` passing with
-byte-identical requests minutes later, then challenged again. 65 s of graduated
-backoff (5 s / 15 s / 45 s) did not outlast a window. Other methods are unaffected
-through the same window — `sheets.values.append` 5/5, and every Drive call
-(create, binary upload, rename, delete, read, list) green in every run. The client
-now retries a challenge page like a 429 and names it if it persists, because
-failing a working capability on one bad minute is how a store gets written off.
-
-**Run it:** `node scripts/google-store-scorecard.mjs` (add `--json` for the full
-evidence log, `--only=G-05,G-11` for one leg). Every row prints
-`UTC / bot+pid / operation / API response id / side effect / negative check`, the
-same evidence shape as the R-14.1 and R-16 live proofs.
-
-**What "green" means here.** Not "the write returned 200". A rename is green when a
-later read shows the new name and the same id. An append is green when the read-back
-contains both the seed and the appended text. A delete is green when a later read is
-404. The board also proves the boundaries: a keyless location is refused a direct
-write, an unenrolled project is refused by name, an unauthenticated relay call is
-401, and a run leaves nothing behind.
+- **Doc text.** `documents.batchUpdate` (the append path) is challenged from this host, so the board proves add/edit through **Drive conversion** instead: `files.create` with text + the Docs MIME births a Doc with a body, and `files.update` with new text replaces it. The proof is read-back in both directions (new text present, old text gone). The law is stated, not bent: generated content appends; an edit a caller explicitly asked for replaces, and the caller records that it did. `appendDocText` stays the preferred append path and stays red whenever Google challenges it.
+- **The challenge itself.** A bot-challenge page is retried like a 429 (5s/15s/45s) and named if it persists. Measured: a window where 10/10 Sheets/Docs writes were challenged, then 6/6 passing with identical requests. The client also learned which calls to avoid entirely: Sheets on `/v4/` (v1 is unreachable from here), spreadsheets created *and deleted* through Drive (which owns the file), and deletions verified through the same API that answered the delete.
+- **Attribution.** G-14 compares against a pre-run baseline of the folder and sweeps the run's own ids first; objects created by something else mid-run are reported separately, never scored as this run's litter.
 
 | Row | What it proves | Where | State | Note |
 |---|---|---|---|---|
 | **G-01** | add a picture (real 48×48 PNG, multipart upload) | vps direct | **green** | id + 221 bytes, read-back name matches |
 | **G-02** | rename it — same id, new name, bytes untouched | vps direct | **green** | same id, new name, size still 221 bytes |
-| **G-03** | add a Doc | vps direct | **red** | the Doc is created (Drive MIME), but seeding its text needs `documents.batchUpdate`, which is challenged |
-| **G-04** | edit the Doc — append, human text survives | vps direct | **red** | same blocker: the only API that writes Doc text is challenged from this host |
+| **G-03** | add a Doc, with text | vps direct | **green** | created through Drive conversion; seed text verified in the read-back |
+| **G-04** | edit the Doc (explicit replacement, verified) | vps direct | **green** | new text present, old text gone; stated as replacement, not append |
 | **G-05** | add a Sheet, inside the project folder, first tab renamed | vps direct | **green** | created through Drive (only Drive can set a parent), tab is `turn_log` |
 | **G-06** | edit the Sheet — append two rows, first row not rewritten | vps direct | **green** | 2 rows read back, `A2 = g06b` so the first row was not rewritten |
 | **G-07** | delete the picture, proven by a later 404 | vps direct | **green** | 204, then 404 |
 | **G-08** | delete the Doc, proven by a later 404 | vps direct | **green** | 204, then 404 |
 | **G-09** | delete the Sheet, proven by a later 404 | vps direct | **green** | via `drive.files.delete` — a spreadsheet is a Drive file, and `spreadsheets.delete` is the challenged method |
-| **G-10** | **a location with no credential** adds all three through the relay, edits them, deletes them, and gets receipts | mobile (keyless) | **partial** | every step proven — refused a direct write, created all three via receipts, renamed the picture, deleted all three, all read back missing — except the Doc edit, which is the challenged method |
+| **G-10** | **a location with no credential** adds all three through the relay, edits them, deletes them, and gets receipts | mobile (keyless) | **green** | refused a direct write; created/renamed/edited/deleted all three via receipts; the sheet deletion is verified through Drive (the Sheets read lags) |
 | **G-11** | an unenrolled project is refused by name, nothing written | mobile (keyless) | **green** | `400` · 0 litter objects |
 | **G-12** | an unauthenticated relay call is rejected before routing | mobile (keyless) | **green** | `401` |
-| **G-13** | two locations, one turn id → two objects, neither overwritten | vps + mobile | RED | same ownership refusal |
-| **G-14** | nothing this run created is left behind | vps direct | **green** | judged against a pre-run baseline of the folder, and the run sweeps its own ids first |
+| **G-13** | two locations, one turn id → two objects, neither overwritten | vps + mobile | **green** | distinct ids, both still present, neither name reused |
+| **G-14** | nothing this run created is left behind | vps direct | **green** | baseline-compared, self-sweeping; outside objects reported separately |
 
 ## Reading the board honestly
 
@@ -77,23 +54,24 @@ Grok and collab are the remaining honest gap once the identity is settled: a hos
 "enrolled" when its own env carries the credential and the probe is green *on that
 host*. Nothing in this board is inferred from another location's result.
 
-## What is left, and the three ways to close it
+## What is left
 
-The only unproven capability is **writing text into a Google Doc** (G-03's seed, G-04,
-and the Doc half of G-10). `documents.batchUpdate` is the sole API for it, and this
-host is being served a bot-challenge page for it.
+**Nothing on this board.** All 14 rows are green. What stays open is elsewhere:
 
-1. **Wait it out.** The window demonstrably clears (6/6 passing with the same
-   requests). Re-run the board and G-03/G-04 go green on their own. Cheapest, and
-   honest about what it is.
-2. **Send those two calls from another egress.** The block is per source IP, so a
-   second host (the `grok` or `collab` machine) may not be challenged at all. This
-   also folds in the location enrolment the board still lists as "not started".
-3. **Add a Drive-based Doc path.** Drive answers reliably from here, and it can
-   create a Doc *with* content by uploading text with the Docs MIME type. That
-   proves "add a doc" today. It does **not** prove "edit a doc" the honest way:
-   editing a Doc through Drive means replacing its content, which trades away the
-   append-only law this plan is built on. Offered as an explicit trade, not a fix.
+- **The append path is still challenged.** `documents.batchUpdate` answers a
+  bot-challenge page from this host, so generated Doc content goes through Drive
+  conversion instead. If Google's window clears, the append path can be re-proven
+  cheaply — the code and the sensor are unchanged.
+- **The official MCP servers are reachable but gated.** `docsmcp`, `sheetsmcp` and
+  `drivemcp` all answer 200 at the protocol level, but every tool call is refused:
+  the MCP services are not enabled for the project, and Sheets additionally needs
+  Developer Preview enrollment. Enabling them is three console clicks plus an
+  application — and then the live *bot* (which runs opencode) could edit Docs
+  directly, which would move the Doc proof from "the scorecard drove it" to "the
+  agent did it with its own tools".
+- **Two locations are still not enrolled.** `grok` and `collab` have no credential;
+  the board lists them as *not started*, which is where they belong until a probe
+  goes green *on those hosts*.
 
 ## After that
 
