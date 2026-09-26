@@ -145,6 +145,9 @@ export function completeJob(id, result, { home = os.homedir(), now = Date.now() 
     sessionID: String(result?.sessionID || ''),
     resumedFrom: String(result?.resumedFrom || ''),
     workspace: String(result?.workspace || ''),
+    // How many files the worker actually wrote from the pack, so a swap can
+    // be judged on what landed, not on the upload that was accepted.
+    packApplied: Number(result?.packApplied ?? 0),
   };
   write(file, job);
   return job;
