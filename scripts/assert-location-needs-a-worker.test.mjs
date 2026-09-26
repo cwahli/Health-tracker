@@ -13,6 +13,7 @@ import {
   workerStatus,
   clearWorker,
   presencePath,
+  machineLabel,
 } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 
@@ -101,6 +102,45 @@ try {
     /if \(!remoteStatus\.reachable\)[\s\S]{0,300}setBlockedLocation\(chatId, location/.test(bot) &&
       !/if \(!status\.reachable\) return null;/.test(bot)
   );
+
+  // 8. The requested location survives a restart: BOT_LOCATION is process env
+  // and dies with the poller, so /location also saves it in the chat's prefs
+  // (reloaded on boot) and the turn path prefers the saved request. /status
+  // prints the requested route, not just the physical host.
+  check(
+    'the requested location is saved per chat on /location',
+    /setPref\(prefs, chatId, \{ location: target \}\);?\s*\n\s*savePrefs\(config\.id, prefs\);/.test(src)
+  );
+  check(
+    'the turn path prefers the saved request over process env',
+    /desiredLocation\(prefs, chatId\) \|\| workLocation\(\)/.test(src)
+  );
+  check('status shows the requested route', /route: requested/.test(src));
+  check('status shows which machine the worker is', /worker: \$\{machineLabel\(/.test(src));
+
+  // 9. Machine identity: presence records which machine answered, stand-ins
+  // are labeled, and /location prints it — a stand-in must never silently
+  // pass as the physical device its host name suggests.
+  const mach = { hostname: 'phone-1', platform: 'android', arch: 'arm64' };
+  recordWorkerConnected({ host: 'mobile', pid: process.pid, detail: 'phone', machine: mach, standin: false, home });
+  const identified = at('mobile');
+  check('presence carries the machine that connected', identified.machine?.hostname === 'phone-1');
+  check('a real worker is not labeled a stand-in', identified.standin === false);
+  check('the machine line names host and platform', machineLabel(mach) === 'phone-1 (android/arm64)');
+  check('an absent machine is said out loud, not blank', machineLabel(null) === 'unknown machine');
+  recordWorkerConnected({ host: 'mobile', pid: process.pid, home });
+  check('a heartbeat that omits the machine keeps the last one', at('mobile').machine?.hostname === 'phone-1');
+  recordWorkerConnected({ host: 'mobile', pid: process.pid, machine: mach, standin: true, home });
+  check('a stand-in is labeled in presence', at('mobile').standin === true);
+  recordWorkerConnected({ host: 'mobile', pid: process.pid, home });
+  check('a heartbeat that omits the flag keeps the stand-in label', at('mobile').standin === true);
+  recordWorkerConnected({ host: 'mobile', pid: process.pid, standin: false, home });
+  check('an explicit standin:false from the worker clears the label', at('mobile').standin === false);
+  check('/location prints the worker machine', /worker: \$\{machineLabel\(status\.machine\)\}/.test(src));
+  check('/location warns on a stand-in', /labeled stand-in/.test(src));
+  check('the canary refuses a worker with no machine identity', /no machine identity reported by the worker/.test(src));
+  check('the canary refuses a changed worker identity', /worker identity changed/.test(src));
+  clearWorker('mobile', home);
 } finally {
   fs.rmSync(home, { recursive: true, force: true });
 }

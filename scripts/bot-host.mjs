@@ -48,7 +48,7 @@ import {
   parseRetryAfter,
 } from './lib/agent-opencode.mjs';
 import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from './lib/opencode-tui.mjs';
-import { KNOWN_HOSTS, workerStatus, isLocalHost } from './lib/worker-presence.mjs';
+import { KNOWN_HOSTS, workerStatus, isLocalHost, machineLabel } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
 import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
@@ -1241,6 +1241,18 @@ export function workLocation() {
   return os.homedir() === '/root' ? 'mobile' : 'vps';
 }
 
+/**
+ * The location this chat asked for, surviving restarts. BOT_LOCATION is
+ * process env: a poller restart wipes it, and the next turn silently runs on
+ * the physical host again. Chat prefs live in stateDir and are reloaded on
+ * boot, so the desired host is re-applied to every turn until the chat names
+ * another one. '' = no request, use the physical host.
+ */
+export function desiredLocation(prefs, chatId) {
+  const v = String(prefFor(prefs, chatId)?.location || '').trim().toLowerCase();
+  return KNOWN_HOSTS.includes(v) ? v : '';
+}
+
 export async function handleTxCommand({ api, config, chatId, arg, lane: requestedLane, tmux = defaultTmuxRunner, ensureTui = ensureOpencodeTui }) {
   const location = workLocation();
   const id = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
@@ -1391,8 +1403,31 @@ export function settleCanary({ host, result = {}, sessionId = '', jobId = '', ho
     const route = rollbackRoute(host, { jobId: jobId || result?.jobId || '', reason: verdict.reasons.join('; '), ...routeOpts });
     return { ok: false, reason: verdict.reasons.join('; '), reasons: verdict.reasons, route };
   }
+  const identity = checkWorkerMachine({ host, result, home });
+  if (!identity.ok) {
+    const route = rollbackRoute(host, { jobId: jobId || result?.jobId || '', reason: identity.reason, ...routeOpts });
+    return { ok: false, reason: identity.reason, reasons: [identity.reason], route };
+  }
   const route = confirmRoute(host, { jobId: jobId || result?.jobId || '', ...routeOpts });
   return { ok: true, reason: '', reasons: [], route };
+}
+
+/**
+ * The job must come from an identified machine, and from the machine presence
+ * currently names for this host. A ledger suffix alone cannot tell a labeled
+ * stand-in (or anything else dialing as this host) from the real device: the
+ * stand-in's ledger ends in worker-<host> too. Fail closed, by name.
+ */
+export function checkWorkerMachine({ host = '', result = {}, home } = {}) {
+  const machine = result?.machine && typeof result.machine === 'object' ? result.machine : null;
+  const got = String(machine?.hostname || '').trim();
+  if (!got) return { ok: false, reason: 'no machine identity reported by the worker' };
+  const presence = workerStatus(host, home ? { home } : {});
+  const want = String(presence?.machine?.hostname || '').trim();
+  if (want && want !== got) {
+    return { ok: false, reason: `worker identity changed: presence says ${want}, the job came from ${got}` };
+  }
+  return { ok: true, reason: '', machine: got, standin: presence?.standin === true };
 }
 
 /**
@@ -1481,6 +1516,21 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       const work = statusForTelegram(workId, { sessionName: WORK_VIEW_SESSION });
       const effSurface = parseModelRef(eff.model).surface;
+      // The requested route, not just the physical host: after a restart the
+      // env var is gone, and without this line the chat cannot tell that its
+      // saved /location is still pending (or that the worker went silent).
+      const desired = desiredLocation(prefs, chatId);
+      const desiredPresence = desired && !isLocalHost(desired) ? workerStatus(desired) : null;
+      const routeLines = [];
+      if (desired) {
+        const state = isLocalHost(desired) ? 'local' : routeState(desired) || 'never routed';
+        routeLines.push(`route: requested ${desired} (${state})`);
+        if (desiredPresence) {
+          routeLines.push(
+            `worker: ${machineLabel(desiredPresence.machine)}${desiredPresence.standin ? ' — ⚠️ stand-in' : ''} · ${desiredPresence.reachable ? 'reachable' : `unreachable (${desiredPresence.reason})`}`
+          );
+        }
+      }
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
         platform: effSurface || 'opencode',
@@ -1496,14 +1546,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           lock: lockHolder(),
         },
         health,
-        extras: work
-          ? [
-              `work session: ${work.id} (${work.state})`,
-              `observer: ${work.probe?.observerLive ? 'live' : work.probe?.surface === 'terminal' ? 'offline' : 'unavailable'}`,
-              `controller: ${effSurface || 'opencode'}`,
-              `debug: ${work.probe?.events ? 'structured events' : 'unavailable'}`,
-            ]
-          : ['work session: none', 'observer: unavailable', `controller: ${effSurface || 'opencode'}`, 'debug: structured events'],
+        extras: [
+          ...(work
+            ? [
+                `work session: ${work.id} (${work.state})`,
+                `observer: ${work.probe?.observerLive ? 'live' : work.probe?.surface === 'terminal' ? 'offline' : 'unavailable'}`,
+                `controller: ${effSurface || 'opencode'}`,
+                `debug: ${work.probe?.events ? 'structured events' : 'unavailable'}`,
+              ]
+            : ['work session: none', 'observer: unavailable', `controller: ${effSurface || 'opencode'}`, 'debug: structured events']),
+          ...routeLines,
+        ],
       });
       await api.sendMessage(chatId, formatStatusPlain(snap));
       return;
@@ -2063,6 +2116,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         if (status.reachable) {
           process.env.BOT_LOCATION = target;
           clearBlockedLocation(chatId);
+          // Persisted per chat: the env var dies with this process, the pref
+          // is reloaded on boot and re-applied to every later turn.
+          setPref(prefs, chatId, { location: target });
+          savePrefs(config.id, prefs);
           // Arm the route: the first turn on a host is a canary (guard 6) and
           // gets the full preflight, so a swap onto a machine that cannot hold
           // this conversation fails before the job exists. Re-arming on every
@@ -2074,9 +2131,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           // The lease follows the location it is held for, so the next
           // starter sees which host the poller is currently on.
           renewPollerLease({ key: config.id, host: target, pid: process.pid });
+          const machineLine = isLocalHost(target)
+            ? ''
+            : `\nworker: ${machineLabel(status.machine)}${status.standin ? ' — ⚠️ labeled stand-in (test worker, not the physical device)' : ''}`;
           await api.sendMessage(
             chatId,
-            `✅ *Compute location set to:* \`${target}\`\n${status.reason}. The next turn runs on ${target}${isLocalHost(target) ? '' : ' — its first turn is a canary (checked, then confirmed as active)'}.`
+            `✅ *Compute location set to:* \`${target}\`\n${status.reason}.${machineLine} The next turn runs on ${target}${isLocalHost(target) ? '' : ' — its first turn is a canary (checked, then confirmed as active)'}. Saved for this chat — it survives restarts.`
           );
           return;
         }
@@ -2605,7 +2665,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     }
 
     const ref = parseModelRef(eff.model);
-    const location = workLocation();
+    // The chat's saved /location wins over this process's env: env dies on
+    // restart, the pref is reloaded on boot. A saved remote host that went
+    // silent is held by the remote branch below — never run locally.
+    const location = desiredLocation(prefs, chatId) || workLocation();
     const workId = sessionKey({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id });
     const workLane = ref.surface === 'cline' ? 'cline' : ref.surface === 'gemini' ? 'gemini' : 'opencode';
     let workSession = resolveSession({ location, chat: String(chatId), workspace: effectiveWorkspace, project: activeProject.id, lane: workLane });

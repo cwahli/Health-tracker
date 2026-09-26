@@ -8,6 +8,11 @@
  *
  *   node scripts/worker-agent.mjs --host=mobile --relay=https://<vm-host>/relay
  *
+ * A drill / proof stand-in runs with --standin (or WORKER_STANDIN=1). It is
+ * labeled in presence as a test worker, and /location says so out loud — a
+ * stand-in must never silently pass as the physical device its host name
+ * suggests.
+ *
  * It keeps its own free-lane ledger, so a turn that runs here spends THIS
  * machine's allowance and stamps THIS machine's ledger. The VM never writes it.
  */
@@ -33,6 +38,14 @@ const arg = (name, fallback) => {
 const HOST = arg('host', process.env.WORKER_HOST || 'mobile');
 const RELAY = arg('relay', process.env.WORKER_RELAY_URL || 'http://127.0.0.1:8890');
 const DETAIL = arg('detail', `${os.hostname()} ${os.platform()}`);
+// Labeled test worker, never the physical device. Bare --standin counts.
+const STANDIN =
+  process.argv.includes('--standin') ||
+  String(arg('standin', process.env.WORKER_STANDIN || '')).trim() === '1' ||
+  String(arg('standin', '')).trim().toLowerCase() === 'true';
+// Which machine this is, so the sender can tell a stand-in from the device
+// and the canary can refuse a job that came from the wrong one.
+const MACHINE = { hostname: os.hostname(), platform: os.platform(), arch: os.arch() };
 const LEDGER = ensureBotLedger(`worker-${HOST}`);
 
 function log(...parts) {
@@ -43,7 +56,7 @@ async function post(route, body) {
   const res = await fetch(`${RELAY}${route}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ host: HOST, pid: process.pid, detail: DETAIL, cwd: process.cwd(), ...body }),
+    body: JSON.stringify({ host: HOST, pid: process.pid, detail: DETAIL, cwd: process.cwd(), machine: MACHINE, standin: STANDIN, ...body }),
   });
   return res.json().catch(() => ({}));
 }
@@ -166,6 +179,7 @@ async function runJob(job) {
       model: model || '',
       error,
       ledger: LEDGER.dir,
+      machine: MACHINE,
       sessionID: '',
       resumedFrom: '',
       workspace: '',
@@ -196,6 +210,7 @@ async function runJob(job) {
       model,
       error: String(result?.lastError || '').slice(0, 400),
       ledger: LEDGER.dir,
+      machine: MACHINE,
       // Back to the VM so the next turn on any host resumes the same thread.
       sessionID: String(result?.sessionID || resume.sessionId || ''),
       resumedFrom: resume.from,
@@ -211,6 +226,7 @@ async function runJob(job) {
       model,
       error: String(err?.message || err).slice(0, 400),
       ledger: LEDGER.dir,
+      machine: MACHINE,
       sessionID: String(resume.sessionId || ''),
       resumedFrom: resume.from,
       workspace,

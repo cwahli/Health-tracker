@@ -29,6 +29,7 @@ import {
 } from './lib/worker-routing.mjs';
 import { enqueueJob, claimJob, completeJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
 import { recordWorkerConnected, workerCwd, clearWorker } from './lib/worker-presence.mjs';
+import { settleCanary } from './bot-host.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let passed = 0;
@@ -205,6 +206,28 @@ try {
   check('the view is re-pointed straight after a swapped turn', /setWorkView\(workSession\.id, \{ opencodeSessionId: handed\.sessionID \}\)[\s\S]{0,600}reconcileWorkViewForLane\(/.test(bot));
   check('the status probe can be told which session to look in', /function sessionStatus\(id, \{ tmux = defaultTmuxRunner, sessionName \}/.test(workSession));
   check('the library default stays location-named for its own tests', /sessionName = session \? tmuxSessionFor\(session\.location\) : null/.test(workSession));
+
+  // 11. The canary knows which machine answered. A ledger suffix alone cannot
+  // tell a stand-in from the device — the stand-in's ledger ends in
+  // worker-<host> too — so a handoff with no machine identity, or one from a
+  // different machine than presence names, rolls the route back by name.
+  const MHOST = 'drill-id';
+  const PHONE = { hostname: 'phone-1', platform: 'android', arch: 'arm64' };
+  const VMBOX = { hostname: 'vm-1', platform: 'linux', arch: 'x64' };
+  const idResult = (machine) => ({ text: 'hi', sessionID: '', workspace: '/w', ledger: `/l/worker-${MHOST}`, machine });
+  recordWorkerConnected({ host: MHOST, pid: process.pid, machine: PHONE, home });
+  const noMachine = settleCanary({ host: MHOST, result: idResult(null), sessionId: '', jobId: 'm1', home });
+  check('a handoff with no machine identity fails', noMachine.ok === false && /no machine identity/.test(noMachine.reason));
+  check('the unidentified handoff rolls the route back', routeState(MHOST, { home }) === 'failed');
+  const changed = settleCanary({ host: MHOST, result: idResult(VMBOX), sessionId: '', jobId: 'm2', home });
+  check('a job from a different machine than presence fails', changed.ok === false && /identity changed/.test(changed.reason));
+  check('presence names the expected machine in the reason', /phone-1/.test(changed.reason) && /vm-1/.test(changed.reason));
+  const same = settleCanary({ host: MHOST, result: idResult(PHONE), sessionId: '', jobId: 'm3', home });
+  check('the identified machine confirms the route', same.ok === true && routeState(MHOST, { home }) === 'active');
+  clearWorker(MHOST, home);
+  const noRow = settleCanary({ host: MHOST, result: idResult(PHONE), sessionId: '', jobId: 'm4', home });
+  check('no presence row skips the match but still needs the identity', noRow.ok === true);
+  clearWorker(MHOST, home);
 } finally {
   fs.rmSync(home, { recursive: true, force: true });
 }

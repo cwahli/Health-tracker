@@ -5,8 +5,8 @@
  * The worker dials outward to this endpoint. There is no inbound address on a
  * phone or a notebook, no Tailscale hop and no tunnel URL.
  *
- *   POST /connect        { host, botId, pid, detail }  register, start presence
- *   POST /heartbeat      { host }                      keep presence fresh
+ *   POST /connect        { host, botId, pid, detail, machine, standin }  register, start presence
+ *   POST /heartbeat      { host, machine, standin }      keep presence fresh
  *   GET  /jobs/next?host=<h>&wait=<ms>                long-poll for one job
  *   POST /jobs/result    { jobId, text, code, model, error, ledger, sessionID }
  *   GET  /sessions/<id>/export                        that conversation, for a
@@ -133,8 +133,10 @@ const server = http.createServer(async (req, res) => {
       pid: Number(body.pid) || null,
       detail: String(body.detail || '').slice(0, 200),
       cwd: String(body.cwd || '').slice(0, 400),
+      machine: body.machine && typeof body.machine === 'object' ? body.machine : null,
+      standin: body.standin === true ? true : body.standin === false ? false : null,
     });
-    console.log(`[relay] worker connected: ${host}${row.detail ? ` (${row.detail})` : ''}`);
+    console.log(`[relay] worker connected: ${host}${row.detail ? ` (${row.detail})` : ''}${row.standin ? ' [stand-in]' : ''}`);
     return send(res, 200, { ok: true, worker: row });
   }
 
@@ -142,7 +144,7 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const host = String(body.host || '').trim().toLowerCase();
     if (!host) return send(res, 400, { error: 'host is required' });
-    const row = recordWorkerConnected({ host, pid: Number(body.pid) || null, detail: body.detail || '', cwd: String(body.cwd || '').slice(0, 400) });
+    const row = recordWorkerConnected({ host, pid: Number(body.pid) || null, detail: body.detail || '', cwd: String(body.cwd || '').slice(0, 400), machine: body.machine && typeof body.machine === 'object' ? body.machine : null, standin: body.standin === true ? true : body.standin === false ? false : null });
     return send(res, 200, { ok: true, lastSeen: row.lastSeen });
   }
 

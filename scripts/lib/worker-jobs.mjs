@@ -133,12 +133,23 @@ export function completeJob(id, result, { home = os.homedir(), now = Date.now() 
   const job = read(file);
   if (!job) return null;
   job.doneAt = new Date(now).toISOString();
+  const machine = result?.machine && typeof result.machine === 'object' ? result.machine : null;
   job.result = {
     text: String(result?.text || ''),
     code: Number(result?.code ?? 0),
     model: String(result?.model || job.model || ''),
     error: String(result?.error || ''),
     ledger: String(result?.ledger || ''),
+    // Which machine ran it, so the canary can refuse a job that came from a
+    // different machine than presence names. Sanitized to the three fields —
+    // the relay never stores anything else the worker posts.
+    machine: machine
+      ? {
+          hostname: String(machine.hostname || '').slice(0, 200),
+          platform: String(machine.platform || '').slice(0, 40),
+          arch: String(machine.arch || '').slice(0, 40),
+        }
+      : null,
     // Conversation continuity, back to whoever handed the turn over: the
     // thread the device ran (so the next turn resumes it, here or there),
     // where it was resumed from, and the directory it actually used.
