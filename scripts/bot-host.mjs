@@ -195,6 +195,8 @@ function parseArgs(argv) {
     else if (arg.startsWith('--registry=')) args.registry = arg.slice('--registry='.length);
     else if (arg.startsWith('--prompt=')) args.prompt = arg.slice('--prompt='.length);
     else if (arg.startsWith('--simulate=')) args.simulate = arg.slice('--simulate='.length);
+    else if (arg.startsWith('--inject=')) args.inject = arg.slice('--inject='.length);
+    else if (arg.startsWith('--chat=')) args.chat = arg.slice('--chat='.length);
   }
   return args;
 }
@@ -207,6 +209,7 @@ Usage:
   node scripts/bot-host.mjs --check-config [--id=<botId>]
   node scripts/bot-host.mjs --dry-run [--id=<botId>] [--prompt="..."]
   node scripts/bot-host.mjs --simulate="/model" [--id=<botId>]
+  node scripts/bot-host.mjs --inject="/status" [--chat=<id>] [--id=<botId>]
 
 Bots are defined in bots/registry.json. Add a new bot by appending an entry,
 exporting its token env var, and starting bot-host@<id>. No code changes.
@@ -2922,6 +2925,61 @@ async function runLoop({ api, config }) {
   }
 }
 
+/**
+ * Run one message through the real handler, with the real Telegram API.
+ *
+ * The Bot API has no way to fabricate an inbound message: getUpdates only ever
+ * returns what a real client sent, and only one poller may hold them. So a
+ * no-human proof feeds the dispatch loop a synthetic message and lets the
+ * replies go to Telegram for real — parse, guards, side effects, formatting.
+ * It neither polls nor takes the poller lease (the lease is pid-held, so this
+ * could not take it anyway), so the live bot keeps serving while it runs.
+ */
+async function injectCommand({ bot, config, args }) {
+  const chatId = Number(args.chat || config.telegram?.allowedUserIds?.[0] || 0);
+  if (!chatId) {
+    console.error('[inject] no chat to answer: pass --chat=<id>, or give the bot an allowedUserIds entry');
+    process.exit(1);
+  }
+  const token = resolveToken(bot);
+  const api = new TelegramApi(token);
+  const sent = [];
+  const realSend = api.sendMessage.bind(api);
+  api.sendMessage = async (to, text, extra) => {
+    const line = String(text).replace(/\s+/g, ' ');
+    sent.push({ to, text: line });
+    console.log(`[inject] telegram -> ${to}: ${line.slice(0, 220)}`);
+    return realSend(to, text, extra);
+  };
+  await api.getMe();
+  await api.deleteWebhook();
+  const message = {
+    message_id: 1,
+    date: Math.floor(Date.now() / 1000),
+    chat: { id: chatId, type: 'private' },
+    from: { id: chatId, is_bot: false, first_name: 'Proof' },
+    text: args.inject,
+  };
+  console.log(`[inject] -> ${message.text}  (bot ${config.id}, chat ${chatId})`);
+  await handleMessage({
+    api,
+    config,
+    throttle: new Throttle({ minIntervalMs: config.progress.editIntervalMs }),
+    sessions: loadSessions(config.id),
+    prefs: loadPrefs(config.id),
+    caches: makeCaches(),
+    running: new Map(),
+    lastUsage: new Map(),
+    totals: loadTotals(config.id),
+    health: { okAt: 0, errAt: 0, err: '' },
+    bootedAt: Date.now(),
+    busy: new Set(),
+    message,
+  });
+  console.log(`[inject] handled: ${sent.length} message(s) sent`);
+  return sent;
+}
+
 async function simulate(config, args) {
   const cmd = parseCommand(args.simulate);
   if (!cmd) {
@@ -3031,6 +3089,11 @@ async function main() {
 
   if (args.simulate) {
     await simulate(config, args);
+    return;
+  }
+
+  if (args.inject) {
+    await injectCommand({ bot, config, args });
     return;
   }
 
