@@ -1,9 +1,9 @@
 # TUI Proposal 2b — VM-Anchored Gateway with Hot-Swap Roaming & Dual-Mode TUI
 
-**Status:** proposal / architecture specification (no code changed)  
-**Date:** 2026-09-26  
-**Follows:** `TG_Tui_Proposal1.md` (POC review) & `Tui_proposal2.md` (VM-anchored core)  
-**Resolves:** Seamless location roaming across quota limits, persistent mobile Mini App view, and multi-tool support (OpenCode, Cline, Grok, Freebuff).
+**Status:** history. Do not implement this file in this order.
+**Date:** 2026-09-26
+**The proposal to implement is `TG_Tui_Proposal1.md`. The steps and the scorecard are `plan/TUI_IMPLEMENTATION.md`.**
+**Follows:** an older draft. `Tui_proposal2.md` has been deleted. Roaming, Freebuff-as-PTY, and `node-pty` in this document are not the plan.
 
 ---
 
