@@ -12,10 +12,9 @@
  * Fully isolated: a fresh HOME, its own relay port, its own tmux-free
  * sandbox. Zero model calls (fake workers answer), zero Telegram messages.
  *
- * One honest split: the canary decision block below mirrors the live turn
- * path in bot-host.mjs turn-for-turn (same functions, same order) because
- * that block needs a Telegram chat to run in place. When `settleCanary`
- * lands in bot-host, this drill should call it instead of mirroring it.
+ * One honest split: the canary decision is `settleCanary` straight out of
+ * scripts/bot-host.mjs — the very function the live turn path calls — so what
+ * this drill proves is what happens on Telegram, not a copy of it.
  *
  * Exit 0 on all pass; exit 1 with FAIL lines otherwise.
  */
@@ -31,8 +30,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'swap-drill-'));
 process.env.HOME = HOME;
 
-const { runOnWorker } = await import(path.join(HERE, 'bot-host.mjs'));
-const { armRoute, confirmRoute, rollbackRoute, routeState, needsCanary, validateCanaryResult } =
+const { runOnWorker, settleCanary } = await import(path.join(HERE, 'bot-host.mjs'));
+const { armRoute, routeState, needsCanary } =
   await import(path.join(HERE, 'lib', 'worker-routing.mjs'));
 const { recordWorkerConnected } = await import(path.join(HERE, 'lib', 'worker-presence.mjs'));
 const { repointWorkView } = await import(path.join(HERE, 'lib', 'work-session.mjs'));
@@ -175,21 +174,19 @@ try {
     });
     const ms = Date.now() - t0;
     const before = sessionRow;
-    // the live turn's canary decision, same functions, same order
-    const verdict = validateCanaryResult({ host, requestedSessionId: before, result: handed || {} });
-    if (!verdict.ok) {
-      const row = rollbackRoute(host, { jobId: handed?.jobId || '', reason: verdict.reasons.join('; '), home: HOME });
+    // The live turn's canary decision — the same function, not a copy of it.
+    const settled = settleCanary({ host, result: handed || {}, sessionId: before, jobId: handed?.jobId || '', home: HOME });
+    if (!settled.ok) {
       rolledBack++;
       check(`swap ${i}: wrong-ledger turn rolls back, row untouched`,
         routeState(host, { home: HOME }) === 'failed' && sessionRow === before && sessionRow === SESSION_ID,
-        `${verdict.reasons.join('; ')} (${ms}ms)`);
-      check(`swap ${i}: rollback names the job`, String(row?.canary?.jobId || '') === String(handed?.jobId || '') && row?.canary?.jobId !== '');
+        `${settled.reason} (${ms}ms)`);
+      check(`swap ${i}: rollback names the job`, String(settled.route?.canary?.jobId || '') === String(handed?.jobId || '') && settled.route?.canary?.jobId !== '');
       // re-arm like a fresh /location would: the next swap must succeed
       armRoute(host, { previous: other, home: HOME });
       rearmed++;
       continue;
     }
-    confirmRoute(host, { jobId: handed?.jobId || '', home: HOME });
     if (handed?.sessionID) sessionRow = handed.sessionID;
     const ok = handed?.code === 0 && handed?.text && sessionRow === SESSION_ID
       && routeState(host, { home: HOME }) === 'active';

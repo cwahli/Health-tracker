@@ -1258,6 +1258,25 @@ export async function reconcileWorkViewForLane({ session, lane, workspace, tmux 
 }
 
 /**
+ * The turn path's canary verdict as one function: validate, then confirm the
+ * route — or roll it back and say why. The conversation row is the caller's
+ * to move, and only when this returns `ok`.
+ *
+ * Exported so the swap drill decides exactly the way the live turn decides,
+ * instead of mirroring it: one implementation, one order, one reason string.
+ */
+export function settleCanary({ host, result = {}, sessionId = '', jobId = '', home } = {}) {
+  const routeOpts = home ? { home } : {};
+  const verdict = validateCanaryResult({ host, requestedSessionId: sessionId, result });
+  if (!verdict.ok) {
+    const route = rollbackRoute(host, { jobId: jobId || result?.jobId || '', reason: verdict.reasons.join('; '), ...routeOpts });
+    return { ok: false, reason: verdict.reasons.join('; '), reasons: verdict.reasons, route };
+  }
+  const route = confirmRoute(host, { jobId: jobId || result?.jobId || '', ...routeOpts });
+  return { ok: true, reason: '', reasons: [], route };
+}
+
+/**
  * The view follows the conversation. The record names the thread that ran;
  * when it names a different one than the pane was built for, the command is
  * rebuilt and the pane is re-pointed in place — same `work-view` session, same
@@ -2548,18 +2567,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       if (wantCanary) {
         // Guard 6: one turn decides whether the route becomes active. The
         // session row is never touched until it passes, so a bad canary costs
-        // nothing but the canary.
-        const verdict = validateCanaryResult({ host: location, requestedSessionId: sessions.get(chatId) || '', result: handed });
-        if (!verdict.ok) {
-          const row = rollbackRoute(location, { jobId: handed.jobId || '', reason: verdict.reasons.join('; ') });
-          const back = row?.previous || 'vps';
+        // nothing but the canary. settleCanary is the same function the swap
+        // drill runs, so what is proven there is what happens here.
+        const settled = settleCanary({ host: location, result: handed, sessionId: sessions.get(chatId) || '', jobId: handed.jobId || '' });
+        if (!settled.ok) {
+          const back = settled.route?.previous || 'vps';
           await api.sendMessage(
             chatId,
-            `⚠️ *Canary failed on \`${location}\`:* ${verdict.reasons.join('; ')}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
+            `⚠️ *Canary failed on \`${location}\`:* ${settled.reason}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
           );
           return;
         }
-        confirmRoute(location, { jobId: handed.jobId || '' });
         console.log(`[${config.id}] canary passed on ${location} (job ${handed.jobId}); route active`);
       }
       // The thread id the worker ran is now ours too, so the next turn —

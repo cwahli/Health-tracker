@@ -181,9 +181,13 @@ try {
   check('an unreachable host holds the turn instead of running it here', /if \(!remoteStatus\.reachable\)/.test(turnPath) && /setBlockedLocation\(chatId, location/.test(turnPath));
   check('a route left failed holds the turn too', /route === 'failed'/.test(turnPath));
   check('the first turn on a host is a canary', /const wantCanary = route !== 'active'/.test(turnPath));
-  check('the canary is validated before the session row changes', turnPath.indexOf('validateCanaryResult(') < turnPath.indexOf('sessions.set(chatId, handed.sessionID)'));
-  check('a failed canary rolls the route back', /rollbackRoute\(location/.test(turnPath));
-  check('a passed canary confirms the route', /confirmRoute\(location/.test(turnPath));
+  check('the canary is settled before the session row changes', turnPath.indexOf('settleCanary(') !== -1 && turnPath.indexOf('settleCanary(') < turnPath.indexOf('sessions.set(chatId, handed.sessionID)'));
+  const settleAt = bot.indexOf('export function settleCanary');
+  const settleFn = bot.slice(settleAt, settleAt + 1400);
+  check('settleCanary validates before it confirms or rolls back', settleAt !== -1 && settleFn.indexOf('validateCanaryResult(') < settleFn.indexOf('confirmRoute('));
+  check('a failed canary rolls the route back by name', /rollbackRoute\(/.test(settleFn) && /ok: false/.test(settleFn));
+  check('a passed canary confirms the route', /confirmRoute\(/.test(settleFn) && /ok: true/.test(settleFn));
+  check('the drill decides with the live turn\u2019s own function', /settleCanary\(/.test(fs.readFileSync(path.join(HERE, 'assert-swap-drill.mjs'), 'utf8')));
   check('/location arms the route it names', /armRoute\(target/.test(bot));
   check('the worker refuses a workspace that resolves nowhere', /workspace_unresolved/.test(agent) && !/workspaceForId\(job\.workspace[^)]*\) \|\| HERE/.test(agent));
   check('the worker reports the directory it runs in', /cwd: process\.cwd\(\)/.test(agent));
