@@ -1118,7 +1118,10 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     if (!g.rows.length) continue;
     const mine = rendered.filter((r) => r.tier === g.tier);
     if (!mine.length) continue;
-    if (tierGroups.length > 1) lines.push(fit(`${g.label} (${mine.length})`));
+    // Indented by the mark column so every line in the block starts at the same left
+    // edge — a heading flush against column 0 while every row starts two glyphs in
+    // reads as misalignment even though the columns are right.
+    if (tierGroups.length > 1) lines.push(fit(`${" ".repeat(MARK_W)}${g.label} (${mine.length})`));
     for (const r of mine) lines.push(r.line);
   }
   // /freemodel embeds exactly these lines and nothing below them, so the two

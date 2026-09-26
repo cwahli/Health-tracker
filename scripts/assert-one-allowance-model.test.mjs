@@ -524,7 +524,9 @@ try {
     const src = read('lib/free-lanes.mjs');
     return /const W_TOTAL = MARK_W \+ W_MODEL \+ W_PLAN \+ W_SCORE \+ W_RESET/.test(src)
       && /const marked = `\$\{ok \? "✅" : "❌"\} \$\{row\}`/.test(src)
-      && /padDisp\(resetIn, W_RESET\)/.test(src);
+      && /padDisp\(resetIn, W_RESET\)/.test(src)
+      // and a subheading shares the left edge, so the block has one margin
+      && /fit\(`\$\{" "\.repeat\(MARK_W\)\}\$\{g\.label\}/.test(src);
   })());
   check('and the message ends with the terminator', /lines\.push\('-'\)/.test(botSrc));
 
