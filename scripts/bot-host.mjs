@@ -1542,6 +1542,18 @@ export function packPathLine(resolved) {
   return `📦 handoff pack${n ? ` (${n} files)` : ''}: summary skipped (${resolved?.reason || 'unknown reason'}); disk pack sent.`;
 }
 
+/**
+ * Stale-session repair gate (decision 1b): a ghost thread id — session 404,
+ * "is not on this host" — holds every future remote turn forever, because the
+ * row outlives its conversation and preflight fails closed. Malformed ids and
+ * opencode outages still hold; only the proven-gone thread repairs, exactly
+ * once per turn, with an explicit notice naming it.
+ */
+export function isStaleSessionPreflight(preflight) {
+  if (!preflight || preflight.failed !== 'session') return false;
+  return /is not on this host/.test(String(preflight.reason || ''));
+}
+
 export async function continueTurnOnNextWorker({ fromHost = '', tried = [], prefer = '', runTurn, statusOf = null } = {}) {
   const hops = [];
   const seen = new Set([String(fromHost || '').toLowerCase(), ...(tried || []).map((h) => String(h || '').toLowerCase())]);
@@ -2973,7 +2985,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // (messaging unless quiet); a delivered answer finishes here; a dry worker
     // (empty text, quota signal) comes back unanswered so the chain can walk
     // on. Returns { done, dry, handed }.
-    const runRemoteTurn = async (host, { wantCanary, quiet = false, hopFrom = '' } = {}) => {
+    const runRemoteTurn = async (host, { wantCanary, quiet = false, hopFrom = '', sessionOverride = null, freshRetried = false } = {}) => {
       const say = async (text) => {
         if (!quiet) await api.sendMessage(chatId, text).catch(() => {});
       };
@@ -3001,13 +3013,24 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         project: isExternalTurn ? activeProject.id : 'health-tracker',
         role: activeRole || '',
         workspace: effectiveWorkspace,
-        sessionId: sessions.get(chatId) || '',
+        sessionId: sessionOverride !== null ? sessionOverride : sessions.get(chatId) || '',
         envMode: turnEnvMode,
         canary: wantCanary,
         preflightFull: wantCanary,
         packRoot: wantCanary ? effectiveWorkspace : '',
       });
       if (handed?.preflight) {
+        // Stale-session repair (decision 1b): a ghost thread id fails preflight
+        // with session-404, which would hold every future remote turn forever.
+        // Exactly once per turn, retry fresh with an explicit notice naming the
+        // lost thread. Malformed ids and opencode outages still hold.
+        if (!freshRetried && isStaleSessionPreflight(handed.preflight)) {
+          const lost = sessionOverride !== null ? sessionOverride : sessions.get(chatId) || '';
+          await say(
+            `⚠️ Previous thread \`${lost || 'unknown'}\` is gone from \`${host}\` — running this turn fresh so the chat is not stuck.`
+          );
+          return runRemoteTurn(host, { wantCanary, quiet, hopFrom, sessionOverride: '', freshRetried: true });
+        }
         setBlockedLocation(chatId, host, `${handed.preflight.failed}: ${handed.preflight.reason}`);
         await say(
           `⏸ *Held:* preflight failed for \`${host}\` — \`${handed.preflight.failed}\`: ${handed.preflight.reason}\n${preflightSummary(handed.preflight.checks)}\nNothing ran and no allowance was sent.`

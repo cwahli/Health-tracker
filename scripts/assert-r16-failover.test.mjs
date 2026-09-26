@@ -49,7 +49,20 @@ function check(name, ok, detail = '') {
 console.log('assert-r16-failover (QS-2/QS-9/QS-10/QS-11)\n');
 
 const host = await import(path.join(__dirname, 'bot-host.mjs'));
-const { continueTurnOnNextWorker, runOpencodeWithFailover, midstreamFlagText, selectTurnLanes } = host;
+const { continueTurnOnNextWorker, runOpencodeWithFailover, midstreamFlagText, selectTurnLanes, isStaleSessionPreflight } = host;
+check('stale-session repair gate is exported', typeof isStaleSessionPreflight === 'function');
+// Decision 1b: only a proven-gone thread (session 404, "is not on this host")
+// repairs, exactly the malformed/outage cases still hold.
+check('a ghost thread id repairs', isStaleSessionPreflight({ failed: 'session', reason: 'session ses_abc is not on this host' }) === true);
+check('a malformed id still holds', isStaleSessionPreflight({ failed: 'session', reason: 'malformed session id ses_abc' }) === false);
+check('an opencode outage still holds', isStaleSessionPreflight({ failed: 'session', reason: 'opencode is not available on the relay' }) === false);
+check('other failures still hold', isStaleSessionPreflight({ failed: 'presence', reason: 'no worker' }) === false);
+check('nothing still holds', isStaleSessionPreflight(null) === false && isStaleSessionPreflight({}) === false);
+{
+  const src = fs.readFileSync(path.join(__dirname, 'bot-host.mjs'), 'utf8');
+  check('the repair retries fresh exactly once with notice',
+    /freshRetried/.test(src) && /running this turn fresh/.test(src) && /sessionOverride: ''/.test(src));
+}
 const lanes = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
 check('the chain is exported', typeof continueTurnOnNextWorker === 'function');
 check('the mid-stream flag builder is exported', typeof midstreamFlagText === 'function');
