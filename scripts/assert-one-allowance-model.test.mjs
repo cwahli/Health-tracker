@@ -423,8 +423,13 @@ try {
   // The router's button: a provider tag, the model's own name, ❌ when unusable.
   // The tag is the same plan code /allowance prints, which is what makes the two
   // commands read as one list instead of two vocabularies.
+  // The button is: ❌ when unusable, the plan code, the model's own name, and the
+  // benchmark score when the scorecard has one (assert-model-ratings covers the
+  // score itself and that an unmeasured model gets no number).
   check('a button is the plan code and the model name, ❌ when unusable',
-    /buttons\.push\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{tag \? tag \+ ': ' : ''\}\$\{label\}`/.test(botSrc), botSrc.match(/buttons\.push\([^\n]*/)?.[0] || 'not found');
+    /const rated = `\$\{tag \? tag \+ ': ' : ''\}\$\{label\}/.test(botSrc)
+    && /buttons\.push\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`\)/.test(botSrc),
+    botSrc.match(/buttons\.push\([^\n]*/)?.[0] || 'not found');
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
   check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
   // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven

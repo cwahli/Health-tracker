@@ -86,6 +86,7 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
+import { ratingSuffix } from './lib/model-ratings.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -812,10 +813,15 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   for (const r of rows) {
     const label = r.laneLabel || r.label;
     const tag = r.plan || (r.lane ? planCodeForLane(r.lane) : '');
+    // The benchmark score rides on the button, so the choice is made with the number
+    // in front of you rather than from memory. Unscored models get nothing — the
+    // scorecard covers about half the reachable free models, and a missing number is
+    // honest where a borrowed one would not be.
+    const rated = `${tag ? tag + ': ' : ''}${label}${ratingSuffix(r.lane?.model || r.model || r.ref || '')}`;
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    buttons.push(`${unusableOf(r) ? '❌ ' : ''}${tag ? tag + ': ' : ''}${label}`);
+    buttons.push(`${unusableOf(r) ? '❌ ' : ''}${rated}`);
   }
   return { text: lines.join('\n'), buttons, rows, usable, unusable };
 }
