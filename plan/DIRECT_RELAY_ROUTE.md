@@ -71,10 +71,45 @@ stand-ins. Do all of these in one window, announced:
   --relay=https://health-tracking.duckdns.org/relay
   --relay-token=$WORKER_RELAY_TOKEN` (token via env file, never chat).
 - **collab (notebook):** ephemeral runtime — every start needs install node,
-  clone branch, creds, start worker; dies on idle/timeout (~12h). Keep secrets
-  in Colab secrets, never in cells. Same start command with `--host=collab`.
+  clone branch, creds, start worker; dies on idle (~12h). Keep secrets in
+  Colab secrets, never in cells. Same start command with `--host=collab`.
   Expect to re-run setup each session; presence going stale is normal, not an
-  incident.
+  incident. Prerequisite: the relay rollout above must be live first (the
+  worker has nothing to dial until the public `/relay` route exists).
+  Paste-ready cells (run after the rollout; token from Colab Secrets):
+  ```bash
+  %%bash
+  # cell 1 — runtime: node, repo, worker
+  command -v node >/dev/null || (curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs)
+  node --version
+  [ -d ~/Health-tracker ] || git clone --branch agent/relay-auth --depth 1 https://github.com/cwahli/Health-tracker.git ~/Health-tracker
+  cd ~/Health-tracker && git pull --ff-only origin agent/relay-auth 2>/dev/null || true
+  command -v opencode >/dev/null || { curl -fsSL https://opencode.ai/install | bash; export PATH="$HOME/.opencode/bin:$PATH"; }
+  opencode --version
+  ```
+  ```python
+  # cell 2 — secrets (Sidebar → Secrets: WORKER_RELAY_TOKEN), then launch
+  from google.colab import userdata
+  import os, subprocess, time, urllib.request, json
+  os.environ['WORKER_RELAY_TOKEN'] = userdata.get('WORKER_RELAY_TOKEN')
+  relay = 'https://health-tracking.duckdns.org/relay'
+  log = open('/tmp/worker-collab.log', 'ab', buffering=0)
+  p = subprocess.Popen(['node', os.path.expanduser('~/Health-tracker/scripts/worker-agent.mjs'),
+                        '--host=collab', f'--relay={relay}'],
+                       env={**os.environ}, stdout=log, stderr=subprocess.STDOUT,
+                       start_new_session=True)
+  print('worker pid:', p.pid)
+  ```
+  ```python
+  # cell 3 — verify (presence must show collab fresh, machine = the Colab box)
+  import urllib.request, json
+  h = json.load(urllib.request.urlopen('https://health-tracking.duckdns.org/relay/health', timeout=20))
+  print([(w['host'], w['reachable']) for w in h['workers'] if w['host'] in ('collab',)])
+  ```
+  Notes: model turns need the same opencode auth the notebook already uses for
+  its Colab engines; Qwen/vLLM lanes stay under the notebook's own `/switch`
+  system (the worker only runs opencode/cline turns). Re-run cells 1–2 every
+  fresh runtime; cell 3 anytime to check in.
 - **grok (location TBD):** whichever box runs the Grok side gets the identical
   client bundle (`--host=grok`, same relay URL + token). First open question
   is placement — answer that, the rest is copy-paste.
