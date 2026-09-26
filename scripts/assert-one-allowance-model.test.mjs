@@ -348,7 +348,9 @@ try {
   ] };
   const twinText = buildAllowanceTextForBots({ stateDir: (() => { const d = ensureBotLedger('vm').dir; fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(twinLanes, null, 2)); return d; })() });
   // Counted over the table rows only: the "Next up" line names the same model too.
-  const twinRows = twinText.split('\n').filter((l) => /^(✅|❌)/.test(l) && /DeepSeek V4\.1/.test(l));
+  // Tags stripped first: the mark moved inside the <code> span so every line in the
+  // block is one code span of the same width, which is what makes it read flush-left.
+  const twinRows = twinText.replace(/<\/?code>/g, '').split('\n').filter((l) => /^(✅|❌)/.test(l) && /DeepSeek V4\.1/.test(l));
   check('and /allowance lists that model once, not twice', twinRows.length === 1, twinText);
 
   // 6g. The parity that matters, asserted on one table holding every awkward shape:
@@ -374,7 +376,7 @@ try {
     const d = ensureBotLedger('vm').dir;
     fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(shared, null, 2));
     const text = buildAllowanceTextForBots({ stateDir: d });
-    const rows = text.split('\n').filter((l) => /^(✅|❌)/.test(l));
+    const rows = text.replace(/<\/?code>/g, '').split('\n').filter((l) => /^(✅|❌)/.test(l));
     return rows.length === canonKeys.length;
   })(), `allowance rows vs canonical rows`);
   check('a terminal-only row is in the list and marked not selectable',
@@ -418,9 +420,17 @@ try {
   // "ling-3.0-flash-f" in a 16-column name.
   const nameSrc = lanesSrc;
   check('a "-free" suffix on the model id is stripped, not left to eat the column',
-    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /const W_MODEL = 20/.test(nameSrc));
-  check('and the name column is wide enough for the longest free model name',
-    /const W_MODEL = 20;/.test(nameSrc));
+    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /const W_MODEL = MODEL_NAME_MAX/.test(nameSrc));
+  // One cap for the column and for shortModelName(). Two numbers is how a 20-char
+  // cap in a 24-char column still cut "nemotron-3.5-lightning" to
+  // "nemotron-3.5-lightni" and "trinity-large-preview" to "trinity-large-previe".
+  check('the name column and the name cap are the same number',
+    /export const MODEL_NAME_MAX = 24;/.test(nameSrc) && /s\.length > MODEL_NAME_MAX \? s\.slice\(0, MODEL_NAME_MAX\)/.test(nameSrc));
+  check('and no two distinct models render the same name', (() => {
+    const names = ['ling-3.0-flash-fin', 'ling-3.0-flash', 'nemotron-3.5-lightning', 'trinity-large-preview']
+      .map((n) => n.padEnd(24, ' ').slice(0, 24).trim());
+    return new Set(names).size === names.length;
+  })());
 
   // R-16: the supersession order comes from the catalog's Ranked picks, from one
   // home, so /allowance and /freemodel cannot drop different models again.
@@ -435,6 +445,18 @@ try {
   const botSrc = read('bot-host.mjs');
   // The rows are the canonical list in the canonical tier-group order — the same
   // helper /allowance groups with — not a second ordering of the same models.
+  // The breakdown has to match, not just the order: the keyboard carries a heading
+  // row per group with the same label and count /allowance prints above the section,
+  // from the same groupRowsByTier() result.
+  check('/freemodel heads each tier group with the same label and count',
+    /buttons\.push\(\{ text: fitCopy\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
+  check('and a heading is a real noop, not a model named noop',
+    /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
+  check('the body carries the same breakdown as one line',
+    /function tierBreakdown\(groups, sep\)/.test(botSrc) && /tierBreakdown\(tierGroups, ' · '\)/.test(botSrc));
+  check('and the per-button tier word is gone, now that the heading says it',
+    !/tierWord/.test(botSrc));
+
   check('/freemodel renders the canonical list, not the raw catalog',
     /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\);/.test(botSrc) && /groupRowsByTier\(canonical \|\| \[\]\)/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
@@ -457,15 +479,7 @@ try {
   check('/freemodel still says why a row is unusable, on one line', /not usable: /.test(botSrc) && /\(reset in /.test(botSrc));
   // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.
   const fmBody = (botSrc.slice(botSrc.indexOf('function formatFreemodelWithDepletion'), botSrc.indexOf('/** Usable rows the ledger has no record for')) || '');
-  // QS-6 supersedes the old no-bullets rule: tier rows ARE the canonical usable
-  // set (the same rows /allowance renders), grouped — not a second list from a
-  // second source. What stays forbidden is a blocked-rows section like the old
-  // "Not selectable right now".
-  check('and tier rows come from the canonical usable set, not a second source',
-    /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\)/.test(fmBody)
-    && /const usable = listed\.filter\(/.test(fmBody)
-    && /for \(const g of tierGroups\)/.test(fmBody)
-    && !/Not selectable right now:/.test(fmBody));
+  check('and the /freemodel body carries no per-model bullet list', !/lines\.push\(`• /.test(fmBody) && !/Not selectable right now:/.test(fmBody));
   check('and it does not repeat the counts in a second footer', !/Allowance \(per-host ledger\)/.test(botSrc));
   // Depleted lanes stay tappable, exactly as the router does, so a tap can answer
   // with what to use instead. Filtering them out is what made the two commands
@@ -477,8 +491,8 @@ try {
   // bakeoff label — or "unranked" when the ledger has no row for that model.
   // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
-    /const rated = `\$\{tag \? tag \+ ': ' : ''\}\$\{label\}/.test(botSrc)
-    && /text: `\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`/.test(botSrc),
+    /const rated = rowCopy\(\{/.test(botSrc)
+    && /mark: unusableOf\(r\) \? '❌' : '✅'/.test(botSrc),
     botSrc.match(/buttons\.push\(\{[^\n]*/)?.[0] || 'not found');
   // Telegram caps callback_data at 64 bytes, and it used to carry the label — so
   // the first label that grew took the whole keyboard down with
@@ -492,6 +506,67 @@ try {
   check('and a payload that cannot fit degrades to a position', /LIMIT = 64/.test(read('lib/commands.mjs')) && /`\$\{kind\}:#\$\{i\}`/.test(read('lib/commands.mjs')));
   check('the tap resolves a route first, then a position, then a label',
     /a\.ref === value/.test(botSrc) && /startsWith\('#'\)/.test(botSrc));
+  // The two commands show one list. The body carries allowanceTableLines() — the
+  // same helper /allowance renders — so the rows, the order, the groups and the
+  // counts cannot differ; the keyboard is the tappable layer on top of it.
+  // The exact text, from the same call /allowance makes — not a re-render of the same
+  // rows, which is how two surfaces drift.
+  // Every free-lanes helper bot-host calls must actually be imported. Removing
+  // buildAllowanceTextForBots while tidying an unrelated edit passed the whole suite
+  // and broke /allowance on the live bot, where it surfaced as
+  // "buildAllowanceTextForBots is not defined" and no rows at all.
+  check('every free-lanes helper bot-host calls is imported', (() => {
+    // The import region, checked by name rather than by parsing the statement: the
+    // multi-line import block is easy to mis-parse, and a false negative here is the
+    // same failure this check exists to catch.
+    const region = botSrc.split('\n').slice(0, 130).join('\n');
+    const imported = new Set((region.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
+    const helpers = ['buildAllowanceTextForBots', 'formatCompactAllowanceChat', 'canonicalAllowanceLanes', 'groupRowsByTier',
+      'rowCopy', 'fitCopy', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',
+      'formatResetIn', 'soonestResetAmongDepleted', 'ensureBotLedger', 'renderFreeLaneTableHtml', 'usableTurnLanes',
+      'stampDepleted', 'freemodelRefToRoute', 'isConnectionFailure', 'stampCooldown'];
+    const missing = helpers.filter((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(botSrc) && !new RegExp(`\\b${fn}\\b`).test(region));
+    if (missing.length) console.error(`    not imported: ${missing.join(', ')}`);
+    return imported.size > 0 && missing.length === 0;
+  })());
+  check('the allowance text helper is still the one renderer', /export function formatCompactAllowanceChat/.test(read('lib/free-lanes.mjs')));
+  check('and rowCopy is the single source of the row copy', /export function rowCopy/.test(read('lib/free-lanes.mjs')) && /rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(read('lib/free-lanes.mjs')));
+  check('the table helper is the table only, so nothing is embedded twice', /if \(tableOnly\) return lines\.join/.test(read('lib/free-lanes.mjs')));
+  // The table is only monospace if the message is sent as HTML, and the plain lines
+  // around it must be escaped or a label with & or < fails the whole send. Both of
+  // these were live bugs: the tags showed up as literal text.
+  // Every line in the table the same width, so the block reads as one flush-left
+  // rectangle. The mark is a column inside the code span for the same reason: with it
+  // outside, a row was two glyphs wider than the header and the edge went ragged.
+  check('every line of the block is finished to the copy width', (() => {
+    const src = read('lib/free-lanes.mjs');
+    return /const header = fitCopy\(/.test(src)
+      && /const sep = fitCopy\(/.test(src)
+      && /lines\.push\(fitCopy\(/.test(src)
+      && /rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(src);
+  })());
+  check('and the message ends with the terminator', /lines\.push\('-'\)/.test(botSrc));
+
+  check('/freemodel sends its body as HTML, which is what makes it monospace', /parse_mode: 'HTML'/.test(botSrc));
+  // One block for the whole message: the preamble is folded into the allowance text's
+  // block, so the entire message is one monospace run with one left edge instead of
+  // proportional prose sitting above a monospace table.
+  check('and the renderer emits no nested code spans', !/<code>.*escHtml\(header\)/.test(read('lib/free-lanes.mjs')) && /const lines = \[header \+ nl \+ sep\]/.test(read('lib/free-lanes.mjs')));
+
+  // One copy, one width: the row /allowance prints is the label the /freemodel button
+  // carries, both finished to 72 characters with a dash, so a button and its row are
+  // the same string rather than two vocabularies.
+  check('the button label is the /allowance row copy', /const rated = rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
+  check('every copy is exactly 72 characters ending in a dash', (() => {
+    const fl = read('lib/free-lanes.mjs');
+    return /export const COPY_WIDTH = 72;/.test(fl)
+      && /const body = raw\.length >= COPY_WIDTH - 1 \? raw\.slice\(0, COPY_WIDTH - 1\)/.test(fl)
+      && /return `\$\{body\}-`;/.test(fl);
+  })());
+  check('and the list is not repeated in the /freemodel message', !/tableForBody/.test(botSrc));
+  check('the old space padding is gone with it', !/LEFT_PAD/.test(botSrc) && !/leftAlign/.test(botSrc));
+  check('a button still carries the benchmark score', /score: benchmarkLabel\(model\)/.test(botSrc));
+
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
   check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
   // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven

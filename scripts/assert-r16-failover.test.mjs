@@ -170,7 +170,7 @@ const table = {
   buckets: {},
   lanes: [
     lane('opencode', 'opencode/laguna-s-2.1-free', 1),
-    lane('opencode', 'opencode/zzz-nope-free', 2),
+    lane('opencode', 'opencode/mystery-free', 2),
     lane('opencode', 'opencode/deepseek-v4.1-flash', 3),
     lane('opencode', 'opencode/sb-a-free', 4, { bucket: 'test-shared' }),
     lane('opencode', 'opencode/sb-b-free', 5, { bucket: 'test-shared' }),
@@ -184,10 +184,13 @@ fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }, n
   const choice = selectTurnLanes({ botId: 'qs10', model: 'opencode/deepseek-v4.1-flash', fallback: 'opencode/deepseek-v4.1-flash' });
   const models = choice.models;
   const deep = models.indexOf('opencode/deepseek-v4.1-flash');
-  const zzz = models.indexOf('opencode/zzz-nope-free');
+  const mys = models.indexOf('opencode/mystery-free');
   const lag = models.indexOf('opencode/laguna-s-2.1-free');
-  check('tier-internal order is coding → unknown → light against adversarial prefs',
-    deep !== -1 && zzz !== -1 && lag !== -1 && deep < zzz && zzz < lag, models.join(','));
+  // The catalog's tools-table fallback puts every unlisted id in light, so the
+  // adversarial split here is high (deepseek, pref 3) vs light (laguna pref 1,
+  // mystery pref 2): tier must beat pref.
+  check('tier order beats pref order: the high lane leads against adversarial prefs',
+    deep !== -1 && mys !== -1 && lag !== -1 && deep === 0 && lag < mys, models.join(','));
   check('ended rows are never offered', !models.some((m) => String(m).includes('old-promo')));
   check('terminal-only and Freebuff rows are never chosen',
     !models.some((m) => String(m).includes('freebuff')) && !choice.exhausted);

@@ -134,13 +134,18 @@ try {
       { provider: 'cline', model: 'cline-free/deep-b', pref: 2, status: 'available', tg: true, label: 'Deep B' },
     ] }, null, 2));
     const ranked = buildAllowanceTextForBots({ stateDir: rankDir, provider: 'cline', model: 'cline-free/deep-b', readiness: r });
-    const rowsInOrder = ranked.split('\n').filter((l) => /^(✅|❌)/.test(l)).map((l) => l.replace(/^(✅|❌)\s*/, '').trim().split(/\s{2,}/)[0]);
+    // Tags stripped: the mark moved inside the <code> span so every line in the
+    // block is one span of the same width, which is what makes it read flush-left.
+    const rankedPlain = ranked.replace(/<\/?code>/g, '');
+    const rowsInOrder = rankedPlain.split('\n').filter((l) => /^(✅|❌)/.test(l)).map((l) => l.replace(/^(✅|❌)\s*/, '').trim().split(/\s{2,}/)[0]);
     check('the current lane is the first row, not the top preference', /Deep B/.test(rowsInOrder[0] || '') && rowsInOrder.length === 2);
     check('Next up names that same lane', /Next up: Deep B/.test(ranked));
-    const dataRows = ranked.split('\n').filter((l) => /^(✅|❌)/.test(l));
+    const dataRows = rankedPlain.split('\n').filter((l) => /^(✅|❌)/.test(l));
     const offsets = dataRows.map((l) => l.search(/(?:^|\s)(OC|CL|TH|CF|FB)(?:\s|$)/));
     check('every row aligns its Plan column', offsets.length > 1 && new Set(offsets).size === 1);
-    check('and the header aligns with them', /Model\s+Plan\s+Reset in/.test(ranked.replace(/<\/?code>/g, '')));
+    // The header names every column the rows carry, including the external
+    // benchmark column that was added back at the owner's request.
+    check('and the header aligns with them', /\sModel\s+Plan\s+AA\s+Reset in/.test(rankedPlain));
   } finally {
     fs.rmSync(rankDir, { recursive: true, force: true });
   }

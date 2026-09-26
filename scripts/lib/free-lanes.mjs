@@ -24,7 +24,7 @@
  * python3 render. Safe to import from tests (point TG_ROUTER_STATE_DIR at a
  * throwaway dir; nothing here touches the live box unless asked to).
  */
-import { catalogScore, tierForModel } from './free-catalogs.mjs';
+import { catalogScore, tierForModel, benchmarkLabel } from './free-catalogs.mjs';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -899,7 +899,9 @@ export function shortModelName(lane) {
   if (/deepseek-v4-flash|deepseek-v4(?!\.1)/i.test(m)) return "DeepSeek V4";
   if (/glm-4\.7/i.test(m)) return "GLM 4.7 Flash";
   if (/glm-5\.3/i.test(m)) return "GLM 5.3 Flash";
-  return s.length > 20 ? s.slice(0, 20) : s;
+  // The cap is the table's name-column width, not a second number: a 20-char cap
+  // in a 24-char column still cut "nemotron-3.5-lightning" to "nemotron-3.5-lightni".
+  return s.length > MODEL_NAME_MAX ? s.slice(0, MODEL_NAME_MAX) : s;
 }
 
 function laneIsEnded(lane) {
@@ -967,7 +969,7 @@ function padDisp(s, n) {
   return x + " ".repeat(n - w);
 }
 
-function escHtml(s) {
+export function escHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -1008,7 +1010,57 @@ export function orderLikeWalk(lanes, currentModel) {
   return [first, ...list];
 }
 
-export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "" } = {}) {
+/**
+ * The copy width every list line is finished to.
+ *
+ * 72 characters, with a `-` in the last cell: the dash is what makes the width
+ * exact, because trailing spaces are trimmed by some clients and by Telegram's own
+ * rendering, so a line padded only with spaces is not reliably 72 anywhere. The
+ * dash is content, so the length holds.
+ */
+export const COPY_WIDTH = 72;
+
+/** The mark column: ✅/❌ plus the space after it. */
+const MARK_W = 2;
+
+/**
+ * Pad (or trim) any line to exactly COPY_WIDTH characters, ending in a `-`.
+ *
+ * The outer fill counts *characters*, not display columns, because "72 char" is how
+ * a reader counts and how Telegram sizes a button. The columns inside a row are
+ * still padded by display width, so the names, plans and scores line up. The two
+ * differ by one on a row carrying ✅, which occupies two columns and one character.
+ */
+export function fitCopy(line) {
+  const raw = String(line ?? '');
+  const body = raw.length >= COPY_WIDTH - 1 ? raw.slice(0, COPY_WIDTH - 1) : raw + ' '.repeat(COPY_WIDTH - 1 - raw.length);
+  return `${body}-`;
+}
+
+/**
+ * One row of the list, as the copy both surfaces show: mark, name, plan, benchmark
+ * and reset, finished to COPY_WIDTH. The allowance table and the /freemodel buttons
+ * call this, so a button and its row cannot say different things at different widths.
+ */
+export function rowCopy({ mark = " ", name = "", plan = "", score = "", resetIn = "—" } = {}) {
+  return fitCopy(`${mark} ${padDisp(name, MODEL_NAME_MAX)}${padDisp(plan, 5)}${padDisp(score, 7)}${padDisp(resetIn, 8)}`);
+}
+
+/**
+ * The ledger table on its own: column header, rule, a subheading per tier group
+ * with the group's count, and one line per row. Shared by /allowance and
+ * /freemodel, which is what makes the two lists the same list rather than two
+ * renderings that agree today.
+ *
+ * It is a monospace `<code>` block because that is the only left-aligned,
+ * column-true rendering Telegram offers. An inline keyboard button cannot be
+ * aligned: the Bot API has no alignment field and clients centre that text.
+ */
+export function allowanceTableLines(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, location = "", readiness = null } = {}) {
+  return formatCompactAllowanceChat(table, session, { now, labelFn, rows, currentModel: "", location, readiness, tableOnly: true });
+}
+
+export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "", tableOnly = false } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });
   // TH + OC-TH are one row (display-only); failover still uses both lanes.
   const lanes = dedupeTokenHarborLanes([...(t.lanes || [])].filter(laneInAllowanceTable));
@@ -1031,17 +1083,28 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     : usable;
   const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
-  // 20 columns, not 16: the two "ling-3.0-flash" variants are 15 and 18 characters
-  // and at 16 they were indistinguishable in the list.
-  const W_MODEL = 20;
-  const W_PLAN = 6;
+  const W_MODEL = MODEL_NAME_MAX;
+  const W_PLAN = 5;
+  // The external benchmark, where the catalog publishes one. A "~" marks an
+  // estimate, and a model with no published figure gets an em dash rather than a
+  // neighbour's number — the same rule the catalog states and the sensor checks.
+  const W_SCORE = 7;
   const W_RESET = 8;
-  const header = `${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}Reset in`;
-  const sep = `${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_RESET)}`;
+  // One width for every line in the block, so it reads as a flush-left rectangle
+  // with a straight right edge. Without it the rows end wherever their content ends
+  // — "AA48   —" against "AA39.5 —" — and the eye reads the ragged edge as ragged
+  // alignment even though every line starts in the same column.
+  // The ✅/❌ mark is a column, not a decoration in front of one: two glyphs, then
+  // the name, then the columns, and the whole line finished to COPY_WIDTH by
+  // fitCopy so every line in the block is the same length and starts at the same
+  // column. The same copy is what a /freemodel button carries, so the button and the
+  // row say the same thing at the same width.
+  const header = fitCopy(`${" ".repeat(MARK_W)}${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}${padDisp("AA", W_SCORE)}Reset in`);
+  const sep = fitCopy(`${" ".repeat(MARK_W)}${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_SCORE)}${"-".repeat(W_RESET)}`);
   const nl = "\n";
-  const lines = [
-    "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
-  ];
+  // No <code> spans of its own: the whole message goes out inside one block, and a
+  // nested span is escaped into visible "&lt;code&gt;" text.
+  const lines = [header + nl + sep];
   // The rows are canonicalAllowanceLanes() — the same list /freemodel renders. This
   // loop used to walk the ordered table with only the Token Harbor pair collapsed,
   // so a vendor twin (`opencode/space-bunny-free` and `opencode-go/space-bunny-free`
@@ -1076,8 +1139,8 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // record — so a depleted row showed "❌" with "Reset in —", the mark without the
     // time, once the catalogue moved to the host's table.
     const resetIn = formatResetIn(verdict?.resetAt ?? laneResetAt(l, t), now);
-    const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${resetIn}`;
-    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: (ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>" });
+    const score = benchmarkLabel(l.model || l) || "—";
+    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: rowCopy({ mark: ok ? "✅" : "❌", name, plan, score, resetIn }) });
   }
   // One subheading per tier group, in the catalog's order, with the group's own
   // count in it. A group with no rows gets no heading, and /freemodel groups the
@@ -1086,9 +1149,15 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     if (!g.rows.length) continue;
     const mine = rendered.filter((r) => r.tier === g.tier);
     if (!mine.length) continue;
-    if (tierGroups.length > 1) lines.push(`${g.label} (${mine.length})`);
+    // Indented by the mark column so every line in the block starts at the same left
+    // edge — a heading flush against column 0 while every row starts two glyphs in
+    // reads as misalignment even though the columns are right.
+    if (tierGroups.length > 1) lines.push(fitCopy(`${" ".repeat(2)}${g.label} (${mine.length})`));
     for (const r of mine) lines.push(r.line);
   }
+  // /freemodel embeds exactly these lines and nothing below them, so the two
+  // commands cannot show different rows for the same ledger.
+  if (tableOnly) return lines.join("\n");
   lines.push("");
   // "Next up" must be a lane the walk can actually choose. A terminal-only row
   // (Freebuff and friends) stays in the table so the user can see it, but it is
@@ -1300,6 +1369,13 @@ export function laneScoreFromCatalog(lane) {
     return null;
   }
 }
+
+/**
+ * The name column's width, and the cap shortModelName() truncates to — one number,
+ * because two numbers is how a 20-char cap in a 24-char column came to cut
+ * "nemotron-3.5-lightning" mid-word.
+ */
+export const MODEL_NAME_MAX = 24;
 
 /**
  * The three tier groups, in the order both surfaces render them.
@@ -1678,10 +1754,18 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
       rows: projection.length ? projection : null,
       currentModel: provider && model ? `${provider}/${model}` : "",
     });
-    const prefix = location ? `Host: ${location} · own provider credentials and quota\n\n` : '';
-    return prefix + (source === "pref-doc-fallback"
-      ? `${body}\n\n(note: per-bot ledger not yet stamped — pref order only until first quota hit)`
-      : body);
+    // The Host line duplicated the location the caller already prints ("Free models
+    // at vps"), and it sat in the proportional font directly above a monospace
+    // block, so the two did not share a left edge. Inside the block, one line.
+    const prefix = location ? `Host: ${location} · own provider credentials and quota\n` : '';
+    // One code block for the whole message. Split it and the prose above the table
+    // renders in the proportional font with a different left edge and a different
+    // line width, which is what makes a message look raggedly aligned even when the
+    // table inside it is not.
+    const note = source === "pref-doc-fallback"
+      ? `\n\n(note: per-bot ledger not yet stamped — pref order only until first quota hit)`
+      : '';
+    return `<code>${escHtml(prefix + body + note)}</code>`;
   } catch (e) {
     return `Allowance failed: ${String(e?.message || e).slice(0, 200)}`;
   }

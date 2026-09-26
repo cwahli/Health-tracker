@@ -155,7 +155,11 @@ export function modelKeyboard(models, { page = 0, pageSize = 8, kind = 'm', all 
   const rows = slice.map((model, i) => {
     const text = typeof model === 'string' ? model : String(model?.text ?? '');
     const want = typeof model === 'string' ? model : String(model?.data ?? text);
-    const payload = `${kind}:${want}`;
+    // `noop` is a whole callback, not a value: the tap handler dispatches on the
+    // kind prefix and answers `noop` silently. Prefixing it produced "fm:noop",
+    // which the freemodel handler read as a model named "noop" and answered
+    // "Expired, run /freemodel again" when a reader tapped a group heading.
+    const payload = want === 'noop' ? 'noop' : `${kind}:${want}`;
     // Too long for Telegram: fall back to a position in this keyboard, which the
     // handler resolves against the same ordered list it rendered.
     const data = Buffer.byteLength(payload, 'utf8') <= LIMIT ? payload : `${kind}:#${i}`;
