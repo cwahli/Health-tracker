@@ -92,7 +92,7 @@ project id and a sensor pins the trap.
 | Service account | `doc-api@food-search-502514.iam.gserviceaccount.com` (no project roles) |
 | Key file (VPS) | `~/.config/bot-host/google-fleet-key.json`, `-rw-------`, owner `ubuntu` |
 | Root folder | Drive folder **"Projects"** — `1KB7r2kj6znFj2YjcSapQchiH5sBaYJKa`, shared Editor. It is a **My Drive** folder, which is what makes writes impossible for a service account (§1b). |
-| Host env | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_FOLDER_HEALTH_TRACKER` in `~/.config/bot-host/common.env` |
+| Host env | `GOOGLE_FOLDER_HEALTH_TRACKER`, plus `GOOGLE_SERVICE_ACCOUNT_JSON` (read-only now) and `GOOGLE_USER_CREDENTIALS_JSON` (the live writer) in `~/.config/bot-host/common.env` |
 | **G-0 probe** | Credential half **PASS** (token minted, folder listed, 0 writes). Now **NOT READY** on `write ownership` — see §1b. |
 | G-0 sensor | `node scripts/assert-google-store.test.mjs` → **48 pass, 0 fail** (stubbed fetch; the real key is never read by a test) |
 | **Live scorecard** | `node scripts/google-store-scorecard.mjs` → **3 green / 0 partial / 11 red**, all reds = §1b ownership. Board: [GOOGLE_STORE_LIVE_MATRIX.md](./GOOGLE_STORE_LIVE_MATRIX.md) |
@@ -134,10 +134,36 @@ folder has no `driveId`, and the probe reports `write ownership: a service accou
 cannot own files here` as a red row. A READY credential with an unwriteable target
 is exactly the failure a zero-burn probe exists to catch early.
 
-**Until this is resolved, G-1's write legs cannot go green and no agent should be
-enrolled.** Everything else (plan, client, probe, sensor, relay route, scorecard)
-is identity-agnostic: switching is a credential source in the host env, not a
-rewrite.
+### Decision — resolved 2026-09-26: **option B, one user identity**
+
+The human has no Google Workspace subscription, so a shared drive is not available
+(a personal @gmail.com account cannot create one). The store therefore runs as
+**one user identity**: a single OAuth grant belonging to the human, held once in the
+host config and used by every surface.
+
+What this keeps from the original design: one consent, one credential bundle, one
+rotation, no per-bot OAuth, no agent that ever reads a client secret, and the same
+card-3 boundary (a turn gets a folder id, never a credential). What it gives up:
+the identity is a human, so its blast radius is that human's Drive — it can read,
+write and delete everything they can. Folder scoping plus audit and read-back are
+the guardrails, exactly as for the service account.
+
+Implementation: `identityFromEnv()` resolves *either* identity and every call site
+(probe, scorecard, relay) asks for "who am I" without branching.
+`scripts/google-authorize.mjs` performs the one-time loopback consent, verifies the
+grant with a zero-burn `about.get`, and writes the bundle mode 600. A user identity
+is preferred when both credentials are present, because a service account that
+cannot write must never be the live identity.
+
+**Operational trap, recorded because it is invisible when it happens:** a consent
+screen left in publishing status **Testing** issues refresh tokens that expire after
+**7 days**. The consent screen must be set to **In production**, or the store will
+work for a week and then start failing with `invalid_grant` on every surface. The
+probe names that cause in its hint.
+
+The service account is now redundant for writing (it can still read). Once the user
+identity is proven, its key should be removed from the host and the account deleted
+in the console — one fewer credential, one fewer thing to rotate.
 
 ## 2. Data model — what goes where
 
@@ -273,12 +299,11 @@ honesty rule as depleted lanes.
 
 ## 7. Decisions needed (human)
 
-0. **BLOCKING — pick the identity:** can your Google account create a **Shared
-   Drive** (that means a Google Workspace business/edu account)? If yes → option
-   A, keep the service account, and I will have you create one shared drive and
-   add `doc-api@…` as a member. If it is a personal @gmail.com → option B, one
-   user identity with a refresh token, and I will add that credential source.
-   Everything else in this plan is already built and waiting.
+0. ~~**BLOCKING — pick the identity**~~ **RESOLVED → option B** (no Workspace, so
+   no shared drive): one user identity, authorized once via
+   `scripts/google-authorize.mjs`. Remaining sub-decision, low stakes: whether to
+   keep the now-redundant service-account key on the host for reading, or delete
+   it. Recommendation: delete it after the user identity is green.
 1. **Google account to own the Cloud project** (a shared/team account, not personal).
 2. **Folder sharing model**: one top folder per project shared with the service
    account (recommended), or one folder total with subfolders.

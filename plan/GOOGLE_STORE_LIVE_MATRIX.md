@@ -2,10 +2,14 @@
 
 **Status:** **NOT GREEN — 3 green / 0 partial / 11 red.** One root cause, and it is
 not a code defect: a service account cannot own files in a **My Drive** folder, so
-every create is refused with `403 storageQuotaExceeded`. See
-[GOOGLE_WORKSPACE_PLAN.md](./GOOGLE_WORKSPACE_PLAN.md) §1b for the forced choice
-(shared drive vs one user identity) — that decision is the only thing between this
-board and green.
+every create is refused with `403 storageQuotaExceeded`.
+
+**The identity is decided** (plan §1b): no Workspace subscription, therefore no
+shared drive, therefore **one user identity** — a single OAuth grant belonging to
+the human, used by every surface, authorized once by
+`scripts/google-authorize.mjs`. The moment that bundle exists, this board re-runs
+unchanged: no code path forks on credential type. Until then the board stays
+honestly red rather than claiming a write path nobody has exercised.
 
 **Run it:** `node scripts/google-store-scorecard.mjs` (add `--json` for the full
 evidence log, `--only=G-05,G-11` for one leg). Every row prints

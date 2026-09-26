@@ -54,7 +54,7 @@ import {
   listChildren,
   redact,
   renameFile,
-  serviceAccountFromEnv,
+  identityFromEnv,
   uploadBinary,
 } from './lib/google-store.mjs';
 
@@ -203,7 +203,7 @@ const server = http.createServer(async (req, res) => {
         enrolled: Object.keys(ready.folders || {}),
       });
     }
-    const tok = await accessToken(serviceAccountFromEnv(process.env), { scopes: Object.values(SCOPES) });
+    const tok = await accessToken(identityFromEnv(process.env), { scopes: Object.values(SCOPES) });
     if (!tok.ok) return send(res, 502, { error: `relay token grant failed: ${redact(tok.error || '')}`, op, project });
     const id = String(body?.id || '').trim();
     const name = String(body?.name || '').trim();
