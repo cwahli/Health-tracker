@@ -93,7 +93,7 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
-import { ratingSuffix, groupForModel } from './lib/model-ratings.mjs';
+import { ratingSuffix, benchmarkLabel, groupForModel } from './lib/model-ratings.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -815,7 +815,7 @@ async function sendHtml(api, chatId, html) {
  * `returns.buttons` is the keyboard, built from the same projection /allowance
  * renders, so the two commands cannot disagree about a row.
  */
-function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
+export function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
     const a = byRef.get(e?.ref);
@@ -879,6 +879,25 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
       ? `Total: ${listed.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''}${needsSetup.length ? ` · ${needsSetup.length} need setup` : ''} · current: ${current || 'default'}`
       : 'No free models are installed and authenticated on this host.',
   ];
+  // QS-6/QS-7: the body renders the two tiers the catalogs already define —
+  // coding-capable first, light second — with each row's benchmark score.
+  // Tiers and scores both come from the shared model-ratings module (scorecard
+  // AA>=35, curated BENCHMARKS groups); 'unknown' renders inside Light because
+  // fallback-class is what unknown means here, and one list beats three. The
+  // keyboard below keeps canonical order and is untouched: the body is
+  // display-only, taps resolve through button callback refs, never text.
+  const refOfRow = (r) => r.lane?.model || r.model || r.ref || '';
+  const tierOfRow = (r) => (groupForModel(refOfRow(r)) === 'coding' ? 'coding' : 'light');
+  const coding = usable.filter((r) => tierOfRow(r) === 'coding');
+  const light = usable.filter((r) => tierOfRow(r) !== 'coding');
+  if (coding.length) {
+    lines.push('', 'Coding-capable:');
+    for (const r of coding) lines.push(`• ${r.laneLabel || r.label} — ${benchmarkLabel(refOfRow(r))}`);
+  }
+  if (light.length) {
+    lines.push('', 'Light / fallback:');
+    for (const r of light) lines.push(`• ${r.laneLabel || r.label} — ${benchmarkLabel(refOfRow(r))}`);
+  }
   // One short footer line — never a second per-model list.
   const footer = [];
   if (noCredential.length) {

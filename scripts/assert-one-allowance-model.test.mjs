@@ -450,7 +450,13 @@ try {
   check('/freemodel still says why a row is unusable, on one line', /not usable: /.test(botSrc) && /\(reset in /.test(botSrc));
   // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.
   const fmBody = (botSrc.slice(botSrc.indexOf('function formatFreemodelWithDepletion'), botSrc.indexOf('/** Usable rows the ledger has no record for')) || '');
-  check('and the /freemodel body carries no per-model bullet list', !/lines\.push\(`• /.test(fmBody) && !/Not selectable right now:/.test(fmBody));
+  // QS-6 supersedes the old no-bullets rule: tier rows ARE the canonical usable
+  // set (the same rows /allowance renders), grouped — not a second list from a
+  // second source. What stays forbidden is a blocked-rows section like the old
+  // "Not selectable right now".
+  check('and tier rows come from the canonical usable set, not a second source',
+    /for \(const r of coding\)/.test(fmBody) && /for \(const r of light\)/.test(fmBody)
+    && /usable\.filter/.test(fmBody) && !/Not selectable right now:/.test(fmBody));
   check('and it does not repeat the counts in a second footer', !/Allowance \(per-host ledger\)/.test(botSrc));
   // Depleted lanes stay tappable, exactly as the router does, so a tap can answer
   // with what to use instead. Filtering them out is what made the two commands

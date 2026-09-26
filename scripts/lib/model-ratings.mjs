@@ -210,6 +210,18 @@ export function ratingSuffix(ref) {
   return bits.length ? ` · ${bits.join(' ')}` : '';
 }
 
+/**
+ * QS-7 row label: the benchmark score for a /freemodel body line, or the
+ * honest word `unranked` when no ledger covers the model. Same sources as
+ * ratingSuffix (scorecard AA, estimates, vendor SWE/TB) — never invented, and
+ * the scale travels with the number so AA48 and SWE78.8 cannot be compared
+ * as if they were one ranking.
+ */
+export function benchmarkLabel(ref) {
+  const suffix = ratingSuffix(ref);
+  return suffix ? suffix.replace(/^ · /, '') : 'unranked';
+}
+
 /** Every alias, resolved — used by the sensor to prove the table still matches. */
 export function resolvedRatings() {
   const out = [];
