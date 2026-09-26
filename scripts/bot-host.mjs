@@ -914,7 +914,10 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    buttons.push(`${unusableOf(r) ? '❌ ' : ''}${rated}`);
+    // text for the reader, data for the tap: the row's route, so a label that
+    // grows (a bakeoff label, a plan tag) can never invalidate the keyboard.
+    const route = r.ref || r.lane?.ref || r.model || '';
+    buttons.push({ text: `${unusableOf(r) ? '❌ ' : ''}${rated}`, data: route, ref: route });
   }
   return { text: lines.join('\n'), buttons, rows, usable, unusable };
 }
@@ -2143,7 +2146,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       const available = selectable.filter((a) => !a.depleted);
       await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() }), {
         reply_markup: modelKeyboard(
-          (available.length ? available : selectable).map((entry) => entry.label),
+          (available.length ? available : selectable).map((entry) => ({ text: entry.label, data: entry.ref })),
           { page: Number(value) || 0, kind: 'fm' },
         ),
       });
@@ -2157,8 +2160,19 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       // rows, which carry that label, and then back to the entry by ref.
       const wanted = String(value || '').replace(/^❌\s*/, '').trim();
       const bundle = getAnnotatedFreeModels(caches, config.id);
-      const hit = (bundle.annotated || []).find(
-        (a) => a.laneLabel === wanted || a.label === wanted || a.ref === value || a.ref === wanted,
+      // `#<n>` is the position in the keyboard this handler just rendered, for a
+      // route too long for Telegram's 64-byte callback_data. Everything else is a
+      // route identity or a label; a route is what a tap should resolve.
+      const byPosition = String(value || '').startsWith('#')
+        ? (() => {
+            const rows = bundle.annotated || [];
+            const selectable = rows.filter((a) => a.selectable !== false);
+            const available = selectable.filter((a) => !a.depleted);
+            return (available.length ? available : selectable)[Number(wanted.slice(1))] || null;
+          })()
+        : null;
+      const hit = byPosition || (bundle.annotated || []).find(
+        (a) => a.ref === value || a.laneLabel === wanted || a.label === wanted || a.ref === wanted,
       );
       const entries = bundle.entries?.length ? bundle.entries : await getFreeModels(caches, config);
       const entry = hit
