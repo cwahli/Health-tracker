@@ -109,8 +109,8 @@ stand-ins. Do all of these in one window, announced:
   # cell 1 — runtime: node, repo, worker
   command -v node >/dev/null || (curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs)
   node --version
-  [ -d ~/Health-tracker ] || git clone --branch agent/r16-scorecard --depth 1 https://github.com/cwahli/Health-tracker.git ~/Health-tracker
-  cd ~/Health-tracker && git pull --ff-only origin agent/r16-scorecard 2>/dev/null || true
+  [ -d ~/Health-tracker ] || git clone --branch agent/relay-auth --depth 1 https://github.com/cwahli/Health-tracker.git ~/Health-tracker
+  cd ~/Health-tracker && git pull --ff-only origin agent/relay-auth 2>/dev/null || true
   command -v opencode >/dev/null || { curl -fsSL https://opencode.ai/install | bash; export PATH="$HOME/.opencode/bin:$PATH"; }
   opencode --version
   ```
@@ -137,11 +137,6 @@ stand-ins. Do all of these in one window, announced:
   its Colab engines; Qwen/vLLM lanes stay under the notebook's own `/switch`
   system (the worker only runs opencode/cline turns). Re-run cells 1–2 every
   fresh runtime; cell 3 anytime to check in.
-=======
-  clone branch, creds, start worker; dies on idle/timeout (~12h). Keep secrets
-  in Colab secrets, never in cells. Same start command with `--host=collab`.
-  Expect to re-run setup each session; presence going stale is normal, not an
-  incident.
 - **grok (location TBD):** whichever box runs the Grok side gets the identical
   client bundle (`--host=grok`, same relay URL + token). First open question
   is placement — answer that, the rest is copy-paste.
