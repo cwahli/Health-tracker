@@ -81,6 +81,7 @@ import {
   effectiveProviderOf,
   planCodeForLane,
   canonicalAllowanceLanes,
+  groupRowsByTier,
   formatResetIn,
   renderFreeLaneTableHtml,
   ensureBotLedger,
@@ -826,7 +827,11 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   // the same Token Harbor collapse and the same no-credential exclusion. This
   // command used to run its own dedupe over the catalog, and two notions of "the
   // same model" drifted by one row for four rounds. One list, one count.
-  const rows = canonical || [];
+  // The same list /allowance renders, in the same tier-group order, from the same
+  // helper — so the two commands cannot disagree about which models exist, what
+  // order they are in, or which pool each one belongs to.
+  const tierGroups = groupRowsByTier(canonical || []);
+  const rows = tierGroups.flatMap((g) => g.rows);
   // A catalogued model with no lane row AT ALL is still reported, never dropped.
   // The test is against the TABLE, not against the canonical list: a superseded
   // model (an older version whose family now has a newer one) is in the table and
@@ -903,14 +908,19 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   // double-list problem one level down.
   const seen = new Set();
   const buttons = [];
-  for (const r of rows) {
+  for (const g of tierGroups) {
+  for (const r of g.rows) {
     const label = r.laneLabel || r.label;
     const tag = r.plan || (r.lane ? planCodeForLane(r.lane) : '');
     // The benchmark score rides on the button, so the choice is made with the number
     // in front of you rather than from memory. Unscored models get nothing — the
     // scorecard covers about half the reachable free models, and a missing number is
     // honest where a borrowed one would not be.
-    const rated = `${tag ? tag + ': ' : ''}${label} · ${scoreLabelFor(r.lane?.model || r.model || r.ref || '')}`;
+    // The tier rides on the button as well as in the order, because a keyboard has
+    // no subheadings: `coding` / `light` / `unranked` is the only way the split is
+    // visible here, and it is the same word /allowance prints above the group.
+    const tierWord = { high: 'coding', light: 'light', unlisted: 'unranked' }[g.tier] || 'unranked';
+    const rated = `${tag ? tag + ': ' : ''}${label} · ${tierWord} · ${scoreLabelFor(r.lane?.model || r.model || r.ref || '')}`;
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -918,6 +928,7 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     // grows (a bakeoff label, a plan tag) can never invalidate the keyboard.
     const route = r.ref || r.lane?.ref || r.model || '';
     buttons.push({ text: `${unusableOf(r) ? '❌ ' : ''}${rated}`, data: route, ref: route });
+  }
   }
   return { text: lines.join('\n'), buttons, rows, usable, unusable };
 }

@@ -24,7 +24,7 @@
  * python3 render. Safe to import from tests (point TG_ROUTER_STATE_DIR at a
  * throwaway dir; nothing here touches the live box unless asked to).
  */
-import { catalogScore } from './free-catalogs.mjs';
+import { catalogScore, tierForModel } from './free-catalogs.mjs';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -1047,7 +1047,14 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   // so a vendor twin (`opencode/space-bunny-free` and `opencode-go/space-bunny-free`
   // are one model) printed twice here while /freemodel counted it once. One list.
   const blocked = [];
-  for (const l of canonicalAllowanceLanes({ table: t, lanes: ordered, session, now, labelFn })) {
+  const canonicalRows = canonicalAllowanceLanes({ table: t, lanes: ordered, session, now, labelFn });
+  // Group once, render in that order. Rows are collected with their tier and the
+  // block is emitted in one pass afterwards, so a subheading can never end up above
+  // the wrong row — inserting headings by index shifts every later one.
+  const tierGroups = groupRowsByTier(canonicalRows);
+  const tierOfRow = new Map(tierGroups.flatMap((g) => g.rows.map((r) => [r, g.tier])));
+  const rendered = [];
+  for (const l of canonicalRows) {
     const verdict = rows ? rows.find((r) => laneKey(r.lane) === laneKey(l.lane)) || l : l;
     // A lane whose provider has no credential on this host cannot be counted,
     // so it leaves the table entirely rather than sitting in it as a mystery
@@ -1070,7 +1077,17 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // time, once the catalogue moved to the host's table.
     const resetIn = formatResetIn(verdict?.resetAt ?? laneResetAt(l, t), now);
     const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${resetIn}`;
-    lines.push((ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>");
+    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: (ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>" });
+  }
+  // One subheading per tier group, in the catalog's order, with the group's own
+  // count in it. A group with no rows gets no heading, and /freemodel groups the
+  // same way from the same helper, so the two lists read as one list.
+  for (const g of tierGroups) {
+    if (!g.rows.length) continue;
+    const mine = rendered.filter((r) => r.tier === g.tier);
+    if (!mine.length) continue;
+    if (tierGroups.length > 1) lines.push(`${g.label} (${mine.length})`);
+    for (const r of mine) lines.push(r.line);
   }
   lines.push("");
   // "Next up" must be a lane the walk can actually choose. A terminal-only row
@@ -1282,6 +1299,39 @@ export function laneScoreFromCatalog(lane) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The three tier groups, in the order both surfaces render them.
+ *
+ * `high` is the coding-agent-capable pool, `light` is the documented
+ * docs/inventory pool, and `unlisted` is a model the catalog does not rank — kept
+ * visible and never promoted into `high`, because an unmeasured model is not a
+ * coding model. The tier itself comes from the catalog (see free-catalogs.mjs),
+ * never from a table in this file.
+ */
+export const TIER_GROUPS = [
+  { tier: 'high', label: 'Coding-agent capable' },
+  { tier: 'unlisted', label: 'Not in the catalog' },
+  { tier: 'light', label: 'Light · docs/inventory' },
+];
+
+/**
+ * Group canonical rows by catalog tier, in TIER_GROUPS order, dropping empty
+ * groups. Both /allowance and /freemodel call this, which is what keeps the two
+ * lists in the same order with the same rows — the count parity they are checked
+ * for is a consequence of sharing this, not of two implementations agreeing.
+ */
+export function groupRowsByTier(rows, { tierOf = null } = {}) {
+  const catalogTierOf = (r) => tierForModel(r?.model || r?.lane?.model || '').tier || 'unlisted';
+  const tier = typeof tierOf === 'function' ? tierOf : (r) => catalogTierOf(r);
+  const buckets = new Map(TIER_GROUPS.map((g) => [g.tier, []]));
+  for (const r of rows || []) {
+    const t = tier(r);
+    const key = buckets.has(t) ? t : 'unlisted';
+    buckets.get(key).push(r);
+  }
+  return TIER_GROUPS.map((g) => ({ ...g, rows: buckets.get(g.tier) })).filter((g) => g.rows.length > 0);
 }
 
 export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "", scoreOf = laneScoreFromCatalog, supersede = true } = {}) {

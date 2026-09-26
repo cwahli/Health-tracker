@@ -58,10 +58,18 @@ function readCatalog(which) {
 export function modelIdOf(ref) {
   let s = String(ref || '').trim().toLowerCase();
   if (!s) return '';
-  // A Cloudflare ref carries two segments before the model: "@cf/<namespace>/<model>".
-  s = s.replace(/^@cf\/[a-z0-9_.-]+\//, '');
-  s = s.replace(/^@[^/]+\//, ''); // any other "@provider/" shape
-  s = s.replace(/^[a-z0-9_-]+[:/]/, ''); // provider prefix: opencode/, cline-free/, poolside/
+  // Prefixes are peeled repeatedly, because they stack: a Cloudflare lane is
+  // "cloudflare/@cf/<namespace>/<model>", and the `@cf/` rule cannot see its own
+  // segment until the provider prefix in front of it is gone. One pass left
+  // "qwen3.8-27b" as "@cf/qwen/qwen3.8-27b", which matched no catalog row and
+  // rendered as unlisted — a high model silently demoted by a parsing slip.
+  for (let i = 0; i < 4; i++) {
+    const before = s;
+    s = s.replace(/^@cf\/[a-z0-9_.-]+\//, '');
+    s = s.replace(/^@[^/]+\//, ''); // any other "@provider/" shape
+    s = s.replace(/^[a-z0-9_-]+[:/]/, ''); // provider prefix: opencode/, cline-free/, poolside/
+    if (s === before) break;
+  }
   s = s.replace(/:free$/, ''); // Token Harbor's ":free" is a routing suffix
   s = s.replace(/(^|[/])models?[/]/, '$1');
   return s;
@@ -163,8 +171,8 @@ export function bakeoffVerdict(ref) {
  * " free" suffix, which is how "Laguna S 2.1 free" is the same model as
  * `laguna-s-2.1`.
  */
-function boundaryHit(hay, base) {
-  if (!base || base.length < 6) return false;
+function boundaryHit(hay, base, minLength = 6) {
+  if (!base || base.length < minLength) return false;
   let at = hay.indexOf(base);
   while (at >= 0) {
     const after = hay.slice(at + base.length);
@@ -256,19 +264,67 @@ function rankedPick(id, src) {
   const light = /proven light|fallback|docs\/?inventory|inventory\/?docs|weaker for restores|\blight\b/i.test(why);
   const rankCell = String(cRank >= 0 ? win.cells[cRank] ?? '' : '').replace(/[^0-9.]/g, '');
   const rank = rankCell ? Number(rankCell) : null;
-  return { tier: light ? 'light' : 'high', rank, retired: false, why: why || null, source: where };
+  return { tier: light ? 'light' : 'high', rank, retired: false, why: why || null, source: where, fromRank: true };
 }
 
 /** Catalog tier for a model: 'high' | 'light' | null (unlisted). */
 export function tierForModel(ref) {
   const src = CATALOG_FILES.catalog;
   const hit = rankedPick(modelIdOf(ref), src);
-  if (hit) return { tier: hit.tier, source: hit.source, line: null, why: hit.why };
+  // A lock outranks a tier: a retired or forbidden row is answered before the
+  // per-model table is consulted, so `deepseek-v4` stays unlisted even though
+  // `deepseek-v4.1-flash` is high and the two are one token apart.
+  if (hit && (hit.retired || hit.terminalOnly)) return { tier: null, source: hit.source, line: null, why: hit.why };
   // "Tools x free models": | Tool | How to connect | Free models (usable) | ...
   const id = modelIdOf(ref);
   const { text, file } = readCatalog('catalog');
   const where = file || src;
   if (!id || !text) return { tier: null, source: where, line: null, why: null };
+
+  // "Model tiers": the per-model table. Consulted before Tools x free models
+  // because it is per-model rather than per-tool, which is the order the catalog's
+  // own reading rules state.
+  const tiers = tableByHeader(text, 'Tier');
+  if (tiers) {
+    const cModelT = tiers.header.indexOf('model');
+    const cTier = tiers.header.indexOf('tier');
+    const cBasis = tiers.header.indexOf('basis');
+    const hits = [];
+    for (const cells of tiers.rows) {
+      // "Hy3" is the row for `hy3-free`: the catalog writes the model the way a
+      // person says it and the ledger carries the provider's `-free` suffix, so a
+      // stem pass runs when the full id does not match. A stem match is weaker than
+      // an id match and is scored as such.
+      let score = matchScore(cells[cModelT], id);
+      if (!score) {
+        // The catalog writes "Ring 2.6 1T" for `ring-2.6-1t-free` and "Hy3" for
+        // `hy3-free`, so the stem pass drops the provider's `-free` and then a tier
+        // word the cell leaves off.
+        let stem = String(id).replace(/-(free|contributor|preview|rc|beta)$/, '');
+        if (stem !== id && matchScore(cells[cModelT], stem) === 2) score = 1;
+        if (!score) {
+          const shorter = stem.replace(/-(flash|pro|omni|lite|ultra|super|tiny|fin|1t)$/i, '');
+          if (shorter !== stem && shorter.length >= 4 && matchScore(cells[cModelT], shorter) === 2) score = 1;
+        }
+        // Short names are safe here in a way they are not in prose: the tier table
+        // is one curated row per model, so "Hy3" matching `hy3-free` is the row
+        // doing its job, where in a ledger cell it would be a coincidence.
+        if (!score && stem.length >= 2 && stem.length < 6) {
+          const looseCell = loose(cells[cModelT]);
+          if (boundaryHit(looseCell, loose(stem), 2)) score = 1;
+        }
+      }
+      if (score) hits.push({ score, cells });
+    }
+    if (hits.length) {
+      const bestT2 = Math.max(...hits.map((h) => h.score));
+      const win = hits.find((h) => h.score === bestT2);
+      const raw = String(win.cells[cTier] || '').trim().toLowerCase();
+      const tier = /\bhigh\b|\bcoding\b/.test(raw) ? 'high' : /\blight\b/.test(raw) ? 'light' : null;
+      if (tier) return { tier, source: where, line: null, why: String(win.cells[cBasis] || '').trim() || `catalog tier: ${raw}` };
+    }
+  }
+
   const tools = tableByHeader(text, 'Free models (usable)');
   if (tools) {
     const cTool = tools.header.indexOf('tool');
@@ -295,6 +351,9 @@ export function tierForModel(ref) {
       return { tier: light ? 'light' : 'high', source: where, line: null, why: why || `${tool} row` };
     }
   }
+  // The ranked pick is the catalog's own opinion, used when neither the per-model
+  // tier table nor Tools x free models had anything to say about this model.
+  if (hit && hit.fromRank) return { tier: hit.tier, source: hit.source, line: null, why: hit.why };
   return { tier: null, source: where, line: null, why: null };
 }
 
