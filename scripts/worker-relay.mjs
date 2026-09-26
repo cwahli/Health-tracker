@@ -221,7 +221,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id: r.id, name: r.title, link: r.webViewLink, error: redact(r.error || '') });
       }
       if (op === 'createSheet') {
-        const r = await createSheet(name || 'sheet', { tabName: String(body?.tab || 'turn_log') }, tok.token);
+        const r = await createSheet(folder, name || 'sheet', { tabName: String(body?.tab || 'turn_log') }, tok.token);
         return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id: r.spreadsheetId, name: r.properties?.title, error: redact(r.error || '') });
       }
       if (op === 'rename') {

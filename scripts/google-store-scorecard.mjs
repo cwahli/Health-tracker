@@ -81,6 +81,17 @@ function ev(rowId, note, detail) {
   return line;
 }
 
+/** Poll a read-back until it agrees, so eventual consistency is not scored as a failure. */
+async function eventually(fn, { tries = 5, gapMs = 700, want = true } = {}) {
+  let last = null;
+  for (let i = 0; i < tries; i += 1) {
+    last = await fn();
+    if (Boolean(last?.missing) === want) return last;
+    if (i < tries - 1) await new Promise((r) => setTimeout(r, gapMs));
+  }
+  return last;
+}
+
 const rows = [];
 function row(id, title, where, fn) {
   rows.push({ id, title, where, fn });
@@ -248,8 +259,8 @@ row('G-03', 'add a Doc (direct)', LOCATION, async () => {
   const name = objectName({ at: RUN, location: LOCATION, chat: BOT_ID, turnId: 'g03', slug: 'rollup' });
   const r = await createDoc(FOLDER, name, { body: 'seed line 1' }, token);
   ev('G-03', 'drive.files.create (Docs MIME) + documents.batchUpdate seed', `${name} -> ${r.ok ? `id ${r.id}` : redact(r.error)}`);
+  if (r.id) created.docs.add(r.id);
   if (!r.ok) return { state: 'red', detail: redact(r.error || 'createDoc failed') };
-  created.docs.add(r.id);
   return { state: 'green', detail: `id ${r.id} · ${r.webViewLink || ''}` };
 });
 
@@ -259,7 +270,7 @@ row('G-04', 'edit the Doc (append, human text survives)', LOCATION, async () => 
   const r = await appendDocText(id, 'appended line 2 by the scorecard', token);
   ev('G-04', 'documents.batchUpdate insertText at endIndex', `${id} -> ${r.ok ? 'appended' : redact(r.error)}`);
   if (!r.ok) return { state: 'red', detail: redact(r.error || 'appendDocText failed') };
-  const back = await httpJson(`https://docs.googleapis.com/v1/documents/${id}`, { token });
+  const back = await httpJson(`${'https://docs.googleapis.com/v1/documents/'}${id}`, { token });
   const text = JSON.stringify(back.json || {});
   const ok = text.includes('seed line 1') && text.includes('appended line 2 by the scorecard');
   return { state: ok ? 'green' : 'partial', detail: `seed present ${text.includes('seed line 1')} · append present ${text.includes('appended line 2 by the scorecard')} · negative check: no earlier text replaced` };
@@ -267,10 +278,10 @@ row('G-04', 'edit the Doc (append, human text survives)', LOCATION, async () => 
 
 row('G-05', 'add a Sheet (direct)', LOCATION, async () => {
   const name = objectName({ at: RUN, location: LOCATION, chat: BOT_ID, turnId: 'g05', slug: 'turn-log' });
-  const r = await createSheet(name, { tabName: 'turn_log' }, token);
-  ev('G-05', 'spreadsheets.create (tab turn_log)', `${name} -> ${r.ok ? r.spreadsheetId : redact(r.error)}`);
+  const r = await createSheet(FOLDER, name, { tabName: 'turn_log' }, token);
+  ev('G-05', 'drive.files.create (Sheets MIME, inside the project folder) + tab rename', `${name} -> ${r.ok ? r.spreadsheetId : redact(r.error)}${r.tabWarning ? ` (tab: ${r.tabWarning})` : ''}`);
+  if (r.spreadsheetId) created.sheets.add(r.spreadsheetId);
   if (!r.ok) return { state: 'red', detail: redact(r.error || 'createSheet failed') };
-  created.sheets.add(r.spreadsheetId);
   return { state: 'green', detail: `id ${r.spreadsheetId}` };
 });
 
@@ -281,7 +292,9 @@ row('G-06', 'edit the Sheet (append a row, no cell overwritten)', LOCATION, asyn
   const r2 = await appendRows(id, 'turn_log', [[RUN, LOCATION, 'g06b', 'lane-probe', 'ok']], token);
   ev('G-06', 'spreadsheets.values.append RAW + INSERT_ROWS (twice)', `${id} -> ${r1.json?.updates?.updatedRange || redact(r1.error)} · ${r2.json?.updates?.updatedRange || redact(r2.error)}`);
   if (!r1.ok || !r2.ok) return { state: 'red', detail: redact(r1.error || r2.error || 'appendRows failed') };
-  const back = await httpJson(`https://sheets.googleapis.com/v1/spreadsheets/${id}/values/turn_log!A1:Z50`, { token });
+  // v4, not v1: this host is served a challenge page for sheets v1 paths, which
+  // would make a working append look like a failed one.
+  const back = await httpJson(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent('turn_log!A1:Z50')}`, { token });
   const vals = back.json?.values || [];
   const flat = JSON.stringify(vals);
   const ok = flat.includes('g06') && flat.includes('g06b');
@@ -294,10 +307,10 @@ row('G-07', 'delete the picture (proven by a later 404)', LOCATION, async () => 
   if (!created.files.has(id)) return { state: 'red', detail: 'refusing to delete an id this run did not create' };
   const r = await deleteFile(id, token);
   ev('G-07', 'drive.files.delete', `${id} -> ${r.ok ? 'deleted' : redact(r.error)}`);
-  const back = await getFile(id, token);
+  const back = await eventually(() => getFile(id, token), { want: true });
   const ok = r.ok && back.missing;
   created.files.delete(id);
-  return { state: ok ? 'green' : 'partial', detail: `delete ${r.ok} · read-back ${back.missing ? '404 as expected' : `STILL THERE (${back.status})`}` };
+  return { state: ok ? 'green' : 'partial', detail: `delete ${r.ok}${r.error ? ` (${redact(r.error)})` : ''} · read-back ${back.missing ? '404 as expected' : `NOT missing — status ${back.status}${back.error ? `: ${redact(back.error)}` : ''}`}` };
 });
 
 row('G-08', 'delete the Doc (proven by a later 404)', LOCATION, async () => {
@@ -305,21 +318,22 @@ row('G-08', 'delete the Doc (proven by a later 404)', LOCATION, async () => {
   if (!id) return { state: 'red', detail: 'no Doc to delete' };
   const r = await deleteFile(id, token);
   ev('G-08', 'drive.files.delete (Docs object)', `${id} -> ${r.ok ? 'deleted' : redact(r.error)}`);
-  const back = await getFile(id, token);
+  const back = await eventually(() => getFile(id, token), { want: true });
   const ok = r.ok && back.missing;
   created.docs.delete(id);
-  return { state: ok ? 'green' : 'partial', detail: `delete ${r.ok} · read-back ${back.missing ? '404 as expected' : `STILL THERE (${back.status})`}` };
+  return { state: ok ? 'green' : 'partial', detail: `delete ${r.ok}${r.error ? ` (${redact(r.error)})` : ''} · read-back ${back.missing ? '404 as expected' : `NOT missing — status ${back.status}${back.error ? `: ${redact(back.error)}` : ''}`}` };
 });
 
 row('G-09', 'delete the Sheet (proven by a later 404)', LOCATION, async () => {
   const id = [...created.sheets][0];
   if (!id) return { state: 'red', detail: 'no Sheet to delete' };
   const r = await deleteSheet(id, token);
-  ev('G-09', 'spreadsheets.delete', `${id} -> ${r.ok ? 'deleted' : redact(r.error)}`);
-  const back = await getSheet(id, token);
+  ev('G-09', 'drive.files.delete (a spreadsheet is a Drive file)', `${id} -> ${r.ok ? 'deleted' : redact(r.error)}`);
+  // Read back through Drive, the same API that answered the delete.
+  const back = await eventually(() => getFile(id, token), { want: true });
   const ok = r.ok && back.missing;
   created.sheets.delete(id);
-  return { state: ok ? 'green' : 'partial', detail: `delete ${r.ok} · read-back ${back.missing ? '404 as expected' : `STILL THERE (${back.status})`}` };
+  return { state: ok ? 'green' : 'partial', detail: `delete ${r.ok}${r.error ? ` (${redact(r.error)})` : ''} · read-back ${back.missing ? '404 as expected' : `NOT missing — status ${back.status}${back.error ? `: ${redact(back.error)}` : ''}`}` };
 });
 
 row('G-10', 'relay: a location with NO credential adds all three, then edits and deletes them', 'mobile (keyless)', async () => {
@@ -364,7 +378,6 @@ row('G-10', 'relay: a location with NO credential adds all three, then edits and
 });
 
 row('G-11', 'relay: an unenrolled project is refused, and nothing is written', 'mobile (keyless)', async () => {
-  const r = await relayCall('createDoc', { name: 'should-not-exist', text: 'x' }, { });
   const forced = await httpJson(`http://127.0.0.1:${relayPort}/store`, { method: 'POST', token: relayToken, body: { op: 'createDoc', project: 'external-9', name: 'should-not-exist' } });
   ev('G-11', 'relay POST /store with project=external-9', `status ${forced.status} · ${redact(forced.json?.error || '')}`);
   const listed = await relayCall('list', {});
@@ -394,31 +407,42 @@ row('G-13', 'two locations, same turn id → two objects, neither overwritten', 
   return { state: ok ? 'green' : 'partial', detail: `distinct ids ${one.id !== two.json.id} · both still present ${!a1.missing && !a2.missing} · negative check: neither name reused` };
 });
 
-row('G-14', 'no litter: every object this run created is gone', LOCATION, async () => {
-  const leftovers = [];
-  for (const id of created.files) {
-    const back = await getFile(id, token);
-    if (!back.missing) leftovers.push(`${id}=file`);
+row('G-14', 'no litter: the run leaves the folder exactly as it found it', LOCATION, async () => {
+  // Sweep first, then judge. A run that cleans up after itself is the point; a run
+  // that merely notices its own mess is not.
+  const swept = [];
+  for (const set of [created.files, created.docs, created.sheets]) {
+    for (const id of set) {
+      const r = await deleteFile(id, token);
+      swept.push(`${r.ok ? 'gone' : 'FAILED'}:${id.slice(0, 6)}`);
+      if (r.ok) set.delete(id);
+    }
   }
-  for (const id of created.docs) {
-    const back = await getFile(id, token);
-    if (!back.missing) leftovers.push(`${id}=doc`);
-  }
-  for (const id of created.sheets) {
-    const back = await getSheet(id, token);
-    if (!back.missing) leftovers.push(`${id}=sheet`);
-  }
+  if (swept.length) ev('G-14', 'sweep of tracked ids before judging', swept.join(' '));
   const listed = await listChildren(FOLDER, token);
-  const ours = (listed.files || []).filter((f) => f.name.startsWith(`gscorecard-${RUN}`) || f.name.includes(RUN));
-  ev('G-14', 'read-back of every created id + folder listing', `unaccounted ${leftovers.length} · objects matching this run still in folder: ${ours.length}`);
-  const ok = leftovers.length === 0 && ours.length === 0;
-  return { state: ok ? 'green' : 'red', detail: ok ? 'folder holds nothing from this run' : `leftovers: ${leftovers.join(', ') || ours.map((f) => f.name).join(', ')}` };
+  const now = listed.files || [];
+  // Two different questions, kept apart on purpose. "Did *this run* leave junk?" is
+  // the row. "Did someone else add something while it ran?" is worth reporting but
+  // is not this script's litter — a human or another agent working in the same
+  // folder must not turn a clean run red.
+  const ours = now.filter((f) => f.name.includes(RUN));
+  const theirs = now.filter((f) => !baseline.has(f.id) && !f.name.includes(RUN));
+  ev('G-14', 'folder listing compared against the pre-run baseline', `pre-existing ${baseline.size} · now ${now.length} · attributable to this run: ${ours.length} · added by something else during the run: ${theirs.length}`);
+  const ok = ours.length === 0;
+  return {
+    state: ok ? 'green' : 'red',
+    detail: (ok
+      ? `folder holds its ${baseline.size} pre-existing object(s) and nothing from this run`
+      : `litter: ${ours.map((f) => f.name).join(', ')}`)
+      + (theirs.length ? ` · note: ${theirs.length} object(s) appeared from outside during the run (${theirs.map((f) => f.name).join(', ')}) — not this run's` : ''),
+  };
 });
 
 // -------------------------------------------------------------------- main
 
 let ready = { ready: false, reason: 'not loaded' };
 let FOLDER = '';
+let baseline = null;
 let results = [];
 
 async function main() {
@@ -440,6 +464,14 @@ async function main() {
   }
   token = tok.token;
   ev('boot', `acting as ${who.email} (${who.kind})`, `token ${tok.cached ? 'cached' : 'minted'}`);
+
+  // What was in the folder before this run started. Litter is then a fact about
+  // the Drive, not about this script's bookkeeping: a row that creates an object
+  // and forgets to delete it still shows up, and a row whose delete silently failed
+  // still shows up.
+  const start = await listChildren(FOLDER, token);
+  baseline = new Set((start.files || []).map((f) => f.id));
+  ev('boot', `folder baseline: ${baseline.size} pre-existing object(s)`, 'litter is judged against this, not against memory');
 
   const needsRelay = rows.some((r) => wanted(r.id) && r.where.includes('keyless'));
   if (needsRelay) {

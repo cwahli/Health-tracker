@@ -235,12 +235,37 @@ check('the monthly tab is UTC and zero-padded', () => {
 
 // ----------------------------------------------------- source-law ratchets
 
-check('the only Sheets write is an append (no values:update path)', () => {
-  return /values\/\$\{tab\}:append/.test(LIB) && !/values:update|batchUpdate.*spreadsheets/i.test(LIB);
+check('the only Sheets row write is an append (no values:update path)', () => {
+  return /:append/.test(LIB) && !/values:update|\/values\/\$\{range\}\$/.test(LIB);
 });
 
 check('appends are RAW + INSERT_ROWS so no cell is edited in place', () => {
-  return /valueInputOption: 'RAW'/.test(LIB) && /insertDataOption: 'INSERT_ROWS'/.test(LIB);
+  // Query parameters, not body fields: in the body the API rejects the whole call.
+  return /valueInputOption=RAW/.test(LIB) && /insertDataOption=INSERT_ROWS/.test(LIB) && !/valueInputOption: 'RAW'/.test(LIB);
+});
+
+check('the Sheets API is called on v4 (v1 answers a challenge page from this host)', () => {
+  return /sheets: 'https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets'/.test(LIB);
+});
+
+check('a spreadsheet is created through Drive, so it lands inside the project folder', () => {
+  // spreadsheets.create has no parent parameter, so a sheet made that way escapes
+  // the folder the whole plan scopes writes to.
+  const fn = LIB.slice(LIB.indexOf('export async function createSheet'), LIB.indexOf('export async function renameFirstTab'));
+  return /API\.drive}\/files/.test(fn) && /MIME\.sheet/.test(fn) && !/spreadsheets'\, \{\s*method: 'POST'/.test(fn);
+});
+
+check('a spreadsheet is deleted through Drive, the API that answers from this host', () => {
+  // spreadsheets.delete is answered with a bot-challenge page here; drive.files.delete
+  // returns 204 and Drive is also what created the file.
+  const fn = LIB.slice(LIB.indexOf('export async function deleteSheet'), LIB.indexOf('/** Sheets: read one spreadsheet'));
+  return /return deleteFile\(sheetId, token\)/.test(fn);
+});
+
+check('a Doc append inserts strictly before the body end, never at it', () => {
+  // The last element is the closing sectionBreak; inserting at its endIndex is
+  // rejected with "Index N must be less than the end index".
+  return /\(last\?\.endIndex \|\| 2\) - 1/.test(LIB);
 });
 
 check('the only PATCH is a rename: exactly one, and its body is { name } alone', () => {
@@ -318,6 +343,22 @@ const RELAY = fs.readFileSync(path.join(HERE, 'worker-relay.mjs'), 'utf8');
 
 check('the scorecard only deletes ids it created in this run', () => {
   return /refusing to delete an id this run did not create/.test(CARD) && /created\.(files|docs|sheets)\.has\(id\)/.test(CARD);
+});
+
+check('a Google bot-challenge page is retried, not reported as a refusal', () => {
+  // Measured: a window where 10/10 Sheets/Docs writes came back as challenge pages,
+  // then 6/6 passed with identical requests. Failing a capability on one bad minute
+  // is how a working store gets written off.
+  return /const challenged = \/non-JSON error page\//.test(LIB)
+    && /if \(!challenged && res\.status < 500/.test(LIB)
+    && /challenged: true/.test(LIB);
+});
+
+check('a failed request keeps its HTTP status instead of collapsing to 0', () => {
+  // Dropping the status turned every honest 404 into "status 0", so a successful
+  // delete was reported as a file that was still there.
+  return /let lastStatus = 0/.test(LIB) && /lastStatus = res\.status/.test(LIB)
+    && /return \{ ok: false, status: lastStatus/.test(LIB);
 });
 
 check('a delete is proven by a later read saying missing, not by the delete call', () => {
