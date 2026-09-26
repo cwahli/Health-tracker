@@ -531,7 +531,11 @@ try {
   check('and the message ends with the terminator', /lines\.push\('-'\)/.test(botSrc));
 
   check('/freemodel sends the table as HTML, which is what makes it monospace', /parse_mode: 'HTML'/.test(botSrc) && /<code>/.test(read('lib/free-lanes.mjs')));
-  check('and the plain lines are escaped, the table left alone', /String\(l\)\.includes\('<code>'\) \? l : escHtml\(l\)/.test(botSrc));
+  // One block for the whole message: the preamble is folded into the allowance text's
+  // block, so the entire message is one monospace run with one left edge instead of
+  // proportional prose sitting above a monospace table.
+  check('the whole message is one code block', /<code>\$\{pre\.join\('\\n'\)\}\\n\$\{inner\}<\/code>/.test(botSrc));
+  check('and the renderer emits no nested code spans', !/<code>.*escHtml\(header\)/.test(read('lib/free-lanes.mjs')) && /const lines = \[header \+ nl \+ sep\]/.test(read('lib/free-lanes.mjs')));
 
   check('button labels are padded left, and say why that is cosmetic',
     /const LEFT_PAD = '\\u00a0\\u00a0'/.test(botSrc) && /no alignment field/.test(botSrc) && /leftAlign\(/.test(botSrc));

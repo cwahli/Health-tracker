@@ -1070,9 +1070,9 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   const header = fit(`${" ".repeat(MARK_W)}${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}${padDisp("AA", W_SCORE)}Reset in`);
   const sep = fit(`${" ".repeat(MARK_W)}${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_SCORE)}${"-".repeat(W_RESET)}`);
   const nl = "\n";
-  const lines = [
-    "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
-  ];
+  // No <code> spans of its own: the whole message goes out inside one block, and a
+  // nested span is escaped into visible "&lt;code&gt;" text.
+  const lines = [header + nl + sep];
   // The rows are canonicalAllowanceLanes() — the same list /freemodel renders. This
   // loop used to walk the ordered table with only the Token Harbor pair collapsed,
   // so a vendor twin (`opencode/space-bunny-free` and `opencode-go/space-bunny-free`
@@ -1112,7 +1112,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // trailing spaces — some clients trim those and the right edge goes ragged again.
     const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${padDisp(score, W_SCORE)}${padDisp(resetIn, W_RESET)}`;
     const marked = `${ok ? "✅" : "❌"} ${row}`;
-    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: "<code>" + escHtml(marked) + "</code>" });
+    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: marked });
   }
   // One subheading per tier group, in the catalog's order, with the group's own
   // count in it. A group with no rows gets no heading, and /freemodel groups the
@@ -1726,10 +1726,18 @@ export function buildAllowanceTextForBots({ stateDir = null, provider = "", mode
       rows: projection.length ? projection : null,
       currentModel: provider && model ? `${provider}/${model}` : "",
     });
-    const prefix = location ? `Host: ${location} · own provider credentials and quota\n\n` : '';
-    return prefix + (source === "pref-doc-fallback"
-      ? `${body}\n\n(note: per-bot ledger not yet stamped — pref order only until first quota hit)`
-      : body);
+    // The Host line duplicated the location the caller already prints ("Free models
+    // at vps"), and it sat in the proportional font directly above a monospace
+    // block, so the two did not share a left edge. Inside the block, one line.
+    const prefix = location ? `Host: ${location} · own provider credentials and quota\n` : '';
+    // One code block for the whole message. Split it and the prose above the table
+    // renders in the proportional font with a different left edge and a different
+    // line width, which is what makes a message look raggedly aligned even when the
+    // table inside it is not.
+    const note = source === "pref-doc-fallback"
+      ? `\n\n(note: per-bot ledger not yet stamped — pref order only until first quota hit)`
+      : '';
+    return `<code>${escHtml(prefix + body + note)}</code>`;
   } catch (e) {
     return `Allowance failed: ${String(e?.message || e).slice(0, 200)}`;
   }

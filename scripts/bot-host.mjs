@@ -980,7 +980,18 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   // table monospace and left-aligned. Without the parse mode the <code> tags showed
   // up as literal text, and without escaping a label containing & or < would fail the
   // whole send.
-  const body = lines.map((l) => (String(l).includes('<code>') ? l : escHtml(l))).join('\n');
+  // The allowance text arrives as one <code> block; the preamble is folded into it so
+  // the entire message is one monospace run with one left edge, rather than prose in
+  // a proportional font sitting above a table in a monospace one.
+  const allowance = tableForBody || '';
+  const pre = lines.map((l) => escHtml(l));
+  let body;
+  if (allowance) {
+    const inner = allowance.replace(/^<code>/, '').replace(/<\/code>$/, '');
+    body = `<code>${pre.join('\n')}\n${inner}</code>`;
+  } else {
+    body = pre.join('\n');
+  }
   return { text: body, buttons, rows, usable, unusable };
 }
 
