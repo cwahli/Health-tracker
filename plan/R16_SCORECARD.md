@@ -88,8 +88,8 @@ unreliable. The 20:34 duplicate was stopped; pid 757798 remains the single polle
 | `probe-free-lanes.mjs` (zero burn, vps host) | exit 0 |
 | `assert-r16-failover.test.mjs` | 26/0 |
 | `assert-freemodel-tiers.test.mjs` | 10/0 (restored: the file had been lost in a merge, rewritten against the current button format) |
-| `assert-button-alignment.test.mjs` | 25/0 (new: the reader's spec — name 30 / plan 2 / reset 15 / benchmark 7 by character offset at 2/34/39/56, plan three spaces clear of the countdown, every button exactly 72 characters ending in `-`, ASCII fill with no U+2002, and the monospace table still finished to 72 display cells) |
-| live `/freemodel` keyboard (`dump_buttons.py`) | exit 0 — 33 buttons, distinct character lengths `[72]`, columns at 2/34/37/54, no EN SPACE, no provider prefix |
+| `assert-button-alignment.test.mjs` | 35/0 (the reader's spec, by *rendered width*: ADV advance table at 17px, every button finished at COPY_UNITS 24em = 408px — under the client's ~415px middle-elision cut-off — columns at fixed em offsets 12.666 / 15.0035 / 17.9758, plan three spaces clear of the countdown, no `AA` prefix on a button (the table keeps it under its own header), headings and the Cancel row through the same width finisher, table char/cell checks intact) |
+| live `/freemodel` keyboard (`dump_buttons.py`) | exit 0 — 33 buttons all rendering 403.9–408.0px (spread 4.1px, budget 408, cut-off ~415), character lengths `[61 … 76]` because width — not count — is the length now, column starts ragged ≤4.8px (one space = 4.4px), plan three spaces before the countdown, no EN SPACE, no `AA`, no provider prefix |
 | live `/allowance` table (`dump_allowance.py`) | exit 0 — 34 lines, distinct display widths `[72]`, header `Model … PL … Reset in … AA` |
 | `assert-cooldown-and-dead-ends.test.mjs` | 47/0 |
 | `assert-one-allowance-model.test.mjs` | 148/0 |
