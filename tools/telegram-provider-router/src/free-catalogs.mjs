@@ -317,10 +317,21 @@ export function tierForModel(ref) {
       if (score) hits.push({ score, cells });
     }
     if (hits.length) {
-      const bestT2 = Math.max(...hits.map((h) => h.score));
-      const win = hits.find((h) => h.score === bestT2);
-      const raw = String(win.cells[cTier] || '').trim().toLowerCase();
-      const tier = /\bhigh\b|\bcoding\b/.test(raw) ? 'high' : /\blight\b/.test(raw) ? 'light' : null;
+      // Only a row that actually names a tier may answer. The Benchmarks table sits
+      // in the same file, so its rows land in this table's row slice, and a row
+      // reading "MiMo V2.6 Flash | ~41 (est.)" scores higher on the model name than
+      // the tier row "MiMo V2.6" does. It has no tier to give, and taking it as the
+      // winner silently dropped the Token Harbor MiMo row out of the coding group.
+      const tierOf = (h) => {
+        const raw = String(h.cells[cTier] || '').trim().toLowerCase();
+        if (/\bhigh\b|\bcoding\b/.test(raw)) return { tier: 'high', raw };
+        if (/\blight\b/.test(raw)) return { tier: 'light', raw };
+        return { tier: null, raw };
+      };
+      const named = hits.filter((h) => tierOf(h).tier);
+      const bestT2 = Math.max(...(named.length ? named : hits).map((h) => h.score));
+      const win = (named.length ? named : hits).find((h) => h.score === bestT2);
+      const { tier, raw } = tierOf(win);
       if (tier) return { tier, source: where, line: null, why: String(win.cells[cBasis] || '').trim() || `catalog tier: ${raw}` };
     }
   }

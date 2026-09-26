@@ -158,5 +158,19 @@ check('a benchmark never decides a tier', (() => {
 check('the benchmark reaches both surfaces from the one table', /benchmarkLabel\(/.test(fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8'))
   && /benchmarkLabel\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
 
+// 12. Two tables in one file must not answer for each other. The Benchmarks table
+// sits below the Model tiers table, so its rows land in the tier table's row slice;
+// a benchmark row that scores higher on the model name used to win the lookup and
+// then hand back no tier at all, which silently dropped a row out of its group.
+check('a row with no tier word cannot answer the tier lookup', (() => {
+  const src = fs.readFileSync(new URL('./lib/free-catalogs.mjs', import.meta.url), 'utf8');
+  return /const named = hits\.filter\(\(h\) => tierOf\(h\)\.tier\)/.test(src);
+})());
+check('and a model on two tools is one group, not two', (() => {
+  const oc = tierForModel('mimo-v2.6-flash-free');
+  const th = tierForModel('mimo-v2.6-flash');
+  return oc.tier === 'high' && th.tier === 'high';
+})());
+
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);
