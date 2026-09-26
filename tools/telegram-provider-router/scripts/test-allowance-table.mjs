@@ -324,7 +324,9 @@ t("W16 compact /allowance shows DeepSeek V4.1 once as TH (no OC-TH)", () => {
   const text = formatCompactAllowanceChat(TH_ONLY_TABLE, EMPTY_SESSION);
   ok(!/OC-TH/.test(text), `OC-TH present:\n${text}`);
   // Count table rows only (the "Next up:" summary may repeat the name).
-  const rows = text.split("\n").filter((l) => /^[✅❌] <code>/.test(l));
+  // The mark moved inside the <code> span so every line in the block is one span of
+  // the same width; strip the tags before counting rows.
+  const rows = text.replace(/<\/?code>/g, "").split("\n").filter((l) => /^[✅❌]/.test(l));
   const thRows = rows.filter((l) => /DeepSeek V4\.1/.test(l));
   eq(thRows.length, 1, `DeepSeek V4.1 table rows = ${JSON.stringify(thRows)}`);
   ok(/DeepSeek V4\.1\s+TH\s/.test(thRows[0] || ""), `row not labeled TH: ${thRows[0]}`);

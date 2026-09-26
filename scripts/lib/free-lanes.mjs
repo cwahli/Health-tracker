@@ -1054,8 +1054,18 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   // neighbour's number — the same rule the catalog states and the sensor checks.
   const W_SCORE = 7;
   const W_RESET = 8;
-  const header = `${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}${padDisp("AA", W_SCORE)}Reset in`;
-  const sep = `${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_SCORE)}${"-".repeat(W_RESET)}`;
+  // One width for every line in the block, so it reads as a flush-left rectangle
+  // with a straight right edge. Without it the rows end wherever their content ends
+  // — "AA48   —" against "AA39.5 —" — and the eye reads the ragged edge as ragged
+  // alignment even though every line starts in the same column.
+  // The ✅/❌ mark is a column, not a decoration in front of one: two glyphs, then
+  // the name, and every line — header, rule, subheading, row — padded to the same
+  // total so the block has one width and a straight right edge.
+  const MARK_W = 2;
+  const W_TOTAL = MARK_W + W_MODEL + W_PLAN + W_SCORE + W_RESET;
+  const fit = (line) => padDisp(line, W_TOTAL);
+  const header = fit(`${" ".repeat(MARK_W)}${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}${padDisp("AA", W_SCORE)}Reset in`);
+  const sep = fit(`${" ".repeat(MARK_W)}${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_SCORE)}${"-".repeat(W_RESET)}`);
   const nl = "\n";
   const lines = [
     "<code>" + escHtml(header) + nl + escHtml(sep) + "</code>",
@@ -1095,8 +1105,11 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // time, once the catalogue moved to the host's table.
     const resetIn = formatResetIn(verdict?.resetAt ?? laneResetAt(l, t), now);
     const score = benchmarkLabel(l.model || l) || "—";
-    const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${padDisp(score, W_SCORE)}${resetIn}`;
-    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: (ok ? "✅" : "❌") + " <code>" + escHtml(row) + "</code>" });
+    // The reset column is padded too, so a row ends in real content rather than in
+    // trailing spaces — some clients trim those and the right edge goes ragged again.
+    const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${padDisp(score, W_SCORE)}${padDisp(resetIn, W_RESET)}`;
+    const marked = `${ok ? "✅" : "❌"} ${row}`;
+    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: "<code>" + escHtml(marked) + "</code>" });
   }
   // One subheading per tier group, in the catalog's order, with the group's own
   // count in it. A group with no rows gets no heading, and /freemodel groups the
@@ -1105,7 +1118,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     if (!g.rows.length) continue;
     const mine = rendered.filter((r) => r.tier === g.tier);
     if (!mine.length) continue;
-    if (tierGroups.length > 1) lines.push(`${g.label} (${mine.length})`);
+    if (tierGroups.length > 1) lines.push(fit(`${g.label} (${mine.length})`));
     for (const r of mine) lines.push(r.line);
   }
   // /freemodel embeds exactly these lines and nothing below them, so the two

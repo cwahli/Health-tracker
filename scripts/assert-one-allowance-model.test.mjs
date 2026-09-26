@@ -348,7 +348,9 @@ try {
   ] };
   const twinText = buildAllowanceTextForBots({ stateDir: (() => { const d = ensureBotLedger('vm').dir; fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(twinLanes, null, 2)); return d; })() });
   // Counted over the table rows only: the "Next up" line names the same model too.
-  const twinRows = twinText.split('\n').filter((l) => /^(✅|❌)/.test(l) && /DeepSeek V4\.1/.test(l));
+  // Tags stripped first: the mark moved inside the <code> span so every line in the
+  // block is one code span of the same width, which is what makes it read flush-left.
+  const twinRows = twinText.replace(/<\/?code>/g, '').split('\n').filter((l) => /^(✅|❌)/.test(l) && /DeepSeek V4\.1/.test(l));
   check('and /allowance lists that model once, not twice', twinRows.length === 1, twinText);
 
   // 6g. The parity that matters, asserted on one table holding every awkward shape:
@@ -374,7 +376,7 @@ try {
     const d = ensureBotLedger('vm').dir;
     fs.writeFileSync(path.join(d, 'free-lane-table.json'), JSON.stringify(shared, null, 2));
     const text = buildAllowanceTextForBots({ stateDir: d });
-    const rows = text.split('\n').filter((l) => /^(✅|❌)/.test(l));
+    const rows = text.replace(/<\/?code>/g, '').split('\n').filter((l) => /^(✅|❌)/.test(l));
     return rows.length === canonKeys.length;
   })(), `allowance rows vs canonical rows`);
   check('a terminal-only row is in the list and marked not selectable',
@@ -507,12 +509,25 @@ try {
   // The two commands show one list. The body carries allowanceTableLines() — the
   // same helper /allowance renders — so the rows, the order, the groups and the
   // counts cannot differ; the keyboard is the tappable layer on top of it.
-  check('/freemodel prints the same table /allowance prints', /allowanceTableLines\(fmTable, fmSession/.test(botSrc));
-  check('and it is the shared helper, not a second renderer', /export function allowanceTableLines/.test(read('lib/free-lanes.mjs')));
+  // The exact text, from the same call /allowance makes — not a re-render of the same
+  // rows, which is how two surfaces drift.
+  check('/freemodel prints what /allowance prints, from the same call', /tableForBody: buildAllowanceTextForBots\(\{/.test(botSrc));
+  check('the allowance text helper is still the one renderer', /export function formatCompactAllowanceChat/.test(read('lib/free-lanes.mjs')));
   check('the table helper is the table only, so nothing is embedded twice', /if \(tableOnly\) return lines\.join/.test(read('lib/free-lanes.mjs')));
   // The table is only monospace if the message is sent as HTML, and the plain lines
   // around it must be escaped or a label with & or < fails the whole send. Both of
   // these were live bugs: the tags showed up as literal text.
+  // Every line in the table the same width, so the block reads as one flush-left
+  // rectangle. The mark is a column inside the code span for the same reason: with it
+  // outside, a row was two glyphs wider than the header and the edge went ragged.
+  check('every line of the block is padded to one width', (() => {
+    const src = read('lib/free-lanes.mjs');
+    return /const W_TOTAL = MARK_W \+ W_MODEL \+ W_PLAN \+ W_SCORE \+ W_RESET/.test(src)
+      && /const marked = `\$\{ok \? "✅" : "❌"\} \$\{row\}`/.test(src)
+      && /padDisp\(resetIn, W_RESET\)/.test(src);
+  })());
+  check('and the message ends with the terminator', /lines\.push\('-'\)/.test(botSrc));
+
   check('/freemodel sends the table as HTML, which is what makes it monospace', /parse_mode: 'HTML'/.test(botSrc) && /<code>/.test(read('lib/free-lanes.mjs')));
   check('and the plain lines are escaped, the table left alone', /String\(l\)\.includes\('<code>'\) \? l : escHtml\(l\)/.test(botSrc));
 

@@ -82,7 +82,6 @@ import {
   planCodeForLane,
   canonicalAllowanceLanes,
   groupRowsByTier,
-  allowanceTableLines,
   escHtml,
   formatResetIn,
   renderFreeLaneTableHtml,
@@ -927,6 +926,9 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     lines.push('');
     lines.push(tableForBody);
   }
+  // A terminator, so the end of the list is unambiguous when it is followed by a
+  // keyboard rather than by more text.
+  lines.push('-');
   // One button per row, the way the router builds its /freemodel keyboard: a
   // provider tag, the model's own name, and ❌ when the row cannot be used. The tag
   // is the same plan code /allowance prints in its Plan column, which is what makes
@@ -1725,7 +1727,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         location: workLocation(),
         canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
         tableLanes: (fmTable && fmTable.lanes) || [],
-        tableForBody: allowanceTableLines(fmTable, fmSession, { location: workLocation(), readiness: hostReadiness(caches), rows: annotated.filter(Boolean) }),
+        // The exact text /allowance prints, from the same function with the same
+        // arguments — not a re-render of the same rows. Anything that differs between
+        // the two commands can only differ in the preamble above it.
+        tableForBody: buildAllowanceTextForBots({
+          stateDir: getLedger(config.id).dir,
+          location: workLocation(),
+          readiness: hostReadiness(caches),
+          catalogEntries: entries,
+        }),
       });
       // One keyboard with every model, no paging, and the router's cancel row.
       await api.sendMessage(chatId, body.text, {
@@ -2209,11 +2219,15 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       const { annotated } = getAnnotatedFreeModels(caches, config.id);
       const selectable = annotated.filter((a) => a.selectable !== false);
       const available = selectable.filter((a) => !a.depleted);
-      const { table: pgTable, session: pgSession } = getLedger(config.id);
       await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, {
         current: eff.model,
         location: workLocation(),
-        tableForBody: pgTable ? allowanceTableLines(pgTable, pgSession, { location: workLocation(), rows: annotated.filter(Boolean) }) : '',
+        tableForBody: buildAllowanceTextForBots({
+          stateDir: getLedger(config.id).dir,
+          location: workLocation(),
+          readiness: hostReadiness(caches),
+          catalogEntries: entries,
+        }),
       }), {
         parse_mode: 'HTML',
         reply_markup: modelKeyboard(
