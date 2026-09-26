@@ -127,6 +127,22 @@ export function specialProviderReadiness({ authPath, readJson = defaultReadJson,
   };
 }
 
+/**
+ * Models that are free without "-free" in the name, with the citation.
+ *
+ * On the OpenCode/Go subscription surfaces a zero list price does NOT mean a free
+ * model — the cost fields are 0 for models that are simply not metered, and the
+ * vendor marks a genuinely free model in its name. Two models on this host sit at
+ * cost 0 without the suffix: grok-code, which the user confirmed on 2026-09-26 is
+ * not free and which therefore has no place in a free list at all, and big-pickle,
+ * which qa-evidence/model-comparison.json documents as "Free, no card; no per-day
+ * cap published" and which is this stack's default model. The exception carries its
+ * citation so it can be re-checked rather than trusted.
+ */
+export const FREE_NAME_EXCEPTIONS = {
+  'big-pickle': 'qa-evidence/model-comparison.json — "Free, no card; no per-day cap published"',
+};
+
 export function listFreeOpenCode({ modelsCachePath, authPath, readJson = defaultReadJson, home = os.homedir(), env = process.env, includeUnready = false } = {}) {
   const paths = defaultPaths(home);
   const cache = readJson(modelsCachePath || paths.modelsCachePath);
@@ -150,6 +166,8 @@ export function listFreeOpenCode({ modelsCachePath, authPath, readJson = default
     for (const [id, spec] of Object.entries(models)) {
       const cost = (spec && typeof spec === 'object' ? spec.cost : null) || {};
       if (Number(cost.input) !== 0 || Number(cost.output) !== 0) continue;
+      // A zero price is not a free model; the name is the signal.
+      if (!/-free/.test(id) && !FREE_NAME_EXCEPTIONS[id]) continue;
       refs.push(`${provider}/${id}`);
     }
   }
