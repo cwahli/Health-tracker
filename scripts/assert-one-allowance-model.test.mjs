@@ -400,6 +400,10 @@ try {
   check('the re-add is keyed on the table, not on the canonical list',
     /const inTable = new Set/.test(paritySrc) && /!inTable\.has\(m\)/.test(paritySrc) && !/inList/.test(paritySrc));
   check('and the handler passes the table lanes through', /tableLanes: \(fmTable && fmTable\.lanes\) \|\| \[\]/.test(paritySrc));
+  // The handler must fold the catalog in before building the canonical list, or it
+  // counts the 17 authored lanes while /allowance renders the folded table.
+  check('and it folds the catalog into the table first', /const fmTable = withCatalogLanes\(rawTable, entries\)\.table \|\| rawTable/.test(paritySrc));
+  check('and the supersession rule gets a score function', /scoreOf: modelScore/.test(paritySrc) && /function modelScore\(lane\)/.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');

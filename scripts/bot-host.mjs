@@ -93,7 +93,7 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
-import { ratingSuffix } from './lib/model-ratings.mjs';
+import { ratingSuffix, ratingForModel } from './lib/model-ratings.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -433,6 +433,19 @@ export function hostReadiness(caches, botId = 'vm') {
 
 function opencodeEnv(config) {
   return buildOpencodeEnv(config.agent);
+}
+
+/** Score for the supersession rule, from the benchmark table. */
+function modelScore(lane) {
+  try {
+    const r = ratingForModel(lane?.model || '');
+    if (!r) return null;
+    if (typeof r.aa === 'number') return r.aa;
+    if (typeof r.swe === 'number') return r.swe;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function chatEnv(api, chatId) {
@@ -1636,11 +1649,16 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // the router keeps a depleted lane tappable so the tap can answer with what
       // to use instead. Filtering them out of the keyboard is what made /freemodel
       // and /allowance list different things.
-      const { table: fmTable, session: fmSession } = getLedger(config.id);
+      // The SAME table /allowance renders: the catalog folded in. Passing the raw
+      // ledger table here meant the canonical list was built from 17 authored lanes
+      // while the renderer used the folded table, so the two surfaces counted
+      // different models (46 against 30) even with the same code.
+      const { table: rawTable, session: fmSession } = getLedger(config.id);
+      const fmTable = withCatalogLanes(rawTable, entries).table || rawTable;
       const body = formatFreemodelWithDepletion(entries, annotated, {
         current: eff.model,
         location: workLocation(),
-        canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
+        canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation(), scoreOf: modelScore }),
         tableLanes: (fmTable && fmTable.lanes) || [],
       });
       // One keyboard with every model, no paging, and the router's cancel row.
