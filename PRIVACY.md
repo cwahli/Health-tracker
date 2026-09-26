@@ -1,8 +1,8 @@
 # Privacy — agent Google Workspace store
 
-**Status: draft for review by the account owner.** Written to satisfy the Google OAuth
-consent screen's requirement for a public privacy policy. Read it, change what is
-wrong, and keep the contact address current.
+**Canonical page:** [https://health-tracking.duckdns.org/privacy](https://health-tracking.duckdns.org/privacy) — served from the project's own domain, which is
+what the Google OAuth consent screen links to. This file is the source of truth for
+its content and edit history; the served page is generated from it.
 
 ## What this store is
 

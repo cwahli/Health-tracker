@@ -1,7 +1,8 @@
 # Conditions d'utilisation — agent Google Workspace store
 
-**Status: draft for review by the account owner.** Companion to
-[PRIVACY.md](./PRIVACY.md), for the Google OAuth consent screen.
+**Canonical page:** [https://health-tracking.duckdns.org/terms](https://health-tracking.duckdns.org/terms) — served from the project's own domain. This file
+is the source of truth for its content and edit history. Companion to
+[PRIVACY.md](./PRIVACY.md).
 
 ## Who these terms cover
 
