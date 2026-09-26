@@ -54,6 +54,7 @@ import {
   listChildren,
   redact,
   renameFile,
+  replaceDocContent,
   identityFromEnv,
   uploadBinary,
 } from './lib/google-store.mjs';
@@ -234,6 +235,13 @@ const server = http.createServer(async (req, res) => {
         const r = await appendDocText(id, String(body?.text || ''), tok.token);
         return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id, error: redact(r.error || '') });
       }
+      if (op === 'editDoc') {
+        // Explicit replacement through Drive conversion (see G-04). batchUpdate is
+        // the append path and it is challenged from this host.
+        if (!id) return send(res, 400, { error: 'editDoc needs an id', op });
+        const r = await replaceDocContent(id, String(body?.text || ''), tok.token);
+        return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, id, error: redact(r.error || '') });
+      }
       if (op === 'appendRows') {
         if (!id) return send(res, 400, { error: 'appendRows needs an id', op });
         const rows = Array.isArray(body?.rows) ? body.rows : [];
@@ -256,7 +264,7 @@ const server = http.createServer(async (req, res) => {
         const r = await listChildren(folder, tok.token);
         return send(res, r.ok ? 200 : 502, { ...out, ok: r.ok, count: r.files?.length || 0, files: (r.files || []).map((f) => ({ id: f.id, name: f.name })), error: redact(r.error || '') });
       }
-      return send(res, 400, { error: `unknown store op: ${op || '(none)'}`, ops: ['createPicture', 'createDoc', 'createSheet', 'rename', 'appendDoc', 'appendRows', 'delete', 'get', 'list'] });
+      return send(res, 400, { error: `unknown store op: ${op || '(none)'}`, ops: ['createPicture', 'createDoc', 'createSheet', 'rename', 'appendDoc', 'editDoc', 'appendRows', 'delete', 'get', 'list'] });
     } catch (err) {
       return send(res, 502, { ok: false, op, project, error: redact(err && err.message ? err.message : err) });
     }

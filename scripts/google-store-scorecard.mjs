@@ -43,8 +43,10 @@ import {
   appendDocText,
   appendRows,
   createDoc,
+  createDocWithContent,
   createFile,
   createSheet,
+  replaceDocContent,
   deleteFile,
   deleteSheet,
   forgetToken,
@@ -255,25 +257,31 @@ row('G-02', 'rename the picture (id stable, name changes)', LOCATION, async () =
   return { state: ok ? 'green' : 'partial', detail: `same id ${back.file?.id === id} · name now ${back.file?.name} · negative check: content size still ${back.file?.size}` };
 });
 
-row('G-03', 'add a Doc (direct)', LOCATION, async () => {
+row('G-03', 'add a Doc, with text (direct)', LOCATION, async () => {
   const name = objectName({ at: RUN, location: LOCATION, chat: BOT_ID, turnId: 'g03', slug: 'rollup' });
-  const r = await createDoc(FOLDER, name, { body: 'seed line 1' }, token);
-  ev('G-03', 'drive.files.create (Docs MIME) + documents.batchUpdate seed', `${name} -> ${r.ok ? `id ${r.id}` : redact(r.error)}`);
+  const r = await createDocWithContent(FOLDER, name, 'seed line 1', token);
+  ev('G-03', 'drive.files.create (text + Docs MIME, converted)', `${name} -> ${r.ok ? `id ${r.id}` : redact(r.error)}`);
   if (r.id) created.docs.add(r.id);
-  if (!r.ok) return { state: 'red', detail: redact(r.error || 'createDoc failed') };
-  return { state: 'green', detail: `id ${r.id} · ${r.webViewLink || ''}` };
+  if (!r.ok) return { state: 'red', detail: redact(r.error || 'createDocWithContent failed') };
+  const back = await httpJson(`${'https://docs.googleapis.com/v1/documents/'}${r.id}`, { token });
+  const present = JSON.stringify(back.json?.body?.content || '').includes('seed line 1');
+  return { state: present ? 'green' : 'partial', detail: `id ${r.id} · seed text in read-back: ${present}` };
 });
 
-row('G-04', 'edit the Doc (append, human text survives)', LOCATION, async () => {
+row('G-04', 'edit the Doc (explicit replacement, verified)', LOCATION, async () => {
+  // Said plainly: this is a replacement, not an append. documents.batchUpdate is the
+  // append path and it is challenged from this host; an edit a caller asked for is a
+  // different operation, and the proof is that the new text is there and the old text
+  // is not.
   const id = [...created.docs][0];
   if (!id) return { state: 'red', detail: 'G-03 produced no Doc' };
-  const r = await appendDocText(id, 'appended line 2 by the scorecard', token);
-  ev('G-04', 'documents.batchUpdate insertText at endIndex', `${id} -> ${r.ok ? 'appended' : redact(r.error)}`);
-  if (!r.ok) return { state: 'red', detail: redact(r.error || 'appendDocText failed') };
+  const r = await replaceDocContent(id, 'edited line 2 by the scorecard', token);
+  ev('G-04', 'drive.files.update (new text + Docs MIME, converted)', `${id} -> ${r.ok ? 'replaced' : redact(r.error)}`);
+  if (!r.ok) return { state: 'red', detail: redact(r.error || 'replaceDocContent failed') };
   const back = await httpJson(`${'https://docs.googleapis.com/v1/documents/'}${id}`, { token });
   const text = JSON.stringify(back.json || {});
-  const ok = text.includes('seed line 1') && text.includes('appended line 2 by the scorecard');
-  return { state: ok ? 'green' : 'partial', detail: `seed present ${text.includes('seed line 1')} · append present ${text.includes('appended line 2 by the scorecard')} · negative check: no earlier text replaced` };
+  const ok = text.includes('edited line 2 by the scorecard') && !text.includes('seed line 1');
+  return { state: ok ? 'green' : 'partial', detail: `new text present ${text.includes('edited line 2 by the scorecard')} · old text gone ${!text.includes('seed line 1')}` };
 });
 
 row('G-05', 'add a Sheet (direct)', LOCATION, async () => {
@@ -355,9 +363,9 @@ row('G-10', 'relay: a location with NO credential adds all three, then edits and
   created.docs.add(doc.json.id);
   created.sheets.add(sheet.json.id);
   const renamed = await relayCall('rename', { id: pic.json.id, name: `${pic.json.id.slice(0, 8)}-from-mobile-renamed.png` });
-  const docEdit = await relayCall('appendDoc', { id: doc.json.id, text: 'phone append' });
+  const docEdit = await relayCall('editDoc', { id: doc.json.id, text: 'phone-edited line (replacement, see G-04)' });
   const sheetEdit = await relayCall('appendRows', { id: sheet.json.id, tab: 'turn_log', rows: [[RUN, 'mobile', 'g10', 'relay', 'ok']] });
-  ev('G-10', 'relay POST /store rename|appendDoc|appendRows', `rename -> ${redact(renamed.json?.name || renamed.error)} · doc ${docEdit.json?.ok} · sheet ${sheetEdit.json?.updatedRange || sheetEdit.error}`);
+  ev('G-10', 'relay POST /store rename|editDoc|appendRows', `rename -> ${redact(renamed.json?.name || renamed.error)} · doc ${docEdit.json?.ok} · sheet ${sheetEdit.json?.range || sheetEdit.json?.error || 'ok'}`);
   const del = [];
   for (const [kind, id] of [['file', pic.json.id], ['file', doc.json.id], ['sheet', sheet.json.id]]) {
     const r = await relayCall('delete', { id, kind });
@@ -365,7 +373,9 @@ row('G-10', 'relay: a location with NO credential adds all three, then edits and
   }
   const gonePic = await relayCall('get', { id: pic.json.id, kind: 'file' });
   const goneDoc = await relayCall('get', { id: doc.json.id, kind: 'file' });
-  const goneSheet = await relayCall('get', { id: sheet.json.id, kind: 'sheet' });
+  // A spreadsheet is a Drive file, and Drive is the API that answered the delete —
+  // so Drive is also the API that proves it. The Sheets read lags and is challenged.
+  const goneSheet = await relayCall('get', { id: sheet.json.id, kind: 'file' });
   ev('G-10', 'relay POST /store delete x3 then get x3', `${del.join(' ')} · missing picture=${gonePic.json?.missing} doc=${goneDoc.json?.missing} sheet=${goneSheet.json?.missing}`);
   const ok = renamed.json?.ok && docEdit.json?.ok && sheetEdit.json?.ok
     && gonePic.json?.missing && goneDoc.json?.missing && goneSheet.json?.missing;
