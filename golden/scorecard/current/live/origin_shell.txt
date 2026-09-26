@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,12 +12,12 @@
         navigator.serviceWorker.register('/sw.js').catch(function() {});
       }
     </script>
-    <script type="module" crossorigin src="/assets/index-CLZeQ5Fq.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/vendor-DCy0fwz4.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-firebase-BcHNMy-o.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-g_DL4ljB.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-motion-BTVCcmNx.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-BIB6JJyu.css">
+    <script type="module" crossorigin src="/assets/index-BtdlgbV1.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-Cq0kn933.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-firebase-CwHH9QXi.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-CGKI_5i2.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-motion-DNnWzPeh.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-Bcz3FniT.css">
   </head>
   <body>
     <div id="root"></div>

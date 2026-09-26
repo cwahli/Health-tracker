@@ -36,12 +36,13 @@ function check(name, ok, detail = '') {
 console.log('assert-freemodel-tiers (QS-6/QS-7)\n');
 
 const host = await import(path.join(__dirname, 'bot-host.mjs'));
-const { ratingForModel, groupForModel } = await import(path.join(__dirname, 'lib', 'model-ratings.mjs'));
+const { tierForModel, scoreLabelFor, bakeoffVerdict } = await import(path.join(__dirname, 'lib', 'free-catalogs.mjs'));
 const { formatFreemodelWithDepletion } = host;
 check('the formatter is exported for the sensor', typeof formatFreemodelWithDepletion === 'function');
 
-// Synthetic canonical rows: a scored coding lane, an unscored unknown lane,
-// a light lane, a depleted lane and a terminal-only lane.
+// Synthetic canonical rows: a bakeoff-ranked high lane, an unlisted lane,
+// a light lane, a depleted lane and a terminal-only lane. Refs are real
+// catalog ids so tier/score resolve through the actual catalog files.
 const rows = [
   { label: 'DeepSeek V4.1', laneLabel: 'DeepSeek V4.1', lane: { model: 'deepseek-v4.1-flash' }, model: 'cline-free/deepseek-v4.1-flash', ref: 'cline:cline-free/deepseek-v4.1-flash', plan: 'CL', selectable: true, inLedger: true },
   { label: 'mystery-free', lane: { model: 'mystery-free' }, model: 'opencode/mystery-free', ref: 'opencode/mystery-free', plan: 'OC', selectable: true, inLedger: true },
@@ -59,44 +60,42 @@ const lightAt = text.indexOf('Light / fallback:');
 check('coding section precedes the light section', codingAt !== -1 && lightAt !== -1 && codingAt < lightAt);
 const codingBlock = text.slice(codingAt, lightAt);
 const lightBlock = text.slice(lightAt);
-check('the scored coding lane renders in Coding with its number',
-  codingBlock.includes('DeepSeek V4.1') && /AA\d/.test(codingBlock), codingBlock.trim().split('\n').slice(0, 3).join(' | '));
-check('the unscored lane renders in Light as unranked, not dropped',
-  lightBlock.includes('mystery-free') && lightBlock.includes('unranked'));
+check('the catalog-high lane renders in Coding with its bakeoff score',
+  codingBlock.includes('DeepSeek V4.1') && codingBlock.includes(scoreLabelFor('cline:cline-free/deepseek-v4.1-flash')),
+  codingBlock.trim().split('\n').slice(0, 3).join(' | '));
+check('the unlisted lane renders in Light as unranked, not dropped',
+  lightBlock.includes('mystery-free') && lightBlock.includes('unranked')
+  && scoreLabelFor('opencode/mystery-free') === 'unranked');
 const tierRows = (block) => block.split('\n').filter((l) => l.startsWith('• ')).join('\n');
 check('depleted and terminal rows stay out of both tiers (footer owns them)',
   !tierRows(codingBlock).includes('Muse 1.3') && !tierRows(lightBlock).includes('Freebuff lane')
   && !tierRows(codingBlock).includes('Freebuff lane') && !tierRows(lightBlock).includes('Muse 1.3'));
 
-// Every score shown must resolve through ratingForModel: parse each body row's
-// trailing label and prove it is either 'unranked' or the module's own number.
+// Every score shown must be the catalog's own verdict: parse each body row's
+// trailing label and prove it equals scoreLabelFor(that row's ref).
 const rowLines = text.split('\n').filter((l) => l.startsWith('• '));
 const bad = [];
 for (const line of rowLines) {
-  const m = line.match(/ — (\S+(?: \S+)?)$/);
+  const m = line.match(/ — (.+)$/);
   const shown = (m && m[1]) || '';
-  if (shown === 'unranked') continue;
   const label = line.slice(2).split(' — ')[0];
   const row = rows.find((r) => (r.laneLabel || r.label) === label);
   const ref = row?.lane?.model || row?.model || row?.ref || '';
-  const r = ratingForModel(ref);
-  const nums = [];
-  if (typeof r?.aa === 'number') nums.push(`AA${r.estimated ? '~' : ''}${r.aa}`);
-  else if (typeof r?.aaEst === 'number') nums.push(`AA~${r.aaEst}`);
-  if (typeof r?.swe === 'number') nums.push(`SWE${r.swe}`);
-  if (!nums.some((n) => shown.includes(n))) bad.push(`${label} shows ${shown}`);
+  if (shown !== scoreLabelFor(ref)) bad.push(`${label} shows ${shown}`);
 }
-check('no invented numbers: every shown score resolves via ratingForModel', bad.length === 0, bad.join('; ') || `${rowLines.length} rows checked`);
-check('unknown-group models are fallback-class, by the module not by fiat',
-  groupForModel('opencode/mystery-free') === 'unknown');
+check('no invented numbers: every shown score is the catalog verdict', bad.length === 0, bad.join('; ') || `${rowLines.length} rows checked`);
+check('unlisted models are fallback-class, by the catalogs not by fiat',
+  tierForModel('opencode/mystery-free').tier !== 'high' && bakeoffVerdict('opencode/mystery-free').label === 'unranked');
 
-// The keyboard is untouched: one button per canonical row, same order.
+// The keyboard is untouched: one button per canonical row, same order, with
+// text for the reader and the route for the tap.
 check('one button per row in canonical order',
   out.buttons.length === rows.length
-  && out.buttons[0].includes('DeepSeek V4.1')
-  && out.buttons[4].includes('Freebuff lane'));
+  && out.buttons[0].text.includes('DeepSeek V4.1')
+  && out.buttons[4].text.includes('Freebuff lane'));
 check('no button text is parsed for taps (refs intact)',
-  out.rows.length === rows.length && out.usable.length === 3 && out.unusable.length === 2);
+  out.rows.length === rows.length && out.usable.length === 3 && out.unusable.length === 2
+  && out.buttons.every((b) => typeof b.data === 'string' && b.data.length > 0));
 
 console.log(`\n${pass} pass, ${fail} fail`);
 if (fail > 0) {
