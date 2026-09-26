@@ -1,51 +1,107 @@
 # R-16 cross-location quota-resilience scorecard — working board
 
-Charter: `plan/ROADMAP.md` §R-16 (QS-1…QS-12). Branch: `agent/r16-scorecard`
-(main + `agent/r14-vendor-sync` + `agent/session-key`, then R-16 fixes).
-Pass rule per charter: every row green **in the same live pass**; one RED row =
-whole scorecard RED. Live quota is never burned for exhaustion: quota-shaped
-errors go through the real error path against ledger copies.
+**Canonical board:** `plan/R16_QS_MATRIX.md` (carried on `main`). It reads
+**R-16 = RED — 5 green, 3 partial, 4 red**, and that is the correct verdict.
 
-Evidence discipline (learned 2026-09-26): several bot versions served one chat
-in one evening, so every capture below names the serving tree + commit.
-`prod` = `/home/ubuntu/bot-host-r14` (live service), `r16` = this branch.
+This file previously claimed "11 green, 1 amber" (`190d0c7`). That claim was rounded
+up: rows were counted green from a unit test, a single-location check, or a VPS-local
+worker standing in for the phone / Colab / Grok box. The charter's pass rule forbids
+all three ("a unit test, a static table diff, or a single-location check never flips a
+row"; "no `BOT_LOCATION` label-as-location"). The claim is withdrawn below and
+replaced by the evidence actually captured.
 
-## Gates (all green 2026-09-26)
+## Live evidence — `driver.py proof locations`, 2026-09-26 07:32:43Z
+
+```text
+UTC: 2026-09-26 07:32:43Z
+Bot and MainPID: ActiveEnterTimestamp=Sat 2026-09-26 07:29:09 UTC MainPID=1190129
+Commit under test: /home/ubuntu/bot-host-r14 @ bdf27e2 fix(allowance): one name cap, and drop "(keyed)" from the Gemini row
+Relay health: vps=up,vm2=up,mobile=up,collab=up,grok=up
+VM ledger mtime before: 2026-09-25 22:19:51.850415682 +0000
+Command sent: /location vps    → ✅ Compute location set to: `vps` (this machine runs the poller)
+Command sent: Reply with the single word: ok   (should run on vps)
+  inbound: ok / build · ctx 9.2k tokens
+vps: turn completed on this machine (local host): True
+Command sent: /location vm2    → ✅ Compute location set to: `vm2`
+  inbound: ok / build · ctx 9.2k tokens
+vm2: turn completed on this machine (local host): True
+Command sent: /location mobile → ✅ Compute location set to: `mobile`
+  worker connected. The next turn runs on mobile — its first turn is a canary (checked, then confirmed as active).
+Command sent: Reply with the single word: ok   (should run on mobile)
+  inbound: ok / host: mobile (canary)
+mobile: the reply names the host that ran it: True
+mobile: worker ledger exists and is its own: True
+Command sent: /location collab → ✅ Compute location set to: `collab` (canary armed)
+Command sent: Reply with the single word: ok   (should run on collab)
+  inbound: ok / host: collab (canary)
+collab: the reply names the host that ran it: True
+collab: worker ledger exists and is its own: True
+Command sent: /location grok   → ✅ Compute location set to: `grok` (canary armed)
+Command sent: Reply with the single word: ok   (should run on grok)
+  inbound: ok / host: grok (canary)
+grok: the reply names the host that ran it: True
+grok: worker ledger exists and is its own: True
+VM ledger mtime after: 2026-09-25 22:19:51.850415682 +0000
+VM ledger mtime unchanged by remote turns: True
+```
+
+Commands reached the live bot through the real Telegram update path (user session,
+`~/proto/tg-user-session/driver.py`), not through a test harness.
+
+## What this run proves, and what it cannot
+
+**Proves (mechanics, live):** all five locations accept `/location <host>` and run the
+next turn; remote turns name the host that ran them (`host: <h> (canary)`); each
+worker keeps its own ledger; the VM ledger does not move when a remote host runs.
+
+**Does not prove (why the rows stay red):** `mobile`, `collab` and `grok` here are
+VPS-local `worker-agent` processes, not the phone, the notebook, or the Grok box. QS-5
+requires each host's *own* probe output — a probe run on this box would be exactly the
+"inferred from another host" failure the row forbids — and QS-1 / QS-3 / QS-4 / QS-9
+need those real devices connected with quota. QS-11 still needs a genuine mid-stream
+quota death, which must never be manufactured.
+
+## Proof-harness defects found and fixed (2026-09-26)
+
+1. `_common.head_commit()` read `/home/ubuntu/bot-host` while the live service serves
+   `/home/ubuntu/bot-host-r14`, so every evidence block named the wrong commit. It now
+   derives the tree from `systemctl show bot-host@<id> -p WorkingDirectory`.
+2. `proofs/locations.py` required the remote `host:` footer on the local hosts
+   (`vps`, `vm2`), printing `False` for a correct local turn. Local hosts now assert
+   that the turn completed instead.
+3. `driver.py` could not run at all: system `python3.14` has no `pip` and no `telethon`.
+   A venv at `~/proto/tg-user-session/.venv` now carries `telethon 1.45.0`.
+
+## Live-stack defect found and fixed (2026-09-26 07:38Z)
+
+**Dual poller.** Two `node src/index.js` router processes (started 2026-09-25 20:23
+and 20:34 out of tmux) carried the *same* `TELEGRAM_BOT_TOKEN` — identical sha256 —
+and both held a Telegram connection. The charter forbids dual-polling a token, and
+duplicate `getUpdates` consumers race the update offset, which makes any live proof
+unreliable. The 20:34 duplicate was stopped; pid 757798 remains the single poller.
+
+## Gates on this branch (2026-09-26)
 
 | gate | result |
 |---|---|
 | `check-capability-propagation.mjs` | 26 capabilities, 0 failures (QS-12) |
-| `assert-one-allowance-model` | 125/0 (QS-8 parity) |
-| `assert-freemodel-tiers` (new) | 10/0 (QS-6/QS-7 render) |
-| `assert-r16-failover` (new) | 25/0 (QS-2/QS-4/QS-9/QS-10/QS-11) |
-| `assert-model-failover` | 10/0 · `assert-cooldown-and-dead-ends` 47/0 |
-| `assert-work-session` 50/0 · `assert-work-view` 13/0 · `assert-session-key` 24/0 on host |
-| `assert-worker-relay` 31/0 (32/0 with relay latest) · `assert-swap-guards` 75/0 |
-| `assert-swap-pack` 35/0 · `assert-poller-lease` 21/0 |
-| `assert-swap-drill` 19/0 (10 swaps + injected rollback + real-tmux repoint) |
-| `live-swap-proof.mjs` | 23/23 on the deployed stack |
-| vitest `work-session` + `bot-host` | 176/176 |
+| `probe-free-lanes.mjs` (zero burn, vps host) | exit 0 |
+| `assert-r16-failover.test.mjs` | 25/0 |
+| `assert-freemodel-tiers.test.mjs` | 10/0 |
+| `assert-cooldown-and-dead-ends.test.mjs` | 47/0 |
+| `assert-one-allowance-model.test.mjs` | 125/0 |
+| `assert-setup-gaps.test.mjs` | 63/0 |
+| `assert-lane-contract.mjs` | 33/0 |
+| `assert-model-failover.mjs` | 10/0 |
+| `assert-worker-relay.test.mjs` | 32/0 |
+| `assert-session-key.test.mjs` | 24/0 |
+| `assert-work-session.mjs` | 50/0 |
+| `assert-location-needs-a-worker.test.mjs` | 36/0 (2 stale regex literals retargeted to the `location`→`host` rename; pass meaning unchanged) |
+| `assert-allowance-walk.test.mjs` | **38/1** — `an exhausted host is told nothing ran` (open on `agent/r14-card-1`, not this branch) |
 
-## Rows
+## Score
 
-| row | status | evidence |
-|---|---|---|
-| QS-1 roam 4 locations, ledger per host | GREEN | driver `proof locations` vs branch poller: vps/vm2 answered `ok` locally; mobile/collab/grok answered `ok — host: <h> (canary)` with own `worker-<h>` ledgers; VM ledger mtime unchanged (`2026-09-25 22:19:51` before = after). Unreachable-host hold proven by guard sensor + card-4 pattern. Caveat: workers are VPS-local stand-ins (same disk) — transport is HTTP either way; a phone/Colab proves the same code across the network. |
-| QS-2 exhausted lane switches with a line, never raw JSON | GREEN | `assert-r16-failover` INFERENCE_CAP_ERROR specimen: switch line `🔀 *m-dying* failed (free limit hit (…)) — switching to *m-next*…`, no `{` anywhere. Live 2026-09-25 cline-429→opencode-ok precedent in AI_HANDOVER. |
-| QS-3 handoff keeps project + role + pack | GREEN | chat 6218257274 `projectId: health-tracker` + role intact across the 5-host roam (state dump); pack landed + applied per host (`live-swap-proof` ticks 20–27, `packApplied: 1`). |
-| QS-4 pack paths stated in the reply | GREEN | `resolvePackPath` + `packPathLine` (sensor: 7 checks — disk-pack / lane-summary excluding the just-failed lane / summary-skipped / refusal). Lane-summary branch is spend-gated (packs > 20 KB only) and untriggered live by design. |
-| QS-5 per-location lists match probes | GREEN | `probe-free-lanes` zero-burn per location: vps 41 (cline 4), mobile 38 (cline 0 — no CLI there), collab/grok/vm2 41; `/freemodel` + `/allowance` renders match each probe. |
-| QS-6 high vs light split | GREEN | live render 2026-09-26 (r16 @ c462b0d, `--inject=/freemodel`): `Coding-capable:` section first, `Light / fallback:` second, from shared `groupForModel` (scorecard AA≥35, curated groups). Same-route-different-score rows (e.g. TH DeepSeek unranked) render Light: unknown evidence = fallback-class, documented. |
-| QS-7 benchmark score on selection | GREEN | same capture: `AA48`, `SWE77.8`, `AA~41` scale-tagged per row, `unranked` where no ledger covers the model; buttons carry scores where rated. No invented numbers (sensor resolves every shown digit via `ratingForModel`). |
-| QS-8 list equality | GREEN | 125-check parity sensor + live side-by-side (36 listed both surfaces, same depleted + terminal-only rows) + single canonical projection (`canonicalAllowanceLanes`). |
-| QS-9 auto-switch on exhaustion | AMBER — logic green, live full-drain pending | `continueTurnOnNextWorker` + `runRemoteTurn` dry-detection + visited-set + prefer-first (sensor: order, naming, no-repeat, all-dry stop). Live full drain needs every VM lane genuinely empty: forbidden to burn quota for it, forbidden to hand-write stamps. Unblock: the next real exhaustion event, or a maintenance window bless. |
-| QS-10 tier-first walk, buckets, skips | GREEN | coding → unknown → light against adversarial prefs; `ended`/terminal-only/Freebuff never offered; sibling-bucket joint depletion (stamp one member, both drop) — all in `assert-r16-failover` on temp ledgers. Walk commit `0793479` live in the chain. |
-| QS-11 mid-turn exhaustion | GREEN | `defaultIsRetryable` gap closed: partial text + quota signal now stamps, continues, and delivers partial + flag + completion (`midstreamFlagText`); dead-end-on-repeat via existing path. Sensor with stubbed mid-stream death. Live mid-turn untriggered by nature (needs a real mid-answer 429). |
-| QS-12 shared components only | GREEN | capability gate 26/0; tiers/scores/failover/chain all consume `free-lanes` + `model-ratings` shared exports; vendor mirror via `sync-router-vendor`. |
-
-## Score: 11 GREEN, 1 AMBER (QS-9 live drain)
-
-The single open cell cannot be closed without either burning real quota or
-forging ledger state — both forbidden by the charter itself. It unblocks the
-next time a host genuinely empties: the chain, the naming, and the stop
-condition are already proven; only the live transcript is missing.
+**R-16 = RED**, same verdict as the canonical board: 5 green, 3 partial, 4 red. The
+four red rows and the three partials each need a real device or a real quota event;
+nothing on this box can turn them green without the charter's "no label-as-location"
+and "never burn live quota to prove exhaustion" rules being broken.
