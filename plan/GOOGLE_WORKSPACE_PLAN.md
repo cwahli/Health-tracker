@@ -297,6 +297,31 @@ honesty rule as depleted lanes.
 
 ---
 
+## 6b. The installed skill (2026-09-26) — what the agent itself can now use
+
+`danielkwapien/google-docs-skill` (fork of `robtaylor/google-docs-skill`, MIT) is
+installed at `~/.claude/skills/google-docs`, which opencode reads as a global
+compatibility scope — so any opencode lane can load it on demand with the `skill`
+tool. It brings Docs + Drive operations as Ruby scripts (`docs_manager.rb`,
+`drive_manager.rb`): read, create, insert, append, replace, format, tables, images,
+plus Drive upload/download/search/share. Proven live from this host: Drive list,
+create-from-markdown, read-back, append, delete.
+
+Auth without another consent: `/tmp/opencode/seed-skill-auth.rb` (kept with the
+session notes; re-runnable) writes `~/.claude/.google/client_secret.json` from the
+fleet's existing OAuth client and seeds `~/.claude/.google/token.json` from the
+fleet's existing refresh token — both mode 600, nothing printed. One honest
+wrinkle is documented in the seeder: the skill requests six scopes, the grant holds
+three (documents, drive, spreadsheets), so the stored token lists all six and
+Google remains the source of truth — a call needing an ungranted scope fails as a
+403 there, nothing invents a permission.
+
+Two limits, stated plainly. First, the skill calls the same APIs from the same
+host, so `insert`/`append` (batchUpdate underneath) face the same intermittent
+challenge the REST client does — the skill is capability, not a bypass. Second, it
+needs Ruby 3.3 + the `google-apis-docs_v1`, `google-apis-drive_v3`, `google-apis-sheets_v4`
+(plus calendar/gmail/people for its other scripts) gems, installed system-wide.
+
 ## 7. Decisions needed (human)
 
 0. ~~**BLOCKING — pick the identity**~~ **RESOLVED → option B** (no Workspace, so
