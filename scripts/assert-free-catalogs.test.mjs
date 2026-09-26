@@ -63,7 +63,12 @@ check('no code imports a ratings module', !/model-ratings/.test(botSrc) && !/mod
 check('the catalogs module is the only score/tier source', /free-catalogs\.mjs/.test(botSrc));
 
 // 3. What /freemodel renders is a bakeoff label or the word "unranked".
-check('the button label comes from the bakeoff ledger', /scoreLabelFor\(/.test(botSrc) || /catalogFacts\(/.test(botSrc));
+// The button now carries the /allowance row copy, which shows the *benchmark* — the
+// published figure from the Benchmarks table — rather than the bakeoff wave count.
+// Both come from this module and both are asserted below; the row copy is built by
+// free-catalogs' sibling in free-lanes, so the check is that the module is the source.
+check('the button label is built from the catalogs (benchmark via rowCopy)', /rowCopy\(\{/.test(botSrc) && /benchmarkLabel\(/.test(botSrc));
+check('and the bakeoff verdict is still available for the row copy path', /scoreLabelFor\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')) || /bakeoffVerdict\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-catalogs.mjs'), 'utf8')));
 check('an unranked model says "unranked"', scoreLabelFor('space-bunny-free') === 'unranked');
 check('a model with waves says so, counted from the ledger', /^bakeoff \d+ pass/.test(scoreLabelFor('deepseek-v4.1-flash')));
 check('no rendered score is a bare number', !/^\d/.test(scoreLabelFor('deepseek-v4.1-flash')));

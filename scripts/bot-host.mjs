@@ -75,13 +75,14 @@ import {
   loadFreeLaneLedger,
   annotateFreemodelEntries,
   isFreemodelEntryDepleted,
-  buildAllowanceTextForBots,
   withCatalogLanes,
   entriesFromLanes,
   effectiveProviderOf,
   planCodeForLane,
   canonicalAllowanceLanes,
   groupRowsByTier,
+  rowCopy,
+  fitCopy,
   escHtml,
   formatResetIn,
   renderFreeLaneTableHtml,
@@ -817,27 +818,13 @@ async function sendHtml(api, chatId, html) {
  * `returns.buttons` is the keyboard, built from the same projection /allowance
  * renders, so the two commands cannot disagree about a row.
  */
-/**
- * Best-effort left alignment for an inline button label.
- *
- * The Bot API has no alignment field for `InlineKeyboardButton` and the official
- * clients centre that text, so this is a cosmetic approximation, not a supported
- * feature: it pads with non-breaking spaces, which the clients preserve and some
- * third-party clients trim. The reliable left-aligned rendering is the monospace
- * table in the message body, which is why the body carries the same list.
- */
-const LEFT_PAD = '\u00a0\u00a0';
-function leftAlign(text) {
-  return LEFT_PAD + String(text);
-}
-
 /** The same groups /allowance heads its sections with, as one readable line. */
 function tierBreakdown(groups, sep) {
   const parts = (groups || []).filter((g) => g.rows.length).map((g) => `${g.label} ${g.rows.length}`);
   return parts.length > 1 ? parts.join(sep) : '';
 }
 
-function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [], tableForBody = '' } = {}) {
+function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
     const a = byRef.get(e?.ref);
@@ -922,12 +909,9 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   // commands show the same rows in the same order with the same counts. It is a
   // monospace block because that is the only left-aligned, column-true rendering
   // Telegram offers; an inline button cannot be aligned at all.
-  if (tableForBody) {
-    lines.push('');
-    lines.push(tableForBody);
-  }
-  // A terminator, so the end of the list is unambiguous when it is followed by a
-  // keyboard rather than by more text.
+  // The list is NOT repeated in the message: it is the keyboard. A button carries the
+  // same copy /allowance prints for that row, at the same width, so the two surfaces
+  // say one thing rather than two versions of it.
   lines.push('-');
   // One button per row, the way the router builds its /freemodel keyboard: a
   // provider tag, the model's own name, and ❌ when the row cannot be used. The tag
@@ -947,7 +931,7 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     // groupRowsByTier() result. `noop` is the callback the router already uses for a
     // non-actionable keyboard row, and the tap handler answers it silently.
     if (tierGroups.length > 1) {
-      buttons.push({ text: leftAlign(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
+      buttons.push({ text: fitCopy(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -964,15 +948,24 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     // and the bakeoff ledger's own verdict. A model with no published figure gets no
     // number at all — never a neighbour's.
     const model = r.lane?.model || r.model || r.ref || '';
-    const bench = benchmarkLabel(model);
-    const rated = `${tag ? tag + ': ' : ''}${label}${bench ? ` · ${bench}` : ''} · ${scoreLabelFor(model)}`;
+    // The button says what the /allowance row says, through the same copy function,
+    // at the same width: mark, name, plan, benchmark, reset, finished to 72
+    // characters with a dash. A button is no longer a second, shorter vocabulary for
+    // a row that already exists.
+    const rated = rowCopy({
+      mark: unusableOf(r) ? '❌' : '✅',
+      name: label,
+      plan: tag,
+      score: benchmarkLabel(model),
+      resetIn: r.resetIn || r.resetLabel || '—',
+    });
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
     // text for the reader, data for the tap: the row's route, so a label that
     // grows (a bakeoff label, a plan tag) can never invalidate the keyboard.
     const route = r.ref || r.lane?.ref || r.model || '';
-    buttons.push({ text: leftAlign(`${unusableOf(r) ? '❌ ' : ''}${rated}`), data: route, ref: route });
+    buttons.push({ text: rated, data: route, ref: route });
   }
   }
   // The plain lines are escaped here and the shared table arrives already escaped,
@@ -980,18 +973,10 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   // table monospace and left-aligned. Without the parse mode the <code> tags showed
   // up as literal text, and without escaping a label containing & or < would fail the
   // whole send.
-  // The allowance text arrives as one <code> block; the preamble is folded into it so
-  // the entire message is one monospace run with one left edge, rather than prose in
-  // a proportional font sitting above a table in a monospace one.
-  const allowance = tableForBody || '';
-  const pre = lines.map((l) => escHtml(l));
-  let body;
-  if (allowance) {
-    const inner = allowance.replace(/^<code>/, '').replace(/<\/code>$/, '');
-    body = `<code>${pre.join('\n')}\n${inner}</code>`;
-  } else {
-    body = pre.join('\n');
-  }
+  // The list is not repeated here. It is the keyboard, and every button carries the
+  // same copy /allowance prints for that row — so the body is the short brief (what
+  // this list is, how many rows, which are not usable) and the buttons are the rows.
+  const body = lines.map((l) => escHtml(l)).join('\n');
   return { text: body, buttons, rows, usable, unusable };
 }
 
@@ -1738,15 +1723,6 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         location: workLocation(),
         canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
         tableLanes: (fmTable && fmTable.lanes) || [],
-        // The exact text /allowance prints, from the same function with the same
-        // arguments — not a re-render of the same rows. Anything that differs between
-        // the two commands can only differ in the preamble above it.
-        tableForBody: buildAllowanceTextForBots({
-          stateDir: getLedger(config.id).dir,
-          location: workLocation(),
-          readiness: hostReadiness(caches),
-          catalogEntries: entries,
-        }),
       });
       // One keyboard with every model, no paging, and the router's cancel row.
       await api.sendMessage(chatId, body.text, {
@@ -2233,12 +2209,6 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, {
         current: eff.model,
         location: workLocation(),
-        tableForBody: buildAllowanceTextForBots({
-          stateDir: getLedger(config.id).dir,
-          location: workLocation(),
-          readiness: hostReadiness(caches),
-          catalogEntries: entries,
-        }),
       }), {
         parse_mode: 'HTML',
         reply_markup: modelKeyboard(

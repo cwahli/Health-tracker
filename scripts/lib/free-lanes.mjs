@@ -1011,6 +1011,42 @@ export function orderLikeWalk(lanes, currentModel) {
 }
 
 /**
+ * The copy width every list line is finished to.
+ *
+ * 72 characters, with a `-` in the last cell: the dash is what makes the width
+ * exact, because trailing spaces are trimmed by some clients and by Telegram's own
+ * rendering, so a line padded only with spaces is not reliably 72 anywhere. The
+ * dash is content, so the length holds.
+ */
+export const COPY_WIDTH = 72;
+
+/** The mark column: ✅/❌ plus the space after it. */
+const MARK_W = 2;
+
+/**
+ * Pad (or trim) any line to exactly COPY_WIDTH characters, ending in a `-`.
+ *
+ * The outer fill counts *characters*, not display columns, because "72 char" is how
+ * a reader counts and how Telegram sizes a button. The columns inside a row are
+ * still padded by display width, so the names, plans and scores line up. The two
+ * differ by one on a row carrying ✅, which occupies two columns and one character.
+ */
+export function fitCopy(line) {
+  const raw = String(line ?? '');
+  const body = raw.length >= COPY_WIDTH - 1 ? raw.slice(0, COPY_WIDTH - 1) : raw + ' '.repeat(COPY_WIDTH - 1 - raw.length);
+  return `${body}-`;
+}
+
+/**
+ * One row of the list, as the copy both surfaces show: mark, name, plan, benchmark
+ * and reset, finished to COPY_WIDTH. The allowance table and the /freemodel buttons
+ * call this, so a button and its row cannot say different things at different widths.
+ */
+export function rowCopy({ mark = " ", name = "", plan = "", score = "", resetIn = "—" } = {}) {
+  return fitCopy(`${mark} ${padDisp(name, MODEL_NAME_MAX)}${padDisp(plan, 5)}${padDisp(score, 7)}${padDisp(resetIn, 8)}`);
+}
+
+/**
  * The ledger table on its own: column header, rule, a subheading per tier group
  * with the group's count, and one line per row. Shared by /allowance and
  * /freemodel, which is what makes the two lists the same list rather than two
@@ -1059,13 +1095,12 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
   // — "AA48   —" against "AA39.5 —" — and the eye reads the ragged edge as ragged
   // alignment even though every line starts in the same column.
   // The ✅/❌ mark is a column, not a decoration in front of one: two glyphs, then
-  // the name, and every line — header, rule, subheading, row — padded to the same
-  // total so the block has one width and a straight right edge.
-  const MARK_W = 2;
-  const W_TOTAL = MARK_W + W_MODEL + W_PLAN + W_SCORE + W_RESET;
-  const fit = (line) => padDisp(line, W_TOTAL);
-  const header = fit(`${" ".repeat(MARK_W)}${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}${padDisp("AA", W_SCORE)}Reset in`);
-  const sep = fit(`${" ".repeat(MARK_W)}${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_SCORE)}${"-".repeat(W_RESET)}`);
+  // the name, then the columns, and the whole line finished to COPY_WIDTH by
+  // fitCopy so every line in the block is the same length and starts at the same
+  // column. The same copy is what a /freemodel button carries, so the button and the
+  // row say the same thing at the same width.
+  const header = fitCopy(`${" ".repeat(MARK_W)}${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}${padDisp("AA", W_SCORE)}Reset in`);
+  const sep = fitCopy(`${" ".repeat(MARK_W)}${"-".repeat(W_MODEL)}${"-".repeat(W_PLAN)}${"-".repeat(W_SCORE)}${"-".repeat(W_RESET)}`);
   const nl = "\n";
   // No <code> spans of its own: the whole message goes out inside one block, and a
   // nested span is escaped into visible "&lt;code&gt;" text.
@@ -1105,11 +1140,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // time, once the catalogue moved to the host's table.
     const resetIn = formatResetIn(verdict?.resetAt ?? laneResetAt(l, t), now);
     const score = benchmarkLabel(l.model || l) || "—";
-    // The reset column is padded too, so a row ends in real content rather than in
-    // trailing spaces — some clients trim those and the right edge goes ragged again.
-    const row = `${padDisp(name, W_MODEL)}${padDisp(plan, W_PLAN)}${padDisp(score, W_SCORE)}${padDisp(resetIn, W_RESET)}`;
-    const marked = `${ok ? "✅" : "❌"} ${row}`;
-    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: marked });
+    rendered.push({ tier: tierOfRow.get(l) || 'unlisted', line: rowCopy({ mark: ok ? "✅" : "❌", name, plan, score, resetIn }) });
   }
   // One subheading per tier group, in the catalog's order, with the group's own
   // count in it. A group with no rows gets no heading, and /freemodel groups the
@@ -1121,7 +1152,7 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     // Indented by the mark column so every line in the block starts at the same left
     // edge — a heading flush against column 0 while every row starts two glyphs in
     // reads as misalignment even though the columns are right.
-    if (tierGroups.length > 1) lines.push(fit(`${" ".repeat(MARK_W)}${g.label} (${mine.length})`));
+    if (tierGroups.length > 1) lines.push(fitCopy(`${" ".repeat(2)}${g.label} (${mine.length})`));
     for (const r of mine) lines.push(r.line);
   }
   // /freemodel embeds exactly these lines and nothing below them, so the two

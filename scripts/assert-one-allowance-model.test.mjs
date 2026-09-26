@@ -449,7 +449,7 @@ try {
   // row per group with the same label and count /allowance prints above the section,
   // from the same groupRowsByTier() result.
   check('/freemodel heads each tier group with the same label and count',
-    /buttons\.push\(\{ text: leftAlign\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
+    /buttons\.push\(\{ text: fitCopy\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
   check('and a heading is a real noop, not a model named noop',
     /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
   check('the body carries the same breakdown as one line',
@@ -491,8 +491,8 @@ try {
   // bakeoff label — or "unranked" when the ledger has no row for that model.
   // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
-    /const rated = `\$\{tag \? tag \+ ': ' : ''\}\$\{label\}/.test(botSrc)
-    && /text: leftAlign\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`\)/.test(botSrc),
+    /const rated = rowCopy\(\{/.test(botSrc)
+    && /mark: unusableOf\(r\) \? '❌' : '✅'/.test(botSrc),
     botSrc.match(/buttons\.push\(\{[^\n]*/)?.[0] || 'not found');
   // Telegram caps callback_data at 64 bytes, and it used to carry the label — so
   // the first label that grew took the whole keyboard down with
@@ -511,8 +511,8 @@ try {
   // counts cannot differ; the keyboard is the tappable layer on top of it.
   // The exact text, from the same call /allowance makes — not a re-render of the same
   // rows, which is how two surfaces drift.
-  check('/freemodel prints what /allowance prints, from the same call', /tableForBody: buildAllowanceTextForBots\(\{/.test(botSrc));
   check('the allowance text helper is still the one renderer', /export function formatCompactAllowanceChat/.test(read('lib/free-lanes.mjs')));
+  check('and rowCopy is the single source of the row copy', /export function rowCopy/.test(read('lib/free-lanes.mjs')) && /rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(read('lib/free-lanes.mjs')));
   check('the table helper is the table only, so nothing is embedded twice', /if \(tableOnly\) return lines\.join/.test(read('lib/free-lanes.mjs')));
   // The table is only monospace if the message is sent as HTML, and the plain lines
   // around it must be escaped or a label with & or < fails the whole send. Both of
@@ -520,26 +520,34 @@ try {
   // Every line in the table the same width, so the block reads as one flush-left
   // rectangle. The mark is a column inside the code span for the same reason: with it
   // outside, a row was two glyphs wider than the header and the edge went ragged.
-  check('every line of the block is padded to one width', (() => {
+  check('every line of the block is finished to the copy width', (() => {
     const src = read('lib/free-lanes.mjs');
-    return /const W_TOTAL = MARK_W \+ W_MODEL \+ W_PLAN \+ W_SCORE \+ W_RESET/.test(src)
-      && /const marked = `\$\{ok \? "✅" : "❌"\} \$\{row\}`/.test(src)
-      && /padDisp\(resetIn, W_RESET\)/.test(src)
-      // and a subheading shares the left edge, so the block has one margin
-      && /fit\(`\$\{" "\.repeat\(MARK_W\)\}\$\{g\.label\}/.test(src);
+    return /const header = fitCopy\(/.test(src)
+      && /const sep = fitCopy\(/.test(src)
+      && /lines\.push\(fitCopy\(/.test(src)
+      && /rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(src);
   })());
   check('and the message ends with the terminator', /lines\.push\('-'\)/.test(botSrc));
 
-  check('/freemodel sends the table as HTML, which is what makes it monospace', /parse_mode: 'HTML'/.test(botSrc) && /<code>/.test(read('lib/free-lanes.mjs')));
+  check('/freemodel sends its body as HTML, which is what makes it monospace', /parse_mode: 'HTML'/.test(botSrc));
   // One block for the whole message: the preamble is folded into the allowance text's
   // block, so the entire message is one monospace run with one left edge instead of
   // proportional prose sitting above a monospace table.
-  check('the whole message is one code block', /<code>\$\{pre\.join\('\\n'\)\}\\n\$\{inner\}<\/code>/.test(botSrc));
   check('and the renderer emits no nested code spans', !/<code>.*escHtml\(header\)/.test(read('lib/free-lanes.mjs')) && /const lines = \[header \+ nl \+ sep\]/.test(read('lib/free-lanes.mjs')));
 
-  check('button labels are padded left, and say why that is cosmetic',
-    /const LEFT_PAD = '\\u00a0\\u00a0'/.test(botSrc) && /no alignment field/.test(botSrc) && /leftAlign\(/.test(botSrc));
-  check('a button still carries the benchmark score', /const bench = benchmarkLabel\(model\)/.test(botSrc) && /\$\{bench \? ` · \$\{bench\}` : ''\}/.test(botSrc));
+  // One copy, one width: the row /allowance prints is the label the /freemodel button
+  // carries, both finished to 72 characters with a dash, so a button and its row are
+  // the same string rather than two vocabularies.
+  check('the button label is the /allowance row copy', /const rated = rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
+  check('every copy is exactly 72 characters ending in a dash', (() => {
+    const fl = read('lib/free-lanes.mjs');
+    return /export const COPY_WIDTH = 72;/.test(fl)
+      && /const body = raw\.length >= COPY_WIDTH - 1 \? raw\.slice\(0, COPY_WIDTH - 1\)/.test(fl)
+      && /return `\$\{body\}-`;/.test(fl);
+  })());
+  check('and the list is not repeated in the /freemodel message', !/tableForBody/.test(botSrc));
+  check('the old space padding is gone with it', !/LEFT_PAD/.test(botSrc) && !/leftAlign/.test(botSrc));
+  check('a button still carries the benchmark score', /score: benchmarkLabel\(model\)/.test(botSrc));
 
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
   check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
