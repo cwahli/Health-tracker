@@ -32,6 +32,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   loadFreeLaneLedger,
+  withCatalogLanes,
   annotateFreemodelEntries,
   laneMatchesRoute,
   liveRecForLane,
@@ -48,6 +49,8 @@ function argVal(name) {
   const kv = process.argv.find((a) => a.startsWith(`--${name}=`));
   return kv ? kv.slice(name.length + 3) : null;
 }
+const LOCATION = argVal('--location') || 'vps';
+const BOT_ID = argVal('--bot') || process.env.HTBOT_ID || 'vm2';
 const DRY = args.has('--dry-run');
 const LANE = argVal('lane');
 const BURN = args.has('--burn-ping');
@@ -94,6 +97,9 @@ if (args.has('--new-candidates') || (!BURN && !LANE)) {
   console.log(`catalog-vs-pref: ${fresh.length} opencode free(s) not in pref (tap-into candidates):`);
   for (const r of fresh.slice(0, 30)) console.log(`  + ${r}`);
   if (!BURN && !LANE) {
+    // The zero-burn path is the one QS-5 asks for, so the host capability table
+    // belongs here rather than after the burn branch's exit.
+    await hostCapabilityProbe();
     console.log('\nzero-burn map done (no quota spent). Add --burn-ping --lane N for one minimal ping.');
   }
   if (!BURN || args.has('--new-candidates')) process.exit(0);
@@ -222,3 +228,111 @@ for (const lane of targets) {
   }
   console.log(`  ⚠️ inconclusive (code ${result?.code}): ${(err || 'no text, no quota error').slice(0, 200)} — ledger untouched (no deplete stamp without quota proof)`);
 }
+
+// R-16 QS-5 wants a probe table per host: installed tools, the local binary and
+// whether it is authenticated, the provider catalog, and the credentials for the
+// hosted providers — because the claim under test is that /freemodel and
+// /allowance show exactly what this host supports and nothing inferred from
+// another host. This block is the independent half of that comparison: it reads
+// the filesystem and the environment, not the ledger those two commands render
+// from, so a row that the ledger claims but the host cannot run shows up here.
+async function hostCapabilityProbe() {
+  // The service reads its credentials from ~/.config/bot-host/{common,<id>}.env, so
+  // a probe run from a plain shell would report "NO CREDENTIAL" for providers the
+  // live bot is using, and QS-5's comparison would be against the wrong host
+  // state. The same files are read here, quotes stripped the way systemd's
+  // EnvironmentFile does, and the sources are printed so the output says which
+  // env it judged.
+  const home = os.homedir();
+  const env = { ...process.env };
+  const envSources = ['process env'];
+  for (const file of [`${home}/.config/bot-host/common.env`, `${home}/.config/bot-host/${BOT_ID}.env`]) {
+    let text = '';
+    try {
+      if (!fs.existsSync(file)) continue;
+      text = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    envSources.push(path.basename(file));
+    for (const line of text.split('\n')) {
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!m) continue;
+      const value = m[2].trim().replace(/^["'](.*)["']$/, '$1');
+      if (value) {
+        env[m[1]] = value;
+        // The catalog is read by spawning `opencode models`, which inherits
+        // process.env — not this local object. Without this the probe loaded the
+        // service's Gemini key and still got a `pending:gemini` placeholder back,
+        // and reported a host state the live bot does not have.
+        process.env[m[1]] = value;
+      }
+    }
+  }
+  const where = (...p) => p.find((f) => { try { return fs.existsSync(f); } catch { return false; } }) || null;
+  const has = (...keys) => keys.some((k) => {
+    const v = env[k];
+    return typeof v === 'string' && v.replace(/^["']|["']$/g, '').trim().length > 0;
+  });
+  const catalog = buildFreeModelList({ location: LOCATION, env }) || [];
+  // A catalogued model reached through OpenCode carries tool=opencode and
+  // provider=cloudflare / gemini, so counting only `tool` reported 0 rows for two
+  // providers the live /allowance shows working.
+  const rowsOf = (...tools) => catalog.filter((e) => tools.includes(String(e?.tool || '').toLowerCase()) || tools.includes(String(e?.provider || '').toLowerCase())).length;
+  // Token Harbor, Cloudflare and the Freebuff row are ledger lanes, not OpenCode
+  // catalog entries: they are reached through a hosted provider, so the honest
+  // count for them is the ledger's, and the catalog count is always zero.
+  // The row count has to come from the same table the live commands read, which is
+  // the router's live state with the pref document as fallback — not a per-bot
+  // ledger directory. Counting the per-bot copy made Cloudflare read 0 rows while
+  // /allowance showed two, and a probe that contradicts the thing it is checking
+  // is worse than no probe.
+  // Counting the raw ledger still read Cloudflare as 0 rows, because its lanes
+  // exist only after the catalog is folded in — which is the table /allowance
+  // actually renders. So the probe counts the folded table, the same fold, or the
+  // probe and the commands are reading two different worlds.
+  let ledgerRows = () => 0;
+  let hostedRows = () => 0;
+  let ledgerSource = 'unavailable';
+  let laneCount = 0;
+  try {
+    const loaded = loadFreeLaneLedger({});
+    const folded = withCatalogLanes(loaded?.table, catalog).table || loaded?.table;
+    const lanes = folded?.lanes || [];
+    laneCount = lanes.length;
+    ledgerSource = `${loaded?.source || 'unknown'}${folded && folded !== loaded?.table ? ' + catalog fold' : ''}`;
+    ledgerRows = (provider) => lanes.filter((l) => String(l?.provider || '').toLowerCase() === provider).length;
+    // Cloudflare and Gemini lanes are OpenCode-hosted: their provider is
+    // `opencode` and the execution owner is in the model id (`@cf/…`, `google/…`).
+    // Counting by provider alone reported 0 for two providers /allowance lists as
+    // working, which is the exact "inferred from the wrong place" mistake the row
+    // forbids.
+    // The owner is a *segment* of the model id, not its head: Cloudflare lanes are
+    // `cloudflare/@cf/<ns>/<model>` reached through OpenCode, so a startsWith('@cf/')
+    // test found 0 of the two rows /allowance shows.
+    hostedRows = (prefix) => lanes.filter((l) => {
+      const segs = String(l?.model || '').toLowerCase().split('/');
+      return segs.includes(prefix) || String(l?.model || '').toLowerCase().startsWith(prefix);
+    }).length;
+  } catch {
+    ledgerRows = () => 0;
+    hostedRows = () => 0;
+  }
+  const rows = [
+    ['OpenCode', where(`${home}/.opencode/bin/opencode`, '/usr/local/bin/opencode', '/usr/bin/opencode') ? 'binary present' : 'NO BINARY', has('OPENCODE_API_KEY') ? 'OPENCODE_API_KEY set' : 'no OPENCODE_API_KEY', `${rowsOf('opencode', 'opencode-go')} catalog rows`],
+    // cline lives under the npm global prefix, which is not on the service PATH;
+    // a probe that missed it would claim Cline is unavailable while /allowance
+    // shows four working Cline rows.
+    ['Cline', where(`${home}/.npm-global/bin/cline`, `${home}/.local/bin/cline`, '/usr/local/bin/cline', '/usr/bin/cline') ? 'binary present' : 'NO BINARY', where(`${home}/.config/cline/data/settings/providers.json`, `${home}/.cline/data/settings/providers.json`, `${home}/.cline/auth.json`) ? 'auth file present' : 'NO AUTH FILE', `${rowsOf('cline')} catalog rows, ${ledgerRows('cline')} ledger rows`],
+    ['Token Harbor', 'remote API', has('TOKEN_HARBOR_API_KEY', 'TOKENHARBOR_API_KEY') ? 'credential set' : 'NO CREDENTIAL', `${ledgerRows('tokenharbor')} ledger rows`],
+    ['Cloudflare Workers AI', 'remote API', has('CLOUDFLARE_WORKERS_AI_TOKEN', 'CLOUDFLARE_API_TOKEN', 'CF_API_TOKEN') ? 'credential set' : 'NO CREDENTIAL', `${ledgerRows('cloudflare')} ledger rows, ${hostedRows('@cf')} @cf lanes`],
+    ['Gemini via OpenCode', 'via OpenCode', has('GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY') ? 'credential set' : 'NO CREDENTIAL', `${rowsOf('gemini')} catalog rows, ${ledgerRows('gemini')} ledger rows, ${hostedRows('google')} google lanes`],
+    ['Freebuff', where(`${home}/.local/bin/freebuff`, '/usr/local/bin/freebuff', '/usr/bin/freebuff') ? 'binary present' : 'NO BINARY', has('FREEBUFF_API_KEY', 'FREEBUFF_TOKEN') ? 'credential set' : 'no credential', `${ledgerRows('freebuff')} ledger rows (terminal-only on this host)`],
+  ];
+  console.log(`\nhost capability probe (zero burn) — env from: ${envSources.join(', ')}; ledger: ${ledgerSource} (${laneCount} lanes)`);
+  const w = [0, 1, 2].map((i) => Math.max(...rows.map((r) => String(r[i]).length)));
+  for (const r of rows) console.log(`  ${String(r[0]).padEnd(w[0])}  ${String(r[1]).padEnd(w[1])}  ${String(r[2]).padEnd(w[2])}  ${r[3]}`);
+  console.log('  a provider with NO CREDENTIAL above must appear in /allowance as needing setup, never as selectable');
+  return rows;
+}
+

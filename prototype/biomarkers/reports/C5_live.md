@@ -5,7 +5,7 @@
 - Insight batch: 20 · draft batch: 12 → 3 agent turns
 - Flow: hits lock dictionary; agent writes medicalInsight only. Misses get pending drafts.
 - Template: `prototype/biomarkers/TEMPLATE.md`
-- Env file: (none)
+- Env file: r16-scorecard/.env
 - Score: **PASS** (50 known / 0 unknown)
 
 ## System instruction (verbatim)
@@ -138,7 +138,7 @@ AUDIT Score (Total)  3.5 score
 
 ## Agent turns (full payload sent + model output)
 
-### Turn 1 (hit) — r01, r02, r03, r04, r05, r06, r07, r08, r09, r10, r11, r12, r13, r14, r15, r16, r17, r18, r19, r20 (20 rows, 7924ms)
+### Turn 1 (hit) — r01, r02, r03, r04, r05, r06, r07, r08, r09, r10, r11, r12, r13, r14, r15, r16, r17, r18, r19, r20 (20 rows, 7356ms)
 
 **User contents sent to the model** (system instruction is above; this is the user turn):
 
@@ -480,7 +480,7 @@ Biomarkers to review (hits - in catalog):
 [
   {
     "id": "r01",
-    "medicalInsight": "Your HbA1c is 30.5 mmol/mol, indicating optimal blood glucose control well below the prediabetes threshold.",
+    "medicalInsight": "Your HbA1c is 30.5 mmol/mol, indicating optimal long-term blood glucose regulation well below the Chinese prediabetes threshold.",
     "optimalValue": "30 mmol/mol",
     "editReason": "",
     "logs": [
@@ -491,12 +491,12 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39",
+    "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes): >=39; Optimal: <39",
     "dictionaryCorrection": null
   },
   {
     "id": "r02",
-    "medicalInsight": "Your fasting glucose is 84.5 mg/dL (4.7 mmol/L), reflecting normal and healthy glycemic control.",
+    "medicalInsight": "Your fasting glucose is 84.5 mg/dL, which is within the normal healthy range for glycemic control.",
     "optimalValue": "85 mg/dL",
     "editReason": "",
     "logs": [
@@ -512,7 +512,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r03",
-    "medicalInsight": "Your fasting insulin of 13.75 mIU/L is within normal limits, suggesting adequate insulin sensitivity.",
+    "medicalInsight": "Your fasting insulin of 13.75 mIU/L is within normal limits, showing adequate insulin sensitivity.",
     "optimalValue": "6 mIU/L",
     "editReason": "",
     "logs": [
@@ -528,7 +528,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r04",
-    "medicalInsight": "Your LDL-C of 2.08 mmol/L is optimal and supports healthy cardiovascular status.",
+    "medicalInsight": "Your LDL-C is 2.08 mmol/L, placing you in an optimal cardiovascular risk category.",
     "optimalValue": "1.8 mmol/L",
     "editReason": "",
     "logs": [
@@ -544,8 +544,8 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r05",
-    "medicalInsight": "Your ApoB is 10 mg/dL, which is exceptionally low and optimal for cardiovascular protection.",
-    "optimalValue": "65 mg/dL",
+    "medicalInsight": "Your ApoB is 10 mg/dL, which is atypically low and should be verified against laboratory assay specifics.",
+    "optimalValue": "70 mg/dL",
     "editReason": "",
     "logs": [
       {
@@ -560,7 +560,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r06",
-    "medicalInsight": "Your total cholesterol is 10 mmol/L, indicating a markedly elevated level requiring clinical correlation.",
+    "medicalInsight": "Your total cholesterol is 10 mmol/L, which is significantly elevated and requires medical review.",
     "optimalValue": "4.5 mmol/L",
     "editReason": "",
     "logs": [
@@ -576,7 +576,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r07",
-    "medicalInsight": "Your HDL-C is 1.3 mmol/L, falling comfortably within the normal protective range.",
+    "medicalInsight": "Your HDL-C is 1.30 mmol/L, reflecting a protective level of good cholesterol.",
     "optimalValue": "1.5 mmol/L",
     "editReason": "",
     "logs": [
@@ -592,8 +592,8 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r08",
-    "medicalInsight": "Your triglycerides are 1.36 mmol/L, which is optimal for metabolic and cardiac health.",
-    "optimalValue": "0.9 mmol/L",
+    "medicalInsight": "Your triglycerides are 1.36 mmol/L, falling within the optimal range for metabolic health.",
+    "optimalValue": "1.0 mmol/L",
     "editReason": "",
     "logs": [
       {
@@ -608,9 +608,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r09",
-    "medicalInsight": "Your eGFR is 10 mL/min/1.73m², which is severely impaired and inconsistent with normal renal function.",
+    "medicalInsight": "Your eGFR is 10 mL/min/1.73m², which appears discordant with your normal creatinine; please verify this value.",
     "optimalValue": "95 mL/min/1.73m2",
-    "editReason": "Correcting naive normal eGFR and inaccurate previous insight text to reflect true value and clinical target.",
+    "editReason": "Corrected naive normal eGFR from 60 to an individualized optimal target of >= 90.",
     "logs": [
       {
         "date": "2026-06-05",
@@ -619,12 +619,12 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": "[Western Standard] Normal: >=90; Mild: 60-89; Moderate: 30-59; Severe: 15-29; Kidney Failure: <15",
+    "customRangeOverlay": "[Western Standard] High: >=90; Low: <60",
     "dictionaryCorrection": null
   },
   {
     "id": "r10",
-    "medicalInsight": "Your BUN is 4.82 mmol/L (approx. 13.5 mg/dL), well within the normal healthy range for kidney function.",
+    "medicalInsight": "Your BUN is 4.82 mmol/L (approx 13.5 mg/dL), which is well within normal renal function parameters.",
     "optimalValue": "5.0 mmol/L",
     "editReason": "",
     "logs": [
@@ -635,12 +635,12 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
+    "customRangeOverlay": null,
     "dictionaryCorrection": null
   },
   {
     "id": "r11",
-    "medicalInsight": "Your red blood cell count is 5.2 M/uL, indicating a normal and robust oxygen-carrying capacity.",
+    "medicalInsight": "Your red blood cell count of 5.2 M/uL is normal, supporting healthy tissue oxygenation.",
     "optimalValue": "5.0 M/uL",
     "editReason": "",
     "logs": [
@@ -656,7 +656,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r12",
-    "medicalInsight": "Your platelet count is 300 K/uL, which is optimal for normal blood clotting.",
+    "medicalInsight": "Your platelet count is 300 K/uL, indicating normal coagulation and bone marrow function.",
     "optimalValue": "250 K/uL",
     "editReason": "",
     "logs": [
@@ -672,7 +672,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r13",
-    "medicalInsight": "Your hs-CRP is 1.0 mg/L, representing a low risk level for systemic and vascular inflammation.",
+    "medicalInsight": "Your hs-CRP is 1.0 mg/L, reflecting a low level of systemic and vascular inflammation.",
     "optimalValue": "0.5 mg/L",
     "editReason": "",
     "logs": [
@@ -688,7 +688,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r14",
-    "medicalInsight": "Your total testosterone is 650 ng/dL, which is a healthy and robust level for your age.",
+    "medicalInsight": "Your total testosterone is 650 ng/dL, demonstrating healthy endocrine function.",
     "optimalValue": "700 ng/dL",
     "editReason": "",
     "logs": [
@@ -704,7 +704,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r15",
-    "medicalInsight": "Your Vitamin D level is 65 ng/mL, showing a healthy status well above the sufficiency threshold.",
+    "medicalInsight": "Your vitamin D level is 65 ng/mL, indicating robust sufficiency for bone and immune health.",
     "optimalValue": "50 ng/mL",
     "editReason": "",
     "logs": [
@@ -720,7 +720,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r16",
-    "medicalInsight": "Your Vitamin B12 is 550 pg/mL, supporting normal neurological and hematological function.",
+    "medicalInsight": "Your vitamin B12 level is 550 pg/mL, which is optimal for neurological and hematological maintenance.",
     "optimalValue": "600 pg/mL",
     "editReason": "",
     "logs": [
@@ -736,7 +736,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r17",
-    "medicalInsight": "Your BMI is 21.7 kg/m², which falls within the normal and healthy weight range for an Asian adult.",
+    "medicalInsight": "Your BMI is 21.7 kg/m², which falls within the normal range adjusted for Asian ethnicity criteria.",
     "optimalValue": "21.5 kg/m2",
     "editReason": "",
     "logs": [
@@ -747,14 +747,14 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": null,
+    "customRangeOverlay": "[Asian] Obese: >=27.5; Overweight: 23.0-27.4; Normal: 18.5-22.9; Underweight: <18.5",
     "dictionaryCorrection": null
   },
   {
     "id": "r18",
-    "medicalInsight": "Your serum creatinine is 75 umol/L, well within the normal healthy range for kidney filtration.",
+    "medicalInsight": "Your serum creatinine is 75 umol/L, well within normal limits reflecting healthy baseline kidney filtration.",
     "optimalValue": "80 umol/L",
-    "editReason": "Correcting insight text to align with the actual patient value of 75 umol/L.",
+    "editReason": "Corrected conflicting insight text regarding creatinine value.",
     "logs": [
       {
         "date": "2026-06-05",
@@ -768,8 +768,8 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r19",
-    "medicalInsight": "Your hematocrit is 0.43 L/L, indicating a normal proportion of red blood cells.",
-    "optimalValue": "0.44 L/L",
+    "medicalInsight": "Your hematocrit is 0.43 L/L, which is well centered in the standard healthy reference interval.",
+    "optimalValue": "0.45 L/L",
     "editReason": "",
     "logs": [
       {
@@ -784,7 +784,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r20",
-    "medicalInsight": "Your hemoglobin is 147.5 g/L, which is optimal for healthy oxygen transport.",
+    "medicalInsight": "Your hemoglobin is 147.5 g/L, indicating normal oxygen-carrying capacity without signs of anemia.",
     "optimalValue": "150 g/L",
     "editReason": "",
     "logs": [
@@ -801,7 +801,7 @@ Biomarkers to review (hits - in catalog):
 ]
 ```
 
-### Turn 2 (hit) — r21, r22, r23, r24, r25, r26, r27, r28, r29, r30, r31, r32, r33, r34, r35, r36, r37, r38, r39, r40 (20 rows, 7522ms)
+### Turn 2 (hit) — r21, r22, r23, r24, r25, r26, r27, r28, r29, r30, r31, r32, r33, r34, r35, r36, r37, r38, r39, r40 (20 rows, 7395ms)
 
 **User contents sent to the model** (system instruction is above; this is the user turn):
 
@@ -1143,7 +1143,7 @@ Biomarkers to review (hits - in catalog):
 [
   {
     "id": "r21",
-    "medicalInsight": "Your MCH level of 30 pg is within the optimal range, indicating normal hemoglobin content per red blood cell.",
+    "medicalInsight": "Your MCH is within the optimal normal range, indicating healthy hemoglobin incorporation per erythrocyte.",
     "optimalValue": "30 pg",
     "editReason": "",
     "logs": [
@@ -1159,7 +1159,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r22",
-    "medicalInsight": "Your MCV level of 90 fL is normal, reflecting healthy red blood cell volume and size.",
+    "medicalInsight": "Your MCV is normal, indicating appropriately sized red blood cells.",
     "optimalValue": "90 fL",
     "editReason": "",
     "logs": [
@@ -1175,7 +1175,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r23",
-    "medicalInsight": "Your MCHC level of 340 g/L is within normal limits, showing appropriate hemoglobin concentration inside your red blood cells.",
+    "medicalInsight": "Your MCHC is within normal limits, reflecting normal cellular hemoglobin concentration.",
     "optimalValue": "340 g/L",
     "editReason": "",
     "logs": [
@@ -1191,7 +1191,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r24",
-    "medicalInsight": "Your RDW of 13% is optimal, indicating a healthy and uniform distribution of red blood cell sizes.",
+    "medicalInsight": "Your RDW is optimal, reflecting low variation in red blood cell sizes.",
     "optimalValue": "13 %",
     "editReason": "",
     "logs": [
@@ -1207,7 +1207,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r25",
-    "medicalInsight": "Your serum albumin level of 42.5 g/L is normal, supporting healthy liver protein synthesis and oncotic pressure.",
+    "medicalInsight": "Your serum albumin level is normal, indicating good hepatic synthetic function and oncotic status.",
     "optimalValue": "45 g/L",
     "editReason": "",
     "logs": [
@@ -1223,8 +1223,8 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r26",
-    "medicalInsight": "Your total protein level of 70 g/L is normal, reflecting healthy systemic protein balance.",
-    "optimalValue": "72 g/L",
+    "medicalInsight": "Your total protein level is normal, reflecting a balanced protein pool in circulation.",
+    "optimalValue": "70 g/L",
     "editReason": "",
     "logs": [
       {
@@ -1234,16 +1234,16 @@ Biomarkers to review (hits - in catalog):
         "comment": null
       }
     ],
-    "customRangeOverlay": null,
+    "customRangeOverlay": "[Western Standard] High: >80 g/L; Normal: 60-80 g/L; Low: <60 g/L",
     "dictionaryCorrection": {
       "field": "normalRange",
-      "correctedValue": "60 - 80",
-      "reason": "Standard units for total protein are g/L, making 6-8 g/L a typo for 60-80 g/L."
+      "correctedValue": "60 - 80 g/L",
+      "reason": "Correcting total protein range formatting from 6 - 8 g/L to standard physiological scale 60 - 80 g/L."
     }
   },
   {
     "id": "r27",
-    "medicalInsight": "Your AUDIT score of 3.5 indicates low-risk alcohol consumption habits.",
+    "medicalInsight": "Your AUDIT score indicates low-risk alcohol consumption patterns.",
     "optimalValue": "0 points",
     "editReason": "",
     "logs": [
@@ -1259,8 +1259,8 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r28",
-    "medicalInsight": "Your total white blood cell count of 7.75 K/uL is within the optimal range, suggesting healthy immune function.",
-    "optimalValue": "6.0 K/uL",
+    "medicalInsight": "Your total white blood cell count is within the healthy reference range.",
+    "optimalValue": "7.0 K/uL",
     "editReason": "",
     "logs": [
       {
@@ -1275,8 +1275,8 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r29",
-    "medicalInsight": "Your neutrophil count of 4.75 10^9/L is normal, supporting robust defense against bacterial pathogens.",
-    "optimalValue": "3.5 10^9/L",
+    "medicalInsight": "Your neutrophil count is normal, indicating an effective baseline innate immune system.",
+    "optimalValue": "4.0 10^9/L",
     "editReason": "",
     "logs": [
       {
@@ -1291,7 +1291,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r30",
-    "medicalInsight": "Your lymphocyte count of 2.25 10^9/L is normal, indicating healthy adaptive immune responsiveness.",
+    "medicalInsight": "Your lymphocyte count is within normal limits, supporting proper adaptive immunity.",
     "optimalValue": "2.0 10^9/L",
     "editReason": "",
     "logs": [
@@ -1307,7 +1307,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r31",
-    "medicalInsight": "Your monocyte count of 0.35 10^9/L is optimal for cellular debris clearance and immune regulation.",
+    "medicalInsight": "Your monocyte count is optimal, showing healthy phagocytic baseline cell levels.",
     "optimalValue": "0.3 10^9/L",
     "editReason": "",
     "logs": [
@@ -1323,7 +1323,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r32",
-    "medicalInsight": "Your eosinophil count of 0.26 10^9/L is normal, reflecting a balanced baseline immune response.",
+    "medicalInsight": "Your eosinophil count is normal, with no signs of active allergic or parasitic activity.",
     "optimalValue": "0.15 10^9/L",
     "editReason": "",
     "logs": [
@@ -1339,7 +1339,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r33",
-    "medicalInsight": "Your basophil count of 0.05 10^9/L is normal.",
+    "medicalInsight": "Your basophil count is within normal parameters.",
     "optimalValue": "0.02 10^9/L",
     "editReason": "",
     "logs": [
@@ -1355,7 +1355,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r34",
-    "medicalInsight": "Your ALT level of 25 U/L is optimal, indicating healthy liver enzyme levels and absence of hepatocellular stress.",
+    "medicalInsight": "Your ALT level is optimal, demonstrating healthy liver enzyme function.",
     "optimalValue": "20 U/L",
     "editReason": "",
     "logs": [
@@ -1371,8 +1371,8 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r35",
-    "medicalInsight": "Your AST level of 25 U/L is normal, showing good hepatic and muscular tissue health.",
-    "optimalValue": "22 U/L",
+    "medicalInsight": "Your AST level is normal, suggesting no significant hepatocellular stress.",
+    "optimalValue": "20 U/L",
     "editReason": "",
     "logs": [
       {
@@ -1387,23 +1387,23 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r36",
-    "medicalInsight": "Your recorded daily step count is currently very low at 10 steps. Increasing physical activity toward 8,000+ steps daily is strongly encouraged for cardiovascular and metabolic wellness.",
-    "optimalValue": "10000 steps",
+    "medicalInsight": "Your daily step count is currently well below recommended physical activity targets.",
+    "optimalValue": "8000 steps",
     "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
         "value": 10,
         "unit": "steps",
-        "comment": null
+        "comment": "Significantly below optimal target"
       }
     ],
-    "customRangeOverlay": "[Western Standard] Low: <8000; Optimal: >=8000",
+    "customRangeOverlay": "[Western Standard] Optimal: >=8000; Low: <8000",
     "dictionaryCorrection": null
   },
   {
     "id": "r37",
-    "medicalInsight": "Your body weight is recorded at 75 kg. Tracking body weight trends helps monitor metabolic balance alongside your biomarker panel.",
+    "medicalInsight": "Your body weight is recorded at 75 kg; assess alongside height and body composition for complete context.",
     "optimalValue": "70 kg",
     "editReason": "",
     "logs": [
@@ -1419,7 +1419,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r38",
-    "medicalInsight": "Your HDSS score of 0 indicates a complete absence of hemorrhoidal symptoms.",
+    "medicalInsight": "Your HDSS score is zero, indicating no active hemorrhoidal symptoms.",
     "optimalValue": "0 score",
     "editReason": "",
     "logs": [
@@ -1435,7 +1435,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r39",
-    "medicalInsight": "Your GERD-SS score of 0 indicates no upper gastrointestinal reflux symptoms.",
+    "medicalInsight": "Your GERD-SS score is zero, indicating an absence of gastroesophageal reflux symptoms.",
     "optimalValue": "0 score",
     "editReason": "",
     "logs": [
@@ -1451,7 +1451,7 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r40",
-    "medicalInsight": "Your joint pain severity score of 0 indicates asymptomatic joint health with no reported discomfort.",
+    "medicalInsight": "Your joint pain severity score is zero, reflecting optimal joint comfort.",
     "optimalValue": "0 score",
     "editReason": "",
     "logs": [
@@ -1468,7 +1468,7 @@ Biomarkers to review (hits - in catalog):
 ]
 ```
 
-### Turn 3 (hit) — r41, r42, r43, r44, r45, r46, r47, r48, r49, r50 (10 rows, 4661ms)
+### Turn 3 (hit) — r41, r42, r43, r44, r45, r46, r47, r48, r49, r50 (10 rows, 3923ms)
 
 **User contents sent to the model** (system instruction is above; this is the user turn):
 
@@ -1650,9 +1650,9 @@ Biomarkers to review (hits - in catalog):
 [
   {
     "id": "r41",
-    "medicalInsight": "Your blood pressure is within the optimal normal range, indicating healthy cardiovascular function.",
+    "medicalInsight": "Your blood pressure is well within the optimal range, reflecting healthy cardiovascular status.",
     "optimalValue": "110 mmHg",
-    "editReason": "Set ideal target below standard normal threshold for optimal cardiovascular health.",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1666,9 +1666,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r42",
-    "medicalInsight": "Your systolic blood pressure is optimal, reflecting good arterial compliance and tone.",
+    "medicalInsight": "Systolic blood pressure is optimal, indicating low vascular resistance and good heart function.",
     "optimalValue": "110 mmHg",
-    "editReason": "Set optimal target for systolic pressure.",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1682,9 +1682,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r43",
-    "medicalInsight": "Your diastolic blood pressure is optimal, well within the protective physiological range.",
+    "medicalInsight": "Diastolic blood pressure is within the ideal physiological range.",
     "optimalValue": "70 mmHg",
-    "editReason": "Set optimal target for diastolic pressure.",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1698,9 +1698,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r44",
-    "medicalInsight": "Your AUDIT-C score indicates low-risk alcohol consumption behavior.",
+    "medicalInsight": "Your AUDIT-C score indicates low-risk alcohol consumption habits.",
     "optimalValue": "0 score",
-    "editReason": "Set optimal target to abstain or lowest risk category.",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1714,9 +1714,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r45",
-    "medicalInsight": "Your target ideal body weight is established as a personalized benchmark for metabolic health.",
+    "medicalInsight": "Target ideal body weight provides a personalized goal for metabolic health and frame optimization.",
     "optimalValue": "70 kg",
-    "editReason": "Set ideal target matching the stated target.",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1730,9 +1730,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r46",
-    "medicalInsight": "Your Apolipoprotein A1 level is normal, supporting healthy reverse cholesterol transport.",
+    "medicalInsight": "ApoA1 levels are optimal, supporting healthy reverse cholesterol transport and cardiovascular protection.",
     "optimalValue": "1.80 g/L",
-    "editReason": "Set optimal target within normal range for HDL-related particle transport.",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1746,9 +1746,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r47",
-    "medicalInsight": "Your GGT level is optimal, suggesting healthy liver function and absence of biliary stress.",
-    "optimalValue": "20 U/L",
-    "editReason": "Set optimal target to lower quartile of reference range.",
+    "medicalInsight": "Gamma-GT levels are normal, indicating healthy liver function and absence of biliary stress.",
+    "optimalValue": "25 U/L",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1762,9 +1762,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r48",
-    "medicalInsight": "Your mean platelet volume is normal, indicating healthy platelet production dynamics.",
+    "medicalInsight": "Mean Platelet Volume falls within the healthy reference interval, indicating normal thrombocyte morphology.",
     "optimalValue": "9.5 fL",
-    "editReason": "Set optimal target to current measured value.",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1778,9 +1778,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r49",
-    "medicalInsight": "Your 10-year cardiovascular disease risk score is below the general clinical threshold.",
-    "optimalValue": "2 %",
-    "editReason": "Set optimal target for minimal cardiovascular risk.",
+    "medicalInsight": "Your QRISK2 10-year cardiovascular risk score is below the general clinical threshold, indicating low estimated risk.",
+    "optimalValue": "5 %",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",
@@ -1794,9 +1794,9 @@ Biomarkers to review (hits - in catalog):
   },
   {
     "id": "r50",
-    "medicalInsight": "Your total AUDIT score indicates low-risk drinking habits.",
+    "medicalInsight": "Your total AUDIT score reflects low-risk alcohol consumption behavior.",
     "optimalValue": "0 score",
-    "editReason": "Set optimal target to complete abstinence or lowest possible score.",
+    "editReason": "",
     "logs": [
       {
         "date": "2026-06-05",

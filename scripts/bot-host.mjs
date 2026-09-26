@@ -81,6 +81,7 @@ import {
   effectiveProviderOf,
   planCodeForLane,
   canonicalAllowanceLanes,
+  groupRowsByTier,
   formatResetIn,
   renderFreeLaneTableHtml,
   ensureBotLedger,
@@ -93,7 +94,10 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
-import { ratingSuffix, benchmarkLabel, groupForModel } from './lib/model-ratings.mjs';
+// R-16: the score on a button is the bakeoff ledger's own verdict, and the tier
+// is the catalog's. Both live in the catalogs, so there is no ratings table here
+// to drift from them. A model with no ledger row renders "unranked".
+import { scoreLabelFor, walkTierRank, tierForModel } from './lib/free-catalogs.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -195,8 +199,6 @@ function parseArgs(argv) {
     else if (arg.startsWith('--registry=')) args.registry = arg.slice('--registry='.length);
     else if (arg.startsWith('--prompt=')) args.prompt = arg.slice('--prompt='.length);
     else if (arg.startsWith('--simulate=')) args.simulate = arg.slice('--simulate='.length);
-    else if (arg.startsWith('--inject=')) args.inject = arg.slice('--inject='.length);
-    else if (arg.startsWith('--chat=')) args.chat = arg.slice('--chat='.length);
   }
   return args;
 }
@@ -209,7 +211,6 @@ Usage:
   node scripts/bot-host.mjs --check-config [--id=<botId>]
   node scripts/bot-host.mjs --dry-run [--id=<botId>] [--prompt="..."]
   node scripts/bot-host.mjs --simulate="/model" [--id=<botId>]
-  node scripts/bot-host.mjs --inject="/status" [--chat=<id>] [--id=<botId>]
 
 Bots are defined in bots/registry.json. Add a new bot by appending an entry,
 exporting its token env var, and starting bot-host@<id>. No code changes.
@@ -835,7 +836,11 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // the same Token Harbor collapse and the same no-credential exclusion. This
   // command used to run its own dedupe over the catalog, and two notions of "the
   // same model" drifted by one row for four rounds. One list, one count.
-  const rows = canonical || [];
+  // The same list /allowance renders, in the same tier-group order, from the same
+  // helper — so the two commands cannot disagree about which models exist, what
+  // order they are in, or which pool each one belongs to.
+  const tierGroups = groupRowsByTier(canonical || []);
+  const rows = tierGroups.flatMap((g) => g.rows);
   // A catalogued model with no lane row AT ALL is still reported, never dropped.
   // The test is against the TABLE, not against the canonical list: a superseded
   // model (an older version whose family now has a newer one) is in the table and
@@ -888,25 +893,6 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
       ? `Total: ${listed.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''}${needsSetup.length ? ` · ${needsSetup.length} need setup` : ''} · current: ${current || 'default'}`
       : 'No free models are installed and authenticated on this host.',
   ];
-  // QS-6/QS-7: the body renders the two tiers the catalogs already define —
-  // coding-capable first, light second — with each row's benchmark score.
-  // Tiers and scores both come from the shared model-ratings module (scorecard
-  // AA>=35, curated BENCHMARKS groups); 'unknown' renders inside Light because
-  // fallback-class is what unknown means here, and one list beats three. The
-  // keyboard below keeps canonical order and is untouched: the body is
-  // display-only, taps resolve through button callback refs, never text.
-  const refOfRow = (r) => r.lane?.model || r.model || r.ref || '';
-  const tierOfRow = (r) => (groupForModel(refOfRow(r)) === 'coding' ? 'coding' : 'light');
-  const coding = usable.filter((r) => tierOfRow(r) === 'coding');
-  const light = usable.filter((r) => tierOfRow(r) !== 'coding');
-  if (coding.length) {
-    lines.push('', 'Coding-capable:');
-    for (const r of coding) lines.push(`• ${r.laneLabel || r.label} — ${benchmarkLabel(refOfRow(r))}`);
-  }
-  if (light.length) {
-    lines.push('', 'Light / fallback:');
-    for (const r of light) lines.push(`• ${r.laneLabel || r.label} — ${benchmarkLabel(refOfRow(r))}`);
-  }
   // One short footer line — never a second per-model list.
   const footer = [];
   if (noCredential.length) {
@@ -931,18 +917,27 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
   // double-list problem one level down.
   const seen = new Set();
   const buttons = [];
-  for (const r of rows) {
+  for (const g of tierGroups) {
+  for (const r of g.rows) {
     const label = r.laneLabel || r.label;
     const tag = r.plan || (r.lane ? planCodeForLane(r.lane) : '');
     // The benchmark score rides on the button, so the choice is made with the number
     // in front of you rather than from memory. Unscored models get nothing — the
     // scorecard covers about half the reachable free models, and a missing number is
     // honest where a borrowed one would not be.
-    const rated = `${tag ? tag + ': ' : ''}${label}${ratingSuffix(r.lane?.model || r.model || r.ref || '')}`;
+    // The tier rides on the button as well as in the order, because a keyboard has
+    // no subheadings: `coding` / `light` / `unranked` is the only way the split is
+    // visible here, and it is the same word /allowance prints above the group.
+    const tierWord = { high: 'coding', light: 'light', unlisted: 'unranked' }[g.tier] || 'unranked';
+    const rated = `${tag ? tag + ': ' : ''}${label} · ${tierWord} · ${scoreLabelFor(r.lane?.model || r.model || r.ref || '')}`;
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    buttons.push(`${unusableOf(r) ? '❌ ' : ''}${rated}`);
+    // text for the reader, data for the tap: the row's route, so a label that
+    // grows (a bakeoff label, a plan tag) can never invalidate the keyboard.
+    const route = r.ref || r.lane?.ref || r.model || '';
+    buttons.push({ text: `${unusableOf(r) ? '❌ ' : ''}${rated}`, data: route, ref: route });
+  }
   }
   return { text: lines.join('\n'), buttons, rows, usable, unusable };
 }
@@ -2279,7 +2274,7 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       const available = selectable.filter((a) => !a.depleted);
       await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() }), {
         reply_markup: modelKeyboard(
-          (available.length ? available : selectable).map((entry) => entry.label),
+          (available.length ? available : selectable).map((entry) => ({ text: entry.label, data: entry.ref })),
           { page: Number(value) || 0, kind: 'fm' },
         ),
       });
@@ -2293,8 +2288,19 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       // rows, which carry that label, and then back to the entry by ref.
       const wanted = String(value || '').replace(/^❌\s*/, '').trim();
       const bundle = getAnnotatedFreeModels(caches, config.id);
-      const hit = (bundle.annotated || []).find(
-        (a) => a.laneLabel === wanted || a.label === wanted || a.ref === value || a.ref === wanted,
+      // `#<n>` is the position in the keyboard this handler just rendered, for a
+      // route too long for Telegram's 64-byte callback_data. Everything else is a
+      // route identity or a label; a route is what a tap should resolve.
+      const byPosition = String(value || '').startsWith('#')
+        ? (() => {
+            const rows = bundle.annotated || [];
+            const selectable = rows.filter((a) => a.selectable !== false);
+            const available = selectable.filter((a) => !a.depleted);
+            return (available.length ? available : selectable)[Number(wanted.slice(1))] || null;
+          })()
+        : null;
+      const hit = byPosition || (bundle.annotated || []).find(
+        (a) => a.ref === value || a.laneLabel === wanted || a.label === wanted || a.ref === wanted,
       );
       const entries = bundle.entries?.length ? bundle.entries : await getFreeModels(caches, config);
       const entry = hit
@@ -2465,14 +2471,14 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   // a low pref number would take over the turn. Light lanes stay reachable as a last
   // resort, because failing a turn outright is worse than a weaker answer, and
   // `degradedToLight` says when that is what happened.
-  const groupOf = (m) => groupForModel(m || '');
-  const rank = (l) => {
-    const g = groupOf(l.model);
-    return g === 'coding' ? 0 : g === 'light' ? 2 : 1;
-  };
+  // Tier order comes from the catalog (QS-6): high first, then models the
+  // catalog does not rank, then light. Light lanes stay reachable as a last
+  // resort, and the reply says so when a coding turn ends up on one.
+  const rank = (l) => walkTierRank(l.model);
   const orderedLanes = [...fallbackLanes].sort((a, b) => rank(a) - rank(b) || (Number(a.pref) || 0) - (Number(b.pref) || 0));
-  const currentGroup = model ? groupOf(freemodelRefToRoute(model).model || model) : 'unknown';
+  const currentGroup = (tierForModel(freemodelRefToRoute(model).model || model).tier) || 'unlisted';
   const codingLeft = orderedLanes.filter((l) => rank(l) === 0).length;
+  const lightLeft = orderedLanes.filter((l) => rank(l) === 2).length;
 
   if (!model && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
@@ -2507,8 +2513,9 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
     // group, so the failover notice can say what happened instead of the reader
     // wondering why the answer got worse.
     currentGroup,
-    degradedToLight: currentGroup === 'coding' && codingLeft === 0 && unique.length > 1,
+    degradedToLight: currentGroup === 'high' && codingLeft === 0 && unique.length > 1,
     codingAvailable: codingLeft,
+    lightAvailable: lightLeft,
   };
 }
 
@@ -2981,15 +2988,33 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => `\`${h.host}\` (${h.ok ? 'answered' : h.reason || 'dry'})`).join(', ')} — no location has quota.` : '';
       await api.sendMessage(
         chatId,
-        `🛑 No lane on ${location} has allowance right now.${when}${tried}\nNothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
+        `🛑 No lane on ${location} has allowance right now.${when}${tried}\nNothing was run and nothing was spent. Send \`/allowance\` for the ledger.`
       ).catch(() => {});
       return;
     }
     if (laneChoice.displaced) {
-      const why = laneChoice.displaced.resetLabel
-        ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
-        : laneChoice.displaced.why;
+      // The ledger's reason usually already carries its own reset stamp
+      // ("depleted until 2026-09-26T11:59:11Z (from vendor countdown …)"), so
+      // appending the reset label again produced "… until X until X".
+      const stamp = laneChoice.displaced.resetLabel;
+      const reason = String(laneChoice.displaced.why || '');
+      const why = stamp && !reason.includes(stamp) ? `${reason} until ${stamp}` : reason;
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
+      // QS-2: "the same prompt completes on the next lane with a user-visible
+      // switch line naming failed lane -> next lane". The walk did exactly that
+      // on 2026-09-26 06:51Z — displaced the depleted cline lane, answered on the
+      // OpenCode lane — and told the chat nothing, only the log. The lane a person
+      // chose and the lane that actually ran were silently different, which is the
+      // same class of silence as the raw-JSON specimen this row exists to kill.
+      //
+      // `why` is the ledger's own reason ("depleted until <stamp>"), never a raw
+      // provider envelope, so this line cannot become the failure QS-2 forbids.
+      if (!laneChoice.degradedToLight) {
+        await api.sendMessage(
+          chatId,
+          `🔀 \`${eff.model}\` is ${why} — this turn ran on \`${laneChoice.chose}\` instead.`,
+        ).catch(() => {});
+      }
       // A coding turn that can only be served by a light model is said out loud.
       // Silently answering with a weaker model is how a coding task starts failing
       // in ways nobody notices until the code is wrong.
@@ -3024,7 +3049,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         : ' ';
       await api.sendMessage(
         chatId,
-        `🛑 No lane on \`${location}\` has allowance right now,${tried}no location has quota. Nothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
+        `🛑 No lane on \`${location}\` has allowance right now,${tried}no location has quota. Nothing was run and nothing was spent. Send \`/allowance\` for the ledger.`
       ).catch(() => {});
       return;
     }
@@ -3231,61 +3256,6 @@ async function runLoop({ api, config }) {
   }
 }
 
-/**
- * Run one message through the real handler, with the real Telegram API.
- *
- * The Bot API has no way to fabricate an inbound message: getUpdates only ever
- * returns what a real client sent, and only one poller may hold them. So a
- * no-human proof feeds the dispatch loop a synthetic message and lets the
- * replies go to Telegram for real — parse, guards, side effects, formatting.
- * It neither polls nor takes the poller lease (the lease is pid-held, so this
- * could not take it anyway), so the live bot keeps serving while it runs.
- */
-async function injectCommand({ bot, config, args }) {
-  const chatId = Number(args.chat || config.telegram?.allowedUserIds?.[0] || 0);
-  if (!chatId) {
-    console.error('[inject] no chat to answer: pass --chat=<id>, or give the bot an allowedUserIds entry');
-    process.exit(1);
-  }
-  const token = resolveToken(bot);
-  const api = new TelegramApi(token);
-  const sent = [];
-  const realSend = api.sendMessage.bind(api);
-  api.sendMessage = async (to, text, extra) => {
-    const line = String(text).replace(/\s+/g, ' ');
-    sent.push({ to, text: line });
-    console.log(`[inject] telegram -> ${to}: ${line.slice(0, 220)}`);
-    return realSend(to, text, extra);
-  };
-  await api.getMe();
-  await api.deleteWebhook();
-  const message = {
-    message_id: 1,
-    date: Math.floor(Date.now() / 1000),
-    chat: { id: chatId, type: 'private' },
-    from: { id: chatId, is_bot: false, first_name: 'Proof' },
-    text: args.inject,
-  };
-  console.log(`[inject] -> ${message.text}  (bot ${config.id}, chat ${chatId})`);
-  await handleMessage({
-    api,
-    config,
-    throttle: new Throttle({ minIntervalMs: config.progress.editIntervalMs }),
-    sessions: loadSessions(config.id),
-    prefs: loadPrefs(config.id),
-    caches: makeCaches(),
-    running: new Map(),
-    lastUsage: new Map(),
-    totals: loadTotals(config.id),
-    health: { okAt: 0, errAt: 0, err: '' },
-    bootedAt: Date.now(),
-    busy: new Set(),
-    message,
-  });
-  console.log(`[inject] handled: ${sent.length} message(s) sent`);
-  return sent;
-}
-
 async function simulate(config, args) {
   const cmd = parseCommand(args.simulate);
   if (!cmd) {
@@ -3395,11 +3365,6 @@ async function main() {
 
   if (args.simulate) {
     await simulate(config, args);
-    return;
-  }
-
-  if (args.inject) {
-    await injectCommand({ bot, config, args });
     return;
   }
 

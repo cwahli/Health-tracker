@@ -2,70 +2,52 @@
 
 Canonical JSON: [`MASTER_SCORECARD_DEBUG.json`](./MASTER_SCORECARD_DEBUG.json). Markdown is a view of that tree. **Skip is not PASS.** Do not cite this file as all-green unless Contract `overall_named_gates` is PASS **and** process exit 0. `result_summary/` is written only then.
 
-**When:** 2026-09-26T08:34:07.190Z
-**Commit:** `8b479b5`
-**Instruction hash:** `a437280e385c`
-**Seal:** `e962277217d49405b34ce0464904a6ffbd9d563db11abbbaf13a3b5aa5b337bb`
+**When:** 2026-09-17T15:12:12.926Z
+**Commit:** `5615f1e`
+**Instruction hash:** `e75cb0d186da`
+**Seal:** `f5c0fe8650d5a0fdeb4ca276e1cec8837b6c17042f3f0620cad804cf634cc9b2`
 **Command:** `node scripts/assert-master-scorecard.mjs`
-**Overall:** **NOT ALL GREEN** — 947 pass / 4 fail / 0 skip
+**Overall:** **ALL GREEN** — 744 pass / 0 fail / 0 skip
+**Archived previous current →** `golden/scorecard/past/runs/2026-09-17T09-55-52-193Z-b4bba8f`
 
 ## Contract
 
 | Law | Result | Actual |
 |---|---|---|
-| `overall_named_gates` | FAIL | 947 pass / 4 fail / 0 skip of 951 |
+| `overall_named_gates` | PASS | 744 pass / 0 fail / 0 skip of 744 |
 | `skip_is_not_pass` | PASS | no required-skip scored as pass |
 | `collection_does_not_crash` | PASS | all named files collected |
 | `i18n_required_chrome` | PASS | 27 frozen keys present, not leak, id≠en |
 | `structure_inventories` | PASS | helpers present; fallback/polarity/converts not swapped |
 | `load_hack_forbidden` | PASS | no @ts-nocheck; named gates on disk; Top Targets helper intact; contract not painted |
 | `live_origin` | PASS | live origin https://health-tracker-backend-64gt.onrender.com |
-| `result_summary_sealed` | PASS | will not write result_summary (not all green) |
+| `result_summary_sealed` | PASS | will write result_summary (overallPass) |
 | `area_localization` | PASS | 65 pass / 0 fail / 0 skip |
-| `area_meal_log` | PASS | 355 pass / 0 fail / 0 skip |
-| `area_compare` | FAIL | 45 pass / 2 fail / 0 skip |
-| `area_biomarkers` | FAIL | 150 pass / 1 fail / 0 skip |
+| `area_meal_log` | PASS | 212 pass / 0 fail / 0 skip |
+| `area_compare` | PASS | 47 pass / 0 fail / 0 skip |
+| `area_biomarkers` | PASS | 154 pass / 0 fail / 0 skip |
 | `area_receptionist` | PASS | 49 pass / 0 fail / 0 skip |
-| `area_reliability` | FAIL | 283 pass / 1 fail / 0 skip |
+| `area_reliability` | PASS | 217 pass / 0 fail / 0 skip |
 | `tsc` | PASS | exit 0 |
-| `journey-guard` | FAIL | FAIL spec_ambiguous: multiple active specs (BOT-12.md, F-13.md, R-13.md, card-3.md, card-5.md, card-8.md, r15-omni-agent-lanes.md); pass an ID |
-| `biomarker-lifecycle-m31` | FAIL | FAIL P0:A3: App does not call enrich |
+| `journey-guard` | PASS | exit 0 |
+| `biomarker-lifecycle-m31` | PASS | exit 0 |
 | `scorecard-live` | PASS | exit 0 |
 | `meal-04-bench` | PASS | exit 0 |
-| `saved-meal-lineage-pw` | PASS | exit 0 |
-| `golden-photo-edit-pw` | PASS | exit 0 |
 
 ## Area rollup
 
 | Area | Result | Pass | Fail | Skip | Total |
 |---|---|---:|---:|---:|---:|
 | Localization | PASS | 65 | 0 | 0 | 65 |
-| Meal Log | PASS | 355 | 0 | 0 | 355 |
-| Compare | FAIL | 45 | 2 | 0 | 47 |
-| Biomarkers | FAIL | 150 | 1 | 0 | 151 |
+| Meal Log | PASS | 212 | 0 | 0 | 212 |
+| Compare | PASS | 47 | 0 | 0 | 47 |
+| Biomarkers | PASS | 154 | 0 | 0 | 154 |
 | Receptionist | PASS | 49 | 0 | 0 | 49 |
-| Reliability | FAIL | 283 | 1 | 0 | 284 |
+| Reliability | PASS | 217 | 0 | 0 | 217 |
 
 ## All failed (red)
 
-### Compare (2)
-
-| Status | File | Test |
-|---|---|---|
-| FAIL | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 16 — shortcut chain seams backs off longer on 503/UNAVAILABLE than other failures — AssertionError: expected 2500 to be 2000 // Object.is equality |
-| FAIL | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 29 — scout retry loop (stubbed LLM) backs off longer on 503 and aborts early on quota errors — AssertionError: expected [ 2500, 2500 ] to deeply equal [ 2000, 2000 ] |
-
-### Reliability (1)
-
-| Status | File | Test |
-|---|---|---|
-| FAIL | `node scripts/journey-guard.mjs` | journey-guard — FAIL spec_ambiguous: multiple active specs (BOT-12.md, F-13.md, R-13.md, card-3.md, card-5.md, card-8.md, r15-omni-agent-lanes.md); pass an ID |
-
-### Biomarkers (1)
-
-| Status | File | Test |
-|---|---|---|
-| FAIL | `node scripts/assert-biomarker-lifecycle-m31.mjs` | biomarker-lifecycle-m31 — FAIL P0:A3: App does not call enrich |
+_none_
 
 ## All skipped (not green)
 
@@ -73,7 +55,7 @@ _none_
 
 ## All passed (green)
 
-### Reliability (283)
+### Reliability (217)
 
 | Status | File | Test |
 |---|---|---|
@@ -134,55 +116,6 @@ _none_
 | PASS | `src/utils/debugPayload.test.ts` | debugPayload allowance table stops |
 | PASS | `src/utils/debugPayload.test.ts` | debugPayload renders Retry Sessions & Execution Attempts section when previousAttempts is provided |
 | PASS | `src/utils/debugPayload.test.ts` | debugPayload debugReportFromJobMsg carries forward previousAttempts and priorLogs |
-| PASS | `src/utils/debugPayload.test.ts` | debugPayload renders a Turn Timeline with each turn prompt, its own photos, and answer (debugmeal1 class) |
-| PASS | `src/utils/debugPayload.test.ts` | debugPayload renders a photo-only clarification turn (no prompt text) with its 1 photo (debugmeal1 class) |
-| PASS | `src/utils/debugPayload.test.ts` | debugPayload keeps the multi-turn continuation marker in Backend Execution Logs (not collapsed away) |
-| PASS | `src/utils/debugRunTree.test.ts` | determinePack infers the operational pack from domain signals |
-| PASS | `src/utils/debugRunTree.test.ts` | determinePack determinePack returns health_coach when input signals coach/plan (or documents actual label) |
-| PASS | `src/utils/debugRunTree.test.ts` | deduplicateBreadcrumbs collapses identical consecutive breadcrumbs and keeps order of first occurrences |
-| PASS | `src/utils/debugRunTree.test.ts` | deduplicateBreadcrumbs handles empty input and preserves a single breadcrumb by identity |
-| PASS | `src/utils/debugRunTree.test.ts` | deduplicateBreadcrumbs returns an array for duplicate object breadcrumbs |
-| PASS | `src/utils/debugRunTree.test.ts` | deduplicateSessionEvents collapses duplicate event ids keeping first |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree minimal input has jobId and pack fields |
-| PASS | `src/utils/debugRunTree.test.ts` | compare runs emit scout only — no narrator backfill (single-agent compare) |
-| PASS | `src/utils/debugRunTree.test.ts` | compare filter drops legacy dietitian AND new diet dispatches (backcompat) |
-| PASS | `src/utils/debugRunTree.test.ts` | parseUnifiedUsageLines parseUnifiedUsageLines with two stages returns length 2 |
-| PASS | `src/utils/debugRunTree.test.ts` | tagJobId prefixes or embeds jobId into a log line idempotently |
-| PASS | `src/utils/debugRunTree.test.ts` | extractDispatches (food) attaches tokens per stage and prefers raw scout output over processed items |
-| PASS | `src/utils/debugRunTree.test.ts` | extractDispatches (food) leaves tokens undefined when no usage lines exist |
-| PASS | `src/utils/debugRunTree.test.ts` | extractDispatches (food) prefers measured timing over regex/default latency |
-| PASS | `src/utils/debugRunTree.test.ts` | extractDispatches (food) omits resolver when no gap resolution occurred |
-| PASS | `src/utils/debugRunTree.test.ts` | extractDispatches (food) returns scout only with length 1 for food with only scout logs and no prior dispatches |
-| PASS | `src/utils/debugRunTree.test.ts` | extractDispatches (food) builds scout and optional resolver from logs when prior dispatches is empty, without inventing edit turns |
-| PASS | `src/utils/debugRunTree.test.ts` | hasCallEvidence hasCallEvidence scout true for production Analyze/Scout marker and false for empty logs |
-| PASS | `src/utils/debugRunTree.test.ts` | hasCallEvidence hasCallEvidence dual-accepts resolver and curator evidence |
-| PASS | `src/utils/debugRunTree.test.ts` | parseUnifiedTimingLines returns [] for empty input and parses one timing line into stage and ms |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging tags console, network and backend lines with the job id |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging tags network lines with jobId when clientNetworkLogs provided |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging preserves and enriches pre-existing multi-turn dispatches array |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging extractDispatches with prior dispatches length 2 keeps both after enrichment |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging assigns per-turn usage/timing lines to the matching turn (t1 keeps t1 numbers) |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging keeps three scout turns when prior dispatches array has length 3 |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging locks three scout turns with distinct users when prior dispatches length is 3 |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging filters out UI debug download button text from dispatch user prompt |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging golden: add_item missing newItemName uses itemName |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging preserves jobId tagging and distinct multi-turn dispatch users |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging builds a medical dispatch and tags console lines for the medical pack |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging does not emit scout for medical pack even when scout artifacts are present |
-| PASS | `src/utils/debugRunTree.test.ts` | buildCanonicalRunTree jobId tagging builds a health coach dispatch for the health_coach pack, not scout |
-| PASS | `src/utils/debugRunTree.test.ts` | extractHandoffs returns traces with matching jobId from breadcrumb/session fixtures and [] for empty input |
-| PASS | `src/utils/debugRunTree.test.ts` | extractPortionAdjustment extracts local_math adjustment when portion diff is <= 30% |
-| PASS | `src/utils/debugRunTree.test.ts` | extractPortionAdjustment extracts agent_edit adjustment when portion diff is > 30% |
-| PASS | `src/utils/debugRunTree.test.ts` | extractPortionAdjustment extracts portion adjustment from breadcrumbs fallback if not on pendingFoodLog |
-| PASS | `src/utils/debugRunTree.test.ts` | retry sessions & stalled stream dispatches extracts stalled Vision Scout and fallback dispatches from logs with 90s latency and respective models |
-| PASS | `src/utils/debugRunTree.test.ts` | retry sessions & stalled stream dispatches extracts multi-turn dispatches from continuation session logs |
-| PASS | `src/utils/debugRunTree.test.ts` | retry sessions & stalled stream dispatches merges prior attempt dispatches into tree dispatches when previousAttempts is provided |
-| PASS | `src/utils/debugRunTree.test.ts` | resolveTurnImages — distribute photos across turns (debugmeal1 class) splits 3 photos into turn 1 (2) and turn 2 (1) using submit breadcrumbs |
-| PASS | `src/utils/debugRunTree.test.ts` | resolveTurnImages — distribute photos across turns (debugmeal1 class) falls back to all photos on turn 1 when no breadcrumbs declare counts |
-| PASS | `src/utils/debugRunTree.test.ts` | resolveTurnImages — distribute photos across turns (debugmeal1 class) returns per-turn counts even when only counts (not order) are known |
-| PASS | `src/utils/debugRunTree.test.ts` | buildTurnTimeline — create + photo-edit journey is reproducible shows each turn prompt, its own photos, and its own agent answer (turn 2 edit photo) |
-| PASS | `src/utils/debugRunTree.test.ts` | buildTurnTimeline — create + photo-edit journey is reproducible attaches per-turn images to the reconstructed t2 dispatch (not only t1) |
-| PASS | `src/utils/debugRunTree.test.ts` | buildTurnTimeline — create + photo-edit journey is reproducible prefers the per-dispatch received.photoUrls for turn attribution |
 | PASS | `src/utils/dumpContract.test.ts` | dumpContract — display lag and complete-once flags happy-path with kcal but no session succeeded |
 | PASS | `src/utils/dumpContract.test.ts` | dumpContract — display lag and complete-once flags 90s scout stall that failed the job without a 3.1 hop |
 | PASS | `src/utils/dumpContract.test.ts` | dumpContract — display lag and complete-once does not flag a stall that already hopped to 3.1 on the same job |
@@ -252,19 +185,6 @@ _none_
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d drops data: copies once the same captures exist on /photos/ |
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d keeps local data: URLs when nothing has been uploaded yet |
 | PASS | `src/utils/foodImageSources.test.ts` | foodImageSources B11d dedupes an all-dead list to zero (orphaned hero-slider root cause) |
-| PASS | `src/utils/foodImageSources.test.ts` | collectSavedMealImageUrls uses originalLog photos when the tag itself has none |
-| PASS | `src/utils/foodImageSources.test.ts` | collectSavedMealImageUrls hydrates from in-memory foodLogs by id when stored urls are placeholders |
-| PASS | `src/utils/foodImageSources.test.ts` | collectSavedMealImageUrls falls back to photos/{id}.jpg when nothing else is stored |
-| PASS | `src/utils/foodImageSources.test.ts` | collectSavedMealImageUrls omits the synthesized guess when allowSynthesized is false (display path) |
-| PASS | `src/utils/foodImageSources.test.ts` | collectSavedMealImageUrls merges donor full-size images after source urls (T-6 multiples) |
-| PASS | `src/utils/foodImageSources.test.ts` | collectSavedMealImageUrls keeps real stored urls when allowSynthesized is false |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveRefPhoto (duplicate pointer records) resolves a duplicate pointer to the primary real photo |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveRefPhoto (duplicate pointer records) follows one chained hop (dup of a dup) |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveRefPhoto (duplicate pointer records) returns undefined for a self-referencing pointer (no infinite loop) |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveRefPhoto (duplicate pointer records) returns undefined when the primary is missing or holds no photo (no proxy guess) |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveRefPhoto (duplicate pointer records) collectSavedMealImageUrls resolves the pointer for the display path |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveRefPhoto (duplicate pointer records) collectSavedMealImageUrls resolves pointers held by the donor itself |
-| PASS | `src/utils/foodImageSources.test.ts` | resolveRefPhoto (duplicate pointer records) collectSavedMealImageUrls drops an unresolvable pointer instead of guessing |
 | PASS | `src/utils/foodImageSources.test.ts` | resolveNextPhotoUrl (previous-meal thumbnail self-heal) tries the local proxy path first, without hitting the network |
 | PASS | `src/utils/foodImageSources.test.ts` | resolveNextPhotoUrl (previous-meal thumbnail self-heal) awaits the signed-URL API once proxy candidates are exhausted, and uses its returned URL |
 | PASS | `src/utils/foodImageSources.test.ts` | resolveNextPhotoUrl (previous-meal thumbnail self-heal) falls back to the raw signed-URL endpoint if the fetch throws (network error), not to null |
@@ -293,13 +213,9 @@ _none_
 | PASS | `src/utils/scorecardContract.test.ts` | scorecard live contract (cannot swap inventories) locks B0 convert multipliers and apply outputs |
 | PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer returns error immediately when uid is missing |
 | PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer POSTs to /api/sync/supabase-push with correct body |
-| PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer attaches Authorization when idToken is provided |
-| PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer always sends Content-Type; Authorization only when a token is available |
+| PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer omits Authorization header when idToken is absent |
 | PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer returns success:false and does not throw on HTTP error |
 | PASS | `src/utils/syncUtils.regression.test.ts` | pushLogsToServer returns success:false and does not throw on network failure |
-| PASS | `src/utils/syncUtils.regression.test.ts` | pull auth headers (401 hides totalFoodsCount → 2-page bug) pullAuthHeaders always includes Content-Type |
-| PASS | `src/utils/syncUtils.regression.test.ts` | pull auth headers (401 hides totalFoodsCount → 2-page bug) fetchAllConsolidatedLogs POSTs /api/sync/supabase-pull with Authorization when signed in |
-| PASS | `src/utils/syncUtils.regression.test.ts` | pull auth headers (401 hides totalFoodsCount → 2-page bug) fetchFoodLogsPage POSTs page 2 with Authorization and preserves totalFoodsCount |
 | PASS | `src/utils/syncUtils.regression.test.ts` | upsertProfileToSupabase is a no-op and does not throw when uid is missing |
 | PASS | `src/utils/syncUtils.regression.test.ts` | upsertProfileToSupabase calls /api/sync/supabase-push with the profile when uid provided |
 | PASS | `src/utils/syncUtils.regression.test.ts` | mergeByRecency prefers the newer item by updated_at |
@@ -349,10 +265,10 @@ _none_
 | PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore does not let a stale realtime failed echo clobber an in-flight retry |
 | PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore CROSS_DEVICE_SYNC: fresh JobStore on second device sees R2/photo URL without local ImageStore |
 | PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore CROSS_DEVICE_SYNC: patches stripped placeholder to durable R2 URL before remote sync |
-| PASS | `src/jobs/__tests__/JobStore.test.ts` | JobStore PORTION_CONFIRM: awaiting_user clarify message carries the meal ledger so Confirm can resolve activeMeal |
 | PASS | `src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts` | scheduleCoalescedJobUpsert collapses a burst of schedules into active + trailing with the latest snapshot |
 | PASS | `src/jobs/__tests__/SupabaseJobSync.coalesce.test.ts` | scheduleCoalescedJobUpsert runs a lone schedule exactly once |
 | PASS | `npx tsc --noEmit` | tsc |
+| PASS | `node scripts/journey-guard.mjs` | journey-guard |
 | PASS | `node scripts/assert-scorecard-live.mjs` | scorecard-live |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_isSoleEligibleDish |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_ts_nocheck |
@@ -361,7 +277,7 @@ _none_
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_contract_not_painted |
 | PASS | `golden/scorecard/instruction/gates.json` | load_hack_no_slice_scripts |
 
-### Meal Log (355)
+### Meal Log (212)
 
 | Status | File | Test |
 |---|---|---|
@@ -407,20 +323,15 @@ _none_
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize F-8.12 locks printed vitamin C from the can label (absolute mg, not the 1000 mg name) |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize F-8.12 locks printed vitamin C from % AKG without inventing the can-name dose |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize F-8.12 carries brand-lock vitamin C micros into the ledger (scaled, not invented) |
-| PASS | `server_dish_finalize.test.ts` | server_dish_finalize F-13.2 live T2 replay: per-100g brand lock |
-| PASS | `server_dish_finalize.test.ts` | server_dish_finalize F-13.2 guard: per-serving Big Mac lock still records 508 kcal @ 215 g |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize adds more fat/Na for fast_food_chain deep_fried than home_cooked and re-derives Atwater (F-10.6) |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize skips TS prep when OCR/brand locks labelled kcal/fat (F-10.6 locked_truth) |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize F-10.8 inner: 11 prototype cases keep restaurant fat/Na residual named (no Gemini, not 90% painted) |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize never zeroes out parent dish nutrients when subcomponents are missing macros |
-| PASS | `server_dish_finalize.test.ts` | server_dish_finalize re-derives unsaturatedFat + salt after the composite child-sum overwrite (debugmeal1 class) |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize does not treat unit-count "1 serving (70g)" as 1 gram (Pia 100 Nanas) |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize does not treat "1 pcs" or "1 porsi" as 1 gram |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize finalizes a 70g labeled serving |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize finalizes a 65g almond pack |
 | PASS | `server_dish_finalize.test.ts` | server_dish_finalize does not explode to 5199 kcal when serving count 2.25 or "2.5 sajian" is passed as servingSize / servingGrams |
-| PASS | `server_dish_finalize.test.ts` | server_dish_finalize carries label evidence on the ledger for provenance/badging (never math) |
-| PASS | `server_dish_finalize.test.ts` | server_dish_finalize carries no label evidence for estimated items |
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger diffs identity + weight into structural commands |
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger enforces identity locks against scout regression |
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger invalidates stale manis sibling metadata on identity change |
@@ -443,121 +354,6 @@ _none_
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger Agent Explicit Edit Contract (replacesDish, targetDishIndex, action) contract: same-meal package vs cooked bowl emits merge_dishes, not a leftover sibling |
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger Agent Explicit Edit Contract (replacesDish, targetDishIndex, action) emits merge_dishes preserving label truth and user selected weight when user says only had 1 dish |
 | PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger Agent Explicit Edit Contract (replacesDish, targetDishIndex, action) job_1789312118652: "It's only 1 meal. Just combine them" merges even when scout replaces the package and leaves the porridge |
-| PASS | `server_edit_patch_ledger.test.ts` | edit patch ledger F-13.1 delete: ambiguous targetDishIndex prefers dishName over 1-based guess |
-| PASS | `server_edit_patch_ledger.test.ts` | F-13.1 live T2 (foods[]-only add/delete, no dish action) emits dish-level add_item for the new dish (never glued onto a prior by index) |
-| PASS | `server_edit_patch_ledger.test.ts` | F-13.1 live T2 (foods[]-only add/delete, no dish action) promotes self-named foods[] delete to dish-level remove_item |
-| PASS | `server_meal_edit.test.ts` | scaleItemNutrients — derived nutrients follow the scaled macros (debugmeal1 class) re-derives unsaturatedFat + salt so a stale derived value can never ride a portion edit |
-| PASS | `server_meal_edit.test.ts` | scaleItemNutrients — derived nutrients follow the scaled macros (debugmeal1 class) treats unsaturatedFat / salt as TS-owned: a carried lock cannot keep a stale derived value |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits Q&A: empty commands leave the meal unchanged |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits replace_identity copies photo + weight and Atwaters the new estimate (tempeh, not this meal’s FDC) |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits split keeps unmentioned sides |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits coalesce remove+add of a composite into split, ignoring few-shot 80/100/70 side grams |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits add_item with scout-shaped estimate never inherits 0 kcal (seitan, not this meal) |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits set_count is a piece annotation and does not double already-weighed grams (tempeh, not this meal) |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits replace_identity then set_count keeps the saved portion (fish cake skewer) |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits split of meat-with-sauce leftover is condiment grams, sides stay components (seitan plate) |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits unsweetened twice applies once |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits synthesizes unsweetened modifier from userMessage when commands are empty (e.g. Es Teh Manis) |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits synthesizes unsweetened modifier from Indonesian userMessage "I had es teh tawar" |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits remove_component subtracts locked nutrients (uneven share, not weight ratio) |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits remove_component keeps locked calories via subtraction instead of Atwater |
-| PASS | `server_meal_edit.test.ts` | applyMealEdits remove_component with unknown component or missing name is a no-op |
-| PASS | `server_meal_edit.test.ts` | evidence job outer check (frozen example, class tests above) T2 commands keep 85g count=2, sauce remainder, nested sides, 1635g |
-| PASS | `server_meal_edit.test.ts` | evidence job outer check (frozen example, class tests above) set_modifier propagates modified name and nutrients to nested components/componentsDetailList |
-| PASS | `server_meal_edit.test.ts` | evidence job outer check (frozen example, class tests above) resets constituent components when replace_identity changes the dish to a distinct new identity |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity preserves scoutIndex and sourceImageIndex on the replaced row |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity may change dbSource to estimated but keeps photo indices |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_item aliases to replace_identity for fish rename |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity keeps boundingBox2D array equality with the prior row |
-| PASS | `server_meal_edit.test.ts` | golden keeps replaced fish identity through a later weight-only edit on another item |
-| PASS | `server_meal_edit.test.ts` | golden golden: unsweetened tea and Ikan Nila rename persist together on top-level and component identities |
-| PASS | `server_meal_edit.test.ts` | golden scout diff + applyMealEdits replaces sweet tea with unsweetened tea and updates tilapia sodium without item duplication |
-| PASS | `server_meal_edit.test.ts` | golden contract: applyMealEdits deterministically honors agent replacesDish and action without item duplicates |
-| PASS | `server_meal_edit.test.ts` | golden contract: applyMealEdits honors subitem add_component and replace_component with full nutrients and image tracking |
-| PASS | `server_meal_edit.test.ts` | golden contract: applyMealEdits executes remove_item for dish deletion |
-| PASS | `server_meal_edit.test.ts` | golden contract: replace_identity with delta foods merges rather than wiping out existing components |
-| PASS | `server_meal_edit.test.ts` | golden golden: split_item with empty into[] is ignored and parent remains |
-| PASS | `server_meal_edit.test.ts` | golden remove_item then set_weight on a different item does not resurrect the removed row |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity then remove_item by the new identity drops the renamed fish and keeps kangkung |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity then remove_item on Kangkung keeps Ikan Nila identity |
-| PASS | `server_meal_edit.test.ts` | golden golden: case-insensitive set_weight itemName updates the matching row |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight on one item keeps result.weightGrams equal to the sum of item weights |
-| PASS | `server_meal_edit.test.ts` | golden golden: update_weight alias is normalized to set_weight and updates the portion |
-| PASS | `server_meal_edit.test.ts` | golden golden: update_weight alias sets grams |
-| PASS | `server_meal_edit.test.ts` | golden golden: update_modifier alias is normalized to set_modifier and unsweetens tea |
-| PASS | `server_meal_edit.test.ts` | golden golden: update_count alias is normalized to set_count and annotates pieces without changing grams |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight coerces string newWeightGrams ("150") instead of no-op |
-| PASS | `server_meal_edit.test.ts` | golden golden: whitespace-trimmed set_weight itemName still matches the row |
-| PASS | `server_meal_edit.test.ts` | golden golden: remove_item with whitespace-trimmed itemName still removes (trim match) |
-| PASS | `server_meal_edit.test.ts` | golden golden: two set_weight commands update both portions and total weight |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item then set_weight updates only the added Tempeh portion |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_modifier unsweetened then replace_identity on fish keeps tea tawar and renames fish |
-| PASS | `server_meal_edit.test.ts` | golden golden: strictly sequential replace_identity then set_modifier keeps fish and tea edits |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity then set_count on NEW fish name applies count to renamed row |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_count then replace_identity keeps the meal coherent and renames the fish |
-| PASS | `server_meal_edit.test.ts` | golden golden: split then set_weight updates one child, preserves sibling, and removes parent |
-| PASS | `server_meal_edit.test.ts` | golden golden: split_item then remove_item of one child keeps the remaining sibling identity and weight |
-| PASS | `server_meal_edit.test.ts` | golden golden: Q&A empty commands after rename keep Ikan Nila unchanged |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item then remove_item returns to the prior meal with no leftover row |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item then remove_item by different casing still removes |
-| PASS | `server_meal_edit.test.ts` | golden golden: remove_item fish then add_item tempeh in the same turn leaves tempeh present and fish gone (coalesce or sequential) |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item twice then set_weight only on the second added item keeps both and prior identities |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight twice on the same item uses the last weight and keeps identity |
-| PASS | `server_meal_edit.test.ts` | golden golden: two identical set_weight commands in one call scale the item once |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity Cakalang to Ikan Nila then Ikan Nila to Salmon keeps final Salmon identity |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_modifier with fuzzy itemName "the tea" falls back to beverage and renames to tawar |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_modifier unsweetened then set_weight on new tawar name both stick |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_count on Kangkung annotates pieces without multiplying already-weighed grams |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_count 1 sets pieceCount 1 |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_count on fish then empty-commands Q&A leaves count intact |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_count then remove_item on the same dish removes the row without crashing |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_count then set_weight on the same item keeps weight and may retain count |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight then set_count on the same item keeps both grams and count |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity then set_weight in the same commands updates the new fish identity |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity fish and set_weight kangkung in same commands both apply |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight then replace_identity on same fish uses the later replace weight (last-wins) |
-| PASS | `server_meal_edit.test.ts` | golden golden: remove_item all items one by one empties the meal |
-| PASS | `server_meal_edit.test.ts` | golden golden: duplicate remove_item for the same dish removes once and notes the second miss |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight with fractional grams applies consistently without NaN |
-| PASS | `server_meal_edit.test.ts` | golden golden: Indonesian weight-only userMessage with empty commands either synthesizes set_weight or is a documented no-op |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity Cakalang to Ikan Nila with newWeightGrams updates identity and portion in one shot |
-| PASS | `server_meal_edit.test.ts` | golden golden: coalesceLegacyCommands remove+add different names on non-composite yields replace_identity or sequential |
-| PASS | `server_meal_edit.test.ts` | golden golden: remove_item plus add_item coalesces to replace or falls back to sequential semantics |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_modifier unsweetened on already tawar tea is idempotent |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item zero-kcal protein estimate keeps Atwater calories above zero |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item with same name as an existing item creates a second row |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight with zero or negative grams is ignored and keeps non-negative coherent weights |
-| PASS | `server_meal_edit.test.ts` | golden golden: commands with only an unknown action leave the meal unchanged and note skipped unknown |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight on unknown itemName notes miss and leaves meal unchanged |
-| PASS | `server_meal_edit.test.ts` | golden golden: replace_identity with empty newItemName keeps the prior fish name |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight by canonicalDbName synonym works after rename, but old name misses |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight then set_modifier tea both persist |
-| PASS | `server_meal_edit.test.ts` | golden golden: simultaneous set_weight on fish and set_modifier on tea persist together |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight then empty-commands Q&A leaves the new weight intact |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight then Q&A preserves the edited portion and total weight |
-| PASS | `server_meal_edit.test.ts` | golden golden: remove_item then set_weight on removed name notes miss and does not resurrect |
-| PASS | `server_meal_edit.test.ts` | golden golden: remove_item with unknown name leaves the meal unchanged |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight identical to current weight may leave changed false and keeps identity |
-| PASS | `server_meal_edit.test.ts` | golden golden: split_item with explicit into grams conserves parent weight within 1g |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item with only newItemName and newWeightGrams inserts a row without estimate |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item with newWeightGrams 0 falls back to default grams instead of creating a 0g row |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_count with zero or negative newCount is ignored and keeps identity/weight |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_count with fractional count documents current accepted-positive behavior |
-| PASS | `server_meal_edit.test.ts` | golden golden: add_item beverage then set_modifier unsweetened in same commands both apply (new drink becomes tawar) |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_modifier on itemName "coffee" with no coffee row notes miss and leaves meal unchanged |
-| PASS | `server_meal_edit.test.ts` | golden golden: dual set_modifier different drinks: only matching tea changes when two beverages exist after add |
-| PASS | `server_meal_edit.test.ts` | golden golden: rename_alias on Sempol Ayam updates identities without changing weight or nutrients |
-| PASS | `server_meal_edit.test.ts` | golden golden: rename_alias then set_count applies count to the renamed row without changing grams |
-| PASS | `server_meal_edit.test.ts` | golden golden: set_weight by originalName field updates the renamed row without changing current name |
-| PASS | `server_meal_edit.test.ts` | golden golden: merge_dishes preserves rawNutritionLabel truth and user portion weight without summing weights |
-| PASS | `server_meal_edit.test.ts` | golden golden: remove_item on labeled package when user says "same dish" falls back to merge preserving label truth |
-| PASS | `server_meal_edit.test.ts` | golden F-13.1 add_item: composer [Mr Oat Rolled Oats] beats short scout/estimate name |
-| PASS | `server_meal_edit.test.ts` | golden F-13.1 replace_identity: bracket tag upgrades short replacement name |
-| PASS | `server_meal_edit.test.ts` | G10 golden — photo edit clarifies ONE dish, adds photo, scales only that blanket replace_identity swaps the ambiguous dish for chicken in place (no duplicate, count unchanged) |
-| PASS | `server_meal_edit.test.ts` | G10 golden — photo edit clarifies ONE dish, adds photo, scales only that blanket scales ONLY the peanuts row down and keeps other dish weights fixed |
-| PASS | `server_meal_edit.test.ts` | G10 golden — photo edit clarifies ONE dish, adds photo, scales only that blanket the clarification photo is appended to the meal image list (initial 2 retained) |
-| PASS | `server_meal_edit.test.ts` | G10 golden — photo edit clarifies ONE dish, adds photo, scales only that blanket photo-only edit (no text) diff-synthesizes replace of the ambiguous dish + scale of the peanut row only |
-| PASS | `server_meal_edit.test.ts` | G10 golden — photo edit clarifies ONE dish, adds photo, scales only that blanket the committed debugmeal1 sample export is reproducible: 2 turns, 3 photos, 3 dispatches |
 | PASS | `server_portion_clarify.test.ts` | detectPortionAmbiguity & buildPortionClarifyPayload parses Indonesian serving counts ("23 sajian per Kemasan") as servings, not countable units |
 | PASS | `server_portion_clarify.test.ts` | detectPortionAmbiguity & buildPortionClarifyPayload keeps whole-pack choice for small packs (brownies 2 servings of 15g) |
 | PASS | `server_portion_clarify.test.ts` | detectPortionAmbiguity & buildPortionClarifyPayload drops absurd whole/half/quarter pack options for bulk packs on the general path |
@@ -653,16 +449,12 @@ _none_
 | PASS | `tests/golden_meal12_chat_saved_meal.test.ts` | golden meal 12 — chat-modal saved-meal journey (offline) correct_results.md is honestly marked with sources |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set registers exactly the official goldens |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — fixture set each golden has Instruction.md, expected.json, and every listed photo |
-| PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match dictionary locks resolve to the pinned FDC / canonical id |
+| PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match dictionary locks resolve to the pinned local canonical id |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match documented catalog gaps do not silently resolve today |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match never-match table rejects the known USDA / brand false friends |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — Layer B resolve locks & USDA never-match category gate still blocks water for a yogurt query |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — G1 picnic query hygiene + edit searches wrap/salad components, not the parent dish title |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — G1 picnic query hygiene + edit "I ate this croissant" is an item edit, not a half/pack refine |
-| PASS | `tests/golden_meals.test.ts` | Golden meals — G10 create + photo-edit clarifies ONE dish pass 1 attaches 2 photos and pass 2 attaches 1 clarification photo |
-| PASS | `tests/golden_meals.test.ts` | Golden meals — G10 create + photo-edit clarifies ONE dish the edit replaces exactly one dish and preserves the others |
-| PASS | `tests/golden_meals.test.ts` | Golden meals — G10 create + photo-edit clarifies ONE dish appends the clarification photo to the initial list (does not substitute) |
-| PASS | `tests/golden_meals.test.ts` | Golden meals — G10 create + photo-edit clarifies ONE dish every listed photo exists on disk |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — G2 Sainsbury oats brand math normalizes Sainsbury to chain_key sainsbury |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — G2 Sainsbury oats brand math scales official per-100g oats to the user 60g |
 | PASS | `tests/golden_meals.test.ts` | Golden meals — G2 Sainsbury oats brand math local brand catalog contains the Scottish rolled oats row |
@@ -691,26 +483,7 @@ _none_
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) under-target and on-target wording; no percent without a target |
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) returns empty with no usable days |
 | PASS | `src/utils/nutritionTargetStatus.test.ts` | buildNutritionTargetStatus (adaptive rolling average) pickExplicitTargets keeps only finite positive target keys |
-| PASS | `src/utils/savedMealLineage.test.ts` | parentIdOfTag returns the saved meal id for previous_meal tags only |
-| PASS | `src/utils/savedMealLineage.test.ts` | stampChildLineage stamps a single saved-meal tray as a child with per-item parents |
-| PASS | `src/utils/savedMealLineage.test.ts` | stampChildLineage leaves mixed trays parentless but attributes each saved item |
-| PASS | `src/utils/savedMealLineage.test.ts` | stampChildLineage supports children of two different masters in one tray |
-| PASS | `src/utils/savedMealLineage.test.ts` | stampChildLineage leaves fresh trays untouched |
-| PASS | `src/utils/savedMealLineage.test.ts` | findMasterMeal / findChildMeals walks chains to the root master |
-| PASS | `src/utils/savedMealLineage.test.ts` | findMasterMeal / findChildMeals stops |
-| PASS | `src/utils/savedMealLineage.test.ts` | findMasterMeal / findChildMeals lists direct children only |
-| PASS | `src/utils/savedMealLineage.test.ts` | propagateMasterUpdate re-scales nutrients to the child weight and follows name/photos |
-| PASS | `src/utils/savedMealLineage.test.ts` | propagateMasterUpdate updates the matched item row including OCR provenance |
-| PASS | `src/utils/savedMealLineage.test.ts` | propagateMasterUpdate preserves child-only keys and never mutates inputs |
-| PASS | `src/utils/savedMealLineage.test.ts` | propagateDownstream updates children and grandchildren from the edited root |
-| PASS | `src/utils/savedMealLineage.test.ts` | propagateDownstream returns just the root when there are no children |
-| PASS | `src/utils/savedMealLineage.test.ts` | applyReviewMealId keeps the reviewed log id on a fresh analysis |
-| PASS | `src/utils/savedMealLineage.test.ts` | applyReviewMealId is a no-op for blank ids and non-objects |
-| PASS | `src/utils/savedMealLineage.test.ts` | resolveInboxSaveId prefers the review link over the pending id |
-| PASS | `src/utils/savedMealLineage.test.ts` | resolveInboxSaveId falls back to the pending id, then undefined |
 | PASS | `node scripts/meal-golden-bench.mjs` | meal-04-bench |
-| PASS | `npx playwright test prototype/tests/saved-meal-lineage.spec.ts` | saved-meal-lineage-pw |
-| PASS | `npx playwright test prototype/tests/photo-edit-replace-dish.spec.ts` | golden-photo-edit-pw |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_getTopTargetNutrientKeys |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_isLimitNutrient |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_callsites_NutrientTargetRow |
@@ -777,12 +550,12 @@ _none_
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) keeps the placeholders the job card interpolates (no silent no-op replace) |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) renders the edit/retry running job card in Indonesian |
 | PASS | `src/utils/i18n.test.ts` | job-card chrome i18n (English-filled id residuals — Wave F) never regresses a scanned key back to the Title-Case humanization of its key |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
-| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive does not render markup when isOpen is false |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders title, subtitle, content, and actions when isOpen is true |
 | PASS | `src/components/ui/AppModal.test.tsx` | AppModal UI Primitive renders with custom size classes and close button |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders English handoff chrome by default |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian handoff chrome for id |
+| PASS | `src/components/chat-cards/ReceptionistCard.i18n.test.tsx` | ReceptionistCard i18n renders Indonesian form and panel chrome for id |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_present |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_not_leak_key |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_required_chrome_id_not_en |
@@ -791,7 +564,7 @@ _none_
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_id_not_incident_string |
 | PASS | `golden/scorecard/instruction/i18n/REQUIRED_CHROME.json` | i18n_components_not_hardcoded_incident |
 
-### Biomarkers (150)
+### Biomarkers (154)
 
 | Status | File | Test |
 |---|---|---|
@@ -804,6 +577,9 @@ _none_
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 biomarker process board — §1.3.1 bio exits DIAG5 auto-send does not fire on a lab chat |
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 biomarker process board — §1.3.1 bio exits shared stall hop still hops on 503 for a medical dummy tree |
 | PASS | `tests/bioProcess.golden.test.ts` | Q-8.4 in-memory medical publish isolation does not treat empty medical dummy as food ledger |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — backoffice extract converts via the single table (no second math path) converts the five G-B1 locks exactly (triglycerides must NOT use the cholesterol factor) |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — backoffice extract converts via the single table (no second math path) leaves incomparable pairs unconverted instead of guessing |
+| PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — backoffice extract converts via the single table (no second math path) keeps the legacy HbA1c % branch verbatim (shared table has no hba1c row) |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 case metadata and class bindings |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 five locked unit conversions match expected.json |
 | PASS | `tests/golden_biomarker.test.ts` | Golden Biomarker — G-B1 & Class Verification verifies G-B1 review modification synthesis converts only non-SI row |
@@ -944,6 +720,7 @@ _none_
 | PASS | `src/utils/clinicalCalculators.test.ts` | Clinical Calculator Engine calculateCkdEpi2021 calculates normal filtration for healthy adult female |
 | PASS | `src/utils/clinicalCalculators.test.ts` | Clinical Calculator Engine calculateCkdEpi2021 calculates decreased filtration for elevated creatinine |
 | PASS | `src/utils/clinicalCalculators.test.ts` | Clinical Calculator Engine CLINICAL_CALCULATOR_REGISTRY contains all core calculator definitions |
+| PASS | `node scripts/assert-biomarker-lifecycle-m31.mjs` | biomarker-lifecycle-m31 |
 | PASS | `golden/scorecard/instruction/inventories/structure.json` | structure_biomarker_multipliers |
 
 ### Receptionist (49)
@@ -1000,7 +777,7 @@ _none_
 | PASS | `src/server/receptionist/jsonSanitize.test.ts` | sanitizeReceptionistJson repairs truncated JSON cut off inside a string literal |
 | PASS | `src/server/receptionist/jsonSanitize.test.ts` | sanitizeReceptionistJson repairs truncated JSON cut off |
 
-### Compare (45)
+### Compare (47)
 
 | Status | File | Test |
 |---|---|---|
@@ -1033,6 +810,7 @@ _none_
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 11 — scout result handling stays silent when the index anchors the row despite wobbling names |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 16 — shortcut chain seams reuses prior scout with portion choices or refine grams |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 16 — shortcut chain seams restores turn-1 candidates into the match stores |
+| PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 16 — shortcut chain seams backs off longer on 503/UNAVAILABLE than other failures |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 17 — skipScout shortcut inherits prior scout with portion choices and dining env |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 17 — skipScout shortcut falls back to prior-scout dining when the body has none |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 20 — resumed-turn predicate detects continued image turns across payload shapes |
@@ -1043,6 +821,7 @@ _none_
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 25 — scout call args passes assembled nutrition targets into the live LLM call, not only debug |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 29 — scout retry loop (stubbed LLM) succeeds first try without sleeping |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 29 — scout retry loop (stubbed LLM) retries once on failure, then succeeds |
+| PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 29 — scout retry loop (stubbed LLM) backs off longer on 503 and aborts early on quota errors |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | F-8.10 shard 29 — scout retry loop (stubbed LLM) passes the stream hook through to the LLM call |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | Turn 2 Portion Selection — multi-dish preservation preserves non-selected items when user chooses portion for one dish |
 | PASS | `src/server/food/server_food_scout_source.test.ts` | Turn 2 Portion Selection — multi-dish preservation restores Turn 1 candidates into databaseMatchesArray and dbMatchMap |

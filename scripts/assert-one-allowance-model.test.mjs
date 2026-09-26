@@ -320,7 +320,7 @@ try {
   // on two paths is one shared bar, and only one of the two surfaces was collapsing
   // it. The router's grid has always collapsed it for display.
   check('/allowance renders the same canonical list, not its own walk of the table',
-    /for \(const l of canonicalAllowanceLanes\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
+    /const canonicalRows = canonicalAllowanceLanes\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
   const fmSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel has no dedupe of its own any more', !/seenModel/.test(fmSrc), 'a second notion of "same model" is how the two drifted apart');
   check('and takes the shared list instead', /canonical = null/.test(fmSrc) && /canonical: canonicalAllowanceLanes\(/.test(fmSrc));
@@ -422,14 +422,21 @@ try {
   check('and the name column is wide enough for the longest free model name',
     /const W_MODEL = 20;/.test(nameSrc));
 
-  check('and the supersession score has one home, in free-lanes',
-    /scoreOf = laneScoreFromRatings/.test(lanesSrc) && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
+  // R-16: the supersession order comes from the catalog's Ranked picks, from one
+  // home, so /allowance and /freemodel cannot drop different models again.
+  check('and the supersession score has one home, in free-lanes, reading the catalog',
+    /scoreOf = laneScoreFromCatalog/.test(lanesSrc) && /from '.\/free-catalogs.mjs'/.test(lanesSrc)
+    && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
   check('and no-credential rows leave the count on both surfaces',
     /const needsSetup = rows\.filter\(\(r\) => r\.needsSetup\)/.test(paritySrc) && /need setup/.test(paritySrc) && /needsSetup\.length \? ` · \$\{needsSetup\.length\} need setup`/.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
-  const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
-  check('/freemodel renders the canonical list, not the raw catalog', /const rows = canonical \|\| \[\];/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
+  const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
+  const botSrc = read('bot-host.mjs');
+  // The rows are the canonical list in the canonical tier-group order — the same
+  // helper /allowance groups with — not a second ordering of the same models.
+  check('/freemodel renders the canonical list, not the raw catalog',
+    /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\);/.test(botSrc) && /groupRowsByTier\(canonical \|\| \[\]\)/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
     /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));
@@ -455,8 +462,10 @@ try {
   // second source. What stays forbidden is a blocked-rows section like the old
   // "Not selectable right now".
   check('and tier rows come from the canonical usable set, not a second source',
-    /for \(const r of coding\)/.test(fmBody) && /for \(const r of light\)/.test(fmBody)
-    && /usable\.filter/.test(fmBody) && !/Not selectable right now:/.test(fmBody));
+    /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\)/.test(fmBody)
+    && /const usable = listed\.filter\(/.test(fmBody)
+    && /for \(const g of tierGroups\)/.test(fmBody)
+    && !/Not selectable right now:/.test(fmBody));
   check('and it does not repeat the counts in a second footer', !/Allowance \(per-host ledger\)/.test(botSrc));
   // Depleted lanes stay tappable, exactly as the router does, so a tap can answer
   // with what to use instead. Filtering them out is what made the two commands
@@ -465,12 +474,24 @@ try {
   // The tag is the same plan code /allowance prints, which is what makes the two
   // commands read as one list instead of two vocabularies.
   // The button is: ❌ when unusable, the plan code, the model's own name, and the
-  // benchmark score when the scorecard has one (assert-model-ratings covers the
-  // score itself and that an unmeasured model gets no number).
+  // bakeoff label — or "unranked" when the ledger has no row for that model.
+  // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
     /const rated = `\$\{tag \? tag \+ ': ' : ''\}\$\{label\}/.test(botSrc)
-    && /buttons\.push\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`\)/.test(botSrc),
-    botSrc.match(/buttons\.push\([^\n]*/)?.[0] || 'not found');
+    && /text: `\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`/.test(botSrc),
+    botSrc.match(/buttons\.push\(\{[^\n]*/)?.[0] || 'not found');
+  // Telegram caps callback_data at 64 bytes, and it used to carry the label — so
+  // the first label that grew took the whole keyboard down with
+  // BUTTON_DATA_INVALID. The payload is the route, and a route that still cannot
+  // fit degrades to a position rather than to a broken button.
+  check('callback_data carries the route, never the label', /data: route/.test(botSrc) && /callback_data: data/.test(read('lib/commands.mjs')));
+  // Every row is an array of buttons. Returning a bare button object instead is
+  // `expected an Array of InlineKeyboardButton`, which is what the first attempt
+  // at this fix did.
+  check('and every keyboard row is an array of buttons', /return \[\{ text, callback_data: data \}\];/.test(read('lib/commands.mjs')));
+  check('and a payload that cannot fit degrades to a position', /LIMIT = 64/.test(read('lib/commands.mjs')) && /`\$\{kind\}:#\$\{i\}`/.test(read('lib/commands.mjs')));
+  check('the tap resolves a route first, then a position, then a label',
+    /a\.ref === value/.test(botSrc) && /startsWith\('#'\)/.test(botSrc));
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
   check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
   // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven

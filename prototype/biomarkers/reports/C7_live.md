@@ -5,8 +5,8 @@
 - Insight batch: 20 · draft batch: 12 → 1 agent turns
 - Flow: hits lock dictionary; agent writes medicalInsight only. Misses get pending drafts.
 - Template: `prototype/biomarkers/TEMPLATE.md`
-- Env file: (none)
-- Score: **PASS** (2 known / 0 unknown)
+- Env file: r16-scorecard/.env
+- Score: **FAIL** (2 known / 0 unknown)
 
 ## System instruction (verbatim)
 
@@ -42,7 +42,7 @@ LDL  100 mg/dL
 
 ## Agent turns (full payload sent + model output)
 
-### Turn 1 (hit) — r01, r02 (2 rows, 1726ms)
+### Turn 1 (hit) — r01, r02 (2 rows, 1762ms)
 
 **User contents sent to the model** (system instruction is above; this is the user turn):
 
@@ -73,7 +73,7 @@ Biomarkers to review (hits - in catalog):
     {
       "id": "r02",
       "name": "LDL-C",
-      "value": 2.59,
+      "value": 2.586,
       "unit": "mmol/L",
       "date": "2026-06-05",
       "range": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
@@ -96,35 +96,35 @@ Biomarkers to review (hits - in catalog):
 [
   {
     "id": "r01",
-    "medicalInsight": "Blood Urea Nitrogen is within normal limits, reflecting adequate renal clearance and protein metabolism.",
-    "optimalValue": "5.0 mmol/L",
-    "editReason": "Converted user input from mg/dL to SI mmol/L for patient preference.",
+    "medicalInsight": "Blood Urea Nitrogen is within the normal range, reflecting adequate renal clearance and protein metabolism.",
+    "optimalValue": "5 mmol/L",
+    "editReason": "Corrected optimal value to a single ideal physiological target.",
     "logs": [
       {
         "date": "2026-06-05",
         "value": 5.35,
         "unit": "mmol/L",
-        "comment": "Converted from 15 mg/dL"
+        "comment": null
       }
     ],
     "customRangeOverlay": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
     "dictionaryCorrection": {
-      "field": "unit",
-      "correctedValue": "mmol/L",
-      "reason": "Standardizing laboratory dictionary to support SI unit conversion."
+      "field": "normalRange",
+      "correctedValue": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
+      "reason": "Standardizing dictionary to SI units for blood urea nitrogen."
     }
   },
   {
     "id": "r02",
-    "medicalInsight": "LDL cholesterol is optimal for a 43-year-old male, supporting a favorable cardiovascular risk profile.",
+    "medicalInsight": "LDL cholesterol is optimal for a 43-year-old male, indicating a favorable cardiovascular risk profile.",
     "optimalValue": "2.0 mmol/L",
-    "editReason": "",
+    "editReason": "Provided a lower optimal target for ideal cardiovascular health.",
     "logs": [
       {
         "date": "2026-06-05",
-        "value": 2.59,
+        "value": 2.586,
         "unit": "mmol/L",
-        "comment": "Value reported as 100 mg/dL equivalent"
+        "comment": null
       }
     ],
     "customRangeOverlay": null,
@@ -138,7 +138,7 @@ Biomarkers to review (hits - in catalog):
 | id | printed | match | writeTarget | status | key | draft | fail |
 |---|---|---|---|---|---|---|---|
 | r01 | BUN | key | observation | — | bun | — | — |
-| r02 | LDL | key | observation | — | ldl | — | — |
+| r02 | LDL | key | observation | — | ldl | — | value |
 
 ## Contract checks
 

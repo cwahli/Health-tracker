@@ -5,7 +5,7 @@
 - Insight batch: 20 · draft batch: 12 → 1 agent turns
 - Flow: hits lock dictionary; agent writes medicalInsight only. Misses get pending drafts.
 - Template: `prototype/biomarkers/TEMPLATE.md`
-- Env file: (none)
+- Env file: r16-scorecard/.env
 - Score: **PASS** (2 known / 0 unknown)
 
 ## System instruction (verbatim)
@@ -42,7 +42,7 @@ LDL cholesterol  4.3 mmol/L
 
 ## Agent turns (full payload sent + model output)
 
-### Turn 1 (hit) — r01, r02 (2 rows, 1484ms)
+### Turn 1 (hit) — r01, r02 (2 rows, 1935ms)
 
 **User contents sent to the model** (system instruction is above; this is the user turn):
 
@@ -96,34 +96,34 @@ Biomarkers to review (hits - in catalog):
 [
   {
     "id": "r01",
-    "medicalInsight": "For a 43-year-old Chinese male, an HbA1c of 40 mmol/mol indicates an elevated prediabetes risk according to Chinese clinical thresholds.",
+    "medicalInsight": "Your HbA1c of 40 mmol/mol indicates an elevated prediabetes risk for a Chinese male, as thresholds for Chinese populations are slightly lower.",
     "optimalValue": "34 mmol/mol",
-    "editReason": "Providing a tailored optimal value and incorporating Chinese ethnic prediabetes risk thresholds (>=39 mmol/mol).",
+    "editReason": "Correcting optimal target to reflect optimal glucose control below prediabetes threshold for Chinese ethnicity.",
     "logs": [
       {
         "date": "2026-06-05",
         "value": 40,
         "unit": "mmol/mol",
-        "comment": null
+        "comment": "Routine blood test"
       }
     ],
-    "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41; High: >41",
+    "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41",
     "dictionaryCorrection": null
   },
   {
     "id": "r02",
-    "medicalInsight": "LDL-C of 4.3 mmol/L is very high and indicates significantly elevated cardiovascular risk, requiring lifestyle and likely therapeutic intervention.",
+    "medicalInsight": "Your LDL cholesterol of 4.3 mmol/L is significantly elevated, placing you at higher cardiovascular risk. Lifestyle changes or further clinical evaluation are recommended.",
     "optimalValue": "2.0 mmol/L",
-    "editReason": "Providing an optimal therapeutic target for cardiovascular risk management.",
+    "editReason": "Providing a more aggressive cardiovascular optimal target for elevated baseline LDL.",
     "logs": [
       {
         "date": "2026-06-05",
         "value": 4.3,
         "unit": "mmol/L",
-        "comment": null
+        "comment": "Routine lipid panel"
       }
     ],
-    "customRangeOverlay": null,
+    "customRangeOverlay": "[Standard] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
     "dictionaryCorrection": null
   }
 ]

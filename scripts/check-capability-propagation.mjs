@@ -70,9 +70,9 @@ const VENDOR_MIRRORS = [
     '// === VENDORED FROM scripts/lib/inbound-media.mjs — DO NOT EDIT ===',
   ],
   [
-    'scripts/lib/model-ratings.mjs',
-    'tools/telegram-provider-router/src/model-ratings.mjs',
-    '// === VENDORED FROM scripts/lib/model-ratings.mjs — DO NOT EDIT ===',
+    'scripts/lib/free-catalogs.mjs',
+    'tools/telegram-provider-router/src/free-catalogs.mjs',
+    '// === VENDORED FROM scripts/lib/free-catalogs.mjs — DO NOT EDIT ===',
   ],
   [
     'scripts/lib/setup-gaps.mjs',
