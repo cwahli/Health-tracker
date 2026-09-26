@@ -447,7 +447,7 @@ try {
   // row per group with the same label and count /allowance prints above the section,
   // from the same groupRowsByTier() result.
   check('/freemodel heads each tier group with the same label and count',
-    /buttons\.push\(\{ text: `\$\{g\.label\} \(\$\{g\.rows\.length\}\)`, data: 'noop', header: true \}\)/.test(botSrc));
+    /buttons\.push\(\{ text: leftAlign\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
   check('and a heading is a real noop, not a model named noop',
     /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
   check('the body carries the same breakdown as one line',
@@ -490,7 +490,7 @@ try {
   // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
     /const rated = `\$\{tag \? tag \+ ': ' : ''\}\$\{label\}/.test(botSrc)
-    && /text: `\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`/.test(botSrc),
+    && /text: leftAlign\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`\)/.test(botSrc),
     botSrc.match(/buttons\.push\(\{[^\n]*/)?.[0] || 'not found');
   // Telegram caps callback_data at 64 bytes, and it used to carry the label — so
   // the first label that grew took the whole keyboard down with
@@ -504,6 +504,16 @@ try {
   check('and a payload that cannot fit degrades to a position', /LIMIT = 64/.test(read('lib/commands.mjs')) && /`\$\{kind\}:#\$\{i\}`/.test(read('lib/commands.mjs')));
   check('the tap resolves a route first, then a position, then a label',
     /a\.ref === value/.test(botSrc) && /startsWith\('#'\)/.test(botSrc));
+  // The two commands show one list. The body carries allowanceTableLines() — the
+  // same helper /allowance renders — so the rows, the order, the groups and the
+  // counts cannot differ; the keyboard is the tappable layer on top of it.
+  check('/freemodel prints the same table /allowance prints', /allowanceTableLines\(fmTable, fmSession/.test(botSrc));
+  check('and it is the shared helper, not a second renderer', /export function allowanceTableLines/.test(read('lib/free-lanes.mjs')));
+  check('the table helper is the table only, so nothing is embedded twice', /if \(tableOnly\) return lines\.join/.test(read('lib/free-lanes.mjs')));
+  check('button labels are padded left, and say why that is cosmetic',
+    /const LEFT_PAD = '\\u00a0\\u00a0'/.test(botSrc) && /no alignment field/.test(botSrc) && /leftAlign\(/.test(botSrc));
+  check('a button still carries the benchmark score', /const bench = benchmarkLabel\(model\)/.test(botSrc) && /\$\{bench \? ` · \$\{bench\}` : ''\}/.test(botSrc));
+
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
   check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
   // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven

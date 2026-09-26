@@ -1013,7 +1013,21 @@ export function orderLikeWalk(lanes, currentModel) {
   return [first, ...list];
 }
 
-export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "" } = {}) {
+/**
+ * The ledger table on its own: column header, rule, a subheading per tier group
+ * with the group's count, and one line per row. Shared by /allowance and
+ * /freemodel, which is what makes the two lists the same list rather than two
+ * renderings that agree today.
+ *
+ * It is a monospace `<code>` block because that is the only left-aligned,
+ * column-true rendering Telegram offers. An inline keyboard button cannot be
+ * aligned: the Bot API has no alignment field and clients centre that text.
+ */
+export function allowanceTableLines(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, location = "", readiness = null } = {}) {
+  return formatCompactAllowanceChat(table, session, { now, labelFn, rows, currentModel: "", location, readiness, tableOnly: true });
+}
+
+export function formatCompactAllowanceChat(table, session, { now = Date.now(), labelFn = defaultResetLabel, rows = null, currentModel = "", tableOnly = false } = {}) {
   const t = overlayLiveQuota(table, session, { now, labelFn });
   // TH + OC-TH are one row (display-only); failover still uses both lanes.
   const lanes = dedupeTokenHarborLanes([...(t.lanes || [])].filter(laneInAllowanceTable));
@@ -1097,6 +1111,9 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     if (tierGroups.length > 1) lines.push(`${g.label} (${mine.length})`);
     for (const r of mine) lines.push(r.line);
   }
+  // /freemodel embeds exactly these lines and nothing below them, so the two
+  // commands cannot show different rows for the same ledger.
+  if (tableOnly) return lines.join("\n");
   lines.push("");
   // "Next up" must be a lane the walk can actually choose. A terminal-only row
   // (Freebuff and friends) stays in the table so the user can see it, but it is
