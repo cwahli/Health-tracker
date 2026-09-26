@@ -2313,17 +2313,19 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'tui': {
       // The actual TUI, not the web UI: ttyd serves a real PTY and mounts it
       // under the same tunnel and the same login, so this is a terminal you
-      // type into from inside Telegram. It runs in its own git worktree
-      // (/root/tui) so it cannot fight the checkout this bot writes to.
+      // type into from inside Telegram. It attaches to THIS chat's opencode
+      // session in THIS checkout (resolved per attach by tui-attach.sh), so it
+      // is the same conversation, not a second agent — which is why a message
+      // you send here shows up there.
       const tuiUrl = readMiniappUrl();
       if (!tuiUrl) {
         await api.sendMessage(chatId, '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.');
         return;
       }
       await api.sendMessage(chatId, [
-        '⌨️ *opencode TUI* — a real terminal, driven by touch, running in its own worktree at `/root/tui` so it never collides with this chat\'s checkout.',
-        'It runs inside tmux, so you can close the Mini App and reopen it and keep your place. Tap the screen once if the keyboard does not come up on its own.',
-        'First tap asks for the password once.',
+        '⌨️ *opencode TUI* — a real terminal, driven by touch, attached to *this* conversation in `/root/Health-tracker`.',
+        'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.',
+        'It refuses to attach while I am mid-turn — two agents writing one session corrupts it. First tap asks for the password once.',
       ].join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/tui/` } }]] },
       });
