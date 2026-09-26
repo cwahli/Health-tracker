@@ -78,7 +78,7 @@ try {
 
   // The relay holds the VM's store (home); the worker holds its own (device).
   // The test addresses the VM's store explicitly rather than through HOME.
-  const { enqueueJob, getJob } = await import('./lib/worker-jobs.mjs');
+  const { enqueueJob, getJob, completeJob } = await import('./lib/worker-jobs.mjs');
   const job = enqueueJob({ host: 'mobile', prompt: 'reply with the word ok', model: 'grok/grok-4.7', workspace: home, envMode: 'project' }, { home });
   let done = null;
   for (let i = 0; i < 120 && !done; i++) {
@@ -96,6 +96,12 @@ try {
   const vmLedger = path.join(home, '.local', 'state', 'bot-host', 'vm', 'free-lanes');
   check('the worker ledger is its own directory, not the VM bot ledger', done?.result?.ledger !== vmLedger);
   check('and it is named for the worker host', /worker-mobile/.test(String(done?.result?.ledger || '')));
+  // The worker counts the files it applied from the pack; that count must come
+  // back with the result, or a swap is judged on the upload it accepted rather
+  // than on what actually landed on the device.
+  const packSentinel = enqueueJob({ host: 'mobile', prompt: 'pack round trip', model: '', workspace: home }, { home });
+  const withPack = completeJob(packSentinel.id, { text: 'ok', code: 0, packApplied: 3, workspace: device }, { home });
+  check('the pack count survives the trip back', withPack?.result?.packApplied === 3, String(withPack?.result?.packApplied));
   check('the job was claimed exactly once', typeof done?.claimedAt === 'string');
   check('the job store lives on the VM, not the device', fs.existsSync(path.join(home, '.hermes', 'worker-jobs')));
 
