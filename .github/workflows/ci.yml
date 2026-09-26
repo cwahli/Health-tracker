@@ -34,18 +34,32 @@ jobs:
       - name: Agent identity on each new commit
         shell: bash
         run: |
+          # Only the commits this change ADDS are its responsibility. An agent
+          # branch that merges main (the normal thing on a long-lived branch)
+          # would otherwise drag main's own commits into the range, and any of
+          # them that predates this rule fails a branch that never touched it:
+          # PR #250 went red on the commits of #232/#234 for exactly that
+          # reason. `--not origin/<base>` drops everything the base already has.
+          # It must be a separate argv word — git does not parse a "--not"
+          # inside one quoted rev string, and the check would then see zero
+          # commits and pass on the gate meant to catch a missing trailer.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            range="${{ github.event.pull_request.base.sha }}..HEAD"
+            base='${{ github.event.pull_request.base.ref }}'
+            before='${{ github.event.pull_request.base.sha }}'
           else
-            before="${{ github.event.before }}"
-            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
-              git fetch origin main
-              range="origin/main..HEAD"
-            else
-              range="$before..${{ github.sha }}"
+            base='${{ github.event.repository.default_branch }}'
+            before='${{ github.event.before }}'
+            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              before=""
             fi
           fi
-          scripts/check-agent-identity.sh --range "$range"
+          git fetch --no-tags --quiet origin "$base"
+          if [ -z "$before" ]; then
+            before="$(git rev-parse "origin/$base")"
+          fi
+          scripts/check-agent-identity.sh \
+            --range "$before..HEAD" \
+            --not "origin/$base"
 
       - uses: actions/setup-node@v4
         with:

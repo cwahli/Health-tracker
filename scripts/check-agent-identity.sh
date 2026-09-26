@@ -46,13 +46,31 @@ if [ "${1:-}" = "--message" ]; then
 fi
 
 if [ "${1:-}" = "--range" ]; then
-  range=$2
+  shift
+  # Every remaining word is a rev-list argument, so a caller can say
+  #   --range <base>..HEAD --not origin/<base>
+  # and the exclusion is real. A single quoted "<base>..HEAD --not origin/<base>"
+  # string is NOT parsed as a rev list by git: it errors, and the loop below then
+  # runs zero times — a silent pass on a gate that exists to catch a missing
+  # trailer. So the arguments are passed through, and an unusable range is a
+  # failure rather than an empty success.
+  if ! commits=$(git rev-list "$@"); then
+    echo "check-agent-identity: git rev-list failed for: $*" >&2
+    exit 1
+  fi
+  if [ -z "$commits" ]; then
+    # Nothing this change adds is unvetted — e.g. a re-push of a branch whose
+    # commits are already on the base. Distinct from the rev-list failure
+    # above, which is a broken range and must not read as a pass.
+    echo "check-agent-identity: no new commits in: $*"
+    exit 0
+  fi
   fail=0
-  for sha in $(git rev-list "$range"); do
+  for sha in $commits; do
     check_commit "$sha" || fail=1
   done
   exit "$fail"
 fi
 
-echo "Usage: check-agent-identity.sh --message <file> | --range <rev-list-range>" >&2
+echo "Usage: check-agent-identity.sh --message <file> | --range <rev> [<rev> ...]" >&2
 exit 2
