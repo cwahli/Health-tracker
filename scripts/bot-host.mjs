@@ -2988,7 +2988,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => `\`${h.host}\` (${h.ok ? 'answered' : h.reason || 'dry'})`).join(', ')} — no location has quota.` : '';
       await api.sendMessage(
         chatId,
-        `🛑 No lane on ${location} has allowance right now.${when}${tried}\nNothing was run and nothing was spent. Send \`/allowance\` for the ledger.`
+        `🛑 No lane on ${location} has allowance right now.${when}${tried}\nNothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
       ).catch(() => {});
       return;
     }
@@ -3049,7 +3049,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         : ' ';
       await api.sendMessage(
         chatId,
-        `🛑 No lane on \`${location}\` has allowance right now,${tried}no location has quota. Nothing was run and nothing was spent. Send \`/allowance\` for the ledger.`
+        `🛑 No lane on \`${location}\` has allowance right now,${tried}no location has quota. Nothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
       ).catch(() => {});
       return;
     }

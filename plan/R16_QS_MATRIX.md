@@ -181,3 +181,40 @@ driver.py proof locations        # cards 4/5/6/6c across vps, vm2, mobile, colla
 
 The `locations` sequence is the harness QS-1, QS-3, QS-4 and QS-9 need; it reports which of
 those hosts are actually reachable before it tries to prove anything on them.
+
+---
+
+## To continue (handoff 2026-09-26)
+
+**Code waiting for review/merge (all on `agent/r16-scorecard`, all gated green):**
+- QS-9 auto-continue chain (`continueTurnOnNextWorker` + `runRemoteTurn` dry-detection,
+  visited-set, prefer-first, held-hops-are-walls) with the no-quota line naming every
+  host tried — sensor `assert-r16-failover` 26/0.
+- QS-11 mid-stream flag (`midstreamFlagText` + partial-preserving failover) — same sensor.
+- QS-4 pack paths (`resolvePackPath` + `packPathLine`: disk-pack / lane-summary excluding
+  the just-failed lane / summary-skipped) — same sensor.
+- QS-6/7 tiered `/freemodel` body + bakeoff scores from `free-catalogs` — sensor
+  `assert-freemodel-tiers` 10/0; live render captured via `--inject` + passive readback.
+- End-to-end drill `assert-swap-drill` 19/0 (10 swaps, injected rollback, real-tmux repoint).
+
+**Do NOT re-prove with:** VPS-local stand-in workers standing in for the phone/Colab/Grok
+box (transport-only evidence), unit tests or table diffs as row flips, hand-written ledger
+stamps, quota burn for exhaustion, or a second poller on one token (Telegram 409 — the
+poller lease guard exists for this; check `systemctl is-active bot-host@vm` and one
+`--id=vm` process before any live pass).
+
+**Concrete unblocks, in order:**
+1. Real `mobile` worker: the phone has no SSH path from the VM (`mosh` exists,
+   `~/.ssh/config` has no phone entry). Add it, run `worker-agent.mjs --host=mobile`
+   against the relay, confirm presence fresh — unlocks QS-1/QS-3/QS-4.
+2. Real `collab`/`grok` workers (units that actually run off-box, separate ledgers,
+   separate opencode stores) — unlocks QS-9 hops and QS-4 cross-host packs.
+3. QS-9 live transcript: needs a host that genuinely empties (forbidden to burn quota
+   or forge stamps to fake this). Next real exhaustion is the trigger; the chain,
+   naming, and stop condition are already proven in sensor + drill.
+4. QS-11 live mid-stream: needs a real mid-answer quota death (unproducible on demand
+   without burn). Parser + stamp + flag + dead-end paths are proven in sensor.
+5. Merge `agent/r16-scorecard` (PR #223) after review, delete the branch, deploy from
+   `main` — production still runs the detached `/home/ubuntu/bot-host-r14` tree, and
+   several bot versions serving one chat in one evening already corrupted one evidence
+   capture. Every future capture must name serving tree + commit + MainPID.
