@@ -1,5 +1,7 @@
 # Direct relay route — one uniform solution for mobile / collab / grok
 
+Status: code + sensor on `agent/r16-scorecard`, staging live (see below), production rollout pending. The live
+=======
 Status: code + sensor on `agent/relay-auth`, **not yet rolled out**. The live
 relay still binds loopback with no token; nothing below has touched it.
 
@@ -19,6 +21,8 @@ the relay itself (`WORKER_RELAY_TOKEN`), the same on every host; `/health`
 stays open for monitoring. No token configured = old loopback behavior,
 unchanged (sensor-proven backward compatible).
 
+## Code (on `agent/r16-scorecard`, sensor `assert-relay-auth` 12/0)
+=======
 ## Code (on `agent/relay-auth`, sensor `assert-relay-auth` 12/0)
 
 - `scripts/worker-relay.mjs`: `WORKER_RELAY_TOKEN` / `--relay-token`; every
@@ -32,6 +36,29 @@ unchanged (sensor-proven backward compatible).
 - `scripts/bot-host.mjs` `runOnWorker`: `relayToken` param (env default) for
   the pack PUT.
 
+## Staging is LIVE (2026-09-26, no production touched)
+
+A token-guarded staging relay already answers the public internet, proven end
+to end, for devices to onboard against today:
+
+- Relay: `/home/ubuntu/dev/relay-auth` @ `agent/r16-scorecard`, port **8891**,
+  loopback-bound, `WORKER_RELAY_TOKEN` from `~/.config/bot-host/relay.env`
+  (0600). Own store (`/tmp/relay-staging-home`) — shares nothing with the
+  production relay on 8890.
+- Public route: `https://health-tracking.duckdns.org/relay-staging/*` → Caddy
+  → 127.0.0.1:8891 (Caddyfile validated + reloaded; main site verified 200).
+- Proven 2026-09-26: anonymous → 401 on every guarded route; health → 200;
+  a worker over **public HTTPS + token** registered with real machine identity;
+  a full job roundtrip came back with the worker's own ledger. Test workers
+  removed afterwards; presence clean.
+- Device start lines (token handed out of band, never in chat):
+  `node <repo>/scripts/worker-agent.mjs --host=<mobile|collab|grok>
+  --relay=https://health-tracking.duckdns.org/relay-staging
+  --relay-token=$WORKER_RELAY_TOKEN`
+  (branch `agent/r16-scorecard`).
+
+## Production rollout (atomic — do not do half of it)
+=======
 ## Rollout (atomic — do not do half of it)
 
 Half-rolled-out is worse than not started: a public route without a token
@@ -71,6 +98,46 @@ stand-ins. Do all of these in one window, announced:
   --relay=https://health-tracking.duckdns.org/relay
   --relay-token=$WORKER_RELAY_TOKEN` (token via env file, never chat).
 - **collab (notebook):** ephemeral runtime — every start needs install node,
+  clone branch, creds, start worker; dies on idle (~12h). Keep secrets in
+  Colab secrets, never in cells. Same start command with `--host=collab`.
+  Expect to re-run setup each session; presence going stale is normal, not an
+  incident. Prerequisite: the relay rollout above must be live first (the
+  worker has nothing to dial until the public `/relay` route exists).
+  Paste-ready cells (run after the rollout; token from Colab Secrets):
+  ```bash
+  %%bash
+  # cell 1 — runtime: node, repo, worker
+  command -v node >/dev/null || (curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs)
+  node --version
+  [ -d ~/Health-tracker ] || git clone --branch agent/r16-scorecard --depth 1 https://github.com/cwahli/Health-tracker.git ~/Health-tracker
+  cd ~/Health-tracker && git pull --ff-only origin agent/r16-scorecard 2>/dev/null || true
+  command -v opencode >/dev/null || { curl -fsSL https://opencode.ai/install | bash; export PATH="$HOME/.opencode/bin:$PATH"; }
+  opencode --version
+  ```
+  ```python
+  # cell 2 — secrets (Sidebar → Secrets: WORKER_RELAY_TOKEN), then launch
+  from google.colab import userdata
+  import os, subprocess, time, urllib.request, json
+  os.environ['WORKER_RELAY_TOKEN'] = userdata.get('WORKER_RELAY_TOKEN')
+  relay = 'https://health-tracking.duckdns.org/relay'
+  log = open('/tmp/worker-collab.log', 'ab', buffering=0)
+  p = subprocess.Popen(['node', os.path.expanduser('~/Health-tracker/scripts/worker-agent.mjs'),
+                        '--host=collab', f'--relay={relay}'],
+                       env={**os.environ}, stdout=log, stderr=subprocess.STDOUT,
+                       start_new_session=True)
+  print('worker pid:', p.pid)
+  ```
+  ```python
+  # cell 3 — verify (presence must show collab fresh, machine = the Colab box)
+  import urllib.request, json
+  h = json.load(urllib.request.urlopen('https://health-tracking.duckdns.org/relay/health', timeout=20))
+  print([(w['host'], w['reachable']) for w in h['workers'] if w['host'] in ('collab',)])
+  ```
+  Notes: model turns need the same opencode auth the notebook already uses for
+  its Colab engines; Qwen/vLLM lanes stay under the notebook's own `/switch`
+  system (the worker only runs opencode/cline turns). Re-run cells 1–2 every
+  fresh runtime; cell 3 anytime to check in.
+=======
   clone branch, creds, start worker; dies on idle/timeout (~12h). Keep secrets
   in Colab secrets, never in cells. Same start command with `--host=collab`.
   Expect to re-run setup each session; presence going stale is normal, not an

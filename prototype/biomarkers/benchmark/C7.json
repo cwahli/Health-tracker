@@ -12,48 +12,48 @@
         "r01",
         "r02"
       ],
-      "ms": 1726,
+      "ms": 1762,
       "n": 2,
-      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"r01\",\n      \"medicalInsight\": \"Blood Urea Nitrogen is within normal limits, reflecting adequate renal clearance and protein metabolism.\",\n      \"optimalValue\": \"5.0 mmol/L\",\n      \"editReason\": \"Converted user input from mg/dL to SI mmol/L for patient preference.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 5.35,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"Converted from 15 mg/dL\"\n        }\n      ],\n      \"customRangeOverlay\": \"[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5\",\n      \"dictionaryCorrection\": {\n        \"field\": \"unit\",\n        \"correctedValue\": \"mmol/L\",\n        \"reason\": \"Standardizing laboratory dictionary to support SI unit conversion.\"\n      }\n    },\n    {\n      \"id\": \"r02\",\n      \"medicalInsight\": \"LDL cholesterol is optimal for a 43-year-old male, supporting a favorable cardiovascular risk profile.\",\n      \"optimalValue\": \"2.0 mmol/L\",\n      \"editReason\": \"\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 2.59,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"Value reported as 100 mg/dL equivalent\"\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    }\n  ]\n}",
+      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"r01\",\n      \"medicalInsight\": \"Blood Urea Nitrogen is within the normal range, reflecting adequate renal clearance and protein metabolism.\",\n      \"optimalValue\": \"5 mmol/L\",\n      \"editReason\": \"Corrected optimal value to a single ideal physiological target.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 5.35,\n          \"unit\": \"mmol/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": \"[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5\",\n      \"dictionaryCorrection\": {\n        \"field\": \"normalRange\",\n        \"correctedValue\": \"[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5\",\n        \"reason\": \"Standardizing dictionary to SI units for blood urea nitrogen.\"\n      }\n    },\n    {\n      \"id\": \"r02\",\n      \"medicalInsight\": \"LDL cholesterol is optimal for a 43-year-old male, indicating a favorable cardiovascular risk profile.\",\n      \"optimalValue\": \"2.0 mmol/L\",\n      \"editReason\": \"Provided a lower optimal target for ideal cardiovascular health.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 2.586,\n          \"unit\": \"mmol/L\",\n          \"comment\": null\n        }\n      ],\n      \"customRangeOverlay\": null,\n      \"dictionaryCorrection\": null\n    }\n  ]\n}",
       "rows": [
         {
           "id": "r01",
-          "medicalInsight": "Blood Urea Nitrogen is within normal limits, reflecting adequate renal clearance and protein metabolism.",
-          "optimalValue": "5.0 mmol/L",
-          "editReason": "Converted user input from mg/dL to SI mmol/L for patient preference.",
+          "medicalInsight": "Blood Urea Nitrogen is within the normal range, reflecting adequate renal clearance and protein metabolism.",
+          "optimalValue": "5 mmol/L",
+          "editReason": "Corrected optimal value to a single ideal physiological target.",
           "logs": [
             {
               "date": "2026-06-05",
               "value": 5.35,
               "unit": "mmol/L",
-              "comment": "Converted from 15 mg/dL"
+              "comment": null
             }
           ],
           "customRangeOverlay": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
           "dictionaryCorrection": {
-            "field": "unit",
-            "correctedValue": "mmol/L",
-            "reason": "Standardizing laboratory dictionary to support SI unit conversion."
+            "field": "normalRange",
+            "correctedValue": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
+            "reason": "Standardizing dictionary to SI units for blood urea nitrogen."
           }
         },
         {
           "id": "r02",
-          "medicalInsight": "LDL cholesterol is optimal for a 43-year-old male, supporting a favorable cardiovascular risk profile.",
+          "medicalInsight": "LDL cholesterol is optimal for a 43-year-old male, indicating a favorable cardiovascular risk profile.",
           "optimalValue": "2.0 mmol/L",
-          "editReason": "",
+          "editReason": "Provided a lower optimal target for ideal cardiovascular health.",
           "logs": [
             {
               "date": "2026-06-05",
-              "value": 2.59,
+              "value": 2.586,
               "unit": "mmol/L",
-              "comment": "Value reported as 100 mg/dL equivalent"
+              "comment": null
             }
           ],
           "customRangeOverlay": null,
           "dictionaryCorrection": null
         }
       ],
-      "user": "<user_upload>\nBUN is 15 mg/dL. LDL is 100 mg/dL. Oh and here's my SSN and address: 123 Main St, SSN: 123-45-6789.\n</user_upload>\n\nBiomarkers to review (hits - in catalog):\n{\n  \"biomarkers\": [\n    {\n      \"id\": \"r01\",\n      \"name\": \"BUN (Blood Urea Nitrogen)\",\n      \"value\": 5.35,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"7 - 20\",\n      \"optimalValue\": null,\n      \"existingInsight\": null,\n      \"existingCustomRange\": null,\n      \"dictionary\": {\n        \"normalRange\": \"7 - 20\",\n        \"unit\": \"mg/dL\",\n        \"description\": \"Urea nitrogen levels; high levels can show kidney load.\"\n      }\n    },\n    {\n      \"id\": \"r02\",\n      \"name\": \"LDL-C\",\n      \"value\": 2.59,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6\",\n      \"optimalValue\": null,\n      \"existingInsight\": null,\n      \"existingCustomRange\": null,\n      \"dictionary\": {\n        \"normalRange\": \"< 2.6\",\n        \"unit\": \"mmol/L\",\n        \"description\": \"Low-Density Lipoprotein, the \\\"bad\\\" cholesterol driving plaque.\"\n      }\n    }\n  ]\n}",
+      "user": "<user_upload>\nBUN is 15 mg/dL. LDL is 100 mg/dL. Oh and here's my SSN and address: 123 Main St, SSN: 123-45-6789.\n</user_upload>\n\nBiomarkers to review (hits - in catalog):\n{\n  \"biomarkers\": [\n    {\n      \"id\": \"r01\",\n      \"name\": \"BUN (Blood Urea Nitrogen)\",\n      \"value\": 5.35,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"7 - 20\",\n      \"optimalValue\": null,\n      \"existingInsight\": null,\n      \"existingCustomRange\": null,\n      \"dictionary\": {\n        \"normalRange\": \"7 - 20\",\n        \"unit\": \"mg/dL\",\n        \"description\": \"Urea nitrogen levels; high levels can show kidney load.\"\n      }\n    },\n    {\n      \"id\": \"r02\",\n      \"name\": \"LDL-C\",\n      \"value\": 2.586,\n      \"unit\": \"mmol/L\",\n      \"date\": \"2026-06-05\",\n      \"range\": \"[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6\",\n      \"optimalValue\": null,\n      \"existingInsight\": null,\n      \"existingCustomRange\": null,\n      \"dictionary\": {\n        \"normalRange\": \"< 2.6\",\n        \"unit\": \"mmol/L\",\n        \"description\": \"Low-Density Lipoprotein, the \\\"bad\\\" cholesterol driving plaque.\"\n      }\n    }\n  ]\n}",
       "payload": [
         {
           "id": "r01",
@@ -74,7 +74,7 @@
         {
           "id": "r02",
           "name": "LDL-C",
-          "value": 2.59,
+          "value": 2.586,
           "unit": "mmol/L",
           "date": "2026-06-05",
           "range": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
@@ -125,26 +125,26 @@
       "customRangePopulation": "",
       "printedRange": "",
       "assignedRange": "7 - 20",
-      "optimalValue": "5.0 mmol/L",
+      "optimalValue": "5 mmol/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Converted user input from mg/dL to SI mmol/L for patient preference.",
+      "editReason": "Corrected optimal value to a single ideal physiological target.",
       "customRangeOverlay": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
-      "medicalInsight": "Blood Urea Nitrogen is within normal limits, reflecting adequate renal clearance and protein metabolism.",
+      "medicalInsight": "Blood Urea Nitrogen is within the normal range, reflecting adequate renal clearance and protein metabolism.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
           "value": 5.35,
           "unit": "mmol/L",
-          "comment": "Converted from 15 mg/dL"
+          "comment": null
         }
       ],
       "currentEvaluationStatus": "Low",
       "newCatalogDraft": null,
       "dictionaryCorrection": {
-        "field": "unit",
-        "correctedValue": "mmol/L",
-        "reason": "Standardizing laboratory dictionary to support SI unit conversion."
+        "field": "normalRange",
+        "correctedValue": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
+        "reason": "Standardizing dictionary to SI units for blood urea nitrogen."
       }
     },
     {
@@ -175,15 +175,15 @@
       "optimalValue": "2.0 mmol/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": null,
+      "editReason": "Provided a lower optimal target for ideal cardiovascular health.",
       "customRangeOverlay": null,
-      "medicalInsight": "LDL cholesterol is optimal for a 43-year-old male, supporting a favorable cardiovascular risk profile.",
+      "medicalInsight": "LDL cholesterol is optimal for a 43-year-old male, indicating a favorable cardiovascular risk profile.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
-          "value": 2.59,
+          "value": 2.586,
           "unit": "mmol/L",
-          "comment": "Value reported as 100 mg/dL equivalent"
+          "comment": null
         }
       ],
       "currentEvaluationStatus": "Optimal",
@@ -200,24 +200,24 @@
       "date": "2026-06-05",
       "printedRange": "",
       "assignedRange": "7 - 20",
-      "optimalValue": "5.0 mmol/L",
-      "editReason": "Converted user input from mg/dL to SI mmol/L for patient preference.",
+      "optimalValue": "5 mmol/L",
+      "editReason": "Corrected optimal value to a single ideal physiological target.",
       "dictionaryCorrection": {
-        "field": "unit",
-        "correctedValue": "mmol/L",
-        "reason": "Standardizing laboratory dictionary to support SI unit conversion."
+        "field": "normalRange",
+        "correctedValue": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
+        "reason": "Standardizing dictionary to SI units for blood urea nitrogen."
       },
       "match": "key",
       "key": "bun",
       "writeTarget": "observation",
-      "medicalInsight": "Blood Urea Nitrogen is within normal limits, reflecting adequate renal clearance and protein metabolism.",
+      "medicalInsight": "Blood Urea Nitrogen is within the normal range, reflecting adequate renal clearance and protein metabolism.",
       "customRangeOverlay": "[Western Standard] High: >7.1; Normal: 2.5-7.1; Low: <2.5",
       "logs": [
         {
           "date": "2026-06-05",
           "value": 5.35,
           "unit": "mmol/L",
-          "comment": "Converted from 15 mg/dL"
+          "comment": null
         }
       ],
       "newCatalogDraft": null
@@ -226,32 +226,39 @@
       "id": "r02",
       "op": "add",
       "printed": "LDL",
-      "value": 2.59,
+      "value": 2.586,
       "unit": "mmol/L",
       "date": "2026-06-05",
       "printedRange": "",
       "assignedRange": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
       "optimalValue": "2.0 mmol/L",
-      "editReason": null,
+      "editReason": "Provided a lower optimal target for ideal cardiovascular health.",
       "match": "key",
       "key": "ldl",
       "writeTarget": "observation",
-      "medicalInsight": "LDL cholesterol is optimal for a 43-year-old male, supporting a favorable cardiovascular risk profile.",
+      "medicalInsight": "LDL cholesterol is optimal for a 43-year-old male, indicating a favorable cardiovascular risk profile.",
       "customRangeOverlay": null,
       "logs": [
         {
           "date": "2026-06-05",
-          "value": 2.59,
+          "value": 2.586,
           "unit": "mmol/L",
-          "comment": "Value reported as 100 mg/dL equivalent"
+          "comment": null
         }
       ],
       "newCatalogDraft": null
     }
   ],
   "score": {
-    "pass": true,
-    "fails": [],
+    "pass": false,
+    "fails": [
+      {
+        "id": "r02",
+        "printed": "LDL",
+        "check": "value",
+        "detail": "2.586 != 2.59"
+      }
+    ],
     "known": 2,
     "unknown": 0,
     "turns": 1

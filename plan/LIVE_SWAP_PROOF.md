@@ -52,3 +52,24 @@ Three honest caveats:
 | mobile | 11139 | 0 | /home/ubuntu/.local/state/bot-host/worker-mobile/free-lanes | 1 | ran on mobile |
 | collab | 15301 | 0 | /home/ubuntu/.local/state/bot-host/worker-collab/free-lanes | 1 | ran on collab |
 | grok | 17457 | 0 | /home/ubuntu/.local/state/bot-host/worker-grok/free-lanes | 1 | ran on grok |
+
+## Telegram layer, with no human
+
+The Bot API cannot fabricate an inbound message — `getUpdates` only ever
+returns what a real client sent, and only one poller may hold them — so the
+command side cannot come from Telegram itself. `--inject` feeds the dispatch
+loop a synthetic message instead, and the replies go out through the real API.
+Run as `node scripts/bot-host.mjs --id=vm --inject="/location mobile"`: it
+neither polls nor takes the pid-held lease, so the live bot keeps serving.
+
+| # | step | result | what landed in chat 6218257274 |
+|---|---|---|---|
+| 70 | `--inject=/status` | PASS | status card: model, agent, session, task |
+| 71 | `--inject=/location mobile` | PASS | `✅ Compute location set to: mobile … its first turn is a canary (checked, then confirmed as active)` |
+| 72 | `--inject=/location vps` | PASS | `✅ Compute location set to: vps … The next turn runs on vps` |
+| 73 | the live poller was not disturbed | PASS | lease row still owned by the live pid — `renew`/`release` refuse any other pid |
+| 74 | the live bot's own location is unchanged | PASS | `BOT_LOCATION` is unset in the running process → it is still on `vps`, which is what the last message says |
+
+Env location is per-process, so an inject's `BOT_LOCATION` dies with it. The
+pass therefore ends by setting `/location vps` again, which is where the live
+bot already was — the chat's last word and the bot's real state agree.

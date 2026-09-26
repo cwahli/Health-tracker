@@ -434,6 +434,7 @@ try {
   // One cap for the column and for shortModelName(). Two numbers is how a 20-char
   // cap in a 24-char column still cut "nemotron-3.5-lightning" to
   // "nemotron-3.5-lightni" and "trinity-large-preview" to "trinity-large-previe".
+  // The reader's spec widened both to 30 together.
   check('the name column and the name cap are the same number',
     /export const MODEL_NAME_MAX = 30;/.test(nameSrc) && /s\.length > MODEL_NAME_MAX \? s\.slice\(0, MODEL_NAME_MAX\)/.test(nameSrc));
   check('and no two distinct models render the same name', (() => {

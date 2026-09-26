@@ -12,40 +12,40 @@
         "r01",
         "r02"
       ],
-      "ms": 1484,
+      "ms": 1935,
       "n": 2,
-      "raw": "{\"rows\":[{\"id\":\"r01\",\"medicalInsight\":\"For a 43-year-old Chinese male, an HbA1c of 40 mmol/mol indicates an elevated prediabetes risk according to Chinese clinical thresholds.\",\"optimalValue\":\"34 mmol/mol\",\"editReason\":\"Providing a tailored optimal value and incorporating Chinese ethnic prediabetes risk thresholds (>=39 mmol/mol).\",\"logs\":[{\"date\":\"2026-06-05\",\"value\":40,\"unit\":\"mmol/mol\",\"comment\":null}],\"customRangeOverlay\":\"[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41; High: >41\",\"dictionaryCorrection\":null},{\"id\":\"r02\",\"medicalInsight\":\"LDL-C of 4.3 mmol/L is very high and indicates significantly elevated cardiovascular risk, requiring lifestyle and likely therapeutic intervention.\",\"optimalValue\":\"2.0 mmol/L\",\"editReason\":\"Providing an optimal therapeutic target for cardiovascular risk management.\",\"logs\":[{\"date\":\"2026-06-05\",\"value\":4.3,\"unit\":\"mmol/L\",\"comment\":null}],\"customRangeOverlay\":null,\"dictionaryCorrection\":null}]}",
+      "raw": "{\n  \"rows\": [\n    {\n      \"id\": \"r01\",\n      \"medicalInsight\": \"Your HbA1c of 40 mmol/mol indicates an elevated prediabetes risk for a Chinese male, as thresholds for Chinese populations are slightly lower.\",\n      \"optimalValue\": \"34 mmol/mol\",\n      \"editReason\": \"Correcting optimal target to reflect optimal glucose control below prediabetes threshold for Chinese ethnicity.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 40,\n          \"unit\": \"mmol/mol\",\n          \"comment\": \"Routine blood test\"\n        }\n      ],\n      \"customRangeOverlay\": \"[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41\",\n      \"dictionaryCorrection\": null\n    },\n    {\n      \"id\": \"r02\",\n      \"medicalInsight\": \"Your LDL cholesterol of 4.3 mmol/L is significantly elevated, placing you at higher cardiovascular risk. Lifestyle changes or further clinical evaluation are recommended.\",\n      \"optimalValue\": \"2.0 mmol/L\",\n      \"editReason\": \"Providing a more aggressive cardiovascular optimal target for elevated baseline LDL.\",\n      \"logs\": [\n        {\n          \"date\": \"2026-06-05\",\n          \"value\": 4.3,\n          \"unit\": \"mmol/L\",\n          \"comment\": \"Routine lipid panel\"\n        }\n      ],\n      \"customRangeOverlay\": \"[Standard] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6\",\n      \"dictionaryCorrection\": null\n    }\n  ]\n}",
       "rows": [
         {
           "id": "r01",
-          "medicalInsight": "For a 43-year-old Chinese male, an HbA1c of 40 mmol/mol indicates an elevated prediabetes risk according to Chinese clinical thresholds.",
+          "medicalInsight": "Your HbA1c of 40 mmol/mol indicates an elevated prediabetes risk for a Chinese male, as thresholds for Chinese populations are slightly lower.",
           "optimalValue": "34 mmol/mol",
-          "editReason": "Providing a tailored optimal value and incorporating Chinese ethnic prediabetes risk thresholds (>=39 mmol/mol).",
+          "editReason": "Correcting optimal target to reflect optimal glucose control below prediabetes threshold for Chinese ethnicity.",
           "logs": [
             {
               "date": "2026-06-05",
               "value": 40,
               "unit": "mmol/mol",
-              "comment": null
+              "comment": "Routine blood test"
             }
           ],
-          "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41; High: >41",
+          "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41",
           "dictionaryCorrection": null
         },
         {
           "id": "r02",
-          "medicalInsight": "LDL-C of 4.3 mmol/L is very high and indicates significantly elevated cardiovascular risk, requiring lifestyle and likely therapeutic intervention.",
+          "medicalInsight": "Your LDL cholesterol of 4.3 mmol/L is significantly elevated, placing you at higher cardiovascular risk. Lifestyle changes or further clinical evaluation are recommended.",
           "optimalValue": "2.0 mmol/L",
-          "editReason": "Providing an optimal therapeutic target for cardiovascular risk management.",
+          "editReason": "Providing a more aggressive cardiovascular optimal target for elevated baseline LDL.",
           "logs": [
             {
               "date": "2026-06-05",
               "value": 4.3,
               "unit": "mmol/L",
-              "comment": null
+              "comment": "Routine lipid panel"
             }
           ],
-          "customRangeOverlay": null,
+          "customRangeOverlay": "[Standard] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
           "dictionaryCorrection": null
         }
       ],
@@ -132,15 +132,15 @@
       "optimalValue": "34 mmol/mol",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Providing a tailored optimal value and incorporating Chinese ethnic prediabetes risk thresholds (>=39 mmol/mol).",
-      "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41; High: >41",
-      "medicalInsight": "For a 43-year-old Chinese male, an HbA1c of 40 mmol/mol indicates an elevated prediabetes risk according to Chinese clinical thresholds.",
+      "editReason": "Correcting optimal target to reflect optimal glucose control below prediabetes threshold for Chinese ethnicity.",
+      "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41",
+      "medicalInsight": "Your HbA1c of 40 mmol/mol indicates an elevated prediabetes risk for a Chinese male, as thresholds for Chinese populations are slightly lower.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
           "value": 40,
           "unit": "mmol/mol",
-          "comment": null
+          "comment": "Routine blood test"
         }
       ],
       "currentEvaluationStatus": "Elevated",
@@ -174,15 +174,15 @@
       "optimalValue": "2.0 mmol/L",
       "existingInsight": null,
       "existingCustomRange": null,
-      "editReason": "Providing an optimal therapeutic target for cardiovascular risk management.",
-      "customRangeOverlay": null,
-      "medicalInsight": "LDL-C of 4.3 mmol/L is very high and indicates significantly elevated cardiovascular risk, requiring lifestyle and likely therapeutic intervention.",
+      "editReason": "Providing a more aggressive cardiovascular optimal target for elevated baseline LDL.",
+      "customRangeOverlay": "[Standard] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
+      "medicalInsight": "Your LDL cholesterol of 4.3 mmol/L is significantly elevated, placing you at higher cardiovascular risk. Lifestyle changes or further clinical evaluation are recommended.",
       "historicalLogs": [
         {
           "date": "2026-06-05",
           "value": 4.3,
           "unit": "mmol/L",
-          "comment": null
+          "comment": "Routine lipid panel"
         }
       ],
       "currentEvaluationStatus": "Very High",
@@ -200,18 +200,18 @@
       "printedRange": "20 - 41 mmol/mol",
       "assignedRange": "20 - 41 mmol/mol",
       "optimalValue": "34 mmol/mol",
-      "editReason": "Providing a tailored optimal value and incorporating Chinese ethnic prediabetes risk thresholds (>=39 mmol/mol).",
+      "editReason": "Correcting optimal target to reflect optimal glucose control below prediabetes threshold for Chinese ethnicity.",
       "match": "alias",
       "key": "hba1c",
       "writeTarget": "observation",
-      "medicalInsight": "For a 43-year-old Chinese male, an HbA1c of 40 mmol/mol indicates an elevated prediabetes risk according to Chinese clinical thresholds.",
-      "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41; High: >41",
+      "medicalInsight": "Your HbA1c of 40 mmol/mol indicates an elevated prediabetes risk for a Chinese male, as thresholds for Chinese populations are slightly lower.",
+      "customRangeOverlay": "[Chinese Ethnicity] Elevated (Prediabetes Risk): >=39; Optimal: <39; [Western Standard] Normal: 20-41",
       "logs": [
         {
           "date": "2026-06-05",
           "value": 40,
           "unit": "mmol/mol",
-          "comment": null
+          "comment": "Routine blood test"
         }
       ],
       "newCatalogDraft": null
@@ -226,18 +226,18 @@
       "printedRange": "1.5 - 3.0 mmol/L",
       "assignedRange": "[All patients] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
       "optimalValue": "2.0 mmol/L",
-      "editReason": "Providing an optimal therapeutic target for cardiovascular risk management.",
+      "editReason": "Providing a more aggressive cardiovascular optimal target for elevated baseline LDL.",
       "match": "alias",
       "key": "ldl",
       "writeTarget": "observation",
-      "medicalInsight": "LDL-C of 4.3 mmol/L is very high and indicates significantly elevated cardiovascular risk, requiring lifestyle and likely therapeutic intervention.",
-      "customRangeOverlay": null,
+      "medicalInsight": "Your LDL cholesterol of 4.3 mmol/L is significantly elevated, placing you at higher cardiovascular risk. Lifestyle changes or further clinical evaluation are recommended.",
+      "customRangeOverlay": "[Standard] Very High: >3.4; Elevated: >2.6; Optimal: <=2.6",
       "logs": [
         {
           "date": "2026-06-05",
           "value": 4.3,
           "unit": "mmol/L",
-          "comment": null
+          "comment": "Routine lipid panel"
         }
       ],
       "newCatalogDraft": null

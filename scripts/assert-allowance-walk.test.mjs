@@ -124,7 +124,10 @@ try {
   const src = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('the turn path calls selectTurnLanes', /const laneChoice = selectTurnLanes\(\{/.test(src));
   check('the chain comes from laneChoice.models', /models: laneChoice\.models\.length \? laneChoice\.models/.test(src));
-  check('an exhausted host is told nothing ran', /Nothing was run and nothing was spent/.test(src));
+  // QS-9: the chain may have run elsewhere first, so the line says nothing
+  // FURTHER was run — and names every host tried before giving up.
+  check('an exhausted host is told nothing further ran', /Nothing further was run and nothing was spent/.test(src));
+  check('and the give-up names every host tried', /cont\.hops\.map\(\(h\) =>/.test(src));
   check('the raw two-entry chain is no longer the only list', !/models: failoverModels\(eff\.model, config\.agent\.model\),/.test(src));
 } finally {
   if (oldHome === undefined) delete process.env.HOME;

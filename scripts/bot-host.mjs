@@ -669,10 +669,14 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
   // Guard 9: on a swap the files this conversation has been editing travel
   // with it, so the worker does not run the turn against its own copy.
   let packId = '';
+  // QS-4: the manifest travels back with the result so the turn can say which
+  // pack path wrote it (disk-pack / lane-summary / summary-skipped).
+  let packManifest = null;
   if (packRoot) {
     const built = buildPack(packRoot);
     if (!built.ok) {
       console.log(`[${host}] pack refused: ${built.reason} (the turn runs without it)`);
+      packManifest = { ok: false, reason: built.reason };
     } else {
       const payload = packWithContents(built);
       if (!payload.ok) console.log(`[${host}] pack not built: ${payload.reason} (the turn runs without it)`);
@@ -684,6 +688,11 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
         });
         if (res.ok) {
           packId = payload.id;
+          packManifest = {
+            ok: true, id: payload.id, root: packRoot, source: payload.source,
+            files: payload.files.map(({ path, sha256, bytes }) => ({ path, sha256, bytes })),
+            totalBytes: payload.totalBytes, createdAt: payload.createdAt,
+          };
           console.log(`[${host}] pack ${payload.id} uploaded (${payload.files.length} file(s), ${payload.totalBytes} bytes)`);
         } else {
           console.log(`[${host}] pack upload refused with ${res.status} (the turn runs without it)`);
@@ -714,7 +723,7 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
       ...(typeof onEvent === 'function' ? { onEvent } : {}),
     });
     if (done?.result) {
-      return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null, attempts: attempt };
+      return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null, attempts: attempt, packManifest };
     }
     // No result by the deadline. Classify it: only a transient failure may be
     // retried, and only while the worker is still alive and its claim is not
@@ -912,7 +921,7 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // model, and the header already counts those. Anything else that shows up here
     // means the fold missed a model, and it is reported rather than dropped.
     if (String(v.ref || '').startsWith('pending:')) continue;
-    const m = String(v.lane?.model || '').toLowerCase().split('/').filter(Boolean).pop();
+    const m = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
     if (m && !inTable.has(m)) rows.push(v);
   }
   // A lane whose provider has no credential on this host leaves the count, the same
@@ -1747,6 +1756,127 @@ export function settleCanary({ host, result = {}, sessionId = '', jobId = '', ho
   }
   const route = confirmRoute(host, { jobId: jobId || result?.jobId || '', ...routeOpts });
   return { ok: true, reason: '', reasons: [], route };
+}
+
+/**
+/**
+ * QS-9: when the chat's host is dry, the same turn continues on the next
+ * connected host with quota — no manual /location, no dropped turn, every hop
+ * named. `runTurn(host)` performs one remote turn and reports
+ * `{ done, handed }`: done means the answer went out (or the hop held), and a
+ * hop is only walked past when it ran dry — empty text with a quota signal.
+ * A visited set keeps one bad evening from looping the fleet; when every
+ * reachable host is dry the turn stops with 'no location has quota' and no
+ * failed lane is ever called twice.
+ */
+/**
+ * QS-4: a handoff pack longer than PACK_SUMMARY_BYTES may earn a written
+ * summary; short packs and refused builds never spend a model call on one.
+ * Pure decision + text: the model call, if any, goes through `summarizeFn`
+ * so the sensor proves the policy without spending quota.
+ */
+export const PACK_SUMMARY_BYTES = 20 * 1024;
+
+export async function resolvePackPath({ manifest = null, failedLane = '', lanesFn = null, summarizeFn = null } = {}) {
+  if (!manifest || !manifest.ok) {
+    return { path: 'summary-skipped', reason: manifest?.reason || 'no pack was built', manifest: null };
+  }
+  const files = manifest.files || [];
+  if (manifest.totalBytes <= PACK_SUMMARY_BYTES) {
+    return { path: 'disk-pack', manifest };
+  }
+  const failedTail = String(failedLane || '').toLowerCase().split('/').filter(Boolean).pop() || '';
+  let lanes = [];
+  try {
+    lanes = (await lanesFn?.()) || [];
+  } catch {
+    lanes = [];
+  }
+  const models = (Array.isArray(lanes) ? lanes : lanes?.models || [])
+    .map(String)
+    .filter((m) => m && (!failedTail || !m.toLowerCase().endsWith(failedTail)));
+  if (!models.length || typeof summarizeFn !== 'function') {
+    return {
+      path: 'summary-skipped',
+      reason: !models.length ? 'no other lane has allowance' : 'no summary writer wired',
+      manifest,
+    };
+  }
+  const lane = models[0];
+  try {
+    const summary = await summarizeFn({ model: lane, manifest });
+    if (!String(summary || '').trim()) throw new Error('empty summary');
+    return { path: 'lane-summary', lane, summary: String(summary).trim().slice(0, 1500), manifest };
+  } catch (err) {
+    return { path: 'summary-skipped', reason: `summary writer failed: ${String(err?.message || err).slice(0, 120)}`, manifest };
+  }
+}
+
+/** QS-4: the reply always states which pack path wrote it. */
+export function packPathLine(resolved) {
+  const n = resolved?.manifest?.files?.length || 0;
+  const size = resolved?.manifest?.totalBytes ?? 0;
+  if (resolved?.path === 'lane-summary') {
+    return `📦 handoff pack (${n} files): lane \`${resolved.lane}\` wrote the summary.`;
+  }
+  if (resolved?.path === 'disk-pack') {
+    return `📦 handoff pack (${n} files, ${size} bytes): built from disk, no summary call.`;
+  }
+  return `📦 handoff pack${n ? ` (${n} files)` : ''}: summary skipped (${resolved?.reason || 'unknown reason'}); disk pack sent.`;
+}
+
+/**
+ * Stale-session repair gate (decision 1b): a ghost thread id — session 404,
+ * "is not on this host" — holds every future remote turn forever, because the
+ * row outlives its conversation and preflight fails closed. Malformed ids and
+ * opencode outages still hold; only the proven-gone thread repairs, exactly
+ * once per turn, with an explicit notice naming it.
+ */
+export function isStaleSessionPreflight(preflight) {
+  if (!preflight || preflight.failed !== 'session') return false;
+  return /is not on this host/.test(String(preflight.reason || ''));
+}
+
+export async function continueTurnOnNextWorker({ fromHost = '', tried = [], prefer = '', runTurn, statusOf = null } = {}) {
+  const hops = [];
+  const seen = new Set([String(fromHost || '').toLowerCase(), ...(tried || []).map((h) => String(h || '').toLowerCase())]);
+  const candidates = (KNOWN_HOSTS || []).filter(
+    (h) => !seen.has(String(h || '').toLowerCase()) && !isLocalHost(h),
+  );
+  // The requested host goes first when it has not been proven dry: the
+  // exhausted branch fires on the local ledger, which says nothing about a
+  // remote host's allowance.
+  const want = String(prefer || '').toLowerCase();
+  candidates.sort((a, b) => (String(b).toLowerCase() === want ? 1 : 0) - (String(a).toLowerCase() === want ? 1 : 0));
+  const reachable = [];
+  for (const host of candidates) {
+    let status = null;
+    try {
+      status = statusOf ? await statusOf(host) : workerStatus(host);
+    } catch {
+      status = null;
+    }
+    if (status && status.reachable) reachable.push(host);
+    else hops.push({ host, ok: false, reason: 'unreachable, skipped' });
+  }
+  for (const host of reachable) {
+    seen.add(String(host).toLowerCase());
+    let out = null;
+    try {
+      out = await runTurn(host);
+    } catch (err) {
+      hops.push({ host, ok: false, reason: String(err?.message || err).slice(0, 200) });
+      continue;
+    }
+    // Delivered means the answer went out; held means the hop never ran (still
+    // a wall, not a success — walking past it is the point of the chain).
+    if (out && out.done && out.delivered) {
+      hops.push({ host, ok: true });
+      return { ok: true, host, hops, handed: out.handed || null };
+    }
+    hops.push({ host, ok: false, reason: String((out && (out.reason || (out.held ? 'held' : ''))) || 'dry').slice(0, 200) || 'dry' });
+  }
+  return { ok: false, reason: 'no location has quota', hops };
 }
 
 /**
@@ -2955,12 +3085,31 @@ export function fanoutProgressEvent({ renderer, observer, event, context = {} })
   try { observer?.onEvent(event, context); } catch {}
 }
 
+/**
+ * Flag line for a turn that died mid-answer on one lane and completed on
+ * another (QS-11). The partial answer is delivered, never dropped, and the
+ * flag names the dead lane plus where the completion came from.
+ */
+export function midstreamFlagText({ partialText = '', deadLanes = [], continuedOn = '' } = {}) {
+  const dead = [...new Set((deadLanes || []).map(String).filter(Boolean))].join(', ') || 'a lane';
+  const head = String(partialText || '').trim();
+  const tail = continuedOn ? `continued on \`${continuedOn}\` below` : 'no lane completed the answer';
+  return `${head}${head ? '\n\n' : ''}⚠️ \`${dead}\` hit the free limit mid-answer — ${tail}.`;
+}
+
 export async function runOpencodeWithFailover({ api, config, chatId, prompt, models, runModel = null, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, onCooldown = null, ...runArgs }) {
   let attempt = 0;
+  // QS-11: partial answers from lanes that die mid-stream, in order. The chain
+  // below empties each dead lane's text so failover continues; the pieces are
+  // reattached to the final result for the flag line.
+  const partialTexts = [];
+  const midstreamDead = [];
+  let lastModel = '';
   const { result } = await runWithModelFailover({
     models,
     makeRun: async (model) => {
       attempt += 1;
+      lastModel = model;
       if (typeof onAttemptStart === 'function') {
         try { onAttemptStart({ model, attempt }); } catch {}
       }
@@ -2971,6 +3120,19 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
       // opencode fallback and back). Without it every candidate runs through
       // the OpenCode CLI, exactly as before.
       let attemptResult = await runOnce();
+      // QS-11: the model answered, then died with a quota signal mid-stream.
+      // Treating the partial text as success would strand the rest of the
+      // answer AND skip the ledger stamp (both key off empty text). Empty it
+      // so the chain continues; the piece is kept above for the flag line.
+      // The emptied result still flows through the normal stamp + dead-end
+      // paths below, so a mid-stream death is recorded exactly once.
+      const partialText = String(attemptResult?.finalText || '').trim();
+      const partialErr = attemptFailureText(attemptResult);
+      if (partialText && isQuotaOrLimitError(partialErr) && !isAborted()) {
+        partialTexts.push(partialText);
+        midstreamDead.push(model);
+        attemptResult = { ...attemptResult, finalText: '' };
+      }
       // One retry, and only for a transport failure. A quota answer is final
       // for that lane and the ledger stamp already says so. Two ECONNREFUSEDs
       // in a row is not a blip, so the lane gets a short cooldown and the walk
@@ -3028,6 +3190,11 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
       }
     },
   });
+  if (partialTexts.length && result && typeof result === 'object') {
+    result._partialText = partialTexts.join('\n\n');
+    result._midstreamQuota = [...new Set(midstreamDead)];
+    result._continuedOn = String(result?.finalText || '').trim() ? lastModel : '';
+  }
   return result;
 }
 
@@ -3377,6 +3544,156 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       });
     };
 
+    // One remote turn, shared by the primary path below and the QS-9
+    // auto-continue chain above it: holds and failed canaries finish here
+    // (messaging unless quiet); a delivered answer finishes here; a dry worker
+    // (empty text, quota signal) comes back unanswered so the chain can walk
+    // on. Returns { done, dry, handed }.
+    const runRemoteTurn = async (host, { wantCanary, quiet = false, hopFrom = '', sessionOverride = null, freshRetried = false } = {}) => {
+      const say = async (text) => {
+        if (!quiet) await api.sendMessage(chatId, text).catch(() => {});
+      };
+      const foot = `host: ${host}${wantCanary ? ' (canary)' : ''}${hopFrom ? ` (continued from ${hopFrom})` : ''}`;
+      const remoteStatus = workerStatus(host);
+      if (!remoteStatus.reachable) {
+        setBlockedLocation(chatId, host, remoteStatus.reason);
+        await say(
+          `⏸ *Held:* \`${host}\` is unreachable (${remoteStatus.reason}).\nNothing ran and no allowance was sent. Send \`/location vps\` to run here, or wait for the ${host} worker to connect.`
+        );
+        return { done: true, held: true, reason: `unreachable: ${remoteStatus.reason}`, handed: null };
+      }
+      if (wantCanary && routeState(host) === 'failed') {
+        const row = routeFor(host);
+        const why = row?.failedReason || 'unknown reason';
+        await say(
+          `⏸ *Held:* the route to \`${host}\` was rolled back after a failed canary (${why}).\nNothing ran here either. Send \`/location ${host}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
+        );
+        return { done: true, held: true, reason: `route failed: ${why}`, handed: null };
+      }
+      // Remote live view: the worker streams its onEvent records to the relay
+      // while the turn runs there. Fan each one through the same local
+      // fanout (headline + observer log) plus the watch feed when enabled —
+      // a remote turn looks exactly like a local one in this chat.
+      // Register the run first so /abort (and the Abort button) reaches it
+      // via the relay flag; the entry is cleared in the finally block.
+      // `wantCanary` is this function's parameter, not a route lookup: the
+      // caller decides whether this hop is a canary.
+      const onRemoteEvent = (event) => {
+        if (running.get(chatId)?.aborted) return;
+        fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+        if (watchOn(prefs, chatId)) postLiveFeed(api, chatId, event).catch(() => {});
+      };
+      if (observer) observer.write('run_start', {}, observerContext);
+      const handed = await runOnWorker({
+        host,
+        prompt: finalPrompt,
+        model: eff.model,
+        project: isExternalTurn ? activeProject.id : 'health-tracker',
+        role: activeRole || '',
+        workspace: effectiveWorkspace,
+        sessionId: sessionOverride !== null ? sessionOverride : sessions.get(chatId) || '',
+        envMode: turnEnvMode,
+        canary: wantCanary,
+        preflightFull: wantCanary,
+        packRoot: wantCanary ? effectiveWorkspace : '',
+        onJob: ({ jobId }) => running.set(chatId, { child: null, aborted: false, jobId, relay: '' }),
+        onEvent: onRemoteEvent,
+      });
+      observerTerminalWritten = true;
+      if (observer) {
+        const wasAborted = Boolean(running.get(chatId)?.aborted);
+        observer.write(wasAborted ? 'aborted' : handed?.text ? 'run_complete' : 'failed', handed || {}, observerContext);
+      }
+      if (handed?.preflight) {
+        // Stale-session repair (decision 1b): a ghost thread id fails preflight
+        // with session-404, which would hold every future remote turn forever.
+        // Exactly once per turn, retry fresh with an explicit notice naming the
+        // lost thread. Malformed ids and opencode outages still hold.
+        if (!freshRetried && isStaleSessionPreflight(handed.preflight)) {
+          const lost = sessionOverride !== null ? sessionOverride : sessions.get(chatId) || '';
+          await say(
+            `⚠️ Previous thread \`${lost || 'unknown'}\` is gone from \`${host}\` — running this turn fresh so the chat is not stuck.`
+          );
+          return runRemoteTurn(host, { wantCanary, quiet, hopFrom, sessionOverride: '', freshRetried: true });
+        }
+        setBlockedLocation(chatId, host, `${handed.preflight.failed}: ${handed.preflight.reason}`);
+        await say(
+          `⏸ *Held:* preflight failed for \`${host}\` — \`${handed.preflight.failed}\`: ${handed.preflight.reason}\n${preflightSummary(handed.preflight.checks)}\nNothing ran and no allowance was sent.`
+        );
+        return { done: true, held: true, reason: `preflight ${handed.preflight.failed}: ${handed.preflight.reason}`, handed };
+      }
+      if (wantCanary) {
+        // Guard 6: one turn decides whether the route becomes active. The
+        // session row is never touched until it passes, so a bad canary costs
+        // nothing but the canary. settleCanary is the same function the swap
+        // drill runs, so what is proven there is what happens here.
+        const settled = settleCanary({ host, result: handed, sessionId: sessions.get(chatId) || '', jobId: handed.jobId || '' });
+        if (!settled.ok) {
+          const back = settled.route?.previous || 'vps';
+          await say(
+            `⚠️ *Canary failed on \`${host}\`:* ${settled.reason}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
+          );
+          return { done: true, held: true, reason: `canary failed: ${settled.reason}`, handed };
+        }
+        console.log(`[${config.id}] canary passed on ${host} (job ${handed.jobId}); route active`);
+      }
+      // The thread id the worker ran is now ours too, so the next turn —
+      // here or there — resumes the same conversation.
+      if (handed.sessionID) {
+        sessions.set(chatId, handed.sessionID);
+        // The view is built from this record, so the record has to name the
+        // thread that just ran — otherwise /tx keeps showing the conversation
+        // from the previous host until something else rewrites it.
+        workSession = setWorkView(workSession.id, { opencodeSessionId: handed.sessionID }) || workSession;
+        if (workSession.tx) {
+          try {
+            workSession = await reconcileWorkViewForLane({
+              session: workSession,
+              lane: workLane,
+              workspace: config.agent.workspace,
+              tmux: defaultTmuxRunner,
+              env: opencodeEnv(config),
+              opencodeBin: config.agent.opencodeBin,
+            }) || workSession;
+          } catch {
+            // view rebind is best-effort; the answer is already on its way
+          }
+        }
+      }
+      // QS-9: a worker that answers empty-handed with a quota signal is dry,
+      // not done — the chain walks on instead of delivering an empty answer.
+      if (!String(handed.text || '').trim() && isQuotaOrLimitError(String(handed.error || ''))) {
+        console.log(`[${config.id}] turn on ${host} came back dry (quota); trying the next host`);
+        return { done: false, dry: true, handed };
+      }
+      // QS-4: a depletion-driven hop says which pack path wrote it. The summary
+      // writer is picked from this machine's lanes excluding the lane that
+      // just died, so the failed lane is never asked to summarize itself.
+      if (hopFrom && handed.packManifest) {
+        try {
+          const pack = await resolvePackPath({
+            manifest: handed.packManifest,
+            failedLane: handed.model || '',
+            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model }).models || []),
+            summarizeFn: async ({ model: lane, manifest: man }) => (await runOpencode({
+              prompt: `Summarize this handoff pack in 10 lines or less (files changed, what the next turn needs):\n${(man.files || []).map((f) => `- ${f.path} (${f.bytes} bytes)`).join('\n')}`,
+              model: lane,
+              workspace: effectiveWorkspace,
+              timeoutMs: 120000,
+            }))?.finalText || '',
+          });
+          await api.sendMessage(chatId, packPathLine(pack)).catch(() => {});
+        } catch {
+          // the pack line is informational; the answer finishes below regardless
+        }
+      }
+      console.log(`[${config.id}] turn ran on ${host} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
+      await renderer.finish(
+        { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
+        { footer: foot }
+      ).catch(() => {});
+      return { done: true, delivered: true, handed };
+    };
     // The ledger picks the walk. A lane it already stamped is not retried, an
     // ended lane is never offered, and a terminal-only row is never chosen.
     const laneChoice = selectTurnLanes({
@@ -3385,10 +3702,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       fallback: config.agent.model,
     });
     if (laneChoice.exhausted) {
+      // QS-9: the local ledger is empty, but that verdict only covers this
+      // machine — a remote host may still serve the turn. Proven-dry hosts
+      // stay out; the requested remote host is tried first (its allowance is
+      // unknown, not empty).
+      const remote = !isLocalHost(location);
+      const cont = await continueTurnOnNextWorker({
+        fromHost: location,
+        tried: remote ? [] : [location],
+        prefer: remote ? location : '',
+        runTurn: (host) => runRemoteTurn(host, {
+          wantCanary: routeState(host) !== 'active',
+          quiet: true,
+          hopFrom: location,
+        }),
+      });
+      if (cont.ok) return;
       const when = laneChoice.soonest?.label ? ` Soonest reset: ${laneChoice.soonest.label}.` : '';
+      const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => `\`${h.host}\` (${h.ok ? 'answered' : h.reason || 'dry'})`).join(', ')} — no location has quota.` : '';
       await api.sendMessage(
         chatId,
-        `🛑 No lane on ${location} has allowance right now.${when}\nNothing was run and nothing was spent. Send \`/allowance\` for the ledger.`
+        `🛑 No lane on ${location} has allowance right now.${when}${tried}\nNothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
       ).catch(() => {});
       return;
     }
@@ -3427,112 +3761,29 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       }
     }
     // A location that names another machine runs there, on that machine's
-    // allowance. This VM does not stamp for it.
-    const remoteStatus = workerStatus(location);
+    // allowance. This VM does not stamp for it. runRemoteTurn (above) performs
+    // one remote turn for the primary path and the QS-9 chain.
     if (!isLocalHost(location)) {
-      const route = routeState(location);
-      // Guard 5: hold, never fall through to this machine. A held turn is
-      // recorded so the user sees why nothing ran, and no allowance is spent.
-      if (!remoteStatus.reachable) {
-        setBlockedLocation(chatId, location, remoteStatus.reason);
-        await api.sendMessage(
-          chatId,
-          `⏸ *Held:* \`${location}\` is unreachable (${remoteStatus.reason}).\nNothing ran and no allowance was sent. Send \`/location vps\` to run here, or wait for the ${location} worker to connect.`
-        );
-        return;
-      }
-      if (route === 'failed') {
-        const row = routeFor(location);
-        await api.sendMessage(
-          chatId,
-          `⏸ *Held:* the route to \`${location}\` was rolled back after a failed canary (${row?.failedReason || 'unknown reason'}).\nNothing ran here either. Send \`/location ${location}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
-        );
-        return;
-      }
-      const wantCanary = route !== 'active';
-      // Remote live view: the worker streams its onEvent records to the relay
-      // while the turn runs there. Fan each one through the same local
-      // fanout (headline + observer log) plus the watch feed when enabled —
-      // a remote turn looks exactly like a local one in this chat.
-      // Register the run first so /abort (and the Abort button) reaches it
-      // via the relay flag; the entry is cleared in the finally block.
-      const onRemoteEvent = (event) => {
-        if (running.get(chatId)?.aborted) return;
-        fanoutProgressEvent({ renderer, observer, event, context: observerContext });
-        if (watchOn(prefs, chatId)) postLiveFeed(api, chatId, event).catch(() => {});
-      };
-      if (observer) observer.write('run_start', {}, observerContext);
-      const handed = await runOnWorker({
-        host: location,
-        prompt: finalPrompt,
-        model: eff.model,
-        project: isExternalTurn ? activeProject.id : 'health-tracker',
-        role: activeRole || '',
-        workspace: effectiveWorkspace,
-        sessionId: sessions.get(chatId) || '',
-        envMode: turnEnvMode,
-        canary: wantCanary,
-        preflightFull: wantCanary,
-        packRoot: wantCanary ? effectiveWorkspace : '',
-        onJob: ({ jobId }) => running.set(chatId, { child: null, aborted: false, jobId, relay: '' }),
-        onEvent: onRemoteEvent,
+      const hop0 = await runRemoteTurn(location, { wantCanary: routeState(location) !== 'active' });
+      if (hop0.done) return;
+      // QS-9: the chat's host is dry — same turn, next connected host with
+      // quota. No manual /location, no dropped turn, every hop named.
+      const cont = await continueTurnOnNextWorker({
+        fromHost: location,
+        tried: [location],
+        runTurn: (host) => runRemoteTurn(host, {
+          wantCanary: routeState(host) !== 'active',
+          quiet: true,
+          hopFrom: location,
+        }),
       });
-      observerTerminalWritten = true;
-      if (observer) {
-        const wasAborted = Boolean(running.get(chatId)?.aborted);
-        observer.write(wasAborted ? 'aborted' : handed?.text ? 'run_complete' : 'failed', handed || {}, observerContext);
-      }
-      if (handed?.preflight) {
-        setBlockedLocation(chatId, location, `${handed.preflight.failed}: ${handed.preflight.reason}`);
-        await api.sendMessage(
-          chatId,
-          `⏸ *Held:* preflight failed for \`${location}\` — \`${handed.preflight.failed}\`: ${handed.preflight.reason}\n${preflightSummary(handed.preflight.checks)}\nNothing ran and no allowance was sent.`
-        );
-        return;
-      }
-      if (wantCanary) {
-        // Guard 6: one turn decides whether the route becomes active. The
-        // session row is never touched until it passes, so a bad canary costs
-        // nothing but the canary. settleCanary is the same function the swap
-        // drill runs, so what is proven there is what happens here.
-        const settled = settleCanary({ host: location, result: handed, sessionId: sessions.get(chatId) || '', jobId: handed.jobId || '' });
-        if (!settled.ok) {
-          const back = settled.route?.previous || 'vps';
-          await api.sendMessage(
-            chatId,
-            `⚠️ *Canary failed on \`${location}\`:* ${settled.reason}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
-          );
-          return;
-        }
-        console.log(`[${config.id}] canary passed on ${location} (job ${handed.jobId}); route active`);
-      }
-      // The thread id the worker ran is now ours too, so the next turn —
-      // here or there — resumes the same conversation.
-      if (handed.sessionID) {
-        sessions.set(chatId, handed.sessionID);
-        // The view is built from this record, so the record has to name the
-        // thread that just ran — otherwise /tx keeps showing the conversation
-        // from the previous host until something else rewrites it.
-        workSession = setWorkView(workSession.id, { opencodeSessionId: handed.sessionID }) || workSession;
-        if (workSession.tx) {
-          try {
-            workSession = await reconcileWorkViewForLane({
-              session: workSession,
-              lane: workLane,
-              workspace: config.agent.workspace,
-              tmux: defaultTmuxRunner,
-              env: opencodeEnv(config),
-              opencodeBin: config.agent.opencodeBin,
-            }) || workSession;
-          } catch {
-            // view rebind is best-effort; the answer is already on its way
-          }
-        }
-      }
-      console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
-      await renderer.finish(
-        { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
-        { footer: `host: ${location}${wantCanary ? ' (canary)' : ''}` }
+      if (cont.ok) return;
+      const tried = cont.hops.length
+        ? ` Tried ${cont.hops.map((h) => `\`${h.host}\` (${h.ok ? 'answered' : h.reason || 'dry'})`).join(', ')} — `
+        : ' ';
+      await api.sendMessage(
+        chatId,
+        `🛑 No lane on \`${location}\` has allowance right now,${tried}no location has quota. Nothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
       ).catch(() => {});
       return;
     }
@@ -3645,6 +3896,19 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         delete kept.handoff;
         setPref(prefs, chatId, kept);
         savePrefs(config.id, prefs);
+      }
+      // QS-11: a turn that died mid-answer arrives with its pieces attached.
+      // The partial answer is delivered first, then the flag, then whatever
+      // the next lane completed — never a silent truncation.
+      if (result?._partialText) {
+        displayResult = {
+          ...displayResult,
+          finalText: midstreamFlagText({
+            partialText: result._partialText,
+            deadLanes: result._midstreamQuota || [],
+            continuedOn: result._continuedOn || '',
+          }) + (String(displayResult?.finalText || '').trim() ? `\n\n${displayResult.finalText}` : ''),
+        };
       }
       await renderer.finish(displayResult, { footer: usageText });
     }
