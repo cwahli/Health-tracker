@@ -431,7 +431,8 @@ try {
     /const needsSetup = rows\.filter\(\(r\) => r\.needsSetup\)/.test(paritySrc) && /need setup/.test(paritySrc) && /needsSetup\.length \? ` · \$\{needsSetup\.length\} need setup`/.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
-  const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
+  const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
+  const botSrc = read('bot-host.mjs');
   check('/freemodel renders the canonical list, not the raw catalog', /const rows = canonical \|\| \[\];/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
@@ -466,8 +467,16 @@ try {
   // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
     /const rated = `\$\{tag \? tag \+ ': ' : ''\}\$\{label\}/.test(botSrc)
-    && /buttons\.push\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`\)/.test(botSrc),
-    botSrc.match(/buttons\.push\([^\n]*/)?.[0] || 'not found');
+    && /text: `\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`/.test(botSrc),
+    botSrc.match(/buttons\.push\(\{[^\n]*/)?.[0] || 'not found');
+  // Telegram caps callback_data at 64 bytes, and it used to carry the label — so
+  // the first label that grew took the whole keyboard down with
+  // BUTTON_DATA_INVALID. The payload is the route, and a route that still cannot
+  // fit degrades to a position rather than to a broken button.
+  check('callback_data carries the route, never the label', /data: route/.test(botSrc) && /callback_data: data/.test(read('lib/commands.mjs')));
+  check('and a payload that cannot fit degrades to a position', /LIMIT = 64/.test(read('lib/commands.mjs')) && /`\$\{kind\}:#\$\{i\}`/.test(read('lib/commands.mjs')));
+  check('the tap resolves a route first, then a position, then a label',
+    /a\.ref === value/.test(botSrc) && /startsWith\('#'\)/.test(botSrc));
   check('the unusable rows are NOT filtered out of the keyboard', !/keyboardEntries/.test(botSrc));
   check('a button is labelled the way /allowance labels the row', /r\.laneLabel \|\| r\.label/.test(botSrc));
   // One keyboard with every model, no paging: 50+ lanes over 8-per-page is seven

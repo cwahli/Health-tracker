@@ -140,15 +140,27 @@ export function modelKeyboard(models, { page = 0, pageSize = 8, kind = 'm', all 
   const pages = all ? 1 : Math.max(1, Math.ceil(total / pageSize));
   const current = all ? 0 : Math.min(Math.max(0, page), pages - 1);
   const slice = all ? models : models.slice(current * pageSize, current * pageSize + pageSize);
-  // Embed the full model id (<=40 chars, well under Telegram's 64-byte
-  // callback_data limit) instead of a bare index, so taps stay valid even
-  // if the list was refetched/re-sorted (free-first) between showing the
-  // keyboard and tapping it. Old `m:<index>` buttons still decode via the
-  // index fallback in handleCallback. Labels are plain ids here (the /freemodel
-  // path passes entry labels, not raw ids, so no free-checkmark here).
-  const rows = slice.map((model) => [
-    { text: model, callback_data: `${kind}:${model}` },
-  ]);
+  // Embed the route identity in `callback_data` instead of a bare index, so taps
+  // stay valid even if the list was refetched/re-sorted between showing the
+  // keyboard and tapping it. Old `m:<index>` buttons still decode via the index
+  // fallback in handleCallback.
+  //
+  // The payload is the *route* (`{ text, data }`), never the label. It used to be
+  // the label, and the moment a label grew — R-16's bakeoff label on every
+  // /freemodel button — the whole keyboard came back `BUTTON_DATA_INVALID`,
+  // because Telegram caps callback_data at 64 bytes. A display string is not an
+  // identity, and BOT-24's own notes already ask for stable route identities in
+  // bot-host callbacks.
+  const LIMIT = 64;
+  const rows = slice.map((model, i) => {
+    const text = typeof model === 'string' ? model : String(model?.text ?? '');
+    const want = typeof model === 'string' ? model : String(model?.data ?? text);
+    const payload = `${kind}:${want}`;
+    // Too long for Telegram: fall back to a position in this keyboard, which the
+    // handler resolves against the same ordered list it rendered.
+    const data = Buffer.byteLength(payload, 'utf8') <= LIMIT ? payload : `${kind}:#${i}`;
+    return { text, callback_data: data };
+  });
   if (all) {
     if (footer) rows.push([footer]);
     return { inline_keyboard: rows };
