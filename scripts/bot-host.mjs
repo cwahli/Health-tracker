@@ -81,9 +81,8 @@ import {
   planCodeForLane,
   canonicalAllowanceLanes,
   groupRowsByTier,
-  rowCopy,
-  fitCopy,
-  headingCopy,
+  rowWidth,
+  headingWidth,
   shortModelName,
   buildAllowanceTextForBots,
   escHtml,
@@ -944,7 +943,7 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // groupRowsByTier() result. `noop` is the callback the router already uses for a
     // non-actionable keyboard row, and the tap handler answers it silently.
     if (tierGroups.length > 1) {
-      buttons.push({ text: headingCopy(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
+      buttons.push({ text: headingWidth(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
     }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
@@ -961,21 +960,25 @@ export function formatFreemodelWithDepletion(entries, annotated, { current, loca
     // and the bakeoff ledger's own verdict. A model with no published figure gets no
     // number at all — never a neighbour's.
     const model = r.lane?.model || r.model || r.ref || '';
-    // The button says what the /allowance row says, through the same copy function,
-    // in the same column order and the same widths: mark, name (30), plan (2),
-    // reset (15), benchmark (7), finished to 72 characters with a dash — the length
-    // the reader counts on a screenshot. A button is no longer a second, shorter
-    // vocabulary for a row that already exists.
+    // The button says what the /allowance row says, in the same column order —
+    // mark, name, plan, three spaces, countdown, benchmark — but padded by
+    // *rendered width* instead of by character count: the client fits pixels in a
+    // proportional font and middle-elides whatever passes its ~415px cut-off, so
+    // 72 characters rendered anywhere from 386px to 465px and half the keyboard
+    // lost its middle. rowWidth() puts every column at a fixed em offset and
+    // every button at COPY_UNITS (24em = 408px), the tier heading's own width.
+    // A button is no longer a second, shorter vocabulary for a row that already
+    // exists.
     const name = shortModelName(r.lane || { label });
     const rawReset = String(r.resetIn || r.resetLabel || '');
     const resetSource = r.resetAt ?? (/^\d{4}-\d{2}-\d{2}/.test(rawReset) ? rawReset : null);
-    const rated = fitCopy(rowCopy({
+    const rated = rowWidth({
       mark: unusableOf(r) ? '❌' : '✅',
       name,
       plan: tag,
       score: benchmarkLabel(model) || '—',
       resetIn: resetSource ? formatResetIn(resetSource, now) : (rawReset && rawReset !== '-' ? rawReset : '—'),
-    }));
+    });
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1924,7 +1927,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         reply_markup: modelKeyboard(body.buttons, {
           kind: 'fm',
           all: true,
-          footer: { text: headingCopy('Cancel — keep current model'), callback_data: 'noop' },
+          footer: { text: headingWidth('Cancel — keep current model'), callback_data: 'noop' },
         }),
       });
       return;

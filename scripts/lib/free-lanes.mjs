@@ -1102,9 +1102,9 @@ export function colsCopy({ name = "", plan = "", resetIn = "—", score = "" } =
  * One row as both surfaces print it: the mark, one space, then the columns.
  * Raw — no width finishing — because the keyboard counts characters and the table
  * counts cells, and only the mark (one character, two cells) tells them apart.
- * Every caller finishes the line in the unit it renders in: fitCopy for a button,
- * fitCells for the monospace table. The allowance table and the /freemodel
- * keyboard call this, so a button and its row cannot say different things.
+ * The monospace table finishes it in cells with fitCells. Buttons no longer
+ * finish this line at all: the client fits rendered width, not characters, so a
+ * button is rowWidth() — the same columns, padded by em instead of by count.
  */
 export function rowCopy({ mark = " ", name = "", plan = "", score = "", resetIn = "—" } = {}) {
   return `${mark} ${colsCopy({ name, plan, resetIn, score })}`;
@@ -1118,6 +1118,209 @@ export function rowCopy({ mark = " ", name = "", plan = "", score = "", resetIn 
  */
 export function headingCopy(text) {
   return fitCopy(`${" ".repeat(MARK_CHARS)}${text}`);
+}
+
+/**
+ * Advance widths in em, for the font the Telegram client draws a button label
+ * in. A button label is laid out in a *proportional* font and centred in its
+ * row, and what the client fits — and middle-elides into `…` when the label
+ * overruns — is rendered width, not characters: the same 72 characters measured
+ * from 386px to 465px across one keyboard, a 414.6px row rendered whole while
+ * the 418.4px row beside it lost its middle, and the one row that reads
+ * correctly (the tier heading) landed at 409px. Character count is therefore
+ * not a length on this surface; these advances are.
+ *
+ * Measured from the system font at 17px (UNIT_PX), the reference size; a client
+ * drawing at another size scales both the label and this budget by the same
+ * factor, so the numbers stay in em.
+ */
+export const ADV = {
+  '\u0020': 0.2559,
+  '!': 0.3235,
+  '"': 0.4471,
+  '#': 0.6765,
+  '$': 0.6045,
+  '%': 0.9412,
+  '&': 0.7059,
+  '\u0027': 0.2353,
+  '(': 0.3564,
+  ')': 0.3564,
+  '*': 0.4471,
+  '+': 0.6471,
+  ',': 0.2706,
+  '-': 0.4463,
+  '.': 0.2715,
+  '/': 0.2793,
+  ':': 0.2706,
+  ';': 0.2706,
+  '<': 0.6471,
+  '=': 0.6471,
+  '>': 0.6471,
+  '?': 0.5765,
+  '@': 0.9706,
+  '[': 0.3235,
+  '\u005c': 0.6471,
+  ']': 0.3235,
+  '^': 0.6471,
+  '_': 0.6045,
+  '`': 0.4471,
+  'a': 0.5264,
+  'b': 0.5889,
+  'c': 0.5342,
+  'd': 0.5889,
+  'e': 0.5459,
+  'f': 0.3364,
+  'g': 0.5840,
+  'h': 0.5630,
+  'i': 0.2217,
+  'j': 0.2217,
+  'k': 0.5176,
+  'l': 0.2275,
+  'm': 0.8447,
+  'n': 0.5581,
+  'o': 0.5654,
+  'p': 0.5850,
+  'q': 0.5850,
+  'r': 0.3555,
+  's': 0.4980,
+  't': 0.3379,
+  'u': 0.5581,
+  'v': 0.5166,
+  'w': 0.7490,
+  'x': 0.4990,
+  'y': 0.5176,
+  'z': 0.4990,
+  '{': 0.6045,
+  '|': 0.2941,
+  '}': 0.6045,
+  '~': 0.6045,
+  '\u00b7': 0.2715,
+  '\u2013': 0.5294,
+  '\u2014': 0.8486,
+  '\u2022': 0.4706,
+  '\u2026': 0.6059,
+  '\u2705': 1.3529,
+  '\u274c': 1.3529,
+  'A': 0.6484,
+  'B': 0.6318,
+  'C': 0.6904,
+  'D': 0.7012,
+  'E': 0.6482,
+  'F': 0.5469,
+  'G': 0.7212,
+  'H': 0.7168,
+  'I': 0.2718,
+  'J': 0.4465,
+  'K': 0.6394,
+  'L': 0.5425,
+  'M': 0.8486,
+  'N': 0.7088,
+  'O': 0.7461,
+  'P': 0.6176,
+  'Q': 0.7461,
+  'R': 0.6824,
+  'S': 0.6118,
+  'T': 0.6084,
+  'U': 0.6941,
+  'V': 0.6484,
+  'W': 0.9529,
+  'X': 0.6235,
+  'Y': 0.6059,
+  'Z': 0.5706,
+  '0': 0.6045,
+  '1': 0.4385,
+  '2': 0.5781,
+  '3': 0.6016,
+  '4': 0.6182,
+  '5': 0.5928,
+  '6': 0.6113,
+  '7': 0.5439,
+  '8': 0.6133,
+  '9': 0.6113
+};
+
+/** UNIT_PX: the size the advances above were measured at. */
+export const UNIT_PX = 17;
+
+/** Rendered width of a string, in em. Unknown glyphs cost the default 0.55em. */
+export function widthUnits(s) {
+  let u = 0;
+  for (const ch of String(s ?? "")) u += ADV[ch] ?? 0.55;
+  return u;
+}
+
+const SP = ADV[" "] ?? 0.2559;
+const W_DASH = ADV["-"] ?? 0.4463;
+
+/**
+ * The button's column budgets, in em — the width each column occupies whatever
+ * it holds, so the plan code, the countdown and the benchmark begin at the same
+ * x on every row instead of wherever the previous column's letters happened to
+ * end. They are the widest value each column has to carry: the mark is the
+ * two-cell emoji, the name the longest shortModelName in the catalog, the plan
+ * a two-letter code, the reset `1h 33`, the benchmark the number without its
+ * `AA` prefix (the reader chose to drop the prefix from buttons; the table
+ * keeps it under the column's own header).
+ */
+export const W_HEAD_UNITS = 12.1542; // mark(1.3529) + space + name(10.5454)
+export const W_PLAN_UNITS = 1.5698;
+export const W_EXPIRY_UNITS = 2.4605;
+export const W_SCORE_UNITS = 2.0957;
+
+/**
+ * COPY_UNITS: every button renders exactly this wide — 24em, 408px at the
+ * reference size. That is the tier heading the reader pointed at as correct
+ * (409px) and it sits under the ~415px where the client starts eating the
+ * middle of a label, so the whole keyboard shares one edge, end to end, and
+ * nothing elides. The gate pins both ends of that window.
+ */
+export const COPY_UNITS = 24.0;
+
+/** Where each column starts on a button, in em (mark + space + name, etc.). */
+export const ROW_UNITS = {
+  plan: W_HEAD_UNITS + 2 * SP,
+  expiry: W_HEAD_UNITS + 2 * SP + W_PLAN_UNITS + 3 * SP,
+  score: W_HEAD_UNITS + 2 * SP + W_PLAN_UNITS + 3 * SP + W_EXPIRY_UNITS + 2 * SP,
+};
+
+/** Pad a string with ASCII spaces until it is `n` em wide. */
+export function padUnits(s, n) {
+  let out = String(s ?? "");
+  while (widthUnits(out) < n - 1e-9) out += " ";
+  return out;
+}
+
+/**
+ * Finish a line for a button: ASCII spaces up to (but never past) COPY_UNITS,
+ * then the dash. Floors rather than rounds up, so a padded line can come out a
+ * fraction under the budget but never over it — over is what the client elides.
+ */
+export function fitWidth(line) {
+  const room = (COPY_UNITS - W_DASH - widthUnits(line)) / SP;
+  const fill = Math.max(0, Math.floor(room + 1e-9));
+  return `${line}${" ".repeat(fill)}-`;
+}
+
+/**
+ * One button row, in the reader's order: mark, name, two spaces, plan, THREE
+ * spaces, countdown, two spaces, benchmark — every column padded by rendered
+ * width, the line finished by rendered width. The benchmark arrives as `AA48`
+ * from benchmarkLabel() and loses the prefix here: the buttons have no header
+ * row to hang it on, and those two glyphs are most of what pushed a row past
+ * the client's cut-off. The monospace table keeps them.
+ */
+export function rowWidth({ mark = " ", name = "", plan = "", score = "", resetIn = "—" } = {}) {
+  const bench = String(score).replace(/^AA/, "");
+  const line = `${padUnits(`${mark} ${name}`, W_HEAD_UNITS)}  ${padUnits(plan, W_PLAN_UNITS)}   ${padUnits(resetIn, W_EXPIRY_UNITS)}  ${padUnits(bench, W_SCORE_UNITS)}`;
+  return fitWidth(line);
+}
+
+/**
+ * A non-row button — a tier heading or the Cancel row — at the same rendered
+ * width as the rows, indented two spaces so its text starts where a mark does.
+ */
+export function headingWidth(text) {
+  return fitWidth(`  ${text}`);
 }
 
 /**

@@ -459,7 +459,7 @@ try {
   // row per group with the same label and count /allowance prints above the section,
   // from the same groupRowsByTier() result.
   check('/freemodel heads each tier group with the same label and count',
-    /buttons\.push\(\{ text: headingCopy\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
+    /buttons\.push\(\{ text: headingWidth\(`\$\{g\.label\} \(\$\{g\.rows\.length\}\)`\), data: 'noop', header: true \}\)/.test(botSrc));
   check('and a heading is a real noop, not a model named noop',
     /const payload = want === 'noop' \? 'noop' : `\$\{kind\}:\$\{want\}`/.test(read('lib/commands.mjs')));
   check('the body carries the same breakdown as one line',
@@ -501,7 +501,7 @@ try {
   // bakeoff label — or "unranked" when the ledger has no row for that model.
   // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
-    /const rated = fitCopy\(rowCopy\(\{/.test(botSrc)
+    /const rated = rowWidth\(\{/.test(botSrc)
     && /mark: unusableOf\(r\) \? '❌' : '✅'/.test(botSrc),
     botSrc.match(/buttons\.push\(\{[^\n]*/)?.[0] || 'not found');
   // Telegram caps callback_data at 64 bytes, and it used to carry the label — so
@@ -532,7 +532,7 @@ try {
     const region = botSrc.split('\n').slice(0, 130).join('\n');
     const imported = new Set((region.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
     const helpers = ['buildAllowanceTextForBots', 'formatCompactAllowanceChat', 'canonicalAllowanceLanes', 'groupRowsByTier',
-      'rowCopy', 'fitCopy', 'headingCopy', 'shortModelName', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',
+      'rowWidth', 'headingWidth', 'shortModelName', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',
       'formatResetIn', 'soonestResetAmongDepleted', 'ensureBotLedger', 'renderFreeLaneTableHtml', 'usableTurnLanes',
       'stampDepleted', 'freemodelRefToRoute', 'isConnectionFailure', 'stampCooldown'];
     const missing = helpers.filter((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(botSrc) && !new RegExp(`\\b${fn}\\b`).test(region));
@@ -563,11 +563,12 @@ try {
   // proportional prose sitting above a monospace table.
   check('and the renderer emits no nested code spans', !/<code>.*escHtml\(header\)/.test(read('lib/free-lanes.mjs')) && /const lines = \[header \+ nl \+ sep\]/.test(read('lib/free-lanes.mjs')));
 
-  // One copy, one width: the row /allowance prints is the label the /freemodel button
-  // carries, both built by the same colsCopy() columns — the table finished to 72
-  // display cells, the button to 72 characters (the unit the reader counts), each
-  // ending in a dash so a button and its row are one string, not two vocabularies.
-  check('the button label is the /allowance row copy', /const rated = fitCopy\(rowCopy\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
+  // One copy, two units: the row /allowance prints and the label the /freemodel
+  // button carries come from the same column order in the same module — the table
+  // finished to 72 display cells (monospace, where characters line up), the button
+  // to COPY_UNITS of rendered width (a proportional font, where they do not and
+  // the client elides whatever passes its cut-off), each ending in a dash.
+  check('the button label is the /allowance row copy, by width', /const rated = rowWidth\(\{/.test(botSrc) && /text: rated, data: route/.test(botSrc));
   check('every copy ends in a dash: 72 characters for a button, 72 cells for a line', (() => {
     const fl = read('lib/free-lanes.mjs');
     return /export const COPY_WIDTH = 72;/.test(fl)

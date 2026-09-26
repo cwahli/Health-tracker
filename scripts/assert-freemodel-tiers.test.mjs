@@ -36,7 +36,8 @@ console.log('assert-freemodel-tiers (QS-6/QS-7)\n');
 
 const host = await import(path.join(__dirname, 'bot-host.mjs'));
 const { scoreLabelFor, tierForModel, benchmarkLabel } = await import(path.join(__dirname, 'lib', 'free-catalogs.mjs'));
-const { groupRowsByTier, headingCopy, COPY_WIDTH, shortModelName } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
+const { groupRowsByTier, headingWidth, widthUnits, COPY_UNITS, shortModelName } = await import(path.join(__dirname, 'lib', 'free-lanes.mjs'));
+const ADV_SPACE = widthUnits(' ');
 const { formatFreemodelWithDepletion } = host;
 check('the formatter is exported for the sensor', typeof formatFreemodelWithDepletion === 'function');
 
@@ -74,7 +75,7 @@ const seenHeadings = [];
 for (const g of groups) {
   const heading = btnText(btns[cursor]);
   seenHeadings.push(heading);
-  if (heading !== headingCopy(`${g.label} (${g.rows.length})`)) orderOk = false;
+  if (heading !== headingWidth(`${g.label} (${g.rows.length})`)) orderOk = false;
   cursor += 1;
   for (const r of g.rows) {
     if (!btnText(btns[cursor]).includes(nameOf(r))) orderOk = false;
@@ -84,28 +85,35 @@ for (const g of groups) {
 check('the buttons follow the catalog tier order, head by head', orderOk && cursor === btns.length,
   seenHeadings.map((h) => h.split('(')[0].trim()).join(' → '));
 
-// 3. every model button is the table's copy: 72 characters, dash last, the mark
-// at index 0, ASCII spaces as the fill and no U+2002 anywhere in the label.
+// 3. every model button is the table's copy, finished by RENDERED WIDTH: the
+// client fits pixels in a proportional font and middle-elides what overruns, so
+// what has to be equal across the keyboard is the width (COPY_UNITS = 408px),
+// not the character count. Dash last, mark at index 0, ASCII fill, no U+2002.
 const modelBtns = btns.filter((b) => !b.header && b.data !== 'noop');
 const shapeBad = modelBtns
-  .filter((b) => b.text.length !== COPY_WIDTH || !b.text.endsWith('-') || !/^[✅❌]/.test(b.text) || !b.text.includes(' ') || b.text.includes('\u2002'))
-  .map((b) => b.text);
-check('every row button is 72 characters, dash last, ASCII filled', shapeBad.length === 0, shapeBad.slice(0, 2).join(' | '));
+  .filter((b) => widthUnits(b.text) > COPY_UNITS + 1e-9 || widthUnits(b.text) < COPY_UNITS - ADV_SPACE - 1e-9
+    || !b.text.endsWith('-') || !/^[✅❌]/.test(b.text) || !b.text.includes(' ') || b.text.includes('\u2002'))
+  .map((b) => `${(widthUnits(b.text) * 17).toFixed(0)}px ${b.text.slice(0, 30)}`);
+check('every row button renders at COPY_UNITS, dash last, ASCII filled', shapeBad.length === 0, shapeBad.slice(0, 2).join(' | '));
 check('the heading rows are finished the same way',
-  btns.filter((b) => b.data === 'noop').every((b) => b.text.length === COPY_WIDTH && b.text.endsWith('-') && b.text.includes(' ') && !b.text.includes('\u2002')));
+  btns.filter((b) => b.data === 'noop').every((b) => widthUnits(b.text) <= COPY_UNITS + 1e-9
+    && widthUnits(b.text) >= COPY_UNITS - ADV_SPACE - 1e-9 && b.text.endsWith('-') && b.text.includes(' ') && !b.text.includes('\u2002')),
+  btns.filter((b) => b.data === 'noop').map((b) => (widthUnits(b.text) * 17).toFixed(0)).join(','));
 
-// 4. the benchmark on the button is the catalog's own string, or nothing.
+// 4. the benchmark on the button is the catalog's own figure, or nothing —
+// without the `AA` prefix, which the buttons dropped to fit the cut-off; the
+// table keeps it under the column's own header.
 const scoreBad = rows
   .map((r) => ({ r, want: benchmarkLabel(r.model) }))
-  .filter(({ r, want }) => want && !btnText(buttonFor(r)).includes(want))
-  .map(({ r, want }) => `${labelOf(r)} wants ${want}`);
+  .filter(({ r, want }) => want && !btnText(buttonFor(r)).includes(want.replace(/^AA/, '')))
+  .map(({ r, want }) => `${labelOf(r)} wants ${want.replace(/^AA/, '')}`);
 function buttonFor(r) {
   return btns.find((b) => typeof b === 'object' && b.ref === r.ref) || {};
 }
 check('every published benchmark appears on its button', scoreBad.length === 0, scoreBad.join('; '));
 check('an unpublished benchmark shows the em dash, never a neighbour\'s number',
   String(scoreLabelFor('mystery-free')).length > 0
-  && btnText(buttonFor(rows[1])).includes(benchmarkLabel(rows[1].model) || '—'));
+  && btnText(buttonFor(rows[1])).includes((benchmarkLabel(rows[1].model) || '—').replace(/^AA/, '')));
 
 // 5. depleted and terminal rows are rendered, but marked and never counted usable.
 check('depleted and terminal rows stay out of usable',
