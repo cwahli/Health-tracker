@@ -192,6 +192,51 @@ fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ quota: {} }, n
     && !choice.models.some((m) => String(m).includes('sb-b-free')));
 }
 
+// ---------------------------------------------------------------- QS-4
+const { resolvePackPath, packPathLine, PACK_SUMMARY_BYTES } = host;
+const { buildPack } = await import(path.join(__dirname, 'lib', 'swap-pack.mjs'));
+check('pack path helpers are exported', typeof resolvePackPath === 'function' && typeof packPathLine === 'function');
+const smallPack = { ok: true, id: 'p1', root: '/tmp', files: [{ path: 'a.md', sha256: 'x', bytes: 100 }], totalBytes: 100 };
+{
+  const r = await resolvePackPath({ manifest: smallPack });
+  check('a small pack ships from disk with no summary call',
+    r.path === 'disk-pack' && packPathLine(r).includes('no summary call'), packPathLine(r));
+}
+const bigPack = { ok: true, id: 'p2', root: '/tmp', files: [{ path: 'big.md', sha256: 'y', bytes: PACK_SUMMARY_BYTES + 1 }], totalBytes: PACK_SUMMARY_BYTES + 1 };
+{
+  const seen = [];
+  const r = await resolvePackPath({
+    manifest: bigPack,
+    failedLane: 'opencode/m-dead-free',
+    lanesFn: async () => ['opencode/m-dead-free', 'opencode/m-good-free'],
+    summarizeFn: async ({ model }) => { seen.push(model); return 'ten lines of summary'; },
+  });
+  check('a long pack earns a lane-written summary, never from the just-failed lane',
+    r.path === 'lane-summary' && r.lane === 'opencode/m-good-free' && seen.join(',') === 'opencode/m-good-free'
+    && packPathLine(r).includes('wrote the summary'));
+}
+{
+  const r = await resolvePackPath({ manifest: bigPack, failedLane: 'x', lanesFn: async () => [], summarizeFn: async () => 's' });
+  check('no other lane means summary skipped, disk pack still sent',
+    r.path === 'summary-skipped' && /no other lane/.test(r.reason) && packPathLine(r).includes('disk pack sent'));
+}
+{
+  const r = await resolvePackPath({ manifest: bigPack, lanesFn: async () => ['m'], summarizeFn: null });
+  check('no summary writer means summary skipped, not a crash', r.path === 'summary-skipped');
+}
+{
+  const r = await resolvePackPath({
+    manifest: bigPack, lanesFn: async () => ['m-good'],
+    summarizeFn: async () => { throw new Error('provider 500'); },
+  });
+  check('a failed summary writer falls back to disk pack, never hangs', r.path === 'summary-skipped' && /provider 500/.test(r.reason));
+}
+{
+  const refused = buildPack('/nonexistent-dir-qs4');
+  const r = await resolvePackPath({ manifest: refused });
+  check('a refused build is reported, not shipped', r.path === 'summary-skipped' && packPathLine(r).includes('summary skipped'));
+}
+
 console.log(`\n${pass} pass, ${fail} fail`);
 if (fail > 0) {
   console.error('\nFailures:\n' + failures.map((f) => `  - ${f}`).join('\n'));

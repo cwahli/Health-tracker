@@ -619,10 +619,14 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
   // Guard 9: on a swap the files this conversation has been editing travel
   // with it, so the worker does not run the turn against its own copy.
   let packId = '';
+  // QS-4: the manifest travels back with the result so the turn can say which
+  // pack path wrote it (disk-pack / lane-summary / summary-skipped).
+  let packManifest = null;
   if (packRoot) {
     const built = buildPack(packRoot);
     if (!built.ok) {
       console.log(`[${host}] pack refused: ${built.reason} (the turn runs without it)`);
+      packManifest = { ok: false, reason: built.reason };
     } else {
       const payload = packWithContents(built);
       if (!payload.ok) console.log(`[${host}] pack not built: ${payload.reason} (the turn runs without it)`);
@@ -634,6 +638,11 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
         });
         if (res.ok) {
           packId = payload.id;
+          packManifest = {
+            ok: true, id: payload.id, root: packRoot, source: payload.source,
+            files: payload.files.map(({ path, sha256, bytes }) => ({ path, sha256, bytes })),
+            totalBytes: payload.totalBytes, createdAt: payload.createdAt,
+          };
           console.log(`[${host}] pack ${payload.id} uploaded (${payload.files.length} file(s), ${payload.totalBytes} bytes)`);
         } else {
           console.log(`[${host}] pack upload refused with ${res.status} (the turn runs without it)`);
@@ -652,7 +661,7 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
     if (remaining <= 0) break;
     const done = await awaitJob(job.id, { timeoutMs: Math.min(budget, remaining) });
     if (done?.result) {
-      return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null, attempts: attempt };
+      return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null, attempts: attempt, packManifest };
     }
     // No result by the deadline. Classify it: only a transient failure may be
     // retried, and only while the worker is still alive and its claim is not
@@ -1410,6 +1419,62 @@ export function settleCanary({ host, result = {}, sessionId = '', jobId = '', ho
  * reachable host is dry the turn stops with 'no location has quota' and no
  * failed lane is ever called twice.
  */
+/**
+ * QS-4: a handoff pack longer than PACK_SUMMARY_BYTES may earn a written
+ * summary; short packs and refused builds never spend a model call on one.
+ * Pure decision + text: the model call, if any, goes through `summarizeFn`
+ * so the sensor proves the policy without spending quota.
+ */
+export const PACK_SUMMARY_BYTES = 20 * 1024;
+
+export async function resolvePackPath({ manifest = null, failedLane = '', lanesFn = null, summarizeFn = null } = {}) {
+  if (!manifest || !manifest.ok) {
+    return { path: 'summary-skipped', reason: manifest?.reason || 'no pack was built', manifest: null };
+  }
+  const files = manifest.files || [];
+  if (manifest.totalBytes <= PACK_SUMMARY_BYTES) {
+    return { path: 'disk-pack', manifest };
+  }
+  const failedTail = String(failedLane || '').toLowerCase().split('/').filter(Boolean).pop() || '';
+  let lanes = [];
+  try {
+    lanes = (await lanesFn?.()) || [];
+  } catch {
+    lanes = [];
+  }
+  const models = (Array.isArray(lanes) ? lanes : lanes?.models || [])
+    .map(String)
+    .filter((m) => m && (!failedTail || !m.toLowerCase().endsWith(failedTail)));
+  if (!models.length || typeof summarizeFn !== 'function') {
+    return {
+      path: 'summary-skipped',
+      reason: !models.length ? 'no other lane has allowance' : 'no summary writer wired',
+      manifest,
+    };
+  }
+  const lane = models[0];
+  try {
+    const summary = await summarizeFn({ model: lane, manifest });
+    if (!String(summary || '').trim()) throw new Error('empty summary');
+    return { path: 'lane-summary', lane, summary: String(summary).trim().slice(0, 1500), manifest };
+  } catch (err) {
+    return { path: 'summary-skipped', reason: `summary writer failed: ${String(err?.message || err).slice(0, 120)}`, manifest };
+  }
+}
+
+/** QS-4: the reply always states which pack path wrote it. */
+export function packPathLine(resolved) {
+  const n = resolved?.manifest?.files?.length || 0;
+  const size = resolved?.manifest?.totalBytes ?? 0;
+  if (resolved?.path === 'lane-summary') {
+    return `📦 handoff pack (${n} files): lane \`${resolved.lane}\` wrote the summary.`;
+  }
+  if (resolved?.path === 'disk-pack') {
+    return `📦 handoff pack (${n} files, ${size} bytes): built from disk, no summary call.`;
+  }
+  return `📦 handoff pack${n ? ` (${n} files)` : ''}: summary skipped (${resolved?.reason || 'unknown reason'}); disk pack sent.`;
+}
+
 export async function continueTurnOnNextWorker({ fromHost = '', tried = [], prefer = '', runTurn, statusOf = null } = {}) {
   const hops = [];
   const seen = new Set([String(fromHost || '').toLowerCase(), ...(tried || []).map((h) => String(h || '').toLowerCase())]);
@@ -2856,6 +2921,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       if (!String(handed.text || '').trim() && isQuotaOrLimitError(String(handed.error || ''))) {
         console.log(`[${config.id}] turn on ${host} came back dry (quota); trying the next host`);
         return { done: false, dry: true, handed };
+      }
+      // QS-4: a depletion-driven hop says which pack path wrote it. The summary
+      // writer is picked from this machine's lanes excluding the lane that
+      // just died, so the failed lane is never asked to summarize itself.
+      if (hopFrom && handed.packManifest) {
+        try {
+          const pack = await resolvePackPath({
+            manifest: handed.packManifest,
+            failedLane: handed.model || '',
+            lanesFn: async () => (selectTurnLanes({ botId: config.id, model: eff.model, fallback: config.agent.model }).models || []),
+            summarizeFn: async ({ model: lane, manifest: man }) => (await runOpencode({
+              prompt: `Summarize this handoff pack in 10 lines or less (files changed, what the next turn needs):\n${(man.files || []).map((f) => `- ${f.path} (${f.bytes} bytes)`).join('\n')}`,
+              model: lane,
+              workspace: effectiveWorkspace,
+              timeoutMs: 120000,
+            }))?.finalText || '',
+          });
+          await api.sendMessage(chatId, packPathLine(pack)).catch(() => {});
+        } catch {
+          // the pack line is informational; the answer finishes below regardless
+        }
       }
       console.log(`[${config.id}] turn ran on ${host} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
       await renderer.finish(
