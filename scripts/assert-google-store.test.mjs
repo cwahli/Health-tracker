@@ -262,6 +262,16 @@ check('a spreadsheet is deleted through Drive, the API that answers from this ho
   return /return deleteFile\(sheetId, token\)/.test(fn);
 });
 
+check('every request identifies the fleet honestly, never as Google\u2019s SDK', () => {
+  // During challenged windows our default-UA requests were refused while an SDK-UA
+  // request passed seconds apart — suggestive, not proof. The answer is still to
+  // say who we are, not to impersonate google-api-nodejs-client on every call.
+  const code = LIB.split('\n').filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//')).join('\n');
+  return /export const USER_AGENT = 'fleet-store\//.test(LIB)
+    && !/google-api-(nodejs|ruby)-client/.test(code)
+    && (LIB.match(/clientHeaders\(/g) || []).length >= 4;
+});
+
 check('a sheet deletion is verified through Drive, the API that answered the delete', () => {
   // The Sheets read lags and is challenged; verifying through it turned a proven
   // delete into a flaky partial.

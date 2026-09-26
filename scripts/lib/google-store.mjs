@@ -53,6 +53,22 @@ const API = {
   docs: 'https://docs.googleapis.com/v1/documents',
 };
 
+/**
+ * Who we tell Google we are. Every request this module makes carries it.
+ *
+ * Measured, honestly stated: during challenged windows a request with undici's
+ * default user agent was refused while the same request minutes later passed, and
+ * the Ruby SDK client passed while ours was refused seconds apart. That is
+ * *suggestive* of user-agent heuristics, not proof — a later control had both
+ * passing. So this is not claimed as the fix (the retry logic and the Drive paths
+ * are the reliability story); it is claimed as correct behaviour. We are the fleet
+ * store, not Google's Node library, so we say so. Impersonating
+ * `google-api-nodejs-client` would be a lie on every request.
+ */
+export const USER_AGENT = 'fleet-store/1.0 (linux; node)';
+
+const clientHeaders = (extra = {}) => ({ 'User-Agent': USER_AGENT, ...extra });
+
 export const MIME = {
   folder: 'application/vnd.google-apps.folder',
   doc: 'application/vnd.google-apps.document',
@@ -375,11 +391,11 @@ async function request(url, { method = 'GET', token = '', body, headers = {}, at
   for (let i = 0; i < attempts; i += 1) {
     const res = await fetch(url, {
       method,
-      headers: {
+      headers: clientHeaders({
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         ...headers,
-      },
+      }),
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
@@ -512,7 +528,7 @@ export async function uploadBinary(folderId, name, bytes, { mimeType = 'image/pn
   const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
   const res = await fetch(`${API.driveUpload}/files?uploadType=multipart&fields=${encodeURIComponent('id,name,mimeType,size,webViewLink')}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    headers: clientHeaders({ Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` }),
     body: Buffer.concat([head, Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes), tail]),
   });
   const text = await res.text();
@@ -631,7 +647,7 @@ export async function createFile(folderId, name, { mimeType = MIME.md, content =
   ].join('\r\n');
   const res = await fetch(`${API.driveUpload}/files?uploadType=multipart&fields=${encodeURIComponent('id,name,mimeType,webViewLink')}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    headers: clientHeaders({ Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` }),
     body,
   });
   const text = await res.text();
@@ -664,7 +680,7 @@ export async function createDocWithContent(folderId, name, text, token) {
   ].join('\r\n');
   const res = await fetch(`${API.driveUpload}/files?uploadType=multipart&fields=${encodeURIComponent('id,name,mimeType,webViewLink')}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    headers: clientHeaders({ Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` }),
     body,
   });
   const out = await res.text();
@@ -698,7 +714,7 @@ export async function replaceDocContent(docId, text, token) {
   ].join('\r\n');
   const res = await fetch(`${API.driveUpload}/files/${encodeURIComponent(docId)}?uploadType=multipart&fields=${encodeURIComponent('id,modifiedTime')}`, {
     method: 'PATCH',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    headers: clientHeaders({ Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` }),
     body,
   });
   const out = await res.text();
