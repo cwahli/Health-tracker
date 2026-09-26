@@ -397,6 +397,7 @@ try {
   // model IS in the table — so a re-add loop keyed on the list instead of the table
   // put 13 models back and /freemodel said 49 rows while /allowance said 30.
   const paritySrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
+  const lanesSrc = fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8');
   // After the catalog is folded in, the only catalogued things without a lane row are
   // provider placeholders like "pending:gemini" — not models. Keying the re-add on
   // those put six non-rows in the list and broke the count parity again (36 vs 30).
@@ -409,7 +410,13 @@ try {
   // counts the 17 authored lanes while /allowance renders the folded table.
   check('and it uses the table the annotation was built against',
     /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels/.test(paritySrc));
-  check('and the supersession rule gets a score function', /scoreOf: modelScore/.test(paritySrc) && /function modelScore\(lane\)/.test(paritySrc));
+  // The supersession policy must have ONE home. /allowance's renderer called
+  // canonicalAllowanceLanes() with no scoreOf while /freemodel passed one, so the
+  // two surfaces dropped different models: 30 rows against 36.
+  check('and the supersession score has one home, in free-lanes',
+    /scoreOf = laneScoreFromRatings/.test(lanesSrc) && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
+  check('and no-credential rows leave the count on both surfaces',
+    /const needsSetup = rows\.filter\(\(r\) => r\.needsSetup\)/.test(paritySrc) && /need setup/.test(paritySrc) && /needsSetup\.length \? ` · \$\{needsSetup\.length\} need setup`/.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
@@ -429,7 +436,7 @@ try {
   check('/freemodel writes its own header, not the raw catalog count', /const header = formatFreeModelText/ .test(botSrc) === false);
   check('the header counts rows with no ledger row separately', /with no ledger row/.test(botSrc));
   // The router's wording: a total, and how many are not usable.
-  check('/freemodel totals the rows the way the router does', /Total: \$\{rows\.length\}/.test(botSrc) && /not usable ❌/.test(botSrc));
+  check('/freemodel totals the rows the way the router does', /Total: \$\{listed\.length\}/.test(botSrc) && /not usable ❌/.test(botSrc));
   // The reason is still shown, on one line, rather than as a second per-model list.
   check('/freemodel still says why a row is unusable, on one line', /not usable: /.test(botSrc) && /\(reset in /.test(botSrc));
   // Scoped to the /freemodel formatter: /setup legitimately prints a bullet per gap.

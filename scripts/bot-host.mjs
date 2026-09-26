@@ -93,7 +93,7 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
-import { ratingSuffix, ratingForModel } from './lib/model-ratings.mjs';
+import { ratingSuffix } from './lib/model-ratings.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -433,19 +433,6 @@ export function hostReadiness(caches, botId = 'vm') {
 
 function opencodeEnv(config) {
   return buildOpencodeEnv(config.agent);
-}
-
-/** Score for the supersession rule, from the benchmark table. */
-function modelScore(lane) {
-  try {
-    const r = ratingForModel(lane?.model || '');
-    if (!r) return null;
-    if (typeof r.aa === 'number') return r.aa;
-    if (typeof r.swe === 'number') return r.swe;
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 function chatEnv(api, chatId) {
@@ -853,10 +840,16 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     const m = String(v.lane?.model || '').toLowerCase().split('/').filter(Boolean).pop();
     if (m && !inTable.has(m)) rows.push(v);
   }
+  // A lane whose provider has no credential on this host leaves the count, the same
+  // way /allowance drops it from its table and names the variable underneath. It was
+  // six rows here, which is why the two commands disagreed about the total even with
+  // one canonical list.
+  const needsSetup = rows.filter((r) => r.needsSetup);
+  const listed = rows.filter((r) => !r.needsSetup);
   const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
-  const usable = rows.filter((r) => !unusableOf(r));
-  const unusable = rows.filter(unusableOf);
-  const noCredential = rows.filter((r) => r.inLedger === false);
+  const usable = listed.filter((r) => !unusableOf(r));
+  const unusable = listed.filter(unusableOf);
+  const noCredential = listed.filter((r) => r.inLedger === false);
   const location0 = location ? ` at ${location}` : '';
   // The same compact reset /allowance prints ("reset in 12h 34"), not the long
   // label. The projection's resetLabel spells out the vendor countdown and an
@@ -879,14 +872,17 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     'Depleted lanes are marked ❌ and stay tappable, so a tap can tell you what to use instead.',
     'Token Harbor / Cloudflare / Gemini taps run through OpenCode. Freebuff is terminal-only — no chat turn.',
     '',
-    rows.length
-      ? `Total: ${rows.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''} · current: ${current || 'default'}`
+    listed.length
+      ? `Total: ${listed.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''}${needsSetup.length ? ` · ${needsSetup.length} need setup` : ''} · current: ${current || 'default'}`
       : 'No free models are installed and authenticated on this host.',
   ];
   // One short footer line — never a second per-model list.
   const footer = [];
   if (noCredential.length) {
     footer.push(`no ledger row: ${noCredential.slice(0, 4).map((r) => r.label).join(', ')}${noCredential.length > 4 ? `, +${noCredential.length - 4} more` : ''}`);
+  }
+  if (needsSetup.length) {
+    footer.push(`needs setup: ${needsSetup.slice(0, 3).map((r) => `${r.label} (${r.setupReason || r.reason || 'provider not set up'})`).join('; ')}${needsSetup.length > 3 ? `; +${needsSetup.length - 3} more` : ''}`);
   }
   if (unusable.length) {
     footer.push(`not usable: ${unusable.slice(0, 4).map((r) => `${r.label} (${why(r)})`).join('; ')}${unusable.length > 4 ? `; +${unusable.length - 4} more` : ''}`);
@@ -1661,7 +1657,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const body = formatFreemodelWithDepletion(entries, annotated, {
         current: eff.model,
         location: workLocation(),
-        canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation(), scoreOf: modelScore }),
+        canonical: canonicalAllowanceLanes({ table: fmTable, session: fmSession, readiness: hostReadiness(caches), location: workLocation() }),
         tableLanes: (fmTable && fmTable.lanes) || [],
       });
       // One keyboard with every model, no paging, and the router's cancel row.
