@@ -106,9 +106,12 @@ try {
   execFileSync('git', ['-C', WS, 'commit', '-qm', 'base']);
   fs.writeFileSync(path.join(WS, 'midway.txt'), 'point 1 drafted — metric receipt still missing\n');
 
-  // presence the drill side can see (same HOME), refreshed as the drill runs
+  // presence the drill side can see (same HOME), refreshed as the drill runs.
+  // It carries a machine like a real worker's heartbeat, so the canary's
+  // identity check has something true to match.
+  const DRILL_MACHINE = { hostname: os.hostname(), platform: os.platform(), arch: os.arch() };
   const beat = () => {
-    for (const h of HOSTS) recordWorkerConnected({ host: h, pid: process.pid, detail: 'swap drill', home: HOME });
+    for (const h of HOSTS) recordWorkerConnected({ host: h, pid: process.pid, detail: 'swap drill', machine: DRILL_MACHINE, home: HOME });
   };
   beat();
 
@@ -139,6 +142,7 @@ try {
           text: `swap turn answered on ${host}`,
           code: 0, model: job.model, error: '',
           ledger: evil ? `${HOME}/.hermes/ledger/worker-evil` : `${HOME}/.hermes/ledger/worker-${host}`,
+          machine: DRILL_MACHINE,
           sessionID: job.sessionId,
           resumedFrom: 'local',
           workspace: WS,

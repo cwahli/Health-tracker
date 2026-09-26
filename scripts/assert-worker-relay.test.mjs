@@ -102,6 +102,13 @@ try {
   const packSentinel = enqueueJob({ host: 'mobile', prompt: 'pack round trip', model: '', workspace: home }, { home });
   const withPack = completeJob(packSentinel.id, { text: 'ok', code: 0, packApplied: 3, workspace: device }, { home });
   check('the pack count survives the trip back', withPack?.result?.packApplied === 3, String(withPack?.result?.packApplied));
+  // The worker's machine identity must survive the trip back too, sanitized
+  // to three fields: the canary refuses a job it cannot attribute, so a
+  // relay that drops the field breaks every swap by name.
+  const idSentinel = enqueueJob({ host: 'mobile', prompt: 'identity round trip', model: '', workspace: home }, { home });
+  const withMachine = completeJob(idSentinel.id, { text: 'ok', code: 0, machine: { hostname: 'phone-1', platform: 'android', arch: 'arm64', injected: 'x'.repeat(500) } }, { home });
+  check('the worker machine survives the trip back', withMachine?.result?.machine?.hostname === 'phone-1', JSON.stringify(withMachine?.result?.machine));
+  check('the machine is sanitized to three fields', withMachine?.result?.machine?.injected === undefined && Object.keys(withMachine?.result?.machine || {}).join(',') === 'hostname,platform,arch');
   check('the job was claimed exactly once', typeof done?.claimedAt === 'string');
   check('the job store lives on the VM, not the device', fs.existsSync(path.join(home, '.hermes', 'worker-jobs')));
 
