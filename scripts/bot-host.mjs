@@ -845,7 +845,12 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   const inTable = new Set((tableLanes || []).map((l) => String(l?.model || '').toLowerCase().split('/').filter(Boolean).pop()).filter(Boolean));
   for (const e of entries || []) {
     const v = verdictOf(e);
-    const m = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
+    // A real model always has a lane once the catalog is folded in, so the only
+    // thing left without one is a provider placeholder ("pending:gemini") — not a
+    // model, and the header already counts those. Anything else that shows up here
+    // means the fold missed a model, and it is reported rather than dropped.
+    if (String(v.ref || '').startsWith('pending:')) continue;
+    const m = String(v.lane?.model || '').toLowerCase().split('/').filter(Boolean).pop();
     if (m && !inTable.has(m)) rows.push(v);
   }
   const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
@@ -1640,7 +1645,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
       // Rendering the catalog alone listed 42 models and none of them were the ones
       // /allowance was showing for those providers.
-      const { entries, annotated } = getAnnotatedFreeModels(caches, config.id);
+      const { entries, annotated, table: fmTable, session: fmSession } = getAnnotatedFreeModels(caches, config.id);
       if (!entries.length) {
         await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
         return;
@@ -1649,12 +1654,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // the router keeps a depleted lane tappable so the tap can answer with what
       // to use instead. Filtering them out of the keyboard is what made /freemodel
       // and /allowance list different things.
-      // The SAME table /allowance renders: the catalog folded in. Passing the raw
-      // ledger table here meant the canonical list was built from 17 authored lanes
-      // while the renderer used the folded table, so the two surfaces counted
-      // different models (46 against 30) even with the same code.
-      const { table: rawTable, session: fmSession } = getLedger(config.id);
-      const fmTable = withCatalogLanes(rawTable, entries).table || rawTable;
+      // The table getAnnotatedFreeModels already folded the catalog into — the same
+      // one the annotation was computed against and the same one /allowance renders.
+      // Folding the union again here produced a different table (46 lanes against
+      // 48) and six models came back that the real list has dropped.
       const body = formatFreemodelWithDepletion(entries, annotated, {
         current: eff.model,
         location: workLocation(),

@@ -397,18 +397,24 @@ try {
   // model IS in the table — so a re-add loop keyed on the list instead of the table
   // put 13 models back and /freemodel said 49 rows while /allowance said 30.
   const paritySrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
+  // After the catalog is folded in, the only catalogued things without a lane row are
+  // provider placeholders like "pending:gemini" — not models. Keying the re-add on
+  // those put six non-rows in the list and broke the count parity again (36 vs 30).
+  check('provider placeholders are not counted as models',
+    /if \(String\(v\.ref \|\| ''\)\.startsWith\('pending:'\)\) continue;/.test(paritySrc));
   check('the re-add is keyed on the table, not on the canonical list',
     /const inTable = new Set/.test(paritySrc) && /!inTable\.has\(m\)/.test(paritySrc) && !/inList/.test(paritySrc));
   check('and the handler passes the table lanes through', /tableLanes: \(fmTable && fmTable\.lanes\) \|\| \[\]/.test(paritySrc));
   // The handler must fold the catalog in before building the canonical list, or it
   // counts the 17 authored lanes while /allowance renders the folded table.
-  check('and it folds the catalog into the table first', /const fmTable = withCatalogLanes\(rawTable, entries\)\.table \|\| rawTable/.test(paritySrc));
+  check('and it uses the table the annotation was built against',
+    /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels/.test(paritySrc));
   check('and the supersession rule gets a score function', /scoreOf: modelScore/.test(paritySrc) && /function modelScore\(lane\)/.test(paritySrc));
 
   // 7. /freemodel's body must not contradict /allowance.
   const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel renders the canonical list, not the raw catalog', /const rows = canonical \|\| \[\];/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
-  check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
+  check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
     /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));
   // Changed deliberately on 2026-09-25, to follow the Grok router, which had
