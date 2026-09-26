@@ -352,7 +352,11 @@ Mobile-first AI dev assistant and compute router for your projects.
       // Step 4: Commit and push
       let commitHash = 'unknown';
       try {
-        const commitMsg = `fix: ${arg.slice(0, 60)}`;
+        const identity = String(process.env.AGENT_IDENTITY || '');
+        if (!/.+ \([^)]+\)$/.test(identity)) {
+          throw new Error("AGENT_IDENTITY must look like 'Grok 4.7 (High)' — model, version, and thinking level.");
+        }
+        const commitMsg = `fix: ${arg.slice(0, 60)}\n\nAgent: ${identity}`;
         execSync('git add -u', { cwd: targetDir, encoding: 'utf8' });
         execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: targetDir, encoding: 'utf8' });
         execSync('git push origin main', { cwd: targetDir, encoding: 'utf8' });

@@ -32,6 +32,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 - One defect per card. The script starts the coder. The Orchestrator profile only posts status.
 - The card closes when `verify.method` is `named_test` or `manual` and `verify.result` is `green`. A green journey stays `verifying`. `bugState` enforces this (`JOURNEY_GREEN_DOES_NOT_CLOSE`).
 - Do not push the coder's commit onto `origin/main`. Open a PR from `agent/<area>`.
+- Every commit ends with `Agent: <model and version> (<thinking level>)`. Example: `Agent: Grok 4.7 (High)`. The name is the model and version the provider shows. The parentheses are the thinking level (`High`, `max`, `low`). Set `AGENT_IDENTITY` to that text without the `Agent:` prefix when a tool commits for you. A commit without the line is rejected. Once per clone: `git config core.hooksPath scripts/git-hooks`.
 - BOT-1 through BOT-23 are history. V-30.1 through V-30.5 are history. CB-6 as written (push to `origin/main`) is superseded. Do not resume CB-7 or CB-8.
 
 ## Do not

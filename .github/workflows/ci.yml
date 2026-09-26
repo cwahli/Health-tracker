@@ -28,6 +28,24 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Agent identity on each new commit
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}..HEAD"
+          else
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              git fetch origin main
+              range="origin/main..HEAD"
+            else
+              range="$before..${{ github.sha }}"
+            fi
+          fi
+          scripts/check-agent-identity.sh --range "$range"
 
       - uses: actions/setup-node@v4
         with:
