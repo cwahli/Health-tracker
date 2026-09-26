@@ -511,6 +511,24 @@ try {
   // counts cannot differ; the keyboard is the tappable layer on top of it.
   // The exact text, from the same call /allowance makes — not a re-render of the same
   // rows, which is how two surfaces drift.
+  // Every free-lanes helper bot-host calls must actually be imported. Removing
+  // buildAllowanceTextForBots while tidying an unrelated edit passed the whole suite
+  // and broke /allowance on the live bot, where it surfaced as
+  // "buildAllowanceTextForBots is not defined" and no rows at all.
+  check('every free-lanes helper bot-host calls is imported', (() => {
+    // The import region, checked by name rather than by parsing the statement: the
+    // multi-line import block is easy to mis-parse, and a false negative here is the
+    // same failure this check exists to catch.
+    const region = botSrc.split('\n').slice(0, 130).join('\n');
+    const imported = new Set((region.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
+    const helpers = ['buildAllowanceTextForBots', 'formatCompactAllowanceChat', 'canonicalAllowanceLanes', 'groupRowsByTier',
+      'rowCopy', 'fitCopy', 'projectLanes', 'loadFreeLaneLedger', 'withCatalogLanes', 'escHtml', 'planCodeForLane',
+      'formatResetIn', 'soonestResetAmongDepleted', 'ensureBotLedger', 'renderFreeLaneTableHtml', 'usableTurnLanes',
+      'stampDepleted', 'freemodelRefToRoute', 'isConnectionFailure', 'stampCooldown'];
+    const missing = helpers.filter((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(botSrc) && !new RegExp(`\\b${fn}\\b`).test(region));
+    if (missing.length) console.error(`    not imported: ${missing.join(', ')}`);
+    return imported.size > 0 && missing.length === 0;
+  })());
   check('the allowance text helper is still the one renderer', /export function formatCompactAllowanceChat/.test(read('lib/free-lanes.mjs')));
   check('and rowCopy is the single source of the row copy', /export function rowCopy/.test(read('lib/free-lanes.mjs')) && /rowCopy\(\{ mark: ok \? "✅" : "❌"/.test(read('lib/free-lanes.mjs')));
   check('the table helper is the table only, so nothing is embedded twice', /if \(tableOnly\) return lines\.join/.test(read('lib/free-lanes.mjs')));

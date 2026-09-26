@@ -83,6 +83,7 @@ import {
   groupRowsByTier,
   rowCopy,
   fitCopy,
+  buildAllowanceTextForBots,
   escHtml,
   formatResetIn,
   renderFreeLaneTableHtml,
