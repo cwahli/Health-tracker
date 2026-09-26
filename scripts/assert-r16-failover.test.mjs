@@ -56,7 +56,8 @@ check('the mid-stream flag builder is exported', typeof midstreamFlagText === 'f
 
 // ---------------------------------------------------------------- QS-9
 const DRY = { done: false, dry: true, handed: { text: '', error: 'Error 429: Daily free limit reached', code: 1 } };
-const HIT = (h) => ({ done: true, handed: { text: `answer from ${h}`, error: '', code: 0 } });
+const HIT = (h) => ({ done: true, delivered: true, handed: { text: `answer from ${h}`, error: '', code: 0 } });
+const HELD = (why) => ({ done: true, held: true, reason: why, handed: null });
 // The chain walks KNOWN_HOSTS (mobile/collab/grok on this box); statusOf decides.
 const up = new Set(['mobile', 'collab', 'grok']);
 {
@@ -91,6 +92,19 @@ const up = new Set(['mobile', 'collab', 'grok']);
   check('the unreachable are skipped, a throwing hop does not end the walk',
     out.ok === false && out.hops.some((h) => h.reason === 'unreachable, skipped')
     && out.hops.some((h) => /relay blip/.test(h.reason || '')));
+}
+{
+  // A held hop (canary failed, preflight failed) is a wall, not a success:
+  // the chain must walk past it instead of stopping with no answer.
+  const calls = [];
+  const out = await continueTurnOnNextWorker({
+    fromHost: 'vps', tried: ['vps'],
+    runTurn: async (h) => { calls.push(h); return h === 'mobile' ? HELD('canary failed: empty result') : HIT(h); },
+    statusOf: async (h) => ({ reachable: up.has(h) }),
+  });
+  check('a held hop is walked past, not mistaken for delivery',
+    out.ok === true && out.host === 'collab' && calls.join(',') === 'mobile,collab'
+    && out.hops.map((h) => `${h.host}:${h.ok ? 'ok' : h.reason}`).join(',') === 'mobile:canary failed: empty result,collab:ok');
 }
 
 // ---------------------------------------------------------------- QS-11 + QS-2

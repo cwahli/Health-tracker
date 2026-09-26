@@ -1506,11 +1506,13 @@ export async function continueTurnOnNextWorker({ fromHost = '', tried = [], pref
       hops.push({ host, ok: false, reason: String(err?.message || err).slice(0, 200) });
       continue;
     }
-    if (out && out.done) {
+    // Delivered means the answer went out; held means the hop never ran (still
+    // a wall, not a success — walking past it is the point of the chain).
+    if (out && out.done && out.delivered) {
       hops.push({ host, ok: true });
       return { ok: true, host, hops, handed: out.handed || null };
     }
-    hops.push({ host, ok: false, reason: 'dry' });
+    hops.push({ host, ok: false, reason: String((out && (out.reason || (out.held ? 'held' : ''))) || 'dry').slice(0, 200) || 'dry' });
   }
   return { ok: false, reason: 'no location has quota', hops };
 }
@@ -2849,14 +2851,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         await say(
           `⏸ *Held:* \`${host}\` is unreachable (${remoteStatus.reason}).\nNothing ran and no allowance was sent. Send \`/location vps\` to run here, or wait for the ${host} worker to connect.`
         );
-        return { done: true, held: true, handed: null };
+        return { done: true, held: true, reason: `unreachable: ${remoteStatus.reason}`, handed: null };
       }
       if (wantCanary && routeState(host) === 'failed') {
         const row = routeFor(host);
+        const why = row?.failedReason || 'unknown reason';
         await say(
-          `⏸ *Held:* the route to \`${host}\` was rolled back after a failed canary (${row?.failedReason || 'unknown reason'}).\nNothing ran here either. Send \`/location ${host}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
+          `⏸ *Held:* the route to \`${host}\` was rolled back after a failed canary (${why}).\nNothing ran here either. Send \`/location ${host}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
         );
-        return { done: true, held: true, handed: null };
+        return { done: true, held: true, reason: `route failed: ${why}`, handed: null };
       }
       const handed = await runOnWorker({
         host,
@@ -2876,7 +2879,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         await say(
           `⏸ *Held:* preflight failed for \`${host}\` — \`${handed.preflight.failed}\`: ${handed.preflight.reason}\n${preflightSummary(handed.preflight.checks)}\nNothing ran and no allowance was sent.`
         );
-        return { done: true, held: true, handed };
+        return { done: true, held: true, reason: `preflight ${handed.preflight.failed}: ${handed.preflight.reason}`, handed };
       }
       if (wantCanary) {
         // Guard 6: one turn decides whether the route becomes active. The
@@ -2889,7 +2892,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           await say(
             `⚠️ *Canary failed on \`${host}\`:* ${settled.reason}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
           );
-          return { done: true, held: true, handed };
+          return { done: true, held: true, reason: `canary failed: ${settled.reason}`, handed };
         }
         console.log(`[${config.id}] canary passed on ${host} (job ${handed.jobId}); route active`);
       }
@@ -2948,7 +2951,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
         { footer: foot }
       ).catch(() => {});
-      return { done: true, handed };
+      return { done: true, delivered: true, handed };
     };
     // The ledger picks the walk. A lane it already stamped is not retried, an
     // ended lane is never offered, and a terminal-only row is never chosen.
@@ -2975,7 +2978,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       });
       if (cont.ok) return;
       const when = laneChoice.soonest?.label ? ` Soonest reset: ${laneChoice.soonest.label}.` : '';
-      const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => h.host).join(', ')} — no location has quota.` : '';
+      const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => `\`${h.host}\` (${h.ok ? 'answered' : h.reason || 'dry'})`).join(', ')} — no location has quota.` : '';
       await api.sendMessage(
         chatId,
         `🛑 No lane on ${location} has allowance right now.${when}${tried}\nNothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
@@ -3016,7 +3019,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         }),
       });
       if (cont.ok) return;
-      const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => h.host).join(', ')} — ` : ' ';
+      const tried = cont.hops.length
+        ? ` Tried ${cont.hops.map((h) => `\`${h.host}\` (${h.ok ? 'answered' : h.reason || 'dry'})`).join(', ')} — `
+        : ' ';
       await api.sendMessage(
         chatId,
         `🛑 No lane on \`${location}\` has allowance right now,${tried}no location has quota. Nothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
