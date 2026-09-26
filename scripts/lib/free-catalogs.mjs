@@ -264,94 +264,170 @@ function rankedPick(id, src) {
   return { tier: light ? 'light' : 'high', rank, retired: false, why: why || null, source: where, fromRank: true };
 }
 
-/** Catalog tier for a model: 'high' | 'light' | null (unlisted). */
+/**
+ * The threshold that separates the coding pool from the docs/inventory pool, as the
+ * catalog states it. The published figures cluster with a wide gap — 30 at the top
+ * of the light pool, 39.5 at the bottom of the coding pool — so any cut in between
+ * gives the same rows and the exact number is not load-bearing.
+ */
+export const HIGH_TIER_MIN_AA = 35;
+
+/**
+ * A model with no published figure that is *demonstrated* rather than described:
+ * it has actually run work on this fleet and a document says so. This is the only
+ * way an unmeasured model enters the coding pool, and the list is deliberately one
+ * row long.
+ */
+export function demonstratedModels() {
+  const { text, file } = readCatalog('catalog');
+  const none = [];
+  if (!text) return none;
+  const table = tableByHeader(text, 'Demonstrated by');
+  if (!table) return none;
+  const cModel = table.header.indexOf('model');
+  const cTier = table.header.indexOf('tier');
+  for (const cells of table.rows) {
+    // The tier cell must *be* the tier, not contain the word. Every table after this
+    // one lands in this row slice too, and a capability-notes row reading
+    // "KAT Coder Pro | Cline free coding model, coding by name | no published figure"
+    // matches /coding/ and promoted every undescribed model into the coding pool.
+    if (!/^(high|coding|light)$/i.test(String(cells[cTier] || '').trim())) continue;
+    if (/no published figure|none found|no figure/i.test(String(cells[table.header.indexOf('demonstrated by')] || ''))) continue;
+    const names = String(cells[cModel] || '').split(/·|,/).map((x) => x.trim()).filter(Boolean);
+    for (const n of names) none.push({ name: n, why: String(cells[table.header.indexOf('demonstrated by')] || '').trim() });
+  }
+  return none;
+}
+
+function demonstratedMatch(id) {
+  for (const d of demonstratedModels()) {
+    if (matchScore(d.name, id) === 2 || (() => {
+      const stem = id.replace(/-(free|contributor|preview)$/, '');
+      return stem !== id && matchScore(d.name, stem) === 2;
+    })()) return d;
+  }
+  return null;
+}
+
+/**
+ * Catalog tier for a model: 'high' | 'light' | null (locked out).
+ *
+ * The catalog's rule, applied in the catalog's order:
+ *   1. a lock outranks everything — `Any DeepSeek V4 — Forbidden` is a user lock,
+ *      and a Freebuff row is terminal-only on this host and never selectable;
+ *   2. otherwise the published benchmark decides: AA >= 35 is the coding pool,
+ *      anything lower is the docs/inventory pool;
+ *   3. a model with no published figure is light, unless it is *demonstrated*
+ *      capable — which today means Space Bunny and nothing else.
+ *
+ * A retired promo row ("Dead") is not a lock: the lane is live and selectable, so
+ * the rating places it like any other row.
+ */
 export function tierForModel(ref) {
   const src = CATALOG_FILES.catalog;
-  const hit = rankedPick(modelIdOf(ref), src);
-  // A lock outranks a tier: a retired or forbidden row is answered before the
-  // per-model table is consulted, so `deepseek-v4` stays unlisted even though
-  // `deepseek-v4.1-flash` is high and the two are one token apart.
-  if (hit && (hit.retired || hit.terminalOnly)) return { tier: null, source: hit.source, line: null, why: hit.why };
-  // "Tools x free models": | Tool | How to connect | Free models (usable) | ...
   const id = modelIdOf(ref);
   const { text, file } = readCatalog('catalog');
   const where = file || src;
+  const hit = rankedPick(id, src);
+  if (hit && (hit.terminalOnly || /forbidden/i.test(String(hit.why || '')))) {
+    return { tier: null, source: hit.source, line: null, why: hit.why };
+  }
   if (!id || !text) return { tier: null, source: where, line: null, why: null };
 
-  // "Model tiers": the per-model table. Consulted before Tools x free models
-  // because it is per-model rather than per-tool, which is the order the catalog's
-  // own reading rules state.
-  const tiers = tableByHeader(text, 'Tier');
-  if (tiers) {
-    const cModelT = tiers.header.indexOf('model');
-    const cTier = tiers.header.indexOf('tier');
-    const cBasis = tiers.header.indexOf('basis');
-    const hits = [];
-    for (const cells of tiers.rows) {
-      // "Hy3" is the row for `hy3-free`: the catalog writes the model the way a
-      // person says it and the ledger carries the provider's `-free` suffix, so a
-      // stem pass runs when the full id does not match. A stem match is weaker than
-      // an id match and is scored as such.
-      let score = matchScore(cells[cModelT], id);
-      if (!score) {
-        // The catalog writes "Ring 2.6 1T" for `ring-2.6-1t-free` and "Hy3" for
-        // `hy3-free`, so the stem pass drops the provider's `-free` and then a tier
-        // word the cell leaves off.
-        let stem = String(id).replace(/-(free|contributor|preview|rc|beta)$/, '');
-        if (stem !== id && matchScore(cells[cModelT], stem) === 2) score = 1;
-        if (!score) {
-          const shorter = stem.replace(/-(flash|pro|omni|lite|ultra|super|tiny|fin|1t)$/i, '');
-          if (shorter !== stem && shorter.length >= 4 && matchScore(cells[cModelT], shorter) === 2) score = 1;
-        }
-        // Short names are safe here in a way they are not in prose: the tier table
-        // is one curated row per model, so "Hy3" matching `hy3-free` is the row
-        // doing its job, where in a ledger cell it would be a coincidence.
-        if (!score && stem.length >= 2 && stem.length < 6) {
-          const looseCell = loose(cells[cModelT]);
-          if (boundaryHit(looseCell, loose(stem), 2)) score = 1;
-        }
-      }
-      if (score) hits.push({ score, cells });
-    }
-    if (hits.length) {
-      const bestT2 = Math.max(...hits.map((h) => h.score));
-      const win = hits.find((h) => h.score === bestT2);
-      const raw = String(win.cells[cTier] || '').trim().toLowerCase();
-      const tier = /\bhigh\b|\bcoding\b/.test(raw) ? 'high' : /\blight\b/.test(raw) ? 'light' : null;
-      if (tier) return { tier, source: where, line: null, why: String(win.cells[cBasis] || '').trim() || `catalog tier: ${raw}` };
-    }
+  const bench = benchmarkFor(ref);
+  if (bench.published && typeof bench.aa === 'number') {
+    const tier = bench.aa >= HIGH_TIER_MIN_AA ? 'high' : 'light';
+    return {
+      tier,
+      source: where,
+      line: null,
+      why: `${bench.estimated ? 'estimated ' : ''}AA ${bench.aa} ${bench.estimated ? '~ ' : ''}(${tier === 'high' ? 'at or above' : 'below'} the ${HIGH_TIER_MIN_AA} cut) — ${bench.source}`,
+    };
   }
+  const shown = demonstratedMatch(id);
+  if (shown) {
+    return { tier: 'high', source: where, line: null, why: `demonstrated capable, no published figure — ${shown.why}` };
+  }
+  return {
+    tier: 'light',
+    source: where,
+    line: null,
+    why: bench.published ? 'no figure' : `no published figure${bench.other ? ` (${String(bench.other).slice(0, 80)})` : ''}`,
+  };
+}
 
-  const tools = tableByHeader(text, 'Free models (usable)');
-  if (tools) {
-    const cTool = tools.header.indexOf('tool');
-    const cModels = tools.header.indexOf('free models (usable)');
-    const cCap = tools.header.indexOf('cap / estimate');
-    const cCaveat = tools.header.indexOf('data / caveats');
-    const hits = [];
-    for (const cells of tools.rows) {
-      const score = matchScore(cells[cModels], id);
-      if (score) hits.push({ score, cells });
-    }
-    const bestT = hits.length ? Math.max(...hits.map((h) => h.score)) : 0;
-    for (const { cells } of hits.filter((h) => h.score === bestT)) {
-      const tool = String(cells[cTool] || '');
-      // Freebuff is terminal-only on this host. The same model under a
-      // coding-capable tool is not, so a non-Freebuff row decides when there is one.
-      if (/freebuff/i.test(tool)) {
-        const onlyFreebuff = hits.filter((h) => h.score === bestT).every((h) => /freebuff/i.test(String(h.cells[cTool] || '')));
-        if (onlyFreebuff) return { tier: null, source: where, line: null, why: `terminal-only tool row: ${tool}` };
-        continue;
+/**
+ * The external published benchmark figures for a model, read from the catalog's
+ * Benchmarks table. The placement rule above reads these, and a model with no
+ * published figure comes back `{ published: false }` so the caller prints nothing
+ * rather than a neighbour's score.
+ */
+export function benchmarkFor(ref) {
+  const id = modelIdOf(ref);
+  const { text, file } = readCatalog('catalog');
+  const none = { published: false, aa: null, other: null, source: file || CATALOG_FILES.catalog, checked: null };
+  if (!id || !text) return none;
+  const table = tableByHeader(text, 'AA Index v4.3');
+  if (!table) return none;
+  const cModel = table.header.indexOf('model');
+  const cAa = table.header.indexOf('aa index v4.3');
+  const cOther = table.header.indexOf('other published figures');
+  const cSource = table.header.indexOf('source');
+  const cChecked = table.header.indexOf('checked');
+  // The last row is a catch-all listing every model with no figure; matching it is
+  // how those models are answered honestly instead of falling through.
+  const hits = [];
+  for (const cells of table.rows) {
+    const cell = String(cells[cModel] || '');
+    if (!cell) continue;
+    const names = cell.split(/·|,/).map((x) => x.trim()).filter(Boolean);
+    for (const n of names) {
+      // The catalog writes the family ("MiMo V2.6 Flash") where the ledger carries the
+      // provider's suffixes, and the other way round for `mimo-v2.6`.
+      let score = matchScore(n, id);
+      if (!score) {
+        for (const st of [
+          String(id).replace(/-(free|contributor|preview|rc|beta)$/, ''),
+          String(id).replace(/-(free|contributor|preview|rc|beta)$/, '').replace(/-(flash|pro|omni|lite|ultra|super|tiny|fin)$/i, ''),
+        ]) {
+          if (!st || st === id) continue;
+          if (matchScore(n, st)) { score = 1; break; }
+        }
       }
-      const why = `${cells[cCap] || ''} ${cells[cCaveat] || ''}`.trim();
-      const light = /fallback|\blight\b|inventory|docs/i.test(why);
-      return { tier: light ? 'light' : 'high', source: where, line: null, why: why || `${tool} row` };
+      if (!score) {
+        const lh = loose(n);
+        const li = loose(id);
+        if (li.length >= 5 && lh.startsWith(li) && /^(flash|pro|omni|lite|ultra|super|tiny|fin|preview|max|high|instruct)/.test(lh.slice(li.length))) score = 1;
+      }
+      if (score) hits.push({ score, cells, cell });
     }
   }
-  // The ranked pick is the catalog's own opinion, used when neither the per-model
-  // tier table nor Tools x free models had anything to say about this model.
-  if (hit && hit.fromRank) return { tier: hit.tier, source: hit.source, line: null, why: hit.why };
-  return { tier: null, source: where, line: null, why: null };
+  if (!hits.length) return none;
+  const best = Math.max(...hits.map((h) => h.score));
+  const win = hits.find((h) => h.score === best);
+  const rawAa = String(win.cells[cAa] || '').trim();
+  const source = String(win.cells[cSource] || '').trim();
+  const checked = String(win.cells[cChecked] || '').trim();
+  if (/no published figure|none found|no figure/i.test(rawAa)) {
+    return { published: false, aa: null, other: String(win.cells[cOther] || '').trim() || null, source, checked, via: win.cell };
+  }
+  const num = rawAa.match(/\d+(?:\.\d+)?/);
+  return {
+    published: true,
+    aa: num ? Number(num[0]) : null,
+    estimated: /~/.test(rawAa) || /estimate/i.test(rawAa),
+    other: String(win.cells[cOther] || '').trim() || null,
+    source,
+    checked,
+    via: win.cell,
+  };
+}
+
+/** The short label a button or row carries: `AA39.5`, `AA~41`, or nothing. */
+export function benchmarkLabel(ref) {
+  const b = benchmarkFor(ref);
+  if (!b.published || typeof b.aa !== 'number') return '';
+  return `AA${b.estimated ? '~' : ''}${b.aa}`;
 }
 
 /**
@@ -395,5 +471,21 @@ export function scoreLabelFor(ref) {
 export function catalogFacts(ref) {
   const b = bakeoffVerdict(ref);
   const t = tierForModel(ref);
-  return { id: modelIdOf(ref), score: b.label, ranked: b.ranked, waves: b.waves, last: b.last, tier: t.tier, tierWhy: t.why, source: b.source, tierSource: t.source };
+  const bench = benchmarkFor(ref);
+  return {
+    id: modelIdOf(ref),
+    score: b.label,
+    ranked: b.ranked,
+    waves: b.waves,
+    last: b.last,
+    tier: t.tier,
+    tierWhy: t.why,
+    source: b.source,
+    tierSource: t.source,
+    benchmark: bench.published ? bench.aa : null,
+    benchmarkLabel: benchmarkLabel(ref),
+    benchmarkEstimated: Boolean(bench.estimated),
+    benchmarkSource: bench.source,
+    benchmarkChecked: bench.checked,
+  };
 }

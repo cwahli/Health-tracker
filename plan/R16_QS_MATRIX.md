@@ -77,6 +77,26 @@ Secrets are never pasted here; the probe prints credential *presence* only.
   says `Dead`; `solar-pro4` is unlisted because its only row is a Freebuff (terminal-only) row.
 - Walk order is `high → unlisted → light` (`assert-allowance-walk` 42 checks), light lanes stay
   reachable, and a degraded turn is announced.
+- The split is **visible**, not just ordered: `/allowance` prints a subheading per group with the
+  group's own count (`Coding-agent capable (18)` / `Not in the catalog (1)` /
+  `Light · docs/inventory (11)`), and `/freemodel` carries the same word on each button
+  (`coding` / `light` / `unranked`) because a keyboard has no subheadings. Both surfaces call one
+  `groupRowsByTier()`, so order and membership cannot differ. Live 30 == 30 on both bots.
+- **Placement is one rule, in the catalog's "Placement rule" section, and it is the owner's:**
+  *a published benchmark of **AA ≥ 35** is the coding pool; anything lower is the
+  docs/inventory pool; **a model with no published figure is `light`**; a model with no published
+  figure that is **demonstrated** capable is `high`.* 35 sits in a wide gap in the published
+  figures (30 at the top of the light pool, 39.5 at the bottom of the coding pool), so any cut
+  in between gives the same rows.
+- The **demonstrated** exception is one row — Space Bunny, on `plan/ROADMAP.md` +
+  `plan/BOT_ROLES.md` making it the fleet fallback plus its answering on this host. On the live
+  board 12 rows have no published figure and exactly **one** of them is in the coding pool.
+- Locks still outrank the rule: `Any DeepSeek V4 — Forbidden` (a user lock) and Freebuff rows
+  (terminal-only on this host) are never offered. A retired *promo* row is **not** a lock — the
+  GLM 5.3 Flash lane is live and selectable, so its AA 42 places it in the coding pool.
+- The per-model "Capability notes" table is kept as the reasoning behind a placement, and
+  decides nothing on its own; `assert-free-catalogs` (59 checks) asserts the rule, the
+  one-row exception list, and that a vendor adjective is not evidence.
 
 ### QS-7 — benchmark score on `/freemodel`, "unranked" when absent 🟢
 

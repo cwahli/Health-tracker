@@ -75,13 +75,16 @@ import {
   loadFreeLaneLedger,
   annotateFreemodelEntries,
   isFreemodelEntryDepleted,
-  buildAllowanceTextForBots,
   withCatalogLanes,
   entriesFromLanes,
   effectiveProviderOf,
   planCodeForLane,
   canonicalAllowanceLanes,
   groupRowsByTier,
+  rowCopy,
+  fitCopy,
+  buildAllowanceTextForBots,
+  escHtml,
   formatResetIn,
   renderFreeLaneTableHtml,
   ensureBotLedger,
@@ -97,7 +100,7 @@ import {
 // R-16: the score on a button is the bakeoff ledger's own verdict, and the tier
 // is the catalog's. Both live in the catalogs, so there is no ratings table here
 // to drift from them. A model with no ledger row renders "unranked".
-import { scoreLabelFor, walkTierRank, tierForModel } from './lib/free-catalogs.mjs';
+import { scoreLabelFor, benchmarkLabel, walkTierRank, tierForModel } from './lib/free-catalogs.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -816,6 +819,12 @@ async function sendHtml(api, chatId, html) {
  * `returns.buttons` is the keyboard, built from the same projection /allowance
  * renders, so the two commands cannot disagree about a row.
  */
+/** The same groups /allowance heads its sections with, as one readable line. */
+function tierBreakdown(groups, sep) {
+  const parts = (groups || []).filter((g) => g.rows.length).map((g) => `${g.label} ${g.rows.length}`);
+  return parts.length > 1 ? parts.join(sep) : '';
+}
+
 function formatFreemodelWithDepletion(entries, annotated, { current, location, canonical = null, tableLanes = [] } = {}) {
   const byRef = new Map((annotated || []).map((a) => [a.ref, a]));
   const verdictOf = (e) => {
@@ -883,6 +892,7 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     listed.length
       ? `Total: ${listed.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''}${needsSetup.length ? ` · ${needsSetup.length} need setup` : ''} · current: ${current || 'default'}`
       : 'No free models are installed and authenticated on this host.',
+    tierBreakdown(tierGroups, ' · '),
   ];
   // One short footer line — never a second per-model list.
   const footer = [];
@@ -896,6 +906,14 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     footer.push(`not usable: ${unusable.slice(0, 4).map((r) => `${r.label} (${why(r)})`).join('; ')}${unusable.length > 4 ? `; +${unusable.length - 4} more` : ''}`);
   }
   if (footer.length) lines.push(footer.join(' — '));
+  // The same ledger table /allowance prints, from the same helper, so the two
+  // commands show the same rows in the same order with the same counts. It is a
+  // monospace block because that is the only left-aligned, column-true rendering
+  // Telegram offers; an inline button cannot be aligned at all.
+  // The list is NOT repeated in the message: it is the keyboard. A button carries the
+  // same copy /allowance prints for that row, at the same width, so the two surfaces
+  // say one thing rather than two versions of it.
+  lines.push('-');
   // One button per row, the way the router builds its /freemodel keyboard: a
   // provider tag, the model's own name, and ❌ when the row cannot be used. The tag
   // is the same plan code /allowance prints in its Plan column, which is what makes
@@ -909,28 +927,51 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   const seen = new Set();
   const buttons = [];
   for (const g of tierGroups) {
+    // A keyboard has no subheadings, so the breakdown is a row of its own: the same
+    // label and the same count /allowance prints above the section, from the same
+    // groupRowsByTier() result. `noop` is the callback the router already uses for a
+    // non-actionable keyboard row, and the tap handler answers it silently.
+    if (tierGroups.length > 1) {
+      buttons.push({ text: fitCopy(`${g.label} (${g.rows.length})`), data: 'noop', header: true });
+    }
   for (const r of g.rows) {
     const label = r.laneLabel || r.label;
     const tag = r.plan || (r.lane ? planCodeForLane(r.lane) : '');
-    // The benchmark score rides on the button, so the choice is made with the number
-    // in front of you rather than from memory. Unscored models get nothing — the
-    // scorecard covers about half the reachable free models, and a missing number is
-    // honest where a borrowed one would not be.
-    // The tier rides on the button as well as in the order, because a keyboard has
-    // no subheadings: `coding` / `light` / `unranked` is the only way the split is
-    // visible here, and it is the same word /allowance prints above the group.
-    const tierWord = { high: 'coding', light: 'light', unlisted: 'unranked' }[g.tier] || 'unranked';
-    const rated = `${tag ? tag + ': ' : ''}${label} · ${tierWord} · ${scoreLabelFor(r.lane?.model || r.model || r.ref || '')}`;
+    // The group header above the row says the tier, so the button carries what the row
+    // cannot inherit: the plan code, the external benchmark where one is published,
+    // and the bakeoff ledger's own verdict. A model with no published figure gets no
+    // number at all — never a neighbour's.
+    const model = r.lane?.model || r.model || r.ref || '';
+    // The button says what the /allowance row says, through the same copy function,
+    // at the same width: mark, name, plan, benchmark, reset, finished to 72
+    // characters with a dash. A button is no longer a second, shorter vocabulary for
+    // a row that already exists.
+    const rated = rowCopy({
+      mark: unusableOf(r) ? '❌' : '✅',
+      name: label,
+      plan: tag,
+      score: benchmarkLabel(model),
+      resetIn: r.resetIn || r.resetLabel || '—',
+    });
     const key = `${tag}|${label}`;
     if (seen.has(key)) continue;
     seen.add(key);
     // text for the reader, data for the tap: the row's route, so a label that
     // grows (a bakeoff label, a plan tag) can never invalidate the keyboard.
     const route = r.ref || r.lane?.ref || r.model || '';
-    buttons.push({ text: `${unusableOf(r) ? '❌ ' : ''}${rated}`, data: route, ref: route });
+    buttons.push({ text: rated, data: route, ref: route });
   }
   }
-  return { text: lines.join('\n'), buttons, rows, usable, unusable };
+  // The plain lines are escaped here and the shared table arrives already escaped,
+  // because the message now goes out with parse_mode HTML — which is what turns the
+  // table monospace and left-aligned. Without the parse mode the <code> tags showed
+  // up as literal text, and without escaping a label containing & or < would fail the
+  // whole send.
+  // The list is not repeated here. It is the keyboard, and every button carries the
+  // same copy /allowance prints for that row — so the body is the short brief (what
+  // this list is, how many rows, which are not usable) and the buttons are the rows.
+  const body = lines.map((l) => escHtml(l)).join('\n');
+  return { text: body, buttons, rows, usable, unusable };
 }
 
 /** Usable rows the ledger has no record for: honest, not hidden. */
@@ -1732,6 +1773,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       });
       // One keyboard with every model, no paging, and the router's cancel row.
       await api.sendMessage(chatId, body.text, {
+        // HTML, not Markdown: the table is a <code> block, which is the only
+        // left-aligned column-true rendering Telegram has, and Markdown has no
+        // equivalent that keeps columns.
+        parse_mode: 'HTML',
         reply_markup: modelKeyboard(body.buttons, {
           kind: 'fm',
           all: true,
@@ -2215,7 +2260,11 @@ async function handleCallback({ api, config, prefs, caches, query }) {
       const { annotated } = getAnnotatedFreeModels(caches, config.id);
       const selectable = annotated.filter((a) => a.selectable !== false);
       const available = selectable.filter((a) => !a.depleted);
-      await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, { current: eff.model, location: workLocation() }), {
+      await api.editMessageText(chatId, messageId, formatFreemodelWithDepletion(entries, annotated, {
+        current: eff.model,
+        location: workLocation(),
+      }), {
+        parse_mode: 'HTML',
         reply_markup: modelKeyboard(
           (available.length ? available : selectable).map((entry) => ({ text: entry.label, data: entry.ref })),
           { page: Number(value) || 0, kind: 'fm' },
