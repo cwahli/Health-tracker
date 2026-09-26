@@ -331,6 +331,20 @@ challenge the REST client does — the skill is capability, not a bypass. Second
 needs Ruby 3.3 + the `google-apis-docs_v1`, `google-apis-drive_v3`, `google-apis-sheets_v4`
 (plus calendar/gmail/people for its other scripts) gems, installed system-wide.
 
+## 6c. First live consumer (2026-09-26): external-2
+
+`~/projects/external-2` (the PIP Defense council, the only live agent) built
+`scripts/sync-drive.mjs` against this store's API *before it existed* — and it
+worked on first contact: 78 tracked files synced to `[External-2-PIP-Defense]`
+(`GOOGLE_FOLDER_EXTERNAL_2`), verified by read-back. Their design is worth
+stealing: manifest-first (a record exists with or without a store), folder scoping
+left entirely to the platform, and an honest refusal when the store is not ready.
+
+Two integration seams remain open, both theirs to pull when ready: council turns
+could spool into the same `turn_log` sheet this store already writes (it has a
+project column), and their telegram-native patch (verified clean against current
+main) is still unapplied — merging it is a platform decision, not theirs to take.
+
 ## 7. Decisions needed (human)
 
 0. ~~**BLOCKING — pick the identity**~~ **RESOLVED → option B** (no Workspace, so
