@@ -25,6 +25,9 @@ import {
   ensureTmuxWorkView,
   disableTmuxObserver,
   createObserver,
+  WORK_VIEW_SESSION,
+  workViewTarget,
+  repointWorkView,
 } from './lib/work-session.mjs';
 import { checkRegistry } from './lib/lane-contract.mjs';
 import { compressReasoning } from './lib/reasoning-compress.mjs';
@@ -48,7 +51,11 @@ import { ensureOpencodeTui, abortOpencodeSession, opencodeServerHealthy } from '
 import { KNOWN_HOSTS, workerStatus, isLocalHost } from './lib/worker-presence.mjs';
 import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './lib/location-state.mjs';
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
-import { enqueueJob, awaitJob } from './lib/worker-jobs.mjs';
+import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
+import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary, relayUrl } from './lib/swap-guards.mjs';
+import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCanaryResult } from './lib/worker-routing.mjs';
+import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
+import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
@@ -593,19 +600,84 @@ export function attemptFailureText(result) {
  * id, because the worker resolves both on its own machine. A turn handed to a
  * notebook continues the thread the VM started instead of answering blank.
  *
- * Returns null when the location is this machine or has no live worker, and the
- * caller runs the turn locally as before.
+ * Runs the turn on that machine and returns its result — or a named failure.
+ * It never falls back to running locally: the caller decides whether to hold
+ * the turn (guard 5) rather than silently spending this machine's allowance.
  */
-export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000 } = {}) {
-  const status = workerStatus(host);
-  if (!status.reachable) return null;
-  const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode });
-  console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}`);
-  const done = await awaitJob(job.id, { timeoutMs });
-  if (!done?.result) {
-    return { text: '', code: 1, model, error: `worker ${host} did not answer in time`, remote: true, jobId: job.id };
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3, packRoot = '' } = {}) {
+  // Guard 4: presence → relay → workspace → session, each named, first failure
+  // wins, so a bad target is caught before a job exists — not after a worker
+  // has claimed it.
+  const preflight = await preflightWorkerTurn({ host, workspace, sessionId, relay, full: preflightFull });
+  if (!preflight.ok) {
+    console.log(`[${host}] preflight failed at ${preflight.failed}: ${preflight.reason}`);
+    return { text: '', code: 1, model, error: `preflight failed (${preflight.failed}): ${preflight.reason}`, remote: true, preflight, failed: preflight.failed };
   }
-  return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null };
+  // Guard 9: on a swap the files this conversation has been editing travel
+  // with it, so the worker does not run the turn against its own copy.
+  let packId = '';
+  if (packRoot) {
+    const built = buildPack(packRoot);
+    if (!built.ok) {
+      console.log(`[${host}] pack refused: ${built.reason} (the turn runs without it)`);
+    } else {
+      const payload = packWithContents(built);
+      if (!payload.ok) console.log(`[${host}] pack not built: ${payload.reason} (the turn runs without it)`);
+      else {
+        const res = await fetch(`${relayUrl({ url: relay })}/packs/${encodeURIComponent(payload.id)}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          packId = payload.id;
+          console.log(`[${host}] pack ${payload.id} uploaded (${payload.files.length} file(s), ${payload.totalBytes} bytes)`);
+        } else {
+          console.log(`[${host}] pack upload refused with ${res.status} (the turn runs without it)`);
+        }
+      }
+    }
+  }
+  const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode, canary, packId });
+  console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}${canary ? ' (canary)' : ''}`);
+  const deadline = Date.now() + timeoutMs;
+  const budget = Math.max(1000, Math.ceil(timeoutMs / Math.max(1, attempts)));
+  let lastError = `worker ${host} did not answer in time`;
+  let lastFailed = 'timeout';
+  for (let attempt = 1; attempt <= Math.max(1, attempts); attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const done = await awaitJob(job.id, { timeoutMs: Math.min(budget, remaining) });
+    if (done?.result) {
+      return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null, attempts: attempt };
+    }
+    // No result by the deadline. Classify it: only a transient failure may be
+    // retried, and only while the worker is still alive and its claim is not
+    // somebody else's work in progress.
+    const cls = classifyWorkerFailure(lastError);
+    lastFailed = cls.code;
+    const presence = workerStatus(host);
+    const row = getJob(job.id);
+    const claimedAt = row?.claimedAt ? Date.parse(row.claimedAt) : 0;
+    const claimFresh = claimedAt > 0 && Date.now() - claimedAt < DEFAULT_LEASE_MS;
+    const canRetry = cls.retryable && presence.reachable && !claimFresh && attempt < Math.max(1, attempts) && deadline - Date.now() > 1000;
+    if (!canRetry) {
+      const failed = !presence.reachable ? 'presence' : claimFresh ? 'timeout' : cls.code;
+      const why = !presence.reachable
+        ? `worker ${host} is gone (${presence.reason})`
+        : claimFresh
+          ? `worker ${host} is still working on ${job.id}`
+          : cls.code === 'timeout'
+            ? `worker ${host} did not answer in time`
+            : cls.code;
+      return { text: '', code: 1, model, error: why, remote: true, jobId: job.id, failed };
+    }
+    // Guard 8: same job id, bounded by the overall deadline, backoff between.
+    requeueJob(job.id, { reason: cls.code });
+    console.log(`[${host}] transient ${cls.code} on ${job.id}; requeued (attempt ${attempt + 1}/${attempts})`);
+    await new Promise((r) => setTimeout(r, retryDelayMs(attempt)));
+  }
+  return { text: '', code: 1, model, error: lastError, remote: true, jobId: job.id, failed: lastFailed };
 }
 
 /** Where the "we already hit this" notes are kept, so a note is written once. */
@@ -1168,7 +1240,7 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
     } else {
       session = setWorkView(id, { tx: true, viewMode: 'observer', viewCommand: null });
     }
-    const created = ensureTmuxWorkView(session, { tmux, solo: lane === 'opencode' });
+    const created = ensureTmuxWorkView(session, { tmux, solo: lane === 'opencode', sessionName: WORK_VIEW_SESSION });
     if (!created.ok) {
       await api.sendMessage(chatId, `Interactive work view unavailable: could not create \`${created.target}\` without replacing an existing tmux session.`);
       return;
@@ -1176,7 +1248,7 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
     if (lane !== 'opencode') setTx(id, true);
   } else if (sub === 'off') {
     const session = getSession(id);
-    if (session) disableTmuxObserver(session, { tmux });
+    if (session) disableTmuxObserver(session, { tmux, sessionName: WORK_VIEW_SESSION });
     setTx(id, false);
   } else if (sub === 'help') {
     await api.sendMessage(chatId, 'Usage: /tx on|off|status|debug|help — shared work-view for this chat.');
@@ -1185,7 +1257,7 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
     await api.sendMessage(chatId, 'Usage: /tx on|off|status|debug|help — shared work-view for this chat.');
     return;
   }
-  const view = statusForTelegram(id, { tmux });
+  const view = statusForTelegram(id, { tmux, sessionName: WORK_VIEW_SESSION });
   if (!view) {
     await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
     return;
@@ -1229,7 +1301,12 @@ export async function handleTxCommand({ api, config, chatId, arg, lane: requeste
 export async function reconcileWorkViewForLane({ session, lane, workspace, tmux = defaultTmuxRunner, ensureTui = ensureOpencodeTui, env = {}, opencodeBin } = {}) {
   if (!session) return null;
   if (lane === 'opencode') {
-    if (session.viewMode === 'tui' && session.serverUrl && session.opencodeSessionId) return session;
+    // A live TUI is not automatically the right one: a swap (or a resume onto
+    // another thread) changes which conversation the pane should be showing.
+    // Rebinding keeps the view, changes what it points at.
+    if (session.viewMode === 'tui' && session.serverUrl && session.opencodeSessionId) {
+      return rebindWorkView(session, { tmux, ensureTui, workspace, env, opencodeBin });
+    }
     try {
       const tui = await ensureTui({
         serverUrl: session.serverUrl,
@@ -1246,22 +1323,73 @@ export async function reconcileWorkViewForLane({ session, lane, workspace, tmux 
         serverPid: tui.serverPid ?? session.serverPid ?? null,
         opencodeSessionId: tui.opencodeSessionId,
       });
-      ensureTmuxWorkView(updated, { tmux, solo: true });
+      ensureTmuxWorkView(updated, { tmux, solo: true, sessionName: WORK_VIEW_SESSION });
       return updated;
     } catch {
       const updated = setWorkView(session.id, { viewMode: 'observer', viewCommand: null });
-      ensureTmuxWorkView(updated, { tmux });
+      ensureTmuxWorkView(updated, { tmux, sessionName: WORK_VIEW_SESSION });
       return updated;
     }
   }
   if (session.viewMode === 'tui') {
-    try { disableTmuxObserver(session, { tmux }); } catch {
+    try { disableTmuxObserver(session, { tmux, sessionName: WORK_VIEW_SESSION }); } catch {
       // stale pane cleanup is best-effort; the metadata downgrade below is the fix
     }
   }
   const updated = setWorkView(session.id, { viewMode: 'observer', viewCommand: null });
-  ensureTmuxWorkView(updated, { tmux });
+  ensureTmuxWorkView(updated, { tmux, sessionName: WORK_VIEW_SESSION });
   return updated;
+}
+
+/**
+ * The turn path's canary verdict as one function: validate, then confirm the
+ * route — or roll it back and say why. The conversation row is the caller's
+ * to move, and only when this returns `ok`.
+ *
+ * Exported so the swap drill decides exactly the way the live turn decides,
+ * instead of mirroring it: one implementation, one order, one reason string.
+ */
+export function settleCanary({ host, result = {}, sessionId = '', jobId = '', home } = {}) {
+  const routeOpts = home ? { home } : {};
+  const verdict = validateCanaryResult({ host, requestedSessionId: sessionId, result });
+  if (!verdict.ok) {
+    const route = rollbackRoute(host, { jobId: jobId || result?.jobId || '', reason: verdict.reasons.join('; '), ...routeOpts });
+    return { ok: false, reason: verdict.reasons.join('; '), reasons: verdict.reasons, route };
+  }
+  const route = confirmRoute(host, { jobId: jobId || result?.jobId || '', ...routeOpts });
+  return { ok: true, reason: '', reasons: [], route };
+}
+
+/**
+ * The view follows the conversation. The record names the thread that ran;
+ * when it names a different one than the pane was built for, the command is
+ * rebuilt and the pane is re-pointed in place — same `work-view` session, same
+ * pane, current tool. Nothing stale means nothing is touched.
+ */
+async function rebindWorkView(session, { tmux, ensureTui, workspace, env = {}, opencodeBin } = {}) {
+  try {
+    const tui = await ensureTui({
+      serverUrl: session.serverUrl,
+      opencodeSessionId: session.opencodeSessionId,
+      workspace,
+      title: `Health-tracker ${session.location} ${session.chat}`,
+      env,
+      opencodeBin,
+    });
+    if (!tui?.command || tui.command === session.viewCommand) return session;
+    const updated = setWorkView(session.id, {
+      viewCommand: tui.command,
+      serverUrl: tui.serverUrl ?? session.serverUrl,
+      serverPid: tui.serverPid ?? session.serverPid ?? null,
+      opencodeSessionId: tui.opencodeSessionId ?? session.opencodeSessionId,
+    });
+    const outcome = repointWorkView({ target: workViewTarget(updated.id), command: updated.viewCommand, tmux });
+    console.log(`[rebind] ${updated.id} -> ${outcome.method || 'no pane'} (${outcome.ok ? 'verified' : 'not verified'})`);
+    return updated;
+  } catch (err) {
+    console.log(`[rebind] ${session.id} left as it was: ${err?.message || err}`);
+    return session;
+  }
 }
 
 // V-30.5 /resume — prints the current ticket packet straight from the bug
@@ -1316,7 +1444,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'status': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
-      const work = statusForTelegram(workId);
+      const work = statusForTelegram(workId, { sessionName: WORK_VIEW_SESSION });
       const effSurface = parseModelRef(eff.model).surface;
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
@@ -1663,7 +1791,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'debug': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
-      const view = statusForTelegram(workId);
+      const view = statusForTelegram(workId, { sessionName: WORK_VIEW_SESSION });
       if (!view) {
         await api.sendMessage(chatId, 'No work session for this chat yet — use /tx on first.');
         return;
@@ -1896,9 +2024,20 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         if (status.reachable) {
           process.env.BOT_LOCATION = target;
           clearBlockedLocation(chatId);
+          // Arm the route: the first turn on a host is a canary (guard 6) and
+          // gets the full preflight, so a swap onto a machine that cannot hold
+          // this conversation fails before the job exists. Re-arming on every
+          // request keeps that true for repeat switches back to a host.
+          if (!isLocalHost(target)) {
+            const route = armRoute(target, { previous: loc });
+            console.log(`[${config.id}] route to ${target} armed (${route.state})`);
+          }
+          // The lease follows the location it is held for, so the next
+          // starter sees which host the poller is currently on.
+          renewPollerLease({ key: config.id, host: target, pid: process.pid });
           await api.sendMessage(
             chatId,
-            `✅ *Compute location set to:* \`${target}\`\n${status.reason}. The next turn runs on ${target}.`
+            `✅ *Compute location set to:* \`${target}\`\n${status.reason}. The next turn runs on ${target}${isLocalHost(target) ? '' : ' — its first turn is a canary (checked, then confirmed as active)'}.`
           );
           return;
         }
@@ -2500,7 +2639,27 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // A location that names another machine runs there, on that machine's
     // allowance. This VM does not stamp for it.
     const remoteStatus = workerStatus(location);
-    if (!isLocalHost(location) && remoteStatus.reachable) {
+    if (!isLocalHost(location)) {
+      const route = routeState(location);
+      // Guard 5: hold, never fall through to this machine. A held turn is
+      // recorded so the user sees why nothing ran, and no allowance is spent.
+      if (!remoteStatus.reachable) {
+        setBlockedLocation(chatId, location, remoteStatus.reason);
+        await api.sendMessage(
+          chatId,
+          `⏸ *Held:* \`${location}\` is unreachable (${remoteStatus.reason}).\nNothing ran and no allowance was sent. Send \`/location vps\` to run here, or wait for the ${location} worker to connect.`
+        );
+        return;
+      }
+      if (route === 'failed') {
+        const row = routeFor(location);
+        await api.sendMessage(
+          chatId,
+          `⏸ *Held:* the route to \`${location}\` was rolled back after a failed canary (${row?.failedReason || 'unknown reason'}).\nNothing ran here either. Send \`/location ${location}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
+        );
+        return;
+      }
+      const wantCanary = route !== 'active';
       const handed = await runOnWorker({
         host: location,
         prompt: finalPrompt,
@@ -2510,18 +2669,63 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         workspace: effectiveWorkspace,
         sessionId: sessions.get(chatId) || '',
         envMode: turnEnvMode,
+        canary: wantCanary,
+        preflightFull: wantCanary,
+        packRoot: wantCanary ? effectiveWorkspace : '',
       });
-      if (handed) {
-        // The thread id the worker ran is now ours too, so the next turn —
-        // here or there — resumes the same conversation.
-        if (handed.sessionID) sessions.set(chatId, handed.sessionID);
-        console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
-        await renderer.finish(
-          { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
-          { footer: `host: ${location}` }
-        ).catch(() => {});
+      if (handed?.preflight) {
+        setBlockedLocation(chatId, location, `${handed.preflight.failed}: ${handed.preflight.reason}`);
+        await api.sendMessage(
+          chatId,
+          `⏸ *Held:* preflight failed for \`${location}\` — \`${handed.preflight.failed}\`: ${handed.preflight.reason}\n${preflightSummary(handed.preflight.checks)}\nNothing ran and no allowance was sent.`
+        );
         return;
       }
+      if (wantCanary) {
+        // Guard 6: one turn decides whether the route becomes active. The
+        // session row is never touched until it passes, so a bad canary costs
+        // nothing but the canary. settleCanary is the same function the swap
+        // drill runs, so what is proven there is what happens here.
+        const settled = settleCanary({ host: location, result: handed, sessionId: sessions.get(chatId) || '', jobId: handed.jobId || '' });
+        if (!settled.ok) {
+          const back = settled.route?.previous || 'vps';
+          await api.sendMessage(
+            chatId,
+            `⚠️ *Canary failed on \`${location}\`:* ${settled.reason}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
+          );
+          return;
+        }
+        console.log(`[${config.id}] canary passed on ${location} (job ${handed.jobId}); route active`);
+      }
+      // The thread id the worker ran is now ours too, so the next turn —
+      // here or there — resumes the same conversation.
+      if (handed.sessionID) {
+        sessions.set(chatId, handed.sessionID);
+        // The view is built from this record, so the record has to name the
+        // thread that just ran — otherwise /tx keeps showing the conversation
+        // from the previous host until something else rewrites it.
+        workSession = setWorkView(workSession.id, { opencodeSessionId: handed.sessionID }) || workSession;
+        if (workSession.tx) {
+          try {
+            workSession = await reconcileWorkViewForLane({
+              session: workSession,
+              lane: workLane,
+              workspace: config.agent.workspace,
+              tmux: defaultTmuxRunner,
+              env: opencodeEnv(config),
+              opencodeBin: config.agent.opencodeBin,
+            }) || workSession;
+          } catch {
+            // view rebind is best-effort; the answer is already on its way
+          }
+        }
+      }
+      console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
+      await renderer.finish(
+        { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
+        { footer: `host: ${location}${wantCanary ? ' (canary)' : ''}` }
+      ).catch(() => {});
+      return;
     }
 
     const result = await runOpencodeWithFailover({
@@ -2829,6 +3033,26 @@ async function main() {
     await dryRun(config, args);
     return;
   }
+
+  // Guard 10: one live poller per bot id. A second process with the same id —
+  // exactly what a move creates while the old host is still up — is refused
+  // by name instead of both answering the same chat. The move is drain (the
+  // old poller stops claiming), release (SIGTERM gives the lease back), start
+  // (the new host acquires it).
+  const lease = acquirePollerLease({ key: config.id, host: workLocation(), pid: process.pid });
+  if (!lease.ok) {
+    console.error(`[bot-host] refusing to start: ${lease.reason}`);
+    process.exit(1);
+  }
+  if (lease.row?.takenOverFrom) {
+    console.log(`[${config.id}] took the poller lease from pid ${lease.row.takenOverFrom.pid} (no longer running)`);
+  }
+  const giveLeaseBack = () => {
+    releasePollerLease({ key: config.id, pid: process.pid });
+  };
+  process.once('SIGTERM', giveLeaseBack);
+  process.once('SIGINT', giveLeaseBack);
+  setInterval(() => renewPollerLease({ key: config.id, host: workLocation(), pid: process.pid }), 60_000).unref();
 
   const token = resolveToken(bot);
   const api = new TelegramApi(token);
