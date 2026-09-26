@@ -3088,7 +3088,9 @@ async function runLoop({ api, config }) {
   while (running_) {
     let updates;
     try {
-      updates = await api.getUpdates({ offset, timeout: 30, allowedUpdates: ['message', 'callback_query'] });
+      // Shorter holds survive hostile networks (phone radio, NAT timeouts):
+      // TG_POLL_TIMEOUT=10 on mobile. Default 30 everywhere else.
+      updates = await api.getUpdates({ offset, timeout: Number(process.env.TG_POLL_TIMEOUT) || 30, allowedUpdates: ['message', 'callback_query'] });
       health.okAt = Date.now();
       health.errAt = 0;
       health.err = '';
