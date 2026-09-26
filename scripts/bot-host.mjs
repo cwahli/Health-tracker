@@ -1076,6 +1076,9 @@ function missingCount(rows) {
 
 export const MAX_FOLLOWUPS = 5;
 const followupQueues = new Map();
+// The tunnel URL this process last handed out. A quick tunnel's hostname changes
+// on every reconnect, so this is how /web knows an older button is now dead.
+let lastMiniappUrl = '';
 
 export function watchOn(prefs, chatId) {
   return prefFor(prefs, chatId)?.watch === true;
@@ -2285,7 +2288,16 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, '🖥 Web terminal is offline — the phone tunnel is down. It restarts itself; try /web again in a minute.');
         return;
       }
-      await api.sendMessage(chatId, '🖥 Live opencode web terminal (phone-hosted, password-gated) — full session view with input box, same workspace the bot runs in.', {
+      // A quick tunnel's hostname changes on every reconnect, so a button sent
+      // in an older message points at a tunnel that no longer exists and fails
+      // with a blank WebView. Say so rather than let the tap look broken.
+      const moved = lastMiniappUrl && lastMiniappUrl !== miniUrl;
+      lastMiniappUrl = miniUrl;
+      await api.sendMessage(chatId, [
+        moved ? '⚠️ *The tunnel was reconnected*, so any earlier /web button is dead — use this one.' : null,
+        '🖥 *opencode web terminal* — the phone-hosted full session view with its own input box, the same workspace the bot runs in.',
+        'First tap asks for the work-session password once; the WebView remembers it.',
+      ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '🖥 Open opencode web', web_app: { url: miniUrl } }]] },
       });
       return;
