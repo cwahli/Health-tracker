@@ -613,11 +613,12 @@ export function attemptFailureText(result) {
  * It never falls back to running locally: the caller decides whether to hold
  * the turn (guard 5) rather than silently spending this machine's allowance.
  */
-export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3, packRoot = '' } = {}) {
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3, packRoot = '', relayToken = process.env.WORKER_RELAY_TOKEN || '' } = {}) {
   // Guard 4: presence → relay → workspace → session, each named, first failure
   // wins, so a bad target is caught before a job exists — not after a worker
   // has claimed it.
-  const preflight = await preflightWorkerTurn({ host, workspace, sessionId, relay, full: preflightFull });
+  const relayHeaders = relayToken ? { authorization: `Bearer ${relayToken}` } : {};
+  const preflight = await preflightWorkerTurn({ host, workspace, sessionId, relay, full: preflightFull, token: relayToken });
   if (!preflight.ok) {
     console.log(`[${host}] preflight failed at ${preflight.failed}: ${preflight.reason}`);
     return { text: '', code: 1, model, error: `preflight failed (${preflight.failed}): ${preflight.reason}`, remote: true, preflight, failed: preflight.failed };
@@ -639,7 +640,7 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
       else {
         const res = await fetch(`${relayUrl({ url: relay })}/packs/${encodeURIComponent(payload.id)}`, {
           method: 'PUT',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...relayHeaders },
           body: JSON.stringify(payload),
         });
         if (res.ok) {

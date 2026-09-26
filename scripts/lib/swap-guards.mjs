@@ -32,9 +32,9 @@ export function relayUrl({ url = '', env = process.env } = {}) {
   return String(url || env.WORKER_RELAY_URL || 'http://127.0.0.1:8890').replace(/\/+$/, '');
 }
 
-async function fetchJson(url, { fetchImpl = fetch, timeoutMs = 5000 } = {}) {
+async function fetchJson(url, { fetchImpl = fetch, timeoutMs = 5000, headers = {} } = {}) {
   try {
-    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), headers });
     const body = await res.json().catch(() => null);
     return { ok: res.ok, status: res.status, body, error: '' };
   } catch (err) {
@@ -70,12 +70,14 @@ export function checkWorkspace(projectId, { host = '', workerCwd = '', exists = 
   };
 }
 
-export async function checkSession(sessionId, { relay = '', fetchImpl = fetch } = {}) {
+export async function checkSession(sessionId, { relay = '', fetchImpl = fetch, token = process.env.WORKER_RELAY_TOKEN || '' } = {}) {
   const id = String(sessionId || '').trim();
   if (!id) return { ok: true, detail: 'fresh conversation, nothing to fetch', skipped: true };
   const base = relayUrl({ url: relay });
-  const res = await fetchJson(`${base}/sessions/${encodeURIComponent(id)}/check`, { fetchImpl });
+  const headers = token ? { authorization: `Bearer ${token}` } : {};
+  const res = await fetchJson(`${base}/sessions/${encodeURIComponent(id)}/check`, { fetchImpl, headers });
   if (res.error) return { ok: false, detail: `session check unreachable: ${res.error}` };
+  if (res.status === 401) return { ok: false, detail: 'relay refused the session check: bad or missing token' };
   if (res.status === 400) return { ok: false, detail: `malformed session id ${id}` };
   if (res.status === 404) return { ok: false, detail: `session ${id} is not on this host` };
   if (res.status === 503) return { ok: false, detail: 'opencode is not available on the relay' };
@@ -100,6 +102,7 @@ export async function preflightWorkerTurn({
   full = true,
   fetchImpl = fetch,
   exists = undefined,
+  token = process.env.WORKER_RELAY_TOKEN || '',
 } = {}) {
   const checks = [];
   const fail = (failed, reason) => ({ ok: false, failed, reason, checks });
@@ -119,7 +122,7 @@ export async function preflightWorkerTurn({
   if (!workspaceCheck.ok) return fail('workspace', workspaceCheck.detail);
 
   if (full) {
-    const sessionCheck = await checkSession(sessionId, { relay, fetchImpl });
+    const sessionCheck = await checkSession(sessionId, { relay, fetchImpl, token });
     checks.push({ name: 'session', ok: sessionCheck.ok, detail: sessionCheck.detail });
     if (!sessionCheck.ok) return fail('session', sessionCheck.detail);
   }
@@ -142,6 +145,7 @@ export function classifyWorkerFailure(text = '') {
   if (/session (not found|is not)|unknown session|malformed session/i.test(s)) return { retryable: false, code: 'session' };
   if (/no allowance|depleted|quota|lane.*(full|depleted)/i.test(s)) return { retryable: false, code: 'depleted' };
   if (/no worker|worker (pid .* is gone|silent|unreachable)/i.test(s)) return { retryable: false, code: 'worker' };
+  if (/401|unauthorized|relay token|bad or missing token/i.test(s)) return { retryable: false, code: 'auth' };
   if (/claim expired|lease expired|claim .*expired/i.test(s)) return { retryable: true, code: 'transient' };
   if (/did not answer in time|timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|network error|EPIPE/i.test(s)) {
     return { retryable: true, code: 'transient' };
