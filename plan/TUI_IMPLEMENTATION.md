@@ -92,4 +92,4 @@ The second pass runs every row below on one restarted gateway and one restarted 
 | S10 | Empty host sends the disk pack. The dead lane is not called |
 | S11 | OpenCode session id survives. The screen is a stated repaint. Cline does not export |
 
-**Complete** means all eleven rows have evidence blocks and every negative check passed. Until then the status is: not ready to test. The website master scorecard is a different gate and is not moved by these rows.
+Rows S1–S11 are checkpoints. They are not a second scorecard. Paste the evidence into `plan/ROADMAP.md` R-16, rows QS-1–QS-15. That table is the only done gate. The website master scorecard is a different gate and is not moved by these rows.
