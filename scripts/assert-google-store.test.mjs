@@ -285,7 +285,7 @@ check('a Doc append inserts strictly before the body end, never at it', () => {
   return /\(last\?\.endIndex \|\| 2\) - 1/.test(LIB);
 });
 
-check('PATCH exists in exactly two shapes: a rename, and a Doc content replacement', () => {
+check('PATCH exists in exactly four shapes, each named and bounded', () => {
   // A rename changes a label ({ name } only). A Doc replacement changes named text
   // because a caller asked for an edit — it is the one deliberate exception to
   // "nothing is overwritten", and it is Docs-MIME-only so it cannot silently eat a
@@ -293,12 +293,33 @@ check('PATCH exists in exactly two shapes: a rename, and a Doc content replaceme
   const patches = [...LIB.matchAll(/method: 'PATCH'/g)].length;
   const nameOnly = [...LIB.matchAll(/method: 'PATCH',\s*\n\s*token,\s*\n\s*body: \{ name: clean \}/g)].length;
   const docReplace = [...LIB.matchAll(/driveUpload}\/files\/\$\{encodeURIComponent\(docId\)\}/g)].length;
-  return patches === 2 && nameOnly === 1 && docReplace === 1;
+  const move = [...LIB.matchAll(/export async function moveFile/g)].length;
+  const mirrorUpdate = [...LIB.matchAll(/export async function updateFileContent/g)].length;
+  // rename (label only), Doc replacement (Docs MIME only), move (relocate+relabel),
+  // mirror update (a sync refreshing its own objects). A fifth PATCH is a review flag.
+  return patches === 4 && nameOnly === 1 && docReplace === 1 && move === 1 && mirrorUpdate === 1;
 });
 
 check('a Doc is created with content through Drive conversion, not an empty shell', () => {
-  const fn = LIB.slice(LIB.indexOf('export async function createDocWithContent'), LIB.indexOf('/**\n * Drive: replace'));
+  const fn = LIB.slice(LIB.indexOf('export async function createDocWithContent'), LIB.indexOf('export async function replaceDocContent'));
   return /mimeType: MIME\.doc/.test(fn) && /Content-Type: text\/plain/.test(fn) && /parents: \[folderId\]/.test(fn);
+});
+
+check('the mirror updater is never called by the turn log, the writer, or the scorecard', () => {
+  // updateFileContent exists so a mirror can refresh without minting new ids every
+  // time. If the write-once paths ever call it, the append-only law is dead.
+  const turn = fs.readFileSync(path.join(HERE, 'lib', 'turn-store.mjs'), 'utf8');
+  const writer = fs.readFileSync(path.join(HERE, 'lib', 'google-writer.mjs'), 'utf8');
+  const card = fs.readFileSync(path.join(HERE, 'google-store-scorecard.mjs'), 'utf8');
+  return !/updateFileContent/.test(turn) && !/updateFileContent/.test(writer) && !/updateFileContent/.test(card);
+});
+
+check('a move relabels safely and refuses an empty move', () => {
+  return /body\.name = String\(name\)\.replace/.test(LIB) && /nothing to move/.test(LIB);
+});
+
+check('mirrored files carry their source hash, so re-syncs compare instead of re-uploading', () => {
+  return /appProperties/.test(LIB) && /export async function downloadFile/.test(LIB);
 });
 
 check('replacement never touches a non-Doc (Docs MIME is the only conversion target)', () => {

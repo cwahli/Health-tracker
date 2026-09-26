@@ -518,9 +518,11 @@ export function forgetToken() {
  * and because the multipart body for binary must not be line-ending-mangled the
  * way a text part is.
  */
-export async function uploadBinary(folderId, name, bytes, { mimeType = 'image/png' } = {}, token) {
+export async function uploadBinary(folderId, name, bytes, { mimeType = 'image/png', appProperties = null } = {}, token) {
   const boundary = 'fleetstorebin';
-  const meta = JSON.stringify({ name, parents: [folderId], mimeType });
+  const metaObj = { name, parents: [folderId], mimeType };
+  if (appProperties && typeof appProperties === 'object') metaObj.appProperties = appProperties;
+  const meta = JSON.stringify(metaObj);
   const head = Buffer.from(
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
     'utf8',
@@ -542,9 +544,21 @@ export async function uploadBinary(folderId, name, bytes, { mimeType = 'image/pn
  * the delete call returned 200.
  */
 export async function getFile(fileId, token) {
-  const res = await request(`${API.drive}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent('id,name,mimeType,size,modifiedTime,parents,trashed')}`, { token });
+  const res = await request(`${API.drive}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent('id,name,mimeType,size,modifiedTime,parents,trashed,appProperties')}`, { token });
   if (res.ok) return { ok: true, missing: false, file: res.json };
   return { ok: res.status === 404, missing: res.status === 404, status: res.status, error: res.error || '' };
+}
+
+/** Download an object's bytes (small text artefacts only — not a photo pipeline). */
+export async function downloadFile(fileId, token) {
+  const res = await fetch(`${API.drive}/files/${encodeURIComponent(fileId)}?alt=media`, {
+    headers: clientHeaders({ Authorization: `Bearer ${token}` }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    return { ok: false, status: res.status, error: `HTTP ${res.status} ${shortError(text)}` };
+  }
+  return { ok: true, bytes: Buffer.from(await res.arrayBuffer()) };
 }
 
 export async function listChildren(folderId, token) {
@@ -562,6 +576,29 @@ export async function listChildren(folderId, token) {
  * not use: artifacts are written once, under a content-addressed name, and a
  * second write is a second object.
  */
+/**
+ * Move and/or rename an object in one call.
+ *
+ * `addParents`/`removeParents` relocate it; `name` relabels it. The combination is
+ * what migrates a flat mirror (`submissions/D-002/v2.md` as a literal name in the
+ * root) into real folders without re-uploading bytes: same id, new home, new name.
+ */
+export async function moveFile(fileId, { name = null, addParents = [], removeParents = [] } = {}, token) {
+  const qs = [];
+  if (addParents.length) qs.push(`addParents=${addParents.map(encodeURIComponent).join(',')}`);
+  if (removeParents.length) qs.push(`removeParents=${removeParents.map(encodeURIComponent).join(',')}`);
+  const body = {};
+  if (name) body.name = String(name).replace(/[\\/\r\n\t]/g, '-').trim().slice(0, 200);
+  if (!Object.keys(body).length && !qs.length) return { ok: false, error: 'nothing to move' };
+  const res = await request(`${API.drive}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent('id,name,parents,modifiedTime')}${qs.length ? `&${qs.join('&')}` : ''}`, {
+    method: 'PATCH',
+    token,
+    body,
+  });
+  if (!res.ok) return res;
+  return { ok: true, id: res.json.id, name: res.json.name, parents: res.json.parents };
+}
+
 export async function renameFile(fileId, name, token) {
   const clean = String(name || '').replace(/[\\/\r\n\t]/g, '-').trim().slice(0, 200);
   if (!clean) return { ok: false, error: 'empty name' };
@@ -572,6 +609,43 @@ export async function renameFile(fileId, name, token) {
   });
   if (!res.ok) return res;
   return { ok: true, id: res.json.id, name: res.json.name, modifiedTime: res.json.modifiedTime };
+}
+
+/**
+ * Drive: replace an object's content in place (same id, new bytes).
+ *
+ * This is the mirror's writer, and only the mirror's: turn logs, evidence and
+ * generated docs are write-once by law, and nothing in `turn-store`,
+ * `google-writer` or the scorecard may call it. A mirror that cannot update
+ * would have to delete and recreate on every change — new ids each time, which
+ * breaks every link and makes history unreadable. The sensor pins the callers.
+ */
+export async function updateFileContent(fileId, bytes, mimeType, { appProperties = null } = {}, token) {
+  const boundary = 'fleetstoremirror';
+  const meta = {};
+  if (appProperties && typeof appProperties === 'object') meta.appProperties = appProperties;
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(meta),
+    `--${boundary}`,
+    `Content-Type: ${mimeType}`,
+    '',
+    Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes || ''), 'utf8'),
+    `--${boundary}--`,
+    '',
+  ];
+  // Buffer.concat: the text parts are utf8, the middle part is raw bytes.
+  const parts = body.map((p, i) => (i === 7 ? p : Buffer.from(p, 'utf8')));
+  const res = await fetch(`${API.driveUpload}/files/${encodeURIComponent(fileId)}?uploadType=multipart&fields=${encodeURIComponent('id,modifiedTime')}`, {
+    method: 'PATCH',
+    headers: clientHeaders({ Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` }),
+    body: Buffer.concat(parts),
+  });
+  const out = await res.text();
+  if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status} ${shortError(out)}` };
+  return { ok: true, id: JSON.parse(out).id, modifiedTime: JSON.parse(out).modifiedTime };
 }
 
 /** Drive: delete an object permanently. */
@@ -630,9 +704,10 @@ export async function listFolder(folderId, token, { pageSize = 10, fields = 'fil
   return request(url, { token });
 }
 
-export async function createFile(folderId, name, { mimeType = MIME.md, content = '' } = {}, token) {
+export async function createFile(folderId, name, { mimeType = MIME.md, content = '', appProperties = null } = {}, token) {
   const boundary = 'fleetstore';
   const meta = { name, parents: [folderId], mimeType };
+  if (appProperties && typeof appProperties === 'object') meta.appProperties = appProperties;
   const body = [
     `--${boundary}`,
     'Content-Type: application/json; charset=UTF-8',
