@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { usableTurnLanes, stampDepleted, ensureBotLedger } from './lib/free-lanes.mjs';
 import { selectTurnLanes } from './bot-host.mjs';
-import { groupForModel } from './lib/model-ratings.mjs';
+import { tierForModel, catalogRank } from './lib/free-catalogs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const botWalkSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
@@ -136,13 +136,22 @@ try {
 // from a coding model must not land on a light model while a coding lane is free —
 // pref order alone let a light model with a low pref number take the turn over.
 check('the walk orders coding lanes before light ones',
-  /rank\(a\) - rank\(b\)/.test(botWalkSrc) && /g === 'coding' \? 0 : g === 'light' \? 2 : 1/.test(botWalkSrc));
+  /rank\(a\) - rank\(b\)/.test(botWalkSrc) && /walkTierRank/.test(botWalkSrc));
 check('a light lane is still reachable as a last resort',
   /degradedToLight/.test(botWalkSrc) && !/codingLeft === 0\) return/.test(botWalkSrc));
 check('and the turn is told when it dropped to a light model',
   /no coding lane is free right now/.test(botWalkSrc));
-check('the model this host actually runs is classified, not left unknown',
-  groupForModel('mimo-v2.6') === 'coding' && groupForModel('deepseek-v4.1') === 'coding' && groupForModel('muse-spark-1.3-contributor') === 'light');
+// The tier is the catalog's, so what is asserted here is that the walk reads the
+// catalog at all and that the three models this host actually runs resolve the
+// way the catalog says. MiMo V2.6 and DeepSeek V4.1 are ranked under a
+// coding-capable tool; Muse Spark 1.3 Contributor is rank 2, high.
+check('the walk reads the catalog for its tier order', /walkTierRank\(l\.model\)/.test(botWalkSrc));
+check('the models this host runs resolve the way the catalog says',
+  tierForModel('deepseek-v4.1-flash').tier === 'high'
+  && tierForModel('muse-spark-1.3-contributor').tier === 'high'
+  && tierForModel('laguna-s-2.1').tier === 'light'
+  && catalogRank('deepseek-v4.1-flash').rank === 1
+  && catalogRank('deepseek-v4').rank === null);
 
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

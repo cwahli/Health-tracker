@@ -422,8 +422,11 @@ try {
   check('and the name column is wide enough for the longest free model name',
     /const W_MODEL = 20;/.test(nameSrc));
 
-  check('and the supersession score has one home, in free-lanes',
-    /scoreOf = laneScoreFromRatings/.test(lanesSrc) && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
+  // R-16: the supersession order comes from the catalog's Ranked picks, from one
+  // home, so /allowance and /freemodel cannot drop different models again.
+  check('and the supersession score has one home, in free-lanes, reading the catalog',
+    /scoreOf = laneScoreFromCatalog/.test(lanesSrc) && /from '.\/free-catalogs.mjs'/.test(lanesSrc)
+    && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
   check('and no-credential rows leave the count on both surfaces',
     /const needsSetup = rows\.filter\(\(r\) => r\.needsSetup\)/.test(paritySrc) && /need setup/.test(paritySrc) && /needsSetup\.length \? ` · \$\{needsSetup\.length\} need setup`/.test(paritySrc));
 
@@ -459,8 +462,8 @@ try {
   // The tag is the same plan code /allowance prints, which is what makes the two
   // commands read as one list instead of two vocabularies.
   // The button is: ❌ when unusable, the plan code, the model's own name, and the
-  // benchmark score when the scorecard has one (assert-model-ratings covers the
-  // score itself and that an unmeasured model gets no number).
+  // bakeoff label — or "unranked" when the ledger has no row for that model.
+  // assert-free-catalogs covers the label's provenance (QS-7).
   check('a button is the plan code and the model name, ❌ when unusable',
     /const rated = `\$\{tag \? tag \+ ': ' : ''\}\$\{label\}/.test(botSrc)
     && /buttons\.push\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`\)/.test(botSrc),
