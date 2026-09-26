@@ -2006,7 +2006,7 @@ describe('BOT-19 /tx wiring', () => {
     await handleTxCommand({ api: fakeApi(sent), config: fakeCfg(), chatId: 9, arg: 'on', tmux: tmux.run, ensureTui: fakeTui });
     expect(sent.length).toBe(1);
     expect(sent[0]).toContain('ON');
-    expect(sent[0]).toMatch(/tmux attach -t work-testbox:ws-/);
+    expect(sent[0]).toMatch(/tmux attach -t work-view:ws-/);
     expect(sent[0]).toContain('9|/ws');
     expect(sent[0]).not.toContain('testbox|9|');
     expect(tmux.calls.map((args) => args[0])).toEqual(['has-session', 'new-session', 'has-session', 'list-windows', 'list-panes', 'select-pane', 'list-panes', 'list-panes']);
