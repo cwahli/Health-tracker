@@ -879,6 +879,12 @@ export function shortModelName(lane) {
     .replace(/\s+contributor\s+/i, " Cont ")
     .replace(/\s+free\s*$/i, "")
     .replace(/\s+free\b/i, "")
+    // "-free" is a suffix on the model id, not a word, and leaving it on ate four
+    // of the columns the name had left. "ling-3.0-flash-fin-free" and
+    // "ling-3.0-flash-free" then truncated to the same 16 columns and printed as
+    // two identical rows, one of them untellable from the other.
+    .replace(/-free$/i, "")
+    .replace(/-free\b/i, "")
     .replace(/\s+/g, " ")
     .trim();
   const m = String(lane?.model || "");
@@ -1025,7 +1031,9 @@ export function formatCompactAllowanceChat(table, session, { now = Date.now(), l
     : usable;
   const ordered = rows ? [...usableOrdered, ...depleted] : [...usable, ...depleted];
   const advice = activeRouteAdvice(t, session, { now, labelFn });
-  const W_MODEL = 16;
+  // 20 columns, not 16: the two "ling-3.0-flash" variants are 15 and 18 characters
+  // and at 16 they were indistinguishable in the list.
+  const W_MODEL = 20;
   const W_PLAN = 6;
   const W_RESET = 8;
   const header = `${padDisp("Model", W_MODEL)}${padDisp("Plan", W_PLAN)}Reset in`;

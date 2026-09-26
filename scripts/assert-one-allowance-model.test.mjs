@@ -413,6 +413,15 @@ try {
   // The supersession policy must have ONE home. /allowance's renderer called
   // canonicalAllowanceLanes() with no scoreOf while /freemodel passed one, so the
   // two surfaces dropped different models: 30 rows against 36.
+  // Two rows that render the same text are one untappable row as far as a reader is
+  // concerned: "ling-3.0-flash-fin-free" and "ling-3.0-flash-free" both printed as
+  // "ling-3.0-flash-f" in a 16-column name.
+  const nameSrc = lanesSrc;
+  check('a "-free" suffix on the model id is stripped, not left to eat the column',
+    /\.replace\(\/\-free\$\/i, ""\)/.test(nameSrc) && /const W_MODEL = 20/.test(nameSrc));
+  check('and the name column is wide enough for the longest free model name',
+    /const W_MODEL = 20;/.test(nameSrc));
+
   check('and the supersession score has one home, in free-lanes',
     /scoreOf = laneScoreFromRatings/.test(lanesSrc) && !/scoreOf: modelScore/.test(paritySrc) && !/function modelScore\(/.test(paritySrc));
   check('and no-credential rows leave the count on both surfaces',
