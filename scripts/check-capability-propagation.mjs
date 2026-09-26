@@ -69,6 +69,16 @@ const VENDOR_MIRRORS = [
     'tools/telegram-provider-router/src/inbound-media.vendor.mjs',
     '// === VENDORED FROM scripts/lib/inbound-media.mjs — DO NOT EDIT ===',
   ],
+  [
+    'scripts/lib/model-ratings.mjs',
+    'tools/telegram-provider-router/src/model-ratings.mjs',
+    '// === VENDORED FROM scripts/lib/model-ratings.mjs — DO NOT EDIT ===',
+  ],
+  [
+    'scripts/lib/setup-gaps.mjs',
+    'tools/telegram-provider-router/src/setup-gaps.mjs',
+    '// === VENDORED FROM scripts/lib/setup-gaps.mjs — DO NOT EDIT ===',
+  ],
 ];
 
 const strict = process.argv.includes('--strict');

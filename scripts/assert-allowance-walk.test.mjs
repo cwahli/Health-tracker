@@ -10,8 +10,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { usableTurnLanes, stampDepleted, ensureBotLedger } from './lib/free-lanes.mjs';
 import { selectTurnLanes } from './bot-host.mjs';
+import { groupForModel } from './lib/model-ratings.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const botWalkSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
 let passed = 0;
 let failed = 0;
 
@@ -129,6 +131,18 @@ try {
   else process.env.HOME = oldHome;
   fs.rmSync(home, { recursive: true, force: true });
 }
+
+// Coding lanes before light ones. The bot writes code, so a turn that fails over
+// from a coding model must not land on a light model while a coding lane is free —
+// pref order alone let a light model with a low pref number take the turn over.
+check('the walk orders coding lanes before light ones',
+  /rank\(a\) - rank\(b\)/.test(botWalkSrc) && /g === 'coding' \? 0 : g === 'light' \? 2 : 1/.test(botWalkSrc));
+check('a light lane is still reachable as a last resort',
+  /degradedToLight/.test(botWalkSrc) && !/codingLeft === 0\) return/.test(botWalkSrc));
+check('and the turn is told when it dropped to a light model',
+  /no coding lane is free right now/.test(botWalkSrc));
+check('the model this host actually runs is classified, not left unknown',
+  groupForModel('mimo-v2.6') === 'coding' && groupForModel('deepseek-v4.1') === 'coding' && groupForModel('muse-spark-1.3-contributor') === 'light');
 
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

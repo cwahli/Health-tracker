@@ -93,7 +93,7 @@ import {
   stampCooldown,
   CONNECTION_FAILED_COOLDOWN_MS,
 } from './lib/free-lanes.mjs';
-import { ratingSuffix } from './lib/model-ratings.mjs';
+import { ratingSuffix, groupForModel } from './lib/model-ratings.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
@@ -195,8 +195,6 @@ function parseArgs(argv) {
     else if (arg.startsWith('--registry=')) args.registry = arg.slice('--registry='.length);
     else if (arg.startsWith('--prompt=')) args.prompt = arg.slice('--prompt='.length);
     else if (arg.startsWith('--simulate=')) args.simulate = arg.slice('--simulate='.length);
-    else if (arg.startsWith('--inject=')) args.inject = arg.slice('--inject='.length);
-    else if (arg.startsWith('--chat=')) args.chat = arg.slice('--chat='.length);
   }
   return args;
 }
@@ -209,7 +207,6 @@ Usage:
   node scripts/bot-host.mjs --check-config [--id=<botId>]
   node scripts/bot-host.mjs --dry-run [--id=<botId>] [--prompt="..."]
   node scripts/bot-host.mjs --simulate="/model" [--id=<botId>]
-  node scripts/bot-host.mjs --inject="/status" [--chat=<id>] [--id=<botId>]
 
 Bots are defined in bots/registry.json. Add a new bot by appending an entry,
 exporting its token env var, and starting bot-host@<id>. No code changes.
@@ -835,13 +832,24 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
   const inTable = new Set((tableLanes || []).map((l) => String(l?.model || '').toLowerCase().split('/').filter(Boolean).pop()).filter(Boolean));
   for (const e of entries || []) {
     const v = verdictOf(e);
-    const m = String(v.lane?.model || v.ref || v.label || '').toLowerCase().split('/').filter(Boolean).pop();
+    // A real model always has a lane once the catalog is folded in, so the only
+    // thing left without one is a provider placeholder ("pending:gemini") — not a
+    // model, and the header already counts those. Anything else that shows up here
+    // means the fold missed a model, and it is reported rather than dropped.
+    if (String(v.ref || '').startsWith('pending:')) continue;
+    const m = String(v.lane?.model || '').toLowerCase().split('/').filter(Boolean).pop();
     if (m && !inTable.has(m)) rows.push(v);
   }
+  // A lane whose provider has no credential on this host leaves the count, the same
+  // way /allowance drops it from its table and names the variable underneath. It was
+  // six rows here, which is why the two commands disagreed about the total even with
+  // one canonical list.
+  const needsSetup = rows.filter((r) => r.needsSetup);
+  const listed = rows.filter((r) => !r.needsSetup);
   const unusableOf = (r) => r.selectable === false || r.depleted || r.ended || r.terminalOnly;
-  const usable = rows.filter((r) => !unusableOf(r));
-  const unusable = rows.filter(unusableOf);
-  const noCredential = rows.filter((r) => r.inLedger === false);
+  const usable = listed.filter((r) => !unusableOf(r));
+  const unusable = listed.filter(unusableOf);
+  const noCredential = listed.filter((r) => r.inLedger === false);
   const location0 = location ? ` at ${location}` : '';
   // The same compact reset /allowance prints ("reset in 12h 34"), not the long
   // label. The projection's resetLabel spells out the vendor countdown and an
@@ -864,14 +872,17 @@ function formatFreemodelWithDepletion(entries, annotated, { current, location, c
     'Depleted lanes are marked ❌ and stay tappable, so a tap can tell you what to use instead.',
     'Token Harbor / Cloudflare / Gemini taps run through OpenCode. Freebuff is terminal-only — no chat turn.',
     '',
-    rows.length
-      ? `Total: ${rows.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''} · current: ${current || 'default'}`
+    listed.length
+      ? `Total: ${listed.length} · ${usable.length} usable${unusable.length ? ` · ${unusable.length} not usable ❌` : ''}${noCredential.length ? ` · ${noCredential.length} with no ledger row` : ''}${needsSetup.length ? ` · ${needsSetup.length} need setup` : ''} · current: ${current || 'default'}`
       : 'No free models are installed and authenticated on this host.',
   ];
   // One short footer line — never a second per-model list.
   const footer = [];
   if (noCredential.length) {
     footer.push(`no ledger row: ${noCredential.slice(0, 4).map((r) => r.label).join(', ')}${noCredential.length > 4 ? `, +${noCredential.length - 4} more` : ''}`);
+  }
+  if (needsSetup.length) {
+    footer.push(`needs setup: ${needsSetup.slice(0, 3).map((r) => `${r.label} (${r.setupReason || r.reason || 'provider not set up'})`).join('; ')}${needsSetup.length > 3 ? `; +${needsSetup.length - 3} more` : ''}`);
   }
   if (unusable.length) {
     footer.push(`not usable: ${unusable.slice(0, 4).map((r) => `${r.label} (${why(r)})`).join('; ')}${unusable.length > 4 ? `; +${unusable.length - 4} more` : ''}`);
@@ -1630,7 +1641,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // own rows in, and those are the Token Harbor / Cloudflare / Freebuff models.
       // Rendering the catalog alone listed 42 models and none of them were the ones
       // /allowance was showing for those providers.
-      const { entries, annotated } = getAnnotatedFreeModels(caches, config.id);
+      const { entries, annotated, table: fmTable, session: fmSession } = getAnnotatedFreeModels(caches, config.id);
       if (!entries.length) {
         await api.sendMessage(chatId, 'No free models found (opencode cache unreadable).');
         return;
@@ -1639,7 +1650,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // the router keeps a depleted lane tappable so the tap can answer with what
       // to use instead. Filtering them out of the keyboard is what made /freemodel
       // and /allowance list different things.
-      const { table: fmTable, session: fmSession } = getLedger(config.id);
+      // The table getAnnotatedFreeModels already folded the catalog into — the same
+      // one the annotation was computed against and the same one /allowance renders.
+      // Folding the union again here produced a different table (46 lanes against
+      // 48) and six models came back that the real list has dropped.
       const body = formatFreemodelWithDepletion(entries, annotated, {
         current: eff.model,
         location: workLocation(),
@@ -2306,11 +2320,26 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
   const currentSkipped = skipped.find(sameRoute);
   const fallbackLanes = lanes.filter((l) => !sameRoute(l));
 
-  if (!model && !fallbackLanes.length) {
+  // Coding lanes first, light ones last. The bot exists to write code, so a turn
+  // that fails over from a coding model must not land on a light one while a coding
+  // lane is still free — the list was ordered by pref alone, and a light model with
+  // a low pref number would take over the turn. Light lanes stay reachable as a last
+  // resort, because failing a turn outright is worse than a weaker answer, and
+  // `degradedToLight` says when that is what happened.
+  const groupOf = (m) => groupForModel(m || '');
+  const rank = (l) => {
+    const g = groupOf(l.model);
+    return g === 'coding' ? 0 : g === 'light' ? 2 : 1;
+  };
+  const orderedLanes = [...fallbackLanes].sort((a, b) => rank(a) - rank(b) || (Number(a.pref) || 0) - (Number(b.pref) || 0));
+  const currentGroup = model ? groupOf(freemodelRefToRoute(model).model || model) : 'unknown';
+  const codingLeft = orderedLanes.filter((l) => rank(l) === 0).length;
+
+  if (!model && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
     return { models: [], skipped, fromLedger: true, exhausted: true, displaced: null, chose: null, soonest };
   }
-  if (model && currentSkipped && !fallbackLanes.length) {
+  if (model && currentSkipped && !orderedLanes.length) {
     const soonest = soonestResetAmongDepleted(table, ledger.session || {}, { now });
     return {
       models: [],
@@ -2325,15 +2354,22 @@ export function selectTurnLanes({ botId, model, fallback, now = Date.now(), read
 
   const models = [];
   if (model && !currentSkipped) models.push(model);
-  for (const lane of fallbackLanes) models.push(toModelRef(lane.provider, lane.model));
+  for (const lane of orderedLanes) models.push(toModelRef(lane.provider, lane.model));
   if (!models.length) models.push(fallback);
+  const unique = [...new Set(models.filter(Boolean))];
   return {
-    models: [...new Set(models.filter(Boolean))],
+    models: unique,
     skipped,
     fromLedger: true,
     exhausted: false,
     displaced: currentSkipped || null,
     chose: models[0] || null,
+    // A coding turn that can only be served by a light lane, and the chat's own
+    // group, so the failover notice can say what happened instead of the reader
+    // wondering why the answer got worse.
+    currentGroup,
+    degradedToLight: currentGroup === 'coding' && codingLeft === 0 && unique.length > 1,
+    codingAvailable: codingLeft,
   };
 }
 
@@ -2643,6 +2679,16 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
         : laneChoice.displaced.why;
       console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
+      // A coding turn that can only be served by a light model is said out loud.
+      // Silently answering with a weaker model is how a coding task starts failing
+      // in ways nobody notices until the code is wrong.
+      if (laneChoice.degradedToLight) {
+        console.log(`[${config.id}] no coding lane left; degraded to a light model (${laneChoice.chose})`);
+        await api.sendMessage(
+          chatId,
+          `⚠️ \`${eff.model}\` is ${laneChoice.displaced.why}, and no coding lane is free right now — this turn runs on the light model \`${laneChoice.chose}\`. Code may be weaker than usual.`
+        ).catch(() => {});
+      }
     }
     // A location that names another machine runs there, on that machine's
     // allowance. This VM does not stamp for it.
@@ -2925,61 +2971,6 @@ async function runLoop({ api, config }) {
   }
 }
 
-/**
- * Run one message through the real handler, with the real Telegram API.
- *
- * The Bot API has no way to fabricate an inbound message: getUpdates only ever
- * returns what a real client sent, and only one poller may hold them. So a
- * no-human proof feeds the dispatch loop a synthetic message and lets the
- * replies go to Telegram for real — parse, guards, side effects, formatting.
- * It neither polls nor takes the poller lease (the lease is pid-held, so this
- * could not take it anyway), so the live bot keeps serving while it runs.
- */
-async function injectCommand({ bot, config, args }) {
-  const chatId = Number(args.chat || config.telegram?.allowedUserIds?.[0] || 0);
-  if (!chatId) {
-    console.error('[inject] no chat to answer: pass --chat=<id>, or give the bot an allowedUserIds entry');
-    process.exit(1);
-  }
-  const token = resolveToken(bot);
-  const api = new TelegramApi(token);
-  const sent = [];
-  const realSend = api.sendMessage.bind(api);
-  api.sendMessage = async (to, text, extra) => {
-    const line = String(text).replace(/\s+/g, ' ');
-    sent.push({ to, text: line });
-    console.log(`[inject] telegram -> ${to}: ${line.slice(0, 220)}`);
-    return realSend(to, text, extra);
-  };
-  await api.getMe();
-  await api.deleteWebhook();
-  const message = {
-    message_id: 1,
-    date: Math.floor(Date.now() / 1000),
-    chat: { id: chatId, type: 'private' },
-    from: { id: chatId, is_bot: false, first_name: 'Proof' },
-    text: args.inject,
-  };
-  console.log(`[inject] -> ${message.text}  (bot ${config.id}, chat ${chatId})`);
-  await handleMessage({
-    api,
-    config,
-    throttle: new Throttle({ minIntervalMs: config.progress.editIntervalMs }),
-    sessions: loadSessions(config.id),
-    prefs: loadPrefs(config.id),
-    caches: makeCaches(),
-    running: new Map(),
-    lastUsage: new Map(),
-    totals: loadTotals(config.id),
-    health: { okAt: 0, errAt: 0, err: '' },
-    bootedAt: Date.now(),
-    busy: new Set(),
-    message,
-  });
-  console.log(`[inject] handled: ${sent.length} message(s) sent`);
-  return sent;
-}
-
 async function simulate(config, args) {
   const cmd = parseCommand(args.simulate);
   if (!cmd) {
@@ -3089,11 +3080,6 @@ async function main() {
 
   if (args.simulate) {
     await simulate(config, args);
-    return;
-  }
-
-  if (args.inject) {
-    await injectCommand({ bot, config, args });
     return;
   }
 

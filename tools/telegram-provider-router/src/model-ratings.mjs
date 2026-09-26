@@ -1,3 +1,6 @@
+// === VENDORED FROM scripts/lib/model-ratings.mjs — DO NOT EDIT ===
+// Mirrored by scripts/sync-router-vendor.mjs. Edit the canonical file, not this copy.
+
 /**
  * Benchmark ratings for the free models, read from the repo's canonical scorecard.
  *
