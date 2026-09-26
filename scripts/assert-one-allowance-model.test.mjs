@@ -320,7 +320,7 @@ try {
   // on two paths is one shared bar, and only one of the two surfaces was collapsing
   // it. The router's grid has always collapsed it for display.
   check('/allowance renders the same canonical list, not its own walk of the table',
-    /for \(const l of canonicalAllowanceLanes\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
+    /const canonicalRows = canonicalAllowanceLanes\(/.test(fs.readFileSync(path.join(HERE, 'lib', 'free-lanes.mjs'), 'utf8')));
   const fmSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
   check('/freemodel has no dedupe of its own any more', !/seenModel/.test(fmSrc), 'a second notion of "same model" is how the two drifted apart');
   check('and takes the shared list instead', /canonical = null/.test(fmSrc) && /canonical: canonicalAllowanceLanes\(/.test(fmSrc));
@@ -433,7 +433,10 @@ try {
   // 7. /freemodel's body must not contradict /allowance.
   const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
   const botSrc = read('bot-host.mjs');
-  check('/freemodel renders the canonical list, not the raw catalog', /const rows = canonical \|\| \[\];/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
+  // The rows are the canonical list in the canonical tier-group order — the same
+  // helper /allowance groups with — not a second ordering of the same models.
+  check('/freemodel renders the canonical list, not the raw catalog',
+    /const rows = tierGroups\.flatMap\(\(g\) => g\.rows\);/.test(botSrc) && /groupRowsByTier\(canonical \|\| \[\]\)/.test(botSrc) && /canonicalAllowanceLanes\(/.test(botSrc));
   check('/freemodel renders the union, not the raw catalog alone', /const \{ entries, annotated, table: fmTable, session: fmSession \} = getAnnotatedFreeModels\(caches, config\.id\)/.test(botSrc));
   check('a pending placeholder is dropped when the ledger has rows for that provider',
     /status !== 'pending-signin'\) return true;/.test(botSrc) && /effectiveProviderOf\(l\)/.test(botSrc));

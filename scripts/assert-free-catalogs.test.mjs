@@ -88,13 +88,22 @@ check('DeepSeek V4.1 Flash is high (rank 1)', tierForModel('deepseek-v4.1-flash'
 check('Muse Spark 1.3 Contributor is high (rank 2)', tierForModel('muse-spark-1.3-contributor').tier === 'high');
 check('Laguna S 2.1 is light (rank 6, "Proven light")', tierForModel('laguna-s-2.1').tier === 'light');
 check('GLM 5.3 Flash is retired in the catalog, so unlisted', tierForModel('glm-5.3-flash').tier === null);
-check('a Freebuff-only row is terminal-only, not a coding tier', tierForModel('solar-pro4').tier === null);
+// Muse Spark 1.2 exists in the catalog only as a Freebuff row, and Freebuff is
+// terminal-only on this host: no tier, so it can never be offered as a coding lane.
+// Solar Pro 4 is the opposite case and used to be the example here — it is
+// reachable through Cline, so it is `light` (no published benchmark) and not
+// terminal-only.
+check('a Freebuff-only row is terminal-only, not a coding tier', tierForModel('muse-spark-1.2').tier === null);
+check('a model reachable on a coding tool is not terminal-only', tierForModel('solar-pro4').tier === 'light');
 
 // 7. The walk's order is the catalog's tier order: high, then unlisted, then light.
 check('high ranks first', walkTierRank('deepseek-v4.1-flash') === 0);
 check('light ranks last', walkTierRank('laguna-s-2.1') === 2);
-check('unlisted sits between them', walkTierRank('space-bunny-free') === 1);
-check('an unlisted model is never high by default', tierForModel('space-bunny-free').tier === null);
+// GLM 5.3 Flash is the catalog's `Dead` row: still listed on Cline, retired as a
+// promo, so it gets no tier and lands between the two pools rather than in either.
+check('unlisted sits between them', walkTierRank('glm-5.3-flash') === 1);
+check('an unlisted model is never high by default', tierForModel('glm-5.3-flash').tier === null);
+check('a catalog-named model is no longer unlisted', tierForModel('space-bunny-free').tier === 'high');
 
 // 8. Ids normalise the way the catalogs are written.
 check('provider prefixes are stripped', modelIdOf('opencode/space-bunny-free') === 'space-bunny-free');

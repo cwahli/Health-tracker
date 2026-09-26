@@ -38,6 +38,78 @@
 
 ---
 
+## Model tiers (high = coding-agent capable · light = docs/inventory)
+
+**Why this table exists.** `/freemodel` and `/allowance` have to separate coding-capable
+models from light ones so a reader can see which pool a turn will draw from. R-16
+(Tier + catalog law) says that split "follows `FREE_CODING_TOOLS_CATALOG.md` Ranked picks +
+Tools × free models and `FREE_MODEL_TOOL_PICKER.md` defaults … no new tier file, no per-bot
+tier fork" — so the tiers live here, in this file, and nowhere else.
+
+**Reading rules, in order.**
+1. A **lock outranks a tier**: `Any DeepSeek V4 — Forbidden`, `GLM 5.3 Flash — Dead`, and every
+   Freebuff row stay unlisted whatever a tier below would say. Freebuff is terminal-only on
+   this host and is never selectable, so it has no tier.
+2. A **Ranked picks rank is a tier**: rank 1–5 are `high` unless the row calls itself a
+   docs/inventory fallback, and rank 6 (Laguna S 2.1, "Proven light") is `light`. That is why
+   Muse Spark 1.3 Contributor is `high` here at rank 2 even though an earlier draft of this
+   catalog called it unscored and put it in `light` — this file's own rank is the newer
+   statement, and it is the repo's #2 pick.
+3. This table fills in every model the ranked picks do not mention. A row here wins over the
+   Tools × free models guess, because it is per-model rather than per-tool.
+
+**Which basis is allowed.** A tier needs a *stated* basis, and only two kinds count: a vendor or
+cache description of what the model is for, or a position in the ranked picks above. An
+unmeasured model is `light`, not `high` — light is the documented docs/inventory tier and it is
+still reachable, so an unmeasured model is never dropped and never quietly promoted into the
+pool that writes code. Benchmark *numbers* are deliberately not a basis here: the score rendered
+on `/freemodel` comes from `FREE_MODEL_BAKEOFF.md` (QS-7), and a number that is not in that
+ledger is not rendered anywhere.
+
+| Model | Tier | Basis |
+|---|---|---|
+| DeepSeek V4.1 Flash | high | Rank 1 pick; the catalog's standing default rotate starts here |
+| DeepSeek V4 Flash | high | the non-1.1 V4 Flash tier, same family; the bare `DeepSeek V4` above stays Forbidden and is deliberately absent here |
+| Hy3 | high | "Tencent Hy reasoning model for coding, instruction following, and agent tasks" |
+| Muse Spark 1.3 Contributor | high | Rank 2 pick; ran waves B–L, "always-on workhorse" |
+| Kimi K2.5 | high | K2 coding family, described for agentic software work |
+| MiMo V2.6 | high | the version this host runs; MiMo family described as an omni model "for agents" |
+| MiMo V2.5 | high | same family as V2.6 |
+| MiMo V2 Flash | high | same family as V2.6 |
+| MiMo V2 Pro | high | same family as V2.6 |
+| MiMo V2 Omni | high | same family as V2.6 |
+| Qwen 3.8 Flash | high | Qwen 3.8 Flash class, hosted on Token Harbor |
+| Qwen 3.8 27B | high | the 27B tier of the Qwen 3.8 class above |
+| GLM 4.7 Flash | high | GLM 4.7 coding class, Cloudflare-hosted |
+| Space Bunny | high | UNSCORED, but described as a reasoning model for coding/agentic tasks and tool use, and `plan/ROADMAP.md` + `plan/BOT_ROLES.md` make it the fleet fallback |
+| ox-alpha | high | "Stealth reasoning model for coding, agentic tasks, and tool use", 1M ctx |
+| x-preview-f | high | same stealth-reasoning description as ox-alpha |
+| Hy3 Preview | high | same Hy family, no description of its own |
+| North Mini Code | high | "Cohere coding model for practical software engineering and agentic edits" |
+| KAT Coder Pro | high | Cline free coding model, coding by name; no published score |
+| MiniMax M2.5 | high | M2 family positioned for agentic coding |
+| MiniMax M2.1 | high | M2 family positioned for agentic coding |
+| Nemotron 3 Ultra | high | the larger Nemotron tiers |
+| Nemotron 3 Super | high | the larger Nemotron tiers |
+| Laguna S 2.1 | light | Rank 6, "Proven light", "Fine for inventory/docs; weaker for restores" |
+| Ling 3.0 Flash | light | "Efficient model for low-latency assistance, extraction, and routine automation" |
+| Ling 3.0 Flash Fin | light | same Ling 3.0 Flash description; the "fin" variant is not a larger model |
+| Ling 3.0 Tiny | light | "Compact MoE … responsive agents, instruction following"; below 3.0 Flash |
+| Ling 2.6 Flash | light | Ling family, low-latency assistance and extraction |
+| Trinity Large Preview | light | 131K context, the smallest in the list, no description |
+| LongCat 2.0 | light | no description and no published benchmark in these catalogs |
+| Ring 2.6 1T | light | a 1T-parameter open-weights tier with no description and no published benchmark in these catalogs |
+| MiniMax M3 | light | no description and no published benchmark in these catalogs |
+| Nemotron 3.5 Lightning | light | the smaller Nemotron tier; superseded by 3 Ultra where both are free |
+| Solar Pro 4 | light | listed under Freebuff (terminal-only) and Cline; no published benchmark |
+| Big Pickle | light | the scorecard's least certain cell, text-only, and the handover records that only `--variant low` replies |
+| Gemini 3.7 Flash | light | between 3.5 Flash Lite and 3.8 Flash; no score of its own |
+| Gemini 3.8 Flash | high | the strongest Gemini tier in the list |
+
+Not listed on purpose: `grok-code` (coding by name, but it is not a `-free` model and has no
+place on a free list), and every model this table does not name — unlisted means unranked, which
+renders as `unranked` and sorts between the two tiers, never as a guess.
+
 ## Tools × free models (expandable)
 
 | Tool | How to connect | Free models (usable) | Cap / estimate | Data / caveats | Verified |
@@ -91,6 +163,7 @@ Authenticated against `https://www.codebuff.com/api/v1/freebuff/session` after C
 ## Changelog
 | Date | Change |
 |---|---|
+| 2026-09-26 | Model tiers table added (high/light per model) so `/freemodel` and `/allowance` can group the list; tiers read from this file, never from code |
 | 2026-09-16 | Freebuff live verify: 100 Freebucks full tier; DeepSeek 15/hr (~6.7h); ads on |
 | 2026-09-16 | Initial catalog: OpenCode, Cline, Token Harbor, Freebuff; ranked picks; Freebucks country table |
 | 2026-09-15 | Bakeoff waves A–L ledger in `FREE_MODEL_BAKEOFF.md` |
