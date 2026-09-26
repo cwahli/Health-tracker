@@ -18,7 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RATING_ALIASES, BENCHMARKS, ratingForModel, ratingSuffix, groupForModel, resolvedRatings } from './lib/model-ratings.mjs';
+import { RATING_ALIASES, BENCHMARKS, AA_ESTIMATES, ratingForModel, ratingSuffix, groupForModel, resolvedRatings } from './lib/model-ratings.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let passed = 0;
@@ -102,6 +102,44 @@ check('an unrated model renders nothing', ratingSuffix('opencode/space-bunny-fre
 const botSrc = fs.readFileSync(path.join(HERE, 'bot-host.mjs'), 'utf8');
 check('/freemodel puts the rating on the button', /ratingSuffix\(/.test(botSrc) && /const rated = /.test(botSrc));
 check('and the button uses the rated label', /buttons\.push\(`\$\{unusableOf\(r\) \? '❌ ' : ''\}\$\{rated\}`\)/.test(botSrc));
+
+// 6. Free means the name says so. A zero list price is not a free model, and
+// grok-code is not one — the user confirmed it on 2026-09-26.
+const { listFreeOpenCode, FREE_NAME_EXCEPTIONS } = await import('./lib/freemodels.mjs');
+const refs = listFreeOpenCode({ env: {}, home: '/home/ubuntu', includeUnready: true });
+check('grok-code is not offered as a free model', !refs.some((r) => /grok-code/.test(r)), refs.filter((r) => /grok-code/.test(r)).join());
+check('every offered model is named -free or is a cited exception',
+  refs.every((r) => { const id = r.split('/').pop(); return /-free/.test(id) || FREE_NAME_EXCEPTIONS[id]; }),
+  refs.filter((r) => { const id = r.split('/').pop(); return !/-free/.test(id) && !FREE_NAME_EXCEPTIONS[id]; }).join());
+check('the one exception carries its citation', Object.values(FREE_NAME_EXCEPTIONS).every((v) => /model-comparison\.json/.test(v)), JSON.stringify(FREE_NAME_EXCEPTIONS));
+
+// 7. One version per family, and a newer model only wins if it is not worse.
+const { supersedeOlderVersions } = await import('./lib/free-lanes.mjs');
+const fam = (models, scoreOf) => supersedeOlderVersions(models.map((m) => ({ model: m })), { scoreOf }).lanes.map((l) => l.model);
+check('an older version is dropped when a newer one is present',
+  !fam(['opencode/deepseek-v4-flash-free', 'cline-free/deepseek-v4.1-flash']).includes('opencode/deepseek-v4-flash-free'));
+check('the newest version is kept', fam(['opencode/deepseek-v4-flash-free', 'cline-free/deepseek-v4.1-flash']).includes('cline-free/deepseek-v4.1-flash'));
+check('a family is matched across surfaces, not by path',
+  !fam(['opencode/ling-2.6-flash-free', 'opencode/ling-3.0-flash-free']).includes('opencode/ling-2.6-flash-free'));
+check('a preview is treated as earlier than its release', !fam(['opencode/hy3-preview-free', 'opencode/hy3-free']).includes('opencode/hy3-preview-free'));
+check('a NEWER but WORSE model does not displace a better older one',
+  fam(['opencode/nemotron-3-ultra-free', 'opencode/nemotron-3.5-lightning-free'], (l) => (l.model.includes('ultra') ? 23 : 13)).includes('opencode/nemotron-3-ultra-free'),
+  'Nemotron 3 Ultra (23) must survive 3.5 Lightning (13)');
+check('and the weaker newer one survives only because nothing beats it',
+  fam(['opencode/nemotron-3-ultra-free', 'opencode/nemotron-3.5-lightning-free'], (l) => (l.model.includes('ultra') ? 23 : 13)).length === 2);
+check('unrelated families are untouched', fam(['opencode/space-bunny-free', 'opencode/glm-5-free']).length === 2);
+
+// 8. An estimate is only ever an inference from a measured relative, and is marked.
+// The basis must name the relative AND state its epistemic status, so "we guessed"
+//and "its parent was also a guess" are both visible in the table.
+check('every estimate names its relative and states how sure that relative is',
+  Object.values(AA_ESTIMATES).every((e) => typeof e.basis === 'string' && e.basis.length > 30
+    && /(measured|published|estimate|interpolat)/i.test(e.basis) && /[A-Za-z]/.test(e.basis)),
+  JSON.stringify(Object.entries(AA_ESTIMATES).filter(([, e]) => !/(measured|published|estimate|interpolat)/i.test(e.basis || '')).map(([k]) => k)));
+check('an estimate renders with a tilde, never as a measurement', /^ · AA~/.test(ratingSuffix('opencode/ling-3.0-tiny-free')), ratingSuffix('opencode/ling-3.0-tiny-free'));
+check('a measured score is not overwritten by an estimate', !/~/.test(ratingSuffix('opencode/nemotron-3-ultra-free')));
+check('no model is given an estimate with no basis', !Object.keys(AA_ESTIMATES).some((id) => !BENCHMARKS[id] && !RATING_ALIASES[id] && !/ling-3.0-tiny/.test(id)));
+check('a model with nothing measured and no relative stays blank', ratingSuffix('opencode/trinity-large-preview-free') === '', ratingSuffix('opencode/trinity-large-preview-free'));
 
 console.log(`\n${passed} pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

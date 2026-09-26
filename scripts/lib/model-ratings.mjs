@@ -94,6 +94,27 @@ export const BENCHMARKS = {
   'big-pickle': { group: 'light', why: 'AA ~30 (the scorecard calls it its least certain cell), text-only, and the handover records that only --variant low replies' },
 };
 
+/**
+ * Estimates, and only where a MEASURED relative exists.
+ *
+ * An estimate from a measured parent or sibling is an inference with a stated
+ * basis, and it is rendered with a `~` so it can never be read as a measurement.
+ * An estimate from nothing — a model with no published score, no measured relative
+ * and no description — is not an estimate, it is a guess, so those stay blank.
+ * `basis` names the relative for every one of these, and a sensor checks it.
+ */
+export const AA_ESTIMATES = {
+  'deepseek-v4-flash-free': { aaEst: 38, basis: 'previous generation of DeepSeek V4.1 Flash (AA 39.5 measured)' },
+  'glm-4.7-free': { aaEst: 42, basis: 'GLM-5 is AA 50 published and the vendor claims ~20% improvement over 4.7' },
+  'mimo-v2-pro-free': { aaEst: 46, basis: 'the scorecard records the MiMo Pro sibling as 46.3, a measured figure' },
+  'mimo-v2.5-free': { aaEst: 39, basis: 'one version older than MiMo 2.6 Flash, whose AA 41 is itself an ESTIMATE in the scorecard — the weakest inference here' },
+  'minimax-m2.5-free': { aaEst: 26, basis: 'previous generation of MiniMax M3 (AA 30 measured)' },
+  'minimax-m2.1-free': { aaEst: 25, basis: 'two generations before MiniMax M3 (AA 30 measured)' },
+  'ling-3.0-tiny-free': { aaEst: 16, basis: 'the tiny sibling of Ling 3.0 Flash (AA 21 measured)' },
+  'ling-2.6-flash-free': { aaEst: 18, basis: 'previous generation of Ling 3.0 Flash (AA 21 measured)' },
+  'gemini-3.7-flash': { aaEst: 30, basis: 'interpolated between two measured rows: Gemini 3.5 Flash Lite (AA 22) and Gemini 3.8 Flash (AA 41.2)' },
+};
+
 let cache = null;
 
 function loadScorecard() {
@@ -142,16 +163,17 @@ export function ratingForModel(ref) {
   const id = modelIdOf(ref);
   if (!id) return null;
   const extra = BENCHMARKS[id] || null;
+  const est = AA_ESTIMATES[id] || null;
   const alias = RATING_ALIASES[id];
-  if (!alias) return extra ? { aa: null, ...extra } : null;
+  if (!alias) return (extra || est) ? { aa: null, ...(extra || {}), ...(est ? { aaEst: est.aaEst, estimateBasis: est.basis } : {}) } : null;
   const { rows, found } = loadScorecard();
-  if (!found || !rows.length) return extra ? { aa: null, ...extra } : null;
+  if (!found || !rows.length) return (extra || est) ? { aa: null, ...(extra || {}), ...(est ? { aaEst: est.aaEst, estimateBasis: est.basis } : {}) } : null;
   const want = alias.replace(/[`*]/g, '').replace(/\(you\)/i, '').trim().toLowerCase();
   const hit = rows.find((r) => r.key === want)
     // The base model shares the variant's score ("Base Ling 3.0 Flash = 21").
     || rows.find((r) => want.startsWith(r.key) || r.key.startsWith(want));
-  if (!hit) return extra ? { aa: null, ...extra } : null;
-  return { aa: hit.score, estimated: hit.estimated, name: hit.label, ...(extra || {}) };
+  if (!hit) return (extra || est) ? { aa: null, ...(extra || {}), ...(est ? { aaEst: est.aaEst, estimateBasis: est.basis } : {}) } : null;
+  return { aa: hit.score, estimated: hit.estimated, name: hit.label, ...(extra || {}), ...(est ? { aaEst: est.aaEst, estimateBasis: est.basis } : {}) };
 }
 
 /**
@@ -180,6 +202,7 @@ export function ratingSuffix(ref) {
   if (!r) return '';
   const bits = [];
   if (typeof r.aa === 'number') bits.push(`AA${r.estimated ? '~' : ''}${r.aa}`);
+  else if (typeof r.aaEst === 'number') bits.push(`AA~${r.aaEst}`);
   if (typeof r.swe === 'number') bits.push(`SWE${r.swe}`);
   return bits.length ? ` · ${bits.join(' ')}` : '';
 }

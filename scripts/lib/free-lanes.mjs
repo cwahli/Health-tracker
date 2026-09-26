@@ -1151,6 +1151,79 @@ export function candidateRouterStateDirs(explicit) {
 }
 
 /**
+ * Drop a model when a newer one of the same family is present AND is not worse.
+ *
+ * The list carried every version the catalogue knows: DeepSeek V4 and V4.1 side by
+ * side, Ling 2.6 beside 3.0, Muse Spark 1.2 beside 1.3, GLM 4.7 beside 5, MiniMax
+ * M2.1/M2.5 beside M3. That is four near-identical choices where one is wanted, and
+ * it makes the preference order mean less with every release.
+ *
+ * "Newer" alone is not a safe rule, and the scorecard's own numbers show why:
+ * Nemotron 3.5 Lightning is a newer version than Nemotron 3 Ultra and scores 13
+ * against 23. Version does not track capability, so a newer model only supersedes an
+ * older one when it is at least as good. Where neither has a score, the newer one
+ * wins — a tidier list is the point — and that is recorded as a guess rather than a
+ * measurement. A "-preview" build is treated as earlier than the release it
+ * previews, which is what it is.
+ */
+const VENDOR_SEGMENT = /^(?:opencode(?:-go)?|cline-free|tokenharbor|cloudflare|google|gemini|freebuff|cline)\//;
+
+/** The model name without the surface it is reached through. */
+function stripVendorName(model) {
+  let m = String(model || '').toLowerCase();
+  m = m.replace(VENDOR_SEGMENT, '');
+  m = m.replace(/^opencode\//, ''); // "opencode/opencode/x" repeats it
+  return m;
+}
+
+export function supersedeOlderVersions(lanes, { scoreOf = null } = {}) {
+  const versionOf = (raw) => {
+    const model = stripVendorName(raw);
+    const m = model.match(/(\d+(?:[.-]\d+)*)/);
+    if (!m) return [];
+    const preview = /-preview|-rc|-beta/.test(model) ? [-1] : [];
+    return [...m[1].split(/[.-]/).map((n) => Number(n) || 0), ...preview];
+  };
+  // The family is the model name, not the path it is reached by: DeepSeek V4 on
+  // the OpenCode surface is the same family as DeepSeek V4.1 on Cline's, and the
+  // first version of this rule kept the vendor segment and so failed to pair them.
+  const familyOf = (model) => stripVendorName(model).split(/(\d+(?:[.-]\d+)*)/)[0].replace(/[-_.]+$/, '');
+  const cmp = (a, b) => {
+    const n = Math.max(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+      const d = (a[i] || 0) - (b[i] || 0);
+      if (d) return d < 0 ? -1 : 1;
+    }
+    return 0;
+  };
+  const score = (lane) => (typeof scoreOf === 'function' ? scoreOf(lane) : null);
+  const val = (lane) => {
+    const s = score(lane);
+    return typeof s === 'number' && Number.isFinite(s) ? s : null;
+  };
+  const out = [];
+  const dropped = [];
+  for (const lane of lanes || []) {
+    const id = String(lane?.model || '');
+    const mine = versionOf(id);
+    const family = familyOf(id);
+    const rival = (lanes || []).find((other) => {
+      if (other === lane) return false;
+      if (familyOf(other?.model || '') !== family) return false;
+      return cmp(versionOf(other?.model || ''), mine) > 0;
+    });
+    if (!rival) { out.push(lane); continue; }
+    const a = val(lane);
+    const b = val(rival);
+    // A newer model supersedes an older one unless it is measurably worse.
+    if (b !== null && a !== null && b < a) { out.push(lane); continue; }
+    if (b === null && a !== null) { out.push(lane); continue; }
+    dropped.push({ model: id, supersededBy: String(rival?.model || ''), basis: a === null || b === null ? 'newer, no comparable score' : `newer and not worse (${b} >= ${a})` });
+  }
+  return { lanes: out, dropped };
+}
+
+/**
  * Identity of a model for matching across surfaces: the vendor prefix is not part
  * of it, everything else is. `opencode/space-bunny-free` and
  * `opencode-go/space-bunny-free` are one model; `mimo-v2.5-free` and
@@ -1185,7 +1258,7 @@ function modelKey(s) {
  * `google/gemini-…` and `gemini:gemini-…` are one model, as are `opencode/x` and
  * `opencode-go/x`.
  */
-export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "" } = {}) {
+export function canonicalAllowanceLanes({ table, lanes = null, session = null, readiness = null, now = Date.now(), location = "", scoreOf = null, supersede = true } = {}) {
   if (!table || !Array.isArray(table.lanes)) return [];
   const projection = projectLanes(table, session, { now, location, readiness });
   const byLane = new Map(projection.map((r) => [laneKey(r.lane), r]));
@@ -1195,7 +1268,12 @@ export function canonicalAllowanceLanes({ table, lanes = null, session = null, r
   // own lane to the top before calling, and that promotion has to survive the
   // filtering and the dedupe, or the current lane stops being row one.
   const source = Array.isArray(lanes) && lanes.length ? lanes : table.lanes;
-  for (const lane of dedupeTokenHarborLanes(source.filter((l) => l && l.provider && l.model))) {
+  // One version per family: a model is dropped when a newer one of the same family
+  // is present and not worse, so the list is not four near-identical choices.
+  const { lanes: current } = supersede
+    ? supersedeOlderVersions(source.filter((l) => l && l.provider && l.model), { scoreOf })
+    : { lanes: source.filter((l) => l && l.provider && l.model) };
+  for (const lane of dedupeTokenHarborLanes(current)) {
     const verdict = byLane.get(laneKey(lane));
     if (verdict && verdict.needsSetup) continue;
     const model = modelKey(lane.model);
