@@ -145,7 +145,7 @@ check('a light lane is still reachable as a last resort',
 check('a displaced lane is announced to the chat, not just logged',
   /this turn ran on \\`\$\{laneChoice\.chose\}\\` instead/.test(botWalkSrc));
 check('and that line quotes the ledger reason, never a raw provider envelope',
-  /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = laneChoice\.displaced\.resetLabel/.test(botWalkSrc));
+  /is \$\{why\} — this turn ran on/.test(botWalkSrc) && /const why = stamp && !reason\.includes\(stamp\)/.test(botWalkSrc));
 check('and the turn is told when it dropped to a light model',
   /no coding lane is free right now/.test(botWalkSrc));
 // The tier is the catalog's, so what is asserted here is that the walk reads the
