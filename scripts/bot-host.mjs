@@ -1076,6 +1076,10 @@ function missingCount(rows) {
 
 export const MAX_FOLLOWUPS = 5;
 const followupQueues = new Map();
+// The tunnel URL this process last handed out. A quick tunnel's hostname changes
+// on every reconnect, so this is how /web knows an older button is now dead.
+let lastMiniappUrl = '';
+let lastWebHintAt = 0;
 
 export function watchOn(prefs, chatId) {
   return prefFor(prefs, chatId)?.watch === true;
@@ -2285,8 +2289,45 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, '🖥 Web terminal is offline — the phone tunnel is down. It restarts itself; try /web again in a minute.');
         return;
       }
-      await api.sendMessage(chatId, '🖥 Live opencode web terminal (phone-hosted, password-gated) — full session view with input box, same workspace the bot runs in.', {
+      // A quick tunnel's hostname changes on every reconnect, so a button sent
+      // in an older message points at a tunnel that no longer exists and fails
+      // with a blank WebView. Say so rather than let the tap look broken.
+      const moved = lastMiniappUrl && lastMiniappUrl !== miniUrl;
+      lastMiniappUrl = miniUrl;
+      // A fresh WebView carries no project list, and the "add project" hint is
+      // the only thing that saves the user a dead end — but say it once, not on
+      // every tap of a button they have already used.
+      const moved2 = lastWebHintAt && Date.now() - lastWebHintAt < 6 * 60 * 60 * 1000;
+      lastWebHintAt = Date.now();
+      await api.sendMessage(chatId, [
+        moved ? '⚠️ *The tunnel was reconnected*, so any earlier /web button is dead — use this one.' : null,
+        '🖥 *opencode web* — the phone-hosted session list, messages and tool calls.',
+        'First tap asks for the password once.',
+        moved2 ? '' : `Then tap *Add project* and enter \`${config.agent.workspace}\` — the WebView keeps its project list in browser storage, so a fresh one starts empty even though the server has every session. Once it is added, your conversations are here.`,
+      ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '🖥 Open opencode web', web_app: { url: miniUrl } }]] },
+      });
+      return;
+    }
+
+    case 'tui': {
+      // The actual TUI, not the web UI: ttyd serves a real PTY and mounts it
+      // under the same tunnel and the same login, so this is a terminal you
+      // type into from inside Telegram. It attaches to THIS chat's opencode
+      // session in THIS checkout (resolved per attach by tui-attach.sh), so it
+      // is the same conversation, not a second agent — which is why a message
+      // you send here shows up there.
+      const tuiUrl = readMiniappUrl();
+      if (!tuiUrl) {
+        await api.sendMessage(chatId, '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.');
+        return;
+      }
+      await api.sendMessage(chatId, [
+        '⌨️ *opencode TUI* — a real terminal, driven by touch, attached to *this* conversation in `/root/Health-tracker`.',
+        'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.',
+        'It refuses to attach while I am mid-turn — two agents writing one session corrupts it. First tap asks for the password once.',
+      ].join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/tui/` } }]] },
       });
       return;
     }
