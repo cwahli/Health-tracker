@@ -48,8 +48,15 @@ const STANDIN =
   process.argv.includes('--standin') ||
   String(arg('standin', process.env.WORKER_STANDIN || '')).trim() === '1' ||
   String(arg('standin', '')).trim().toLowerCase() === 'true';
-// Which machine this is, so the sender can tell a stand-in from the device
-// and the canary can refuse a job that came from the wrong one.
+// A pid is only meaningful to a relay on the SAME machine (it checks
+// liveness with kill(pid, 0) in its own pid namespace). A worker dialing a
+// relay on another box reports --no-pid (WORKER_NO_PID=1): its heartbeat TTL
+// is the liveness signal, and a stale number must not fail presence.
+const SEND_PID = !(
+  process.argv.includes('--no-pid') ||
+  String(arg('no-pid', process.env.WORKER_NO_PID || '')).trim() === '1' ||
+  String(arg('no-pid', '')).trim().toLowerCase() === 'true'
+);
 const MACHINE = { hostname: os.hostname(), platform: os.platform(), arch: os.arch() };
 const LEDGER = ensureBotLedger(`worker-${HOST}`);
 
@@ -61,7 +68,7 @@ async function post(route, body) {
   const res = await fetch(`${RELAY}${route}`, {
     method: 'POST',
     headers: authHeaders({ 'content-type': 'application/json' }),
-    body: JSON.stringify({ host: HOST, pid: process.pid, detail: DETAIL, cwd: process.cwd(), machine: MACHINE, standin: STANDIN, ...body }),
+    body: JSON.stringify({ host: HOST, pid: SEND_PID ? process.pid : null, detail: DETAIL, cwd: process.cwd(), machine: MACHINE, standin: STANDIN, ...body }),
   });
   return res.json().catch(() => ({}));
 }

@@ -61,6 +61,13 @@ try {
   check('a dead worker pid is not a connection', at('collab').reachable === false);
   check('the dead reason names the pid', /pid 999999 is gone/.test(at('collab').reason));
   check('the record still exists on disk', fs.existsSync(presencePath('collab', home)));
+  // Pids are per-machine: a dead pid number from ANOTHER machine must not
+  // fail presence — the heartbeat TTL is the signal, not the number.
+  recordWorkerConnected({ host: 'grok', pid: 999999, machine: { hostname: 'elsewhere-1', platform: 'x', arch: 'y' }, home });
+  const remoteDead = at('grok');
+  check('a remote pid number is not judged in this pid namespace', remoteDead.reachable === true);
+  check('the remote worker machine is still recorded', remoteDead.machine?.hostname === 'elsewhere-1');
+  clearWorker('grok', home);
   check('an unknown host is unreachable, not an error', workerStatus('somewhere-else', { home }).reachable === false);
 
   // 4. A record with no timestamp is not trusted.
@@ -138,6 +145,8 @@ try {
   check('an explicit standin:false from the worker clears the label', at('mobile').standin === false);
   check('/location prints the worker machine', /worker: \$\{machineLabel\(status\.machine\)\}/.test(src));
   check('/location warns on a stand-in', /labeled stand-in/.test(src));
+  const agentSrc = fs.readFileSync(path.join(HERE, 'worker-agent.mjs'), 'utf8');
+  check('a remote worker omits its pid (pid namespaces are per-machine)', /pid: SEND_PID \? process\.pid : null/.test(agentSrc));
   check('the canary refuses a worker with no machine identity', /no machine identity reported by the worker/.test(src));
   check('the canary refuses a changed worker identity', /worker identity changed/.test(src));
   clearWorker('mobile', home);

@@ -149,7 +149,16 @@ export function workerStatus(host, { home = os.homedir(), now = Date.now(), ttlM
     return { host: h, reachable: false, reason: `worker silent for ${Math.round(ageMs / 1000)}s`, lastSeen: row.lastSeen, ageMs, machine, standin };
   }
   if (row.pid && !alive(row.pid)) {
-    return { host: h, reachable: false, reason: `worker pid ${row.pid} is gone`, lastSeen: row.lastSeen, ageMs, machine, standin };
+    // Pids live in per-machine namespaces: only a worker on THIS machine can
+    // be judged by a local pid number. A remote worker's pid is meaningless
+    // here (a phone's pid 10857 says nothing about this box) — its heartbeat
+    // TTL is the liveness signal, not the number. Same-host rows without a
+    // machine (old workers) keep the old check.
+    const here = os.hostname();
+    const there = String(row.machine?.hostname || '').trim();
+    if (!there || there === here) {
+      return { host: h, reachable: false, reason: `worker pid ${row.pid} is gone`, lastSeen: row.lastSeen, ageMs, machine, standin };
+    }
   }
   return { host: h, reachable: true, reason: 'worker connected', lastSeen: row.lastSeen, ageMs, machine, standin };
 }
