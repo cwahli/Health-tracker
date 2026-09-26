@@ -9,6 +9,9 @@
  *   POST /heartbeat      { host, machine, standin }      keep presence fresh
  *   GET  /jobs/next?host=<h>&wait=<ms>                long-poll for one job
  *   POST /jobs/result    { jobId, text, code, model, error, ledger, sessionID }
+ *   POST /jobs/event     { jobId, event }  live tool/thinking event while running
+ *   GET  /jobs/<id>/events?after=<n>                  poll live events (TG feed)
+ *   POST /jobs/abort     { jobId }  flag a running job aborted (/abort button)
  *   GET  /sessions/<id>/export                        that conversation, for a
  *                                                     worker that has not got it
  *   GET  /sessions/<id>/check                         is it here? (preflight)
@@ -36,7 +39,7 @@ import {
   recordWorkerConnected,
   workerStatus,
 } from './lib/worker-presence.mjs';
-import { claimJob, completeJob, pendingCount } from './lib/worker-jobs.mjs';
+import { claimJob, completeJob, pendingCount, appendJobEvent, readJobEvents, abortJob, getJob } from './lib/worker-jobs.mjs';
 import { savePack, loadPack, PACK_BODY_MAX } from './lib/swap-pack.mjs';
 import {
   SCOPES,
@@ -315,6 +318,42 @@ const server = http.createServer(async (req, res) => {
     if (!job) return send(res, 404, { error: 'unknown job' });
     console.log(`[relay] ${job.id} finished on ${job.host} (code ${job.result?.code ?? '?'})`);
     return send(res, 200, { ok: true, jobId: job.id });
+  }
+
+  // Live view channel: the worker POSTs one sanitized progress event per
+  // opencode onEvent while the turn runs; the bot-host GETs whatever is new
+  // and fans it out to the TG headline + watch feed + observer log. Small,
+  // additive, and behind the same bearer token as /jobs/result.
+  if (route === 'POST /jobs/event') {
+    const body = await readBody(req);
+    if (!body?.jobId) return send(res, 400, { error: 'jobId is required' });
+    const out = appendJobEvent(body.jobId, body.event || {});
+    if (!out.ok) return send(res, 404, { error: out.reason || 'unknown job' });
+    return send(res, 200, { ok: true, jobId: body.jobId, seq: out.seq });
+  }
+
+  if (route.startsWith('GET /jobs/') && route.endsWith('/events')) {
+    const id = decodeURIComponent(url.pathname.slice('/jobs/'.length, -'/events'.length));
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return send(res, 400, { error: 'bad job id' });
+    const after = Number(url.searchParams.get('after') || 0);
+    return send(res, 200, { ok: true, jobId: id, ...readJobEvents(id, { after }) });
+  }
+
+  if (route === 'POST /jobs/abort') {
+    const body = await readBody(req);
+    if (!body?.jobId) return send(res, 400, { error: 'jobId is required' });
+    const job = abortJob(body.jobId);
+    if (!job) return send(res, 404, { error: 'unknown or finished job' });
+    console.log(`[relay] ${job.id} flagged aborted (TG /abort)`);
+    return send(res, 200, { ok: true, jobId: job.id });
+  }
+
+  if (route.startsWith('GET /jobs/') && route.endsWith('/status')) {
+    const id = decodeURIComponent(url.pathname.slice('/jobs/'.length, -'/status'.length));
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return send(res, 400, { error: 'bad job id' });
+    const job = getJob(id);
+    if (!job) return send(res, 404, { error: 'unknown job' });
+    return send(res, 200, { ok: true, jobId: id, done: Boolean(job.doneAt), aborted: Boolean(job.aborted) });
   }
 
   if (route.startsWith('PUT /packs/')) {

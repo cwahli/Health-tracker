@@ -25,6 +25,7 @@ import {
   ensureTmuxWorkView,
   disableTmuxObserver,
   createObserver,
+  scrubSecrets,
   WORK_VIEW_SESSION,
   workViewTarget,
   repointWorkView,
@@ -653,7 +654,7 @@ export function attemptFailureText(result) {
  * It never falls back to running locally: the caller decides whether to hold
  * the turn (guard 5) rather than silently spending this machine's allowance.
  */
-export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3, packRoot = '', relayToken = process.env.WORKER_RELAY_TOKEN || '' } = {}) {
+export async function runOnWorker({ host, prompt, model, project = '', role = '', workspace = '', sessionId = '', envMode = 'project', timeoutMs = 900000, canary = false, relay = '', preflightFull = false, attempts = 3, packRoot = '', relayToken = process.env.WORKER_RELAY_TOKEN || '', onJob = null, onEvent = null } = {}) {
   // Guard 4: presence → relay → workspace → session, each named, first failure
   // wins, so a bad target is caught before a job exists — not after a worker
   // has claimed it.
@@ -690,6 +691,13 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
   }
   const job = enqueueJob({ host, prompt, model, project, role, workspace, sessionId, envMode, canary, packId });
   console.log(`[${host}] handed ${job.id} to the connected worker${sessionId ? ` (session ${sessionId})` : ''}${canary ? ' (canary)' : ''}`);
+  // Let the caller register the run (abort map) and stream live events (TG
+  // headline + watch feed + observer) while the turn runs elsewhere.
+  if (typeof onJob === 'function') {
+    try { onJob({ jobId: job.id }); } catch {
+      // registration must never break the hand-off
+    }
+  }
   const deadline = Date.now() + timeoutMs;
   const budget = Math.max(1000, Math.ceil(timeoutMs / Math.max(1, attempts)));
   let lastError = `worker ${host} did not answer in time`;
@@ -697,7 +705,12 @@ export async function runOnWorker({ host, prompt, model, project = '', role = ''
   for (let attempt = 1; attempt <= Math.max(1, attempts); attempt++) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    const done = await awaitJob(job.id, { timeoutMs: Math.min(budget, remaining) });
+    const done = await awaitJobWithEventPump(job.id, {
+      timeoutMs: Math.min(budget, remaining),
+      relay,
+      relayToken,
+      ...(typeof onEvent === 'function' ? { onEvent } : {}),
+    });
     if (done?.result) {
       return { ...done.result, remote: true, jobId: job.id, ledger: done.result.ledger || null, attempts: attempt };
     }
@@ -1034,6 +1047,200 @@ function missingCount(rows) {
   return rows.filter((r) => r.inLedger === false).length;
 }
 
+/**
+ * TG-native live work view (replaces tmux tail for the phone).
+ *
+ * Why this exists: tmux `work-view` is host-local — it cannot cross the
+ * VM<->phone relay, needs a terminal to attach, and is invisible from the TG
+ * chat. The event channel (worker POSTs /jobs/event, bot-host GETs
+ * /jobs/<id>/events) carries the same onEvent stream the local run already
+ * fans out to the headline + observer log, so remote turns are no longer a
+ * black box that only delivers final text.
+ *
+ * Three pieces, all additive:
+ * - watch pref per chat (`/watch on|off`): verbose thinking + per-tool feed.
+ *   The throttled headline stays always; the feed is opt-in so a chatty turn
+ *   does not spam a quiet chat.
+ * - formatLiveEvent(): one TG-safe chunk per tool/reasoning/error/step
+ *   event. Secrets are scrubbed (same scrubSecrets as the observer view) and
+ *   input/output are clipped — a tool argument must never leak a token or
+ *   flood the chat. Partial text is skipped: it accumulates into the final
+ *   answer, which is delivered whole, so streaming it too would double-post.
+ * - follow-up queue: a message sent while busy queues (max 5) instead of
+ *   being rejected; the turn loop drains it as new turns on the same
+ *   session. /abort clears the current run; /new clears the queue too.
+ * - /web: opens the phone-hosted opencode web UI (Mini App button) — the
+ *   true terminal equivalent. The cloudflared wrapper publishes its public
+ *   URL to a state file; /web reads it (empty = tunnel down, say so).
+ */
+
+export const MAX_FOLLOWUPS = 5;
+const followupQueues = new Map();
+
+export function watchOn(prefs, chatId) {
+  return prefFor(prefs, chatId)?.watch === true;
+}
+
+export function setWatch(prefs, chatId, on) {
+  setPref(prefs, chatId, { watch: Boolean(on) });
+}
+
+export function queuedFollowups(chatId) {
+  return followupQueues.get(String(chatId)) || [];
+}
+
+export function queueFollowup(chatId, text) {
+  const key = String(chatId);
+  const queue = followupQueues.get(key) || [];
+  if (queue.length >= MAX_FOLLOWUPS) return null;
+  queue.push(String(text));
+  followupQueues.set(key, queue);
+  return queue.length;
+}
+
+export function shiftFollowup(chatId) {
+  const key = String(chatId);
+  const queue = followupQueues.get(key) || [];
+  const next = queue.shift() || null;
+  if (queue.length) followupQueues.set(key, queue);
+  else followupQueues.delete(key);
+  return next;
+}
+
+export function clearFollowups(chatId) {
+  followupQueues.delete(String(chatId));
+}
+
+/** One short TG-safe line per live event. Null = nothing worth posting. */
+export function formatLiveEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  const kind = String(event.kind || '');
+  if (kind === 'tool') {
+    const tool = String(event.tool || 'tool').slice(0, 80);
+    const status = String(event.status || '').slice(0, 40);
+    const input = String(event.input || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    const output = String(event.output || '').replace(/\s+/g, ' ').trim().slice(0, 800);
+    const bits = [status ? `🔧 ${tool} (${status})` : `🔧 ${tool}`];
+    if (input) bits.push(`in: ${input}`);
+    if (output) bits.push(`out: ${output}`);
+    return scrubSecrets(bits.join('\n')).slice(0, 1200);
+  }
+  if (kind === 'reasoning' && String(event.text || '').trim()) {
+    // Full live thinking (the headline only carries the compressed gist).
+    // Capped per event; a long think streams as several 🧠 messages.
+    return scrubSecrets(`🧠 ${String(event.text).replace(/\s+/g, ' ').trim()}`).slice(0, 1500);
+  }
+  if (kind === 'error') {
+    return scrubSecrets(`❌ ${String(event.message || 'error').replace(/\s+/g, ' ').trim().slice(0, 400)}`).slice(0, 900);
+  }
+  if (kind === 'step_finish') {
+    const tokens = Number(event.tokens);
+    return Number.isFinite(tokens) && tokens > 0 ? `▫️ step done — ${tokens} tokens` : null;
+  }
+  // Partial text is skipped on purpose: it accumulates into the final answer,
+  // which is delivered whole at the end — streaming it too would double-post
+  // every reply for watchers.
+  return null;
+}
+
+/** Relay live-channel helpers: same bearer token as the job hand-off. */
+function relayAuthHeaders(token = process.env.WORKER_RELAY_TOKEN || '') {
+  const t = String(token || '');
+  return t ? { authorization: `Bearer ${t}` } : {};
+}
+
+export async function fetchRelayEvents(relay, jobId, after = 0, { token = process.env.WORKER_RELAY_TOKEN || '' } = {}) {
+  try {
+    const res = await fetch(`${relayUrl({ url: relay })}/jobs/${encodeURIComponent(jobId)}/events?after=${Number(after) || 0}`, {
+      headers: relayAuthHeaders(token),
+    });
+    if (!res.ok) return { events: [], nextAfter: Number(after) || 0, done: false, aborted: false };
+    const body = await res.json().catch(() => ({}));
+    return {
+      events: Array.isArray(body?.events) ? body.events : [],
+      nextAfter: Number(body?.nextAfter ?? after) || 0,
+      done: Boolean(body?.done),
+      aborted: Boolean(body?.aborted),
+    };
+  } catch {
+    return { events: [], nextAfter: Number(after) || 0, done: false, aborted: false };
+  }
+}
+
+export async function postRelayAbort(relay, jobId, { token = process.env.WORKER_RELAY_TOKEN || '' } = {}) {
+  try {
+    const res = await fetch(`${relayUrl({ url: relay })}/jobs/abort`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...relayAuthHeaders(token) },
+      body: JSON.stringify({ jobId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * awaitJob plus the live event pump: while the worker runs the turn elsewhere,
+ * poll the relay event channel and fan each new event out through onEvent
+ * (headline + observer + watch feed). Without onEvent this is plain awaitJob —
+ * zero behavior change for callers that do not stream.
+ */
+export async function awaitJobWithEventPump(jobId, { timeoutMs = 600000, pollMs = 1000, relay = '', relayToken = '', onEvent = null } = {}) {
+  if (typeof onEvent !== 'function') return awaitJob(jobId, { timeoutMs, pollMs });
+  const deadline = Date.now() + timeoutMs;
+  let after = 0;
+  for (;;) {
+    const job = getJob(jobId);
+    if (job?.doneAt) return job;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return getJob(jobId)?.doneAt ? getJob(jobId) : null;
+    const feed = await fetchRelayEvents(relay, jobId, after, { token: relayToken });
+    after = feed.nextAfter;
+    for (const ev of feed.events) {
+      try { await onEvent(ev); } catch {
+        // a renderer hiccup must never break the wait
+      }
+    }
+    const recheck = getJob(jobId);
+    if (recheck?.doneAt) return recheck;
+    await new Promise((r) => setTimeout(r, Math.min(1500, remaining)));
+  }
+}
+
+/**
+ * Post one verbose feed line when /watch is on. Best-effort: a feed hiccup
+ * must never break the turn. Uses chunkForTelegram so a long tool argument
+ * splits exactly like a final answer does.
+ */
+export async function postLiveFeed(api, chatId, event) {
+  const line = formatLiveEvent(event);
+  if (!line) return;
+  try {
+    for (const p of chunkForTelegram(line)) {
+      await api.sendMessage(chatId, p.text, p.extra);
+    }
+  } catch {
+    // feed failures stay silent; the headline + final answer carry the turn
+  }
+}
+
+/** Phone-hosted opencode web UI (Mini App test): the cloudflared wrapper
+ * publishes the current public URL here; /web reads it into a web_app
+ * button. Empty = the tunnel is down (it restarts itself; say so). */
+export function miniappUrlFile() {
+  return process.env.MINIAPP_URL_FILE || '/data/data/com.termux/files/home/.phone-miniapp-url';
+}
+
+export function readMiniappUrl(file = miniappUrlFile()) {
+  try {
+    const url = String(fs.readFileSync(file, 'utf8')).trim();
+    return /^https:\/\/[A-Za-z0-9.-]+(\/.*)?$/.test(url) ? url : '';
+  } catch {
+    return '';
+  }
+}
+
 export class ProgressRenderer {
   constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
     this.api = api;
@@ -1093,6 +1300,32 @@ export class ProgressRenderer {
     }
     this.startedAt = Date.now();
     this._startTyping();
+  }
+
+  /**
+   * Post the headline immediately (status: starting) instead of waiting for
+   * the model's first thinking/tool event. A slow lane can take a minute to
+   * emit anything, and until then the chat stares at bare typing with no
+   * proof the turn started. Call after setHeadline so the first paint already
+   * names the right provider + model. Never throws — a failed create just
+   * falls back to the old lazy path (first event creates it).
+   */
+  async announce() {
+    if (this.dryRun || this.messageId != null || this.creating || Date.now() < this.createRetryAt) return;
+    this.creating = true;
+    try {
+      const result = await this._guarded(() => this.api.sendMessage(this.chatId, this._render()));
+      if (result?.message_id != null) {
+        this.messageId = result.message_id;
+        if (typeof this.onMessageId === 'function') {
+          try { this.onMessageId(this.messageId); } catch {}
+        }
+      } else {
+        this.createRetryAt = Date.now() + 5000;
+      }
+    } finally {
+      this.creating = false;
+    }
   }
 
   _startTyping() {
@@ -1668,6 +1901,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     case 'new':
       sessions.delete(chatId);
       saveSessions(config.id, sessions);
+      clearFollowups(chatId);
       await api.sendMessage(chatId, 'Started a fresh session.');
       return;
 
@@ -2013,11 +2247,47 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           }
         }, 3000);
       } catch {
-        // already gone
+        // already gone (remote turns have no local child — the relay flag below does it)
+      }
+      // Remote turn: the worker polls the aborted flag and SIGKILLs its own
+      // opencode child. Fire-and-forget — the worker's own poll is the kill.
+      if (active.jobId) {
+        postRelayAbort(active.relay || '', active.jobId).catch(() => {});
       }
       await api.sendMessage(chatId, 'Aborting the running request...');
       const workId = sessionKey({ location: workLocation(), chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
       abortSession(workId, { transcriptRef: sessions.get(chatId) || null });
+      return;
+    }
+
+    case 'watch': {
+      const sub = String(cmd.args || '').trim().toLowerCase();
+      if (sub === 'on') {
+        setWatch(prefs, chatId, true);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '👁 Live feed ON — thinking (🧠) + every tool call (🔧 with in/out) post here while a turn runs. /watch off to mute.');
+        return;
+      }
+      if (sub === 'off') {
+        setWatch(prefs, chatId, false);
+        savePrefs(config.id, prefs);
+        await api.sendMessage(chatId, '👁 Live tool feed OFF — the working headline still updates. /watch on to re-enable.');
+        return;
+      }
+      const on = watchOn(prefs, chatId);
+      await api.sendMessage(chatId, `👁 Live tool feed is ${on ? 'ON' : 'OFF'}. Usage: /watch on|off — thinking + per-tool lines in this chat while a turn runs (the working headline always updates).`);
+      return;
+    }
+
+    case 'web': {
+      const miniUrl = readMiniappUrl();
+      if (!miniUrl) {
+        await api.sendMessage(chatId, '🖥 Web terminal is offline — the phone tunnel is down. It restarts itself; try /web again in a minute.');
+        return;
+      }
+      await api.sendMessage(chatId, '🖥 Live opencode web terminal (phone-hosted, password-gated) — full session view with input box, same workspace the bot runs in.', {
+        reply_markup: { inline_keyboard: [[{ text: '🖥 Open opencode web', web_app: { url: miniUrl } }]] },
+      });
       return;
     }
 
@@ -2297,7 +2567,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
   }
 }
 
-async function handleCallback({ api, config, prefs, caches, query }) {
+async function handleCallback({ api, config, prefs, caches, running = null, query }) {
   const chatId = query.message?.chat?.id;
   const messageId = query.message?.message_id;
   const userId = Number(query.from?.id);
@@ -2473,6 +2743,39 @@ async function handleCallback({ api, config, prefs, caches, query }) {
         reply_markup: CLEAR_KEYBOARD,
       });
       await api.answerCallbackQuery(query.id, { text: variant });
+      return;
+    }
+    // Live-view controls (sent with every turn's control line): Abort kills
+    // the run exactly like /abort; Watch toggles the per-tool feed.
+    if (kind === 'abort') {
+      const active = running?.get(chatId);
+      if (!active) {
+        await api.answerCallbackQuery(query.id, { text: 'Nothing is running' });
+        return;
+      }
+      active.aborted = true;
+      await abortOpencodeSession({ serverUrl: active.serverUrl, sessionId: active.opencodeSessionId }).catch(() => false);
+      try {
+        active.child.kill('SIGTERM');
+        setTimeout(() => {
+          try { active.child.kill('SIGKILL'); } catch {}
+        }, 3000);
+      } catch {
+        // remote turns have no local child — the relay flag below does it
+      }
+      if (active.jobId) postRelayAbort(active.relay || '', active.jobId).catch(() => {});
+      await api.answerCallbackQuery(query.id, { text: 'Aborting…' });
+      await api.sendMessage(chatId, 'Aborting the running request...').catch(() => {});
+      return;
+    }
+    if (kind === 'watch') {
+      const on = String(value || '').toLowerCase() === 'on';
+      setWatch(prefs, chatId, on);
+      savePrefs(config.id, prefs);
+      await api.answerCallbackQuery(query.id, { text: on ? 'Tool feed on' : 'Tool feed off' });
+      await api.editMessageText(chatId, messageId, `👁 Live tool feed ${on ? 'ON' : 'OFF'} — ${on ? 'thinking + every tool call post here while a turn runs.' : 'muted; the working headline still updates.'}`, {
+        reply_markup: CLEAR_KEYBOARD,
+      }).catch(() => {});
       return;
     }
     await api.answerCallbackQuery(query.id);
@@ -2695,7 +2998,7 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
   return result;
 }
 
-async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message }) {
+async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
   const chatId = message.chat.id;
   const userId = Number(message.from?.id);
   if (!config.telegram.allowedUserIds.includes(userId)) {
@@ -2713,7 +3016,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   }
 
   if (busy.has(chatId)) {
-    await api.sendMessage(chatId, 'Still working on the previous request. Send /abort to cancel or /new to reset.');
+    // Direct phone interaction: a message sent mid-run queues as a follow-up
+    // turn instead of being rejected. Commands still run (handled above), so
+    // /abort cancels the current run while the queue stays queued.
+    if (hasMedia) {
+      await api.sendMessage(chatId, 'Still working — photos/files cannot queue, please resend them when this turn finishes (/abort to cancel it).');
+      return;
+    }
+    if (!text) return;
+    const pos = queueFollowup(chatId, text);
+    if (pos == null) {
+      await api.sendMessage(chatId, `Follow-up queue is full (${MAX_FOLLOWUPS}). Send /abort to cancel the current run, or wait.`);
+      return;
+    }
+    await api.sendMessage(chatId, `⏳ Queued as follow-up #${pos} — runs when the current turn finishes. Send /abort to cancel the current run (the queue stays).`);
     return;
   }
 
@@ -2780,6 +3096,24 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       providerLabel: providerLabelForModel(eff.model),
       modelLabel: eff.model || '',
     });
+    // Paint the headline now (starting… 0s) so the chat sees the turn begin
+    // at once; the old lazy path left only bare typing until the first
+    // model event, which on a slow lane looks stuck.
+    await renderer.announce().catch(() => {});
+    // Phone controls for the run: Abort kills it like /abort, Watch toggles
+    // the per-tool feed. Best-effort and stateless — taps after the run ends
+    // just answer what is true then ("nothing running" / pref flip).
+    {
+      const watchNow = watchOn(prefs, chatId);
+      await api.sendMessage(chatId, `🎛 Run controls — ⏹ aborts this turn, 👁 toggles the per-tool feed (now ${watchNow ? 'ON' : 'OFF'}).`, {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '⏹ Abort', callback_data: 'abort' },
+            { text: watchNow ? '👁 Watch off' : '👁 Watch on', callback_data: watchNow ? 'watch:off' : 'watch:on' },
+          ]],
+        },
+      }).catch(() => {});
+    }
     const handoff = prefFor(prefs, chatId).handoff || '';
     const quotedPrompt = buildQuotedPrompt(text, message.reply_to_message);
     const basePrompt = handoff ? `Prior session brief:\n${handoff}\n\nNew request:\n${quotedPrompt}` : quotedPrompt;
@@ -2870,7 +3204,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     if (workSession.viewMode !== 'tui' && sessions.get(chatId)) extraArgs.push('--session', sessions.get(chatId));
     try { observer = createObserver(workSession); } catch {}
     observerContext = { model: eff.model, attempt: 1, surface: ref.surface, provider: ref.surface };
-    const onObserverEvent = (event) => fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+    // Local fanout: headline + observer log always; thinking + per-tool TG
+    // feed only when /watch is on for this chat. The feed is fire-and-forget
+    // — a send hiccup must never break the run.
+    const onObserverEvent = (event) => {
+      fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+      if (watchOn(prefs, chatId)) postLiveFeed(api, chatId, event).catch(() => {});
+    };
     let lastAttemptModel = eff.model;
     const runSurfaceModel = (model) => {
       const candidate = parseModelRef(model);
@@ -2989,6 +3329,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         return;
       }
       const wantCanary = route !== 'active';
+      // Remote live view: the worker streams its onEvent records to the relay
+      // while the turn runs there. Fan each one through the same local
+      // fanout (headline + observer log) plus the watch feed when enabled —
+      // a remote turn looks exactly like a local one in this chat.
+      // Register the run first so /abort (and the Abort button) reaches it
+      // via the relay flag; the entry is cleared in the finally block.
+      const onRemoteEvent = (event) => {
+        if (running.get(chatId)?.aborted) return;
+        fanoutProgressEvent({ renderer, observer, event, context: observerContext });
+        if (watchOn(prefs, chatId)) postLiveFeed(api, chatId, event).catch(() => {});
+      };
+      if (observer) observer.write('run_start', {}, observerContext);
       const handed = await runOnWorker({
         host: location,
         prompt: finalPrompt,
@@ -3001,7 +3353,14 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         canary: wantCanary,
         preflightFull: wantCanary,
         packRoot: wantCanary ? effectiveWorkspace : '',
+        onJob: ({ jobId }) => running.set(chatId, { child: null, aborted: false, jobId, relay: '' }),
+        onEvent: onRemoteEvent,
       });
+      observerTerminalWritten = true;
+      if (observer) {
+        const wasAborted = Boolean(running.get(chatId)?.aborted);
+        observer.write(wasAborted ? 'aborted' : handed?.text ? 'run_complete' : 'failed', handed || {}, observerContext);
+      }
       if (handed?.preflight) {
         setBlockedLocation(chatId, location, `${handed.preflight.failed}: ${handed.preflight.reason}`);
         await api.sendMessage(
@@ -3198,6 +3557,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // spool depth, and the turn above already reached the chat.
       console.error(`[store] turn not recorded: ${String(err && err.message ? err.message : err).slice(0, 160)}`);
     }
+    // Drain one queued follow-up as its own turn (depth-guarded; the queue
+    // itself is capped at MAX_FOLLOWUPS). busy is free again, so the recursive
+    // call runs the full turn path — headline, feed, failover, finish — and
+    // records its own turn in the store above.
+    if (depth < MAX_FOLLOWUPS) {
+      const next = shiftFollowup(chatId);
+      if (next) {
+        await api.sendMessage(chatId, `▶️ Running queued follow-up (${queuedFollowups(chatId).length} left in queue)…`).catch(() => {});
+        await handleMessage({
+          api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy,
+          message: { ...message, text: next, caption: undefined },
+          depth: depth + 1,
+        });
+      }
+    }
   }
 }
 
@@ -3256,7 +3630,7 @@ async function runLoop({ api, config }) {
       saveOffset(config.id, offset);
       if (update.callback_query) {
         track(
-          handleCallback({ api, config, prefs, caches, query: update.callback_query }).catch((err) => {
+          handleCallback({ api, config, prefs, caches, running, query: update.callback_query }).catch((err) => {
             console.error(`[${config.id}] callback handler error: ${err.message}`);
           }),
         );
