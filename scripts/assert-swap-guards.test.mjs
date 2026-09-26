@@ -177,11 +177,17 @@ try {
   check('runOnWorker preflights before it enqueues', workerFn.indexOf('preflightWorkerTurn(') !== -1 && workerFn.indexOf('preflightWorkerTurn(') < workerFn.indexOf('enqueueJob('));
   check('runOnWorker never returns null (no silent local fallback)', !/return null;/.test(workerFn));
   check('runOnWorker may requeue the same job id', /requeueJob\(job\.id/.test(workerFn) && /await new Promise\(\(r\) => setTimeout\(r, retryDelayMs\(attempt\)\)\)/.test(workerFn));
-  const turnPath = bot.slice(bot.indexOf('// A location that names another machine'), bot.indexOf('const result = await runOpencodeWithFailover'));
-  check('an unreachable host holds the turn instead of running it here', /if \(!remoteStatus\.reachable\)/.test(turnPath) && /setBlockedLocation\(chatId, location/.test(turnPath));
-  check('a route left failed holds the turn too', /route === 'failed'/.test(turnPath));
-  check('the first turn on a host is a canary', /const wantCanary = route !== 'active'/.test(turnPath));
+  // QS-9: the remote path lives in runRemoteTurn now (shared by the primary
+  // path and the auto-continue chain), so the slice starts at the helper.
+  const turnPath = bot.slice(bot.indexOf('const runRemoteTurn = async'), bot.indexOf('const result = await runOpencodeWithFailover'));
+  check('an unreachable host holds the turn instead of running it here', /if \(!remoteStatus\.reachable\)/.test(turnPath) && /setBlockedLocation\(chatId, host/.test(turnPath));
+  check('a route left failed holds the turn too', /routeState\(host\) === 'failed'/.test(turnPath));
+  check('the first turn on a host is a canary', /wantCanary/.test(turnPath) && /routeState\(host\) !== 'active'/.test(bot));
   check('the canary is settled before the session row changes', turnPath.indexOf('settleCanary(') !== -1 && turnPath.indexOf('settleCanary(') < turnPath.indexOf('sessions.set(chatId, handed.sessionID)'));
+  check('a dry worker comes back unanswered for the chain, not delivered',
+    /dry: true/.test(turnPath) && /isQuotaOrLimitError\(String\(handed\.error/.test(turnPath));
+  check('the exhausted branch and the dry path both walk the chain',
+    (bot.match(/continueTurnOnNextWorker\(\{/g) || []).length >= 2);
   const settleAt = bot.indexOf('export function settleCanary');
   const settleFn = bot.slice(settleAt, settleAt + 1400);
   check('settleCanary validates before it confirms or rolls back', settleAt !== -1 && settleFn.indexOf('validateCanaryResult(') < settleFn.indexOf('confirmRoute('));

@@ -1401,6 +1401,56 @@ export function settleCanary({ host, result = {}, sessionId = '', jobId = '', ho
 }
 
 /**
+ * QS-9: when the chat's host is dry, the same turn continues on the next
+ * connected host with quota — no manual /location, no dropped turn, every hop
+ * named. `runTurn(host)` performs one remote turn and reports
+ * `{ done, handed }`: done means the answer went out (or the hop held), and a
+ * hop is only walked past when it ran dry — empty text with a quota signal.
+ * A visited set keeps one bad evening from looping the fleet; when every
+ * reachable host is dry the turn stops with 'no location has quota' and no
+ * failed lane is ever called twice.
+ */
+export async function continueTurnOnNextWorker({ fromHost = '', tried = [], prefer = '', runTurn, statusOf = null } = {}) {
+  const hops = [];
+  const seen = new Set([String(fromHost || '').toLowerCase(), ...(tried || []).map((h) => String(h || '').toLowerCase())]);
+  const candidates = (KNOWN_HOSTS || []).filter(
+    (h) => !seen.has(String(h || '').toLowerCase()) && !isLocalHost(h),
+  );
+  // The requested host goes first when it has not been proven dry: the
+  // exhausted branch fires on the local ledger, which says nothing about a
+  // remote host's allowance.
+  const want = String(prefer || '').toLowerCase();
+  candidates.sort((a, b) => (String(b).toLowerCase() === want ? 1 : 0) - (String(a).toLowerCase() === want ? 1 : 0));
+  const reachable = [];
+  for (const host of candidates) {
+    let status = null;
+    try {
+      status = statusOf ? await statusOf(host) : workerStatus(host);
+    } catch {
+      status = null;
+    }
+    if (status && status.reachable) reachable.push(host);
+    else hops.push({ host, ok: false, reason: 'unreachable, skipped' });
+  }
+  for (const host of reachable) {
+    seen.add(String(host).toLowerCase());
+    let out = null;
+    try {
+      out = await runTurn(host);
+    } catch (err) {
+      hops.push({ host, ok: false, reason: String(err?.message || err).slice(0, 200) });
+      continue;
+    }
+    if (out && out.done) {
+      hops.push({ host, ok: true });
+      return { ok: true, host, hops, handed: out.handed || null };
+    }
+    hops.push({ host, ok: false, reason: 'dry' });
+  }
+  return { ok: false, reason: 'no location has quota', hops };
+}
+
+/**
  * The view follows the conversation. The record names the thread that ran;
  * when it names a different one than the pane was built for, the command is
  * rebuilt and the pane is re-pointed in place — same `work-view` session, same
@@ -2407,12 +2457,31 @@ export function fanoutProgressEvent({ renderer, observer, event, context = {} })
   try { observer?.onEvent(event, context); } catch {}
 }
 
+/**
+ * Flag line for a turn that died mid-answer on one lane and completed on
+ * another (QS-11). The partial answer is delivered, never dropped, and the
+ * flag names the dead lane plus where the completion came from.
+ */
+export function midstreamFlagText({ partialText = '', deadLanes = [], continuedOn = '' } = {}) {
+  const dead = [...new Set((deadLanes || []).map(String).filter(Boolean))].join(', ') || 'a lane';
+  const head = String(partialText || '').trim();
+  const tail = continuedOn ? `continued on \`${continuedOn}\` below` : 'no lane completed the answer';
+  return `${head}${head ? '\n\n' : ''}⚠️ \`${dead}\` hit the free limit mid-answer — ${tail}.`;
+}
+
 export async function runOpencodeWithFailover({ api, config, chatId, prompt, models, runModel = null, onSwitchNotify, onAttemptStart, onAttemptComplete, isAborted = () => false, onCooldown = null, ...runArgs }) {
   let attempt = 0;
+  // QS-11: partial answers from lanes that die mid-stream, in order. The chain
+  // below empties each dead lane's text so failover continues; the pieces are
+  // reattached to the final result for the flag line.
+  const partialTexts = [];
+  const midstreamDead = [];
+  let lastModel = '';
   const { result } = await runWithModelFailover({
     models,
     makeRun: async (model) => {
       attempt += 1;
+      lastModel = model;
       if (typeof onAttemptStart === 'function') {
         try { onAttemptStart({ model, attempt }); } catch {}
       }
@@ -2423,6 +2492,19 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
       // opencode fallback and back). Without it every candidate runs through
       // the OpenCode CLI, exactly as before.
       let attemptResult = await runOnce();
+      // QS-11: the model answered, then died with a quota signal mid-stream.
+      // Treating the partial text as success would strand the rest of the
+      // answer AND skip the ledger stamp (both key off empty text). Empty it
+      // so the chain continues; the piece is kept above for the flag line.
+      // The emptied result still flows through the normal stamp + dead-end
+      // paths below, so a mid-stream death is recorded exactly once.
+      const partialText = String(attemptResult?.finalText || '').trim();
+      const partialErr = attemptFailureText(attemptResult);
+      if (partialText && isQuotaOrLimitError(partialErr) && !isAborted()) {
+        partialTexts.push(partialText);
+        midstreamDead.push(model);
+        attemptResult = { ...attemptResult, finalText: '' };
+      }
       // One retry, and only for a transport failure. A quota answer is final
       // for that lane and the ledger stamp already says so. Two ECONNREFUSEDs
       // in a row is not a blip, so the lane gets a short cooldown and the walk
@@ -2480,6 +2562,11 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
       }
     },
   });
+  if (partialTexts.length && result && typeof result === 'object') {
+    result._partialText = partialTexts.join('\n\n');
+    result._midstreamQuota = [...new Set(midstreamDead)];
+    result._continuedOn = String(result?.finalText || '').trim() ? lastModel : '';
+  }
   return result;
 }
 
@@ -2681,63 +2768,33 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       });
     };
 
-    // The ledger picks the walk. A lane it already stamped is not retried, an
-    // ended lane is never offered, and a terminal-only row is never chosen.
-    const laneChoice = selectTurnLanes({
-      botId: config.id,
-      model: eff.model,
-      fallback: config.agent.model,
-    });
-    if (laneChoice.exhausted) {
-      const when = laneChoice.soonest?.label ? ` Soonest reset: ${laneChoice.soonest.label}.` : '';
-      await api.sendMessage(
-        chatId,
-        `🛑 No lane on ${location} has allowance right now.${when}\nNothing was run and nothing was spent. Send \`/allowance\` for the ledger.`
-      ).catch(() => {});
-      return;
-    }
-    if (laneChoice.displaced) {
-      const why = laneChoice.displaced.resetLabel
-        ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
-        : laneChoice.displaced.why;
-      console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
-      // A coding turn that can only be served by a light model is said out loud.
-      // Silently answering with a weaker model is how a coding task starts failing
-      // in ways nobody notices until the code is wrong.
-      if (laneChoice.degradedToLight) {
-        console.log(`[${config.id}] no coding lane left; degraded to a light model (${laneChoice.chose})`);
-        await api.sendMessage(
-          chatId,
-          `⚠️ \`${eff.model}\` is ${laneChoice.displaced.why}, and no coding lane is free right now — this turn runs on the light model \`${laneChoice.chose}\`. Code may be weaker than usual.`
-        ).catch(() => {});
-      }
-    }
-    // A location that names another machine runs there, on that machine's
-    // allowance. This VM does not stamp for it.
-    const remoteStatus = workerStatus(location);
-    if (!isLocalHost(location)) {
-      const route = routeState(location);
-      // Guard 5: hold, never fall through to this machine. A held turn is
-      // recorded so the user sees why nothing ran, and no allowance is spent.
+    // One remote turn, shared by the primary path below and the QS-9
+    // auto-continue chain above it: holds and failed canaries finish here
+    // (messaging unless quiet); a delivered answer finishes here; a dry worker
+    // (empty text, quota signal) comes back unanswered so the chain can walk
+    // on. Returns { done, dry, handed }.
+    const runRemoteTurn = async (host, { wantCanary, quiet = false, hopFrom = '' } = {}) => {
+      const say = async (text) => {
+        if (!quiet) await api.sendMessage(chatId, text).catch(() => {});
+      };
+      const foot = `host: ${host}${wantCanary ? ' (canary)' : ''}${hopFrom ? ` (continued from ${hopFrom})` : ''}`;
+      const remoteStatus = workerStatus(host);
       if (!remoteStatus.reachable) {
-        setBlockedLocation(chatId, location, remoteStatus.reason);
-        await api.sendMessage(
-          chatId,
-          `⏸ *Held:* \`${location}\` is unreachable (${remoteStatus.reason}).\nNothing ran and no allowance was sent. Send \`/location vps\` to run here, or wait for the ${location} worker to connect.`
+        setBlockedLocation(chatId, host, remoteStatus.reason);
+        await say(
+          `⏸ *Held:* \`${host}\` is unreachable (${remoteStatus.reason}).\nNothing ran and no allowance was sent. Send \`/location vps\` to run here, or wait for the ${host} worker to connect.`
         );
-        return;
+        return { done: true, held: true, handed: null };
       }
-      if (route === 'failed') {
-        const row = routeFor(location);
-        await api.sendMessage(
-          chatId,
-          `⏸ *Held:* the route to \`${location}\` was rolled back after a failed canary (${row?.failedReason || 'unknown reason'}).\nNothing ran here either. Send \`/location ${location}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
+      if (wantCanary && routeState(host) === 'failed') {
+        const row = routeFor(host);
+        await say(
+          `⏸ *Held:* the route to \`${host}\` was rolled back after a failed canary (${row?.failedReason || 'unknown reason'}).\nNothing ran here either. Send \`/location ${host}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
         );
-        return;
+        return { done: true, held: true, handed: null };
       }
-      const wantCanary = route !== 'active';
       const handed = await runOnWorker({
-        host: location,
+        host,
         prompt: finalPrompt,
         model: eff.model,
         project: isExternalTurn ? activeProject.id : 'health-tracker',
@@ -2750,28 +2807,26 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         packRoot: wantCanary ? effectiveWorkspace : '',
       });
       if (handed?.preflight) {
-        setBlockedLocation(chatId, location, `${handed.preflight.failed}: ${handed.preflight.reason}`);
-        await api.sendMessage(
-          chatId,
-          `⏸ *Held:* preflight failed for \`${location}\` — \`${handed.preflight.failed}\`: ${handed.preflight.reason}\n${preflightSummary(handed.preflight.checks)}\nNothing ran and no allowance was sent.`
+        setBlockedLocation(chatId, host, `${handed.preflight.failed}: ${handed.preflight.reason}`);
+        await say(
+          `⏸ *Held:* preflight failed for \`${host}\` — \`${handed.preflight.failed}\`: ${handed.preflight.reason}\n${preflightSummary(handed.preflight.checks)}\nNothing ran and no allowance was sent.`
         );
-        return;
+        return { done: true, held: true, handed };
       }
       if (wantCanary) {
         // Guard 6: one turn decides whether the route becomes active. The
         // session row is never touched until it passes, so a bad canary costs
         // nothing but the canary. settleCanary is the same function the swap
         // drill runs, so what is proven there is what happens here.
-        const settled = settleCanary({ host: location, result: handed, sessionId: sessions.get(chatId) || '', jobId: handed.jobId || '' });
+        const settled = settleCanary({ host, result: handed, sessionId: sessions.get(chatId) || '', jobId: handed.jobId || '' });
         if (!settled.ok) {
           const back = settled.route?.previous || 'vps';
-          await api.sendMessage(
-            chatId,
-            `⚠️ *Canary failed on \`${location}\`:* ${settled.reason}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
+          await say(
+            `⚠️ *Canary failed on \`${host}\`:* ${settled.reason}\nRoute rolled back to \`${back}\`; the conversation row was left untouched.${handed.text ? `\n\n${handed.text}` : ''}`
           );
-          return;
+          return { done: true, held: true, handed };
         }
-        console.log(`[${config.id}] canary passed on ${location} (job ${handed.jobId}); route active`);
+        console.log(`[${config.id}] canary passed on ${host} (job ${handed.jobId}); route active`);
       }
       // The thread id the worker ran is now ours too, so the next turn —
       // here or there — resumes the same conversation.
@@ -2796,10 +2851,89 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
           }
         }
       }
-      console.log(`[${config.id}] turn ran on ${location} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
+      // QS-9: a worker that answers empty-handed with a quota signal is dry,
+      // not done — the chain walks on instead of delivering an empty answer.
+      if (!String(handed.text || '').trim() && isQuotaOrLimitError(String(handed.error || ''))) {
+        console.log(`[${config.id}] turn on ${host} came back dry (quota); trying the next host`);
+        return { done: false, dry: true, handed };
+      }
+      console.log(`[${config.id}] turn ran on ${host} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
       await renderer.finish(
         { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
-        { footer: `host: ${location}${wantCanary ? ' (canary)' : ''}` }
+        { footer: foot }
+      ).catch(() => {});
+      return { done: true, handed };
+    };
+    // The ledger picks the walk. A lane it already stamped is not retried, an
+    // ended lane is never offered, and a terminal-only row is never chosen.
+    const laneChoice = selectTurnLanes({
+      botId: config.id,
+      model: eff.model,
+      fallback: config.agent.model,
+    });
+    if (laneChoice.exhausted) {
+      // QS-9: the local ledger is empty, but that verdict only covers this
+      // machine — a remote host may still serve the turn. Proven-dry hosts
+      // stay out; the requested remote host is tried first (its allowance is
+      // unknown, not empty).
+      const remote = !isLocalHost(location);
+      const cont = await continueTurnOnNextWorker({
+        fromHost: location,
+        tried: remote ? [] : [location],
+        prefer: remote ? location : '',
+        runTurn: (host) => runRemoteTurn(host, {
+          wantCanary: routeState(host) !== 'active',
+          quiet: true,
+          hopFrom: location,
+        }),
+      });
+      if (cont.ok) return;
+      const when = laneChoice.soonest?.label ? ` Soonest reset: ${laneChoice.soonest.label}.` : '';
+      const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => h.host).join(', ')} — no location has quota.` : '';
+      await api.sendMessage(
+        chatId,
+        `🛑 No lane on ${location} has allowance right now.${when}${tried}\nNothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
+      ).catch(() => {});
+      return;
+    }
+    if (laneChoice.displaced) {
+      const why = laneChoice.displaced.resetLabel
+        ? `${laneChoice.displaced.why} until ${laneChoice.displaced.resetLabel}`
+        : laneChoice.displaced.why;
+      console.log(`[${config.id}] lane ${eff.model} not selectable (${why}); using ${laneChoice.chose}`);
+      // A coding turn that can only be served by a light model is said out loud.
+      // Silently answering with a weaker model is how a coding task starts failing
+      // in ways nobody notices until the code is wrong.
+      if (laneChoice.degradedToLight) {
+        console.log(`[${config.id}] no coding lane left; degraded to a light model (${laneChoice.chose})`);
+        await api.sendMessage(
+          chatId,
+          `⚠️ \`${eff.model}\` is ${laneChoice.displaced.why}, and no coding lane is free right now — this turn runs on the light model \`${laneChoice.chose}\`. Code may be weaker than usual.`
+        ).catch(() => {});
+      }
+    }
+    // A location that names another machine runs there, on that machine's
+    // allowance. This VM does not stamp for it. runRemoteTurn (above) performs
+    // one remote turn for the primary path and the QS-9 chain.
+    if (!isLocalHost(location)) {
+      const hop0 = await runRemoteTurn(location, { wantCanary: routeState(location) !== 'active' });
+      if (hop0.done) return;
+      // QS-9: the chat's host is dry — same turn, next connected host with
+      // quota. No manual /location, no dropped turn, every hop named.
+      const cont = await continueTurnOnNextWorker({
+        fromHost: location,
+        tried: [location],
+        runTurn: (host) => runRemoteTurn(host, {
+          wantCanary: routeState(host) !== 'active',
+          quiet: true,
+          hopFrom: location,
+        }),
+      });
+      if (cont.ok) return;
+      const tried = cont.hops.length ? ` Tried ${cont.hops.map((h) => h.host).join(', ')} — ` : ' ';
+      await api.sendMessage(
+        chatId,
+        `🛑 No lane on \`${location}\` has allowance right now,${tried}no location has quota. Nothing further was run and nothing was spent. Send \`/allowance\` for the ledger.`
       ).catch(() => {});
       return;
     }
@@ -2900,6 +3034,19 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         delete kept.handoff;
         setPref(prefs, chatId, kept);
         savePrefs(config.id, prefs);
+      }
+      // QS-11: a turn that died mid-answer arrives with its pieces attached.
+      // The partial answer is delivered first, then the flag, then whatever
+      // the next lane completed — never a silent truncation.
+      if (result?._partialText) {
+        displayResult = {
+          ...displayResult,
+          finalText: midstreamFlagText({
+            partialText: result._partialText,
+            deadLanes: result._midstreamQuota || [],
+            continuedOn: result._continuedOn || '',
+          }) + (String(displayResult?.finalText || '').trim() ? `\n\n${displayResult.finalText}` : ''),
+        };
       }
       await renderer.finish(displayResult, { footer: usageText });
     }
