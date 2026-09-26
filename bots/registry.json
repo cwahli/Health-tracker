@@ -238,6 +238,80 @@
       "agent": {
         "kind": "hermes"
       }
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode Bot",
+      "runtime": "bot-host",
+      "enabled": true,
+      "telegram": {
+        "tokenEnv": "OPENCODE_BOT_TOKEN",
+        "allowedUserIds": [
+          6218257274
+        ]
+      },
+      "agent": {
+        "kind": "opencode",
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free",
+        "defaultAgent": "build",
+        "workspace": "/home/ubuntu/src/Health-tracker",
+        "timeoutMs": 900000,
+        "thinking": true,
+        "allowExternalDirectory": true,
+        "playwrightOutputDir": "/tmp/bot-host-shots-opencode",
+        "sharedSkills": [
+          ".agents/skills",
+          "/home/ubuntu/bot-host/scripts/skills/common"
+        ]
+      },
+      "progress": {
+        "mode": "concise",
+        "editIntervalMs": 2500,
+        "maxEdits": 40,
+        "maxChars": 220
+      },
+      "session": {
+        "mode": "per-chat"
+      }
+    },
+    {
+      "id": "android",
+      "name": "Android Bot",
+      "runtime": "bot-host",
+      "enabled": true,
+      "telegram": {
+        "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN",
+        "allowedUserIds": [
+          6218257274
+        ]
+      },
+      "agent": {
+        "kind": "opencode",
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free",
+        "defaultAgent": "build",
+        "workspace": "/home/ubuntu/src/Health-tracker",
+        "timeoutMs": 900000,
+        "thinking": true,
+        "allowExternalDirectory": true,
+        "playwrightOutputDir": "/tmp/bot-host-shots-android",
+        "sharedSkills": [
+          ".agents/skills",
+          "/home/ubuntu/bot-host/scripts/skills/common"
+        ]
+      },
+      "progress": {
+        "mode": "concise",
+        "editIntervalMs": 2500,
+        "maxEdits": 40,
+        "maxChars": 220
+      },
+      "session": {
+        "mode": "per-chat"
+      }
     }
   ]
 }
