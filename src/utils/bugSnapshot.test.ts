@@ -18,6 +18,7 @@ import {
   bugShotContentType,
   bugShotName,
   buildBugEvidenceText,
+  originFromHeaders,
   BUG_SNAPSHOT_MAX_SHOTS,
 } from './bugSnapshot';
 
@@ -207,6 +208,48 @@ describe('bugSnapshot', () => {
     expect(text).toContain('/api/bugs/tag-1/artifacts?');
     expect(text).toContain('shot-01.jpg');
     expect(text).not.toMatch(/https?:\/\/[^\s]*r2\.dev\/bugs\//);
+  });
+
+  it('absolutises screenshot URLs when given an origin — a chat cannot resolve /api', () => {
+    // Regression shape from #303: the text packet printed a relative
+    // /api/bugs/... path, which is dead text in Telegram /resume and unusable
+    // from any other host. Relative stays the default so the in-app browser
+    // rendering is unchanged.
+    const rel = buildBugEvidenceText({ tagId: 'tag-1', reports: [{ id: 'iss-9', reportId: 'iss-9', shot_count: 1 }] });
+    expect(rel).toContain('/api/bugs/tag-1/artifacts?');
+    expect(rel).not.toMatch(/shot 1: https?:\/\//);
+
+    const abs = buildBugEvidenceText({
+      tagId: 'tag-1',
+      reports: [{ id: 'iss-9', reportId: 'iss-9', shot_count: 1 }],
+      origin: 'https://health-tracking.duckdns.org',
+    });
+    expect(abs).toContain('https://health-tracking.duckdns.org/api/bugs/tag-1/artifacts?');
+    expect(abs).toMatch(/shot 1: https:\/\/[^\s]+\/api\/bugs\//);
+  });
+
+  it('tolerates a trailing slash or blank origin without doubling it up', () => {
+    for (const origin of ['https://h.example/', 'https://h.example', '', null, undefined]) {
+      const t = buildBugEvidenceText({
+        tagId: 't',
+        reports: [{ id: 'i', reportId: 'i', shot_count: 1 }],
+        origin: origin as any,
+      });
+      expect(t).not.toContain('//api');
+      expect(t).toContain('/api/bugs/t/artifacts?');
+    }
+  });
+
+  it('derives the link origin from the request, honouring the tunnel proxy', () => {
+    // The deploy sits behind a cloudflared tunnel, so req.protocol alone reports
+    // http and would hand out http links behind https. x-forwarded-proto wins.
+    expect(originFromHeaders({ host: 'h.example' }, 'https')).toBe('https://h.example');
+    expect(originFromHeaders({ host: 'h.example', 'x-forwarded-proto': 'https,http' }, 'http')).toBe('https://h.example');
+    expect(originFromHeaders({ host: '127.0.0.1:3000' }, 'http')).toBe('http://127.0.0.1:3000');
+    // An ephemeral quick-tunnel hostname changes per reconnect: nothing may be
+    // hardcoded, so a missing Host yields no origin rather than a wrong one.
+    expect(originFromHeaders({}, 'https')).toBeNull();
+    expect(originFromHeaders(null, 'https')).toBeNull();
   });
 
   it('the text evidence block still reports a failed upload instead of hiding it', () => {

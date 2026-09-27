@@ -1,0 +1,15 @@
+{
+  "slug": "collab-bug-intake",
+  "node": "planner",
+  "at": "2026-09-27T10:37:58.685Z",
+  "git": {
+    "head": "511f37c2347e23f30407565a50f68c34b7f6cb30",
+    "stashCommit": "a5f848bcfd6ce5fa9fd85b8edc8bff4c332abd35"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts"
+  ]
+}

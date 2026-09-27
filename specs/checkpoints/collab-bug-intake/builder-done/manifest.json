@@ -1,0 +1,16 @@
+{
+  "slug": "collab-bug-intake",
+  "node": "builder-done",
+  "at": "2026-09-27T10:43:54.074Z",
+  "git": {
+    "head": "511f37c2347e23f30407565a50f68c34b7f6cb30",
+    "stashCommit": "3a44438ad16afcd88643f55d1ab7c3f195c771ce"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/collab-bug-intake.md"
+  ]
+}
