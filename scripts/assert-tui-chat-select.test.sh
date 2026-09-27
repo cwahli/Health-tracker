@@ -62,6 +62,24 @@ grep -q "writeJson(path.join(stateDir(config.id), 'tui-open.json')" "$HERE/bot-h
   && { echo "  PASS  the write targets this bot's state dir"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the write targets this bot's state dir"; FAIL=$((FAIL + 1)); }
 
+# 7. Session continuity survives a restart: the Map key type must match the
+#    disk round-trip. Turns used to write the raw Telegram id (a number) while
+#    saveMap/loadMap stringify keys, so every restart forgot every session
+#    until that chat's next turn. Both entry points now normalize once.
+node -e '
+  const m = new Map();
+  m.set(String(6218257274), "ses_X");
+  const roundTripped = new Map(Object.entries(Object.fromEntries(m)));
+  if (roundTripped.get(String(6218257274)) !== "ses_X") process.exit(1);
+' && { echo "  PASS  string keys survive a disk round-trip"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  string keys survive a disk round-trip"; FAIL=$((FAIL + 1)); }
+grep -q "const chatId = String(message.chat.id);" "$HERE/bot-host.mjs" \
+  && { echo "  PASS  handleMessage normalizes chatId once"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  handleMessage normalizes chatId once"; FAIL=$((FAIL + 1)); }
+grep -q "const chatId = String(query.message?.chat?.id ?? '');" "$HERE/bot-host.mjs" \
+  && { echo "  PASS  handleCallback normalizes chatId once"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  handleCallback normalizes chatId once"; FAIL=$((FAIL + 1)); }
+
 rm -rf "$ROOT"
 echo
 echo "$PASS pass, $FAIL fail"
