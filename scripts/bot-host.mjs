@@ -2500,9 +2500,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // whichever conversation happened to be first in the map. Best-effort and
       // never fatal: a missing write just leaves the legacy behavior in place.
       try {
+        // Both key shapes: turns write the Map with the raw Telegram id while
+        // disk round-trips stringify keys, so exactly one of these hits. The
+        // attach path re-reads sessions.json anyway; this field is redundancy.
+        const sid = sessions.get(chatId) ?? sessions.get(String(chatId)) ?? null;
         writeJson(path.join(stateDir(config.id), 'tui-open.json'), {
           chatId: String(chatId),
-          sessionId: sessions.get(chatId) || null,
+          sessionId: sid,
           at: new Date().toISOString(),
         });
       } catch {
