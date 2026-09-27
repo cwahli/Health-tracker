@@ -55,21 +55,30 @@ export function validateInitData(initData, botToken, { now = Date.now(), maxAgeS
   if (!hash) return fail('no hash in initData');
 
   const pairs = [];
+  const pairsWithSig = [];
   for (const [k, v] of params.entries()) {
-    if (k === 'hash' || k === 'signature') continue;
+    if (k === 'hash') continue;
+    pairsWithSig.push(`${k}=${v}`);
+    if (k === 'signature') continue;
     pairs.push(`${k}=${v}`);
   }
   // Telegram requires the key=value pairs sorted by key.
   pairs.sort();
-  const dataCheckString = pairs.join('\n');
+  pairsWithSig.sort();
 
   // secret_key = HMAC_SHA256("WebAppData", bot_token)
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
-  const expected = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+  const hmac = (dcs) => crypto.createHmac('sha256', secretKey).update(dcs).digest('hex');
 
-  const a = Buffer.from(expected, 'hex');
+  // Current Telegram clients sign the check string WITH the signature field
+  // included (only `hash` is excluded); older data has no signature field, so
+  // both shapes are accepted and neither client generation breaks.
   const b = Buffer.from(hash, 'hex');
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fail('hash mismatch');
+  const match = (dcs) => {
+    const a = Buffer.from(hmac(dcs), 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  };
+  if (!match(pairs.join('\n')) && !match(pairsWithSig.join('\n'))) return fail('hash mismatch');
 
   const authDate = Number(params.get('auth_date') || 0);
   if (!Number.isFinite(authDate) || authDate <= 0) return fail('no auth_date');
@@ -248,6 +257,27 @@ function presentedToken(req, url) {
     || (url ? String(url.searchParams.get('token') || '') : '');
 }
 
+/** All tokens the caller presented, in preference order. */
+function presentedTokens(req, url) {
+  return [
+    cookieValue(req, COOKIE_NAME),
+    (String(req.headers.authorization || '').startsWith('Bearer ')
+      ? String(req.headers.authorization).slice(7)
+      : ''),
+    (url ? String(url.searchParams.get('token') || '') : ''),
+  ].filter((t) => typeof t === 'string' && t.length > 0);
+}
+
+/** Accept when ANY presented token verifies: a stale cookie must not shadow a fresh query token. */
+function verifyAnyToken(req, url, secret) {
+  let verdict = { ok: false, reason: 'bad token' };
+  for (const t of presentedTokens(req, url)) {
+    verdict = verifyToken(t, secret);
+    if (verdict.ok) return verdict;
+  }
+  return verdict;
+}
+
 function cookieValue(req, name) {
   const raw = req.headers.cookie || '';
   for (const part of raw.split(';')) {
@@ -303,8 +333,13 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
       }
       const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
       log(`admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
+      // The token rides in the query as well as the cookie: some Telegram
+      // WebViews swallow the Set-Cookie on the redirect chain, and the ttyd
+      // client appends location.search to its socket URL, so ?token= reaches
+      // /authz through Caddy untouched. Short-lived (ttl) and chat-bound, and
+      // the served page makes no third-party requests, so nothing leaks it.
       res.writeHead(302, {
-        'location': ttydPathFor(botId),
+        'location': `${ttydPathFor(botId)}?token=${encodeURIComponent(token)}`,
         'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
         'cache-control': 'no-store',
       });
@@ -349,7 +384,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
     // Caddy calls this before proxying the websocket. Answering 204 lets the
     // upgrade through; anything else stops it before a socket exists.
     if (url.pathname === '/authz') {
-      const verdict = verifyToken(presentedToken(req, url), secret);
+      const verdict = verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
         log(`authz refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -365,8 +400,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
     // the vm2 terminal and land in another bot's conversation map.
     const route = TTYD_ROUTES[url.pathname];
     if (route) {
-      const token = presentedToken(req, url);
-      const verdict = verifyToken(token, secret);
+      const verdict = verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
         log(`page refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
