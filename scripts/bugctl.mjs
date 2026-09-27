@@ -10,9 +10,14 @@
  *   BUG_API_BASE   default http://127.0.0.1:3000
  *   BUG_API_TOKEN  sent as X-Bug-Api-Token (A-f5)
  *   BUGCTL_QUEUE   offline queue path (default .bugctl-queue.jsonl)
+ *   BUGCTL_JOURNAL_DIR  journal dir (default specs/bug-journal); tests point this at a temp dir
  *
  * Commands:
  *   create  --title T [--surface S] [--class C] [--assignee A] [--source S]
+ *           --screenshot <path>  attach a local image (png/jpg) as the card's evidence report;
+ *                                 stored on R2 and readable via /api/bugs/:tagId/artifacts.
+ *                                 A missing file is a hard error; an upload that fails is
+ *                                 reported as a warning and the card is still created.
  *   pack    --id N --component C --observed O --expected E --criteria R [--class ...]
  *           --check          validate payload only (schema + single-defect + criteria + fingerprint); no HTTP
  *           --split <file>   multi-item report JSON → { ok, card, split[] } (one card + split list)
@@ -46,7 +51,11 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const BASE = (process.env.BUG_API_BASE || 'http://127.0.0.1:3000').replace(/\/$/, '');
 const TOKEN = process.env.BUG_API_TOKEN || '';
 const QUEUE_PATH = process.env.BUGCTL_QUEUE || path.join(REPO_ROOT, '.bugctl-queue.jsonl');
-const JOURNAL_DIR = path.join(REPO_ROOT, 'specs', 'bug-journal');
+// Overridable so a test that gets a real {tag_id, public_n} back writes its
+// journal rows into a temp dir. Without this, any test asserting on a
+// successful create appends to the tracked specs/bug-journal/<n>.jsonl and
+// dirties the working tree.
+const JOURNAL_DIR = process.env.BUGCTL_JOURNAL_DIR || path.join(REPO_ROOT, 'specs', 'bug-journal');
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -191,6 +200,18 @@ async function main() {
     case 'create': {
       const title = String(args.title || args._[1] || '').trim();
       if (!title) fail('--title required', args);
+      // An agent reporting a bug usually has the picture already. Attach it so
+      // the card carries the same evidence a phone user's screenshot does —
+      // otherwise `create` makes a card that can never show an image.
+      let screenshot;
+      const shotPath = args.screenshot ? String(args.screenshot) : '';
+      if (shotPath) {
+        if (!fs.existsSync(shotPath)) fail(`--screenshot not found: ${shotPath}`, args);
+        const abs = path.resolve(shotPath);
+        const ext = (path.extname(abs).slice(1) || 'jpg').toLowerCase();
+        const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
+        screenshot = `data:${mime};base64,${fs.readFileSync(abs).toString('base64')}`;
+      }
       const body = {
         title,
         surface: args.surface,
@@ -199,10 +220,14 @@ async function main() {
         source: args.source || 'human',
         idem_key: args['idem-key'] || args.idem_key,
         reply_to: args['reply-to'] ? JSON.parse(args['reply-to']) : undefined,
+        ...(screenshot ? { screenshot } : {}),
       };
       const r = await withFallback({ op: 'create', ...body }, args, () => api('POST', '/api/bugs', body));
       if (r.tag_id) appendJournal(r.public_n, { op: 'create', tag_id: r.tag_id, state: r.state, title });
       out(r, args);
+      if (r.screenshot && r.screenshot.ok === false) {
+        console.error(`warning: card created but the screenshot was not stored (${r.screenshot.error || 'unknown'})`);
+      }
       if (r.error && !r.queued) process.exit(1);
       break;
     }

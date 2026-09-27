@@ -4,6 +4,7 @@ import { AlertCircle, Bug, Camera, Check, ClipboardPaste, ListPlus, Plus, Trash2
 import { BugCategory, ISSUE_TYPE_LABELS, IssueType } from '../utils/issueBacklog';
 import { hydrateWorkItem, publicId } from '../utils/bugWorkItem';
 import { parseBatchBugs } from '../utils/bugBatchParser';
+import { compressImage } from '../utils/imageCompressor';
 
 export interface IssueEntry {
   id: string;
@@ -258,8 +259,11 @@ export function FlagIssueForm({
             ...resolvedPayload,
             modalTitle: 'Flag food analysis issue',
             flaggedAt: new Date().toISOString(),
+            // One field, one place. This used to be sent twice (screenshot_data +
+            // screenshot_url) with the same base64, and the PII scrub in
+            // budgetPayloadForDigest only removed one of them — so a copy always
+            // survived. The server promotes this into the canonical report shape.
             screenshot_data: ent.screenshotDataUrl || undefined,
-            screenshot_url: ent.screenshotDataUrl || undefined,
           },
         };
 
@@ -531,13 +535,19 @@ export function FlagIssueForm({
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
+                        e.target.value = '';
                         if (file) {
-                          const reader = new FileReader();
-                          reader.onload = (evt) => {
-                            const res = evt.target?.result as string;
-                            if (res) updateEntry(idx, { screenshotDataUrl: res });
-                          };
-                          reader.readAsDataURL(file);
+                          // A phone screenshot is 1170x2532 PNG; readAsDataURL would put
+                          // megabytes of base64 in the JSON body. Compress on the client
+                          // like every other capture path (BugSnapshotFab uses the same
+                          // 1280/1280/0.75 budget) so the image still arrives.
+                          compressImage(file, 1280, 1280, 0.75)
+                            .then((dataUrl) => {
+                              if (dataUrl) updateEntry(idx, { screenshotDataUrl: dataUrl });
+                            })
+                            .catch(() => {
+                              /* keep the picker usable if compression fails */
+                            });
                         }
                       }}
                     />

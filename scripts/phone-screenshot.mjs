@@ -15,9 +15,15 @@
  *
  * Usage:
  *   node scripts/phone-screenshot.mjs                       # 5 newest phone photos
+ *   node scripts/phone-screenshot.mjs --kind=bug            # bug-report screenshots
  *   node scripts/phone-screenshot.mjs --n=12 --json          # more, plus a manifest
  *   node scripts/phone-screenshot.mjs --key=photos/x.jpg     # one known key
  *   node scripts/phone-screenshot.mjs --url=http://localhost:3000
+ *
+ * Two kinds, because there are two different things a phone produces:
+ *   meal = a photo of the food, uploaded as part of logging it
+ *   bug  = a screenshot of the app, attached when reporting a bug
+ * Both end up in R2, under different keys, reached through different routes.
  *
  * Exit 0 = at least one image written. Exit 1 = nothing reachable.
  */
@@ -93,6 +99,10 @@ async function main() {
   }
 
   const n = Math.max(1, Math.min(50, Number(args.n || DEFAULT_N)));
+  const kind = String(args.kind || 'meal');
+  if (kind === 'bug') return await runBugKind({ baseUrl, outDir, n, wantJson });
+  if (kind !== 'meal') fail(`unknown --kind=${kind} (expected meal|bug)`);
+
   const data = await getJson(`${baseUrl}/api/admin/meals-with-photos`);
   const meals = (data.meals || []).filter((m) => m.imageUrl);
   if (!meals.length) fail(`${baseUrl} returned no meals with photos`);
@@ -119,6 +129,77 @@ async function main() {
   }
   console.log(`\n${ok.length}/${rows.length} phone image(s) in ${path.relative(REPO_ROOT, outDir)}/`);
   if (!ok.length) fail('no image could be fetched');
+}
+
+/**
+ * Bug screenshots: the images a user attached when reporting a bug, which for a
+ * phone user is a screenshot of the app itself.
+ *
+ * These live under bugs/<category>/<tagId>/reports/<reportId>/shot-NN.jpg and
+ * there was no way to find them: shot_count lived only on a report row, so
+ * listing a bug never mentioned a screenshot, and the artifacts route needs a
+ * tagId + reportId + exact filename. `?with_shots=1` on the list route is the
+ * one query that yields all three. Note the artifact route is binary-safe and
+ * streams bytes, unlike a raw r2.dev key which is not guaranteed public.
+ */
+async function runBugKind({ baseUrl, outDir, n, wantJson }) {
+  const data = await getJson(`${baseUrl}/api/bugs/list?with_shots=1`);
+  const withShots = (data.rows || []).filter((r) => (r.shot_count || 0) > 0);
+  if (!withShots.length) {
+    console.log(`no bug on ${baseUrl} has an attached screenshot yet`);
+    if (wantJson) {
+      fs.writeFileSync(
+        path.join(outDir, 'manifest.json'),
+        JSON.stringify({ source: baseUrl, fetched_at: new Date().toISOString(), count: 0, shots: [] }, null, 2)
+      );
+    }
+    return;
+  }
+  const rows = [];
+  let i = 0;
+  for (const bug of withShots.slice(0, n)) {
+    for (const shot of bug.shots || []) {
+      i += 1;
+      const label = { _i: i, date: (bug.updated_at || bug.created_at || '').slice(0, 10), name: bug.title };
+      const url = `${baseUrl}/api/bugs/${encodeURIComponent(bug.tag_id)}/artifacts?reportId=${encodeURIComponent(
+        shot.report_id
+      )}&name=${encodeURIComponent(shot.name)}${shot.key ? `&key=${encodeURIComponent(shot.key)}` : ''}`;
+      const got = await getBuffer(url);
+      if (!got.ok) {
+        console.log(`${label.date}  FAILED HTTP ${got.status}  ${bug.tag_id} ${shot.name}`);
+        rows.push({ ok: false, status: got.status, tag_id: bug.tag_id, ...shot });
+        continue;
+      }
+      const file = `${String(i).padStart(2, '0')}${label.date ? `-${label.date}` : ''}-bug-${safeName(
+        bug.title || bug.tag_id
+      )}-${shot.name}`;
+      const full = path.join(outDir, file);
+      fs.writeFileSync(full, got.buf);
+      const row = {
+        ok: true,
+        tag_id: bug.tag_id,
+        title: bug.title,
+        state: bug.state,
+        ...shot,
+        url,
+        file: path.relative(REPO_ROOT, full),
+        bytes: got.buf.length,
+      };
+      rows.push(row);
+      console.log(`${label.date || '?'}  ${String(got.buf.length).padStart(7)} B  ${row.file}`);
+    }
+  }
+  const ok = rows.filter((r) => r.ok);
+  if (wantJson) {
+    const mf = path.join(outDir, 'manifest.json');
+    fs.writeFileSync(
+      mf,
+      JSON.stringify({ source: baseUrl, kind: 'bug', fetched_at: new Date().toISOString(), count: ok.length, shots: ok }, null, 2)
+    );
+    console.log(`\nmanifest -> ${path.relative(REPO_ROOT, mf)}`);
+  }
+  console.log(`\n${ok.length}/${rows.length} bug screenshot(s) in ${path.relative(REPO_ROOT, outDir)}/`);
+  if (!ok.length) fail('no bug screenshot could be fetched');
 }
 
 main().catch((e) => fail(e?.message || String(e)));

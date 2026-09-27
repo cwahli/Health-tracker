@@ -33,7 +33,7 @@ import { BugCategory } from '../utils/issueBacklog';
 import { AVAILABLE_LLMS } from '../utils/llm';
 import { saveAgentRequestLog } from '../utils/agentLogsTracker';
 import GoldenInboxPanel from './GoldenInboxPanel';
-import { bugArtifactUrl, evidencePhotoSrc } from '../utils/bugSnapshot';
+import { bugArtifactUrl, bugShotName, evidencePhotoSrc } from '../utils/bugSnapshot';
 import {
   hydrateWorkItem,
   linePhotosForText,
@@ -170,6 +170,28 @@ export default function BugTrackerModal({ isOpen, onClose, onViewJob, language }
 
   const artifactUrl = (tagId: string, reportId: string, name: string, key?: string) =>
     bugArtifactUrl(tagId, reportId, name, key);
+
+  /**
+   * Renderable URLs for one report's screenshots.
+   *
+   * Prefers the exact stored keys (`r2_shots[].key`) so the filename — and its
+   * extension — always matches what is in R2; the artifacts route 404s on a
+   * guessed name. Falls back to the positional convention only when a report
+   * predates stored keys. Never a raw `bugs/...` key as an <img src>.
+   */
+  const reportShotSrcs = (tagId: string, rep: any): Array<{ url: string; name: string }> => {
+    const count = Number(rep?.shot_count || 0);
+    if (!count) return [];
+    const reportId = rep?.reportId || rep?.id || '';
+    const stored: any[] = Array.isArray(rep?.r2_shots) ? rep.r2_shots : [];
+    const out: Array<{ url: string; name: string }> = [];
+    for (let i = 0; i < count; i++) {
+      const key = typeof stored[i]?.key === 'string' ? stored[i].key : null;
+      const name = key ? bugShotName(key) : `shot-0${i + 1}.jpg`;
+      out.push({ url: bugArtifactUrl(tagId, reportId, name, key), name });
+    }
+    return out;
+  };
 
   const viewTextArtifact = async (tagId: string, reportId: string, name: string) => {
     setArtifactLoading(true);
@@ -2143,7 +2165,9 @@ export default function BugTrackerModal({ isOpen, onClose, onViewJob, language }
                               Linked Reports & Evidence Packs ({selectedReports.length})
                             </h3>
                             <div className="space-y-2">
-                              {selectedReports.map((rep: any) => (
+                              {selectedReports.map((rep: any) => {
+                                const shotSrcs = reportShotSrcs(selectedTag.id, rep);
+                                return (
                                 <div
                                   key={rep.id}
                                   className="p-3 bg-slate-900/90 rounded-xl border border-white/10 flex items-center justify-between gap-3 text-xs"
@@ -2156,6 +2180,42 @@ export default function BugTrackerModal({ isOpen, onClose, onViewJob, language }
                                       {rep.created_at ? rep.created_at.slice(0, 16).replace('T', ' ') : ''} ·{' '}
                                       {rep.shot_count || 0} screenshot(s) {rep.obsolete ? '· (obsolete)' : ''}
                                     </div>
+
+                                    {/* The screenshot itself. This row used to say
+                                        "1 screenshot(s)" and offer no way to open it,
+                                        so a phone-reported bug could not be seen from
+                                        the tracker at all. */}
+                                    {shotSrcs.length > 0 && (
+                                      <div className="flex gap-2 flex-wrap mt-2">
+                                        {shotSrcs.map((s, sIdx) => (
+                                          <div
+                                            key={sIdx}
+                                            onClick={() =>
+                                              setLightboxImage({
+                                                url: s.url,
+                                                caption: `${t(language, 'bugReportScreenshot')} — ${rep.dish_query || rep.user_note || rep.id}`,
+                                              })
+                                            }
+                                            className="w-20 h-20 rounded-xl bg-slate-800 border-2 border-indigo-500/40 hover:border-indigo-400 overflow-hidden cursor-pointer relative group flex items-end p-1 shadow-sm transition-transform active:scale-95"
+                                          >
+                                            <img
+                                              src={s.url}
+                                              alt={t(language, 'bugReportScreenshot')}
+                                              className="absolute inset-0 w-full h-full object-cover"
+                                              loading="lazy"
+                                            />
+                                            <span className="relative text-[9px] font-bold bg-black/70 text-white px-1 rounded z-10">
+                                              {sIdx + 1}/{shotSrcs.length}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {!shotSrcs.length && rep.shot_upload_error && (
+                                      <div className="text-[10px] text-rose-300/80 mt-1">
+                                        {t(language, 'bugReportShotUploadFailed')}: {rep.shot_upload_error}
+                                      </div>
+                                    )}
                                   </div>
 
                                   <div className="flex items-center gap-2 shrink-0">
@@ -2179,7 +2239,8 @@ export default function BugTrackerModal({ isOpen, onClose, onViewJob, language }
                                     )}
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}

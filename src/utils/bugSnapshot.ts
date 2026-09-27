@@ -22,6 +22,22 @@ export function isBugSnapshotEnabled(): boolean {
   }
 }
 
+/**
+ * Who may file a bug from the phone.
+ *
+ * Filing a bug is not an operator action, so this is deliberately NOT the admin
+ * check: any signed-in real profile qualifies, which is what makes a screenshot
+ * taken on the phone able to become a ticket at all. A Demo profile is excluded
+ * so guest sessions do not add noise to the shared queue.
+ *
+ * The capture kill-switch stays admin-gated — see isBugSnapshotEnabled, whose
+ * toggle is rendered by DbInteractionsOverlay only for admins.
+ */
+export function canFileBugForProfile(profile: { userType?: string } | null | undefined): boolean {
+  if (!profile) return false;
+  return profile.userType !== 'Demo';
+}
+
 export function setBugSnapshotEnabled(on: boolean): void {
   if (typeof localStorage === 'undefined') return;
   try {
@@ -54,6 +70,66 @@ export function bugShotKey(category: string, tagId: string, reportId: string, in
   return `${bugReportR2Prefix(category, tagId, reportId)}/shot-${n}.${ext}`;
 }
 
+/**
+ * Extension to store a screenshot under.
+ *
+ * Deliberately png-or-jpg, mirroring what the snapshot path has always written
+ * (serverBugSnapshot.ts) and what the artifacts route is willing to serve as an
+ * image. A `webp` name would fall through to the text reader and hand binary
+ * bytes to a UTF-8 decode, so the extension is normalised rather than passed
+ * through. The true content type is still recorded alongside it.
+ */
+export function bugShotExt(contentType: string): 'png' | 'jpg' {
+  return String(contentType || '').includes('png') ? 'png' : 'jpg';
+}
+
+/** The content type that matches a normalised shot extension. */
+export function bugShotContentType(ext: string): 'image/png' | 'image/jpeg' {
+  return ext === 'png' ? 'image/png' : 'image/jpeg';
+}
+
+export interface BugReportShotFieldsInput {
+  category: string;
+  tagId: string;
+  reportId: string;
+  contentType: string;
+  /** The key the upload targeted — always reported, so a failure is diagnosable. */
+  shotKey: string;
+  /** Public URL, when the upload succeeded. */
+  url?: string | null;
+  /** False when the bytes never landed. Never claim a shot you cannot serve. */
+  ok: boolean;
+  error?: string | null;
+}
+
+/**
+ * The payload fields a bug report must carry for its screenshot to be readable.
+ *
+ * `GET /api/bugs/:tagId` derives its `reports[]` rows from
+ * `issue_tag_links` and then reads `reportId` / `r2_prefix` / `shot_count` (and
+ * falls back to `r2_shots.length`) out of the stored payload. Any intake path
+ * that attaches an image has to write exactly this set, or the image is
+ * invisible: shot_count reads 0 and the artifacts route cannot build a key.
+ *
+ * On failure `shot_count` is deliberately left unset so the reader falls back to
+ * 0 rather than advertising evidence that is not there; the reason is recorded
+ * instead of a key that resolves to nothing.
+ */
+export function bugReportShotFields(input: BugReportShotFieldsInput): Record<string, unknown> {
+  const { category, tagId, reportId, contentType, shotKey, url, ok, error } = input;
+  const fields: Record<string, unknown> = {
+    reportId,
+    r2_prefix: bugReportR2Prefix(category, tagId, reportId),
+  };
+  if (ok) {
+    fields.shot_count = 1;
+    fields.r2_shots = [{ key: shotKey, url: url || null, contentType }];
+  } else {
+    fields.shot_upload_error = error || 'upload_failed';
+  }
+  return fields;
+}
+
 /** Dashboard / agent fetch URL. Never use a raw `bugs/...` R2 key as an <img src>. */
 export function bugArtifactUrl(tagId: string, reportId: string, name: string, key?: string | null): string {
   const q = new URLSearchParams({
@@ -62,6 +138,65 @@ export function bugArtifactUrl(tagId: string, reportId: string, name: string, ke
   });
   if (key && String(key).startsWith('bugs/')) q.set('key', String(key));
   return `/api/bugs/${encodeURIComponent(tagId)}/artifacts?${q.toString()}`;
+}
+
+/** The stored filename for a report screenshot, e.g. `bugs/…/shot-01.jpg` -> `shot-01.jpg`. */
+export function bugShotName(keyOrName: string): string {
+  const s = String(keyOrName || '');
+  const i = s.lastIndexOf('/');
+  return i === -1 ? s : s.slice(i + 1);
+}
+
+export interface BugEvidenceTextInput {  tagId: string;
+  currentEvidence?: Record<string, any> | null;
+  /** Rows from the reports query: { id, reportId, shot_count, shot_upload_error }. */
+  reports?: Array<Record<string, any>>;
+}
+
+/**
+ * The `## Evidence` block for the plain-text bug packet.
+ *
+ * The text form is what every non-JSON reader gets — Telegram `/resume` prints
+ * it, and so does `bugctl packet --format text`. Evidence used to exist only in
+ * the JSON branch, so a card could carry a screenshot and every reader still saw
+ * none. Screenshot pointers are rendered through bugArtifactUrl, never as a raw
+ * `bugs/...` R2 key, because a key is not a URL a client can fetch.
+ *
+ * Returns '' when there is genuinely nothing, so callers can filter it out.
+ */
+export function buildBugEvidenceText(input: BugEvidenceTextInput): string {
+  const { tagId, currentEvidence, reports = [] } = input;
+  const ev = currentEvidence || {};
+  const photos: string[] = Array.isArray(ev.photo_urls) ? ev.photo_urls.filter(Boolean) : [];
+  const shotLines: string[] = [];
+  let totalShots = 0;
+  for (const rep of reports) {
+    const count = Number(rep?.shot_count || 0);
+    if (!count) {
+      if (rep?.shot_upload_error) {
+        shotLines.push(`- report ${rep.id}: screenshot upload failed (${rep.shot_upload_error})`);
+      }
+      continue;
+    }
+    totalShots += count;
+    for (let i = 1; i <= count; i++) {
+      const reportId = rep.reportId || rep.id || '';
+      shotLines.push(`- report ${rep.id} shot ${i}: ${bugArtifactUrl(tagId, reportId, `shot-0${i}.jpg`)}`);
+    }
+  }
+  const anyEvidence = photos.length || shotLines.length || ev.debug_url || ev.scout_url || ev.job_id;
+  if (!anyEvidence) return '';
+  return [
+    '## Evidence',
+    ev.job_id ? `Job: ${ev.job_id}` : '',
+    ...photos.map((u: string) => `Photo: ${u}`),
+    ev.debug_url ? `Debug: ${ev.debug_url}` : '',
+    ev.scout_url ? `Scout: ${ev.scout_url}` : '',
+    totalShots ? `Screenshots (${totalShots}):\n${shotLines.join('\n')}` : '',
+    shotLines.length && !totalShots ? shotLines.join('\n') : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 export function evidencePhotoSrc(tagId: string, photo: string): string {
@@ -735,6 +870,11 @@ export function budgetPayloadForDigest(payload: any, maxChars = 8_000): string {
   try {
     const clone = JSON.parse(JSON.stringify(payload));
     delete clone.screenshot_data;
+    // Legacy duplicate: FlagIssueModal used to send the same base64 under both
+    // names and the scrub above only caught one, so a full-size copy always
+    // survived into the digest. The sender is fixed, but keep this list complete
+    // so an older client cannot reintroduce the leak.
+    delete clone.screenshot_url;
     delete clone.screenshotDataUrl;
     delete clone.image_data;
     delete clone.food_image_data;

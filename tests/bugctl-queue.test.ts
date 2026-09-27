@@ -12,10 +12,13 @@ const BUGCTL = path.join(HERE, '..', 'scripts', 'bugctl.mjs');
 
 let dir;
 let queuePath;
+let journalDir;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bugctlq-'));
   queuePath = path.join(dir, 'queue.jsonl');
+  // Keep journal rows out of the tracked specs/bug-journal/ tree.
+  journalDir = path.join(dir, 'journal');
 });
 
 /** A port nothing listens on (offline API). */
@@ -33,7 +36,13 @@ function runBugctl(args, env = {}) {
       process.execPath,
       [BUGCTL, ...args],
       {
-        env: { ...process.env, BUGCTL_QUEUE: queuePath, BUG_API_BASE: 'http://127.0.0.1:1', ...env },
+        env: {
+          ...process.env,
+          BUGCTL_QUEUE: queuePath,
+          BUGCTL_JOURNAL_DIR: journalDir,
+          BUG_API_BASE: 'http://127.0.0.1:1',
+          ...env,
+        },
         timeout: 20000,
       },
       (error, stdout, stderr) => {
@@ -78,6 +87,57 @@ describe('offline queue (sess-ticket-resume)', () => {
     expect(rows.length).toBe(1);
     expect(rows[0]).toMatchObject({ op: 'create', title: 'Offline card' });
     expect(rows[0].queued_at).toBeTruthy();
+  });
+
+  it('create attaches a local screenshot, and queues it with the card when offline', async () => {
+    // An agent reporting a bug usually has the picture. `create --screenshot`
+    // must carry it all the way through the offline queue, otherwise a card
+    // filed while the API is down silently loses its evidence on replay.
+    const shot = path.join(dir, 'evidence.png');
+    fs.writeFileSync(shot, Buffer.from('89504e470d0a1a0a', 'hex')); // PNG magic
+
+    const live = await stubApi({ ok: true, tag_id: 'tag_x', public_n: 1, state: 'new' });
+    try {
+      const r = await runBugctl(['create', '--title', 'With picture', '--screenshot', shot, '--json'], {
+        BUG_API_BASE: `http://127.0.0.1:${live.port}`,
+      });
+      expect(r.code).toBe(0);
+      const sent = JSON.parse(live.seen[0].body);
+      expect(sent.screenshot).toMatch(/^data:image\/png;base64,/);
+      expect(Buffer.from(sent.screenshot.split(',')[1], 'base64').toString('hex')).toBe('89504e470d0a1a0a');
+    } finally {
+      live.srv.close();
+    }
+
+    // Same card, API down: the image must ride along in the queue.
+    const dead = await closedPort();
+    const off = await runBugctl(['create', '--title', 'With picture', '--screenshot', shot, '--json'], {
+      BUG_API_BASE: `http://127.0.0.1:${dead}`,
+    });
+    expect(off.code).toBe(0);
+    const rows = queueRows();
+    expect(rows.length).toBe(1);
+    expect(rows[0].screenshot).toMatch(/^data:image\/png;base64,/);
+
+    // Replay must still send it.
+    const replay = await stubApi({ ok: true, tag_id: 'tag_x', public_n: 1, state: 'new' });
+    try {
+      await runBugctl(['flush', '--json'], { BUG_API_BASE: `http://127.0.0.1:${replay.port}` });
+      expect(JSON.parse(replay.seen[0].body).screenshot).toMatch(/^data:image\/png;base64,/);
+    } finally {
+      replay.srv.close();
+    }
+  });
+
+  it('create fails loudly on a missing screenshot file rather than filing a card without it', async () => {
+    const dead = await closedPort();
+    const r = await runBugctl(['create', '--title', 'No picture', '--screenshot', path.join(dir, 'nope.png'), '--json'], {
+      BUG_API_BASE: `http://127.0.0.1:${dead}`,
+    });
+    expect(r.code).not.toBe(0);
+    // bugctl's fail() reports through out(), i.e. stdout, like every other error.
+    expect(r.stdout).toContain('--screenshot not found');
+    expect(queueRows()).toEqual([]);
   });
 
   it('flush replays queued rows and empties the queue', async () => {

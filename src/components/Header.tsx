@@ -17,6 +17,7 @@ const DedupeBiomarkerLogsModal = lazyWithRetry(() => import('./DedupeBiomarkerLo
 const NutritionDataBrowserModal = lazyWithRetry(() => import('./NutritionDataBrowserModal'));
 const BugTrackerModal = lazyWithRetry(() => import('./BugTrackerModal'));
 import BugSnapshotFab from './BugSnapshotFab';
+import { canFileBugForProfile } from '../utils/bugSnapshot';
 import ProfileModal from './ProfileModal';
 import DbInteractionsOverlay from './DbInteractionsOverlay';
 import ThemeCustomizerScreen from './ThemeCustomizerScreen';
@@ -317,6 +318,12 @@ export default function Header({
 
   const isAdmin = profile?.userType === 'Admin' || profile?.email?.toLowerCase().trim() === 'cwah.liu@gmail.com';
 
+  // Filing a bug is not an operator action: any signed-in real profile may open
+  // the capture UI. A Demo profile is excluded so guest sessions do not add
+  // noise to the shared queue. The capture *kill-switch* stays admin-only
+  // (DbInteractionsOverlay gates BugSnapshotSettingsToggle on isAdmin).
+  const canFileBug = canFileBugForProfile(profile);
+
   return (
     <>
       <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800/80 px-6 py-4 sticky top-0 z-40 shadow-sm transition-colors duration-200">
@@ -341,10 +348,10 @@ export default function Header({
               <div className="flex items-center gap-1.5">
                 <span
                   id="user-nickname-text"
-                  className={`font-semibold text-theme-text truncate text-base leading-tight ${isAdmin ? 'cursor-pointer hover:text-rose-500' : ''}`}
-                  title={isAdmin ? 'Admin: open bug snapshot capture' : undefined}
+                  className={`font-semibold text-theme-text truncate text-base leading-tight ${canFileBug ? 'cursor-pointer hover:text-rose-500' : ''}`}
+                  title={canFileBug ? t.openBugSnapshotCapture : undefined}
                   onClick={() => {
-                    if (!isAdmin) return;
+                    if (!canFileBug) return;
                     try {
                       document.getElementById('bug-snapshot-fab')?.click();
                     } catch {
@@ -496,9 +503,9 @@ export default function Header({
         onClose={() => setShowDedupeBiomarkerLogs(false)}
       />
       </React.Suspense>
-      {isAdmin && (
+      {canFileBug && (
         <BugSnapshotFab
-          isAdmin={isAdmin}
+          canFileBug={canFileBug}
           firebaseUid={auth.currentUser?.uid || null}
           activeTab={activeTab}
           viewingJobId={viewingJobId}

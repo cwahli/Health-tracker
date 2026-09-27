@@ -1,0 +1,16 @@
+{
+  "slug": "phone-bug-intake",
+  "node": "planner",
+  "at": "2026-09-27T06:45:57.296Z",
+  "git": {
+    "head": "85bf1fbf22f4a567c3cf3eba77eb8888e6f440fb",
+    "stashCommit": "8225ec65b3a71c5d721eff7f904b7a35e3438199"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/phone-bug-intake.md"
+  ]
+}

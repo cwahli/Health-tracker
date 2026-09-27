@@ -18,8 +18,19 @@ import { localePacks, translations } from './translations';
 
 /** Baseline recorded when the packs were split out (both packs held 1,980 keys). */
 const BASELINE_TOTAL_KEYS = 3960;
-/** sha256 of the sorted `[key, value]` pairs, first 16 hex chars. */
-const FROZEN_DIGESTS = { en: 'a893ce7398967cbd', id: '81c809577cb90492' } as const;
+/**
+ * sha256 of the sorted `[key, value]` pairs, first 16 hex chars.
+ *
+ * Re-recorded for `phone-bug-intake`, which added three keys per pack
+ * (`openBugSnapshotCapture`, `bugReportScreenshot`, `bugReportShotUploadFailed`)
+ * so the widened capture button and the report thumbnails are not hardcoded
+ * English. No existing copy value was changed. Justified in
+ * `specs/active/phone-bug-intake.md` ("Deliberate ratchet move"); the same
+ * deliberate-act rule `scripts/assert-parity.mjs` documents. Growth is what
+ * this file already permits — parity and the `>=` count floor below exist so
+ * the pack can grow without anyone editing existing copy in silence.
+ */
+const FROZEN_DIGESTS = { en: '177f712afc6183e0', id: '8ce5e793a8b246c9' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));
