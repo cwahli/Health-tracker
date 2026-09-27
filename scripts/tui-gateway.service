@@ -1,0 +1,25 @@
+[Unit]
+Description=TUI gateway — the authenticated door to the terminal (plan step 2)
+Documentation=file:///home/ubuntu/bot-host-r14/plan/TUI_IMPLEMENTATION.md
+After=network-online.target tui-ttyd-vm.service
+Wants=network-online.target tui-ttyd-vm.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bot-host-r14
+Environment=HOME=/home/ubuntu
+Environment=TUI_GATEWAY_BIND=127.0.0.1
+Environment=TUI_GATEWAY_PORT=8897
+Environment=TUI_TTYD_URL=http://127.0.0.1:8896
+Environment=TUI_BOT_ID=vm
+Environment=TUI_SESSION_TTL_SEC=900
+EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-gateway.env
+ExecStart=/usr/bin/node /home/ubuntu/bot-host-r14/scripts/tui-gateway.mjs
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
