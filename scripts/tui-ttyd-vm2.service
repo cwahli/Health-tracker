@@ -26,7 +26,7 @@ EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-ttyd.env
 # Loopback only, like the vm instance. Base-path /tty2 keeps this socket's page
 # and websocket under /tty2/, so Caddy can route each bot's socket to its own
 # ttyd and the client's relative links keep working.
-ExecStart=/usr/bin/ttyd --port 8898 --interface 127.0.0.1 --base-path /tty2 \
+ExecStart=/usr/bin/ttyd --port 8899 --interface 127.0.0.1 --base-path /tty2 \
   --writable --max-clients 1 --once=false \
   -c ${TUI_TTYD_USER}:${TUI_TTYD_PASSWORD} \
   --check-origin --terminal-type xterm-256color \

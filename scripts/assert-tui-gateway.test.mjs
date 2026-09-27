@@ -269,9 +269,9 @@ console.log('assert-tui-gateway:');
   check('an unknown bot falls back to the shared ttyd',
     ttydFor('nosuchbot', {}) === 'http://127.0.0.1:8896');
   check('a per-bot URL wins for that bot',
-    ttydFor('vm2', { TUI_TTYD_URL_VM2: 'http://127.0.0.1:8898' }) === 'http://127.0.0.1:8898');
+    ttydFor('vm2', { TUI_TTYD_URL_VM2: 'http://127.0.0.1:8899' }) === 'http://127.0.0.1:8899');
   check('the per-bot URL does not leak to the other bot',
-    ttydFor('vm', { TUI_TTYD_URL_VM2: 'http://127.0.0.1:8898' }) === 'http://127.0.0.1:8896');
+    ttydFor('vm', { TUI_TTYD_URL_VM2: 'http://127.0.0.1:8899' }) === 'http://127.0.0.1:8896');
   check('the landing sends vm to /tty/', ttydPathFor('vm') === '/tty/');
   check('the landing sends vm2 to /tty2/', ttydPathFor('vm2') === '/tty2/');
   check('an unknown bot lands on /tty/', ttydPathFor('nosuchbot') === '/tty/');
