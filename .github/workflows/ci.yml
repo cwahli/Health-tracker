@@ -43,23 +43,80 @@ jobs:
           # It must be a separate argv word — git does not parse a "--not"
           # inside one quoted rev string, and the check would then see zero
           # commits and pass on the gate meant to catch a missing trailer.
+          #
+          # Exception: a push TO main. The landed squash commit is minted by
+          # GitHub from the PR title+body and was never checked as a branch
+          # commit (seven trailer-less commits landed that way on 2026-09-27).
+          # $before is the pre-push main, so before..HEAD is exactly what the
+          # push added — it must be checked WITHOUT --not. With --not, the
+          # fetch below advances origin/<base> past the push, the range goes
+          # empty, and this gate is a no-op on the one path that needs it.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base='${{ github.event.pull_request.base.ref }}'
             before='${{ github.event.pull_request.base.sha }}'
+            exclude_not=1
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            base='${{ github.event.repository.default_branch }}'
+            before='${{ github.event.before }}'
+            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              before=""
+            fi
+            exclude_not=0
           else
             base='${{ github.event.repository.default_branch }}'
             before='${{ github.event.before }}'
             if [ "$before" = "0000000000000000000000000000000000000000" ]; then
               before=""
             fi
+            exclude_not=1
           fi
           git fetch --no-tags --quiet origin "$base"
           if [ -z "$before" ]; then
             before="$(git rev-parse "origin/$base")"
           fi
-          scripts/check-agent-identity.sh \
-            --range "$before..HEAD" \
-            --not "origin/$base"
+          if [ "$exclude_not" = "1" ]; then
+            scripts/check-agent-identity.sh \
+              --range "$before..HEAD" \
+              --not "origin/$base"
+          else
+            scripts/check-agent-identity.sh \
+              --range "$before..HEAD"
+          fi
+
+      - name: Agent identity in PR body (becomes the squash message)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # GitHub mints the landed squash commit from the PR title+body, and
+          # nothing re-checks that message afterwards (see above). Requiring
+          # the trailer in the body makes it flow into main automatically —
+          # no manual paste into the squash box. Pattern is owned by
+          # scripts/check-agent-identity.sh; --message reuses it directly.
+          printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
+          scripts/check-agent-identity.sh --message "$RUNNER_TEMP/pr-body.txt"
+
+      - name: PR must add net change vs base (no empty merges)
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+        shell: bash
+        run: |
+          # Stale branches whose work already landed elsewhere squash-merge
+          # into empty no-op commits with misleading fix/feat messages (five
+          # such commits landed on 2026-09-27). Fail fast instead. Rebase long-
+          # lived branches; do not merge main into them (a pure main-merge
+          # also reads as empty here — that is intentional).
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base='${{ github.event.pull_request.base.ref }}'
+          else
+            base='${{ github.event.repository.default_branch }}'
+          fi
+          git fetch --no-tags --quiet origin "$base"
+          if [ -z "$(git diff --stat "origin/$base...HEAD" --)" ]; then
+            echo "No net change vs $base. Close the PR, or rebase the branch" >&2
+            echo "onto origin/$base so it carries exactly its own work." >&2
+            exit 1
+          fi
 
       - uses: actions/setup-node@v4
         with:
