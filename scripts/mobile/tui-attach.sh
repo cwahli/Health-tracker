@@ -72,14 +72,52 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # --- which session is the chat on?
-SID=$(node -e '
+#
+# Resolution order, because ttyd runs one static command per bot and cannot be
+# told the chat any other way:
+#   1. TUI_CHAT_ID — explicit wins (ops overrides, deterministic tests).
+#   2. tui-open.json — written by bot-host on every /tui: the chat that opened
+#      the Mini App most recently, with the session it was on then.
+#   3. ids[0] — legacy fallback: the first session in the map. Wrong whenever
+#      two chats share the bot, which is exactly the S1 failure this replaces.
+CHAT_ID="${TUI_CHAT_ID:-}"
+FROM_ENV=0
+if [ -n "$CHAT_ID" ]; then FROM_ENV=1; else
+  CHAT_ID=$(node -e '
+    const fs = require("fs");
+    try {
+      const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      if (m && m.chatId) process.stdout.write(String(m.chatId));
+    } catch { /* no tui-open yet: fall through to the legacy pick */ }
+  ' "$STATE/tui-open.json" 2>/dev/null || true)
+fi
+# One node step resolves AND labels, so the SOURCE line can never disagree with
+# the SID line: explicit-hit and tui-open-hit mean the session belongs to that
+# chat; legacy-first means the map did not contain it (the S1 failure mode).
+RESOLVED=$(node -e '
   const fs = require("fs");
+  const want = String(process.argv[2] || "");
+  const fromEnv = process.argv[3] === "1";
+  const hit = (sid, how) => process.stdout.write(`${sid}|${how}`);
   try {
     const map = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const ids = Object.values(map).map((v) => String(v || "").trim()).filter((v) => /^ses_/.test(v));
-    process.stdout.write(ids[0] || "");
-  } catch { process.stdout.write(""); }
-' "$SESSIONS" 2>/dev/null || true)
+    if (want && map[want] && /^ses_/.test(String(map[want]))) {
+      hit(String(map[want]), fromEnv ? "explicit-hit" : "tui-open-hit");
+    } else {
+      const ids = Object.values(map).map((v) => String(v || "").trim()).filter((v) => /^ses_/.test(v));
+      hit(ids[0] || "", "legacy-first");
+    }
+  } catch { process.stdout.write("|legacy-first"); }
+' "$SESSIONS" "$CHAT_ID" "$FROM_ENV" 2>/dev/null || echo "|legacy-first")
+SID="${RESOLVED%%|*}"
+CHAT_SOURCE="${RESOLVED##*|}"
+
+# Headless seam for the sensor: print what would be attached without touching
+# tmux, leases, or the model. TUI_DRY_RUN=1 prints SID=<id> SOURCE=<where>.
+if [ "${TUI_DRY_RUN:-0}" = "1" ]; then
+  echo "SID=${SID} SOURCE=${CHAT_SOURCE}"
+  exit 0
+fi
 
 # --- wait out a turn that is already running rather than refusing to attach
 WAITED=0
