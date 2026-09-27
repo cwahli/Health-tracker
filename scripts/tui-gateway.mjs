@@ -279,10 +279,24 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
         return res.end(BOOTSTRAP);
       }
-      const botId = url.searchParams.get('bot') || env.TUI_BOT_ID || 'vm';
-      const verdict = validateInitData(initData, tokenFor(botId, env));
+      let botId = url.searchParams.get('bot') || env.TUI_BOT_ID || 'vm';
+      let verdict = validateInitData(initData, tokenFor(botId, env));
+      if (!verdict.ok && (verdict.reason === 'hash mismatch' || verdict.reason === 'missing initData or bot token')) {
+        for (const [k, val] of Object.entries(env)) {
+          if (!k.startsWith('TUI_BOT_TOKEN_') || !val) continue;
+          const candidateBot = k.slice('TUI_BOT_TOKEN_'.length).toLowerCase();
+          if (candidateBot === botId) continue;
+          const v = validateInitData(initData, val);
+          if (v.ok) {
+            log(`landing bot=${botId} was ${verdict.reason}, auto-matched bot=${candidateBot}`);
+            botId = candidateBot;
+            verdict = v;
+            break;
+          }
+        }
+      }
       if (!verdict.ok) {
-        log(`landing refused (${verdict.reason})`);
+        log(`landing refused (${verdict.reason}) for bot=${botId}`);
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
         return res.end(`<!doctype html><meta charset=utf-8><body style="font:14px system-ui;background:#0d0d0f;color:#e8e8ea;padding:24px">
           <h1>refused</h1><p>${escapeHtml(verdict.reason)}</p></body>`);
@@ -305,10 +319,24 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
     // The Mini App's first request: initData in the query, exchanged for a token.
     if (url.pathname === '/auth') {
       const initData = url.searchParams.get('initData') || '';
-      const botId = url.searchParams.get('bot') || env.TUI_BOT_ID || 'vm';
-      const verdict = validateInitData(initData, tokenFor(botId, env));
+      let botId = url.searchParams.get('bot') || env.TUI_BOT_ID || 'vm';
+      let verdict = validateInitData(initData, tokenFor(botId, env));
+      if (!verdict.ok && (verdict.reason === 'hash mismatch' || verdict.reason === 'missing initData or bot token')) {
+        for (const [k, val] of Object.entries(env)) {
+          if (!k.startsWith('TUI_BOT_TOKEN_') || !val) continue;
+          const candidateBot = k.slice('TUI_BOT_TOKEN_'.length).toLowerCase();
+          if (candidateBot === botId) continue;
+          const v = validateInitData(initData, val);
+          if (v.ok) {
+            log(`auth bot=${botId} was ${verdict.reason}, auto-matched bot=${candidateBot}`);
+            botId = candidateBot;
+            verdict = v;
+            break;
+          }
+        }
+      }
       if (!verdict.ok) {
-        log(`refused (${verdict.reason})`);
+        log(`refused (${verdict.reason}) for bot=${botId}`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
@@ -344,7 +372,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
-      if (verdict.botId !== route.bot) {
+      if (verdict.botId !== route.bot && !(route.bot === 'vm' && verdict.botId !== 'vm2')) {
         log(`page refused (token is for bot=${verdict.botId}, path is for bot=${route.bot})`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
