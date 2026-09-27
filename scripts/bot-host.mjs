@@ -2796,7 +2796,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
 }
 
 async function handleCallback({ api, config, prefs, caches, running = null, query }) {
-  const chatId = query.message?.chat?.id;
+  // String once, at the boundary: Map keys written with the raw Telegram id
+  // never match the same keys after a disk round-trip stringifies them, so
+  // every restart silently forgot every chat's session until its next turn.
+  const chatId = String(query.message?.chat?.id ?? '');
   const messageId = query.message?.message_id;
   const userId = Number(query.from?.id);
   if (!config.telegram.allowedUserIds.includes(userId) || !chatId) {
@@ -3332,7 +3335,9 @@ function scheduleTuiQueueDrain(ctx) {
 }
 
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
-  const chatId = message.chat.id;
+  // Same boundary rule as handleCallback: one String type for chat ids
+  // everywhere downstream, so disk round-trips stop invalidating sessions.
+  const chatId = String(message.chat.id);
   const userId = Number(message.from?.id);
   if (!config.telegram.allowedUserIds.includes(userId)) {
     console.warn(`[${config.id}] ignored message from unauthorized user ${userId}`);
