@@ -2494,6 +2494,20 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // broken.
       const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
       lastMiniappUrl = tuiUrl;
+      // Record which chat opened the TUI and which session it is on. ttyd runs
+      // one static command per bot, so it cannot be told the chat any other
+      // way — and tui-attach.sh reading only ids[0] attached every chat to
+      // whichever conversation happened to be first in the map. Best-effort and
+      // never fatal: a missing write just leaves the legacy behavior in place.
+      try {
+        writeJson(path.join(stateDir(config.id), 'tui-open.json'), {
+          chatId: String(chatId),
+          sessionId: sessions.get(chatId) || null,
+          at: new Date().toISOString(),
+        });
+      } catch {
+        // fall through to the button below
+      }
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
         `⌨️ *opencode TUI* — a real terminal, driven by touch, attached to *this* conversation in \`${config.agent.workspace}\`.`,
