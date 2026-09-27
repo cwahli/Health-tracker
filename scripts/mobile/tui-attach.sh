@@ -36,7 +36,9 @@ LEASES="${STATE}/leases.json"
 TUI_LEASE="${STATE}/tui-lease.json"
 WORKTREE="${TUI_WORKTREE:-/root/Health-tracker}"
 TMUX_NAME="${TUI_TMUX_NAME:-opencode-tui}"
-SID_MARK="/tmp/tui-session-id"
+# Per-bot: two ttyd instances (vm, vm2) share this host, and a shared mark file
+# would make each instance reap the other's tmux session on every attach.
+SID_MARK="/tmp/tui-session-id-${BOT_ID}"
 OPENCODE_BIN="${OPENCODE_BIN:-/root/.opencode/bin/opencode}"
 WAIT_SECONDS="${TUI_WAIT_SECONDS:-180}"
 

@@ -1,0 +1,41 @@
+[Unit]
+Description=Typeable TUI terminal for the vm2 bot's chats (ttyd, behind the gateway)
+Documentation=file:///home/ubuntu/bot-host-r14/scripts/tui-gateway.mjs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bot-host-r14
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+# TUI_BOT_ID=vm2: the attach script reads THIS bot's sessions.json, so a vm2
+# chat lands in a vm2 conversation. Pointing both bots at one ttyd would attach
+# every vm2 chat to a vm session — the wrong conversation, silently.
+Environment=TUI_BOT_ID=vm2
+Environment=TUI_STATE_ROOT=/home/ubuntu/.local/state/bot-host
+Environment=TUI_WORKTREE=/home/ubuntu/bot-host-r14
+Environment=OPENCODE_BIN=/home/ubuntu/.opencode/bin/opencode
+Environment=TUI_TMUX_NAME=opencode-tui-vm2
+# Same credential file as the vm instance (0600, not in git — see the comment
+# in tui-ttyd-vm.service). One credential for both sockets keeps a single
+# secret; per-bot isolation lives in the gateway's token, not here.
+EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-ttyd.env
+# Loopback only, like the vm instance. Base-path /tty2 keeps this socket's page
+# and websocket under /tty2/, so Caddy can route each bot's socket to its own
+# ttyd and the client's relative links keep working.
+ExecStart=/usr/bin/ttyd --port 8898 --interface 127.0.0.1 --base-path /tty2 \
+  --writable --max-clients 1 --once=false \
+  -c ${TUI_TTYD_USER}:${TUI_TTYD_PASSWORD} \
+  --check-origin --terminal-type xterm-256color \
+  --client-option fontSize=13 \
+  --ping-interval 20 \
+  /home/ubuntu/bot-host-r14/scripts/mobile/tui-attach.sh
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, createGateway, COOKIE_NAME } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -258,6 +258,59 @@ console.log('assert-tui-gateway:');
     }
   }
   check(`the bootstrap runs without throwing${broke ? ` — ${firstError}` : ''}`, broke === 0);
+}
+
+// 13. Two bots, two terminals. Each bot's sessions map is its own, so sharing
+//     one ttyd would attach every vm2 chat to a vm conversation. The gateway
+//     routes each bot to its own ttyd and refuses a token on the other bot's
+//     page — the page equivalent of the socket's cross-bot refusal.
+{
+  check('vm keeps the shared ttyd', ttydFor('vm', {}) === 'http://127.0.0.1:8896');
+  check('an unknown bot falls back to the shared ttyd',
+    ttydFor('nosuchbot', {}) === 'http://127.0.0.1:8896');
+  check('a per-bot URL wins for that bot',
+    ttydFor('vm2', { TUI_TTYD_URL_VM2: 'http://127.0.0.1:8898' }) === 'http://127.0.0.1:8898');
+  check('the per-bot URL does not leak to the other bot',
+    ttydFor('vm', { TUI_TTYD_URL_VM2: 'http://127.0.0.1:8898' }) === 'http://127.0.0.1:8896');
+  check('the landing sends vm to /tty/', ttydPathFor('vm') === '/tty/');
+  check('the landing sends vm2 to /tty2/', ttydPathFor('vm2') === '/tty2/');
+  check('an unknown bot lands on /tty/', ttydPathFor('nosuchbot') === '/tty/');
+}
+
+// 14. The page door is per-bot. A vm token on /tty2/ (and vice versa) is
+//     refused even though the token itself is valid — otherwise the sessions
+//     map the attach script reads would belong to the wrong bot.
+{
+  const serve = async (bot, path) => {
+    let upstreamPort = 0;
+    const ttyd = http.createServer((rq, rs) => {
+      rs.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      rs.end(`<html><body>${bot}</body></html>`);
+    });
+    await new Promise((r) => ttyd.listen(0, '127.0.0.1', r));
+    upstreamPort = ttyd.address().port;
+    const env = {
+      TUI_GATEWAY_SECRET: SECRET,
+      TUI_BOT_TOKEN_VM: TOKEN,
+      TUI_BOT_TOKEN_VM2: TOKEN,
+      TUI_TTYD_URL: `http://127.0.0.1:${upstreamPort}`,
+      TUI_TTYD_URL_VM2: `http://127.0.0.1:${upstreamPort}`,
+      TUI_TTYD_CREDENTIAL: Buffer.from('tui:x').toString('base64'),
+    };
+    const token = issueToken({ botId: bot, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    const code = await new Promise((resolve, reject) => {
+      const res = { writeHead: (c) => resolve(c), end: () => {} };
+      handle({ method: 'GET', url: path,
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, res).catch(reject);
+    });
+    ttyd.close();
+    return code;
+  };
+  check('a vm token opens the vm page', await serve('vm', '/tty/') === 200);
+  check('a vm2 token opens the vm2 page', await serve('vm2', '/tty2/') === 200);
+  check("a vm token is refused on the vm2 page", await serve('vm', '/tty2/') === 401);
+  check("a vm2 token is refused on the vm page", await serve('vm2', '/tty/') === 401);
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);
