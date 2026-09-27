@@ -41,7 +41,7 @@ unchanged (sensor-proven backward compatible).
 A token-guarded staging relay already answers the public internet, proven end
 to end, for devices to onboard against today:
 
-- Relay: `/home/ubuntu/dev/relay-auth` @ `agent/r16-scorecard`, port **8891**,
+- Relay: `/home/ubuntu/dev/relay-auth` @ `agent/relay-auth`, port **8891**,
   loopback-bound, `WORKER_RELAY_TOKEN` from `~/.config/bot-host/relay.env`
   (0600). Own store (`/tmp/relay-staging-home`) — shares nothing with the
   production relay on 8890.
@@ -55,11 +55,9 @@ to end, for devices to onboard against today:
   `node <repo>/scripts/worker-agent.mjs --host=<mobile|collab|grok>
   --relay=https://health-tracking.duckdns.org/relay-staging
   --relay-token=$WORKER_RELAY_TOKEN`
-  (branch `agent/r16-scorecard`).
+  (branch `agent/relay-auth` — main's worker has no token headers yet).
 
 ## Production rollout (atomic — do not do half of it)
-=======
-## Rollout (atomic — do not do half of it)
 
 Half-rolled-out is worse than not started: a public route without a token
 exposes session exports; a token without restarted workers 401s the live
@@ -109,8 +107,8 @@ stand-ins. Do all of these in one window, announced:
   # cell 1 — runtime: node, repo, worker
   command -v node >/dev/null || (curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs)
   node --version
-  [ -d ~/Health-tracker ] || git clone --branch agent/r16-scorecard --depth 1 https://github.com/cwahli/Health-tracker.git ~/Health-tracker
-  cd ~/Health-tracker && git pull --ff-only origin agent/r16-scorecard 2>/dev/null || true
+  [ -d ~/Health-tracker ] || git clone --branch agent/relay-auth --depth 1 https://github.com/cwahli/Health-tracker.git ~/Health-tracker
+  cd ~/Health-tracker && git pull --ff-only origin agent/relay-auth 2>/dev/null || true
   command -v opencode >/dev/null || { curl -fsSL https://opencode.ai/install | bash; export PATH="$HOME/.opencode/bin:$PATH"; }
   opencode --version
   ```
@@ -137,11 +135,6 @@ stand-ins. Do all of these in one window, announced:
   its Colab engines; Qwen/vLLM lanes stay under the notebook's own `/switch`
   system (the worker only runs opencode/cline turns). Re-run cells 1–2 every
   fresh runtime; cell 3 anytime to check in.
-=======
-  clone branch, creds, start worker; dies on idle/timeout (~12h). Keep secrets
-  in Colab secrets, never in cells. Same start command with `--host=collab`.
-  Expect to re-run setup each session; presence going stale is normal, not an
-  incident.
 - **grok (location TBD):** whichever box runs the Grok side gets the identical
   client bundle (`--host=grok`, same relay URL + token). First open question
   is placement — answer that, the rest is copy-paste.
