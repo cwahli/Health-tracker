@@ -45,6 +45,17 @@ Read this before adding agents.
 
 There is no graph. Opening the project folder in Obsidian would draw one. Nothing in the bot does.
 
+**2026-09-27 correction — two statements below are now stale, kept for history.**
+As of #298 (`noteLaneSwitch` in `scripts/bot-host.mjs`, sensor
+`scripts/assert-recovery-ledger.test.mjs` 13/13): the live bot DOES call
+`recordRecoveryAttempt` on every lane switch (row parks in `recovering` naming
+the evaluated rule; the next clean run closes it), and it DOES append one
+dead-end row on the second sighting of a signature (`noteDeadEnd`) and retrieve
+dead-ends on build/investigate turns (`deadEndNotesFor`, sensor
+`assert-cooldown-and-dead-ends`). What remains true: `review-failures.mjs`
+still only prints LEARN (a human converts repeats into sensors), and the model
+still never rewrites its own instructions.
+
 There is a log, and there is not yet a lesson that changes the next run.
 
 - A failed chat turn appends `~/.hermes/bot-failures.jsonl` and opens a row in `~/.hermes/bot-error-log.json`, keyed by error kind, lane, and bot (`scripts/bot-host.mjs`, `scripts/lib/error-log.mjs`). A later clean run on that same lane closes the row. That is bookkeeping. The closed row is not read back into the next prompt.
