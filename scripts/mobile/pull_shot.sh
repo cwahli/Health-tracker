@@ -36,6 +36,14 @@ BASE="${SHOT_URL:-http://127.0.0.1:7777}"
 DEST="${SHOT_DIR:-$HOME/shots}"
 TIMEOUT="${SHOT_TIMEOUT:-30}"
 TOKEN="${SHOT_TOKEN:-}"
+# Local-only addition: the bridge token lives in ~/.config/shot-bridge.env so a
+# plain `pull_shot.sh` (mine, a cron, a human) authenticates without the caller
+# having to remember to export it. An explicit SHOT_TOKEN still wins.
+if [ -z "$TOKEN" ] && [ -r "$HOME/.config/shot-bridge.env" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.config/shot-bridge.env"
+  TOKEN="${SHOT_TOKEN:-}"
+fi
 MAX_MB="${SHOT_MAX_MB:-64}"
 INDEX_OFFSET=0
 SINCE=""
