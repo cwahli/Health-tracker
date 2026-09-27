@@ -1,0 +1,34 @@
+[Unit]
+Description=Typeable TUI terminal for this host's bot chats (ttyd, behind the gateway)
+Documentation=file:///home/ubuntu/bot-host-r14/scripts/tui-gateway.mjs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bot-host-r14
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+# The attach script resolves THIS chat's session at attach time, so the
+# terminal is the same conversation the bot is in, not a second agent.
+Environment=TUI_BOT_ID=vm
+Environment=TUI_STATE_ROOT=/home/ubuntu/.local/state/bot-host
+Environment=TUI_WORKTREE=/home/ubuntu/bot-host-r14
+Environment=OPENCODE_BIN=/home/ubuntu/.opencode/bin/opencode
+Environment=TUI_TMUX_NAME=opencode-tui
+# Loopback only. The gateway admits a request; nothing else can reach this
+# socket, and it must never be reachable from the internet directly.
+ExecStart=/usr/bin/ttyd --port 8896 --interface 127.0.0.1 --base-path /tty \
+  --writable --max-clients 1 --once=false \
+  --check-origin --terminal-type xterm-256color \
+  --client-option fontSize=13 \
+  --ping-interval 20 \
+  /home/ubuntu/bot-host-r14/scripts/mobile/tui-attach.sh
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

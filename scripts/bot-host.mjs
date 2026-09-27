@@ -1258,6 +1258,18 @@ export function readMiniappUrl(file = miniappUrlFile()) {
   }
 }
 
+/**
+ * The URL `/tui` should hand out, in order of preference:
+ *   1. TUI_GATEWAY_URL — this host's own terminal behind the gateway, which is
+ *      the plan's shape (its own hostname, initData-gated, never the website's).
+ *   2. the phone's URL file, for a phone-hosted quick tunnel.
+ */
+export function readTuiUrl(env = process.env, file = miniappUrlFile()) {
+  const gw = String(env.TUI_GATEWAY_URL || '').trim().replace(/\/+$/, '');
+  if (/^https:\/\/[A-Za-z0-9.-]+$/.test(gw)) return gw;
+  return readMiniappUrl(file);
+}
+
 export class ProgressRenderer {
   constructor({ api = null, throttle = null, chatId, mode, maxChars, maxEdits, dryRun = false, providerLabel = '', modelLabel = '', thinking = '', onMessageId = null }) {
     this.api = api;
@@ -2432,9 +2444,23 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // empty, and no deep link that survives a tunnel hostname change. The TUI
       // covers the same ground and is strictly better on a phone; browsing older
       // sessions is a /sessions picker away inside the TUI itself.
-      const tuiUrl = readMiniappUrl();
+      // A gateway URL wins over the phone's quick-tunnel file: it is this host's
+      // own terminal, on its own hostname, and it is the one that is not a
+      // dead hostname waiting to happen.
+      const tuiUrl = readTuiUrl();
       if (!tuiUrl) {
-        await api.sendMessage(chatId, '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.');
+        // Say what is actually true. This used to blame a phone tunnel, which
+        // is only the story on the phone: the URL file defaults to a Termux
+        // path, so on the VM it can never exist and the reply named a tunnel
+        // this bot has no relationship with.
+        const onPhone = String(miniappUrlFile()).includes('/data/data/com.termux/');
+        await api.sendMessage(chatId, onPhone
+          ? '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.'
+          : [
+            '⌨️ TUI is not served from this machine yet.',
+            'The phone publishes its terminal through a quick tunnel whose hostname changes on every reconnect, and this bot has no URL for it. The VM-side terminal is a separate gateway on its own hostname (`plan/TUI_IMPLEMENTATION.md` step 2), gated on Telegram `initData` so a public PTY is never anonymous.',
+            'Until that gateway answers there is no terminal to open here. `/tx on` still gives you the live tool feed in this chat.',
+          ].join('\n'));
         return;
       }
       // A quick tunnel's hostname changes on every reconnect, so a button sent
@@ -2445,11 +2471,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       lastMiniappUrl = tuiUrl;
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
-        '⌨️ *opencode TUI* — a real terminal, driven by touch, attached to *this* conversation in `/root/Health-tracker`.',
+        `⌨️ *opencode TUI* — a real terminal, driven by touch, attached to *this* conversation in \`${config.agent.workspace}\`.`,
         'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.',
-        'It refuses to attach while I am mid-turn — two agents writing one session corrupts it. First tap asks for the password once.',
+        'It refuses to attach while I am mid-turn — two agents writing one session corrupts it. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
       ].filter(Boolean).join('\n'), {
-        reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/tui/` } }]] },
+        reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } }]] },
       });
       return;
     }

@@ -26,7 +26,11 @@
 set -u
 
 BOT_ID="${TUI_BOT_ID:-mobile}"
-STATE="/root/.local/state/bot-host/${BOT_ID}"
+# The state root is the phone's by default and the VM's when this runs beside
+# the relay. Hardcoding /root meant the script could only ever be right on the
+# phone, and the VM's copy silently read a state directory that does not exist.
+STATE_ROOT="${TUI_STATE_ROOT:-/root/.local/state/bot-host}"
+STATE="${STATE_ROOT}/${BOT_ID}"
 SESSIONS="${STATE}/sessions.json"
 LEASES="${STATE}/leases.json"
 TUI_LEASE="${STATE}/tui-lease.json"
