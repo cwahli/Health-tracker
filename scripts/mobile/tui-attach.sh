@@ -49,20 +49,31 @@ read_json() {
   ' "$1" 2>/dev/null || echo "{}"
 }
 
-# A lease is "held" if its object has any key. Stale leases are the failure
-# mode that would block the user forever, so every holder stamps a heartbeat
-# and readers treat an old heartbeat as free.
+# A lease is "held" while any entry looks like a live turn. bot-host writes
+# leases.json as {"<chatId>": {"startedAt": ms, ...}} on turn start and deletes
+# the entry when the turn ends — there is no top-level heartbeat, so the check
+# is per-entry startedAt against max_age_s. An entry with no usable timestamp
+# fails safe to HELD (a corrupt lease must delay, never corrupt); only when
+# EVERY entry is older than max_age_s does it read free, because a crashed
+# turn has no other clearing path until the bot restarts and sweeps it.
+# Callers pass a generous bound (turns can run many minutes); WAIT_SECONDS
+# still caps each attempt, and the give-up branch refuses rather than barging.
 lease_held() {
   local file="$1" max_age_s="${2:-120}"
   node -e '
     const fs = require("fs");
     let m = {};
     try { m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(0); }
-    const keys = Object.keys(m || {});
-    if (!keys.length) process.exit(0);
-    const hb = Number(m.heartbeat || m.startedAt || 0);
-    const age = (Date.now() - hb) / 1000;
-    process.exit(age > Number(process.argv[2]) ? 0 : 1);
+    const vals = Object.values(m || {});
+    if (!vals.length) process.exit(0);
+    const maxAgeMs = Number(process.argv[2]) * 1000;
+    const now = Date.now();
+    for (const v of vals) {
+      const ts = Number(v && (v.startedAt || v.heartbeat));
+      if (!Number.isFinite(ts) || ts <= 0) process.exit(1);
+      if (now - ts <= maxAgeMs) process.exit(1);
+    }
+    process.exit(0);
   ' "$file" "$max_age_s" 2>/dev/null
 }
 
@@ -119,9 +130,11 @@ if [ "${TUI_DRY_RUN:-0}" = "1" ]; then
   exit 0
 fi
 
-# --- wait out a turn that is already running rather than refusing to attach
+# --- wait out a turn that is already running rather than refusing to attach.
+# lease_held exits 1 while held, so the loop needs the negation: without it
+# the script waited on an idle chat and barged into a live turn (2026-09-27).
 WAITED=0
-while lease_held "$LEASES" 300 && [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
+while ! lease_held "$LEASES" 1800 && [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
   if [ "$WAITED" -eq 0 ]; then
     echo "The bot is answering a message in this conversation right now."
     echo "Attaching as soon as it finishes — one writer at a time, or the"
@@ -131,8 +144,9 @@ while lease_held "$LEASES" 300 && [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
   sleep 3
   WAITED=$((WAITED + 3))
 done
-if lease_held "$LEASES" 300; then
-  echo "Still waiting on the bot after ${WAIT_SECONDS}s."
+if ! lease_held "$LEASES" 1800; then
+  echo "Still waiting on the bot after ${WAIT_SECONDS}s — not attaching, two"
+  echo "writers would corrupt the conversation."
   echo "Close this and try again, or send /abort in the chat to stop the turn."
   sleep 20
   exit 0

@@ -76,6 +76,40 @@ Origin check (browser Origin opens fine), H1-vs-H2, cookie (query fallback).
   already shredded (2026-09-27).
 - This worktree: `scripts/mobile/pull_shot.sh` was already dirty before
   this session — NOT mine, left untouched, do not commit blindly.
+  (Follow-up 13:15 UTC: the dirty hunk loads SHOT_TOKEN from
+  ~/.config/shot-bridge.env; ~/bin/pull_shot.sh is a symlink to this file,
+  so it is almost certainly the shot-bridge work from the previous session,
+  not a stranger's. Committed as its own commit on this branch.)
+
+## Found after the trail: the attach never attached (fixed, this branch)
+
+Two stacked defects in `scripts/mobile/tui-attach.sh`, both since a504011:
+
+1. **Inverted polarity.** `lease_held()` exits 1=held/0=free, but
+   `while lease_held` / `if lease_held` used it bare (0 reads true in
+   shell). Idle chat -> waited the full 180s printing "the bot is
+   answering" -> "still waiting" -> exit 0 without attaching (the
+   reconnect prompt the user reported). Live turn -> attached immediately
+   (the corruption the wait was written to prevent).
+2. **Wrong lease shape.** It read a top-level `heartbeat`, which bot-host
+   never writes — real `leases.json` is `{"<chatId>": {"startedAt"...}}`
+   (recordRunStart/recordRunFinish). Every live turn read as free.
+
+Fix: per-entry `startedAt` check (missing timestamp fails safe to held,
+all-entries-older-than-1800s reads free), `while !` / `if !`, give-up
+branch refuses loudly instead of barging. Sensor
+`assert-tui-chat-select.test.sh` §9 pins both (red 15/5 before, green
+20/20 after). E2E: isolated STATE_ROOT + scratch tmux name attaches
+straight to the banner on free leases; live vm2 leases untouched, no live
+tui-lease claimed. Detached `tmux new ... opencode --session
+ses_f208cbf6cffepaoCKtcdzk8OeC` holds 18s+ and renders the thread.
+
+The trail's `NotFound FileSystem.access` instant-exit did NOT reproduce:
+`--prompt "say ok"` completed a full turn on the same session, and the
+tmux boot above holds. No code changed for it — likely a transient
+(server starting / lock contention) during the debug window. If it recurs,
+capture `~/.local/share/opencode/log/opencode.log` at that minute, not
+the TUI framebuffer.
 
 ## Security follow-ups (do not lose)
 
