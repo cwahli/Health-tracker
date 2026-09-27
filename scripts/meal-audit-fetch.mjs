@@ -22,6 +22,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const BASE_URL = (process.env.API_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const TS_WINDOW_MS = 3 * 60 * 1000;
@@ -37,6 +38,9 @@ function parseArgs() {
     debugFile: null,
     list: false,
     help: false,
+    limit: 50,
+    showAll: false,
+    source: 'both',
   };
   for (const arg of args) {
     if (arg === '--list') options.list = true;
@@ -47,6 +51,14 @@ function parseArgs() {
     else if (arg.startsWith('--uid=')) options.uid = arg.slice('--uid='.length).trim();
     else if (arg.startsWith('--output-dir=')) options.outputDir = arg.slice('--output-dir='.length).trim();
     else if (arg.startsWith('--debug-file=')) options.debugFile = arg.slice('--debug-file='.length).trim();
+    else if (arg.startsWith('--limit=')) {
+      const n = parseInt(arg.slice('--limit='.length).trim(), 10);
+      if (Number.isFinite(n)) options.limit = Math.min(Math.max(n, 1), 200);
+    } else if (arg === '--all') options.showAll = true;
+    else if (arg.startsWith('--source=')) {
+      const v = arg.slice('--source='.length).trim().toLowerCase();
+      if (['jobs', 'foods', 'both'].includes(v)) options.source = v;
+    }
   }
   return options;
 }
@@ -59,11 +71,20 @@ Usage:
   node scripts/meal-audit-fetch.mjs --job-id="job_1787301189340_xxx" [--output-dir=...]
   node scripts/meal-audit-fetch.mjs --timestamp="2026-09-22 08:21" [--name="hotpot"]
   node scripts/meal-audit-fetch.mjs --name="Chicken Hotpot" [--uid=<firebaseUid>]
+  node scripts/meal-audit-fetch.mjs --timestamp="23 sep 14:56" --name="oatmeal" [--uid=<uid>]
   node scripts/meal-audit-fetch.mjs --debug-file=/path/debug.json [--name="..."]
-  node scripts/meal-audit-fetch.mjs --list
+  node scripts/meal-audit-fetch.mjs --list [--limit=50] [--uid=<uid>]
+  node scripts/meal-audit-fetch.mjs --name="Mr. Oat" --source=both --limit=50 --all
 
 Notes:
   - Never invents job IDs. Zero/ambiguous matches exit 2 with a candidate list.
+  - Searches BOTH agent_jobs (/api/jobs/status) AND food_logs (/api/audit/food-search,
+    the Food History source of truth). Screenshot titles like "23 sep 14:56" live
+    in food_logs; jobs alone (last 20 by default) miss Saved/Tracked meals.
+  - Name matching is punctuation-insensitive token-AND: "Mr. Oat" matches "Mr Oat".
+  - Timestamps accept Food History format "23 sep 14:56" (day-first) as well as
+    "Sept 22 08:21", ISO-8601, and "08:21". Pass --uid to scope to one user and
+    --limit/--all to page beyond the default 50.
   - Photos are downloaded into <output-dir>/photos/ (local paths in the skeleton).
   - The skeleton carries empty dishes[] — the audit agent fills them after review.
 `);
@@ -88,8 +109,28 @@ async function fetchJson(url, { allow404 = false } = {}) {
   return body;
 }
 
+export function normalizeMealText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function tokenizeMealQuery(s) {
+  return normalizeMealText(s).split(' ').filter((t) => t.length >= 2);
+}
+
+/** Punctuation-insensitive token-AND: every query token must occur in the haystack. */
+export function matchesNormalizedHaystack(haystack, query) {
+  const toks = tokenizeMealQuery(query);
+  if (toks.length === 0) return true;
+  const hay = normalizeMealText(haystack);
+  return toks.every((t) => hay.includes(t));
+}
+
 /** Parse user timestamp into a window. Returns null if unparseable. */
-function parseTimestampWindow(raw) {
+export function parseTimestampWindow(raw) {
   if (!raw) return null;
   const s = String(raw).trim();
   let d = null;
@@ -97,6 +138,7 @@ function parseTimestampWindow(raw) {
 
   const iso = s.match(/^(\d{4}-\d{2}-\d{2})[T\s]+(\d{2}:\d{2})(?::(\d{2}))?/);
   const monDay = s.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:,|\s)+(\d{4})?\s*(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+  const dayMon = s.match(/^(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?(?:\s+(\d{4}))?\s+(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
   const timeOnly = s.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
 
   if (iso) {
@@ -113,6 +155,18 @@ function parseTimestampWindow(raw) {
     if (ampm === 'am' && hour === 12) hour = 0;
     d = new Date(year, monthMap[mKey] ?? 0, Number(monDay[2]), hour, min, 0, 0);
     hasTime = true;
+  } else if (dayMon) {
+    // Food History format: "23 sep 14:56" / "23 Sep 2026 14:56" (day-first).
+    const monthMap = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
+    const mKey = dayMon[2].toLowerCase().slice(0, 3);
+    const year = dayMon[3] ? Number(dayMon[3]) : new Date().getFullYear();
+    let hour = Number(dayMon[4]);
+    const min = Number(dayMon[5]);
+    const ampm = (dayMon[6] || '').toLowerCase();
+    if (ampm === 'pm' && hour < 12) hour += 12;
+    if (ampm === 'am' && hour === 12) hour = 0;
+    d = new Date(year, monthMap[mKey] ?? 0, Number(dayMon[1]), hour, min, 0, 0);
+    hasTime = true;
   } else if (timeOnly) {
     const now = new Date();
     let hour = Number(timeOnly[1]);
@@ -124,7 +178,9 @@ function parseTimestampWindow(raw) {
     hasTime = true;
   } else {
     const parsed = new Date(s);
-    if (!Number.isNaN(parsed.getTime())) d = parsed;
+    // Guard: bare "23 sep 14:56"-style strings can fall through to a wrong-century
+    // Date (e.g. year 2001). Only accept fallback parses in a sane year window.
+    if (!Number.isNaN(parsed.getTime()) && parsed.getFullYear() >= 2020 && parsed.getFullYear() <= 2035) d = parsed;
   }
 
   if (!d || Number.isNaN(d.getTime())) return null;
@@ -170,11 +226,17 @@ function summarizeJob(job) {
   };
 }
 
-async function listJobs({ full = true } = {}) {
-  const qs = full ? 'full=true' : '';
+async function listJobs({ full = true, limit = 50, uid = null } = {}) {
+  const params = new URLSearchParams();
+  if (full) params.set('full', 'true');
+  const safeLimit = Number.isFinite(Number(limit)) ? Math.min(Math.max(Number(limit), 1), 200) : 50;
+  params.set('limit', String(safeLimit));
+  if (uid) params.set('userId', String(uid));
   try {
-    const body = await fetchJson(`${BASE_URL}/api/jobs/status?${qs}`);
-    return Array.isArray(body && body.jobs) ? body.jobs : [];
+    const body = await fetchJson(`${BASE_URL}/api/jobs/status?${params.toString()}`);
+    const jobs = Array.isArray(body && body.jobs) ? body.jobs : [];
+    console.error(`[Fetch] jobs/status: got ${jobs.length} job(s) (limit=${safeLimit}${uid ? ` uid=${uid}` : ''}).`);
+    return jobs;
   } catch (err) {
     console.error(`[Fetch] Cannot list jobs from ${BASE_URL}: ${err.message}`);
     console.error(`[Fetch] Is the server running? (API_BASE_URL=${BASE_URL})`);
@@ -182,38 +244,142 @@ async function listJobs({ full = true } = {}) {
   }
 }
 
-function filterCandidates(jobs, { timestampWindow, name }) {
+async function searchFoodLogs({ query = '', uid = null, limit = 50 } = {}) {
+  const params = new URLSearchParams();
+  if (query) params.set('q', String(query));
+  if (uid) params.set('uid', String(uid));
+  params.set('limit', String(Number.isFinite(Number(limit)) ? Math.min(Math.max(Number(limit), 1), 50) : 50));
+  const url = `${BASE_URL}/api/audit/food-search?${params.toString()}`;
+  try {
+    const body = await fetchJson(url, { allow404: true });
+    if (body && body.__status === 404) {
+      console.error('[Fetch] /api/audit/food-search missing (server predates audit patch) — jobs only.');
+      return [];
+    }
+    const foods = Array.isArray(body && body.foods) ? body.foods : [];
+    console.error(`[Fetch] audit/food-search: got ${foods.length} food log(s) for q="${query}"${uid ? ` uid=${uid}` : ''}.`);
+    return foods;
+  } catch (err) {
+    console.error(`[Fetch] food-search failed (${err.message}) — continuing with jobs only.`);
+    return [];
+  }
+}
+
+function summarizeFood(food) {
+  let images = [];
+  try {
+    images = Array.isArray(food.image_urls) ? food.image_urls : JSON.parse(food.image_urls || '[]');
+  } catch { images = []; }
+  return {
+    foodLogId: food.id,
+    name: food.name,
+    date: food.date || null,
+    updatedAt: food.updated_at || null,
+    userId: food.firebase_uid || null,
+    calories: food.calories ?? null,
+    weightGrams: food.weight_grams ?? null,
+    debugUrl: food.debug_url || null,
+    sourceMealId: food.source_meal_id || null,
+    imageCount: Array.isArray(images) ? images.length : 0,
+  };
+}
+
+export function filterCandidates(jobs, { timestampWindow, name }) {
   let out = jobs;
   if (timestampWindow) {
     out = out.filter((j) => {
       const ms = jobCreatedMs(j);
       if (ms == null) return false;
-      if (timestampWindow.hasTime) return ms >= timestampWindow.startMs && ms <= timestampWindow.endMs;
+      if (timestampWindow.hasTime) {
+        if (ms >= timestampWindow.startMs && ms <= timestampWindow.endMs) return true;
+        // Food logs often carry date-only precision or a display TZ different from
+        // the audit runner (UI shows profile TZ, e.g. WIB = UTC+7, while updated_at
+        // is UTC). Fall back to same UTC calendar day so "23 sep 14:56" still finds
+        // a log stamped 2026-09-23T07:56Z. Name matching disambiguates within the day.
+        const d = new Date(ms);
+        const dd = new Date(timestampWindow.dateMs);
+        return d.getUTCFullYear() === dd.getUTCFullYear() && d.getUTCMonth() === dd.getUTCMonth() && d.getUTCDate() === dd.getUTCDate();
+      }
       const d = new Date(ms);
       const dd = new Date(timestampWindow.dateMs);
       return d.getFullYear() === dd.getFullYear() && d.getMonth() === dd.getMonth() && d.getDate() === dd.getDate();
     });
   }
   if (name) {
-    const q = name.toLowerCase();
     out = out.filter((j) => {
       const hay = JSON.stringify({
         id: j.id,
         clean_result: j.clean_result,
         status_message: j.status_message,
         photo_url: j.photo_url,
-      }).toLowerCase();
-      return hay.includes(q);
+      });
+      return matchesNormalizedHaystack(hay, name);
     });
   }
   return out;
 }
 
-function emitCandidatesAndExit(candidates, reason) {
+export function jobTitleHaystack(j) {
+  const cr = (j && j.clean_result) || {};
+  const parts = [];
+  const dishes = cr.dishes || cr.scoutItems || (cr.pendingFoodLog && cr.pendingFoodLog.dishes) || [];
+  for (const d of Array.isArray(dishes) ? dishes : []) {
+    if (d && (d.dishName || d.name)) parts.push(d.dishName || d.name);
+  }
+  if (typeof cr.message === 'string') parts.push(cr.message);
+  if (j && typeof j.status_message === 'string') parts.push(j.status_message);
+  return parts.join(' | ');
+}
+
+export function filterFoodCandidates(foods, { name, timestampWindow }) {
+  let out = Array.isArray(foods) ? [...foods] : [];
+  if (timestampWindow) {
+    out = out.filter((f) => {
+      const candidates = [f.date, f.updated_at].filter(Boolean);
+      let ms = null;
+      for (const c of candidates) {
+        const t = Date.parse(String(c));
+        if (!Number.isNaN(t)) { ms = t; break; }
+      }
+      if (ms == null) return false;
+      if (timestampWindow.hasTime) {
+        if (ms >= timestampWindow.startMs && ms <= timestampWindow.endMs) return true;
+        // Food logs often carry date-only precision or a display TZ different from
+        // the audit runner (UI shows profile TZ, e.g. WIB = UTC+7, while updated_at
+        // is UTC). Fall back to same UTC calendar day so "23 sep 14:56" still finds
+        // a log stamped 2026-09-23T07:56Z. Name matching disambiguates within the day.
+        const d = new Date(ms);
+        const dd = new Date(timestampWindow.dateMs);
+        return d.getUTCFullYear() === dd.getUTCFullYear() && d.getUTCMonth() === dd.getUTCMonth() && d.getUTCDate() === dd.getUTCDate();
+      }
+      const d = new Date(ms);
+      const dd = new Date(timestampWindow.dateMs);
+      return d.getFullYear() === dd.getFullYear() && d.getMonth() === dd.getMonth() && d.getDate() === dd.getDate();
+    });
+  }
+  if (name) {
+    out = out.filter((f) => matchesNormalizedHaystack(`${f.name || ''} ${f.id || ''}`, name));
+  }
+  return out;
+}
+
+function emitCandidatesAndExit(candidates, reason, extra = {}) {
   const list = candidates.map(summarizeJob);
   console.error(`[Fetch] ${reason}`);
   console.error(`[Fetch] ${list.length} candidate(s). Re-run with --job-id=<id>.`);
-  process.stdout.write(`${JSON.stringify({ reason, candidates: list }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ reason, candidates: list, ...extra }, null, 2)}\n`);
+  process.exit(2);
+}
+
+function emitCombinedAndExit({ jobs, foods }, reason) {
+  const foodList = (foods || []).map(summarizeFood);
+  console.error(`[Fetch] ${reason}`);
+  console.error(`[Fetch] ${(jobs || []).length} job candidate(s), ${foodList.length} food-log candidate(s).`);
+  if (foodList.length > 0) {
+    console.error('[Fetch] Food History is the source of truth for Saved/Tracked meals.');
+    console.error('[Fetch] If a food log has sourceMealId/debugUrl with a job_ id, re-run with --job-id=<that id>.');
+  }
+  process.stdout.write(`${JSON.stringify({ reason, candidates: (jobs || []).map(summarizeJob), foodLogs: foodList }, null, 2)}\n`);
   process.exit(2);
 }
 
@@ -223,7 +389,7 @@ async function resolveJobId(options) {
   const timestampWindow = parseTimestampWindow(options.timestamp);
   if (options.timestamp && !timestampWindow) {
     console.error(`[Fetch] Could not parse --timestamp="${options.timestamp}".`);
-    console.error('[Fetch] Accepted: "2026-09-22 08:21", "Sept 22 08:21", "08:21", ISO-8601.');
+    console.error('[Fetch] Accepted: "2026-09-22 08:21", "Sept 22 08:21", "23 sep 14:56", "08:21", ISO-8601.');
     process.exit(2);
   }
   if (!timestampWindow && !options.name) {
@@ -231,21 +397,58 @@ async function resolveJobId(options) {
     process.exit(1);
   }
 
-  const jobs = await listJobs({ full: true });
-  const matches = filterCandidates(jobs, { timestampWindow, name: options.name });
+  const limit = options.showAll ? 200 : (options.limit || 50);
+  const wantJobs = options.source === 'jobs' || options.source === 'both';
+  const wantFoods = options.source === 'foods' || options.source === 'both';
 
-  if (matches.length === 1) {
+  const jobs = wantJobs ? await listJobs({ full: true, limit, uid: options.uid }) : [];
+  const blobMatches = wantJobs ? filterCandidates(jobs, { timestampWindow, name: options.name }) : [];
+  // Prefer dish-title hits: blob-wide token-AND is noisy ("quick"/"cook" can match
+  // prompt text or URLs in unrelated jobs). Fall back to blob hits only when no title hits.
+  const titleHits = options.name
+    ? blobMatches.filter((j) => matchesNormalizedHaystack(jobTitleHaystack(j), options.name))
+    : blobMatches;
+  const matches = titleHits.length > 0 ? titleHits : blobMatches;
+  const usedBlobFallback = matches.length > 0 && titleHits.length === 0 && blobMatches.length > 0;
+
+  let foods = [];
+  let foodMatches = [];
+  if (wantFoods && options.name) {
+    foods = await searchFoodLogs({ query: options.name, uid: options.uid, limit: Math.min(limit, 50) });
+    foodMatches = filterFoodCandidates(foods, { name: options.name, timestampWindow });
+  }
+
+  // Single unambiguous job hit -> use it (classic path).
+  if (matches.length === 1 && foodMatches.length <= 1) {
     const s = summarizeJob(matches[0]);
-    console.error(`  ✓ Matched job ${s.jobId} (created=${s.createdAt || s.createdMs})`);
+    console.error(`  Matched job ${s.jobId} (created=${s.createdAt || s.createdMs})`);
+    if (foodMatches.length === 1) {
+      const f = summarizeFood(foodMatches[0]);
+      console.error(`  Corroborated by food log "${f.name}" (${f.date || f.updatedAt || 'no date'}).`);
+    }
     return s.jobId;
   }
-  if (matches.length === 0) {
-    emitCandidatesAndExit([], `No job matched timestamp=${options.timestamp || '-'} name=${options.name || '-'} on ${BASE_URL}.`);
+  // Single food-log hit with a linked job id -> follow the link.
+  if (matches.length === 0 && foodMatches.length === 1) {
+    const f = summarizeFood(foodMatches[0]);
+    const linkSrc = `${f.sourceMealId || ''} ${f.debugUrl || ''}`;
+    const m = linkSrc.match(/job_\d+_[A-Za-z0-9]+/);
+    if (m) {
+      console.error(`  Matched food log "${f.name}" -> linked job ${m[0]} (via ${f.sourceMealId ? 'sourceMealId' : 'debugUrl'}).`);
+      return m[0];
+    }
+    emitCombinedAndExit({ jobs: [], foods: foodMatches },
+      `Food-log match has no linked analysis job (Saved/Manual meal?): "${f.name}" ${f.date || f.updatedAt || ''}. Audit from Food History detail instead of run-tree. timestamp=${options.timestamp || '-'} name=${options.name || '-'} on ${BASE_URL}.`);
+  }
+  if (matches.length === 0 && foodMatches.length === 0) {
+    emitCombinedAndExit({ jobs: [], foods: [] },
+      `No job or food log matched timestamp=${options.timestamp || '-'} name=${options.name || '-'} on ${BASE_URL} (jobs scanned=${jobs.length}, foods scanned=${foods.length}${options.uid ? ` uid=${options.uid}` : ' all users'}). Hint: Food History titles live in food_logs — retry with --source=both --uid=<owner> --limit=100 and day-first timestamp "23 sep 14:56".`);
   }
   const windowNote = timestampWindow && !timestampWindow.hasTime
     ? 'date-only match'
     : `window=+/-${TS_WINDOW_MS / 60000}min`;
-  emitCandidatesAndExit(matches, `Ambiguous match: ${matches.length} jobs for timestamp=${options.timestamp || '-'} name=${options.name || '-'} (${windowNote}).`);
+  emitCombinedAndExit({ jobs: matches, foods: foodMatches },
+    `Ambiguous match: ${matches.length} job(s) + ${foodMatches.length} food log(s) for timestamp=${options.timestamp || '-'} name=${options.name || '-'} (${windowNote})${usedBlobFallback ? ' [title match: none — blob-text fallback]' : ''}.`);
 }
 
 async function fetchRunTree(jobId) {
@@ -284,6 +487,98 @@ function loadDebugFile(file) {
 }
 
 /**
+ * True when a turn image entry is a real downloadable photo URL.
+ * Rejects debug-contract placeholders produced by stripHeavyImages
+ * ("[image omitted 20KB]"), data-URLs, empty strings, and non-URL junk.
+ * Those placeholders used to be treated as relative paths
+ * (`<BASE>/<placeholder>`), fetched as HTML error pages (1.4KB),
+ * and saved as fake `_image_20omitted_200KB_.jpg` files.
+ */
+export function isDownloadablePhotoUrl(u) {
+  if (typeof u !== 'string') return false;
+  const s = u.trim();
+  if (!s) return false;
+  if (s.startsWith('data:')) return false;
+  if (s.startsWith('[') || s.includes('image omitted') || s.includes('omitted_')) return false;
+  if (/^https?:\/\//i.test(s)) return true;
+  if (s.startsWith('/photos/') || s.startsWith('/')) return true;
+  // R2 public hosts and site photo paths only; bare filenames from the
+  // photos/ dir are downloadable via the proxy. Anything else is junk.
+  if (/^photos\//i.test(s)) return true;
+  if (/\.r2\.dev\/photos\//i.test(s)) return true;
+  if (/\.(jpe?g|png|webp|gif|heic|heif)(\?.*)?$/i.test(s) && !/\s/.test(s)) return true;
+  return false;
+}
+
+/**
+ * True when a downloaded buffer looks like a real image.
+ * Rejects HTML error pages / placeholders (start with "<", "<!DOCTYPE",
+ * "<html") which the photo proxy returns for unknown keys.
+ */
+export function isImageBuffer(buf, contentType) {
+  if (!buf || buf.length === 0) return false;
+  if (typeof contentType === 'string' && /text\/html/i.test(contentType)) return false;
+  const head = buf.subarray(0, Math.min(buf.length, 200)).toString('latin1').trimStart();
+  if (head.startsWith('<')) return false;
+  if (/^<!doctype\s+html/i.test(head) || /^<html/i.test(head)) return false;
+  // Magic bytes: JPEG FF D8 FF, PNG 89 50 4E 47, GIF 47 49 46, WEBP RIFF....WEBP, HEIC ftyp, BMP 42 4D
+  const b = buf;
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true;
+  if (b.length >= 4 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true;
+  if (b.length >= 3 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return true;
+  if (b.length >= 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return true;
+  if (b.length >= 12 && b.toString('latin1', 4, 8) === 'ftyp') return true;
+  if (b.length >= 2 && b[0] === 0x42 && b[1] === 0x4d) return true;
+  // Unknown binary (e.g. signed R2 bytes without a known header): accept as long
+  // as it is not HTML/text. Content-type image/* already passed above.
+  if (typeof contentType === 'string' && /^image\//i.test(contentType)) return true;
+  // No content-type and no known magic: reject small text-like payloads only.
+  if (b.length < 256) return false;
+  return true;
+}
+
+/**
+ * Collect unique downloadable photo URLs from a turn list.
+ * Skips placeholders and data-URLs; preserves first-seen order.
+ */
+export function collectDownloadablePhotoUrls(turns) {
+  const seen = new Set();
+  const out = [];
+  let skippedPlaceholders = 0;
+  for (const t of turns || []) {
+    const urls = [
+      ...(Array.isArray(t.images) ? t.images : []),
+      ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
+    ];
+    for (const u of urls) {
+      if (typeof u !== 'string' || !u || u.startsWith('data:')) continue;
+      if (!isDownloadablePhotoUrl(u)) {
+        skippedPlaceholders++;
+        continue;
+      }
+      if (!seen.has(u)) {
+        seen.add(u);
+        out.push(u);
+      }
+    }
+  }
+  return { urls: out, skippedPlaceholders };
+}
+
+/**
+ * Per-turn remote URLs for the skeleton. A turn whose CanonicalRunTree
+ * imageCount is 0 is text-only: it must get zero photos even when other
+ * turns in the same job carry photos (no stale carry-over).
+ */
+export function turnRemoteUrls(t) {
+  if (t && typeof t.imageCount === 'number' && t.imageCount === 0) return [];
+  const remote = [
+    ...(Array.isArray(t.images) ? t.images : []),
+    ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
+  ];
+  return remote.filter(isDownloadablePhotoUrl);
+}
+/**
  * Rewrite R2 public URLs to the site's /photos/ proxy.
  * The raw *.r2.dev host often has an expired/mismatched cert; the Caddy-served
  * /photos/<key> endpoint serves the same bytes and trusts our CA chain.
@@ -316,10 +611,16 @@ async function downloadPhoto(url, photosDir) {
 
   const res = await fetch(abs);
   if (!res.ok) throw new Error(`photo HTTP ${res.status}: ${abs}`);
+  const contentType = res.headers ? res.headers.get('content-type') : null;
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length === 0) throw new Error(`photo empty: ${abs}`);
+  if (!isImageBuffer(buf, contentType)) {
+    throw new Error(
+      `photo not an image (content-type=${contentType || 'unknown'}, bytes=${buf.length}): ${abs} — placeholder/HTML error page, not a photo`
+    );
+  }
   fs.writeFileSync(dest, buf);
-  return { url, resolvedUrl: abs, localPath: dest, bytes: buf.length };
+  return { url, resolvedUrl: abs, localPath: dest, bytes: buf.length, contentType };
 }
 
 async function main() {
@@ -330,7 +631,8 @@ async function main() {
   }
 
   if (options.list) {
-    const jobs = await listJobs({ full: true });
+    const limit = options.showAll ? 200 : (options.limit || 50);
+    const jobs = await listJobs({ full: true, limit, uid: options.uid });
     process.stdout.write(`${JSON.stringify(jobs.map(summarizeJob), null, 2)}\n`);
     process.exit(0);
   }
@@ -376,19 +678,9 @@ async function main() {
 
   fs.writeFileSync(path.join(outDir, 'run_tree.json'), JSON.stringify(runTree, null, 2), 'utf-8');
 
-  const seenUrls = new Set();
-  const photoUrls = [];
-  for (const t of turns) {
-    const urls = [
-      ...(Array.isArray(t.images) ? t.images : []),
-      ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
-    ];
-    for (const u of urls) {
-      if (typeof u === 'string' && u && !u.startsWith('data:') && !seenUrls.has(u)) {
-        seenUrls.add(u);
-        photoUrls.push(u);
-      }
-    }
+  const { urls: photoUrls, skippedPlaceholders } = collectDownloadablePhotoUrls(turns);
+  if (skippedPlaceholders > 0) {
+    console.error(`[Fetch] Skipped ${skippedPlaceholders} placeholder/non-photo image entrie(s) ("[image omitted ...]", data-URLs).`);
   }
 
   const downloaded = [];
@@ -408,10 +700,7 @@ async function main() {
   const localByRemote = new Map(downloaded.map((d) => [d.url, path.relative(outDir, d.localPath)]));
 
   const passes = turns.map((t, idx) => {
-    const remote = [
-      ...(Array.isArray(t.images) ? t.images : []),
-      ...(Array.isArray(t.dispatches) ? t.dispatches.flatMap((d) => (Array.isArray(d.images) ? d.images : [])) : []),
-    ];
+    const remote = turnRemoteUrls(t);
     const addedPhotos = [...new Set(remote.map((u) => localByRemote.get(u)).filter(Boolean))];
     const turnNo = typeof t.turn === 'number' ? t.turn : idx + 1;
     return {
@@ -450,6 +739,8 @@ async function main() {
     notes: [
       'dishes[] intentionally empty — audit agent must fill after reviewing photos (no placeholder ground truth).',
       'Turn structure comes from the server CanonicalRunTree (buildTurnTimeline); do not re-parse invented event types.',
+      'Photo truth: only downloadable http(s)//photos URLs are fetched; "[image omitted ...]" placeholders and data-URLs are skipped, HTML error pages are rejected (not saved as .jpg), and a turn with imageCount 0 stays photo-less (no carry-over from other turns).',
+      'Audit rule: if a pass has zero usable photos, audit that pass from user text/debug only and say so — never borrow a photo from another turn or invent a Big Mac out of frame.',
     ],
   };
 
@@ -463,7 +754,21 @@ async function main() {
   console.error(`  node scripts/generate-meal-result.mjs --input="${skeletonPath}" --bundle-name="Meal-${bundleSlug}-01"`);
 }
 
-main().catch((err) => {
-  console.error('[MealAuditFetch] Fatal:', err);
-  process.exit(1);
-});
+const isDirectCli = Boolean(
+  process.argv[1] &&
+  (import.meta.url === `file://${process.argv[1]}` ||
+    (() => {
+      try {
+        return fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+      } catch {
+        return false;
+      }
+    })())
+);
+
+if (isDirectCli) {
+  main().catch((err) => {
+    console.error('[MealAuditFetch] Fatal:', err);
+    process.exit(1);
+  });
+}
