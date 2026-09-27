@@ -11,6 +11,7 @@
     "build": "npm run build:web && npm run build:server",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
+    "pretest": "node scripts/sync-router-vendor.mjs",
     "lint": "tsc --noEmit",
     "test": "vitest run --exclude tests/golden_inbox.test.ts",
     "test:receptionist": "vitest run src/server/receptionist/handoffContract.test.ts src/components/chat-cards/ReceptionistCard.i18n.test.tsx",
