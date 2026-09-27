@@ -117,3 +117,10 @@ jobs:
       # dispatcher must mirror non-agent coder branches onto agent/dispatch-*.
       - name: Dispatch branch-scope sensor (journey/* → agent/** mirror)
         run: npx vitest run tests/dispatch-branch-scope.test.ts
+
+      # shot bridge: one phone screenshot pulled by two agents at once must land
+      # as ONE file (it used to write shot-X.png + shot-X-2.png), and a 401 must
+      # never read as "the phone has no screenshots". Real client against a real
+      # server on a loopback port in a throwaway cache — no phone, no tunnel.
+      - name: Screenshot bridge gate (scripts/mobile/test-pull-shot.sh)
+        run: bash scripts/mobile/test-pull-shot.sh
