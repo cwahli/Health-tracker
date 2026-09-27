@@ -60,7 +60,7 @@ import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
-import { recordError, noteHealthy } from './lib/error-log.mjs';
+import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, evaluateRecovery } from './lib/error-log.mjs';
 import {
   parseModelRef,
   buildFreeModelList,
@@ -787,6 +787,31 @@ export function failureSignature({ lane = '', errText = '' } = {}) {
  * The model never rewrites its own instructions; this only records what
  * happened.
  */
+/**
+ * Record that a lane switch was attempted as a recovery.
+ *
+ * The failover walk already moves the turn; what was missing is the ledger
+ * entry saying so. Without this call the error log shows open→closed with no
+ * trace of how the conversation survived — a recovery nobody can audit. With
+ * it, the row parks in `recovering` naming the evaluated rule, and the next
+ * clean run on either lane closes it via noteHealthy. Bookkeeping must never
+ * break failover, so every failure mode here returns null instead of throwing.
+ */
+export function noteLaneSwitch({ from = '', to = '', reason = '', botId = '', home = os.homedir() } = {}) {
+  try {
+    const logPath = process.env.BOT_ERROR_LOG === '0'
+      ? null
+      : (process.env.BOT_ERROR_LOG || path.join(home, '.hermes', 'bot-error-log.json'));
+    const kind = classifyErrorKind(String(reason || 'error'));
+    const rec = recordError({ kind, lane: from, bot: botId, hint: String(reason || '').slice(0, 200) }, logPath);
+    if (!rec) return null;
+    const { action: rule } = evaluateRecovery(rec);
+    return recordRecoveryAttempt(rec.id, { rule, ok: false, note: `switched to ${to}` }, logPath);
+  } catch {
+    return null;
+  }
+}
+
 export function noteDeadEnd({ lane = '', errText = '', botId = '', home = os.homedir() } = {}) {
   try {
     const sig = failureSignature({ lane, errText });
@@ -3198,6 +3223,14 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
     },
     onSwitch: ({ from, to, reason }) => {
       const raw = String(reason || 'error');
+      // The switch IS the recovery attempt — record it so the error log shows
+      // open→recovering→closed instead of open→closed with no trace of how.
+      // A UI hiccup must never break failover, and neither must bookkeeping.
+      try {
+        noteLaneSwitch({ from, to, reason: raw, botId: config?.id });
+      } catch {
+        // fall through to the user-visible switch line
+      }
       // Quota envelopes (Cline's INFERENCE_CAP_ERROR JSON) stay in the
       // ledger/observer log; the chat line carries the short verdict only.
       const short = isQuotaOrLimitError(raw)
