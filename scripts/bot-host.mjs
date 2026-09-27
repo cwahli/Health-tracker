@@ -3766,10 +3766,19 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         }
       }
       console.log(`[${config.id}] turn ran on ${host} (job ${handed.jobId}, ledger ${handed.ledger || 'worker'}${handed.sessionID ? `, session ${handed.sessionID}` : ''})`);
-      await renderer.finish(
-        { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
-        { footer: foot }
-      ).catch(() => {});
+      // Same rule as the local path below: a result that lands after /abort
+      // belongs to a dead turn. Delivering it would answer a question the user
+      // already cancelled — on 2026-09-27 a 2000-word essay arrived 26s after
+      // the abort ack because this call had no aborted check.
+      if (running.get(chatId)?.aborted) {
+        renderer.status = 'aborted';
+        await renderer.deliver('Aborted.').catch(() => {});
+      } else {
+        await renderer.finish(
+          { finalText: handed.text || '', lastError: handed.error || '', code: handed.code },
+          { footer: foot }
+        ).catch(() => {});
+      }
       return { done: true, delivered: true, handed };
     };
     // The ledger picks the walk. A lane it already stamped is not retried, an
