@@ -229,11 +229,18 @@ not the physical devices.
    result shape the new canary check refused. Restarting both stand-ins from
    `/home/ubuntu/bot-host-r14` fixed it; the canary then passed and reported
    `worker: vps-0a61fae6 (linux/x64)`.
-2. **A sticky `failed` route had no recovery in the pass path.** After a failed
+   **Now supervised:** `worker-standin@.service` runs them from the serving tree
+   with `Restart=always`, so a reboot or a stale module cannot silently cost a
+   day again. The locations sweep was re-run green under the units.
+2. **`bot-host@mobile` crash-looped on the VPS** (restart counter 463, one 409
+   every ~13s) because the phone poller was left enabled here. Stopped and
+   disabled: the phone dials the relay, it is not served from this box. The
+   `mobile` ledger directory is untouched — the crash loop never wrote a turn.
+3. **A sticky `failed` route had no recovery in the pass path.** After a failed
    canary the chat stayed pinned and every later turn held with "route rolled
    back … (unknown reason)". Re-arming with `/location <host>` is the documented
    way out and it works, but the reply names no reason, which is worth fixing.
-3. **Four proof oracles were wrong, not the product** (cards 2, 3, 6, 8): a
+4. **Four proof oracles were wrong, not the product** (cards 2, 3, 6, 8): a
    string compare that conflated "dir absent" with "dir empty"; a pass/fail on
    refusal *wording* instead of the side effect; a hardcoded model name that was
    not in the table so the check could not fail; and two first-line definitions
@@ -243,8 +250,9 @@ not the physical devices.
 
 - **QS-1 / QS-3 / QS-4 / QS-9 need a real device worker.** `mobile` has never
   connected. Everything reachable with stand-ins is green above.
-- **The stand-ins are not supervised.** They were started by hand at 00:33 and
-  nothing restarts them; a box reboot loses all three remote hosts. A unit or a
-  documented start command belongs here.
-- **`bot-host@mobile` is in a 409 crash-loop on the VPS** (restart counter 463).
-  The phone poller must not run here at all; the phone has its own.
+- `collab` and `grok` remain **stand-ins on this box**, now supervised by
+  `worker-standin@.service`. A real Colab runtime and a real phone are the only
+  way QS-1/QS-3/QS-4/QS-9 go green, and the bot already labels them honestly in
+  its own reply.
+- **A `failed` route still replies "(unknown reason)"** — re-arming works, but the
+  user is told a canary failed without being told why.
