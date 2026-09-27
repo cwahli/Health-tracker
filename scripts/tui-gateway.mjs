@@ -34,7 +34,10 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { URL } from 'node:url';
 
-export const COOKIE_NAME = 'tui_session';
+// `__Host-` is a browser-enforced prefix: the cookie is only accepted with
+// Secure, Path=/ and no Domain, so it cannot be read by a sibling subdomain or
+// sent over plaintext. All three hold here.
+export const COOKIE_NAME = '__Host-tui_session';
 export const MAX_AGE_SEC = 5 * 60;
 export const SKEW_SEC = 60;
 
@@ -81,10 +84,20 @@ export function validateInitData(initData, botToken, { now = Date.now(), maxAgeS
   }
   if (!user || !user.id) return fail('no user in initData');
 
-  // The Mini App is opened from a chat; binding to it is what stops bot A's
-  // token opening bot B's conversation.
-  const chatId = user.id;
-  return { ok: true, reason: '', user, chatId, authDate, queryId: params.get('query_id') || '' };
+  // Bind to the CHAT when Telegram sends one, and to the user otherwise (a
+  // private Mini App has no `chat` field). The distinction matters: in a group
+  // the same person in two chats must not get the same session, and two people
+  // in one chat must not either. An earlier version always used user.id while
+  // calling it a chat binding, so the name promised an isolation it did not have.
+  let chat = null;
+  try {
+    chat = params.get('chat') ? JSON.parse(params.get('chat')) : null;
+  } catch {
+    return fail('chat is not JSON');
+  }
+  const chatId = String(chat?.id ?? user.id);
+  const boundBy = chat?.id ? 'chat' : 'user';
+  return { ok: true, reason: '', user, chat, chatId, boundBy, authDate, queryId: params.get('query_id') || '' };
 }
 
 /** Sign a session token bound to (botId, chatId). */
@@ -119,11 +132,12 @@ export function verifyToken(token, secret, { now = Date.now() } = {}) {
   return { ok: true, botId, chatId, exp: Number(exp) };
 }
 
-/** Which bot token to check against, given the bot ids this gateway serves. */
+/** Escape text interpolated into the refusal page. */
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** Which bot token to check against, given the bot ids this gateway serves. */
 export function tokenFor(botId, env = process.env) {
   const direct = env[`TUI_BOT_TOKEN_${String(botId).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`];
   if (direct) return direct;
@@ -131,18 +145,6 @@ export function tokenFor(botId, env = process.env) {
 }
 
 
-/**
- * The injected page.
- *
- * ttyd 1.7.7 inlines its whole client into one HTML page, so there is nothing to
- * import and no build step: the gateway takes ttyd's own page and rewrites it.
- * Two things are injected — the session token (as a value, never a URL) and a
- * `WebSocket` shim, because a browser cannot set a header on a websocket and
- * ttyd's client opens one itself.
- *
- * The shim only touches a socket that is talking to this ttyd, so nothing else
- * on the page is affected.
- */
 /**
  * The bootstrap the Mini App opens.
  *
@@ -174,39 +176,6 @@ const BOOTSTRAP = [
   '})();',
   '</script></body></html>',
 ].join("\n");
-
-function injectInto(html, token) {
-  // The two patterns are built with `new RegExp` instead of written as
-  // literals. This is a template literal, and inside one a backslash before a
-  // slash collapses, so /\/ws/ would reach the browser as //ws/ — a comment,
-  // not a pattern. The shim would then never fire and the websocket would open
-  // with no credential on it, which is the one failure this whole file exists to
-  // prevent. Escaping that correctly through a template literal is a trap, so
-  // the slashes are sidestepped instead.
-  const boot = [
-    '<script>',
-    '(function () {',
-    '  var TOKEN = ' + JSON.stringify(token) + ';',
-    '  var Native = window.WebSocket;',
-    '  var IS_WS = new RegExp("/ws(" + String.fromCharCode(63) + "|$)");',
-    '  var SCHEME = new RegExp("^(wss?:" + String.fromCharCode(47, 47) + ")");',
-    '  function Patched(url, protocols) {',
-    '    if (typeof url === "string" && IS_WS.test(url)) {',
-    "      url = url.replace(SCHEME, '$1' + TOKEN + ':x@');",
-    '    }',
-    '    return protocols === undefined ? new Native(url) : new Native(url, protocols);',
-    '  }',
-    '  Patched.prototype = Native.prototype;',
-    '  Patched.CONNECTING = Native.CONNECTING; Patched.OPEN = Native.OPEN;',
-    '  Patched.CLOSING = Native.CLOSING; Patched.CLOSED = Native.CLOSED;',
-    '  window.WebSocket = Patched;',
-    '})();',
-    '</script>',
-  ].join('\n');
-  // Ahead of ttyd's own scripts, so the shim is installed first.
-  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + '\n' + boot);
-  return boot + html;
-}
 
 /**
  * The token the caller presented, wherever they put it. A browser navigating
@@ -263,10 +232,10 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
           <h1>refused</h1><p>${escapeHtml(verdict.reason)}</p></body>`);
       }
       const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
-      log(`admitted bot=${botId} chat=${verdict.chatId}`);
+      log(`admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
       res.writeHead(302, {
         'location': '/tty/',
-        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
         'cache-control': 'no-store',
       });
       return res.end();
@@ -288,7 +257,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
       const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
-      log(`admitted bot=${botId} chat=${verdict.chatId}`);
+      log(`admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       return res.end(JSON.stringify({ ok: true, token, bot: botId, chat: verdict.chatId, ttyd: '/tty/' }));
     }
@@ -321,7 +290,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
         res.writeHead(503, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
       }
-      return serveInjectedPage(req, res, ttyd, token, ttydCredential);
+      return serveTtydPage(req, res, ttyd, ttydCredential);
     }
 
     res.writeHead(404, { 'content-type': 'application/json' });
@@ -330,12 +299,22 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
 }
 
 /**
- * Fetch ttyd's page and serve it with the session token and the WebSocket shim
- * injected. Identity encoding is requested on purpose: the body is rewritten as
- * text, so a gzipped response would reach the browser as gzip bytes with the
- * header stripped — row S7's replacement characters, reached the other way.
+ * Fetch ttyd's page and serve it unchanged.
+ *
+ * There is no injected script and no credential in the page. The session
+ * cookie authorizes the socket: a browser sends cookies on a websocket
+ * handshake, so Caddy's forward_auth sees it without any help from JavaScript.
+ * An earlier version rewrote the page to put the token on the socket as Basic
+ * credentials — but /authz never read Basic, so the shim was doing nothing
+ * except throwing a SyntaxError on every page load. Deleting it removed a real
+ * bug instead of patching one, and left one credential instead of two
+ * half-wired ones.
+ *
+ * Identity encoding is still requested: the page is forwarded as text, and a
+ * gzipped body would reach the browser as gzip bytes with the header stripped —
+ * row S7's replacement characters reached from the other side.
  */
-function serveInjectedPage(req, res, ttydBase, token, ttydCredential = '') {
+function serveTtydPage(req, res, ttydBase, ttydCredential = '') {
   const target = new URL('/tty/', ttydBase);
   const upstream = http.request(
     {
@@ -353,13 +332,13 @@ function serveInjectedPage(req, res, ttydBase, token, ttydCredential = '') {
       const chunks = [];
       up.on('data', (c) => chunks.push(c));
       up.on('end', () => {
-        const html = injectInto(Buffer.concat(chunks).toString('utf8'), token);
+        const body = Buffer.concat(chunks);
         res.writeHead(up.statusCode || 200, {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-store',
-          'content-length': String(Buffer.byteLength(html)),
+          'content-length': String(body.length),
         });
-        res.end(html);
+        res.end(body);
       });
     },
   );

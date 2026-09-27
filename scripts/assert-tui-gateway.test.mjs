@@ -3,8 +3,9 @@
 //
 // Run: node scripts/assert-tui-gateway.test.mjs
 import crypto from 'node:crypto';
+import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, createGateway, COOKIE_NAME } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -38,6 +39,54 @@ function makeInitData(fields, { secretKey = null, hash = null } = {}) {
   return `${wire}&hash=${h}`;
 }
 
+// Fetch the real page through the real handler, with a stub ttyd, so the page
+// under test is the one a browser would be handed.
+async function ttydPageThroughGateway() {
+  let upstream = '';
+  const ttyd = http.createServer((rq, rs) => {
+    const page = '<!doctype html><html><head><title>t</title></head><body>'
+      + '<script>console.log("hello");</script></body></html>';
+    upstream = page;
+    rs.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    rs.end(page);
+  });
+  await new Promise((r) => ttyd.listen(0, '127.0.0.1', r));
+  const port = ttyd.address().port;
+  const env = {
+    TUI_GATEWAY_SECRET: SECRET,
+    TUI_BOT_TOKEN_VM: TOKEN,
+    TUI_TTYD_URL: `http://127.0.0.1:${port}`,
+    TUI_TTYD_CREDENTIAL: Buffer.from('tui:x').toString('base64'),
+  };
+  const token = issueToken({ botId: 'vm', chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+  const handle = createGateway({ env, log: () => {} });
+  const html = await new Promise((resolve, reject) => {
+    const res = {
+      writeHead: () => {},
+      end: (body) => resolve(String(body || '')),
+    };
+    handle({
+      method: 'GET',
+      url: '/tty/',
+      headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` },
+    }, res).catch(reject);
+    setTimeout(() => reject(new Error('the page handler never answered')), 5000).unref?.();
+  });
+  ttyd.close();
+  return { html, upstream };
+}
+
+// The bootstrap is what a cold WebView gets, with no initData in the URL.
+async function bootstrapThroughGateway() {
+  const env = { TUI_GATEWAY_SECRET: SECRET, TUI_BOT_TOKEN_VM: TOKEN };
+  const handle = createGateway({ env, log: () => {} });
+  return new Promise((resolve, reject) => {
+    const res = { writeHead: () => {}, end: (b) => resolve(String(b || '')) };
+    handle({ method: 'GET', url: '/', headers: {} }, res).catch(reject);
+    setTimeout(() => reject(new Error('the bootstrap handler never answered')), 5000).unref?.();
+  });
+}
+
 const now = Date.now();
 const fresh = (extra = {}) => ({
   auth_date: String(Math.floor(now / 1000)),
@@ -52,7 +101,7 @@ console.log('assert-tui-gateway:');
 {
   const v = validateInitData(makeInitData(fresh()), TOKEN, { now });
   check('valid initData is admitted', v.ok === true);
-  check('the chat is bound from the user', v.chatId === 6218257274);
+  check('the chat is bound from the user', String(v.chatId) === '6218257274');
 }
 
 // 2. A different bot's token must not open this bot.
@@ -126,6 +175,89 @@ console.log('assert-tui-gateway:');
   check('a per-bot token is preferred', tokenFor('vm', env) === 'vm-token');
   check('an unlisted bot falls back to the shared token', tokenFor('other', env) === 'shared');
   check('a bot id with punctuation still maps', tokenFor('vm2', { TUI_BOT_TOKEN_VM2: 'x' }) === 'x');
+}
+
+// 10. The session binds to the CHAT when Telegram sends one. Binding to the
+//     user alone meant the same person in two chats shared a session, while the
+//     field was named chatId and the comments claimed a chat binding.
+{
+  const withChat = (chatId) => makeInitData(fresh({
+    chat: JSON.stringify({ id: chatId, type: 'group', title: 't' }),
+  }));
+  const a = validateInitData(withChat(-1001), TOKEN, { now });
+  const b = validateInitData(withChat(-1002), TOKEN, { now });
+  check('a group initData binds to the chat', a.ok && a.boundBy === 'chat' && String(a.chatId) === '-1001');
+  check('the same user in two chats gets two bindings', a.chatId !== b.chatId);
+  const ta = issueToken({ botId: 'vm', chatId: String(a.chatId), secret: SECRET, ttlSec: 900, now });
+  const tb = issueToken({ botId: 'vm', chatId: String(b.chatId), secret: SECRET, ttlSec: 900, now });
+  check("chat A's token does not verify as chat B",
+    verifyToken(ta, SECRET, { now }).chatId !== verifyToken(tb, SECRET, { now }).chatId);
+  const priv = validateInitData(makeInitData(fresh()), TOKEN, { now });
+  check('a private Mini App falls back to the user', priv.ok && priv.boundBy === 'user' && String(priv.chatId) === '6218257274');
+  check('a malformed chat field is refused, not ignored',
+    validateInitData(makeInitData(fresh({ chat: '{not json' })), TOKEN, { now }).ok === false);
+}
+
+// 11. The cookie is hardened. A terminal behind a public hostname whose
+//     session cookie can travel in plaintext is a session that can be stolen.
+{
+  check('the cookie name carries the __Host- prefix', COOKIE_NAME.startsWith('__Host-'));
+  const env = { TUI_GATEWAY_SECRET: SECRET, TUI_BOT_TOKEN_VM: TOKEN };
+  const handle = createGateway({ env, log: () => {} });
+  // The cookie is issued on the EXCHANGE, so the request has to carry valid
+  // initData. Hitting '/' with nothing only proves the bootstrap is served.
+  const initData = makeInitData(fresh());
+  const headers = await new Promise((resolve) => {
+    const res = {
+      writeHead: (code, h) => resolve({ code, h: h || {} }),
+      end: () => resolve({ code: 0, h: {} }),
+    };
+    handle({ method: 'GET', url: `/?bot=vm&initData=${encodeURIComponent(initData)}`, headers: {} }, res);
+  });
+  check('the exchange is a redirect to the page', headers.code === 302);
+  const cookie = String(headers.h?.['set-cookie'] || '');
+  check('the landing sets a cookie', /__Host-tui_session=/.test(cookie));
+  check('the cookie is HttpOnly', /HttpOnly/.test(cookie));
+  check('the cookie is Secure', /Secure/.test(cookie));
+  check('the cookie is SameSite=Strict', /SameSite=Strict/.test(cookie));
+  check('the cookie is Path=/', /Path=\//.test(cookie));
+  check('the cookie carries no Domain (required by __Host-)', !/Domain=/.test(cookie));
+}
+
+// 12. The pages the browser actually gets.
+//     A script error on these fires on every page load and only a browser ever
+//     sees it, so both are executed here rather than parsed. Parsing is not
+//     enough: `new RegExp("/ws(?|$)")` parses fine and throws when it runs,
+//     which is exactly the bug that shipped.
+{
+  // 12a. ttyd's page must arrive byte-identical. The gateway adds no script to
+  //      it, so there is nothing of ours in the browser to break.
+  const { html, upstream } = await ttydPageThroughGateway();
+  check('the page is html', /<html/i.test(html));
+  check("the gateway adds nothing to ttyd's page", html === upstream);
+  check('the page is not gzip bytes labelled as html', !html.startsWith('\u001f\u008b'));
+  check('no credential is embedded in the page', !/tui_session=/.test(html) && !/var TOKEN =/.test(html));
+
+  // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
+  const boot = await bootstrapThroughGateway();
+  const scripts = [...boot.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
+  check('the bootstrap has a script', scripts.length > 0);
+  let broke = 0;
+  let firstError = '';
+  for (const body of scripts) {
+    const stubWindow = {};
+    const stubDoc = { getElementById: () => ({ set textContent(v) {}, onclick: null }) };
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function('window', 'document', 'location', 'Telegram', body)(
+        stubWindow, stubDoc, { search: '', replace() {} }, undefined,
+      );
+    } catch (e) {
+      broke++;
+      if (!firstError) firstError = String(e.message);
+    }
+  }
+  check(`the bootstrap runs without throwing${broke ? ` — ${firstError}` : ''}`, broke === 0);
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);
