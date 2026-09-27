@@ -80,6 +80,16 @@ grep -q "const chatId = String(query.message?.chat?.id ?? '');" "$HERE/bot-host.
   && { echo "  PASS  handleCallback normalizes chatId once"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  handleCallback normalizes chatId once"; FAIL=$((FAIL + 1)); }
 
+# 8. A remote result that lands after /abort is buried, not delivered. On
+#    2026-09-27 a 2000-word essay arrived 26s after the abort ack because the
+#    remote delivery path (runRemoteTurn) had no aborted check while the local
+#    path did. Static tripwire: both delivery sites must consult the flag.
+grep -q "if (running.get(chatId)?.aborted) {" "$HERE/bot-host.mjs" \
+  && { echo "  PASS  an aborted check exists on a delivery path"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  an aborted check exists on a delivery path"; FAIL=$((FAIL + 1)); }
+REMOTE_ABORTS="$(grep -c "renderer.status = 'aborted'" "$HERE/bot-host.mjs")"
+check "both delivery paths bury post-abort results ($REMOTE_ABORTS sites)" "$REMOTE_ABORTS" "2"
+
 rm -rf "$ROOT"
 echo
 echo "$PASS pass, $FAIL fail"
