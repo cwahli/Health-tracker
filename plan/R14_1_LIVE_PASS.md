@@ -256,3 +256,107 @@ not the physical devices.
   its own reply.
 - **A `failed` route still replies "(unknown reason)"** — re-arming works, but the
   user is told a canary failed without being told why.
+
+---
+
+# Re-run 2026-09-27 — card-9 matrix (SELF-RUN, not a close)
+
+**Authorship caveat (read first).** The plan requires card 9 to be run by someone
+who did not author the patches. The runner of this pass authored tree patches
+(recovery ledger, TUI gateway, CI gates), so this re-run **does not close card 9
+and flips no row**. It is evidence for the non-author closer: every command below
+went through Telegram to the live bot as the allowlisted user (chat 6218257274)
+via the Telethon user session, never via a handler call. Rule 8 held throughout:
+no allowance burned to prove quota, no hand-written stamp, no dual poller.
+
+| | |
+|---|---|
+| Commit under test | `a6cf769` (serving tree `/home/ubuntu/bot-host-r14`, clean) |
+| bot-host@vm | pid 1976023 @ 07:06:05 UTC → 1978341 @ 07:10:04 (card-2 override) → 1979442 @ 07:11:22 (override reverted) → 1980757 @ 07:14:17 (card-6 ledger copy) → 1982514 @ 07:16:41 (overrides reverted, final) |
+| bot-host@vm2 | pid 1975990 @ 07:06:03 UTC |
+| tui-gateway | pid 1975740 @ 07:05:40 UTC |
+| Real ledger | `~/.local/state/bot-host/vm/free-lanes`, mtime `2026-09-26 11:45:04` — **unmoved across the entire pass** |
+| Note | #302 (tui bootstrap, gateway-only) merged mid-pass; bot-host runtime unchanged by it |
+
+## Card 1 — PASS (after setup correction)
+
+The chat was parked on `grok` from earlier work, so the first attempt ran
+remotely. `/location vps` released it and the card was re-run on the VM. All
+four reply checks True (frontend_ui first line, twice, never ops);
+`projects_state.json` holds `roleId: frontend_ui`; website repo clean.
+
+## Card 2 — PASS
+
+`COUNCIL_MODEL=opencode/definitely-not-a-real-model-xyz` (override visible in
+`/proc/<pid>/environ`, reverted after). Reply: `❌ Council stage failed: model
+call failed for role accuracy_review: Unknown gemini model…`. Contains `failed`:
+True. Filled rebuttal: False. `output/` file set before == after (empty).
+
+## Card 3 — PASS
+
+Malicious instruction sent on project external-2. Reply non-empty (turn really
+ran; wording is informational, side effect is the verdict). `git status`
+clean→clean, `git log` unchanged. VERDICT PASS.
+
+## Card 4 — PASS (one oracle note)
+
+`/location mobile` (relay: mobile=down) → unreachable + not-run reply; `ping` →
+held. Ledger mtime unmoved, `BOT_LOCATION` unset in the service, no
+opencode/cline under the bot pid. The proof's `children unchanged` line read
+False: the before-snapshot caught a transient reaping child from the previous
+proof while the after-snapshot was empty — a string compare over PIDs, not a
+spawn. Verified after: zero children of the bot pid, no bot-parented
+opencode/cline anywhere on the box.
+
+## Card 6 / 6b — PASS (ledger copy)
+
+`FREE_LANES_DIR=/home/ubuntu/r14-ledger-copy` (visible in environ, reverted
+after), one lane marked `ended` in the copy. Real ledger hashes AND mtime
+unchanged. Ended lane (`google/gemini-3.8-flash`) absent from `/allowance` and
+never chosen across two turns.
+
+## Card 7 — PASS
+
+`/project external 3` → blank workspace, `PROJECT2_ONLY` count 0, only the five
+blank templates present, website repo clean.
+
+## Card 8 — PASS
+
+`/role legal` → reply is an accepted first line (instruction sentence or H1 —
+the model is non-deterministic between them; the oracle accepts either and the
+substantive check is exact). `severance` count across serving `projects/`: 0.
+
+## Card 6c — PASS
+
+`/tx on` → window `ws-6218257274-health-tracker-e555ebff` id `@4`, unchanged
+across `/project external 2` and `/location grok`. Pane fingerprints advance
+per turn (`run_complete` timestamps differ). Remote turn reports its host. The
+active lane is Cline (API-only), so the pane is the structured observer stream,
+as the code declares — no blank pane, no stale tool left on screen.
+
+## Locations sweep — PASS (mobile correctly held)
+
+Relay: vps=up, vm2=up, mobile=down, collab=up, grok=up. vps/vm2 local turns True.
+Mobile held (no worker — card-4 behaviour, correct). Collab + grok answered with
+own host named and own ledgers; VM ledger mtime unmoved by all remote turns.
+
+## Card 6 router half — NOT RUN (structurally blocked)
+
+No live Grok-router Telegram bot exists: only the allowance-watch daemon and
+the grok stand-in worker are up; there is no router `.env`, no router poller,
+no router token. Standing one up needs a BotFather token (human) — the plan
+forbids inventing bots. This half awaits a real router bot, not more testing.
+
+## TUI rows S1–S8 as written — measured, not started
+
+No phase-2 code was written (sequence holds). Against the shipped PTY-first
+gateway, the rows as specified score: **S4 mostly green** (forged / stale /
+cross-bot initData refused live 11/0; replay-after-window is N/A by design —
+no initData travels on sockets, only the short-lived cookie); **S7 partial**
+(gzip decodes to valid UTF-8, `permessage-deflate` refused at the proxy, pane
+reflects the current turn — but the capture is the observer stream on API
+lanes, not a painted TUI); **S3 / S5 / S6 / S8 RED as written** (they require
+the event-feed-first page of step 3, the per-chat attach refinement of step 1,
+and the keyboard measurement of step 4 — none built). These reds are a build
+list, not a product failure: the shipped door (own hostname, initData HMAC,
+cookie auth, per-bot terminals) is proven; the feed-first UI is not.
