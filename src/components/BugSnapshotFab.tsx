@@ -62,7 +62,8 @@ import { BugSnapRemainingSection, HomeStatePanel, HealthLogsPanel, type BugSnapR
 import { autoSpotFood, autoSpotHome, autoSpotHealth, mergeAutoSpotHits, type AutoSpotHit } from '../utils/bugAutoSpot';
 
 export interface BugSnapshotFabProps {
-  isAdmin: boolean;
+  /** Any signed-in non-Demo profile may file a bug from here (see Header.canFileBug). */
+  canFileBug: boolean;
   firebaseUid?: string | null;
   /** Active page / tab identifier to auto-select */
   activeTab?: string;
@@ -223,7 +224,7 @@ async function capturePageScreenshot(): Promise<string | null> {
 
 
 export default function BugSnapshotFab({
-  isAdmin,
+  canFileBug,
   firebaseUid,
   activeTab,
   getModalContext,
@@ -627,7 +628,7 @@ export default function BugSnapshotFab({
     }
   }, [open, category, activeTab, viewingJobId, biomarkerHistory]);
 
-  if (!isAdmin || !enabled) return null;
+  if (!canFileBug || !enabled) return null;
 
   const normalizeCat = (c: string) => (c || 'foodcart').toLowerCase();
   const pageTags = bugTags.filter(

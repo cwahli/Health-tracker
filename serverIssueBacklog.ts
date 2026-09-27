@@ -14,6 +14,7 @@ import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import { normalizeChainKey } from './serverBrandMenu.js';
 import { assignMissingPublicNs, hydrateWorkItem, lastCommit, publicId } from './src/utils/bugWorkItem';
+import { bugReportShotFields, bugShotContentType, bugShotExt, bugShotKey, parseDataUrl } from './src/utils/bugSnapshot';
 import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,116 @@ async function d1LinkTag(tagId: string, issueId: string): Promise<void> {
     [linkId, tagId, issueId, issueId]
   );
   await d1Query(`UPDATE issue_backlog SET ever_tagged = 1 WHERE id = ?`, [issueId]);
+}
+
+/**
+ * Upload one evidence image as a real R2 object.
+ *
+ * `uploadBacklogPayloadToR2` is JSON-only (it stringifies its argument), so a
+ * screenshot sent through the flag path used to be stored as base64 inside
+ * `backlogs/<id>.json` — a shape the bug artifacts route cannot serve, and one
+ * that kept a full-size phone PNG in the diagnostic blob. This writes bytes at
+ * the canonical key instead.
+ *
+ * Returns ok=false rather than throwing: a lost image must not lose the ticket,
+ * and the caller records the failure instead of persisting a key that resolves
+ * to nothing.
+ */
+export async function uploadBacklogImageToR2(
+  key: string,
+  body: Buffer,
+  contentType: string
+): Promise<{ ok: boolean; url: string; error?: string }> {
+  const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || 'd17eecca64f82625d29dc38b14f46c14';
+  const CLOUDFLARE_R2_BUCKET_NAME = process.env.CLOUDFLARE_R2_BUCKET_NAME || 'health-tracker-photos';
+  const CLOUDFLARE_R2_PUBLIC_URL = (
+    process.env.CLOUDFLARE_R2_PUBLIC_URL || 'https://pub-d17eecca64f82625d29dc38b14f46c14.r2.dev'
+  ).replace(/\/$/, '');
+  const url = `${CLOUDFLARE_R2_PUBLIC_URL}/${key}`;
+  const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID || '';
+  const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || '';
+  if (!accessKeyId || !secretAccessKey) {
+    return { ok: false, url, error: 'r2_credentials_missing' };
+  }
+  try {
+    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+    const client = new S3Client({
+      region: 'auto',
+      endpoint: `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: { accessKeyId, secretAccessKey },
+    });
+    await client.send(
+      new PutObjectCommand({
+        Bucket: CLOUDFLARE_R2_BUCKET_NAME,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+      })
+    );
+    return { ok: true, url };
+  } catch (err: any) {
+    console.error('[Backlog R2] Image upload failed:', err?.message || err);
+    return { ok: false, url, error: err?.message || 'upload_failed' };
+  }
+}
+
+/**
+ * Store one attached screenshot as a bug report, and record it on the row.
+ *
+ * THE single write path for "a user attached an image to this bug". Both human
+ * intake (POST /api/issues/flag) and agent intake (POST /api/bugs via
+ * `bugctl create --screenshot`) call this, because the alternative is two
+ * divergent shapes for the same concept — which is exactly the drift that left
+ * screenshots invisible on the tickets that already existed.
+ *
+ * The report id is the issue_backlog row id, so the caller's existing
+ * issue_tag_links row is what makes the report resolve on GET /api/bugs/:tagId.
+ *
+ * Never throws: a lost image must not lose the ticket. On failure `shot_count`
+ * is left unset (the reader falls back to 0, so an absent image reads as absent)
+ * and the reason is recorded instead of a key that resolves to nothing.
+ */
+export async function attachReportScreenshot(opts: {
+  issueId: string;
+  category: string;
+  tagId: string;
+  dataUrl: string;
+  /** Existing payload fields to preserve (r2_url, counts, …). */
+  basePayload?: Record<string, unknown>;
+  addDebugLog?: (msg: string, sessionId?: string) => void;
+  sessionId?: string;
+}): Promise<{ ok: boolean; error?: string; fields: Record<string, unknown> }> {
+  const { issueId, category, tagId, dataUrl, basePayload = {}, addDebugLog, sessionId } = opts;
+  const log = (m: string) => addDebugLog?.(m, sessionId && sessionId !== 'global' ? sessionId : undefined);
+
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed) {
+    log('[IssueBacklog] screenshot dropped: unreadable data URL');
+    return { ok: false, error: 'unreadable_data_url', fields: {} };
+  }
+  const ext = bugShotExt(parsed.contentType);
+  const contentType = bugShotContentType(ext);
+  const key = bugShotKey(category, tagId, issueId, 1, ext);
+  const uploaded = await uploadBacklogImageToR2(key, Buffer.from(parsed.base64, 'base64'), contentType);
+  const fields = bugReportShotFields({
+    category,
+    tagId,
+    reportId: issueId,
+    contentType,
+    shotKey: key,
+    url: uploaded.url,
+    ok: uploaded.ok,
+    error: uploaded.error,
+  });
+  if (!uploaded.ok) {
+    log(`[IssueBacklog] screenshot upload failed: ${uploaded.error}`);
+    return { ok: false, error: uploaded.error, fields };
+  }
+  await d1Query(`UPDATE issue_backlog SET payload = ? WHERE id = ?`, [
+    JSON.stringify({ ...basePayload, ...fields }),
+    issueId,
+  ]);
+  return { ok: true, fields };
 }
 
 export async function uploadBacklogPayloadToR2(id: string, payload: any, customKey?: string): Promise<string> {
@@ -681,6 +792,17 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         receivedAt: new Date().toISOString(),
       };
 
+      // An attached screenshot is evidence, not payload. Pull it out here so the
+      // diagnostic blob uploaded to R2 below stays small, and so the base64 never
+      // lands in issue_backlog.payload where the digest would have to scrub it.
+      // It is re-attached below as a real image object under bugs/<cat>/<tag>/…
+      const screenshotDataUrl =
+        typeof safePayload.screenshot_data === 'string' && safePayload.screenshot_data.startsWith('data:')
+          ? safePayload.screenshot_data
+          : null;
+      delete safePayload.screenshot_data;
+      delete safePayload.screenshot_url;
+
       const noteText = user_note != null ? String(user_note).trim() || null : null;
 
       const lightweightPayload = {
@@ -728,9 +850,13 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         return res.status(500).json({ error: 'insert succeeded but row not found' });
       }
 
+      // Held so the screenshot promotion below can rewrite the payload without
+      // dropping the r2_url this block just wrote.
+      let backlogR2Url: string | null = null;
       try {
         const publicUrl = await uploadBacklogPayloadToR2(data.id, safePayload);
         if (publicUrl) {
+          backlogR2Url = publicUrl;
           await d1Query(`UPDATE issue_backlog SET payload = ? WHERE id = ?`, [
             JSON.stringify({ ...lightweightPayload, r2_url: publicUrl }),
             data.id,
@@ -796,6 +922,32 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         }
       } catch (tagErr: any) {
         console.warn('[issue_tags] ensure failed (run SQL migration?):', tagErr?.message);
+      }
+
+      // An attached screenshot becomes a real report. GET /api/bugs/:tagId reads
+      // `reportId` / `r2_prefix` / `shot_count` out of the payload and serves the
+      // image from bugs/<category>/<tagId>/reports/<reportId>/<name>; this path
+      // used to write none of those, so a screenshot attached through this modal
+      // was invisible on the ticket. The report id is the backlog row id, and the
+      // issue_tag_links row above is what makes `reports` resolve at all.
+      if (screenshotDataUrl) {
+        const shotTagId = tagIds[0] || null;
+        if (!shotTagId) {
+          addDebugLog(
+            '[IssueBacklog] screenshot dropped: no tag to file it under',
+            sessionId !== 'global' ? sessionId : undefined
+          );
+        } else {
+          await attachReportScreenshot({
+            issueId: data.id,
+            category: category || 'foodcart',
+            tagId: shotTagId,
+            dataUrl: screenshotDataUrl,
+            basePayload: { ...lightweightPayload, r2_url: backlogR2Url },
+            addDebugLog,
+            sessionId,
+          });
+        }
       }
 
       const urlToRegister = register_source_url || (issue_type === 'missing_link' ? source_url : null);

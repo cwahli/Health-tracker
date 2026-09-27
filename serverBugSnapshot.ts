@@ -9,6 +9,8 @@ import {
   bugTagR2Prefix,
   bugReportR2Prefix,
   bugShotKey,
+  buildBugEvidenceText,
+  bugShotName,
   bugManifestKey,
   bugMetaKey,
   bugIdentifiedProblemsKey,
@@ -27,7 +29,7 @@ import {
 } from './src/utils/bugSnapshot';
 import { domainPackForAgent, buildOverviewMarkdown } from './src/utils/bugDomainPacks';
 import { stripHeavyImages } from './src/utils/debugPayload';
-import { findIssueTag, normalizeTagKey, normIssueTag } from './serverIssueBacklog.js';
+import { attachReportScreenshot, findIssueTag, normalizeTagKey, normIssueTag } from './serverIssueBacklog.js';
 import {
   appendEvidenceCommit,
   applySnapRemaining,
@@ -152,6 +154,94 @@ async function persistWorkItem(tagId: string, item: ReturnType<typeof hydrateWor
 
 async function findTagByParam(param: string): Promise<any | null> {
   return findIssueTag(param);
+}
+
+/**
+ * Every report linked to a tag, newest first, with its screenshot pointers.
+ *
+ * A "report" is an `issue_backlog` row reached through `issue_tag_links` — there
+ * is no reports table. The shape here is the contract every reader depends on:
+ * `shot_count` falls back to `r2_shots.length` so an intake path that only
+ * writes one of the two still reads correctly, and `r2_prefix` is what the
+ * artifacts route builds image keys from.
+ *
+ * Shared by the detail route and the packet's text form so the two cannot drift.
+ */
+async function loadBugReports(tagId: string): Promise<any[]> {
+  const { d1Query } = await import('./server_d1.js');
+  const linkRes = await d1Query<any>(`SELECT issue_id FROM issue_tag_links WHERE tag_id = ?`, [tagId]);
+  const issueIds = ((linkRes.results || []) as any[]).map((l: any) => l.issue_id);
+  if (!issueIds.length) return [];
+  const placeholders = issueIds.map(() => '?').join(', ');
+  const issRes = await d1Query<any>(
+    `SELECT id, created_at, status, dish_query, user_note, context, payload FROM issue_backlog WHERE id IN (${placeholders}) ORDER BY created_at DESC`,
+    issueIds
+  );
+  return ((issRes.results || []) as any[]).map((i: any) => {
+    const p = typeof i.payload === 'string' ? (() => { try { return JSON.parse(i.payload); } catch { return {}; } })() : (i.payload || {});
+    return {
+      id: i.id,
+      created_at: i.created_at,
+      status: i.status,
+      dish_query: i.dish_query,
+      user_note: i.user_note,
+      context: i.context,
+      reportId: p?.reportId || null,
+      r2_prefix: p?.r2_prefix || null,
+      r2_manifest_key: p?.r2_manifest_key || null,
+      shot_count: p?.shot_count ?? p?.r2_shots?.length ?? 0,
+      // The exact stored keys, so a client never has to guess an extension the
+      // artifacts route would then 404 on.
+      r2_shots: Array.isArray(p?.r2_shots) ? p.r2_shots : [],
+      shot_upload_error: p?.shot_upload_error || null,
+      obsolete: p?.obsolete === true,
+    };
+  });
+}
+
+/**
+ * Screenshot counts per tag, in ONE query.
+ *
+ * "Which bugs have a phone screenshot" was previously unanswerable without N
+ * detail reads, because shot_count only exists on a report row, not on a tag.
+ * A per-tag query inside the list route would be N+1 over up to 1000 tags, so
+ * this joins once and aggregates in JS — and derives shot_count the same way
+ * loadBugReports does (`shot_count ?? r2_shots.length`) so the two cannot
+ * disagree.
+ *
+ * This route is unauthenticated, so the per-shot detail (keys/urls) is opt-in
+ * via ?with_shots=1. The default adds two integers and nothing else.
+ */
+async function loadShotIndex(withShots: boolean): Promise<Map<string, any>> {
+  const out = new Map<string, any>();
+  const { d1Query } = await import('./server_d1.js');
+  const r = await d1Query<any>(
+    `SELECT l.tag_id AS tag_id, b.id AS id, b.created_at AS created_at, b.payload AS payload
+     FROM issue_tag_links l JOIN issue_backlog b ON b.id = l.issue_id`
+  );
+  for (const row of (r.results || []) as any[]) {
+    const p = typeof row.payload === 'string' ? (() => { try { return JSON.parse(row.payload); } catch { return {}; } })() : (row.payload || {});
+    const shots: any[] = Array.isArray(p?.r2_shots) ? p.r2_shots : [];
+    const shotCount = Number(p?.shot_count ?? shots.length ?? 0);
+    const entry = out.get(row.tag_id) || { shot_count: 0, report_count: 0, shots: [] };
+    entry.report_count += 1;
+    if (shotCount > 0) {
+      entry.shot_count += shotCount;
+      for (let i = 0; i < shotCount; i++) {
+        const key = typeof shots[i]?.key === 'string' ? shots[i].key : null;
+        entry.shots.push({
+          report_id: p?.reportId || row.id,
+          name: key ? bugShotName(key) : `shot-0${i + 1}.jpg`,
+          key,
+        });
+      }
+    } else if (p?.shot_upload_error) {
+      entry.shot_upload_error = p.shot_upload_error;
+    }
+    out.set(row.tag_id, entry);
+  }
+  if (!withShots) for (const e of out.values()) delete e.shots;
+  return out;
 }
 
 export type BugSnapshotDeps = {
@@ -1407,11 +1497,16 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       const wantState = req.query.state ? String(req.query.state) : null;
       const wantAssignee = req.query.assignee ? String(req.query.assignee) : null;
       const wantSurface = req.query.surface ? String(req.query.surface) : null;
+      // Opt-in only: the per-shot keys/urls are more disclosure than a count, and
+      // this route is unauthenticated.
+      const withShots = String(req.query.with_shots || '') === '1';
+      const shotIndex = await loadShotIndex(withShots);
       const rows = tags
         .map((t) => {
           const item = hydrateWorkItem(t);
           const ticket = bugState(item);
           const lastEvent = item.curation_events?.[item.curation_events.length - 1] || null;
+          const shots = shotIndex.get(t.id) || { shot_count: 0, report_count: 0, shots: [] };
           return {
             tag_id: t.id,
             public_n: item.public_n,
@@ -1433,6 +1528,11 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
             archive_reason: item.archive_reason || null,
             defect: item.defect || null,
             blocked_by: item.blocked_by || [],
+            // A bug reported from a phone screenshot is identifiable by this.
+            shot_count: shots.shot_count || 0,
+            report_count: shots.report_count || 0,
+            ...(withShots && shots.shots?.length ? { shots: shots.shots } : {}),
+            ...(shots.shot_upload_error ? { shot_upload_error: shots.shot_upload_error } : {}),
             updated_at: t.updated_at,
             created_at: t.created_at,
           };
@@ -1512,33 +1612,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       const tag = await findTagByParam(req.params.tagId);
       if (!tag) return res.status(404).json({ error: 'not found' });
       const tagId = tag.id;
-
-      const linkRes = await d1Query<any>(`SELECT issue_id FROM issue_tag_links WHERE tag_id = ?`, [tagId]);
-      const issueIds = ((linkRes.results || []) as any[]).map((l: any) => l.issue_id);
-      let reports: any[] = [];
-      if (issueIds.length) {
-        const placeholders = issueIds.map(() => '?').join(', ');
-        const issRes = await d1Query<any>(
-          `SELECT id, created_at, status, dish_query, user_note, context, payload FROM issue_backlog WHERE id IN (${placeholders}) ORDER BY created_at DESC`,
-          issueIds
-        );
-        reports = ((issRes.results || []) as any[]).map((i: any) => {
-          const p = typeof i.payload === 'string' ? (() => { try { return JSON.parse(i.payload); } catch { return {}; } })() : (i.payload || {});
-          return {
-            id: i.id,
-            created_at: i.created_at,
-            status: i.status,
-            dish_query: i.dish_query,
-            user_note: i.user_note,
-            context: i.context,
-            reportId: p?.reportId || null,
-            r2_prefix: p?.r2_prefix || null,
-            r2_manifest_key: p?.r2_manifest_key || null,
-            shot_count: p?.shot_count ?? p?.r2_shots?.length ?? 0,
-            obsolete: p?.obsolete === true,
-          };
-        });
-      }
+      const reports = await loadBugReports(tagId);
 
       const item = hydrateWorkItem({ ...tag, linked_count: reports.length });
       const start = buildStartPayload({ ...tag, work_item: item, id: tag.id });
@@ -2085,6 +2159,42 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
       if (!item.public_n) item.public_n = maxN + 1;
       const projected = projectBugState(item);
       await persistWorkItem(freshId, projected.item);
+
+      // An agent-filed card with evidence gets the same report shape a phone
+      // user's screenshot does. This route used to create a tag and nothing else —
+      // no issue_backlog row, no issue_tag_links — so every card from
+      // `bugctl create` read as `reports: []` and could never carry an image,
+      // however much evidence the reporter had. Same helper as the human flag
+      // path, so the two shapes cannot drift.
+      let shotResult: { ok: boolean; error?: string } | null = null;
+      const screenshot = typeof body.screenshot === 'string' ? body.screenshot : '';
+      if (screenshot) {
+        const { d1Query: q1 } = await import('./server_d1.js');
+        const issueId = `iss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const insReport = await q1(
+          `INSERT INTO issue_backlog (id, status, issue_type, severity, country_code, chain_key, dish_query, context, source_url, user_note, firebase_uid, resolution_note, ever_tagged, payload)
+           VALUES (?, 'to_fix', 'general_bug', 'medium', NULL, NULL, ?, 'bug_report', ?, ?, NULL, NULL, 1, ?)`,
+          [issueId, title.slice(0, 200), body.source_url || null, body.user_note || title, JSON.stringify({ is_r2: true })]
+        );
+        if (insReport.success) {
+          await q1(`INSERT OR IGNORE INTO issue_tag_links (id, tag_id, backlog_id, issue_id) VALUES (?, ?, ?, ?)`, [
+            `${freshId}::${issueId}`,
+            freshId,
+            issueId,
+            issueId,
+          ]);
+          shotResult = await attachReportScreenshot({
+            issueId,
+            category,
+            tagId: freshId,
+            dataUrl: screenshot,
+            basePayload: { is_r2: true },
+          });
+        } else {
+          shotResult = { ok: false, error: insReport.error || 'report_insert_failed' };
+        }
+      }
+
       res.status(201).json({
         ok: true,
         existing: false,
@@ -2092,6 +2202,9 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         public_n: projected.item.public_n,
         state: projected.ticket.state,
         flags: projected.ticket.flags,
+        ...(shotResult
+          ? { screenshot: { ok: shotResult.ok, ...(shotResult.error ? { error: shotResult.error } : {}) } }
+          : {}),
         work_item: projected.item,
       });
     } catch (err: any) {
@@ -2274,6 +2387,16 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         updated_at: tag.updated_at,
       };
       if (String(req.query.format || '').toLowerCase() === 'text') {
+        // Evidence belongs in the text form. It used to live only in the JSON
+        // branch below, so every plain-text reader — Telegram /resume, an agent
+        // shelling out to `bugctl packet --format text` — could not see that a
+        // screenshot existed, let alone open it. Built by the shared helper so
+        // this surface and the tests cannot drift.
+        const evidenceBlock = buildBugEvidenceText({
+          tagId: tag.id,
+          currentEvidence: item.current_evidence,
+          reports: await loadBugReports(tag.id),
+        });
         const lines = [
           `# Bug ${item.public_n ? `#${item.public_n}` : tag.id}`,
           `Title: ${tag.title || ''}`,
@@ -2288,6 +2411,7 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
           item.plan ? `\n## Plan\nHypothesis: ${item.plan.hypothesis}\nFiles: ${item.plan.files.join(', ')}\nGates: ${item.plan.gates.join(', ')}` : '',
           item.verify ? `\n## Verify (${item.verify.result})\nCommand: ${item.verify.command}\nEvidence: ${item.verify.evidence.join(', ') || '—'}` : '',
           `\n## Remaining (${item.remaining.length})\n${item.remaining.map((r) => `- [ ] ${r}`).join('\n') || '(none)'}`,
+          evidenceBlock,
           `\nBurns: ${item.burns.filter((b) => b.burned).length}/${2}`,
         ].filter(Boolean);
         return res.type('text/plain').send(lines.join('\n'));
