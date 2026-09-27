@@ -26,9 +26,17 @@ Here is the current meal screen.
 
 Use absolute paths. Do not wrap the line in text or a code fence.
 
-## Capture a live app screenshot
+## Capturing a picture of the app
 
-The repo ships a Playwright journey runner:
+There are two different things you might be asked for. Do not confuse them.
+
+**A picture the user took on their phone.** You cannot produce this — it already
+exists, in the chat, as an inbound attachment saved under `.bot-media/<chatId>/`.
+Use the path you were given. Never describe such an attachment as a "screenshot"
+you captured, and never re-derive it by re-running a headless browser: that is a
+different image of a different machine at a different viewport.
+
+**A fresh render of the app.** The repo ships a Playwright journey runner:
 
 ```bash
 node scripts/qa-runner.mjs --journey=meal
@@ -43,6 +51,15 @@ MEDIA:/home/ubuntu/src/Health-tracker/qa-evidence/clean_meal_<ts>.png
 
 Journeys: `meal`, `biomarker`, `onboarding`; add `--url=<base>` to target a
 specific host (defaults to the live app).
+
+Label this one honestly as a headless render at a fixed desktop viewport. It is a
+simulation of the app, not the user's phone.
+
+## Attaching a picture to a bug
+
+If the picture is evidence for a bug, it belongs **on the card**, not only in the
+chat. See the `bug-ticket` skill: `bugctl create --screenshot <abs path>`, then
+confirm with `bugctl show --id <n> --json` that `reports[].shot_count` is not 0.
 
 ## Rules
 

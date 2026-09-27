@@ -10,6 +10,7 @@ import {
   bugReportR2Prefix,
   bugShotKey,
   buildBugEvidenceText,
+  originFromHeaders,
   bugShotName,
   bugManifestKey,
   bugMetaKey,
@@ -150,6 +151,14 @@ async function persistWorkItem(tagId: string, item: ReturnType<typeof hydrateWor
     console.warn(`${BUG_SNAPSHOT_LOG} work_item persist failed:`, e?.message || e);
     return false;
   }
+}
+
+/**
+ * Absolute origin for links this server hands to off-origin readers.
+ * Thin Express adapter over the pure originFromHeaders().
+ */
+export function requestOrigin(req: Request): string | null {
+  return originFromHeaders(req.headers as any, req.protocol || 'https');
 }
 
 async function findTagByParam(param: string): Promise<any | null> {
@@ -2395,6 +2404,9 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
         const evidenceBlock = buildBugEvidenceText({
           tagId: tag.id,
           currentEvidence: item.current_evidence,
+          // Absolute, because the text packet's main readers are a chat message
+          // and a CLI — neither can resolve a relative /api path.
+          origin: requestOrigin(req),
           reports: await loadBugReports(tag.id),
         });
         const lines = [

@@ -146,11 +146,41 @@ export function bugShotName(keyOrName: string): string {
   const i = s.lastIndexOf('/');
   return i === -1 ? s : s.slice(i + 1);
 }
+/**
+ * Absolute origin for links this server hands to off-origin readers.
+ *
+ * Never hardcode a host: the same process serves localhost, the duckdns name,
+ * and an ephemeral quick-tunnel hostname that changes on every reconnect.
+ * `x-forwarded-proto` is honoured because the deploy sits behind a tunnel, so
+ * `req.protocol` alone reports http and hands out http links behind https.
+ *
+ * Pure over a plain header bag so it is testable without an Express request.
+ */
+export function originFromHeaders(
+  headers: Record<string, string | string[] | undefined> | null | undefined,
+  fallbackProto = 'https'
+): string | null {
+  const host = String(headers?.host || '').trim();
+  if (!host) return null;
+  const raw = headers?.['x-forwarded-proto'] || fallbackProto;
+  const proto = String(Array.isArray(raw) ? raw[0] : raw).split(',')[0].trim() || fallbackProto;
+  return `${proto}://${host}`;
+}
 
-export interface BugEvidenceTextInput {  tagId: string;
+export interface BugEvidenceTextInput {
+  tagId: string;
   currentEvidence?: Record<string, any> | null;
   /** Rows from the reports query: { id, reportId, shot_count, shot_upload_error }. */
   reports?: Array<Record<string, any>>;
+  /**
+   * Absolute origin to prefix artifact URLs with, e.g.
+   * `https://health-tracking.duckdns.org`. Optional on purpose: the in-app
+   * browser resolves a relative path fine and must keep doing so, but a chat
+   * message cannot — Telegram only auto-links absolute http(s) URLs, so a
+   * relative `/api/bugs/...` in `/resume` renders as dead text. Server callers
+   * pass the request origin; nothing here should ever hardcode a host.
+   */
+  origin?: string | null;
 }
 
 /**
@@ -165,7 +195,12 @@ export interface BugEvidenceTextInput {  tagId: string;
  * Returns '' when there is genuinely nothing, so callers can filter it out.
  */
 export function buildBugEvidenceText(input: BugEvidenceTextInput): string {
-  const { tagId, currentEvidence, reports = [] } = input;
+  const { tagId, currentEvidence, reports = [], origin } = input;
+  const base = String(origin || '').replace(/\/+$/, '');
+  const shotUrl = (reportId: string, name: string) => {
+    const rel = bugArtifactUrl(tagId, reportId, name);
+    return base ? `${base}${rel}` : rel;
+  };
   const ev = currentEvidence || {};
   const photos: string[] = Array.isArray(ev.photo_urls) ? ev.photo_urls.filter(Boolean) : [];
   const shotLines: string[] = [];
@@ -181,7 +216,7 @@ export function buildBugEvidenceText(input: BugEvidenceTextInput): string {
     totalShots += count;
     for (let i = 1; i <= count; i++) {
       const reportId = rep.reportId || rep.id || '';
-      shotLines.push(`- report ${rep.id} shot ${i}: ${bugArtifactUrl(tagId, reportId, `shot-0${i}.jpg`)}`);
+      shotLines.push(`- report ${rep.id} shot ${i}: ${shotUrl(reportId, `shot-0${i}.jpg`)}`);
     }
   }
   const anyEvidence = photos.length || shotLines.length || ev.debug_url || ev.scout_url || ev.job_id;

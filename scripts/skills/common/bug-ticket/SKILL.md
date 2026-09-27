@@ -40,6 +40,64 @@ Use `list` for the full canonical list, including reviewed, blocked, in-flight, 
    The handoff receipt must be current. Any later edit invalidates it and requires a new handoff.
 7. Reply with the card number, state, revision, and receipt/handoff status. Stop.
 
+### Bringing a picture (evidence is part of the card)
+
+A user who reports a bug from a phone usually sends the screenshot. **That picture
+belongs on the card.** If it is only in the chat, the card is incomplete: the next
+agent reads the card, not the chat, and sees a defect with no evidence.
+
+New card — attach the file at create time:
+
+```bash
+node scripts/bugctl.mjs create --title "<one line>" --screenshot <ABSOLUTE path> --json
+```
+
+Rules and failure modes, all of them deliberate:
+
+- The path must be **absolute** and must exist. A missing file is a **hard error**
+  and no card is created — that is intentional, so you never file a card that
+  silently lost its picture.
+- An **upload** failure is only a warning: the card is still created and the
+  response carries `screenshot.ok=false` with a reason. Say so in your reply.
+  Never describe a card as having a screenshot when `shot_count` is 0.
+- `png` and `jpg` are stored. Anything else is normalised to `jpg`, so pass a
+  real photo rather than a `webp`/PDF and expect the stored name to differ.
+- Do not also keep the local `data:` URL on the card. One picture, one stored
+  object — a second copy is what let a full-size image leak into digests before.
+
+Existing card: `evidence` **cannot take a file**. It links URLs that already
+exist in R2 (`--photo-urls`):
+
+```bash
+node scripts/bugctl.mjs evidence --id <id> --summary "<what the picture shows>" --photo-urls "<url>"
+```
+
+So a *new* picture for an *existing* card has no one-shot path today. File a new
+card that references the old one with `duplicate_of`, or state plainly that the
+picture could not be attached. Do not pretend `evidence` accepted a file.
+
+Verify rather than assume:
+
+```bash
+node scripts/bugctl.mjs show --id <id> --json   # reports[].shot_count
+node scripts/bugctl.mjs packet --id <id> --format=text   # absolute screenshot URLs
+```
+
+`packet --format=text` emits **absolute** URLs under `## Evidence`, so a card
+read in a chat message yields a link that opens. Report the URL, not the key.
+
+**Preconditions — check before promising anything:**
+
+- `BUG_API_BASE` must point at a reachable server. It defaults to
+  `http://127.0.0.1:3000`, which is wrong on every host except a local dev box.
+- `BUG_API_TOKEN` must be set. Without it `bugWriteGuard` rejects every
+  non-browser writer, and the write silently queues instead of landing.
+- Confirm with a read first (`node scripts/bugctl.mjs list --json`). A read
+  succeeding does not prove writes will.
+
+If a write queues, it is not filed. Run `node scripts/bugctl-drain.mjs` (or
+`bugctl flush`) to replay it, and say which you ran.
+
 ### Allowed `bugctl` surface
 
 - Read: `list`, `queue`, `show`, `packet`, `state`, `next`.
@@ -55,7 +113,7 @@ Use `list` for the full canonical list, including reviewed, blocked, in-flight, 
 - Never silently delete, archive, or merge away a card; duplicates and blocked cards remain auditable.
 - The orchestrator is the only role that plans or dispatches a coder. A handoff is a handoff to the orchestrator, not permission to fix the code.
 - Never invoke `orchestrator-dispatcher` from this profile.
-- If the API is unavailable, queued writes are not a completed handoff; report `queued` and wait for `bugctl flush` before claiming success.
+- If the API is unavailable, queued writes are not a completed handoff; report `queued` and drain it with `node scripts/bugctl-drain.mjs` before claiming success. `bugctl flush` does the same thing interactively. Nothing in the repo calls either for you on a schedule — if you did not run one, the row is still sitting in the queue.
 
 ### Reply contract
 
