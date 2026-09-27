@@ -25,7 +25,8 @@
  * Env:
  *   TUI_GATEWAY_PORT      default 8897
  *   TUI_GATEWAY_BIND      default 127.0.0.1 (Caddy fronts it; never 0.0.0.0)
- *   TUI_TTYD_URL          default http://127.0.0.1:8896
+ *   TUI_TTYD_URL          default http://127.0.0.1:8896 (vm's ttyd)
+ *   TUI_TTYD_URL_<BOT>    per-bot override, e.g. TUI_TTYD_URL_VM2 for the vm2 ttyd
  *   TUI_GATEWAY_SECRET    server secret for signing session tokens
  *   TUI_BOT_TOKEN_<id>    the Telegram bot token per bot id
  *   TUI_SESSION_TTL_SEC   default 900
@@ -144,6 +145,37 @@ export function tokenFor(botId, env = process.env) {
   return env.TUI_BOT_TOKEN || '';
 }
 
+/**
+ * Which ttyd serves a bot, and under which gateway path.
+ *
+ * Two bots share this box, and each has its own sessions map, so each gets its
+ * own ttyd: the attach script reads one bot's sessions.json, and pointing two
+ * bots at one ttyd would attach every vm2 chat to a vm conversation. The paths
+ * mirror ttyd's own base-paths (`--base-path /tty` serves page + socket under
+ * `/tty/`), so the client's relative links keep working through the gateway.
+ */
+export const TTYD_ROUTES = {
+  '/tty/': { bot: 'vm', base: '/tty/' },
+  '/tty': { bot: 'vm', base: '/tty/' },
+  '/tty2/': { bot: 'vm2', base: '/tty2/' },
+  '/tty2': { bot: 'vm2', base: '/tty2/' },
+};
+
+/** The ttyd upstream for a bot. Per-bot URL wins; the shared one is the fallback. */
+export function ttydFor(botId, env = process.env) {
+  const direct = env[`TUI_TTYD_URL_${String(botId).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`];
+  if (direct) return direct;
+  return env.TUI_TTYD_URL || 'http://127.0.0.1:8896';
+}
+
+/** Where the landing page sends a bot after the exchange. */
+export function ttydPathFor(botId) {
+  for (const [path, route] of Object.entries(TTYD_ROUTES)) {
+    if (route.bot === botId && path.endsWith('/')) return path;
+  }
+  return '/tty/';
+}
+
 
 /**
  * The bootstrap the Mini App opens.
@@ -202,7 +234,6 @@ function cookieValue(req, name) {
 
 export function createGateway({ env = process.env, log = () => {} } = {}) {
   const secret = env.TUI_GATEWAY_SECRET || '';
-  const ttyd = env.TUI_TTYD_URL || 'http://127.0.0.1:8896';
   const ttl = Number(env.TUI_SESSION_TTL_SEC || 900);
   // ttyd's own credential, base64 of user:password. It is substituted for the
   // caller's session token on the way upstream and is never sent to a browser.
@@ -234,7 +265,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
       const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
       log(`admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
       res.writeHead(302, {
-        'location': '/tty/',
+        'location': ttydPathFor(botId),
         'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
         'cache-control': 'no-store',
       });
@@ -243,7 +274,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
 
     if (url.pathname === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ ok: true, ttyd: ttyd.replace(/:\d+$/, ':<port>') }));
+      return res.end(JSON.stringify({ ok: true }));
     }
 
     // The Mini App's first request: initData in the query, exchanged for a token.
@@ -259,7 +290,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
       const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
       log(`admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: true, token, bot: botId, chat: verdict.chatId, ttyd: '/tty/' }));
+      return res.end(JSON.stringify({ ok: true, token, bot: botId, chat: verdict.chatId, ttyd: ttydPathFor(botId) }));
     }
 
     // Caddy calls this before proxying the websocket. Answering 204 lets the
@@ -275,10 +306,12 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
       return res.end();
     }
 
-    // The page. The socket is NOT proxied from here: node's upgrade handling
-    // hung up on the socket, and Caddy proxies upgrades properly. So this path
-    // serves ttyd's HTML with the shim injected, and /tty/ws is Caddy's.
-    if (url.pathname === '/tty/' || url.pathname === '/tty') {
+    // The page, one per bot. The socket is NOT proxied from here: node's upgrade
+    // handling hung up on the socket, and Caddy proxies upgrades properly. The
+    // token's bot must match the path's bot — otherwise a vm session could open
+    // the vm2 terminal and land in another bot's conversation map.
+    const route = TTYD_ROUTES[url.pathname];
+    if (route) {
       const token = presentedToken(req, url);
       const verdict = verifyToken(token, secret);
       if (!verdict.ok) {
@@ -286,11 +319,16 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
+      if (verdict.botId !== route.bot) {
+        log(`page refused (token is for bot=${verdict.botId}, path is for bot=${route.bot})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
+      }
       if (!ttydCredential) {
         res.writeHead(503, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
       }
-      return serveTtydPage(req, res, ttyd, ttydCredential);
+      return serveTtydPage(req, res, ttydFor(route.bot, env), route.base, ttydCredential);
     }
 
     res.writeHead(404, { 'content-type': 'application/json' });
@@ -314,8 +352,8 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
  * gzipped body would reach the browser as gzip bytes with the header stripped —
  * row S7's replacement characters reached from the other side.
  */
-function serveTtydPage(req, res, ttydBase, ttydCredential = '') {
-  const target = new URL('/tty/', ttydBase);
+function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '') {
+  const target = new URL(upstreamPath, ttydBase);
   const upstream = http.request(
     {
       hostname: target.hostname,
