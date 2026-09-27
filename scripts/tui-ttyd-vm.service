@@ -18,10 +18,16 @@ Environment=TUI_STATE_ROOT=/home/ubuntu/.local/state/bot-host
 Environment=TUI_WORKTREE=/home/ubuntu/bot-host-r14
 Environment=OPENCODE_BIN=/home/ubuntu/.opencode/bin/opencode
 Environment=TUI_TMUX_NAME=opencode-tui
+# ttyd's own credential. It lives here, 0600, and is expanded into ExecStart by
+# systemd — it is NOT in this file. An earlier version had the credential only in
+# the INSTALLED unit, so reinstalling from scripts/ silently dropped it and ttyd
+# would have answered the whole internet.
+EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-ttyd.env
 # Loopback only. The gateway admits a request; nothing else can reach this
 # socket, and it must never be reachable from the internet directly.
 ExecStart=/usr/bin/ttyd --port 8896 --interface 127.0.0.1 --base-path /tty \
   --writable --max-clients 1 --once=false \
+  -c ${TUI_TTYD_USER}:${TUI_TTYD_PASSWORD} \
   --check-origin --terminal-type xterm-256color \
   --client-option fontSize=13 \
   --ping-interval 20 \
