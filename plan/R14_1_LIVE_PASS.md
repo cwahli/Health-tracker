@@ -360,3 +360,54 @@ the event-feed-first page of step 3, the per-chat attach refinement of step 1,
 and the keyboard measurement of step 4 — none built). These reds are a build
 list, not a product failure: the shipped door (own hostname, initData HMAC,
 cookie auth, per-bot terminals) is proven; the feed-first UI is not.
+
+---
+
+## Card 9 — PAUSED 2026-09-27 (two attempts, neither reachable from this box)
+
+Card 9 (re-run cards 1–8, including 6b and 6c, in order on one restarted
+`bot-host@vm`, one evidence block per card) is the next open card. It is not
+reachable from here. Two attempts, both recorded:
+
+**Attempt 1 — can the pass complete at all? No: card 6's router half has no bot.**
+Card 9 re-runs card 6, and card 6's live proof is required on `@VM_19485_bot`
+*and* the Grok router bot. That router half is already recorded NOT RUN
+(structurally blocked) above. Re-checked on this box:
+
+```text
+systemctl list-units --all | grep -iE 'router|grok'  ->  worker-standin@grok.service
+ls ~/.hermes/profiles/  ->  bug_ticket meal_audit orchestrator qa_biomarker qa_meal qa_onboarding
+```
+
+A stand-in worker is not a router bot: no router `.env`, no router poller, no
+router token, and no router profile. Standing one up needs a BotFather token
+(human); the plan forbids inventing a bot.
+**Unblock: a human creates the Grok router bot and installs its token, or the
+owner explicitly re-scopes card 9 to the non-router half on the record.**
+
+**Attempt 2 — could the rest run now? No: the serving tree is not on main.**
+Rule 4 requires the service restarted from the commit under test. State at
+13:5x UTC:
+
+```text
+serving tree /home/ubuntu/bot-host-r14 @ 5434923, working tree clean
+bot-host@vm MainPID 2073855 · ActiveEnterTimestamp 2026-09-27 10:24:12 UTC
+git rev-list --left-right --count HEAD...origin/main  ->  4  0
+gh pr view 315  ->  state=OPEN
+```
+
+The tree is **4 commits ahead of `main`**, sitting on `fix/tui-telegram-auth`
+with **PR #315 open** — another agent's in-flight TUI auth/attach work.
+Deploying `main` over it would pull the serving bot out from under an open PR;
+running card 9 against that branch would not be "the commit under test" for
+these cards. Nothing was restarted and nothing was deployed.
+
+Still true, and still blocking the mobile half: the phone is down.
+`ping -c1 -W2 114.79.4.158` → 1 transmitted, 0 received, 100% packet loss, so
+card 5's mobile half and the locations sweep cannot be re-proved either.
+
+**Verdict: paused, not done.** Cards 1–8 keep the evidence blocks already pasted
+above. The next move is a human one (router token, or an explicit reorder). Do
+not mark R-14.1 complete, and do not close this row from a partial pass.
+
+
