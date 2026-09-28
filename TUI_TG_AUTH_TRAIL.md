@@ -270,3 +270,30 @@ So the lag was my threshold, not the mechanism: a page fired only after a
 third of the screen (~280px). Now a page fires per EIGHTH (~87px), at most 3
 keys per touchmove so a fast drag is never throttled, first response inside a
 short flick. Sensors 100->102.
+
+## 2026-09-28: one line per line of drag — natural scrolling (this branch)
+
+User: still laggy, wants it natural. The quantum was the problem, not the
+mechanism, so I measured the whole ladder instead of guessing. Each row =
+exact bytes sent to the real opencode in tmux, rows moved = pane diff:
+
+| key | bytes | rows moved | browser-reachable? |
+| --- | --- | --- | --- |
+| alt+ArrowUp / alt+ArrowDown | ESC[1;5A / ESC[1;5B | 2 (= 1 line) | YES, verified on the wire |
+| ctrl+alt+u / ctrl+alt+d | ESC 0x15 / ESC 0x04 | 16 (= half page) | yes |
+| ctrl+alt+b, PageUp | ESC 0x02 / ESC[5~ | 30 (= page) | yes |
+| ctrl+alt+y (documented line UP) | — | 1 line in tmux | **NO: xterm never sends it** |
+| ctrl+alt+k/t/p/z/r, ctrl+alt+ArrowUp | — | no movement | yes, but dead |
+
+So one line is both the finest step the app has and the finest pair a browser
+can deliver. The bridge now emits one alt+Arrow* per line-height of drag
+(step = viewport/48, no baked font or screen size), max 6 per touchmove, plus
+a decaying fling capped at 12 lines.
+
+Verified on the LIVE page with real touch events and CDP frame capture: a
+300px drag puts 33 one-line commands on the wire, `ESC[1;5B` on drag up and
+`ESC[1;5A` on drag down. Sensor 102->103.
+
+Also learned: a 401 on the page's own `/tty2/token` is the cookie, not the
+query token — headless checks that skip the landing 302 get a refused socket
+and send nothing, which is why the first live probe read "no bytes".

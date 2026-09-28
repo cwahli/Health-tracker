@@ -590,47 +590,61 @@ export const LAYOUT_JS = [
 
 /**
  * Touch drag -> the app's own scroll keys, so a finger can scroll a fullscreen
- * TUI on a phone.
+ * TUI on a phone. One line per line of finger travel: a real 1:1 scroll.
  *
- * Why keys and not wheel (both measured, not guessed):
- * - A drag is inert on a phone: opencode runs with mouse tracking on, and
- *   xterm.js skips its own touch handling while mouse events are active
- *   (`if(!coreMouseService.areMouseEventsActive) return`), and ttyd 1.7.7 ships
- *   no touch-to-wheel bridge. So drag produces nothing at all.
- * - Turning the drag into wheel events is not enough either: the installed
- *   opencode IGNORES SGR wheel (proved by sending ESC[65/ESC[66 straight to
- *   the app: the view did not move), while its documented scroll keys
- *   (PageUp/PageDown) DO move the view. So wheel would have been a placebo.
- * - xterm encodes keyCode 33/34 to ESC[5~ / ESC[6~ and the listener is on its
- *   own textarea with no isTrusted check, so a synthetic key press is
- *   indistinguishable from a real one on the wire.
+ * Everything here was measured, against the installed opencode and a real
+ * xterm, not assumed:
  *
- * Comfort details: paging is EIGHTHS of the screen, not thirds — measured
- * against the real binary, a 3-key burst registers fine (no coalescing) while
- * `ctrl+alt+y` (line scroll) does nothing at all, so pages are the only
- * granularity available. A page per eighth puts the first response inside a
- * short flick, at most 3 keys fire per touchmove so a fast drag is not
- * throttled, `preventDefault` only fires once a drag is really scrolling (a
- * tap still types), multi-touch is left alone so pinch-zoom survives, and the
- * accumulator resets per gesture.
+ * - A drag is inert on a phone by default: opencode runs with mouse tracking
+ *   on, xterm's touch handlers bail while mouse events are active, and ttyd
+ *   1.7.7 ships no touch-to-wheel bridge. So the page has to translate.
+ * - Wheel is not the translation: SGR wheel (ESC[65/66) sent straight to the
+ *   app left the view unchanged, so a wheel bridge would have been a placebo.
+ * - Scroll granularity ladder, each row measured by sending the exact bytes to
+ *   the real binary and diffing the pane:
+ *     alt+ArrowUp / alt+ArrowDown  -> 1 line  (2 rows differ)   <- used here
+ *     ctrl+alt+u / ctrl+alt+d       -> half page (16 rows)
+ *     ctrl+alt+b, PageUp           -> full page (30 rows)
+ *   One line is the finest step the app has, and alt+Arrow* is the pair that
+ *   survives the browser: xterm emits ESC[1;5A / ESC[1;5B for them (verified
+ *   on the wire), whereas ctrl+alt+y — the documented line-up binding — is
+ *   swallowed by xterm and never reaches the app.
+ * - Bursts register, so keys can be dense.
+ *
+ * Feel: one line per line-height of drag, up to 6 keys per touchmove so a fast
+ * drag is never throttled, a decaying fling for momentum, `preventDefault`
+ * only once a drag is really scrolling (a tap still types), multi-touch left
+ * alone so pinch-zoom survives, and one accumulator per gesture.
  */
 export const TOUCH_SCROLL_JS = [
   '(function(){',
   'try{',
-  'var MIN_STEP=28,MAX_FLING=0.9,UP=33,DOWN=34,MAX_KEYS=3;',
-  'var t=null,y0=0,acc=0,v=0,last=0,active=0,raf=0,queued=0;',
+  '// One line per step. alt+ArrowUp/alt+ArrowDown are the finest scroll the',
+  '// app has (measured: 1 line) AND the finest pair the browser can send',
+  '// (xterm emits ESC[1;5A / ESC[1;5B; ctrl+alt+y never leaves the browser).',
+  'var UP=38,DOWN=40,MAX_KEYS=6,FLING_PX_PER_LINE=60,MAX_FLING_LINES=12;',
+  'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,raf=0,queued=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
   'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
   'function now(){try{return performance.now();}catch(e){return Date.now();}}',
-  'function step(){return Math.max(MIN_STEP,(screen()?(screen().clientHeight||0):0)/8);}',
+  'function lineH(){',
+  'try{',
+  'var h=(screen()?(screen().clientHeight||0):0);',
+  '// one terminal line of finger travel, derived from the viewport so no',
+  '// font size or screen size is baked in',
+  'return Math.max(10,Math.min(26,Math.round(h/48)));',
+  '}catch(e){return 16;}',
+  '}',
+  'function step(){return lineH();}',
   'function press(code){',
   'var el=keys();if(!el)return;',
   'try{',
-  '// xterm reads keys from its textarea; a page key only counts if that',
-  '// element is the focused one, so take focus first.',
+  '// xterm reads keys from its textarea, and only prefixes ESC for alt when',
+  '// altKey is set, so the modifier travels with the key.',
   'if(typeof el.focus==="function")el.focus();',
-  'var o={bubbles:true,cancelable:true,keyCode:code,which:code,code:(code===UP?"PageUp":"PageDown"),',
-  'key:(code===UP?"PageUp":"PageDown")};',
+  'var up=(code===UP);',
+  'var o={bubbles:true,cancelable:true,keyCode:code,which:code,',
+  'key:(up?"ArrowUp":"ArrowDown"),code:(up?"ArrowUp":"ArrowDown"),altKey:true};',
   'el.dispatchEvent(new KeyboardEvent("keydown",o));',
   'el.dispatchEvent(new KeyboardEvent("keyup",o));',
   '}catch(e){}',
@@ -642,7 +656,7 @@ export const TOUCH_SCROLL_JS = [
   '}',
   'function down(e){',
   'if(active||!e.touches||e.touches.length!==1)return;',
-  't=e.touches[0];y0=t.clientY;v=0;acc=0;last=now();',
+  't=e.touches[0];y0=t.clientY;v=0;v0=0;acc=0;last=now();',
   '}',
   'function move(e){',
   'if(!t||!e.touches||e.touches.length!==1)return;',
@@ -651,16 +665,30 @@ export const TOUCH_SCROLL_JS = [
   'if(!active&&Math.abs(acc+dy)>=step()){active=1;}',
   'acc+=dy;',
   'v=dy/Math.max(1,n-last);last=n;',
+  'v0=v;',
   'drain();',
   'if(active){try{e.preventDefault();}catch(err){}}',
   '}',
   'function up(){',
   'if(!t)return;',
   't=null;',
-  'var f=0;',
-  'if(Math.abs(v)>MAX_FLING)f=v>0?DOWN:UP;',
-  'if(f)press(f);',
+  '// Momentum: a flick keeps scrolling for a few lines, one per frame, so it',
+  '// glides instead of jumping. Capped, and it decays to nothing on its own.',
+  'var lines=0;',
+  'try{',
+  'lines=Math.min(MAX_FLING_LINES,Math.round(Math.abs(v)*FLING_PX_PER_LINE/step()));',
+  '}catch(e){}',
   'acc=0;active=0;v=0;',
+  'var code=v0>0?DOWN:UP;',
+  'if(lines>0){',
+  'var n=0;',
+  'var tick=function(){',
+  'if(n++>=lines)return;',
+  'press(code);',
+  'try{requestAnimationFrame(tick);}catch(e){}',
+  '};',
+  'try{requestAnimationFrame(tick);}catch(e){}',
+  '}',
   '}',
   'var h={touchstart:down,touchmove:move,touchend:up,touchcancel:up};',
   'var bound=null,tries=0;',

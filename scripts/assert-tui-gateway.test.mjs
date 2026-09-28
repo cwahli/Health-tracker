@@ -407,10 +407,10 @@ console.log('assert-tui-gateway:');
     check('the bridge binds once the terminal mounts',
       !!handlers.touchstart && !!handlers.touchmove && !!handlers.touchend);
 
-    // step() = 700/8 = 87px, so a tap and a small nudge must not scroll.
+    // step() = 700/48 = 15px per line, so a 10px nudge is still below it.
     handlers.touchstart({ touches: [{ clientY: 600 }] });
-    handlers.touchmove({ touches: [{ clientY: 580 }], preventDefault() { prevented++; } });
-    check('a small nudge does not page',
+    handlers.touchmove({ touches: [{ clientY: 590 }], preventDefault() { prevented++; } });
+    check('a small nudge does not scroll',
       keys.filter((k) => k.type === 'keydown').length === 0);
     check('a nudge is not taken off the page', prevented === 0);
 
@@ -419,17 +419,17 @@ console.log('assert-tui-gateway:');
     handlers.touchstart({ touches: [{ clientY: 600 }] });
     handlers.touchmove({ touches: [{ clientY: 300 }], preventDefault() { prevented++; } });
     const upKeys = keys.slice(up0);
-    check('an upward drag pages down (keyCode 34)',
-      upKeys.some((k) => k.type === 'keydown' && k.keyCode === 34));
-    check('the key is released too', upKeys.some((k) => k.type === 'keyup' && k.keyCode === 34));
+    check('an upward drag scrolls later (alt+ArrowDown, keyCode 40)',
+      upKeys.some((k) => k.type === 'keydown' && k.keyCode === 40 && k.altKey));
+    check('the key is released too', upKeys.some((k) => k.type === 'keyup' && k.keyCode === 40));
     check('the drag is taken off the page once scrolling', prevented >= 1);
 
     // Dragging DOWN shows earlier content: PageUp (keyCode 33).
     const before = keys.length;
     handlers.touchstart({ touches: [{ clientY: 300 }] });
     handlers.touchmove({ touches: [{ clientY: 600 }], preventDefault() { prevented++; } });
-    check('a downward drag pages up (keyCode 33)',
-      keys.slice(before).some((k) => k.keyCode === 33 && k.type === 'keydown'));
+    check('a downward drag scrolls earlier (alt+ArrowUp, keyCode 38)',
+      keys.slice(before).some((k) => k.keyCode === 38 && k.altKey && k.type === 'keydown'));
 
     // One long drag pages as it goes, and a fast drag is not throttled: a
     // page per eighth of the screen (700/8 = 87px) is ~8 over a full drag.
@@ -439,21 +439,29 @@ console.log('assert-tui-gateway:');
       handlers.touchmove({ touches: [{ clientY: y }], preventDefault() { prevented++; } });
     }
     const downs = keys.slice(b2).filter((k) => k.type === 'keydown').length;
-    check('a full-screen drag pages about eight times, not a handful',
-      downs >= 6 && downs <= 10);
+    // step() = 700/48 = 15px per line, so a full-screen drag is ~46 lines.
+    check('a full-screen drag scrolls about forty-five lines', downs >= 35 && downs <= 60);
+    // Granularity: this is the whole point of alt+Arrow* - a small drag moves
+    // only a line or two, so the view tracks the finger instead of jumping.
+    const gf = keys.length;
+    handlers.touchend({});
+    handlers.touchstart({ touches: [{ clientY: 400 }] });
+    handlers.touchmove({ touches: [{ clientY: 365 }], preventDefault() { prevented++; } });
+    const fine = keys.slice(gf).filter((k) => k.type === 'keydown').length;
+    check('a 35px drag moves about two lines, not a page', fine >= 1 && fine <= 3);
     // A single huge jump (a fast flick) still pages, but is capped per event.
     handlers.touchend({});
     const b2b = keys.length;
     handlers.touchstart({ touches: [{ clientY: 700 }] });
     handlers.touchmove({ touches: [{ clientY: 0 }], preventDefault() { prevented++; } });
     const jump = keys.slice(b2b).filter((k) => k.type === 'keydown').length;
-    check('one touchmove never fires more than three pages', jump <= 3 && jump >= 1);
-    check('the first page arrives within a short flick (under 100px)',
+    check('one touchmove never fires more than six lines', jump <= 6 && jump >= 1);
+    check('the first step arrives within a short flick',
       (() => {
         handlers.touchend({});
         const b = keys.length;
-        handlers.touchstart({ touches: [{ clientY: 500 }] });
-        handlers.touchmove({ touches: [{ clientY: 410 }], preventDefault() { prevented++; } });
+        handlers.touchstart({ touches: [{ clientY: 600 }] });
+        handlers.touchmove({ touches: [{ clientY: 480 }], preventDefault() { prevented++; } });
         return keys.slice(b).some((k) => k.type === 'keydown');
       })());
 
@@ -470,8 +478,8 @@ console.log('assert-tui-gateway:');
     handlers.touchstart({ touches: [{ clientY: 600 }] });
     handlers.touchmove({ touches: [{ clientY: 560 }], preventDefault() { prevented++; } });
     handlers.touchend({});
-    check('a flick adds at most one page',
-      keys.slice(b4).filter((k) => k.type === 'keydown').length <= 1);
+    check('a flick adds at most twelve lines',
+      keys.slice(b4).filter((k) => k.type === 'keydown').length <= 12);
   }
 
   // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only
