@@ -239,6 +239,7 @@ console.log('assert-tui-gateway:');
   check('the page is html', /<html/i.test(html));
   check('the served page has a phone viewport', /<meta[^>]*viewport[^>]*width=device-width/i.test(html));
   check('the served page zeroes the body frame', /html,body\{[^}]*margin:0/i.test(html));
+  check('the served page full-bleeds the terminal container', /#terminal-container\{[^}]*width:100%/i.test(html));
   check('the upstream body survives the injection', html.includes('console.log("hello")'));
   check('the fullscreen button ships with the page', html.includes('tui-fsbtn'));
   check('exactly our widget scripts are added, nothing else',
@@ -267,12 +268,15 @@ console.log('assert-tui-gateway:');
     withFullscreenButton(withFullscreenButton('<html><body>x</body></html>'))
       .split('tui-fsbtn').length === 3);
   {
-    const calls = { fullscreen: 0, resized: 0, viewportHook: null };
+    const calls = { fullscreen: 0, exited: 0, expanded: 0, swipesOff: 0, resized: 0, viewportHook: null };
     const btn = { style: {}, addEventListener: (ev, fn) => { btn[ev] = fn; } };
     const tg = {
       ready: () => {},
+      isFullscreen: false,
       requestFullscreen: () => { calls.fullscreen++; },
-      expand: () => {},
+      exitFullscreen: () => { calls.exited++; },
+      expand: () => { calls.expanded++; },
+      disableVerticalSwipes: () => { calls.swipesOff++; },
       onEvent: (ev, fn) => { calls.viewportHook = ev; btn.viewportFn = fn; },
     };
     const stubWindow = {
@@ -288,8 +292,13 @@ console.log('assert-tui-gateway:');
       );
     } catch (e) { threw = String(e.message); }
     check(`the widget runs without throwing${threw ? ` — ${threw}` : ''}`, threw === '');
+    check('the app expands on load', calls.expanded >= 1);
+    check('vertical swipes are handed to the terminal', calls.swipesOff === 1);
     btn.click();
     check('tapping the button requests fullscreen', calls.fullscreen === 1);
+    tg.isFullscreen = true;
+    btn.click();
+    check('tapping again in fullscreen exits it', calls.exited === 1);
     btn.viewportFn();
     check('a Telegram viewport change refits the terminal', calls.resized >= 1);
     check('the widget hooks viewportChanged', calls.viewportHook === 'viewportChanged');

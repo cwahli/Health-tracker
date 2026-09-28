@@ -475,8 +475,12 @@ export const VIEWPORT_HEAD_TAGS = [
   '<meta name="viewport" content="width=device-width, initial-scale=1">',
   '<style>html,body{margin:0!important;padding:0!important;height:100%!important;'
     + 'width:100%!important;overflow:hidden!important;background:#000!important}'
+    + '#terminal-container{width:100%!important;max-width:100%!important;margin:0!important;'
+    + 'padding:0!important;height:100%!important}'
+    + '#terminal-container .terminal,.terminal{padding:0!important;height:100%!important;'
+    + 'width:100%!important;box-sizing:border-box!important}'
     + '.xterm{height:100%!important;width:100%!important}'
-    + '.xterm .xterm-viewport{touch-action:pan-y!important}</style>',
+    + '.xterm .xterm-viewport{touch-action:pan-y!important;overscroll-behavior:contain!important}</style>',
 ].join('');
 
 export function withPhoneViewport(html) {
@@ -487,14 +491,17 @@ export function withPhoneViewport(html) {
 }
 
 /**
- * Fullscreen button for the Mini App WebView. Telegram keeps its own header
- * ("VM2 bot" bar) unless the app requests fullscreen; that chrome plus the
- * shrunken layout is the "container" on a small screen. The snippet is
- * deliberately tiny and dependency-free apart from Telegram's own loader:
- * tap toggles fullscreen (falls back to expand where fullscreen is off),
- * and Telegram viewport changes re-fire window resize so xterm refits
- * (keyboard open/close included). Everything is guarded — outside Telegram
- * the button hides itself and the page behaves as before.
+ * Fullscreen button + Mini App viewport lock for the terminal page. Two
+ * separate phone complaints, one snippet:
+ * - Telegram keeps its own header ("VM2 bot" bar) unless the app requests
+ *   fullscreen; the button toggles it (expand fallback).
+ * - A vertical drag inside the terminal collapsed the Mini App instead of
+ *   scrolling: Telegram claims vertical swipes for its own sheet gestures
+ *   unless the app calls disableVerticalSwipes(). That call — on load, not
+ *   on tap — is what keeps a scroll gesture inside the terminal.
+ * The snippet is tiny and dependency-free apart from Telegram's own loader.
+ * Everything is guarded: outside Telegram the button hides itself; unknown
+ * API methods are feature-checked (older clients lack both calls).
  */
 export const FULLSCREEN_WIDGET_JS = [
   '(function(){',
@@ -504,9 +511,15 @@ export const FULLSCREEN_WIDGET_JS = [
   'if(!b)return;',
   "if(!tg){b.style.display='none';return;}",
   'if(tg.ready)tg.ready();',
+  'try{if(tg.expand)tg.expand();}catch(e){}',
+  'try{if(tg.disableVerticalSwipes)tg.disableVerticalSwipes();}catch(e){}',
   'function refit(){try{window.dispatchEvent(new Event(\'resize\'));}catch(e){}}',
   'function go(){',
-  'try{if(tg.requestFullscreen){tg.requestFullscreen();}else if(tg.expand){tg.expand();}}catch(e){}',
+  'try{',
+  'if(tg.isFullscreen&&tg.exitFullscreen){tg.exitFullscreen();}',
+  'else if(tg.requestFullscreen){tg.requestFullscreen();}',
+  'else if(tg.expand){tg.expand();}',
+  '}catch(e){}',
   'setTimeout(refit,300);setTimeout(refit,1000);',
   '}',
   "b.addEventListener('click',go);",

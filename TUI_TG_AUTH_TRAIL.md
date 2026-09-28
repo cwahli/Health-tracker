@@ -171,3 +171,19 @@ Screenshot shows the terminal rendering full-width (viewport fix held),
 but the tmux status line eats the bottom row and frames the small screen
 while opencode draws its own status. `status off` per TUI session
 (global untouched). Sensor 23->24.
+
+## 2026-09-28: side gap + swipe-collapse (this branch, live)
+
+Screenshot (08:03 phone): terminal full-width-ish but a grey strip on the
+right, and a vertical drag collapses the Mini App instead of scrolling.
+Two causes:
+- Vertical swipes belong to Telegram's sheet gestures unless the app calls
+  disableVerticalSwipes(). The widget now calls it (plus expand()) on load,
+  feature-checked for older clients. That is the scroll fix — no CSS can do
+  it.
+- ttyd's own `#terminal-container{width:auto;margin:0 auto}` +
+  `.terminal{padding:5px}` frames the small screen. Gateway CSS now
+  full-bleeds both layers (100%, padding 0) and contains overscroll.
+The ⛶ button now toggles (exitFullscreen when already fullscreen).
+Sensor 74->78. Live page verified: swipes-lock, container CSS, button,
+token endpoint all present.
