@@ -131,9 +131,11 @@ fi
 WAITED=0
 while ! lease_held "$LEASES" 1800 && [ "$WAITED" -lt "$WAIT_SECONDS" ]; do
   if [ "$WAITED" -eq 0 ]; then
-    echo "The bot is answering a message in this conversation right now."
-    echo "Attaching as soon as it finishes — one writer at a time, or the"
-    echo "conversation gets corrupted. This is not an error; it takes a moment."
+    echo "A bot turn is running in this chat right now."
+    echo "The terminal attaches the moment that turn finishes, so nothing you"
+    echo "type is lost — it just takes a moment. It waits rather than typing"
+    echo "over the top, because two writers on one conversation is what"
+    echo "breaks it."
     echo
   fi
   sleep 3

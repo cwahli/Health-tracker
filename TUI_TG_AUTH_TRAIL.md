@@ -330,3 +330,36 @@ Honest limit: this is the finest scrolling this app can do from a browser —
 one line down, one line up only if the key repeats (it does not), so up is a
 half page. A truly 1:1 scroll in both directions would need the app to accept
 a repeatable line-up key, which is an opencode change, not a gateway change.
+
+## 2026-09-28: "Done (exit 1), but the model returned no text output" (unrelated to TUI)
+
+The user typed "hi" and got that message. Not a TUI fault and not corruption:
+the opencode server log shows the bot's own run dying at spawn.
+
+    cli process failed cause="Fail(~effect/cli/CliError/ShowHelp: Help requested)"
+    args=["run","--format","json","--print-logs","--log-level","ERROR",
+          "--thinking","--variant","xhigh","-m","opencode/space-bunny-free", ...]
+
+Two argv defects against the installed CLI (2.0.18), each fatal on its own:
+
+1. `--variant` no longer exists. The variant is part of the model string
+   (`provider/model#variant`). An unknown flag makes the CLI print help and
+   exit 1.
+2. `--log-level ERROR` is the wrong case. The enum is
+   all|trace|debug|info|warn|warning|error|fatal|none, so "ERROR" is an
+   InvalidValue -> help -> exit 1.
+
+Either one alone gives exit 1 with zero stdout, and the bot's only honest
+report is "no text output". The old unit test pinned the broken argv, so the
+bug was locked in; it now pins the correct contract, and
+`assert-model-failover` gained a live guard so the class is gated even in a
+worktree with no vitest (node_modules is empty here, so tests/bot-host.test.ts
+could not be executed — the assert-* sensors could).
+
+Proven with the real CLI: same command, exit 0 and real text output ("ok"),
+before exit 1 and nothing. bot-host@vm2 restarted on the fix.
+
+Separately, the attach script's wait banner said "...or the conversation gets
+corrupted", which the user read as the TUI being corrupt. Reworded: it says a
+bot turn is running, the terminal attaches when it finishes, and that is why
+it waits rather than typing over the top.

@@ -186,12 +186,18 @@ export function buildOpencodeArgs({ prompt, model, variant, thinking = true, att
   // ERROR log lines, after which opencode sits there forever with an EMPTY
   // stdout — no JSON events at all. Without these flags the only thing the bot
   // can report is "timed out after 900000ms", 15 minutes later.
-  args.push('--print-logs', '--log-level', 'ERROR');
+  // Lowercase is required: the CLI validates --log-level against
+  // all|trace|debug|info|warn|warning|error|fatal|none, so "ERROR" is an
+  // InvalidValue, the CLI prints help and exits 1 with no output (2026-09-28).
+  args.push('--print-logs', '--log-level', 'error');
   if (attachUrl) args.push('--attach', attachUrl);
   if (sessionId) args.push('--session', sessionId);
   if (thinking) args.push('--thinking');
-  if (variant) args.push('--variant', variant);
-  if (model) args.push('-m', model);
+  // The variant is part of the model string now ("provider/model#variant").
+  // A separate `--variant` flag is not a valid flag in CLI 2.0.18: the CLI
+  // prints help and exits 1 ("ShowHelp: Help requested"), so the bot reports
+  // "the model returned no text output" for every turn (2026-09-28).
+  if (model) args.push('-m', variant ? `${model}#${variant}` : model);
   if (extraArgs.length) args.push(...extraArgs);
   args.push(prompt);
   return args;
