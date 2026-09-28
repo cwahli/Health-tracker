@@ -198,6 +198,17 @@ export function ttydPathFor(botId) {
   return '/tty/';
 }
 
+/**
+ * The 302 target after a successful Telegram exchange. TEMP-DEBUG: with
+ * TUI_PAGE_DEBUG=1 it also asks the page for its on-screen geometry readout,
+ * so one phone screenshot carries the numbers. Remove both when the phone
+ * layout is confirmed.
+ */
+export function landingLocationFor(botId, token, env = process.env) {
+  const debug = String(env.TUI_PAGE_DEBUG || '') === '1' ? '&tui_measure=1' : '';
+  return `${ttydPathFor(botId)}?token=${encodeURIComponent(token)}${debug}`;
+}
+
 
 /**
  * The bootstrap the Mini App opens.
@@ -351,8 +362,11 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
       // client appends location.search to its socket URL, so ?token= reaches
       // /authz through Caddy untouched. Short-lived (ttl) and chat-bound, and
       // the served page makes no third-party requests, so nothing leaks it.
+      // TEMP-DEBUG 2026-09-28: TUI_PAGE_DEBUG=1 turns on the on-screen geometry
+      // readout so a phone screenshot carries the numbers. Remove with the
+      // readout once the layout is confirmed.
       res.writeHead(302, {
-        'location': `${ttydPathFor(botId)}?token=${encodeURIComponent(token)}`,
+        'location': landingLocationFor(botId, token, env),
         'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
         'cache-control': 'no-store',
       });
@@ -503,6 +517,32 @@ export function withPhoneViewport(html) {
  * Everything is guarded: outside Telegram the button hides itself; unknown
  * API methods are feature-checked (older clients lack both calls).
  */
+
+/**
+ * Layout work that must run EVERYWHERE (headless included, so it is
+ * verifiable), split from the Telegram-only chrome. Loading the page without
+ * Telegram used to be a total no-op, which meant the phone fixes could not be
+ * checked here at all.
+ */
+export const LAYOUT_JS = [
+  '(function(){',
+  'try{',
+  'function refit(){try{window.dispatchEvent(new Event("resize"));}catch(e){}}',
+  'try{',
+  'var c=document.getElementById("terminal-container");',
+  'if(c&&window.ResizeObserver){new window.ResizeObserver(refit).observe(c);}',
+  'else{var n=0;var iv=setInterval(function(){n++;refit();if(n>8)clearInterval(iv);},700);}',
+  '}catch(e){}',
+  // Telegram resizes the WebView without firing window resize and ttyd only
+  // refits on window resize, so xterm kept its first-paint width. Refit a few
+  // times across the first seconds as well: the Mini App's own chrome settles
+  // after load.
+  '[150,600,1500,3000].forEach(function(t){setTimeout(refit,t);});',
+  '}catch(e){}',
+  '})();',
+].join('');
+
+/** Telegram-only chrome: fullscreen, expand, and the swipe lock. */
 export const FULLSCREEN_WIDGET_JS = [
   '(function(){',
   'try{',
@@ -522,8 +562,43 @@ export const FULLSCREEN_WIDGET_JS = [
   '}catch(e){}',
   'setTimeout(refit,300);setTimeout(refit,1000);',
   '}',
+  // Fullscreen on load, not only on tap: Telegram opens a Mini App with its own
+  // header AND horizontal insets, and only real fullscreen removes them — no
+  // page CSS can reach a native inset. Guarded on isFullscreen, and retried
+  // once because some clients refuse the call during the first tick.
+  'setTimeout(function(){try{if(tg.requestFullscreen&&!tg.isFullscreen)tg.requestFullscreen();}catch(e){}refit();},600);',
+  'setTimeout(function(){try{if(tg.requestFullscreen&&!tg.isFullscreen)tg.requestFullscreen();}catch(e){}refit();},1800);',
   "b.addEventListener('click',go);",
   "try{tg.onEvent('viewportChanged',refit);}catch(e){}",
+  '}catch(e){}',
+  '})();',
+].join('');
+
+/**
+ * TEMP-DEBUG 2026-09-28: on-screen geometry readout, switched on only when the
+ * gateway appends tui_measure=1 to the landing URL (TUI_PAGE_DEBUG=1). Remove
+ * once the phone layout is confirmed.
+ */
+export const MEASURE_JS = [
+  '(function(){',
+  'try{',
+  "if(!/[?&]tui_measure=1/.test(location.search))return;",
+  'setTimeout(function(){',
+  'var c=document.getElementById("terminal-container");',
+  'var x=document.querySelector(".xterm");',
+  'var s=document.querySelector(".xterm-screen");',
+  'var vp=window.visualViewport;',
+  'var d=document.createElement("pre");',
+  'd.id="tui-measure";',
+  'd.style.cssText="position:fixed;left:2px;bottom:2px;z-index:99999;margin:0;'
+    + 'background:rgba(0,0,0,.85);color:#0f0;font:9px/1.3 monospace;padding:2px 3px;";',
+  'd.textContent=JSON.stringify({',
+  'iw:window.innerWidth,dpr:window.devicePixelRatio,',
+  'vvw:vp?Math.round(vp.width):null,vvs:vp?vp.scale:null,',
+  'cw:c?c.clientWidth:null,xw:x?x.clientWidth:null,sw:s?s.clientWidth:null',
+  '});',
+  'document.body.appendChild(d);',
+  '},8000);',
   '}catch(e){}',
   '})();',
 ].join('');
@@ -533,6 +608,7 @@ export const FULLSCREEN_WIDGET = [
   '<button id="tui-fsbtn" title="fullscreen" style="position:fixed;top:8px;right:8px;'
     + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
     + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x26F6;</button>',
+  `<script>${LAYOUT_JS}</script>`,
   `<script>${FULLSCREEN_WIDGET_JS}</script>`,
 ].join('');
 
@@ -541,6 +617,12 @@ export function withFullscreenButton(html) {
   if (body.includes('tui-fsbtn')) return body;
   if (/<\/body\s*>/i.test(body)) return body.replace(/<\/body\s*>/i, (m) => `${FULLSCREEN_WIDGET}${m}`);
   return `${body}${FULLSCREEN_WIDGET}`;
+}
+
+export function withGeometryProbe(html) {
+  const body = String(html || '');
+  if (body.includes('tui-measure')) return body;
+  return body.replace(/<\/body\s*>/i, (m) => `<script>${MEASURE_JS}</script>${m}`);
 }
 function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '') {
   const target = new URL(upstreamPath, ttydBase);
@@ -563,7 +645,12 @@ function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredentia
         let out = Buffer.concat(chunks);
         // Phone viewport injection is for the terminal page only; error
         // bodies pass through untouched.
-        if ((up.statusCode || 200) === 200) out = Buffer.from(withFullscreenButton(withPhoneViewport(out.toString('utf8'))), 'utf8');
+        if ((up.statusCode || 200) === 200) {
+          let page = withPhoneViewport(out.toString('utf8'));
+          page = withFullscreenButton(page);
+          page = withGeometryProbe(page);
+          out = Buffer.from(page, 'utf8');
+        }
         res.writeHead(up.statusCode || 200, {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-store',

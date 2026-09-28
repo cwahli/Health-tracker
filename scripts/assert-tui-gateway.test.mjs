@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, landingLocationFor } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -243,7 +243,7 @@ console.log('assert-tui-gateway:');
   check('the upstream body survives the injection', html.includes('console.log("hello")'));
   check('the fullscreen button ships with the page', html.includes('tui-fsbtn'));
   check('exactly our widget scripts are added, nothing else',
-    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 2
+    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 4
     && html.includes('requestFullscreen'));
   check('the page is not gzip bytes labelled as html', !html.startsWith('\u001f\u008b'));
   check('no credential is embedded in the page', !/tui_session=/.test(html) && !/var TOKEN =/.test(html));
@@ -283,7 +283,9 @@ console.log('assert-tui-gateway:');
       Telegram: { WebApp: tg },
       dispatchEvent: (e) => { if (e && e.type === 'resize') calls.resized++; },
     };
-    const stubDoc = { getElementById: (id) => (id === 'tui-fsbtn' ? btn : null) };
+    const stubDoc = {
+      getElementById: (id) => (id === 'tui-fsbtn' ? btn : (id === 'terminal-container' ? { clientWidth: 500 } : null)),
+    };
     let threw = '';
     try {
       // eslint-disable-next-line no-new-func
@@ -302,6 +304,7 @@ console.log('assert-tui-gateway:');
     btn.viewportFn();
     check('a Telegram viewport change refits the terminal', calls.resized >= 1);
     check('the widget hooks viewportChanged', calls.viewportHook === 'viewportChanged');
+    check('fullscreen is requested on load, not only on tap', calls.fullscreen >= 1);
     const btn2 = { style: {}, addEventListener: () => {} };
     new Function('window', 'document', 'location', 'Telegram', 'Event', FULLSCREEN_WIDGET_JS)(
       { dispatchEvent: () => {} }, { getElementById: () => btn2 }, { search: '' }, undefined,
@@ -309,6 +312,41 @@ console.log('assert-tui-gateway:');
     );
     check('without Telegram the button hides itself', btn2.style.display === 'none');
   }
+
+  // 12a4. The LAYOUT pass must not depend on Telegram. It used to sit inside
+  //       the Telegram-only widget, so headless Chromium ran none of it and
+  //       the phone fixes could not be verified here at all.
+  {
+    let observed = null; let refits = 0;
+    const timers = [];
+    const win = {
+      dispatchEvent: (e) => { if (e && e.type === 'resize') refits++; },
+      ResizeObserver: class { constructor(fn) { this.fn = fn; } observe(el) { observed = el; } },
+      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    };
+    const container = { clientWidth: 500, tagName: 'DIV' };
+    let threw = '';
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function('window', 'document', 'setTimeout', LAYOUT_JS)(
+        win, { getElementById: (id) => (id === 'terminal-container' ? container : null) },
+        (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      );
+      for (const t of timers) t.fn();
+    } catch (e) { threw = String(e.message); }
+    check(`the layout pass runs without Telegram${threw ? ` — ${threw}` : ''}`, threw === '');
+    check('the layout pass watches the terminal container', observed === container);
+    check('the layout pass refits after Telegram settles the viewport', refits >= 4);
+  }
+
+  // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only
+  //        when TUI_PAGE_DEBUG=1, and never otherwise.
+  check('the landing redirect carries no readout flag by default',
+    landingLocationFor('vm2', 'TOK', {}).indexOf('tui_measure') === -1);
+  check('TUI_PAGE_DEBUG=1 turns the readout on',
+    landingLocationFor('vm2', 'TOK', { TUI_PAGE_DEBUG: '1' }).indexOf('tui_measure=1') !== -1);
+  check('the readout flag keeps the session token first',
+    landingLocationFor('vm2', 'TOK', { TUI_PAGE_DEBUG: '1' }) === '/tty2/?token=TOK&tui_measure=1');
 
   // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
   const boot = await bootstrapThroughGateway();
