@@ -527,17 +527,56 @@ export function withPhoneViewport(html) {
 export const LAYOUT_JS = [
   '(function(){',
   'try{',
-  'function refit(){try{window.dispatchEvent(new Event("resize"));}catch(e){}}',
+  // The rule: the terminal fills the phone's real max width, whatever that is.
+  // No device is special-cased, and nothing is measured off a screen size.
+  'function avail(){',
+  'try{',
+  'var vv=window.visualViewport;',
+  'var w=(vv&&vv.width)||document.documentElement.clientWidth||window.innerWidth;',
+  'return Math.max(1,Math.floor(w));',
+  '}catch(e){return Math.max(1,window.innerWidth||1);}',
+  '}',
+  'function fit(){',
   'try{',
   'var c=document.getElementById("terminal-container");',
-  'if(c&&window.ResizeObserver){new window.ResizeObserver(refit).observe(c);}',
-  'else{var n=0;var iv=setInterval(function(){n++;refit();if(n>8)clearInterval(iv);},700);}',
+  'if(c){',
+  // Widen the container to the viewport itself. Telegram insets the sheet, so
+  // the container is narrower than the screen and xterm fits to the inset —
+  // that inset was the "gap on the side", and it is native, so the page
+  // overreaches the viewport width instead of living inside the inset.
+  'c.style.setProperty("width",avail()+"px");',
+  'c.style.setProperty("max-width","none");',
+  '}',
+  'window.dispatchEvent(new Event("resize"));',
   '}catch(e){}',
-  // Telegram resizes the WebView without firing window resize and ttyd only
-  // refits on window resize, so xterm kept its first-paint width. Refit a few
-  // times across the first seconds as well: the Mini App's own chrome settles
-  // after load.
-  '[150,600,1500,3000].forEach(function(t){setTimeout(refit,t);});',
+  // xterm floors columns, so up to one whole cell of background is left over.
+  // Absorb it by stretching the grid over the full width — automatic for any
+  // width, no size list, no font tuning. Below ~1% the stretch is invisible and
+  // it is left off so text stays crisp.
+  'setTimeout(function(){',
+  'try{',
+  'var c=document.getElementById("terminal-container");',
+  'var s=document.querySelector(".xterm-screen");',
+  'if(!c||!s)return;',
+  'var g=s.clientWidth,t=c.clientWidth;',
+  'if(g>8&&t>g&&(t-g)/t>0.01){',
+  's.style.transform="scaleX("+(t/g)+")";',
+  's.style.transformOrigin="left top";',
+  '}else if(s.style.transform){s.style.transform="";s.style.transformOrigin="";}',
+  '}catch(e){}',
+  '},60);',
+  '}',
+  'try{',
+  'var c=document.getElementById("terminal-container");',
+  'if(c&&window.ResizeObserver){new window.ResizeObserver(fit).observe(c);}',
+  '}catch(e){}',
+  'try{if(window.visualViewport&&window.visualViewport.addEventListener)',
+  'window.visualViewport.addEventListener("resize",fit);}catch(e){}',
+  'window.addEventListener("resize",fit);',
+  'try{if(window.visualViewport&&window.visualViewport.addEventListener)',
+  'window.visualViewport.addEventListener("scroll",fit);}catch(e){}',
+  // The Mini App's own chrome settles after load, so fit again as it does.
+  '[0,150,600,1500,3000,6000].forEach(function(t){setTimeout(fit,t);});',
   '}catch(e){}',
   '})();',
 ].join('');

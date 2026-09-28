@@ -187,3 +187,25 @@ Two causes:
 The ⛶ button now toggles (exitFullscreen when already fullscreen).
 Sensor 74->78. Live page verified: swipes-lock, container CSS, button,
 token endpoint all present.
+
+## 2026-09-28: auto-fit to the phone's real max width (this branch)
+
+User: the readout was legible but the TUI should not need a specific phone
+size — it should just fill the phone's max width automatically.
+
+The fix is now a rule, not a size list. The layout pass (runs everywhere, not
+only under Telegram — that guard was why the phone fixes were unverifiable
+here) does, on load and on every viewport/resize/scroll/settle:
+1. measure the real max width: `visualViewport.width` (falls back to
+   `documentElement.clientWidth` / `innerWidth`);
+2. set `#terminal-container` to that width with `max-width:none`, so xterm
+   fits the screen and not a Telegram sheet inset (native, unreachable by
+   CSS — this was the side gap);
+3. fire a resize so xterm refits, then absorb the sub-cell leftover by
+   `scaleX` on `.xterm-screen` (only when the slack is >1%, so text stays
+   crisp). No font tuning, no device branching.
+
+Verified headless at 390x844 @3x: container = 500px (== viewport),
+grid stretched 484 -> 500 via `scaleX(1.033)`, zero bands across the row.
+Sensors 85->88. TUI_PAGE_DEBUG readout left in the tree but OFF (landing no
+longer appends the flag); turn it back on to re-read phone numbers.

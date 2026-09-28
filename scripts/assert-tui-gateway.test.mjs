@@ -313,30 +313,53 @@ console.log('assert-tui-gateway:');
     check('without Telegram the button hides itself', btn2.style.display === 'none');
   }
 
-  // 12a4. The LAYOUT pass must not depend on Telegram. It used to sit inside
-  //       the Telegram-only widget, so headless Chromium ran none of it and
-  //       the phone fixes could not be verified here at all.
+  // 12a4. The LAYOUT pass must not depend on Telegram, and it must fill
+  //       whatever the viewport actually is — no device is special-cased.
   {
-    let observed = null; let refits = 0;
-    const timers = [];
+    let observed = null; let fits = 0;
+    const listeners = {};
+    const container = { clientWidth: 0, style: { props: {}, setProperty(k, v) { this.props[k] = v; } } };
+    const screen = { clientWidth: 0, style: {} };
     const win = {
-      dispatchEvent: (e) => { if (e && e.type === 'resize') refits++; },
+      innerWidth: 500,
+      visualViewport: { width: 390, scale: 1, addEventListener: (e, f) => { listeners[e] = f; } },
+      dispatchEvent: (e) => { if (e && e.type === 'resize') fits++; },
+      addEventListener: (e, f) => { listeners[e] = f; },
       ResizeObserver: class { constructor(fn) { this.fn = fn; } observe(el) { observed = el; } },
-      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     };
-    const container = { clientWidth: 500, tagName: 'DIV' };
+    const doc = {
+      getElementById: (id) => (id === 'terminal-container' ? container : null),
+      querySelector: (s) => (s === '.xterm-screen' ? screen : null),
+      documentElement: { clientWidth: 500 },
+    };
+    const tick = () => { for (const t of docTimers) t.fn(); };
+    const docTimers = [];
     let threw = '';
     try {
       // eslint-disable-next-line no-new-func
-      new Function('window', 'document', 'setTimeout', LAYOUT_JS)(
-        win, { getElementById: (id) => (id === 'terminal-container' ? container : null) },
-        (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
-      );
-      for (const t of timers) t.fn();
+      new Function('window', 'document', 'setTimeout', LAYOUT_JS)(win, doc, (fn, ms) => {
+        docTimers.push({ fn, ms });
+        return docTimers.length;
+      });
+      tick();
     } catch (e) { threw = String(e.message); }
     check(`the layout pass runs without Telegram${threw ? ` — ${threw}` : ''}`, threw === '');
     check('the layout pass watches the terminal container', observed === container);
-    check('the layout pass refits after Telegram settles the viewport', refits >= 4);
+    check('the container is widened to the visual viewport, not the inset',
+      container.style.props.width === '390px' && container.style.props['max-width'] === 'none');
+    check('a viewport change refits again', typeof listeners.resize === 'function' && fits >= 1);
+
+    // The leftover-cell absorb: grid 300 in a 390-wide container = 23% slack.
+    screen.clientWidth = 300;
+    container.clientWidth = 390;
+    docTimers[docTimers.length - 1].fn();
+    check('the grid is stretched to the full width',
+      /scaleX\(1\.3\)/.test(screen.style.transform || ''));
+    // A 1% leftover is left alone: sub-percent stretching only blurs text.
+    screen.clientWidth = 387;
+    docTimers[docTimers.length - 1].fn();
+    check('a sub-percent leftover is left alone',
+      (screen.style.transform || '') === '');
   }
 
   // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only
