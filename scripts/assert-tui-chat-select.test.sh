@@ -121,6 +121,21 @@ if grep -qE "(while|if) lease_held" "$ATTACH"; then
 else
   echo "  PASS  no bare while/if lease_held remains"; PASS=$((PASS + 1))
 fi
+# 10. tmux must not be backgrounded: a backgrounded tmux client dies instantly
+# ("open terminal failed: not a terminal") while the script lives on — banner
+# sent, session never created, reconnect overlay forever (2026-09-28). The
+# session is ensured detached; only the attach holds the pty, in front.
+grep -q 'tmux attach-session -t' "$ATTACH" \
+  && { echo "  PASS  the attach holds the pty in front"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the attach holds the pty in front"; FAIL=$((FAIL + 1)); }
+if grep -vE "^\s*#" "$ATTACH" | grep -E "tmux new-session -A" | grep -qv "\-d -A"; then
+  echo "  FAIL  a foreground-needing tmux runs backgrounded"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  no backgrounded tmux client remains"; PASS=$((PASS + 1))
+fi
+grep -q 'HEARTBEAT_PID' "$ATTACH" \
+  && { echo "  PASS  the lease heartbeat survives the reshape"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the lease heartbeat survives the reshape"; FAIL=$((FAIL + 1)); }
 rm -rf "$LEASE_FIX" "$ROOT"
 echo
 echo "$PASS pass, $FAIL fail"

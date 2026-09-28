@@ -77,11 +77,6 @@ lease_held() {
   ' "$file" "$max_age_s" 2>/dev/null
 }
 
-cleanup() {
-  rm -f "$TUI_LEASE" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
-
 # --- which session is the chat on?
 #
 # Resolution order, because ttyd runs one static command per bot and cannot be
@@ -177,7 +172,11 @@ cd "$WORKTREE" || exit 1
 
 # Claim the conversation for as long as a client is attached. The heartbeat is
 # what makes a crashed holder recoverable: without it a killed phone would
-# leave a lease that blocks the chat forever.
+# leave a lease that blocks the chat forever. The heartbeat runs in a
+# background subshell (no terminal use, so backgrounding is safe); tmux itself
+# stays in the FOREGROUND — a backgrounded tmux client dies instantly with
+# "open terminal failed: not a terminal" (2026-09-28), which was the reconnect
+# loop: banner printed, session never created, overlay forever.
 claim() {
   node -e '
     const fs = require("fs");
@@ -186,13 +185,17 @@ claim() {
   ' "$TUI_LEASE" "$SID" 2>/dev/null || true
 }
 claim
+( while true; do sleep 15; claim; done ) &
+HEARTBEAT_PID=$!
 
-# tmux as a child, not exec: the loop below is what releases the lease when the
-# terminal client goes away, which is the whole point of claiming it.
-tmux new-session -A -s "$TMUX_NAME" "$OPENCODE_BIN" "${SID_ARG[@]}" &
-TMUX_PID=$!
+cleanup() {
+  kill "$HEARTBEAT_PID" 2>/dev/null || true
+  rm -f "$TUI_LEASE" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
 
-while kill -0 "$TMUX_PID" 2>/dev/null; do
-  claim
-  sleep 15
-done
+# Ensure the session detached (needs no terminal), then attach in the
+# foreground so the pty shows the conversation. A second open re-attaches to
+# the same session; tmux keeps your place between opens.
+tmux new-session -d -A -s "$TMUX_NAME" "$OPENCODE_BIN" "${SID_ARG[@]}"
+tmux attach-session -t "$TMUX_NAME"

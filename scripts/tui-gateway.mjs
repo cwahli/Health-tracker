@@ -170,6 +170,19 @@ export const TTYD_ROUTES = {
   '/tty2': { bot: 'vm2', base: '/tty2/' },
 };
 
+/**
+ * The socket AuthToken, one per bot. The ttyd page fetches `./token`
+ * (relative to the served page, so it lands here through Caddy) and puts it
+ * in the socket init message; ttyd kills a socket whose token is missing or
+ * wrong (POLICY_VIOLATION, and silently when the key is absent) — without
+ * this route every open died seconds later on the reconnect prompt. Same
+ * admission as the page; the body matches ttyd's own /token endpoint.
+ */
+export const TOKEN_ROUTES = {
+  '/tty/token': 'vm',
+  '/tty2/token': 'vm2',
+};
+
 /** The ttyd upstream for a bot. Per-bot URL wins; the shared one is the fallback. */
 export function ttydFor(botId, env = process.env) {
   const direct = env[`TUI_TTYD_URL_${String(botId).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`];
@@ -392,6 +405,29 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
       }
       res.writeHead(204);
       return res.end();
+    }
+
+    // The socket AuthToken the served page fetches as ./token (see
+    // TOKEN_ROUTES). Same admission as the page below.
+    const tokenBot = TOKEN_ROUTES[url.pathname];
+    if (tokenBot) {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`token refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      if (verdict.botId !== tokenBot && !(tokenBot === 'vm' && verdict.botId !== 'vm2')) {
+        log(`token refused (token is for bot=${verdict.botId}, path is for bot=${tokenBot})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
+      }
+      if (!ttydCredential) {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ token: ttydCredential }));
     }
 
     // The page, one per bot. The socket is NOT proxied from here: node's upgrade

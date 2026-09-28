@@ -118,3 +118,39 @@ the TUI framebuffer.
   today (ttyd ignores WS auth) = latent total breakage. Align + rotate.
 - The ttyd password is visible in `ps`/cmdline/history. Rotate
   TUI_TTYD_PASSWORD (ttyd `-c`, gateway TUI_TTYD_CREDENTIAL, Caddyfile).
+
+## 2026-09-28: two more defects — the actual open-killers (fixed, this branch)
+
+The lease fix was real but the user still looped on "Press Enter to
+Reconnect". Live taps showed: admitted, page 200, `/authz` silent-204, then
+the socket dying in ~25–140ms with nothing spawned. Full chain built
+headlessly (faithful WS client + scratch ttyds) to bisect:
+
+1. **Gateway 404'd `/tty/token` and `/tty2/token`.** The served page fetches
+   `./token` for the socket AuthToken; the gateway had no such route, so
+   every socket opened with a missing token and ttyd killed it silently
+   (POLICY_VIOLATION with no warning when the key is absent — read off
+   tsl0922/ttyd 1.7.7 `protocol.c`). Fix: `TOKEN_ROUTES` in
+   `scripts/tui-gateway.mjs`, same admission as the page, body matches
+   ttyd's own `/token`. Sensor +6 (60/60). Live: 200 + body, 401 cross-bot,
+   401 anonymous.
+2. **tui-attach.sh backgrounded the tmux client (`... &`).** A backgrounded
+   tmux client dies instantly ("open terminal failed: not a terminal") while
+   the script lives on in its monitor loop — banner sent, session never
+   created, dead terminal. Foreground works (proven). Fix: `new-session -d
+   -A` (detached ensure, needs no terminal) + foreground `attach-session`;
+   heartbeat moved to a background subshell (no terminal use) with trap
+   cleanup. Sensor +3 tripwires (23/23).
+
+Red herrings killed with evidence: no credential mismatch anywhere (the
+z/v "first char differs" was a misread — computed base64 matches ttyd's own
+/token body byte-for-byte); `--once=false` prints an error but starts
+normally with once OFF; the trail's FileSystem.access crash never
+reproduced. Test ttyds/sessions and /tmp probes all removed; live
+`opencode-tui-vm2` scratch session reaped.
+
+Live proof (headless, through the real gateway + live ttyd, real session):
+token fetch 200 -> socket init -> banner + 19,419 bytes incl. the rendered
+opencode TUI on ses_f208..., tmux session attached during hold, live lease
+claimed with fresh heartbeat and released on close. Only the real page JS +
+Caddy proxy remain unexercised — needs one human /tui tap.

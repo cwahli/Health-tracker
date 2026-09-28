@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -311,6 +311,37 @@ console.log('assert-tui-gateway:');
   check('a vm2 token opens the vm2 page', await serve('vm2', '/tty2/') === 200);
   check("a vm token is refused on the vm2 page", await serve('vm', '/tty2/') === 401);
   check("a vm2 token is refused on the vm page", await serve('vm2', '/tty/') === 401);
+}
+
+// The socket AuthToken the served page fetches as ./token. On 2026-09-28 the
+// gateway 404'd it, so every socket opened with a missing token and ttyd
+// killed it silently (POLICY_VIOLATION, no warning) — the reconnect loop.
+{
+  check('both token paths are routed', TOKEN_ROUTES['/tty/token'] === 'vm' && TOKEN_ROUTES['/tty2/token'] === 'vm2');
+  const CRED = Buffer.from('tui:x').toString('base64');
+  const serveToken = async (bot, path, withCookie = true) => {
+    const env = {
+      TUI_GATEWAY_SECRET: SECRET,
+      TUI_BOT_TOKEN_VM: TOKEN,
+      TUI_BOT_TOKEN_VM2: TOKEN,
+      TUI_TTYD_CREDENTIAL: CRED,
+    };
+    const token = issueToken({ botId: bot, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env, log: () => {} });
+    return new Promise((resolve, reject) => {
+      let code = 0; let body = '';
+      const res = { writeHead: (c) => { code = c; }, end: (b) => { body = String(b || ''); resolve({ code, body }); } };
+      const headers = withCookie ? { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } : {};
+      handle({ method: 'GET', url: path, headers }, res).catch(reject);
+    });
+  };
+  const vmTok = await serveToken('vm', '/tty/token');
+  check('a vm token gets the vm socket token', vmTok.code === 200 && JSON.parse(vmTok.body).token === CRED);
+  const vm2Tok = await serveToken('vm2', '/tty2/token');
+  check('a vm2 token gets the vm2 socket token', vm2Tok.code === 200 && JSON.parse(vm2Tok.body).token === CRED);
+  check('a vm token is refused the vm2 socket token', (await serveToken('vm', '/tty2/token')).code === 401);
+  check('a vm2 token is refused the vm socket token', (await serveToken('vm2', '/tty/token')).code === 401);
+  check('no cookie gets no socket token', (await serveToken('vm', '/tty/token', false)).code === 401);
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);
