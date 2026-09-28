@@ -485,6 +485,50 @@ export function withPhoneViewport(html) {
   if (/<head[^>]*>/i.test(body)) return body.replace(/<head[^>]*>/i, (m) => `${m}${VIEWPORT_HEAD_TAGS}`);
   return `${VIEWPORT_HEAD_TAGS}${body}`;
 }
+
+/**
+ * Fullscreen button for the Mini App WebView. Telegram keeps its own header
+ * ("VM2 bot" bar) unless the app requests fullscreen; that chrome plus the
+ * shrunken layout is the "container" on a small screen. The snippet is
+ * deliberately tiny and dependency-free apart from Telegram's own loader:
+ * tap toggles fullscreen (falls back to expand where fullscreen is off),
+ * and Telegram viewport changes re-fire window resize so xterm refits
+ * (keyboard open/close included). Everything is guarded — outside Telegram
+ * the button hides itself and the page behaves as before.
+ */
+export const FULLSCREEN_WIDGET_JS = [
+  '(function(){',
+  'try{',
+  'var tg=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp:null;',
+  "var b=document.getElementById('tui-fsbtn');",
+  'if(!b)return;',
+  "if(!tg){b.style.display='none';return;}",
+  'if(tg.ready)tg.ready();',
+  'function refit(){try{window.dispatchEvent(new Event(\'resize\'));}catch(e){}}',
+  'function go(){',
+  'try{if(tg.requestFullscreen){tg.requestFullscreen();}else if(tg.expand){tg.expand();}}catch(e){}',
+  'setTimeout(refit,300);setTimeout(refit,1000);',
+  '}',
+  "b.addEventListener('click',go);",
+  "try{tg.onEvent('viewportChanged',refit);}catch(e){}",
+  '}catch(e){}',
+  '})();',
+].join('');
+
+export const FULLSCREEN_WIDGET = [
+  '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
+  '<button id="tui-fsbtn" title="fullscreen" style="position:fixed;top:8px;right:8px;'
+    + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
+    + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x26F6;</button>',
+  `<script>${FULLSCREEN_WIDGET_JS}</script>`,
+].join('');
+
+export function withFullscreenButton(html) {
+  const body = String(html || '');
+  if (body.includes('tui-fsbtn')) return body;
+  if (/<\/body\s*>/i.test(body)) return body.replace(/<\/body\s*>/i, (m) => `${FULLSCREEN_WIDGET}${m}`);
+  return `${body}${FULLSCREEN_WIDGET}`;
+}
 function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '') {
   const target = new URL(upstreamPath, ttydBase);
   const upstream = http.request(
@@ -506,7 +550,7 @@ function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredentia
         let out = Buffer.concat(chunks);
         // Phone viewport injection is for the terminal page only; error
         // bodies pass through untouched.
-        if ((up.statusCode || 200) === 200) out = Buffer.from(withPhoneViewport(out.toString('utf8')), 'utf8');
+        if ((up.statusCode || 200) === 200) out = Buffer.from(withFullscreenButton(withPhoneViewport(out.toString('utf8'))), 'utf8');
         res.writeHead(up.statusCode || 200, {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-store',

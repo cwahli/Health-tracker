@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -240,8 +240,10 @@ console.log('assert-tui-gateway:');
   check('the served page has a phone viewport', /<meta[^>]*viewport[^>]*width=device-width/i.test(html));
   check('the served page zeroes the body frame', /html,body\{[^}]*margin:0/i.test(html));
   check('the upstream body survives the injection', html.includes('console.log("hello")'));
-  check('no script is added to the page',
-    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length);
+  check('the fullscreen button ships with the page', html.includes('tui-fsbtn'));
+  check('exactly our widget scripts are added, nothing else',
+    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 2
+    && html.includes('requestFullscreen'));
   check('the page is not gzip bytes labelled as html', !html.startsWith('\u001f\u008b'));
   check('no credential is embedded in the page', !/tui_session=/.test(html) && !/var TOKEN =/.test(html));
 
@@ -254,6 +256,50 @@ console.log('assert-tui-gateway:');
   check('a page with a viewport passes through untouched',
     withPhoneViewport('<html><head><meta name="viewport" content="x"></head></html>')
       === '<html><head><meta name="viewport" content="x"></head></html>');
+
+  // 12a3. The fullscreen widget: idempotent, body-anchored, and executable.
+  //       Page JS burned us before (a shim SyntaxError on every load), so the
+  //       snippet runs here against stubs, like the bootstrap section does.
+  check('the widget anchors before </body>',
+    /id="tui-fsbtn"[\s\S]*<\/button>/.test(
+      withFullscreenButton('<html><body>x</body></html>')));
+  check('the widget is idempotent',
+    withFullscreenButton(withFullscreenButton('<html><body>x</body></html>'))
+      .split('tui-fsbtn').length === 3);
+  {
+    const calls = { fullscreen: 0, resized: 0, viewportHook: null };
+    const btn = { style: {}, addEventListener: (ev, fn) => { btn[ev] = fn; } };
+    const tg = {
+      ready: () => {},
+      requestFullscreen: () => { calls.fullscreen++; },
+      expand: () => {},
+      onEvent: (ev, fn) => { calls.viewportHook = ev; btn.viewportFn = fn; },
+    };
+    const stubWindow = {
+      Telegram: { WebApp: tg },
+      dispatchEvent: (e) => { if (e && e.type === 'resize') calls.resized++; },
+    };
+    const stubDoc = { getElementById: (id) => (id === 'tui-fsbtn' ? btn : null) };
+    let threw = '';
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function('window', 'document', 'location', 'Telegram', 'Event', FULLSCREEN_WIDGET_JS)(
+        stubWindow, stubDoc, { search: '' }, undefined, function Event(t) { this.type = t; },
+      );
+    } catch (e) { threw = String(e.message); }
+    check(`the widget runs without throwing${threw ? ` — ${threw}` : ''}`, threw === '');
+    btn.click();
+    check('tapping the button requests fullscreen', calls.fullscreen === 1);
+    btn.viewportFn();
+    check('a Telegram viewport change refits the terminal', calls.resized >= 1);
+    check('the widget hooks viewportChanged', calls.viewportHook === 'viewportChanged');
+    const btn2 = { style: {}, addEventListener: () => {} };
+    new Function('window', 'document', 'location', 'Telegram', 'Event', FULLSCREEN_WIDGET_JS)(
+      { dispatchEvent: () => {} }, { getElementById: () => btn2 }, { search: '' }, undefined,
+      function Event(t) { this.type = t; },
+    );
+    check('without Telegram the button hides itself', btn2.style.display === 'none');
+  }
 
   // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
   const boot = await bootstrapThroughGateway();
