@@ -407,7 +407,7 @@ console.log('assert-tui-gateway:');
     check('the bridge binds once the terminal mounts',
       !!handlers.touchstart && !!handlers.touchmove && !!handlers.touchend);
 
-    // step() = 700/3 = 233px, so a tap and a small nudge must not scroll.
+    // step() = 700/8 = 87px, so a tap and a small nudge must not scroll.
     handlers.touchstart({ touches: [{ clientY: 600 }] });
     handlers.touchmove({ touches: [{ clientY: 580 }], preventDefault() { prevented++; } });
     check('a small nudge does not page',
@@ -431,14 +431,31 @@ console.log('assert-tui-gateway:');
     check('a downward drag pages up (keyCode 33)',
       keys.slice(before).some((k) => k.keyCode === 33 && k.type === 'keydown'));
 
-    // One long drag pages once per third of the screen, not per pixel.
+    // One long drag pages as it goes, and a fast drag is not throttled: a
+    // page per eighth of the screen (700/8 = 87px) is ~8 over a full drag.
     const b2 = keys.length;
     handlers.touchstart({ touches: [{ clientY: 700 }] });
     for (let y = 700; y >= 0; y -= 20) {
       handlers.touchmove({ touches: [{ clientY: y }], preventDefault() { prevented++; } });
     }
     const downs = keys.slice(b2).filter((k) => k.type === 'keydown').length;
-    check('a full-screen drag pages about three times, not dozens', downs >= 2 && downs <= 4);
+    check('a full-screen drag pages about eight times, not a handful',
+      downs >= 6 && downs <= 10);
+    // A single huge jump (a fast flick) still pages, but is capped per event.
+    handlers.touchend({});
+    const b2b = keys.length;
+    handlers.touchstart({ touches: [{ clientY: 700 }] });
+    handlers.touchmove({ touches: [{ clientY: 0 }], preventDefault() { prevented++; } });
+    const jump = keys.slice(b2b).filter((k) => k.type === 'keydown').length;
+    check('one touchmove never fires more than three pages', jump <= 3 && jump >= 1);
+    check('the first page arrives within a short flick (under 100px)',
+      (() => {
+        handlers.touchend({});
+        const b = keys.length;
+        handlers.touchstart({ touches: [{ clientY: 500 }] });
+        handlers.touchmove({ touches: [{ clientY: 410 }], preventDefault() { prevented++; } });
+        return keys.slice(b).some((k) => k.type === 'keydown');
+      })());
 
     // Multi-touch is ignored so pinch-zoom is not hijacked.
     handlers.touchend({});

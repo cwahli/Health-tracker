@@ -605,19 +605,24 @@ export const LAYOUT_JS = [
  *   own textarea with no isTrusted check, so a synthetic key press is
  *   indistinguishable from a real one on the wire.
  *
- * Comfort details: a drag must cover a third of the screen per page, so a tap
- * still types and a small nudge does not jump; multi-touch is left alone so
- * pinch-zoom survives; the fling is one extra page at most.
+ * Comfort details: paging is EIGHTHS of the screen, not thirds — measured
+ * against the real binary, a 3-key burst registers fine (no coalescing) while
+ * `ctrl+alt+y` (line scroll) does nothing at all, so pages are the only
+ * granularity available. A page per eighth puts the first response inside a
+ * short flick, at most 3 keys fire per touchmove so a fast drag is not
+ * throttled, `preventDefault` only fires once a drag is really scrolling (a
+ * tap still types), multi-touch is left alone so pinch-zoom survives, and the
+ * accumulator resets per gesture.
  */
 export const TOUCH_SCROLL_JS = [
   '(function(){',
   'try{',
-  'var MIN_STEP=56,MAX_FLING=0.9,UP=33,DOWN=34;',
+  'var MIN_STEP=28,MAX_FLING=0.9,UP=33,DOWN=34,MAX_KEYS=3;',
   'var t=null,y0=0,acc=0,v=0,last=0,active=0,raf=0,queued=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
   'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
   'function now(){try{return performance.now();}catch(e){return Date.now();}}',
-  'function step(){return Math.max(MIN_STEP,(screen()?(screen().clientHeight||0):0)/3);}',
+  'function step(){return Math.max(MIN_STEP,(screen()?(screen().clientHeight||0):0)/8);}',
   'function press(code){',
   'var el=keys();if(!el)return;',
   'try{',
@@ -631,9 +636,9 @@ export const TOUCH_SCROLL_JS = [
   '}catch(e){}',
   '}',
   'function drain(){',
-  'var s=step();',
-  'while(acc>=s){acc-=s;press(DOWN);}',
-  'while(acc<=-s){acc+=s;press(UP);}',
+  'var s=step(),n=0;',
+  'while(acc>=s&&n<MAX_KEYS){acc-=s;press(DOWN);n++;}',
+  'while(acc<=-s&&n<MAX_KEYS){acc+=s;press(UP);n++;}',
   '}',
   'function down(e){',
   'if(active||!e.touches||e.touches.length!==1)return;',

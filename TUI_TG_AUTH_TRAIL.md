@@ -253,3 +253,20 @@ re-created), focus the textarea before synthesising a key, arm the
 ResizeObserver lazily once the container exists. Sensors pin the load-order
 trap explicitly: a document without the terminal must get NO listeners, and
 the same bridge must bind once it appears. 99->100.
+
+## 2026-09-28: paging granularity measured, lag fixed (this branch)
+
+User: it scrolls, but so slowly it looks stuck. Two wrong tests of my own
+first (hashing the whole pane caught a footer repaint; and paging DOWN from
+the bottom is correctly a no-op). Corrected measurements, full-pane diffs,
+read-only:
+
+- PageUp MOVES the view (32 lines differ).
+- A 3-key PageUp BURST registers — no coalescing, so keys can be dense.
+- `ctrl+alt+y` (line scroll) does NOTHING — pages are the only granularity the
+  installed opencode offers.
+
+So the lag was my threshold, not the mechanism: a page fired only after a
+third of the screen (~280px). Now a page fires per EIGHTH (~87px), at most 3
+keys per touchmove so a fast drag is never throttled, first response inside a
+short flick. Sensors 100->102.
