@@ -590,29 +590,31 @@ export const LAYOUT_JS = [
 
 /**
  * Touch drag -> the app's own scroll keys, so a finger can scroll a fullscreen
- * TUI on a phone. One line per line of finger travel: a real 1:1 scroll.
+ * TUI on a phone.
  *
- * Everything here was measured, against the installed opencode and a real
- * xterm, not assumed:
+ * Every number here is measured against the installed opencode: keys fired as
+ * exact bytes into the real binary, pane diffs counted, and REPEATABILITY
+ * tested (fire 4, see how many land). Repeatability is the whole game - a key
+ * that fires once and then goes dead makes dragging feel broken.
  *
- * - A drag is inert on a phone by default: opencode runs with mouse tracking
- *   on, xterm's touch handlers bail while mouse events are active, and ttyd
- *   1.7.7 ships no touch-to-wheel bridge. So the page has to translate.
- * - Wheel is not the translation: SGR wheel (ESC[65/66) sent straight to the
- *   app left the view unchanged, so a wheel bridge would have been a placebo.
- * - Scroll granularity ladder, each row measured by sending the exact bytes to
- *   the real binary and diffing the pane:
- *     alt+ArrowUp / alt+ArrowDown  -> 1 line  (2 rows differ)   <- used here
- *     ctrl+alt+u / ctrl+alt+d       -> half page (16 rows)
- *     ctrl+alt+b, PageUp           -> full page (30 rows)
- *   One line is the finest step the app has, and alt+Arrow* is the pair that
- *   survives the browser: xterm emits ESC[1;5A / ESC[1;5B for them (verified
- *   on the wire), whereas ctrl+alt+y — the documented line-up binding — is
- *   swallowed by xterm and never reaches the app.
- * - Bursts register, so keys can be dense.
+ *   key                  moves        repeats?
+ *   alt+ArrowUp / Down   1 line       NO - 1 of 4 applies, at any gap
+ *   ctrl+alt+y (doc'd    1 line       n/a - xterm never sends it at all
+ *     line UP)
+ *   ctrl+alt+e           1 line       YES - 4 of 4, 1 line each
+ *   ctrl+alt+u / d       half page    YES - 4 of 4, 8 lines each
+ *   ctrl+alt+b, PageUp   full page    partly
+ *   SGR wheel (ESC[65/66) none        n/a - the app ignores wheel entirely
  *
- * Feel: one line per line-height of drag, up to 6 keys per touchmove so a fast
- * drag is never throttled, a decaying fling for momentum, `preventDefault`
+ * So: scrolling DOWN is 1 line per step (ctrl+alt+e) and scrolling UP is a
+ * half page per step (ctrl+alt+u). An up drag is nudged with a page key
+ * first - the app ignores a same-direction key inside a few hundred ms of
+ * the last one, so the nudge also re-arms it. That is the finest repeatable
+ * scrolling this app can do from a browser, and it is why the earlier
+ * "one line each way" version felt like it was not scrolling at all.
+ *
+ * Feel: one step per ~1/24th of the screen, up to 6 keys per touchmove so a
+ * fast drag is never throttled, a decaying fling for momentum, `preventDefault`
  * only once a drag is really scrolling (a tap still types), multi-touch left
  * alone so pinch-zoom survives, and one accumulator per gesture.
  */
@@ -622,37 +624,53 @@ export const TOUCH_SCROLL_JS = [
   '// One line per step. alt+ArrowUp/alt+ArrowDown are the finest scroll the',
   '// app has (measured: 1 line) AND the finest pair the browser can send',
   '// (xterm emits ESC[1;5A / ESC[1;5B; ctrl+alt+y never leaves the browser).',
-  'var UP=38,DOWN=40,MAX_KEYS=6,FLING_PX_PER_LINE=60,MAX_FLING_LINES=12;',
-  'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,raf=0,queued=0;',
+  '// Line DOWN (ctrl+alt+e, keyCode 69) repeats 4-for-4; the matching line UP',
+  '// (ctrl+alt+y) is swallowed by xterm and alt+ArrowUp fires only once, so up',
+  '// scrolls a half page (ctrl+alt+u, keyCode 85) and is re-armed with a page',
+  '// key (ctrl+alt+b, keyCode 66) - the app ignores a same-direction key sent',
+  '// too soon after the last one.',
+  'var DOWN=69,UP=85,MAX_KEYS=6,COOLDOWN_MS=300,',
+  'FLING_PX_PER_STEP=55,MAX_FLING_STEPS=10;',
+  'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
   'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
   'function now(){try{return performance.now();}catch(e){return Date.now();}}',
   'function lineH(){',
   'try{',
   'var h=(screen()?(screen().clientHeight||0):0);',
-  '// one terminal line of finger travel, derived from the viewport so no',
-  '// font size or screen size is baked in',
-  'return Math.max(10,Math.min(26,Math.round(h/48)));',
-  '}catch(e){return 16;}',
+  '// one step of finger travel, derived from the viewport so no font size or',
+  '// screen size is baked in',
+  'return Math.max(8,Math.min(24,Math.round(h/24)));',
+  '}catch(e){return 12;}',
   '}',
   'function step(){return lineH();}',
   'function press(code){',
   'var el=keys();if(!el)return;',
   'try{',
-  '// xterm reads keys from its textarea, and only prefixes ESC for alt when',
-  '// altKey is set, so the modifier travels with the key.',
+  '// xterm reads keys from its textarea and only emits the ESC prefix when',
+  '// ctrl+alt are set, so both modifiers travel with every key here.',
   'if(typeof el.focus==="function")el.focus();',
-  'var up=(code===UP);',
+  'var ch=code===DOWN?"e":"u";',
   'var o={bubbles:true,cancelable:true,keyCode:code,which:code,',
-  'key:(up?"ArrowUp":"ArrowDown"),code:(up?"ArrowUp":"ArrowDown"),altKey:true};',
+  'key:ch,code:("Key"+ch.toUpperCase()),ctrlKey:true,altKey:true};',
   'el.dispatchEvent(new KeyboardEvent("keydown",o));',
   'el.dispatchEvent(new KeyboardEvent("keyup",o));',
   '}catch(e){}',
   '}',
+  '// Down needs no rate limit: ctrl+alt+e applies 4-for-4 at any speed. Up does,',
+  '// because ctrl+alt+u lands ~4-for-4 at 300ms and less when fired flat out -',
+  '// so an up-drag is paced instead of dropped. No page-key nudge: measured',
+  '// repeats say the half page is enough, and a page nudge would jump 30 lines.',
+  'function emit(dir){',
+  'if(dir>0){press(DOWN);lastDir=1;lastKeyAt=now();return;}',
+  'var t=now();',
+  'if(t-lastKeyAt<COOLDOWN_MS)return;',
+  'press(UP);lastDir=-1;lastKeyAt=t;',
+  '}',
   'function drain(){',
   'var s=step(),n=0;',
-  'while(acc>=s&&n<MAX_KEYS){acc-=s;press(DOWN);n++;}',
-  'while(acc<=-s&&n<MAX_KEYS){acc+=s;press(UP);n++;}',
+  'while(acc>=s&&n<MAX_KEYS){acc-=s;emit(1);n++;}',
+  'while(acc<=-s&&n<MAX_KEYS){acc+=s;emit(-1);n++;}',
   '}',
   'function down(e){',
   'if(active||!e.touches||e.touches.length!==1)return;',
@@ -672,19 +690,19 @@ export const TOUCH_SCROLL_JS = [
   'function up(){',
   'if(!t)return;',
   't=null;',
-  '// Momentum: a flick keeps scrolling for a few lines, one per frame, so it',
-  '// glides instead of jumping. Capped, and it decays to nothing on its own.',
-  'var lines=0;',
+  '// Momentum: a flick keeps scrolling for a few steps, one per frame, so it',
+  '// glides instead of stopping dead. Capped, and it ends on its own.',
+  'var steps=0;',
   'try{',
-  'lines=Math.min(MAX_FLING_LINES,Math.round(Math.abs(v)*FLING_PX_PER_LINE/step()));',
+  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/step()));',
   '}catch(e){}',
+  'var dir=v>0?1:-1;',
   'acc=0;active=0;v=0;',
-  'var code=v0>0?DOWN:UP;',
-  'if(lines>0){',
+  'if(steps>0){',
   'var n=0;',
   'var tick=function(){',
-  'if(n++>=lines)return;',
-  'press(code);',
+  'if(n++>=steps)return;',
+  'emit(dir);',
   'try{requestAnimationFrame(tick);}catch(e){}',
   '};',
   'try{requestAnimationFrame(tick);}catch(e){}',

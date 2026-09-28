@@ -297,3 +297,36 @@ Verified on the LIVE page with real touch events and CDP frame capture: a
 Also learned: a 401 on the page's own `/tty2/token` is the cookie, not the
 query token — headless checks that skip the landing 302 get a refused socket
 and send nothing, which is why the first live probe read "no bytes".
+
+## 2026-09-28: it stopped scrolling because I picked a key that fires once
+
+Symptom: "not scrolling again", right after the change that made it finer.
+The obvious suspect was my own rate, so I measured REPEATABILITY instead of
+guessing: fire 4 keys at 300ms into the real opencode, count what lands.
+
+| key | moves | applied of 4 |
+| --- | --- | --- |
+| alt+ArrowUp / alt+ArrowDown | 1 line | **1 of 4** — fires once, then dead |
+| ctrl+alt+y (documented line up) | 1 line | n/a: xterm never sends it |
+| ctrl+alt+e | 1 line | **4 of 4**, at any rate |
+| ctrl+alt+u / ctrl+alt+d | half page | 4 of 4 at 300ms |
+| ctrl+alt+b, PageUp | full page | 3 of 4 |
+| 45 line keys flat out | — | moved ~1 line in total |
+
+So the "1 line each way" build was sending keys the app honours exactly once
+per view. That is why scrolling looked dead, and it is the opposite of the
+previous complaint (half pages, which scroll fine but feel steppy) — the two
+symptoms had two different causes.
+
+Fix: down = ctrl+alt+e, one line per step, unpaced (it never drops). Up =
+ctrl+alt+u, one half page per step, paced to 300ms (that is the rate at which
+it lands 4-for-4). No page-key nudge: repeats say a half page is enough, and a
+page nudge would jump 30 lines.
+
+Live proof: a 300px drag up puts 22 `ESC 0x05` frames on the wire; the same
+drag down puts exactly 1 `ESC 0x15` (paced). Sensor 103->104.
+
+Honest limit: this is the finest scrolling this app can do from a browser —
+one line down, one line up only if the key repeats (it does not), so up is a
+half page. A truly 1:1 scroll in both directions would need the app to accept
+a repeatable line-up key, which is an opencode change, not a gateway change.

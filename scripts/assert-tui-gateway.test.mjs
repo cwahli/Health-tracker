@@ -362,13 +362,22 @@ console.log('assert-tui-gateway:');
       (screen.style.transform || '') === '');
   }
 
-  // 12a6. Touch drag must become the app's own scroll keys. Measured facts
-  //       this pins: opencode IGNORES SGR wheel (view did not move when
-  //       ESC[65/66 were sent straight to it) and DOES move on PageUp/PageDown,
-  //       and xterm encodes keyCode 33/34 to ESC[5~/ESC[6~ on its textarea.
+  // 12a6. Touch drag -> the app's own scroll keys. Everything pinned here
+  //       was measured against the installed opencode by firing exact bytes and
+  //       diffing the pane, REPEATS INCLUDED (fire 4, count how many land):
+  //         alt+ArrowUp / alt+ArrowDown  1 line    but only 1 of 4 applies
+  //         ctrl+alt+y (documented       1 line    xterm never sends it at all
+  //           line UP)
+  //         ctrl+alt+e                  1 line    4 of 4 apply, any rate
+  //         ctrl+alt+u / d              half page 4 of 4 at 300ms
+  //         SGR wheel (ESC[65/66)       none      app ignores wheel
+  //       So down is 1 line per step (unpaced) and up is a half page per step
+  //       paced to 300ms. Choosing a key that fires once is what made an
+  //       earlier version look like it was not scrolling at all.
   {
     const handlers = {}; const keys = [];
     let mounted = false;
+    let clock = 1000;
     const screenEl = {
       clientWidth: 360, clientHeight: 700,
       addEventListener: (ev, fn) => { handlers[ev] = fn; },
@@ -380,106 +389,102 @@ console.log('assert-tui-gateway:');
         : (s === '.xterm-helper-textarea' ? textarea : null)),
     };
     // ttyd mounts xterm AFTER this file runs, so the document starts without
-    // it — that ordering is the bug, not an edge case.
+    // it - that ordering is the bug, not an edge case.
     let prevented = 0;
     let threw = '';
     const intervals = [];
     try {
       // eslint-disable-next-line no-new-func
-      new Function('window', 'document', 'KeyboardEvent', 'performance', 'setInterval', 'clearInterval', TOUCH_SCROLL_JS)(
+      new Function('window', 'document', 'KeyboardEvent', 'performance', 'setInterval', 'clearInterval', 'requestAnimationFrame', TOUCH_SCROLL_JS)(
         { addEventListener: () => {} },
         doc,
         function KeyboardEvent(type, init) { this.type = type; Object.assign(this, init); },
-        { now: () => 1000 },
+        { now: () => clock },
         (fn) => { intervals.push(fn); return intervals.length; },
         () => {},
+        () => 1,
       );
     } catch (e) { threw = String(e.message); }
     check(`the touch bridge installs${threw ? ` — ${threw}` : ''}`, threw === '');
-    // THE LOAD-ORDER TRAP: ttyd mounts xterm after its bundle boots, so at
-    // script time `.xterm-screen` does not exist yet. The bridge must poll
-    // until it appears — attaching once at load attached nothing and a drag
-    // did nothing at all (measured: __tuiAtLoad=false, 2026-09-28).
-    check('nothing is bound before the terminal mounts',
-      Object.keys(handlers).length === 0);
+    check('nothing is bound before the terminal mounts', Object.keys(handlers).length === 0);
     mounted = true;
     for (const t of intervals) t();
     check('the bridge binds once the terminal mounts',
       !!handlers.touchstart && !!handlers.touchmove && !!handlers.touchend);
 
-    // step() = 700/48 = 15px per line, so a 10px nudge is still below it.
+    const down = (c) => keys.filter((k) => k.type === 'keydown' && k.keyCode === c);
+    const up = (c) => keys.filter((k) => k.type === 'keydown' && k.keyCode === c);
+    const reset = () => { handlers.touchend({}); clock += 1000; };
+    const drag = (from, to, steps = 1) => {
+      handlers.touchstart({ touches: [{ clientY: from }] });
+      for (let i = 1; i <= steps; i += 1) {
+        handlers.touchmove({ touches: [{ clientY: from + (to - from) * (i / steps) }], preventDefault() { prevented += 1; } });
+        clock += 5;
+      }
+    };
+
+    // A tap must not scroll and must not swallow the tap.
+    const t0 = keys.length;
     handlers.touchstart({ touches: [{ clientY: 600 }] });
-    handlers.touchmove({ touches: [{ clientY: 590 }], preventDefault() { prevented++; } });
-    check('a small nudge does not scroll',
-      keys.filter((k) => k.type === 'keydown').length === 0);
+    handlers.touchmove({ touches: [{ clientY: 594 }], preventDefault() { prevented += 1; } });
+    check('a small nudge does not scroll', keys.length === t0);
     check('a nudge is not taken off the page', prevented === 0);
 
-    // Dragging UP shows later content: PageDown (keyCode 34).
-    const up0 = keys.length;
-    handlers.touchstart({ touches: [{ clientY: 600 }] });
-    handlers.touchmove({ touches: [{ clientY: 300 }], preventDefault() { prevented++; } });
-    const upKeys = keys.slice(up0);
-    check('an upward drag scrolls later (alt+ArrowDown, keyCode 40)',
-      upKeys.some((k) => k.type === 'keydown' && k.keyCode === 40 && k.altKey));
-    check('the key is released too', upKeys.some((k) => k.type === 'keyup' && k.keyCode === 40));
+    // Down: one line per step, no rate limit. step() = 700/24 = 29px.
+    reset();
+    let b = keys.length;
+    drag(600, 300, 6);
+    const downKeys = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 69);
+    check('an upward drag scrolls later, one line at a time',
+      downKeys.length >= 8 && downKeys.length <= 12);
+    check('down steps are not rate limited (all 4-of-4 keys used)',
+      downKeys.length > 4);
+    check('down keys carry ctrl+alt (xterm needs both for the ESC prefix)',
+      downKeys.every((k) => k.ctrlKey === true && k.altKey === true));
+    check('a key is released as well as pressed',
+      keys.slice(b).some((k) => k.type === 'keyup' && k.keyCode === 69));
     check('the drag is taken off the page once scrolling', prevented >= 1);
 
-    // Dragging DOWN shows earlier content: PageUp (keyCode 33).
-    const before = keys.length;
-    handlers.touchstart({ touches: [{ clientY: 300 }] });
-    handlers.touchmove({ touches: [{ clientY: 600 }], preventDefault() { prevented++; } });
-    check('a downward drag scrolls earlier (alt+ArrowUp, keyCode 38)',
-      keys.slice(before).some((k) => k.keyCode === 38 && k.altKey && k.type === 'keydown'));
+    // Up: paced to the cooldown. Same distance, so without pacing it would be
+    // a burst; the app drops those, so at most one may escape per window.
+    reset();
+    b = keys.length;
+    drag(300, 600, 6);
+    const upBurst = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 85).length;
+    check('a burst of up steps is paced to the cooldown', upBurst <= 1);
+    check('no page-key nudge is ever sent',
+      keys.slice(b).every((k) => k.keyCode !== 66 && k.keyCode !== 33));
 
-    // One long drag pages as it goes, and a fast drag is not throttled: a
-    // page per eighth of the screen (700/8 = 87px) is ~8 over a full drag.
-    const b2 = keys.length;
+    // After the cooldown, up scrolls again.
+    reset();
+    b = keys.length;
+    drag(300, 600, 6);
+    check('up scrolls again once the cooldown has passed',
+      keys.slice(b).some((k) => k.type === 'keydown' && k.keyCode === 85 && k.altKey));
+
+    // A long down drag is capped per touchmove, not throttled overall.
+    b = keys.length;
+    reset();
     handlers.touchstart({ touches: [{ clientY: 700 }] });
-    for (let y = 700; y >= 0; y -= 20) {
-      handlers.touchmove({ touches: [{ clientY: y }], preventDefault() { prevented++; } });
-    }
-    const downs = keys.slice(b2).filter((k) => k.type === 'keydown').length;
-    // step() = 700/48 = 15px per line, so a full-screen drag is ~46 lines.
-    check('a full-screen drag scrolls about forty-five lines', downs >= 35 && downs <= 60);
-    // Granularity: this is the whole point of alt+Arrow* - a small drag moves
-    // only a line or two, so the view tracks the finger instead of jumping.
-    const gf = keys.length;
-    handlers.touchend({});
-    handlers.touchstart({ touches: [{ clientY: 400 }] });
-    handlers.touchmove({ touches: [{ clientY: 365 }], preventDefault() { prevented++; } });
-    const fine = keys.slice(gf).filter((k) => k.type === 'keydown').length;
-    check('a 35px drag moves about two lines, not a page', fine >= 1 && fine <= 3);
-    // A single huge jump (a fast flick) still pages, but is capped per event.
-    handlers.touchend({});
-    const b2b = keys.length;
-    handlers.touchstart({ touches: [{ clientY: 700 }] });
-    handlers.touchmove({ touches: [{ clientY: 0 }], preventDefault() { prevented++; } });
-    const jump = keys.slice(b2b).filter((k) => k.type === 'keydown').length;
+    handlers.touchmove({ touches: [{ clientY: 0 }], preventDefault() { prevented += 1; } });
+    const jump = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 69).length;
     check('one touchmove never fires more than six lines', jump <= 6 && jump >= 1);
-    check('the first step arrives within a short flick',
-      (() => {
-        handlers.touchend({});
-        const b = keys.length;
-        handlers.touchstart({ touches: [{ clientY: 600 }] });
-        handlers.touchmove({ touches: [{ clientY: 480 }], preventDefault() { prevented++; } });
-        return keys.slice(b).some((k) => k.type === 'keydown');
-      })());
 
-    // Multi-touch is ignored so pinch-zoom is not hijacked.
-    handlers.touchend({});
-    const b3 = keys.length;
+    // Multi-touch is left alone so pinch-zoom survives.
+    reset();
+    b = keys.length;
     handlers.touchstart({ touches: [{ clientY: 100 }, { clientY: 200 }] });
-    handlers.touchmove({ touches: [{ clientY: 0 }, { clientY: 300 }], preventDefault() { prevented++; } });
-    check('multi-touch is left alone', keys.length === b3);
+    handlers.touchmove({ touches: [{ clientY: 0 }, { clientY: 300 }], preventDefault() { prevented += 1; } });
+    check('multi-touch is left alone', keys.length === b);
 
-    // A fast flick adds at most one page.
-    handlers.touchend({});
-    const b4 = keys.length;
+    // A flick adds momentum, capped.
+    reset();
+    b = keys.length;
     handlers.touchstart({ touches: [{ clientY: 600 }] });
-    handlers.touchmove({ touches: [{ clientY: 560 }], preventDefault() { prevented++; } });
+    handlers.touchmove({ touches: [{ clientY: 560 }], preventDefault() { prevented += 1; } });
     handlers.touchend({});
-    check('a flick adds at most twelve lines',
-      keys.slice(b4).filter((k) => k.type === 'keydown').length <= 12);
+    check('a flick adds momentum, capped at ten steps',
+      keys.slice(b).filter((k) => k.type === 'keydown').length <= 10);
   }
 
   // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only
