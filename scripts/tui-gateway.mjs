@@ -460,21 +460,31 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
 }
 
 /**
- * Fetch ttyd's page and serve it unchanged.
+ * Fetch ttyd's page and serve it with a phone-sized viewport.
  *
- * There is no injected script and no credential in the page. The session
- * cookie authorizes the socket: a browser sends cookies on a websocket
- * handshake, so Caddy's forward_auth sees it without any help from JavaScript.
- * An earlier version rewrote the page to put the token on the socket as Basic
- * credentials — but /authz never read Basic, so the shim was doing nothing
- * except throwing a SyntaxError on every page load. Deleting it removed a real
- * bug instead of patching one, and left one credential instead of two
- * half-wired ones.
- *
- * Identity encoding is still requested: the page is forwarded as text, and a
- * gzipped body would reach the browser as gzip bytes with the header stripped —
- * row S7's replacement characters reached from the other side.
+ * Two additions, CSS + meta only, no JavaScript (an earlier JS shim threw a
+ * SyntaxError on every page load, so page surgery stays declarative):
+ * - viewport meta: without it a phone WebView lays the page out at ~980px
+ *   and shrinks it into a framed box instead of filling the screen.
+ * - margin:0 + full-size html/body: ttyd's bundle sets no body margin, so the
+ *   browser default 8px shows as a frame around the terminal.
+ * - touch-action on the xterm viewport: lets one-finger vertical pans scroll
+ *   the scrollback instead of fighting the canvas.
  */
+export const VIEWPORT_HEAD_TAGS = [
+  '<meta name="viewport" content="width=device-width, initial-scale=1">',
+  '<style>html,body{margin:0!important;padding:0!important;height:100%!important;'
+    + 'width:100%!important;overflow:hidden!important;background:#000!important}'
+    + '.xterm{height:100%!important;width:100%!important}'
+    + '.xterm .xterm-viewport{touch-action:pan-y!important}</style>',
+].join('');
+
+export function withPhoneViewport(html) {
+  const body = String(html || '');
+  if (/<meta[^>]*viewport/i.test(body)) return body;
+  if (/<head[^>]*>/i.test(body)) return body.replace(/<head[^>]*>/i, (m) => `${m}${VIEWPORT_HEAD_TAGS}`);
+  return `${VIEWPORT_HEAD_TAGS}${body}`;
+}
 function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '') {
   const target = new URL(upstreamPath, ttydBase);
   const upstream = http.request(
@@ -493,13 +503,16 @@ function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredentia
       const chunks = [];
       up.on('data', (c) => chunks.push(c));
       up.on('end', () => {
-        const body = Buffer.concat(chunks);
+        let out = Buffer.concat(chunks);
+        // Phone viewport injection is for the terminal page only; error
+        // bodies pass through untouched.
+        if ((up.statusCode || 200) === 200) out = Buffer.from(withPhoneViewport(out.toString('utf8')), 'utf8');
         res.writeHead(up.statusCode || 200, {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-store',
-          'content-length': String(body.length),
+          'content-length': String(out.length),
         });
-        res.end(body);
+        res.end(out);
       });
     },
   );

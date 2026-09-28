@@ -154,3 +154,13 @@ token fetch 200 -> socket init -> banner + 19,419 bytes incl. the rendered
 opencode TUI on ses_f208..., tmux session attached during hold, live lease
 claimed with fresh heartbeat and released on close. Only the real page JS +
 Caddy proxy remain unexercised — needs one human /tui tap.
+
+## 2026-09-28: phone layout — viewport + frame + touch scroll (this branch)
+
+User: opens now, but framed in a container, not full width, can't scroll.
+Cause: ttyd's bundle ships no viewport meta (phone WebView lays out at
+~980px and shrinks it into a box) and no body margin reset (8px default
+frame). Fix: gateway injects meta + margin:0/full-size CSS +
+touch-action:pan-y on the xterm viewport into <head> (CSS/meta only, no
+JS — script count pinned by sensor). Sensor 60->66. Live page +329
+bytes, scripts unchanged, token flow untouched.

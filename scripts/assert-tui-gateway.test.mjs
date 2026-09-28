@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -230,13 +230,30 @@ console.log('assert-tui-gateway:');
 //     enough: `new RegExp("/ws(?|$)")` parses fine and throws when it runs,
 //     which is exactly the bug that shipped.
 {
-  // 12a. ttyd's page must arrive byte-identical. The gateway adds no script to
-  //      it, so there is nothing of ours in the browser to break.
+  // 12a. ttyd's page arrives with a phone viewport injected and nothing else:
+  //      without a viewport meta a phone WebView lays out at ~980px and
+  //      shrinks the terminal into a framed box (2026-09-28). CSS + meta
+  //      only — a previous JS shim threw on every load, so script count
+  //      must not change.
   const { html, upstream } = await ttydPageThroughGateway();
   check('the page is html', /<html/i.test(html));
-  check("the gateway adds nothing to ttyd's page", html === upstream);
+  check('the served page has a phone viewport', /<meta[^>]*viewport[^>]*width=device-width/i.test(html));
+  check('the served page zeroes the body frame', /html,body\{[^}]*margin:0/i.test(html));
+  check('the upstream body survives the injection', html.includes('console.log("hello")'));
+  check('no script is added to the page',
+    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length);
   check('the page is not gzip bytes labelled as html', !html.startsWith('\u001f\u008b'));
   check('no credential is embedded in the page', !/tui_session=/.test(html) && !/var TOKEN =/.test(html));
+
+  // 12a2. The injection itself: head, no-head, already-present.
+  check('tags go inside an existing head',
+    withPhoneViewport('<html><head><title>t</title></head><body>x</body></html>')
+      .includes('<head><meta name="viewport"'));
+  check('tags prepend when there is no head',
+    withPhoneViewport('<html><body>x</body></html>').startsWith('<meta name="viewport"'));
+  check('a page with a viewport passes through untouched',
+    withPhoneViewport('<html><head><meta name="viewport" content="x"></head></html>')
+      === '<html><head><meta name="viewport" content="x"></head></html>');
 
   // 12b. The bootstrap we do serve is ours, so it is executed with stubs.
   const boot = await bootstrapThroughGateway();
