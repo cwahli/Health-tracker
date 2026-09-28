@@ -540,6 +540,11 @@ export const LAYOUT_JS = [
   'try{',
   'var c=document.getElementById("terminal-container");',
   'if(c){',
+  // The container does not exist at load either; arm the observer the first
+  // time it shows up, not only on the first pass.
+  'try{',
+  'if(window.ResizeObserver&&!c.__tuiObserved){c.__tuiObserved=1;new window.ResizeObserver(fit).observe(c);}',
+  '}catch(e2){}',
   // Widen the container to the viewport itself. Telegram insets the sheet, so
   // the container is narrower than the screen and xterm fits to the inset —
   // that inset was the "gap on the side", and it is native, so the page
@@ -568,7 +573,9 @@ export const LAYOUT_JS = [
   '}',
   'try{',
   'var c=document.getElementById("terminal-container");',
-  'if(c&&window.ResizeObserver){new window.ResizeObserver(fit).observe(c);}',
+  'if(c&&window.ResizeObserver&&!c.__tuiObserved){',
+  'c.__tuiObserved=1;new window.ResizeObserver(fit).observe(c);',
+  '}',
   '}catch(e){}',
   'try{if(window.visualViewport&&window.visualViewport.addEventListener)',
   'window.visualViewport.addEventListener("resize",fit);}catch(e){}',
@@ -579,7 +586,7 @@ export const LAYOUT_JS = [
   '[0,150,600,1500,3000,6000].forEach(function(t){setTimeout(fit,t);});',
   '}catch(e){}',
   '})();',
-].join('');
+].join('\n');
 
 /**
  * Touch drag -> the app's own scroll keys, so a finger can scroll a fullscreen
@@ -614,6 +621,9 @@ export const TOUCH_SCROLL_JS = [
   'function press(code){',
   'var el=keys();if(!el)return;',
   'try{',
+  '// xterm reads keys from its textarea; a page key only counts if that',
+  '// element is the focused one, so take focus first.',
+  'if(typeof el.focus==="function")el.focus();',
   'var o={bubbles:true,cancelable:true,keyCode:code,which:code,code:(code===UP?"PageUp":"PageDown"),',
   'key:(code===UP?"PageUp":"PageDown")};',
   'el.dispatchEvent(new KeyboardEvent("keydown",o));',
@@ -647,16 +657,34 @@ export const TOUCH_SCROLL_JS = [
   'if(f)press(f);',
   'acc=0;active=0;v=0;',
   '}',
-  'var el=screen();',
-  'if(el){',
-  'el.addEventListener("touchstart",down,{passive:true});',
-  'el.addEventListener("touchmove",move,{passive:false});',
-  'el.addEventListener("touchend",up,{passive:true});',
-  'el.addEventListener("touchcancel",up,{passive:true});',
+  'var h={touchstart:down,touchmove:move,touchend:up,touchcancel:up};',
+  'var bound=null,tries=0;',
+  'function arm(){',
+  'try{',
+  'var el=document.querySelector(".xterm-screen");',
+  'if(!el)return false;',
+  'if(el===bound)return true;',
+  'if(bound){',
+  '["touchstart","touchmove","touchend","touchcancel"].forEach(function(t){',
+  'try{bound.removeEventListener(t,h[t]);}catch(e){}});',
   '}',
+  'el.addEventListener("touchstart",h.touchstart,{passive:true});',
+  'el.addEventListener("touchmove",h.touchmove,{passive:false});',
+  'el.addEventListener("touchend",h.touchend,{passive:true});',
+  'el.addEventListener("touchcancel",h.touchcancel,{passive:true});',
+  'bound=el;',
+  'return true;',
+  '}catch(e){return false;}',
+  '}',
+  '// The terminal does not exist when this file runs: ttyd mounts xterm after',
+  '// its bundle boots, so attaching once at load attached nothing and a finger',
+  '// drag did nothing at all. Poll until it is there, then attach; if xterm is',
+  '// ever re-created the element changes and this re-arms.',
+  'var iv=setInterval(function(){tries++;if(arm()||tries>240)clearInterval(iv);},150);',
+  'try{window.addEventListener("resize",function(){arm();});}catch(e){}',
   '}catch(e){}',
   '})();',
-].join('');
+].join('\n');
 
 /** Telegram-only chrome: fullscreen, expand, and the swipe lock. */
 export const FULLSCREEN_WIDGET_JS = [
@@ -688,7 +716,7 @@ export const FULLSCREEN_WIDGET_JS = [
   "try{tg.onEvent('viewportChanged',refit);}catch(e){}",
   '}catch(e){}',
   '})();',
-].join('');
+].join('\n');
 
 /**
  * TEMP-DEBUG 2026-09-28: on-screen geometry readout, switched on only when the
@@ -698,6 +726,7 @@ export const FULLSCREEN_WIDGET_JS = [
 export const MEASURE_JS = [
   '(function(){',
   'try{',
+  'window.__tuiAtLoad=!!document.querySelector(".xterm-screen");',
   "if(!/[?&]tui_measure=1/.test(location.search))return;",
   'setTimeout(function(){',
   'var c=document.getElementById("terminal-container");',
@@ -711,13 +740,15 @@ export const MEASURE_JS = [
   'd.textContent=JSON.stringify({',
   'iw:window.innerWidth,dpr:window.devicePixelRatio,',
   'vvw:vp?Math.round(vp.width):null,vvs:vp?vp.scale:null,',
-  'cw:c?c.clientWidth:null,xw:x?x.clientWidth:null,sw:s?s.clientWidth:null',
+  'cw:c?c.clientWidth:null,xw:x?x.clientWidth:null,sw:s?Math.round(s.clientWidth):null,',
+  'atLoad:window.__tuiAtLoad,screenNow:!!document.querySelector(".xterm-screen"),',
+  'taNow:!!document.querySelector(".xterm-helper-textarea")',
   '});',
   'document.body.appendChild(d);',
   '},8000);',
   '}catch(e){}',
   '})();',
-].join('');
+].join('\n');
 
 export const FULLSCREEN_WIDGET = [
   '<script src="https://telegram.org/js/telegram-web-app.js"></script>',

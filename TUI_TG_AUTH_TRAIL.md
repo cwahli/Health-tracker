@@ -231,3 +231,25 @@ dragged, `preventDefault` only once a drag is really scrolling (a tap still
 types), multi-touch left alone for pinch-zoom, one extra page on a fast
 flick, and the accumulator resets per gesture (a leftover remainder used to
 carry into the next drag). Sensor 88->99.
+
+## 2026-09-28: the drag bridge never attached (root cause, this branch)
+
+Symptom: keyboard scrolls, dragging does nothing at all. Not a direction or
+threshold problem — the listeners were never installed.
+
+Measured: `__tuiAtLoad=false`. These scripts are injected at the end of
+<body>, but ttyd mounts xterm AFTER its bundle boots, so
+`document.querySelector('.xterm-screen')` was null at that moment and the
+bridge bound its touch handlers to nothing, once, with no retry. The layout
+pass had the same trap and only survived because its timed refits re-ran.
+
+Second bug found while fixing it: these JS arrays were `.join('')`-ed, so
+every `//` comment swallowed the code that followed it on the joined string
+(the "Widen the container" block never ran in that form). All injected scripts
+now `.join('\n')`.
+
+Fixes: poll until `.xterm-screen` exists then bind (re-binds if xterm is
+re-created), focus the textarea before synthesising a key, arm the
+ResizeObserver lazily once the container exists. Sensors pin the load-order
+trap explicitly: a document without the terminal must get NO listeners, and
+the same bridge must bind once it appears. 99->100.

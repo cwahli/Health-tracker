@@ -368,28 +368,44 @@ console.log('assert-tui-gateway:');
   //       and xterm encodes keyCode 33/34 to ESC[5~/ESC[6~ on its textarea.
   {
     const handlers = {}; const keys = [];
+    let mounted = false;
     const screenEl = {
       clientWidth: 360, clientHeight: 700,
       addEventListener: (ev, fn) => { handlers[ev] = fn; },
+      removeEventListener: () => {},
     };
-    const textarea = { dispatchEvent: (e) => { keys.push(e); return true; } };
+    const textarea = { dispatchEvent: (e) => { keys.push(e); return true; }, focus: () => {} };
     const doc = {
-      querySelector: (s) => (s === '.xterm-screen' ? screenEl
+      querySelector: (s) => (s === '.xterm-screen' ? (mounted ? screenEl : null)
         : (s === '.xterm-helper-textarea' ? textarea : null)),
     };
+    // ttyd mounts xterm AFTER this file runs, so the document starts without
+    // it — that ordering is the bug, not an edge case.
     let prevented = 0;
     let threw = '';
+    const intervals = [];
     try {
       // eslint-disable-next-line no-new-func
-      new Function('window', 'document', 'KeyboardEvent', 'performance', TOUCH_SCROLL_JS)(
-        {},
+      new Function('window', 'document', 'KeyboardEvent', 'performance', 'setInterval', 'clearInterval', TOUCH_SCROLL_JS)(
+        { addEventListener: () => {} },
         doc,
         function KeyboardEvent(type, init) { this.type = type; Object.assign(this, init); },
         { now: () => 1000 },
+        (fn) => { intervals.push(fn); return intervals.length; },
+        () => {},
       );
     } catch (e) { threw = String(e.message); }
     check(`the touch bridge installs${threw ? ` — ${threw}` : ''}`, threw === '');
-    check('the bridge listens on the terminal', !!handlers.touchstart && !!handlers.touchmove && !!handlers.touchend);
+    // THE LOAD-ORDER TRAP: ttyd mounts xterm after its bundle boots, so at
+    // script time `.xterm-screen` does not exist yet. The bridge must poll
+    // until it appears — attaching once at load attached nothing and a drag
+    // did nothing at all (measured: __tuiAtLoad=false, 2026-09-28).
+    check('nothing is bound before the terminal mounts',
+      Object.keys(handlers).length === 0);
+    mounted = true;
+    for (const t of intervals) t();
+    check('the bridge binds once the terminal mounts',
+      !!handlers.touchstart && !!handlers.touchmove && !!handlers.touchend);
 
     // step() = 700/3 = 233px, so a tap and a small nudge must not scroll.
     handlers.touchstart({ touches: [{ clientY: 600 }] });
