@@ -136,6 +136,9 @@ fi
 grep -q 'HEARTBEAT_PID' "$ATTACH" \
   && { echo "  PASS  the lease heartbeat survives the reshape"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the lease heartbeat survives the reshape"; FAIL=$((FAIL + 1)); }
+grep -q 'set-option -t "$TMUX_NAME" status off' "$ATTACH" \
+  && { echo "  PASS  the tmux frame stays off the phone screen"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the tmux frame stays off the phone screen"; FAIL=$((FAIL + 1)); }
 rm -rf "$LEASE_FIX" "$ROOT"
 echo
 echo "$PASS pass, $FAIL fail"

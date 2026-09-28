@@ -196,6 +196,9 @@ trap cleanup EXIT INT TERM
 
 # Ensure the session detached (needs no terminal), then attach in the
 # foreground so the pty shows the conversation. A second open re-attaches to
-# the same session; tmux keeps your place between opens.
+# the same session; tmux keeps your place between opens. The tmux status bar
+# stays off for these sessions: on a phone screen it is a wasted row and a
+# visual frame, and opencode draws its own status line.
 tmux new-session -d -A -s "$TMUX_NAME" "$OPENCODE_BIN" "${SID_ARG[@]}"
+tmux set-option -t "$TMUX_NAME" status off 2>/dev/null || true
 tmux attach-session -t "$TMUX_NAME"

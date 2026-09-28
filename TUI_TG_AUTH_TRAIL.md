@@ -164,3 +164,10 @@ frame). Fix: gateway injects meta + margin:0/full-size CSS +
 touch-action:pan-y on the xterm viewport into <head> (CSS/meta only, no
 JS — script count pinned by sensor). Sensor 60->66. Live page +329
 bytes, scripts unchanged, token flow untouched.
+
+## 2026-09-28: phone polish — tmux status bar off (this branch)
+
+Screenshot shows the terminal rendering full-width (viewport fix held),
+but the tmux status line eats the bottom row and frames the small screen
+while opencode draws its own status. `status off` per TUI session
+(global untouched). Sensor 23->24.
