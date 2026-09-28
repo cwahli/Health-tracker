@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, landingLocationFor } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -243,7 +243,7 @@ console.log('assert-tui-gateway:');
   check('the upstream body survives the injection', html.includes('console.log("hello")'));
   check('the fullscreen button ships with the page', html.includes('tui-fsbtn'));
   check('exactly our widget scripts are added, nothing else',
-    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 4
+    (html.match(/<script/gi) || []).length === (upstream.match(/<script/gi) || []).length + 5
     && html.includes('requestFullscreen'));
   check('the page is not gzip bytes labelled as html', !html.startsWith('\u001f\u008b'));
   check('no credential is embedded in the page', !/tui_session=/.test(html) && !/var TOKEN =/.test(html));
@@ -360,6 +360,85 @@ console.log('assert-tui-gateway:');
     docTimers[docTimers.length - 1].fn();
     check('a sub-percent leftover is left alone',
       (screen.style.transform || '') === '');
+  }
+
+  // 12a6. Touch drag must become the app's own scroll keys. Measured facts
+  //       this pins: opencode IGNORES SGR wheel (view did not move when
+  //       ESC[65/66 were sent straight to it) and DOES move on PageUp/PageDown,
+  //       and xterm encodes keyCode 33/34 to ESC[5~/ESC[6~ on its textarea.
+  {
+    const handlers = {}; const keys = [];
+    const screenEl = {
+      clientWidth: 360, clientHeight: 700,
+      addEventListener: (ev, fn) => { handlers[ev] = fn; },
+    };
+    const textarea = { dispatchEvent: (e) => { keys.push(e); return true; } };
+    const doc = {
+      querySelector: (s) => (s === '.xterm-screen' ? screenEl
+        : (s === '.xterm-helper-textarea' ? textarea : null)),
+    };
+    let prevented = 0;
+    let threw = '';
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function('window', 'document', 'KeyboardEvent', 'performance', TOUCH_SCROLL_JS)(
+        {},
+        doc,
+        function KeyboardEvent(type, init) { this.type = type; Object.assign(this, init); },
+        { now: () => 1000 },
+      );
+    } catch (e) { threw = String(e.message); }
+    check(`the touch bridge installs${threw ? ` — ${threw}` : ''}`, threw === '');
+    check('the bridge listens on the terminal', !!handlers.touchstart && !!handlers.touchmove && !!handlers.touchend);
+
+    // step() = 700/3 = 233px, so a tap and a small nudge must not scroll.
+    handlers.touchstart({ touches: [{ clientY: 600 }] });
+    handlers.touchmove({ touches: [{ clientY: 580 }], preventDefault() { prevented++; } });
+    check('a small nudge does not page',
+      keys.filter((k) => k.type === 'keydown').length === 0);
+    check('a nudge is not taken off the page', prevented === 0);
+
+    // Dragging UP shows later content: PageDown (keyCode 34).
+    const up0 = keys.length;
+    handlers.touchstart({ touches: [{ clientY: 600 }] });
+    handlers.touchmove({ touches: [{ clientY: 300 }], preventDefault() { prevented++; } });
+    const upKeys = keys.slice(up0);
+    check('an upward drag pages down (keyCode 34)',
+      upKeys.some((k) => k.type === 'keydown' && k.keyCode === 34));
+    check('the key is released too', upKeys.some((k) => k.type === 'keyup' && k.keyCode === 34));
+    check('the drag is taken off the page once scrolling', prevented >= 1);
+
+    // Dragging DOWN shows earlier content: PageUp (keyCode 33).
+    const before = keys.length;
+    handlers.touchstart({ touches: [{ clientY: 300 }] });
+    handlers.touchmove({ touches: [{ clientY: 600 }], preventDefault() { prevented++; } });
+    check('a downward drag pages up (keyCode 33)',
+      keys.slice(before).some((k) => k.keyCode === 33 && k.type === 'keydown'));
+
+    // One long drag pages once per third of the screen, not per pixel.
+    const b2 = keys.length;
+    handlers.touchstart({ touches: [{ clientY: 700 }] });
+    for (let y = 700; y >= 0; y -= 20) {
+      handlers.touchmove({ touches: [{ clientY: y }], preventDefault() { prevented++; } });
+    }
+    const downs = keys.slice(b2).filter((k) => k.type === 'keydown').length;
+    check('a full-screen drag pages about three times, not dozens', downs >= 2 && downs <= 4);
+
+    // Multi-touch is ignored so pinch-zoom is not hijacked.
+    handlers.touchend({});
+    const b3 = keys.length;
+    handlers.touchstart({ touches: [{ clientY: 100 }, { clientY: 200 }] });
+    handlers.touchmove({ touches: [{ clientY: 0 }, { clientY: 300 }], preventDefault() { prevented++; } });
+    check('multi-touch is left alone', keys.length === b3);
+
+    // A fast flick adds at most one page.
+    handlers.touchend({});
+    const b4 = keys.length;
+    handlers.touchstart({ touches: [{ clientY: 600 }] });
+    handlers.touchmove({ touches: [{ clientY: 560 }], preventDefault() { prevented++; } });
+    handlers.touchend({});
+    check('a flick adds at most one page',
+      keys.slice(b4).filter((k) => k.type === 'keydown').length <= 1);
   }
 
   // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only

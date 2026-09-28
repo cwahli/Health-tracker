@@ -209,3 +209,25 @@ Verified headless at 390x844 @3x: container = 500px (== viewport),
 grid stretched 484 -> 500 via `scaleX(1.033)`, zero bands across the row.
 Sensors 85->88. TUI_PAGE_DEBUG readout left in the tree but OFF (landing no
 longer appends the flag); turn it back on to re-read phone numbers.
+
+## 2026-09-28: touch drag -> the app's own scroll keys (this branch)
+
+Full screen solved; last complaint is that dragging does nothing. Chain
+measured end to end before writing the fix:
+
+1. Drag is inert: opencode runs with mouse tracking on and xterm's touch
+   handlers bail while mouse is active (`if(!areMouseEventsActive) return`),
+   and ttyd 1.7.7 ships no touch-to-wheel bridge.
+2. Wheel is NOT the answer: sending ESC[65 / ESC[66 (SGR wheel) straight to
+   the real opencode in tmux (`tmux send-keys -H`) left the view unchanged;
+   PageUp/PageDown moved it. So a wheel-emitting bridge would have been a
+   placebo — measured, not assumed.
+3. xterm encodes keyCode 33/34 to ESC[5~/ESC[6~ and binds keydown on its own
+   `.xterm-helper-textarea` with no isTrusted check, so a synthetic press is
+   indistinguishable from a real one on the wire.
+
+The bridge therefore pages: one PageUp/PageDown per third of the screen
+dragged, `preventDefault` only once a drag is really scrolling (a tap still
+types), multi-touch left alone for pinch-zoom, one extra page on a fast
+flick, and the accumulator resets per gesture (a leftover remainder used to
+carry into the next drag). Sensor 88->99.

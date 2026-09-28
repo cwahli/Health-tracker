@@ -581,6 +581,83 @@ export const LAYOUT_JS = [
   '})();',
 ].join('');
 
+/**
+ * Touch drag -> the app's own scroll keys, so a finger can scroll a fullscreen
+ * TUI on a phone.
+ *
+ * Why keys and not wheel (both measured, not guessed):
+ * - A drag is inert on a phone: opencode runs with mouse tracking on, and
+ *   xterm.js skips its own touch handling while mouse events are active
+ *   (`if(!coreMouseService.areMouseEventsActive) return`), and ttyd 1.7.7 ships
+ *   no touch-to-wheel bridge. So drag produces nothing at all.
+ * - Turning the drag into wheel events is not enough either: the installed
+ *   opencode IGNORES SGR wheel (proved by sending ESC[65/ESC[66 straight to
+ *   the app: the view did not move), while its documented scroll keys
+ *   (PageUp/PageDown) DO move the view. So wheel would have been a placebo.
+ * - xterm encodes keyCode 33/34 to ESC[5~ / ESC[6~ and the listener is on its
+ *   own textarea with no isTrusted check, so a synthetic key press is
+ *   indistinguishable from a real one on the wire.
+ *
+ * Comfort details: a drag must cover a third of the screen per page, so a tap
+ * still types and a small nudge does not jump; multi-touch is left alone so
+ * pinch-zoom survives; the fling is one extra page at most.
+ */
+export const TOUCH_SCROLL_JS = [
+  '(function(){',
+  'try{',
+  'var MIN_STEP=56,MAX_FLING=0.9,UP=33,DOWN=34;',
+  'var t=null,y0=0,acc=0,v=0,last=0,active=0,raf=0,queued=0;',
+  'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
+  'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
+  'function now(){try{return performance.now();}catch(e){return Date.now();}}',
+  'function step(){return Math.max(MIN_STEP,(screen()?(screen().clientHeight||0):0)/3);}',
+  'function press(code){',
+  'var el=keys();if(!el)return;',
+  'try{',
+  'var o={bubbles:true,cancelable:true,keyCode:code,which:code,code:(code===UP?"PageUp":"PageDown"),',
+  'key:(code===UP?"PageUp":"PageDown")};',
+  'el.dispatchEvent(new KeyboardEvent("keydown",o));',
+  'el.dispatchEvent(new KeyboardEvent("keyup",o));',
+  '}catch(e){}',
+  '}',
+  'function drain(){',
+  'var s=step();',
+  'while(acc>=s){acc-=s;press(DOWN);}',
+  'while(acc<=-s){acc+=s;press(UP);}',
+  '}',
+  'function down(e){',
+  'if(active||!e.touches||e.touches.length!==1)return;',
+  't=e.touches[0];y0=t.clientY;v=0;acc=0;last=now();',
+  '}',
+  'function move(e){',
+  'if(!t||!e.touches||e.touches.length!==1)return;',
+  'var y=e.touches[0].clientY,dy=y0-y,n=now();',
+  'y0=y;',
+  'if(!active&&Math.abs(acc+dy)>=step()){active=1;}',
+  'acc+=dy;',
+  'v=dy/Math.max(1,n-last);last=n;',
+  'drain();',
+  'if(active){try{e.preventDefault();}catch(err){}}',
+  '}',
+  'function up(){',
+  'if(!t)return;',
+  't=null;',
+  'var f=0;',
+  'if(Math.abs(v)>MAX_FLING)f=v>0?DOWN:UP;',
+  'if(f)press(f);',
+  'acc=0;active=0;v=0;',
+  '}',
+  'var el=screen();',
+  'if(el){',
+  'el.addEventListener("touchstart",down,{passive:true});',
+  'el.addEventListener("touchmove",move,{passive:false});',
+  'el.addEventListener("touchend",up,{passive:true});',
+  'el.addEventListener("touchcancel",up,{passive:true});',
+  '}',
+  '}catch(e){}',
+  '})();',
+].join('');
+
 /** Telegram-only chrome: fullscreen, expand, and the swipe lock. */
 export const FULLSCREEN_WIDGET_JS = [
   '(function(){',
@@ -648,6 +725,7 @@ export const FULLSCREEN_WIDGET = [
     + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
     + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x26F6;</button>',
   `<script>${LAYOUT_JS}</script>`,
+  `<script>${TOUCH_SCROLL_JS}</script>`,
   `<script>${FULLSCREEN_WIDGET_JS}</script>`,
 ].join('');
 
