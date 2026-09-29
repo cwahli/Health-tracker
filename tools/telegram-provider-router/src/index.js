@@ -36,6 +36,18 @@ import {
   ensureChatsMap,
 } from "./chat-sessions.js";
 import { prepareInboundMedia } from "./inbound-media-adapter.mjs";
+// Per-chat project selection. The router had no /project handler, so
+// `/project external 4` was dropped by the slash-guard and the bot answered
+// against its default repo. See project-registry.mjs for the full why.
+import {
+  DEFAULT_PROJECT,
+  buildProjectContext,
+  describeProject,
+  ensureWorkspace,
+  knownProjectList,
+  readBrief,
+  resolveProjectId,
+} from "./project-registry.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -79,7 +91,50 @@ const RETRY_409_MS = Number(process.env.ROUTER_409_RETRY_MS || 45000);
 let consecutive409 = 0;
 // In-memory Cline child PID for the active dispatch (also persisted to state.clinePid).
 let activeClinePid = null;
-const OC_DIR_QS = `?directory=${encodeURIComponent(WORKSPACE)}`;
+// The OpenCode server takes its working directory as a `?directory=` query
+// param, so this is how a session is bound to a folder. It was a module
+// constant pinned to WORKSPACE, which is exactly why /project could never take
+// effect: every session targeted the default repo no matter what the user
+// selected. It is now resolved per chat at call time via dirQsFor(chatId).
+const defaultDirQs = `?directory=${encodeURIComponent(WORKSPACE)}`;
+const dirQsCache = new Map();
+
+/**
+ * Which chat owns an OpenCode session id?
+ *
+ * state.sessions maps chatId -> sid (chatsMap), so this inverts it. Progress
+ * and status helpers only receive a `sid`, and threading a chatId through every
+ * one of them is exactly the kind of change that silently drops an argument.
+ * Resolving from the session keeps them correct without a new parameter.
+ */
+function chatIdForSession(sid) {
+  if (!sid) return null;
+  const map = state.sessions?.chats;
+  if (!map || typeof map !== "object") return null;
+  for (const [chatId, value] of Object.entries(map)) {
+    if (value === sid) return chatId;
+  }
+  return null;
+}
+
+function dirQsFor(chatId) {
+  if (chatId === null || chatId === undefined) return defaultDirQs;
+  const key = String(chatId);
+  const project = activeProject(key);
+  if (project.id === DEFAULT_PROJECT.id) return defaultDirQs;
+  if (dirQsCache.has(key)) return dirQsCache.get(key);
+  // Only advertise a directory that actually exists; a missing one would make
+  // OpenCode reject the session and the bot would go silent.
+  const dir = existsSync(project.workspace) ? project.workspace : WORKSPACE;
+  const qs = `?directory=${encodeURIComponent(dir)}`;
+  dirQsCache.set(key, qs);
+  return qs;
+}
+
+/** As dirQsFor, but keyed off a session id for the sid-only helpers. */
+function dirQsForSession(sid) {
+  return dirQsFor(chatIdForSession(sid));
+}
 // Status pings answered locally from router state (no OpenCode call).
 const STATUS_PING_RE =
   /\b(are you (still |currently )?working|still working|are you done|are you finished|what are you doing|what('s| is) the (status|progress)|how('s| is) it going|progress\??|status\??)\b/i;
@@ -462,12 +517,17 @@ function loadState() {
       lastReceivedText: null,
       // E) light quota memory: quota["provider/model"] = { depletedUntil, lastError }.
       quota: {},
+      // F) per-chat project selection (chats[chatId] = { projectId, roleId, switchedAt }).
+      // Absent = the default health-tracker repo, i.e. today's behaviour.
+      chats: {},
     };
   }
   const s = JSON.parse(readFileSync(STATE_PATH, "utf8"));
   // Backfill tracking fields for older state files.
   if (typeof s.busy !== "boolean") s.busy = false;
   if (!("busySince" in s)) s.busySince = null;
+  // F) per-chat project map; older state files predate /project.
+  if (!s.chats || typeof s.chats !== "object") s.chats = {};
   if (!("lastUserText" in s)) s.lastUserText = null;
   if (!("lastReplyPreview" in s)) s.lastReplyPreview = null;
   if (!("lastError" in s)) s.lastError = null;
@@ -1181,6 +1241,36 @@ function gate(ctx) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Per-chat project selection
+// ---------------------------------------------------------------------------
+
+/** The project active for a chat; health-tracker when nothing was chosen. */
+function activeProject(chatId) {
+  const pid = state.chats?.[String(chatId)]?.projectId;
+  return describeProject(pid) || DEFAULT_PROJECT;
+}
+
+/**
+ * The context block for this chat's project, or "" on the default repo.
+ *
+ * Read fresh per message so a /project switch takes effect on the very next
+ * message without a restart, and so a brief synced later is picked up.
+ */
+function projectContextFor(chatId) {
+  const project = activeProject(chatId);
+  if (project.id === DEFAULT_PROJECT.id) return "";
+  return buildProjectContext(project, readBrief(project), state.chats?.[String(chatId)]?.roleId || "synthesizer");
+}
+
+/** One-line "what am I working on" for /status. */
+function projectSummary(chatId) {
+  const project = activeProject(chatId);
+  if (project.id === DEFAULT_PROJECT.id) return "health-tracker (default repo)";
+  const brief = readBrief(project);
+  return `${project.id} · ${project.workspace} · role ${state.chats?.[String(chatId)]?.roleId || "synthesizer"}${brief.found ? " · brief ✓" : " · brief MISSING"}`;
+}
+
 async function oc(path, opts = {}) {
   const timeoutMs = opts.timeoutMs || 60000;
   const ctrl = new AbortController();
@@ -1211,9 +1301,10 @@ async function oc(path, opts = {}) {
   }
 }
 
-async function ocAbort(sid) {
+async function ocAbort(sid, chatId = null) {
+  chatId = chatId ?? chatIdForSession(sid);
   try {
-    await oc(`/session/${sid}/abort${OC_DIR_QS}`, { method: "POST", body: "{}", timeoutMs: 15000 });
+    await oc(`/session/${sid}/abort${dirQsFor(chatId)}`, { method: "POST", body: "{}", timeoutMs: 15000 });
   } catch {
     /* best effort */
   }
@@ -1223,7 +1314,7 @@ async function ensureOcSession(chatId = null) {
   const sid = getChatSid(state, chatId);
   if (sid) {
     try {
-      const info = await oc(`/session/${sid}${OC_DIR_QS}`, { timeoutMs: 15000 });
+      const info = await oc(`/session/${sid}${dirQsFor(chatId)}`, { timeoutMs: 15000 });
       // Pin session directory to WORKSPACE; stale /workspace sessions are dropped.
       if (info && info.directory === WORKSPACE) return sid;
       console.log(`sticky session dir mismatch (${info?.directory} != ${WORKSPACE}); recreating`);
@@ -1231,7 +1322,7 @@ async function ensureOcSession(chatId = null) {
       /* recreate */
     }
   }
-  const created = await oc(`/session${OC_DIR_QS}`, {
+  const created = await oc(`/session${dirQsFor(chatId)}`, {
     method: "POST",
     body: "{}",
     timeoutMs: 30000,
@@ -1266,13 +1357,15 @@ function ocModelBody() {
     : { providerID: "opencode", modelID: model };
 }
 
-async function ocSessionStatus(sid) {
-  const all = await oc(`/session/status${OC_DIR_QS}`, { timeoutMs: 10000 });
+async function ocSessionStatus(sid, chatId = null) {
+  chatId = chatId ?? chatIdForSession(sid);
+  const all = await oc(`/session/status${dirQsFor(chatId)}`, { timeoutMs: 10000 });
   return (all && all[sid]) || { type: "idle" };
 }
 
-async function ocMessageList(sid, limit = 40) {
-  const q = `${OC_DIR_QS}&limit=${limit}`.replace("?&", "?");
+async function ocMessageList(sid, limit = 40, chatId = null) {
+  chatId = chatId ?? chatIdForSession(sid);
+  const q = `${dirQsFor(chatId)}&limit=${limit}`.replace("?&", "?");
   const msgs = await oc(`/session/${sid}/message${q}`, { timeoutMs: 30000 });
   return Array.isArray(msgs) ? msgs : [];
 }
@@ -1292,7 +1385,7 @@ function messageRole(m) {
 
 async function summarizeOcProgress(sid, sinceCreated = 0) {
   const st = await ocSessionStatus(sid).catch(() => ({ type: "unknown" }));
-  const msgs = await ocMessageList(sid, 80).catch(() => []);
+  const msgs = await ocMessageList(sid, 80, chatIdForSession(sid)).catch(() => []);
 
   function scan(windowMsgs) {
     const toolCounts = {};
@@ -1458,7 +1551,7 @@ function ocToolMark(status) {
 
 async function ocLastActivityLine(sid, sinceCreated = 0) {
   try {
-    const msgs = await ocMessageList(sid, 20);
+    const msgs = await ocMessageList(sid, 20, chatIdForSession(sid));
     const recent = sinceCreated
       ? msgs.filter((m) => messageCreated(m) >= sinceCreated - 2000)
       : msgs;
@@ -1500,7 +1593,7 @@ async function ocCompactProgressCard(sid, sinceCreated, { label, detail, elapsed
   );
   const lines = [head];
   try {
-    const msgs = await ocMessageList(sid, 40);
+    const msgs = await ocMessageList(sid, 40, chatIdForSession(sid));
     const recent = sinceCreated
       ? msgs.filter((m) => messageCreated(m) >= sinceCreated - 2000)
       : msgs.slice(-25);
@@ -1571,7 +1664,7 @@ async function ocCompactProgressCard(sid, sinceCreated, { label, detail, elapsed
   return lines.join("\n").slice(0, 3500);
 }
 
-async function waitOcIdle(sid, { onProgress, onTyping, label = "OpenCode", sinceCreated = 0 } = {}) {
+async function waitOcIdle(sid, { onProgress, onTyping, label = "OpenCode", chatId = null, sinceCreated = 0 } = {}) {
   const started = Date.now();
   let lastProgressAt = 0;
   let lastActivityAt = Date.now();
@@ -1581,7 +1674,7 @@ async function waitOcIdle(sid, { onProgress, onTyping, label = "OpenCode", since
     const st = await ocSessionStatus(sid);
     let fp = st.type || "unknown";
     try {
-      const info = await oc(`/session/${sid}${OC_DIR_QS}`, { timeoutMs: 10000 });
+      const info = await oc(`/session/${sid}${dirQsFor(chatId)}`, { timeoutMs: 10000 });
       fp += `|${info?.time?.updated || 0}|${info?.tokens?.output || 0}|${info?.tokens?.input || 0}`;
     } catch {
       /* ignore */
@@ -1659,7 +1752,7 @@ async function waitOcIdle(sid, { onProgress, onTyping, label = "OpenCode", since
 }
 
 async function extractLatestAssistantSince(sid, sinceCreated, excludeIds) {
-  const msgs = await ocMessageList(sid, 50);
+  const msgs = await ocMessageList(sid, 50, chatIdForSession(sid));
   const assistants = msgs
     .filter((m) => messageRole(m) === "assistant")
     .filter((m) => messageCreated(m) >= sinceCreated - 1000)
@@ -1701,24 +1794,24 @@ async function runOpenCode(prompt, { onProgress, onTyping, chatId = null } = {})
 
   // Clear orphan busy from a prior Telegram hard-timeout so we can start cleanly.
   try {
-    const st0 = await ocSessionStatus(sid);
+    const st0 = await ocSessionStatus(sid, chatId);
     if (st0.type === "busy" || st0.type === "retry") {
       if (onProgress) await Promise.resolve(onProgress("OpenCode was still busy — aborting leftover turn…"));
-      await ocAbort(sid);
-      await waitOcIdle(sid, { onProgress, onTyping, label: "OpenCode (clearing)" });
+      await ocAbort(sid, chatId);
+      await waitOcIdle(sid, { onProgress, onTyping, label: "OpenCode (clearing)", chatId });
     }
   } catch (e) {
     // If clearing fails, still try to submit; prompt_async may reject.
     console.error("pre-clear busy failed:", e.message || e);
   }
 
-  const before = await ocMessageList(sid, 20);
+  const before = await ocMessageList(sid, 20, chatId);
   const excludeIds = new Set(before.map(messageId).filter(Boolean));
   const sinceCreated = Date.now();
 
   // Async prompt: returns immediately; we poll until idle.
   try {
-    await oc(`/session/${sid}/prompt_async${OC_DIR_QS}`, {
+    await oc(`/session/${sid}/prompt_async${dirQsFor(chatId)}`, {
       method: "POST",
       body: JSON.stringify(body),
       timeoutMs: 30000,
@@ -1727,14 +1820,14 @@ async function runOpenCode(prompt, { onProgress, onTyping, chatId = null } = {})
     // Fallback to sync message endpoint with long HTTP timeout (= max runtime).
     if (onProgress) await Promise.resolve(onProgress("Async prompt unavailable — using long sync wait…"));
     try {
-      const result = await oc(`/session/${sid}/message${OC_DIR_QS}`, {
+      const result = await oc(`/session/${sid}/message${dirQsFor(chatId)}`, {
         method: "POST",
         body: JSON.stringify(body),
         timeoutMs: OC_MAX_MS,
       });
       return extractOcText(result);
     } catch (e2) {
-      await ocAbort(sid);
+      await ocAbort(sid, chatId);
       await attachOcProgress(sid, sinceCreated, e2);
     }
   }
@@ -1747,12 +1840,12 @@ async function runOpenCode(prompt, { onProgress, onTyping, chatId = null } = {})
     await Promise.resolve(onProgress(head));
   }
   try {
-    await waitOcIdle(sid, { onProgress, onTyping, sinceCreated });
+    await waitOcIdle(sid, { onProgress, onTyping, sinceCreated, chatId });
     const text = await extractLatestAssistantSince(sid, sinceCreated, excludeIds);
     try {
       const mid = state.models?.opencode || "";
       if (String(mid).includes("cloudflare/") || String(mid).includes("@cf/")) {
-        const live = await fetchOpenCodeLiveStatus(sid).catch(() => null);
+        const live = await fetchOpenCodeLiveStatus(sid, chatId).catch(() => null);
         if (live && !live.error) {
           recordCfNeuronEstimate(mid, live.tokens?.input || live.used || 0, live.tokens?.output || 0);
         }
@@ -2357,9 +2450,10 @@ function resolveCtxLimit(providerID, modelID, meta) {
 }
 
 /** Prefer last completed assistant turn tokens — session.tokens are lifetime cumulatives. */
-async function fetchLastAssistantContextUsed(sid) {
+async function fetchLastAssistantContextUsed(sid, chatId = null) {
+  chatId = chatId ?? chatIdForSession(sid);
   try {
-    const msgs = await oc(`/session/${sid}/message${OC_DIR_QS}`, { timeoutMs: 20000 });
+    const msgs = await oc(`/session/${sid}/message${dirQsFor(chatId)}`, { timeoutMs: 20000 });
     if (!Array.isArray(msgs)) return null;
     for (let i = msgs.length - 1; i >= 0; i--) {
       const info = msgs[i]?.info || msgs[i];
@@ -2379,10 +2473,11 @@ async function fetchLastAssistantContextUsed(sid) {
   return null;
 }
 
-async function fetchOpenCodeLiveStatus(sid) {
+async function fetchOpenCodeLiveStatus(sid, chatId = null) {
+  chatId = chatId ?? chatIdForSession(sid);
   if (!sid) return null;
   try {
-    const info = await oc(`/session/${sid}${OC_DIR_QS}`, { timeoutMs: 15000 });
+    const info = await oc(`/session/${sid}${dirQsFor(chatId)}`, { timeoutMs: 15000 });
     if (!info || typeof info !== "object") return null;
     const model = info.model || {};
     const providerID = model.providerID || "opencode";
@@ -2440,7 +2535,7 @@ async function statusText() {
   if (p === "opencode") {
     const sid = getChatSid(state, state.lastChatId) || "(none)";
     lines.push(`Session: \`${sid}\``);
-    const live = await fetchOpenCodeLiveStatus(getChatSid(state, state.lastChatId));
+    const live = await fetchOpenCodeLiveStatus(getChatSid(state, state.lastChatId), state.lastChatId);
     if (live?.error) {
       lines.push(`OpenCode: unavailable (${live.error})`);
     } else if (live) {
@@ -2489,12 +2584,12 @@ async function compactOpenCodeSession(chatId = null) {
   const providerID = model.includes("/") ? model.split("/")[0] : "opencode";
   const modelID = model.includes("/") ? model.split("/").slice(1).join("/") : model;
   // OpenCode compaction = session.summarize (v2 /compact is not available yet).
-  await oc(`/session/${sid}/summarize${OC_DIR_QS}`, {
+  await oc(`/session/${sid}/summarize${dirQsFor(chatId)}`, {
     method: "POST",
     body: JSON.stringify({ providerID, modelID }),
     timeoutMs: 180000,
   });
-  const live = await fetchOpenCodeLiveStatus(sid);
+  const live = await fetchOpenCodeLiveStatus(sid, chatId);
   return { sid, live };
 }
 
@@ -3432,6 +3527,7 @@ bot.command("help", async (ctx) => {
   await ctx.reply(
     "Commands:\n" +
       "/switch [opencode|cline|tokenharbor|freebuff|commandcode]\n" +
+      "/project [external N] — switch project workspace (e.g. /project external 4)\n" +
       "/model [id] — list or set free model for active provider\n" +
       "/freemodel [provider] — tap to select a free model\n" +
       "/status — live usage/thinking (opencode) + Thinking level (cline)\n" +
@@ -3604,6 +3700,61 @@ async function handleThinking(ctx) {
 bot.command("thinking", handleThinking);
 bot.command("think", handleThinking);
 
+// REGRESSION: `/project external 4` was silently dropped before this handler
+// existed — the slash-guard below ignored it and the bot answered "hi" against
+// the default repo. Accepts the same aliases as bot-host's project-registry.
+bot.command("project", async (ctx) => {
+  if (!gate(ctx)) return;
+  const chatId = String(ctx.chat.id);
+  const raw = String(ctx.message?.text || "")
+    .trim()
+    .split(/\s+/)
+    .slice(1)
+    .join(" ")
+    .trim();
+
+  // No argument = show the current project, do not switch.
+  if (!raw) {
+    await ctx.reply(`Project: ${projectSummary(chatId)}`);
+    return;
+  }
+
+  const pid = resolveProjectId(raw);
+  if (!pid) {
+    await ctx.reply(
+      `Could not read "${raw}" as a project.\n` +
+        `Try: /project 4 · /project external 4 · /project external-4\n` +
+        `Known: ${knownProjectList().join(", ")}\n` +
+        `Currently: ${projectSummary(chatId)}`,
+    );
+    return;
+  }
+
+  try {
+    ensureWorkspace(pid);
+  } catch (e) {
+    await ctx.reply(`Could not prepare ${pid}: ${String(e.message || e).slice(0, 200)}`);
+    return;
+  }
+
+  // Role resets on switch (same as bot-host): a new project is a new context.
+  state.chats[chatId] = { projectId: pid, roleId: "synthesizer", switchedAt: new Date().toISOString() };
+  saveState(state);
+
+  const brief = readBrief(describeProject(pid));
+  await ctx.reply(
+    `Project → ${pid}\n` +
+      `Workspace: ${describeProject(pid).workspace}\n` +
+      `Role: synthesizer\n` +
+      (brief.found
+        ? `Brief: ${brief.path}${brief.truncated ? " (truncated in the prompt — read the file for the rest)" : ""}`
+        : `Brief: NONE FOUND in ${describeProject(pid).workspace}.\n` +
+          `This box has no Drive credential, so the brief cannot be fetched here. ` +
+          `Sync the brief into the workspace, then /project ${pid} again.`) +
+      `\n\nYour next message is answered as synthesizer for this project.`,
+  );
+});
+
 bot.command("model", async (ctx) => {
   if (!gate(ctx)) return;
   const parts = (ctx.message?.text || "").trim().split(/\s+/);
@@ -3724,12 +3875,12 @@ bot.callbackQuery(/^busy_/, async (ctx) => {
       return;
     }
     const old = getChatSid(state, ctx.chat.id);
-    if (old) await ocAbort(old);
+    if (old) await ocAbort(old, ctx.chat.id);
     state.lastUserText = null;
     state.lastReplyPreview = null;
     state.lastError = null;
     try {
-      const created = await oc(`/session${OC_DIR_QS}`, {
+      const created = await oc(`/session${dirQsFor(chatId)}`, {
         method: "POST",
         body: "{}",
         timeoutMs: 30000,
@@ -3754,14 +3905,14 @@ bot.command("new", async (ctx) => {
   // Reset busy + last-task tracking, then create a fresh WORKSPACE-pinned session.
   // Per-chat (BOT-22): only this chat's session is replaced.
   const old = getChatSid(state, ctx.chat.id);
-  if (old) await ocAbort(old);
+  if (old) await ocAbort(old, ctx.chat.id);
   state.busy = false;
   state.busySince = null;
   state.lastUserText = null;
   state.lastReplyPreview = null;
   state.lastError = null;
   try {
-    const created = await oc(`/session${OC_DIR_QS}`, {
+    const created = await oc(`/session${dirQsFor(chatId)}`, {
       method: "POST",
       body: "{}",
       timeoutMs: 30000,
@@ -3830,7 +3981,7 @@ bot.on(["message:text", "message:photo", "message:document"], async (ctx) => {
     chatId: ctx.chat.id,
     workspace: WORKSPACE,
     token: TOKEN,
-  });
+  });  
   if (inbound.selected && !inbound.paths.length) {
     await ctx.reply("Could not download the Telegram attachment. Please send it again.");
     return;
@@ -3838,10 +3989,13 @@ bot.on(["message:text", "message:photo", "message:document"], async (ctx) => {
   if (inbound.failures) {
     await ctx.reply(`Downloaded ${inbound.paths.length} of ${inbound.selected} attachment(s); continuing with the available file(s).`).catch(() => {});
   }
-  const prompt = inbound.prompt;
+  // Project context first, so the dispatched prompt and the busy card agree.
+  // Empty on the default repo, which keeps the normal coding prompt untouched.
+  const projectContext = projectContextFor(ctx.chat.id);
+  const prompt = projectContext ? `${projectContext}\n\n---\n\n${inbound.prompt}` : inbound.prompt;
   state.busy = true;
   state.busySince = new Date().toISOString();
-  state.lastUserText = prompt.slice(0, 1000);
+  state.lastUserText = inbound.prompt.slice(0, 1000);
   state.lastChatId = ctx.chat.id;
   state.lastError = null;
   dispatchActive = true;
@@ -3969,6 +4123,7 @@ const BOT_COMMANDS = [
   { command: "allowance", description: "Free-lane allowance (add 'table' for the HTML grid)" },
   { command: "compact", description: "Compact OpenCode session context" },
   { command: "switch", description: "Switch provider (opencode, cline, …)" },
+  { command: "project", description: "Switch project workspace (e.g. /project external 4)" },
   { command: "model", description: "List or set model for active provider" },
   { command: "freemodel", description: "Tap to pick an available free model" },
   { command: "unlock", description: "Cancel stuck work and unlock the bot" },
