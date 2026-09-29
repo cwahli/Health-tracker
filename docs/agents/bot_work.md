@@ -34,6 +34,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 - Do not push the coder's commit onto `origin/main`. Open a PR from `agent/<area>`.
 - Every commit ends with `Author: <model and version> (<thinking level>) <location>`. Example: `Author: Grok 4.7 (High) VM`. The name is the model and version the provider shows. The parentheses are the thinking level (`High`, `max`, `low`). The location is where the work ran (`VM`, hostname, device). Set `AUTHOR_IDENTITY` (or legacy `AGENT_IDENTITY`) to that text without the `Author:` prefix when a tool commits for you. A commit without the line is rejected. Once per clone: `git config core.hooksPath scripts/git-hooks`.
 - BOT-1 through BOT-23 are history. V-30.1 through V-30.5 are history. CB-6 as written (push to `origin/main`) is superseded. Do not resume CB-7 or CB-8.
+- Bot commands ship everywhere or not at all: every `/command` needs a handler, a `/` autocomplete entry, a `/help` line, and a `ui-commands` verdict in `bots/capabilities.json`. Bot-host serves via `scripts/lib/commands.mjs`; Hermes serves via `scripts/skills/common/<name>/SKILL.md` (auto-synced to every profile, autocomplete via the skill menu). A runtime that cannot serve answers with the pointer, never `Unknown command`.
 
 ## Do not
 
