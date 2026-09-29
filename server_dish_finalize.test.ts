@@ -1031,4 +1031,70 @@ describe("server_dish_finalize", () => {
       expect(ledger.labelNutrientsPerServing).toBeNull();
     });
   });
+
+  it('preserves locked brand nutrients when subcomponents are summed', async () => {
+    const ledger = await finalizeDishLedger({
+      item: {
+        scoutIndex: 0,
+        originalName: 'Yolk Steak Frites Salad',
+        keyword: 'steak salad',
+        brandName: 'Yolk',
+        chainName: 'Yolk',
+        dbSource: 'brand_official',
+        lockedNutrientKeys: ['calories', 'protein', 'totalFat', 'carbohydrates', 'sodium'],
+        estimatedWeightGrams: 350,
+        nutrientBasisWeight: 350,
+        nutrients: {
+          calories: 650,
+          protein: 42,
+          totalFat: 28,
+          saturatedFat: 7,
+          carbohydrates: 55,
+          sodium: 1100,
+        },
+        componentsDetailList: [
+          {
+            name: 'Bavette Steak',
+            weightGrams: 150,
+            calories: 300,
+            protein: 35,
+            totalFat: 15,
+            saturatedFat: 5,
+            carbohydrates: 0,
+            sodium: 200,
+          },
+          {
+            name: 'Shoestring Frites',
+            weightGrams: 80,
+            calories: 250,
+            protein: 3,
+            totalFat: 12,
+            saturatedFat: 2,
+            carbohydrates: 32,
+            sodium: 300,
+          },
+          {
+            name: 'Salad Dressing & Leaves',
+            weightGrams: 120,
+            calories: 180,
+            protein: 1,
+            totalFat: 16,
+            saturatedFat: 2,
+            carbohydrates: 4,
+            sodium: 250,
+          },
+        ],
+      },
+      nutrientBasisWeight: 350,
+      consumedWeight: 350,
+    });
+
+    // Subcomponents sum would be 730 kcal, 39g protein, 43g fat, 36g carbs, 750mg sodium.
+    // Brand catalog values (650 kcal, 42g protein, 32g fat, 45g carbs, 850mg sodium) must be locked and preserved.
+    expect(ledger.nutrients.calories).toBe(650);
+    expect(ledger.nutrients.protein).toBe(42);
+    expect(ledger.nutrients.totalFat).toBe(32);
+    expect(ledger.nutrients.carbohydrates).toBe(45);
+    expect(ledger.nutrients.sodium).toBe(850);
+  });
 });

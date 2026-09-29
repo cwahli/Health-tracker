@@ -689,14 +689,14 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
         sumFibre += (c.totalFibre || c.nutrients?.totalFibre || 0);
       }
       if (sumCal > 0 || sumProt > 0 || sumFat > 0 || sumCarbs > 0) {
-        nutrients.calories = Math.round(sumCal);
-        nutrients.protein = Math.round(sumProt * 10) / 10;
-        nutrients.totalFat = Math.round(sumFat * 10) / 10;
-        nutrients.saturatedFat = Math.round(sumSat * 10) / 10;
-        nutrients.carbohydrates = Math.round(sumCarbs * 10) / 10;
-        nutrients.sodium = Math.round(sumNa);
-        if (sumTrans > 0) nutrients.transFat = Math.round(sumTrans * 10) / 10;
-        if (sumFibre > 0) nutrients.totalFibre = Math.round(sumFibre * 10) / 10;
+        if (!lockedNutrientKeys.includes('calories')) nutrients.calories = Math.round(sumCal);
+        if (!lockedNutrientKeys.includes('protein')) nutrients.protein = Math.round(sumProt * 10) / 10;
+        if (!lockedNutrientKeys.includes('totalFat')) nutrients.totalFat = Math.round(sumFat * 10) / 10;
+        if (!lockedNutrientKeys.includes('saturatedFat')) nutrients.saturatedFat = Math.round(sumSat * 10) / 10;
+        if (!lockedNutrientKeys.includes('carbohydrates')) nutrients.carbohydrates = Math.round(sumCarbs * 10) / 10;
+        if (!lockedNutrientKeys.includes('sodium')) nutrients.sodium = Math.round(sumNa);
+        if (!lockedNutrientKeys.includes('transFat') && sumTrans > 0) nutrients.transFat = Math.round(sumTrans * 10) / 10;
+        if (!lockedNutrientKeys.includes('totalFibre') && sumFibre > 0) nutrients.totalFibre = Math.round(sumFibre * 10) / 10;
         // The child-sum above rewrites totalFat/sat/trans/sodium AFTER step 5
         // derived unsaturatedFat/salt (e.g. from the estimated fallback when the
         // scout dish carries no top-level nutrients). Re-derive so the ledger

@@ -69,9 +69,17 @@ export async function matchBrandMenu(
 
   // Check (a) exact normalizeDishKey match
   const normQ = normalizeDishKey(query);
+  const qWithoutChain = chainName ? query.replace(new RegExp(`^${chainName}\\s*`, 'i'), '').trim() : query;
+  const normQWithoutChain = normalizeDishKey(qWithoutChain);
+  const origWithoutChain = (chainName && originalName) ? originalName.replace(new RegExp(`^${chainName}\\s*`, 'i'), '').trim() : (originalName || '');
+  const normOrigWithoutChain = normalizeDishKey(origWithoutChain);
+
   const exactHit = validHits.find((hit: any) => {
     const normHit = normalizeDishKey(hit.dish_name || hit.name || '');
-    return normHit === normQ || normHit === normalizeDishKey(originalName || '');
+    return normHit === normQ ||
+           normHit === normQWithoutChain ||
+           normHit === normalizeDishKey(originalName || '') ||
+           normHit === normOrigWithoutChain;
   });
 
   let topHit: any = null;
