@@ -232,6 +232,110 @@ export function ttydPathFor(botId) {
   return '/tty/';
 }
 
+/** Upstream Health Tracker app server that serves the built bug board page
+ *  (/bugs.html) and the /api + /assets it needs. Same host the site runs on. */
+export function boardUpstream(env = process.env) {
+  return String(env.BUG_BOARD_UPSTREAM || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+}
+
+/**
+ * Cold-start page for the bug board mini app (packet bug-board-miniapp,
+ * Node 5). Same shape as BOOTSTRAP: Telegram hands initData to the page, the
+ * page puts it in the query, the server exchanges it — the HMAC never runs
+ * in the browser.
+ */
+const BOOTSTRAP_BUGS = [
+  '<!doctype html>',
+  '<html lang="en"><head><meta charset="utf-8">',
+  '<meta name="viewport" content="width=device-width,initial-scale=1">',
+  '<title>Bug queue</title>',
+  '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
+  '<style>html,body{margin:0;height:100%;background:#0b1220;color:#f8fafc;',
+  'font:14px system-ui;display:flex;align-items:center;justify-content:center;',
+  'text-align:center;padding:24px}</style>',
+  '</head><body><div id="m">opening the bug board\u2026</div>',
+  '<script>',
+  '(function () {',
+  '  var m = document.getElementById("m");',
+  '  var attempts = 0;',
+  '  function tryProceed() {',
+  '    attempts++;',
+  '    var bot = (typeof location !== "undefined" && location.search && new URLSearchParams(location.search).get("bot")) || "bug_ticket";',
+  '    var initData = "";',
+  '    if (typeof Telegram !== "undefined" && Telegram && Telegram.WebApp) {',
+  '      if (Telegram.WebApp.ready) Telegram.WebApp.ready();',
+  '      if (Telegram.WebApp.expand) Telegram.WebApp.expand();',
+  '      if (Telegram.WebApp.initData) initData = Telegram.WebApp.initData;',
+  '    }',
+  '    if (!initData && typeof window !== "undefined" && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {',
+  '      initData = window.Telegram.WebApp.initData;',
+  '    }',
+  '    if (!initData && typeof location !== "undefined" && location.hash) {',
+  '      try {',
+  '        var hp = new URLSearchParams(location.hash.replace(/^#/, ""));',
+  '        initData = hp.get("tgWebAppData") || "";',
+  '      } catch (e) {}',
+  '    }',
+  '    if (initData) {',
+  '      if (typeof location !== "undefined" && location.replace) {',
+  '        location.replace("/bugs/?bot=" + encodeURIComponent(bot) + "&initData=" + encodeURIComponent(initData));',
+  '      }',
+  '      return;',
+  '    }',
+  '    if (attempts < 20 && typeof setTimeout !== "undefined") {',
+  '      setTimeout(tryProceed, 100);',
+  '      return;',
+  '    }',
+  '    if (m) m.textContent = "no initData \u2014 open this from the /bugs button in Telegram";',
+  '  }',
+  '  tryProceed();',
+  '})();',
+  '</script></body></html>',
+].join("\n");
+
+/**
+ * Transparent upstream proxy (packet bug-board-miniapp, Node 5). Forwards
+ * method/headers/body to the app server and streams the response back. The
+ * target host is fixed (boardUpstream); only the path+query come from the
+ * caller, so this cannot be aimed elsewhere.
+ */
+async function proxyPass(req, res, target) {
+  try {
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers || {})) {
+      if (['host', 'connection', 'content-length'].includes(String(k).toLowerCase())) continue;
+      headers[k] = v;
+    }
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = Buffer.concat(chunks);
+    const up = await fetch(String(target), {
+      method: req.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(String(req.method)) || body.length === 0 ? undefined : body,
+      duplex: 'half',
+    });
+    const outHeaders = { 'cache-control': 'no-store' };
+    const ct = up.headers.get('content-type');
+    if (ct) outHeaders['content-type'] = ct;
+    res.writeHead(up.status, outHeaders);
+    if (up.body) {
+      for await (const c of up.body) {
+        if (!res.write(c)) await new Promise((r) => res.once('drain', r));
+      }
+    }
+    res.end();
+  } catch (err) {
+    logGatewayError(err);
+    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'board upstream unreachable' }));
+  }
+}
+
+function logGatewayError(err) {
+  console.error('[tui-gateway] board proxy error:', err && err.message ? err.message : err);
+}
+
 /**
  * The 302 target after a successful Telegram exchange. TEMP-DEBUG: with
  * TUI_PAGE_DEBUG=1 it also asks the page for its on-screen geometry readout,
@@ -504,6 +608,83 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
         return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
       }
       return serveTtydPage(req, res, ttydFor(route.bot, env), route.base, ttydCredential);
+    }
+
+    // Bug board mini app (packet bug-board-miniapp, Node 5). Same initData
+    // door as the terminal: exchange here, then the token admits /bugs/app.
+    // Page assets (/assets/*) and data (/api/*) below are proxied to the app
+    // upstream so the page works same-origin; the upstream keeps its own
+    // posture (reads already same-origin-open on the app host), the door
+    // keeps casual browsing out without forking auth.
+    if (url.pathname === '/bugs/' || url.pathname === '/bugs' || url.pathname === '/bugs/index.html') {
+      const initData = url.searchParams.get('initData') || '';
+      if (!initData) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(BOOTSTRAP_BUGS);
+      }
+      let botId = url.searchParams.get('bot') || 'bug_ticket';
+      let verdict = validateInitData(initData, tokenFor(botId, env));
+      if (!verdict.ok && (verdict.reason === 'hash mismatch' || verdict.reason === 'missing initData or bot token')) {
+        for (const [k, raw] of Object.entries(env)) {
+          if (!k.startsWith('TUI_BOT_TOKEN_')) continue;
+          const val = String(raw || '').trim();
+          if (!val) continue;
+          const candidateBot = k.slice('TUI_BOT_TOKEN_'.length).toLowerCase();
+          if (candidateBot === botId) continue;
+          const v = validateInitData(initData, val);
+          if (v.ok) {
+            log(`bugs landing bot=${botId} was ${verdict.reason}, auto-matched bot=${candidateBot}`);
+            botId = candidateBot;
+            verdict = v;
+            break;
+          }
+        }
+      }
+      if (!verdict.ok) {
+        log(`bugs landing refused (${verdict.reason}) for bot=${botId} (tokens for: ${configuredTokenBots(env).join(',') || 'none'}); got ${describeInitData(initData)}`);
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(`<!doctype html><meta charset=utf-8><body style="font:14px system-ui;background:#0b1220;color:#f8fafc;padding:24px">
+          <h1>refused</h1><p>${escapeHtml(verdict.reason)}</p></body>`);
+      }
+      const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
+      log(`bugs admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
+      res.writeHead(302, {
+        'location': `/bugs/app?token=${encodeURIComponent(token)}`,
+        'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
+        'cache-control': 'no-store',
+      });
+      return res.end();
+    }
+
+    if (url.pathname === '/bugs/app') {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`board refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      try {
+        const up = await fetch(boardUpstream(env) + '/bugs.html', { headers: { 'accept-encoding': 'identity' } });
+        if (up.status === 404) {
+          res.writeHead(503, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'bug board not built on app upstream (vite build has no bugs.html input yet)' }));
+        }
+        const body = Buffer.from(await up.arrayBuffer());
+        res.writeHead(up.status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end(body);
+      } catch (err) {
+        logGatewayError(err);
+        res.writeHead(502, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'board upstream unreachable' }));
+      }
+    }
+
+    if (url.pathname === '/assets/' || url.pathname.startsWith('/assets/')) {
+      return proxyPass(req, res, boardUpstream(env) + url.pathname + url.search);
+    }
+
+    if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+      return proxyPass(req, res, boardUpstream(env) + url.pathname + url.search);
     }
 
     res.writeHead(404, { 'content-type': 'application/json' });
