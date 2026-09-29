@@ -55,21 +55,30 @@ export function validateInitData(initData, botToken, { now = Date.now(), maxAgeS
   if (!hash) return fail('no hash in initData');
 
   const pairs = [];
+  const pairsWithSig = [];
   for (const [k, v] of params.entries()) {
-    if (k === 'hash' || k === 'signature') continue;
+    if (k === 'hash') continue;
+    pairsWithSig.push(`${k}=${v}`);
+    if (k === 'signature') continue;
     pairs.push(`${k}=${v}`);
   }
   // Telegram requires the key=value pairs sorted by key.
   pairs.sort();
-  const dataCheckString = pairs.join('\n');
+  pairsWithSig.sort();
 
   // secret_key = HMAC_SHA256("WebAppData", bot_token)
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
-  const expected = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+  const hmac = (dcs) => crypto.createHmac('sha256', secretKey).update(dcs).digest('hex');
 
-  const a = Buffer.from(expected, 'hex');
+  // Current Telegram clients sign the check string WITH the signature field
+  // included (only `hash` is excluded); older data has no signature field, so
+  // both shapes are accepted and neither client generation breaks.
   const b = Buffer.from(hash, 'hex');
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fail('hash mismatch');
+  const match = (dcs) => {
+    const a = Buffer.from(hmac(dcs), 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  };
+  if (!match(pairs.join('\n')) && !match(pairsWithSig.join('\n'))) return fail('hash mismatch');
 
   const authDate = Number(params.get('auth_date') || 0);
   if (!Number.isFinite(authDate) || authDate <= 0) return fail('no auth_date');
@@ -154,6 +163,32 @@ export function configuredTokenBots(env = process.env) {
 }
 
 /**
+ * Non-secret shape of an initData string, for refusal logs. Keys, the user id,
+ * auth_date and length — never values, never the hash. A "hash mismatch" with
+ * sane keys means Telegram signed with a key we don't hold (wrong bot);
+ * mangled keys (double-encoding, truncation) point at the transport instead.
+ */
+export function describeInitData(initData) {
+  try {
+    const params = new URLSearchParams(initData || '');
+    const keys = [...new Set(params.keys())].sort();
+    const authDate = params.get('auth_date') || 'none';
+    let userId = 'none';
+    const u = params.get('user');
+    if (u) {
+      try {
+        userId = String(JSON.parse(u).id ?? 'unparsed');
+      } catch {
+        userId = 'unparsed';
+      }
+    }
+    return `keys=[${keys.join(',')}] user=${userId} auth_date=${authDate} len=${String(initData || '').length}`;
+  } catch {
+    return 'initData unparseable';
+  }
+}
+
+/**
  * Which ttyd serves a bot, and under which gateway path.
  *
  * Two bots share this box, and each has its own sessions map, so each gets its
@@ -169,6 +204,19 @@ export const TTYD_ROUTES = {
   '/tty2': { bot: 'vm2', base: '/tty2/' },
 };
 
+/**
+ * The socket AuthToken, one per bot. The ttyd page fetches `./token`
+ * (relative to the served page, so it lands here through Caddy) and puts it
+ * in the socket init message; ttyd kills a socket whose token is missing or
+ * wrong (POLICY_VIOLATION, and silently when the key is absent) — without
+ * this route every open died seconds later on the reconnect prompt. Same
+ * admission as the page; the body matches ttyd's own /token endpoint.
+ */
+export const TOKEN_ROUTES = {
+  '/tty/token': 'vm',
+  '/tty2/token': 'vm2',
+};
+
 /** The ttyd upstream for a bot. Per-bot URL wins; the shared one is the fallback. */
 export function ttydFor(botId, env = process.env) {
   const direct = env[`TUI_TTYD_URL_${String(botId).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`];
@@ -182,6 +230,17 @@ export function ttydPathFor(botId) {
     if (route.bot === botId && path.endsWith('/')) return path;
   }
   return '/tty/';
+}
+
+/**
+ * The 302 target after a successful Telegram exchange. TEMP-DEBUG: with
+ * TUI_PAGE_DEBUG=1 it also asks the page for its on-screen geometry readout,
+ * so one phone screenshot carries the numbers. Remove both when the phone
+ * layout is confirmed.
+ */
+export function landingLocationFor(botId, token, env = process.env) {
+  const debug = String(env.TUI_PAGE_DEBUG || '') === '1' ? '&tui_measure=1' : '';
+  return `${ttydPathFor(botId)}?token=${encodeURIComponent(token)}${debug}`;
 }
 
 
@@ -256,6 +315,27 @@ function presentedToken(req, url) {
     || (url ? String(url.searchParams.get('token') || '') : '');
 }
 
+/** All tokens the caller presented, in preference order. */
+function presentedTokens(req, url) {
+  return [
+    cookieValue(req, COOKIE_NAME),
+    (String(req.headers.authorization || '').startsWith('Bearer ')
+      ? String(req.headers.authorization).slice(7)
+      : ''),
+    (url ? String(url.searchParams.get('token') || '') : ''),
+  ].filter((t) => typeof t === 'string' && t.length > 0);
+}
+
+/** Accept when ANY presented token verifies: a stale cookie must not shadow a fresh query token. */
+function verifyAnyToken(req, url, secret) {
+  let verdict = { ok: false, reason: 'bad token' };
+  for (const t of presentedTokens(req, url)) {
+    verdict = verifyToken(t, secret);
+    if (verdict.ok) return verdict;
+  }
+  return verdict;
+}
+
 function cookieValue(req, name) {
   const raw = req.headers.cookie || '';
   for (const part of raw.split(';')) {
@@ -306,15 +386,23 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
         }
       }
       if (!verdict.ok) {
-        log(`landing refused (${verdict.reason}) for bot=${botId} (tokens for: ${configuredTokenBots(env).join(',') || 'none'})`);
+        log(`landing refused (${verdict.reason}) for bot=${botId} (tokens for: ${configuredTokenBots(env).join(',') || 'none'}); got ${describeInitData(initData)}`);
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
         return res.end(`<!doctype html><meta charset=utf-8><body style="font:14px system-ui;background:#0d0d0f;color:#e8e8ea;padding:24px">
           <h1>refused</h1><p>${escapeHtml(verdict.reason)}</p></body>`);
       }
       const token = issueToken({ botId, chatId: verdict.chatId, secret, ttlSec: ttl });
       log(`admitted bot=${botId} ${verdict.boundBy}=${verdict.chatId}`);
+      // The token rides in the query as well as the cookie: some Telegram
+      // WebViews swallow the Set-Cookie on the redirect chain, and the ttyd
+      // client appends location.search to its socket URL, so ?token= reaches
+      // /authz through Caddy untouched. Short-lived (ttl) and chat-bound, and
+      // the served page makes no third-party requests, so nothing leaks it.
+      // TEMP-DEBUG 2026-09-28: TUI_PAGE_DEBUG=1 turns on the on-screen geometry
+      // readout so a phone screenshot carries the numbers. Remove with the
+      // readout once the layout is confirmed.
       res.writeHead(302, {
-        'location': ttydPathFor(botId),
+        'location': landingLocationFor(botId, token, env),
         'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttl}`,
         'cache-control': 'no-store',
       });
@@ -348,7 +436,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
         }
       }
       if (!verdict.ok) {
-        log(`refused (${verdict.reason}) for bot=${botId} (tokens for: ${configuredTokenBots(env).join(',') || 'none'})`);
+        log(`refused (${verdict.reason}) for bot=${botId} (tokens for: ${configuredTokenBots(env).join(',') || 'none'}); got ${describeInitData(initData)}`);
         res.writeHead(401, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
       }
@@ -361,7 +449,7 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
     // Caddy calls this before proxying the websocket. Answering 204 lets the
     // upgrade through; anything else stops it before a socket exists.
     if (url.pathname === '/authz') {
-      const verdict = verifyToken(presentedToken(req, url), secret);
+      const verdict = verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
         log(`authz refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -371,14 +459,36 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
       return res.end();
     }
 
+    // The socket AuthToken the served page fetches as ./token (see
+    // TOKEN_ROUTES). Same admission as the page below.
+    const tokenBot = TOKEN_ROUTES[url.pathname];
+    if (tokenBot) {
+      const verdict = verifyAnyToken(req, url, secret);
+      if (!verdict.ok) {
+        log(`token refused (${verdict.reason})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: verdict.reason }));
+      }
+      if (verdict.botId !== tokenBot && !(tokenBot === 'vm' && verdict.botId !== 'vm2')) {
+        log(`token refused (token is for bot=${verdict.botId}, path is for bot=${tokenBot})`);
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'token is for another bot' }));
+      }
+      if (!ttydCredential) {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'gateway has no TUI_TTYD_CREDENTIAL' }));
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return res.end(JSON.stringify({ token: ttydCredential }));
+    }
+
     // The page, one per bot. The socket is NOT proxied from here: node's upgrade
     // handling hung up on the socket, and Caddy proxies upgrades properly. The
     // token's bot must match the path's bot — otherwise a vm session could open
     // the vm2 terminal and land in another bot's conversation map.
     const route = TTYD_ROUTES[url.pathname];
     if (route) {
-      const token = presentedToken(req, url);
-      const verdict = verifyToken(token, secret);
+      const verdict = verifyAnyToken(req, url, secret);
       if (!verdict.ok) {
         log(`page refused (${verdict.reason})`);
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -402,21 +512,355 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
 }
 
 /**
- * Fetch ttyd's page and serve it unchanged.
+ * Fetch ttyd's page and serve it with a phone-sized viewport.
  *
- * There is no injected script and no credential in the page. The session
- * cookie authorizes the socket: a browser sends cookies on a websocket
- * handshake, so Caddy's forward_auth sees it without any help from JavaScript.
- * An earlier version rewrote the page to put the token on the socket as Basic
- * credentials — but /authz never read Basic, so the shim was doing nothing
- * except throwing a SyntaxError on every page load. Deleting it removed a real
- * bug instead of patching one, and left one credential instead of two
- * half-wired ones.
- *
- * Identity encoding is still requested: the page is forwarded as text, and a
- * gzipped body would reach the browser as gzip bytes with the header stripped —
- * row S7's replacement characters reached from the other side.
+ * Two additions, CSS + meta only, no JavaScript (an earlier JS shim threw a
+ * SyntaxError on every page load, so page surgery stays declarative):
+ * - viewport meta: without it a phone WebView lays the page out at ~980px
+ *   and shrinks it into a framed box instead of filling the screen.
+ * - margin:0 + full-size html/body: ttyd's bundle sets no body margin, so the
+ *   browser default 8px shows as a frame around the terminal.
+ * - touch-action on the xterm viewport: lets one-finger vertical pans scroll
+ *   the scrollback instead of fighting the canvas.
  */
+export const VIEWPORT_HEAD_TAGS = [
+  '<meta name="viewport" content="width=device-width, initial-scale=1">',
+  '<style>html,body{margin:0!important;padding:0!important;height:100%!important;'
+    + 'width:100%!important;overflow:hidden!important;background:#000!important}'
+    + '#terminal-container{width:100%!important;max-width:100%!important;margin:0!important;'
+    + 'padding:0!important;height:100%!important}'
+    + '#terminal-container .terminal,.terminal{padding:0!important;height:100%!important;'
+    + 'width:100%!important;box-sizing:border-box!important}'
+    + '.xterm{height:100%!important;width:100%!important}'
+    + '.xterm .xterm-viewport{touch-action:pan-y!important;overscroll-behavior:contain!important}</style>',
+].join('');
+
+export function withPhoneViewport(html) {
+  const body = String(html || '');
+  if (/<meta[^>]*viewport/i.test(body)) return body;
+  if (/<head[^>]*>/i.test(body)) return body.replace(/<head[^>]*>/i, (m) => `${m}${VIEWPORT_HEAD_TAGS}`);
+  return `${VIEWPORT_HEAD_TAGS}${body}`;
+}
+
+/**
+ * Fullscreen button + Mini App viewport lock for the terminal page. Two
+ * separate phone complaints, one snippet:
+ * - Telegram keeps its own header ("VM2 bot" bar) unless the app requests
+ *   fullscreen; the button toggles it (expand fallback).
+ * - A vertical drag inside the terminal collapsed the Mini App instead of
+ *   scrolling: Telegram claims vertical swipes for its own sheet gestures
+ *   unless the app calls disableVerticalSwipes(). That call — on load, not
+ *   on tap — is what keeps a scroll gesture inside the terminal.
+ * The snippet is tiny and dependency-free apart from Telegram's own loader.
+ * Everything is guarded: outside Telegram the button hides itself; unknown
+ * API methods are feature-checked (older clients lack both calls).
+ */
+
+/**
+ * Layout work that must run EVERYWHERE (headless included, so it is
+ * verifiable), split from the Telegram-only chrome. Loading the page without
+ * Telegram used to be a total no-op, which meant the phone fixes could not be
+ * checked here at all.
+ */
+export const LAYOUT_JS = [
+  '(function(){',
+  'try{',
+  // The rule: the terminal fills the phone's real max width, whatever that is.
+  // No device is special-cased, and nothing is measured off a screen size.
+  'function avail(){',
+  'try{',
+  'var vv=window.visualViewport;',
+  'var w=(vv&&vv.width)||document.documentElement.clientWidth||window.innerWidth;',
+  'return Math.max(1,Math.floor(w));',
+  '}catch(e){return Math.max(1,window.innerWidth||1);}',
+  '}',
+  'function fit(){',
+  'try{',
+  'var c=document.getElementById("terminal-container");',
+  'if(c){',
+  // The container does not exist at load either; arm the observer the first
+  // time it shows up, not only on the first pass.
+  'try{',
+  'if(window.ResizeObserver&&!c.__tuiObserved){c.__tuiObserved=1;new window.ResizeObserver(fit).observe(c);}',
+  '}catch(e2){}',
+  // Widen the container to the viewport itself. Telegram insets the sheet, so
+  // the container is narrower than the screen and xterm fits to the inset —
+  // that inset was the "gap on the side", and it is native, so the page
+  // overreaches the viewport width instead of living inside the inset.
+  'c.style.setProperty("width",avail()+"px");',
+  'c.style.setProperty("max-width","none");',
+  '}',
+  'window.dispatchEvent(new Event("resize"));',
+  '}catch(e){}',
+  // xterm floors columns, so up to one whole cell of background is left over.
+  // Absorb it by stretching the grid over the full width — automatic for any
+  // width, no size list, no font tuning. Below ~1% the stretch is invisible and
+  // it is left off so text stays crisp.
+  'setTimeout(function(){',
+  'try{',
+  'var c=document.getElementById("terminal-container");',
+  'var s=document.querySelector(".xterm-screen");',
+  'if(!c||!s)return;',
+  'var g=s.clientWidth,t=c.clientWidth;',
+  'if(g>8&&t>g&&(t-g)/t>0.01){',
+  's.style.transform="scaleX("+(t/g)+")";',
+  's.style.transformOrigin="left top";',
+  '}else if(s.style.transform){s.style.transform="";s.style.transformOrigin="";}',
+  '}catch(e){}',
+  '},60);',
+  '}',
+  'try{',
+  'var c=document.getElementById("terminal-container");',
+  'if(c&&window.ResizeObserver&&!c.__tuiObserved){',
+  'c.__tuiObserved=1;new window.ResizeObserver(fit).observe(c);',
+  '}',
+  '}catch(e){}',
+  'try{if(window.visualViewport&&window.visualViewport.addEventListener)',
+  'window.visualViewport.addEventListener("resize",fit);}catch(e){}',
+  'window.addEventListener("resize",fit);',
+  'try{if(window.visualViewport&&window.visualViewport.addEventListener)',
+  'window.visualViewport.addEventListener("scroll",fit);}catch(e){}',
+  // The Mini App's own chrome settles after load, so fit again as it does.
+  '[0,150,600,1500,3000,6000].forEach(function(t){setTimeout(fit,t);});',
+  '}catch(e){}',
+  '})();',
+].join('\n');
+
+/**
+ * Touch drag -> the app's own scroll keys, so a finger can scroll a fullscreen
+ * TUI on a phone.
+ *
+ * Every number here is measured against the installed opencode: keys fired as
+ * exact bytes into the real binary, pane diffs counted, and REPEATABILITY
+ * tested (fire 4, see how many land). Repeatability is the whole game - a key
+ * that fires once and then goes dead makes dragging feel broken.
+ *
+ *   key                  moves        repeats?
+ *   alt+ArrowUp / Down   1 line       NO - 1 of 4 applies, at any gap
+ *   ctrl+alt+y (doc'd    1 line       n/a - xterm never sends it at all
+ *     line UP)
+ *   ctrl+alt+e           1 line       YES - 4 of 4, 1 line each
+ *   ctrl+alt+u / d       half page    YES - 4 of 4, 8 lines each
+ *   ctrl+alt+b, PageUp   full page    partly
+ *   SGR wheel (ESC[65/66) none        n/a - the app ignores wheel entirely
+ *
+ * So: scrolling DOWN is 1 line per step (ctrl+alt+e) and scrolling UP is a
+ * half page per step (ctrl+alt+u). An up drag is nudged with a page key
+ * first - the app ignores a same-direction key inside a few hundred ms of
+ * the last one, so the nudge also re-arms it. That is the finest repeatable
+ * scrolling this app can do from a browser, and it is why the earlier
+ * "one line each way" version felt like it was not scrolling at all.
+ *
+ * Feel: one step per ~1/24th of the screen, up to 6 keys per touchmove so a
+ * fast drag is never throttled, a decaying fling for momentum, `preventDefault`
+ * only once a drag is really scrolling (a tap still types), multi-touch left
+ * alone so pinch-zoom survives, and one accumulator per gesture.
+ */
+export const TOUCH_SCROLL_JS = [
+  '(function(){',
+  'try{',
+  '// One line per step. alt+ArrowUp/alt+ArrowDown are the finest scroll the',
+  '// app has (measured: 1 line) AND the finest pair the browser can send',
+  '// (xterm emits ESC[1;5A / ESC[1;5B; ctrl+alt+y never leaves the browser).',
+  '// Line DOWN (ctrl+alt+e, keyCode 69) repeats 4-for-4; the matching line UP',
+  '// (ctrl+alt+y) is swallowed by xterm and alt+ArrowUp fires only once, so up',
+  '// scrolls a half page (ctrl+alt+u, keyCode 85) and is re-armed with a page',
+  '// key (ctrl+alt+b, keyCode 66) - the app ignores a same-direction key sent',
+  '// too soon after the last one.',
+  'var DOWN=69,UP=85,MAX_KEYS=6,COOLDOWN_MS=300,',
+  'FLING_PX_PER_STEP=55,MAX_FLING_STEPS=10;',
+  'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
+  'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
+  'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
+  'function now(){try{return performance.now();}catch(e){return Date.now();}}',
+  'function lineH(){',
+  'try{',
+  'var h=(screen()?(screen().clientHeight||0):0);',
+  '// one step of finger travel, derived from the viewport so no font size or',
+  '// screen size is baked in',
+  'return Math.max(8,Math.min(24,Math.round(h/24)));',
+  '}catch(e){return 12;}',
+  '}',
+  'function step(){return lineH();}',
+  'function press(code){',
+  'var el=keys();if(!el)return;',
+  'try{',
+  '// xterm reads keys from its textarea and only emits the ESC prefix when',
+  '// ctrl+alt are set, so both modifiers travel with every key here.',
+  'if(typeof el.focus==="function")el.focus();',
+  'var ch=code===DOWN?"e":"u";',
+  'var o={bubbles:true,cancelable:true,keyCode:code,which:code,',
+  'key:ch,code:("Key"+ch.toUpperCase()),ctrlKey:true,altKey:true};',
+  'el.dispatchEvent(new KeyboardEvent("keydown",o));',
+  'el.dispatchEvent(new KeyboardEvent("keyup",o));',
+  '}catch(e){}',
+  '}',
+  '// Down needs no rate limit: ctrl+alt+e applies 4-for-4 at any speed. Up does,',
+  '// because ctrl+alt+u lands ~4-for-4 at 300ms and less when fired flat out -',
+  '// so an up-drag is paced instead of dropped. No page-key nudge: measured',
+  '// repeats say the half page is enough, and a page nudge would jump 30 lines.',
+  'function emit(dir){',
+  'if(dir>0){press(DOWN);lastDir=1;lastKeyAt=now();return;}',
+  'var t=now();',
+  'if(t-lastKeyAt<COOLDOWN_MS)return;',
+  'press(UP);lastDir=-1;lastKeyAt=t;',
+  '}',
+  'function drain(){',
+  'var s=step(),n=0;',
+  'while(acc>=s&&n<MAX_KEYS){acc-=s;emit(1);n++;}',
+  'while(acc<=-s&&n<MAX_KEYS){acc+=s;emit(-1);n++;}',
+  '}',
+  'function down(e){',
+  'if(active||!e.touches||e.touches.length!==1)return;',
+  't=e.touches[0];y0=t.clientY;v=0;v0=0;acc=0;last=now();',
+  '}',
+  'function move(e){',
+  'if(!t||!e.touches||e.touches.length!==1)return;',
+  'var y=e.touches[0].clientY,dy=y0-y,n=now();',
+  'y0=y;',
+  'if(!active&&Math.abs(acc+dy)>=step()){active=1;}',
+  'acc+=dy;',
+  'v=dy/Math.max(1,n-last);last=n;',
+  'v0=v;',
+  'drain();',
+  'if(active){try{e.preventDefault();}catch(err){}}',
+  '}',
+  'function up(){',
+  'if(!t)return;',
+  't=null;',
+  '// Momentum: a flick keeps scrolling for a few steps, one per frame, so it',
+  '// glides instead of stopping dead. Capped, and it ends on its own.',
+  'var steps=0;',
+  'try{',
+  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/step()));',
+  '}catch(e){}',
+  'var dir=v>0?1:-1;',
+  'acc=0;active=0;v=0;',
+  'if(steps>0){',
+  'var n=0;',
+  'var tick=function(){',
+  'if(n++>=steps)return;',
+  'emit(dir);',
+  'try{requestAnimationFrame(tick);}catch(e){}',
+  '};',
+  'try{requestAnimationFrame(tick);}catch(e){}',
+  '}',
+  '}',
+  'var h={touchstart:down,touchmove:move,touchend:up,touchcancel:up};',
+  'var bound=null,tries=0;',
+  'function arm(){',
+  'try{',
+  'var el=document.querySelector(".xterm-screen");',
+  'if(!el)return false;',
+  'if(el===bound)return true;',
+  'if(bound){',
+  '["touchstart","touchmove","touchend","touchcancel"].forEach(function(t){',
+  'try{bound.removeEventListener(t,h[t]);}catch(e){}});',
+  '}',
+  'el.addEventListener("touchstart",h.touchstart,{passive:true});',
+  'el.addEventListener("touchmove",h.touchmove,{passive:false});',
+  'el.addEventListener("touchend",h.touchend,{passive:true});',
+  'el.addEventListener("touchcancel",h.touchcancel,{passive:true});',
+  'bound=el;',
+  'return true;',
+  '}catch(e){return false;}',
+  '}',
+  '// The terminal does not exist when this file runs: ttyd mounts xterm after',
+  '// its bundle boots, so attaching once at load attached nothing and a finger',
+  '// drag did nothing at all. Poll until it is there, then attach; if xterm is',
+  '// ever re-created the element changes and this re-arms.',
+  'var iv=setInterval(function(){tries++;if(arm()||tries>240)clearInterval(iv);},150);',
+  'try{window.addEventListener("resize",function(){arm();});}catch(e){}',
+  '}catch(e){}',
+  '})();',
+].join('\n');
+
+/** Telegram-only chrome: fullscreen, expand, and the swipe lock. */
+export const FULLSCREEN_WIDGET_JS = [
+  '(function(){',
+  'try{',
+  'var tg=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp:null;',
+  "var b=document.getElementById('tui-fsbtn');",
+  'if(!b)return;',
+  "if(!tg){b.style.display='none';return;}",
+  'if(tg.ready)tg.ready();',
+  'try{if(tg.expand)tg.expand();}catch(e){}',
+  'try{if(tg.disableVerticalSwipes)tg.disableVerticalSwipes();}catch(e){}',
+  'function refit(){try{window.dispatchEvent(new Event(\'resize\'));}catch(e){}}',
+  'function go(){',
+  'try{',
+  'if(tg.isFullscreen&&tg.exitFullscreen){tg.exitFullscreen();}',
+  'else if(tg.requestFullscreen){tg.requestFullscreen();}',
+  'else if(tg.expand){tg.expand();}',
+  '}catch(e){}',
+  'setTimeout(refit,300);setTimeout(refit,1000);',
+  '}',
+  // Fullscreen on load, not only on tap: Telegram opens a Mini App with its own
+  // header AND horizontal insets, and only real fullscreen removes them — no
+  // page CSS can reach a native inset. Guarded on isFullscreen, and retried
+  // once because some clients refuse the call during the first tick.
+  'setTimeout(function(){try{if(tg.requestFullscreen&&!tg.isFullscreen)tg.requestFullscreen();}catch(e){}refit();},600);',
+  'setTimeout(function(){try{if(tg.requestFullscreen&&!tg.isFullscreen)tg.requestFullscreen();}catch(e){}refit();},1800);',
+  "b.addEventListener('click',go);",
+  "try{tg.onEvent('viewportChanged',refit);}catch(e){}",
+  '}catch(e){}',
+  '})();',
+].join('\n');
+
+/**
+ * TEMP-DEBUG 2026-09-28: on-screen geometry readout, switched on only when the
+ * gateway appends tui_measure=1 to the landing URL (TUI_PAGE_DEBUG=1). Remove
+ * once the phone layout is confirmed.
+ */
+export const MEASURE_JS = [
+  '(function(){',
+  'try{',
+  'window.__tuiAtLoad=!!document.querySelector(".xterm-screen");',
+  "if(!/[?&]tui_measure=1/.test(location.search))return;",
+  'setTimeout(function(){',
+  'var c=document.getElementById("terminal-container");',
+  'var x=document.querySelector(".xterm");',
+  'var s=document.querySelector(".xterm-screen");',
+  'var vp=window.visualViewport;',
+  'var d=document.createElement("pre");',
+  'd.id="tui-measure";',
+  'd.style.cssText="position:fixed;left:2px;bottom:2px;z-index:99999;margin:0;'
+    + 'background:rgba(0,0,0,.85);color:#0f0;font:9px/1.3 monospace;padding:2px 3px;";',
+  'd.textContent=JSON.stringify({',
+  'iw:window.innerWidth,dpr:window.devicePixelRatio,',
+  'vvw:vp?Math.round(vp.width):null,vvs:vp?vp.scale:null,',
+  'cw:c?c.clientWidth:null,xw:x?x.clientWidth:null,sw:s?Math.round(s.clientWidth):null,',
+  'atLoad:window.__tuiAtLoad,screenNow:!!document.querySelector(".xterm-screen"),',
+  'taNow:!!document.querySelector(".xterm-helper-textarea")',
+  '});',
+  'document.body.appendChild(d);',
+  '},8000);',
+  '}catch(e){}',
+  '})();',
+].join('\n');
+
+export const FULLSCREEN_WIDGET = [
+  '<script src="https://telegram.org/js/telegram-web-app.js"></script>',
+  '<button id="tui-fsbtn" title="fullscreen" style="position:fixed;top:8px;right:8px;'
+    + 'z-index:9999;width:40px;height:40px;border-radius:20px;border:1px solid #555;'
+    + 'background:rgba(20,20,20,.7);color:#eee;font-size:20px;line-height:1;cursor:pointer;">&#x26F6;</button>',
+  `<script>${LAYOUT_JS}</script>`,
+  `<script>${TOUCH_SCROLL_JS}</script>`,
+  `<script>${FULLSCREEN_WIDGET_JS}</script>`,
+].join('');
+
+export function withFullscreenButton(html) {
+  const body = String(html || '');
+  if (body.includes('tui-fsbtn')) return body;
+  if (/<\/body\s*>/i.test(body)) return body.replace(/<\/body\s*>/i, (m) => `${FULLSCREEN_WIDGET}${m}`);
+  return `${body}${FULLSCREEN_WIDGET}`;
+}
+
+export function withGeometryProbe(html) {
+  const body = String(html || '');
+  if (body.includes('tui-measure')) return body;
+  return body.replace(/<\/body\s*>/i, (m) => `<script>${MEASURE_JS}</script>${m}`);
+}
 function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredential = '') {
   const target = new URL(upstreamPath, ttydBase);
   const upstream = http.request(
@@ -435,13 +879,21 @@ function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredentia
       const chunks = [];
       up.on('data', (c) => chunks.push(c));
       up.on('end', () => {
-        const body = Buffer.concat(chunks);
+        let out = Buffer.concat(chunks);
+        // Phone viewport injection is for the terminal page only; error
+        // bodies pass through untouched.
+        if ((up.statusCode || 200) === 200) {
+          let page = withPhoneViewport(out.toString('utf8'));
+          page = withFullscreenButton(page);
+          page = withGeometryProbe(page);
+          out = Buffer.from(page, 'utf8');
+        }
         res.writeHead(up.statusCode || 200, {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-store',
-          'content-length': String(body.length),
+          'content-length': String(out.length),
         });
-        res.end(body);
+        res.end(out);
       });
     },
   );

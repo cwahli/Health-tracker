@@ -14,6 +14,12 @@ ENV_FILE="${TUI_GATEWAY_ENV:-/home/ubuntu/.config/bot-host/tui-gateway.env}"
 BOT_ID="${TUI_BOT_ID:-vm}"
 CHAT_ID="${TUI_CHAT_ID:-6218257274}"
 
+# The terminal page is per-bot (gateway TTYD_ROUTES): vm2 lives under /tty2/,
+# every other bot under /tty/. Probing a vm2 token against /tty/ is refused by
+# design (bot isolation), so the proof must ask for this bot's own path.
+TTY_PATH="/tty/"
+if [ "$BOT_ID" = "vm2" ]; then TTY_PATH="/tty2/"; fi
+
 # The env key is the bot id UPPER-CASED with punctuation folded to "_", which is
 # what the gateway's tokenFor() does. Building it any other way finds nothing
 # and the proof exits as "no token" instead of testing the auth.
@@ -98,19 +104,19 @@ echo
 echo "--- the terminal itself"
 if [ -n "$TOKEN_OUT" ]; then
   code=$(curl -s -o /tmp/tui-body.html -w '%{http_code}' --max-time 15 \
-    -H "Authorization: Bearer ${TOKEN_OUT}" "${BASE}/tty/")
+    -H "Authorization: Bearer ${TOKEN_OUT}" "${BASE}${TTY_PATH}")
   if [ "$code" = "200" ]; then
     printf '  PASS  %-46s HTTP %s\n' "ttyd reached with a session token" "$code"
     printf '        bytes read back: %s\n' "$(head -c 60 /tmp/tui-body.html | tr -d '\n')"
   else
     printf '  FAIL  %-46s HTTP %s\n' "ttyd reached with a session token" "$code"
   fi
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${BASE}/tty/")
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${BASE}${TTY_PATH}")
   [ "$code" = "401" ] \
     && printf '  PASS  %-46s HTTP %s\n' "ttyd refused without a token" "$code" \
     || printf '  FAIL  %-46s HTTP %s\n' "ttyd refused without a token" "$code"
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
-    -H "Authorization: Bearer ${TOKEN_OUT}x" "${BASE}/tty/")
+    -H "Authorization: Bearer ${TOKEN_OUT}x" "${BASE}${TTY_PATH}")
   [ "$code" = "401" ] \
     && printf '  PASS  %-46s HTTP %s\n' "ttyd refused a tampered token" "$code" \
     || printf '  FAIL  %-46s HTTP %s\n' "ttyd refused a tampered token" "$code"

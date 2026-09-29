@@ -90,7 +90,56 @@ grep -q "if (running.get(chatId)?.aborted) {" "$HERE/bot-host.mjs" \
 REMOTE_ABORTS="$(grep -c "renderer.status = 'aborted'" "$HERE/bot-host.mjs")"
 check "both delivery paths bury post-abort results ($REMOTE_ABORTS sites)" "$REMOTE_ABORTS" "2"
 
-rm -rf "$ROOT"
+# 9. The attach must wait while a turn runs and barge never. On 2026-09-27
+# /tui showed "the bot is answering" on an idle chat and then dropped to the
+# reconnect prompt: lease_held() returned 0=free/1=held but the while/if used
+# it bare (0 reads true in shell), and it read a top-level heartbeat that
+# bot-host never writes (real leases are per-chat startedAt entries). Both
+# halves are pinned here: semantics by execution, wiring by tripwire.
+LEASE_FIX="$(mktemp -d)"
+eval "$(sed -n '/^lease_held() {/,/^}/p' "$ATTACH")"
+NOW_MS="$(node -e 'process.stdout.write(String(Date.now()))')"
+FRESH=$((NOW_MS - 5000))
+STALE=$((NOW_MS - 2000000))
+echo '{"other-chat":{"chatId":"other-chat","startedAt":'"$FRESH"',"pid":123}}' > "$LEASE_FIX/held.json"
+echo '{"other-chat":{"chatId":"other-chat","startedAt":'"$STALE"',"pid":123}}' > "$LEASE_FIX/stale.json"
+echo '{"other-chat":{"chatId":"other-chat","pid":123}}' > "$LEASE_FIX/nots.json"
+echo '{}' > "$LEASE_FIX/empty.json"
+lease_held "$LEASE_FIX/missing.json" 1800; check "missing leases file reads free" "$?" "0"
+lease_held "$LEASE_FIX/empty.json" 1800; check "empty leases read free" "$?" "0"
+lease_held "$LEASE_FIX/held.json" 1800; check "fresh turn lease reads held" "$?" "1"
+lease_held "$LEASE_FIX/stale.json" 1800; check "orphaned (>max age) lease reads free" "$?" "0"
+lease_held "$LEASE_FIX/nots.json" 1800; check "timestamp-less entry fails safe to held" "$?" "1"
+grep -q "while ! lease_held" "$ATTACH" \
+  && { echo "  PASS  the wait loop runs while held, not while free"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the wait loop runs while held, not while free"; FAIL=$((FAIL + 1)); }
+grep -q "if ! lease_held" "$ATTACH" \
+  && { echo "  PASS  the give-up branch fires while still held"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the give-up branch fires while still held"; FAIL=$((FAIL + 1)); }
+if grep -qE "(while|if) lease_held" "$ATTACH"; then
+  echo "  FAIL  bare while/if lease_held (inverted polarity) still present"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  no bare while/if lease_held remains"; PASS=$((PASS + 1))
+fi
+# 10. tmux must not be backgrounded: a backgrounded tmux client dies instantly
+# ("open terminal failed: not a terminal") while the script lives on — banner
+# sent, session never created, reconnect overlay forever (2026-09-28). The
+# session is ensured detached; only the attach holds the pty, in front.
+grep -q 'tmux attach-session -t' "$ATTACH" \
+  && { echo "  PASS  the attach holds the pty in front"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the attach holds the pty in front"; FAIL=$((FAIL + 1)); }
+if grep -vE "^\s*#" "$ATTACH" | grep -E "tmux new-session -A" | grep -qv "\-d -A"; then
+  echo "  FAIL  a foreground-needing tmux runs backgrounded"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  no backgrounded tmux client remains"; PASS=$((PASS + 1))
+fi
+grep -q 'HEARTBEAT_PID' "$ATTACH" \
+  && { echo "  PASS  the lease heartbeat survives the reshape"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the lease heartbeat survives the reshape"; FAIL=$((FAIL + 1)); }
+grep -q 'set-option -t "$TMUX_NAME" status off' "$ATTACH" \
+  && { echo "  PASS  the tmux frame stays off the phone screen"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the tmux frame stays off the phone screen"; FAIL=$((FAIL + 1)); }
+rm -rf "$LEASE_FIX" "$ROOT"
 echo
 echo "$PASS pass, $FAIL fail"
 [ "$FAIL" -eq 0 ]
