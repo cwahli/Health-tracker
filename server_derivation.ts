@@ -90,6 +90,48 @@ export function computeSolubleFibre(
   return Math.max(0, Math.round(tf * 0.28 * 10) / 10);
 }
 
+/**
+ * Detect if an item represents a fruit juice, vegetable juice, or clear juice beverage
+ * that has zero natural saturated fat.
+ * Excludes high-fat plant juices (coconut milk/juice, avocado juice) and meat gravies/sauces.
+ */
+export function isFruitJuiceItem(itemOrName: any): boolean {
+  if (!itemOrName) return false;
+  const name = typeof itemOrName === 'string'
+    ? itemOrName
+    : String(itemOrName.name || itemOrName.originalName || itemOrName.dishName || itemOrName.canonicalDbName || '');
+  const category = typeof itemOrName === 'object'
+    ? String(itemOrName.foodCategory || itemOrName.category || itemOrName.taxonomy || '')
+    : '';
+
+  // Exclude coconut, avocado, and savory meat gravies/sauces ("au jus")
+  if (/\b(coconut|avocado|au jus|meat juice|clamato)\b/i.test(name)) {
+    return false;
+  }
+
+  if (category && /\b(fruit_juice|juice|beverage_juice)\b/i.test(category)) {
+    return true;
+  }
+
+  // Curated brands / products known for juices:
+  const brandJuiceRegex = /\b(tropicana|naked\s+(?:juice|smoothie)|ocean\s+spray|ribena|innocent|capri[- ]?sun|robinsons|minute\s+maid|copella|welch'?s)\b/i;
+  if (brandJuiceRegex.test(name)) {
+    return true;
+  }
+
+  // Generic juice patterns:
+  const genericJuiceRegex = /\b(fruit juice|apple juice|orange juice|grape juice|juice blend|pineapple juice|cranberry juice|grapefruit juice|mango juice|guava juice|pomegranate juice|tomato juice)\b/i;
+  if (genericJuiceRegex.test(name)) {
+    return true;
+  }
+
+  if (/\bjuice\b/i.test(name) && !/\b(vape|e-juice)\b/i.test(name)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function deriveCarbohydratesFromEnergy(
   calories?: number | null,
   protein?: number | null,

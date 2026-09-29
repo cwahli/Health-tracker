@@ -19,6 +19,7 @@ import {
   reapplyDerivedNutrients,
   deriveCarbohydratesFromEnergy,
   decomposeSaucedEntree,
+  isFruitJuiceItem,
 } from './server_derivation';
 import { backfillSparseMicronutrients } from './server_pure_helpers';
 import { deduceSugarBreakdown } from './server_sugar_engine';
@@ -531,9 +532,9 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
   }
 
   // Physical invariant: totalFat must always be at least saturatedFat
-  const isFruitJuice = /\b(fruit juice|apple juice|orange juice|grape juice|juice blend)\b/i.test(originalName) ||
-    (/\bjuice\b/i.test(originalName) && !/\b(coconut|avocado)\b/i.test(originalName));
-  if (isFruitJuice && !lockedNutrientKeys.includes('saturatedFat') && (nutrients.totalFat ?? 0) <= 0.5) {
+  const isFruitJuice = isFruitJuiceItem(item || originalName);
+  const tfPer100g = consumedWeight > 0 ? ((nutrients.totalFat ?? 0) / consumedWeight) * 100 : (nutrients.totalFat ?? 0);
+  if (isFruitJuice && !lockedNutrientKeys.includes('saturatedFat') && (tfPer100g <= 1.0 || (nutrients.totalFat ?? 0) <= 1.0)) {
     nutrients.saturatedFat = 0;
   }
   if (typeof nutrients.saturatedFat === 'number' && nutrients.saturatedFat > 0) {
@@ -632,6 +633,14 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
         if (ocrNutrients.solubleFibre != null) cSol = ocrNutrients.solubleFibre;
         childDbSource = 'label';
         Object.assign(cNuts, ocrNutrients);
+      }
+
+      const isChildJuice = isFruitJuiceItem(c);
+      const cTfPer100g = cBasisWeight > 0 ? (cFatRaw / cBasisWeight) * 100 : cFat;
+      if (isChildJuice && !c.lockedNutrientKeys?.includes('saturatedFat') && (cTfPer100g <= 1.0 || cFat <= 1.0)) {
+        cSat = 0;
+        cSatRaw = 0;
+        if (cNuts.saturatedFat != null) cNuts.saturatedFat = 0;
       }
 
       const base100g = cBasisWeight > 0 ? {

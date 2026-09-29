@@ -38,6 +38,7 @@ import { sumSalvagedAggregates, salvageLedgerPlausibility } from './src/server/f
 import { retrieveFoodImages } from './server.js';
 import { getInMemoryServerJob } from './serverJobs.js';
 import { sanitizeVerdictLabel } from './server_pure_helpers.js';
+import { computeCaloriesFromMacros, isFruitJuiceItem } from './server_derivation.js';
 
 export async function executeFinalizePhase(
   ctx: AnalyzeRunContext,
@@ -469,6 +470,44 @@ export async function executeFinalizePhase(
     activeMeal.message = finalMessage;
     activeMeal.healthImpact = finalMessage;
 
+    const syncedEditItems = (result.items || []).map((it: any) => {
+      const n = it.nutrients || {};
+      let satFat = Number(n.saturatedFat ?? it.saturatedFat ?? 0) || 0;
+      let totalFat = Number(n.totalFat ?? it.totalFat ?? it.fat ?? 0) || 0;
+      if (isFruitJuiceItem(it) && !it.lockedNutrientKeys?.includes('saturatedFat') && totalFat <= 1.0) {
+        satFat = 0;
+      }
+      totalFat = Math.max(totalFat, satFat);
+      const prot = Number(n.protein ?? it.protein ?? 0) || 0;
+      const carbs = Number(n.carbohydrates ?? it.carbohydrates ?? it.carbs ?? 0) || 0;
+      let cal = Number(n.calories ?? it.calories ?? 0) || 0;
+      if (cal === 0 && (prot > 0 || carbs > 0 || totalFat > 0)) {
+        cal = computeCaloriesFromMacros(prot, carbs, totalFat);
+      }
+      const sod = Number(n.sodium ?? it.sodium ?? 0) || 0;
+      return {
+        ...it,
+        calories: cal,
+        protein: prot,
+        carbohydrates: carbs,
+        carbs,
+        totalFat,
+        fat: totalFat,
+        saturatedFat: satFat,
+        sodium: sod,
+        nutrients: {
+          ...n,
+          calories: cal,
+          protein: prot,
+          carbohydrates: carbs,
+          totalFat,
+          saturatedFat: satFat,
+          sodium: sod,
+        },
+      };
+    });
+    activeMeal.itemsBreakdown = syncedEditItems;
+
     ctx.addDebugLog('[MealBuild] edit-path (finalize executor)');
     if (Array.isArray((result as any).userLockedSlots)) {
       activeMeal.userLockedSlots = (result as any).userLockedSlots;
@@ -499,36 +538,6 @@ export async function executeFinalizePhase(
         ctx.addDebugLog(`[PatchLedger] persisted ${activeMeal.userLockedSlots.length} lock(s) on job ${ctx.req.body.jobId}`);
       }
     }
-    const syncedEditItems = (result.items || []).map((it: any) => {
-      const n = it.nutrients || {};
-      const satFat = Number(n.saturatedFat ?? it.saturatedFat ?? 0) || 0;
-      const totalFat = Math.max(Number(n.totalFat ?? it.totalFat ?? it.fat ?? 0) || 0, satFat);
-      const cal = Number(n.calories ?? it.calories ?? 0) || 0;
-      const prot = Number(n.protein ?? it.protein ?? 0) || 0;
-      const carbs = Number(n.carbohydrates ?? it.carbohydrates ?? it.carbs ?? 0) || 0;
-      const sod = Number(n.sodium ?? it.sodium ?? 0) || 0;
-      return {
-        ...it,
-        calories: cal,
-        protein: prot,
-        carbohydrates: carbs,
-        carbs,
-        totalFat,
-        fat: totalFat,
-        saturatedFat: satFat,
-        sodium: sod,
-        nutrients: {
-          ...n,
-          calories: cal,
-          protein: prot,
-          carbohydrates: carbs,
-          totalFat,
-          saturatedFat: satFat,
-          sodium: sod,
-        },
-      };
-    });
-    activeMeal.itemsBreakdown = syncedEditItems;
     if (pendingFoodLog) {
       pendingFoodLog.itemsBreakdown = syncedEditItems;
       pendingFoodLog.items = syncedEditItems;

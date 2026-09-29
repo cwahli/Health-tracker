@@ -7,7 +7,7 @@
  */
 
 import { finalizeDishLedger, parseOcrLabel } from './server_dish_finalize.js';
-import { applyNutrientModifiers, computeCaloriesFromMacros, computeSolubleFibre, reapplyDerivedNutrients } from './server_derivation.js';
+import { applyNutrientModifiers, computeCaloriesFromMacros, computeSolubleFibre, reapplyDerivedNutrients, isFruitJuiceItem } from './server_derivation.js';
 import { findItemIndexInList, formatMealReceiptTable, synthesizeEditCommandsFromBreakdown, itemsMatchByName } from './server_pure_helpers.js';
 import { NUTRIENT_KEYS } from './src/utils/nutrients.js';
 import { sumItemNutrients } from './server_meal_from_finalize.js';
@@ -172,6 +172,11 @@ export function scaleItemNutrients(item: any, ratio: number, newWeight?: number)
   const locked = Array.isArray(item.lockedNutrientKeys) ? item.lockedNutrientKeys : [];
   if (!locked.includes('calories') || base.calories == null || base.calories === 0) {
     base.calories = computeCaloriesFromMacros(base.protein, base.carbohydrates, base.totalFat);
+  }
+  const isJuice = isFruitJuiceItem(item);
+  const tfPer100g = item.baseNutrients100g?.totalFat ?? (w > 0 ? ((base.totalFat ?? 0) * 100) / w : (base.totalFat ?? 0));
+  if (isJuice && !locked.includes('saturatedFat') && (tfPer100g <= 1.0 || (base.totalFat ?? 0) <= 1.0)) {
+    base.saturatedFat = 0;
   }
   if (typeof base.saturatedFat === 'number' && base.saturatedFat > 0) {
     if (base.totalFat == null || base.totalFat < base.saturatedFat) {
