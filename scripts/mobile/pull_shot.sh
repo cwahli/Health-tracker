@@ -36,6 +36,16 @@ BASE="${SHOT_URL:-http://127.0.0.1:7777}"
 DEST="${SHOT_DIR:-$HOME/shots}"
 TIMEOUT="${SHOT_TIMEOUT:-30}"
 TOKEN="${SHOT_TOKEN:-}"
+# The bridge token lives in ~/.config/shot-bridge.env, so a plain pull (an
+# agent, the cron, a human) authenticates without the caller having to remember
+# to export it. An explicit SHOT_TOKEN still wins. Without this the common case
+# 401'd, and the error told the caller to "set SHOT_TOKEN" — advice that did
+# not persist anywhere, so the next pull failed the same way.
+if [ -z "$TOKEN" ] && [ -r "$HOME/.config/shot-bridge.env" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.config/shot-bridge.env"
+  TOKEN="${SHOT_TOKEN:-}"
+fi
 MAX_MB="${SHOT_MAX_MB:-64}"
 INDEX_OFFSET=0
 SINCE=""

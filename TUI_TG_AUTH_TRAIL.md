@@ -430,7 +430,37 @@ is the gap the ratchet below closes.
 ### Still unlanded on that branch (not TUI, not fixed by that commit)
 
 - `2bf613a` "the run argv is rejected by the opencode CLI, so every turn
-  failed" — claims every bot turn was failing. Worth checking against
-  `scripts/lib/agent-opencode.mjs` before the branch is deleted.
-- `6d5952f` pull_shot reads `SHOT_TOKEN` from `~/.config/shot-bridge.env`.
+  failed" — **CONFIRMED REAL and landed 2026-09-29** (see below). It was not
+  a TUI bug at all; it only surfaced while chasing them.
+- `6d5952f` pull_shot reads `SHOT_TOKEN` from `~/.config/shot-bridge.env` —
+  landed 2026-09-29.
 - `5434923` the handover note, superseded by this section.
+
+## 2026-09-29: `2bf613a` verified — every turn really was dying at spawn
+
+Landed as `fix(bot): the run argv was rejected by the CLI, so every turn
+failed`. Confirmed against the installed CLI (opencode 2.0.18) on this box,
+not taken on the branch's word:
+
+| argv | result |
+|---|---|
+| `--log-level ERROR` | `InvalidValue: Expected "all" \| "trace" \| … \| "error" \| "none"`, exit 1, **no stdout** |
+| `--variant high` | prints help, exit 1, no stdout |
+| `--log-level error -m provider/model#high` | exit 0, real text output |
+
+Both failures look identical from the bot's side: `Done (exit 1), but the
+model returned no text output`. The live prefs had `variant: xhigh` set, so
+the `--variant` half was live on the running bot — every turn would have hit
+it. Main had both bugs; the branch's fix is now on main.
+
+One extra defect found while verifying, not on the branch: `extractLogError()`
+matched `/level=ERROR/`, but the log level is now requested in lowercase (the
+enum's own case), so the CLI writes `level=error` and the pattern would have
+matched nothing — the user loses the reason a turn failed at the exact moment
+they most want it. Now case-insensitive, with a test for the lowercase
+spelling.
+
+The lesson is the same one as the rest of this file: a claim on a branch is
+not evidence. `2bf613a` sat unlanded for 25 hours with "every turn failed" in
+its subject line, and the thing that proved it was running the installed
+binary, not reading the commit.

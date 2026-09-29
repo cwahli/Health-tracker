@@ -186,12 +186,18 @@ export function buildOpencodeArgs({ prompt, model, variant, thinking = true, att
   // ERROR log lines, after which opencode sits there forever with an EMPTY
   // stdout — no JSON events at all. Without these flags the only thing the bot
   // can report is "timed out after 900000ms", 15 minutes later.
-  args.push('--print-logs', '--log-level', 'ERROR');
+  // Lowercase is required: the CLI validates --log-level against
+  // all|trace|debug|info|warn|warning|error|fatal|none, so "ERROR" is an
+  // InvalidValue, the CLI prints help and exits 1 with no output (2026-09-28).
+  args.push('--print-logs', '--log-level', 'error');
   if (attachUrl) args.push('--attach', attachUrl);
   if (sessionId) args.push('--session', sessionId);
   if (thinking) args.push('--thinking');
-  if (variant) args.push('--variant', variant);
-  if (model) args.push('-m', model);
+  // The variant is part of the model string now ("provider/model#variant").
+  // A separate `--variant` flag is not a valid flag in CLI 2.0.18: the CLI
+  // prints help and exits 1 ("ShowHelp: Help requested"), so the bot reports
+  // "the model returned no text output" for every turn (2026-09-28).
+  if (model) args.push('-m', variant ? `${model}#${variant}` : model);
   if (extraArgs.length) args.push(...extraArgs);
   args.push(prompt);
   return args;
@@ -274,7 +280,12 @@ export function extractLogError(stderr) {
   // Strip ANSI color (cline/opencode both emit \x1b[..m) so patterns match and
   // chat output stays clean.
   const text = String(stderr || '').replace(/\x1b\[[0-9;]*m/g, '');
-  if (!text || !/level=ERROR/.test(text)) return null;
+  // Case-insensitive: the log level is now requested in lowercase (the enum's
+  // own case, and the case the CLI validates), so the lines it prints are
+  // `level=error`. A pattern pinned to `level=ERROR` matches nothing, and the
+  // user loses the reason a turn failed. Both spellings accepted, since older
+  // runs and other runners write either.
+  if (!text || !/level=ERROR/i.test(text)) return null;
   // opencode runs a cosmetic "small" model (session titles) before the model the
   // user actually asked for, so its failures are NOT fatal: a run can still
   // answer normally after one (measured on the VPS: `ling-3.0-flash-fin-free`
@@ -283,7 +294,7 @@ export function extractLogError(stderr) {
   // `small=false` (or unlabelled) errors are considered.
   const lines = text
     .split('\n')
-    .filter((line) => /level=ERROR/.test(line) && !/\bsmall=true\b/.test(line));
+    .filter((line) => /level=ERROR/i.test(line) && !/\bsmall=true\b/.test(line));
   if (!lines.length) return null;
   const details = [...new Set(lines
     .map((line) => line.match(/error\.error="([^"]+)"/)?.[1]

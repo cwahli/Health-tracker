@@ -13,8 +13,10 @@
 # origin/fix/tui-telegram-auth — 16 commits, PR #315. The TUI work landed on
 # main as 9641a2e on 2026-09-29 (files reworked on top of a75c75e's refusal
 # logging, so not byte-identical to the branch and the gate cannot infer it).
-# The branch itself is still open and should be deleted once 2bf613a below has
-# been judged. Waived 2026-09-29 by the commit that landed the TUI files.
+# 2bf613a (the run argv, which was NOT a TUI file) was judged and landed the
+# same day; 6d5952f (pull_shot's token) with it. Nothing from this branch is
+# outstanding now, so the branch can be deleted. Waived 2026-09-29 by the
+# commit that landed the TUI files.
 9ce3990  landed as 9641a2e (signature shape + cookie-less WebViews), waived 2026-09-29
 dec3e28  landed as 9641a2e (lease wait/attach polarity), waived 2026-09-29
 976c48d  landed as 9641a2e (socket token route + foreground tmux attach), waived 2026-09-29
@@ -29,9 +31,9 @@ a0638d1  landed as 9641a2e (drag bridge bound after mount), waived 2026-09-29
 9730c7c  landed as 9641a2e (page per eighth of the screen), waived 2026-09-29
 7264642  landed as 9641a2e (one line per line of drag), waived 2026-09-29
 bf2ae01  landed as 9641a2e (keys that actually repeat), waived 2026-09-29
-2bf613a  NOT LANDED — claims the run argv was rejected by the opencode CLI, so
-#         every bot turn failed. Open question, not a waiver: see
-#         TUI_TG_AUTH_TRAIL.md "Still unlanded". Waived 2026-09-29 pending that.
+2bf613a  verified against the installed CLI and landed 2026-09-29 (--variant is
+#         gone, the variant rides in the model string; --log-level is
+#         lowercase). Waived 2026-09-29 by that commit, not by judgement alone.
 
 # origin/agent/* — old agent branches whose TUI work reached main by other
 # routes (squash merges, re-derivations). Kept here rather than deleted because

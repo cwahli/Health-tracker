@@ -304,22 +304,45 @@ describe('agent-opencode event mapping', () => {
       thinking: true,
       extraArgs: ['--session', 'ses_1'],
     });
+    // The variant rides in the model string and --log-level is lowercase:
+    // CLI 2.0.18 rejects both a bare `--variant` flag and "ERROR" by printing
+    // help and exiting 1, which is what made every turn report "the model
+    // returned no text output" (2026-09-28).
     expect(args).toEqual([
       'run',
       '--format',
       'json',
       '--print-logs',
       '--log-level',
-      'ERROR',
+      'error',
       '--thinking',
-      '--variant',
-      'high',
       '-m',
-      'opencode-go/deepseek-v4.1-flash',
+      'opencode-go/deepseek-v4.1-flash#high',
       '--session',
       'ses_1',
        'fix it',
      ]);
+   });
+
+   it('never emits a flag the opencode CLI rejects', () => {
+    const args = buildOpencodeArgs({
+      prompt: 'hi',
+      model: 'opencode/space-bunny-free',
+      variant: 'xhigh',
+      thinking: true,
+      sessionId: 'ses_1',
+    });
+    // Guards the class, not the instance: opencode answers an unknown flag by
+    // printing help and exiting 1 with no JSON on stdout, which the bot can
+    // only report as "no text output".
+    expect(args).not.toContain('--variant');
+    expect(args.join(' ')).not.toMatch(/--log-level\s+ERROR/);
+    expect(args[args.indexOf('-m') + 1]).toBe('opencode/space-bunny-free#xhigh');
+   });
+
+   it('leaves the model alone when there is no variant', () => {
+    const args = buildOpencodeArgs({ prompt: 'hi', model: 'opencode/mimo', thinking: false });
+    expect(args[args.indexOf('-m') + 1]).toBe('opencode/mimo');
    });
 
    it('builds attached TUI-session args', () => {
@@ -335,7 +358,7 @@ describe('agent-opencode event mapping', () => {
       'json',
       '--print-logs',
       '--log-level',
-      'ERROR',
+      'error',
       '--attach',
       'http://127.0.0.1:4096',
       '--session',
@@ -346,6 +369,14 @@ describe('agent-opencode event mapping', () => {
 });
 
 describe('extractLogError', () => {
+  // --log-level is requested in lowercase, so the lines the CLI prints are
+  // `level=error`. A pattern pinned to `level=ERROR` matches nothing and the
+  // user loses the reason the turn failed, so both spellings must work.
+  it('reads a lowercase level=error line', () => {
+    expect(extractLogError('level=error error.error="AI_APICallError: out of credits"'))
+      .toContain('out of credits');
+  });
+
   const rateLimitLog =
     'timestamp=2026-09-23T20:53:03.552Z level=ERROR run=692ab56a message="stream error" ' +
     'providerID=opencode modelID=big-pickle small=false agent=build mode=primary ' +

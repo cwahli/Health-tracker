@@ -92,6 +92,33 @@ try {
   });
   check('fail-then-succeed delivers the second result', res.finalText === 'ok');
   check('switch line names from → to', sent.length === 1 && /m1.*switching to.*m2/.test(sent[0]));
+
+  // 6. The run's argv must only contain flags the installed opencode CLI
+  //    accepts. CLI 2.0.18 answers an unknown flag or a bad enum value by
+  //    printing help and exiting 1 with NO stdout, so the bot can only report
+  //    "Done (exit 1), but the model returned no text output" — which is what
+  //    every turn did on 2026-09-28 (`--variant` is gone; the variant belongs
+  //    in the model string, and --log-level is lowercase). Asserted here as
+  //    well as in the vitest file so the guard runs in a worktree with no
+  //    node_modules, which is where it was originally missed.
+  const { buildOpencodeArgs } = await import('./lib/agent-opencode.mjs');
+  const args = buildOpencodeArgs({
+    prompt: 'hi',
+    model: 'opencode/space-bunny-free',
+    variant: 'xhigh',
+    thinking: true,
+    sessionId: 'ses_1',
+    extraArgs: ['--agent', 'build'],
+  });
+  check('the run never passes a bare --variant flag', !args.includes('--variant'));
+  check('the variant rides in the model string',
+    args[args.indexOf('-m') + 1] === 'opencode/space-bunny-free#xhigh');
+  check('--log-level is lowercase (the CLI enum is)',
+    args[args.indexOf('--log-level') + 1] === 'error');
+  check('the prompt is still the last argument', args[args.length - 1] === 'hi');
+  const noVariant = buildOpencodeArgs({ prompt: 'hi', model: 'opencode/mimo', thinking: false });
+  check('a run without a variant is left alone',
+    noVariant[noVariant.indexOf('-m') + 1] === 'opencode/mimo');
 } finally {
   if (oldLog === undefined) delete process.env.BOT_FAILURE_LOG;
   else process.env.BOT_FAILURE_LOG = oldLog;
