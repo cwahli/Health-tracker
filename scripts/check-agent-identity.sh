@@ -25,6 +25,9 @@ set -u
 pattern='^(Agent|Author): [^ ].+ \([^)]+\)$'
 new_pattern='^(Agent|Author): [^ ].+ \([^()]+\) [A-Za-z0-9][A-Za-z0-9._-]*$'
 
+# An empty range is a pass only when the caller says so. See the check below.
+allow_empty=0
+
 # Commits authored before this timestamp keep the old shape (no location).
 # Anything authored after must name its location. In-flight work rebased
 # after this keeps its original author dates, so it is judged as written.
@@ -95,6 +98,7 @@ if [ "${1:-}" = "--range" ]; then
         [ $# -ge 2 ] || { echo "check-agent-identity: --since needs a value" >&2; exit 2; }
         since=$2; shift 2 ;;
       --no-grandfather) grandfather=0; shift ;;
+      --allow-empty) allow_empty=1; shift ;;
       --range) shift ;;
       *) revs="$revs $1"; nrevs=$((nrevs + 1)); shift ;;
     esac
@@ -110,11 +114,26 @@ if [ "${1:-}" = "--range" ]; then
     exit 1
   fi
   if [ -z "$commits" ]; then
-    # Nothing this change adds is unvetted — e.g. a re-push of a branch whose
-    # commits are already on the base. Distinct from the rev-list failure
-    # above, which is a broken range and must not read as a pass.
-    echo "check-agent-identity: no new commits in:$revs"
-    exit 0
+    # An empty range means the commits are ALREADY on the base, which is
+    # genuinely nothing to judge — so exit 0, but only when the caller said the
+    # range may legitimately be empty.
+    #
+    # `--allow-empty` is required. Without it an empty range silently passed,
+    # and the one caller that could not tell an empty range from a broken one
+    # was ci.yml on a post-merge run: a repository_dispatch has no `before`, the
+    # fallback resolved to origin/main == HEAD, and every squash landed on main
+    # unverified for author identity (2026-09-29). A gate that cannot tell
+    # "nothing new" from "I looked at the wrong range" must not be allowed to
+    # answer both with 0.
+    if [ "$allow_empty" = "1" ]; then
+      echo "check-agent-identity: no new commits in:$revs (allowed)"
+      exit 0
+    fi
+    echo "check-agent-identity: refusing to pass an empty range in:$revs" >&2
+    echo "  An empty range means the commits are already on the base, OR that" >&2
+    echo "  the range resolved to nothing (e.g. a post-merge run with no 'before')." >&2
+    echo "  Pass --allow-empty only when an empty range really is 'nothing to do'." >&2
+    exit 1
   fi
   fail=0
   grandfathered=0
@@ -128,5 +147,5 @@ if [ "${1:-}" = "--range" ]; then
 fi
 
 echo "Usage: check-agent-identity.sh --message <file>" >&2
-echo "       check-agent-identity.sh --range [<rev> ...] [--since <iso8601>] [--no-grandfather]" >&2
+echo "       check-agent-identity.sh --range [<rev> ...] [--since <iso8601>] [--no-grandfather] [--allow-empty]" >&2
 exit 2

@@ -61,6 +61,33 @@ jobs:
             base='${{ github.event.pull_request.base.ref }}'
             before='${{ github.event.pull_request.base.sha }}'
             exclude_not=1
+          elif [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            # main-verify (2026-09-29, #349). A repository_dispatch carries NO
+            # `before`: the event is "verify main now", not "verify these
+            # commits". So the pre-merge `before` fallback resolved to
+            # origin/<base> == HEAD and the range came out EMPTY — the gate
+            # printed "no new commits" and exited 0 without judging the merge
+            # that had just landed. Every squash on main therefore went
+            # unverified for author identity, which is the one thing this gate
+            # exists for.
+            #
+            # The commit that landed is in client_payload.sha, and the parent of
+            # that commit is the pre-merge base. Deriving `before` from the
+            # merge's own parent is what makes the range the merge's commits,
+            # whatever the event type is.
+            base='${{ github.event.repository.default_branch }}'
+            landed='${{ github.event.client_payload.sha }}'
+            if [ -n "$landed" ]; then
+              before="$(git rev-parse "$landed^" 2>/dev/null || true)"
+            fi
+            if [ -z "$before" ]; then
+              # No usable payload: fall back to the branch tip's parent, which
+              # is the same value for a single-commit main, and say so rather
+              # than silently judging nothing.
+              echo "::warning::no client_payload.sha; judging the tip commit of $base only"
+              before="$(git rev-parse "origin/$base^" 2>/dev/null || true)"
+            fi
+            exclude_not=0
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             base='${{ github.event.repository.default_branch }}'
             before='${{ github.event.before }}'
@@ -81,10 +108,17 @@ jobs:
             before="$(git rev-parse "origin/$base")"
           fi
           if [ "$exclude_not" = "1" ]; then
+            # A PR whose commits are all already on the base (a re-push, or a
+            # branch merged from elsewhere) really does have nothing to judge.
+            # That is the ONLY caller allowed to say so; see --allow-empty.
             scripts/check-agent-identity.sh \
               --range "$before..HEAD" \
-              --not "origin/$base"
+              --not "origin/$base" \
+              --allow-empty
           else
+            # A push to main, or a post-merge main-verify. No --allow-empty: an
+            # empty range here means the range was wrong, not that there was
+            # nothing to check.
             scripts/check-agent-identity.sh \
               --range "$before..HEAD"
           fi
