@@ -35,23 +35,55 @@ jobs:
           BRANCH="${GITHUB_REF_NAME}"
           if [ "$BRANCH" = "main" ]; then echo "skip main"; exit 0; fi
 
-          # Title from the branch's first commit (stable), body lists all commits.
+          # Title from the branch's first commit (stable). The body has a
+          # machine-managed commit list between markers plus preserved author
+          # content: auto-pr rewrites only its own block and the trailer
+          # lines, so hand-written ## Summary/Status/Left sections (see the
+          # PR body contract gate) survive every push.
+          TRAILER_RE='^(Agent|Author): [^ ].+ \([^)]+\)( [A-Za-z0-9][A-Za-z0-9._-]*)?$'
           git fetch --quiet origin main || true
           base="$(git merge-base origin/main HEAD 2>/dev/null || true)"
           if [ -n "$base" ]; then
             title="$(git log --format=%s "$base"..HEAD | tail -n1)"
-            body="$(git log --format='- %s' "$base"..HEAD)"
+            subjects="$(git log --format='- %s' "$base"..HEAD)"
+            trailers="$(git log --format=%B "$base"..HEAD | grep -E "$TRAILER_RE" | sort -u)"
           else
             title="$(git log -1 --pretty=%s)"
-            body="$(git log -1 --pretty=%B)"
+            subjects=""
+            trailers="$(git log -1 --pretty=%B | grep -E "$TRAILER_RE" | sort -u)"
           fi
           [ -n "$title" ] || title="$BRANCH"
+          managed="$(printf '<!-- auto-pr:start -->\n%s\n<!-- auto-pr:end -->' "$subjects")"
+          build_body() {
+            # $1 = previous body (may be empty). Preserved content = previous
+            # body minus the old managed block, minus this branch's own
+            # subject bullets, minus trailer lines (re-appended fresh below).
+            prev="$1"
+            preserved="$(printf '%s\n' "$prev" | awk '/<!-- auto-pr:start -->/{skip=1} /<!-- auto-pr:end -->/{skip=0; next} !skip')"
+            subjfile="$(mktemp)"
+            printf '%s\n' "$subjects" | grep -v '^$' > "$subjfile"
+            if [ -s "$subjfile" ]; then
+              preserved="$(printf '%s\n' "$preserved" | grep -Fxv -f "$subjfile" || true)"
+            fi
+            rm -f "$subjfile"
+            preserved="$(printf '%s\n' "$preserved" | grep -Ev "$TRAILER_RE" | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba' || true)"
+            body="$managed"
+            if [ -n "$(printf '%s' "$preserved" | tr -d '[:space:]')" ]; then
+              body="$(printf '%s\n\n%s' "$body" "$preserved")"
+            fi
+            if [ -n "$trailers" ]; then
+              body="$(printf '%s\n\n%s' "$body" "$trailers")"
+            fi
+          }
 
           count="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length' 2>&1)" || {
             echo "::error title=auto-pr list failed::$count"; exit 1; }
 
           if [ "$count" != "0" ]; then
             me="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
+            prev="$(gh pr view "$me" --json body --jq .body 2>&1)" || {
+              echo "::warning title=auto-pr read body failed::$prev"; prev=""; }
+            build_body "$prev"
             if ! out="$(gh pr edit "$me" --title "$title" --body "$body" 2>&1)"; then
               echo "::error title=auto-pr edit failed::$out"; exit 1
             fi
@@ -59,6 +91,7 @@ jobs:
             exit 0
           fi
 
+          build_body ""
           if ! out="$(gh pr create --base main --head "$BRANCH" --title "$title" --body "$body" 2>&1)"; then
             echo "::error title=auto-pr create failed::$out"
             exit 1
