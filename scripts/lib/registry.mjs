@@ -35,20 +35,51 @@ export function applyMasterDefaults(registry) {
   if (!master) throw new Error(`Master bot "${masterId}" not found`);
   if (master.extends) throw new Error(`Master bot "${masterId}" must not extend another bot`);
 
-  const resolved = bots.map((bot) => {
-    if (bot.id === masterId) return bot;
+  const masterRuntime = master.runtime || 'bot-host';
+  const byId = new Map(bots.map((b) => [b.id, b]));
+  const resolvedById = new Map();
+  const inProgress = [];
+
+  /**
+   * Resolve one bot, recursing through `extends`.
+   *
+   * The recursion is the point: a parent may itself be a thin row that only
+   * names a parent, so merging from the RAW parent row would hand the child an
+   * empty `agent` block and silently drop every inherited feature. Resolving
+   * the parent first means `extends` is transitive, which is what makes "a new
+   * bot is a thin row" true all the way down a chain.
+   */
+  function resolve(bot) {
+    const cached = resolvedById.get(bot.id);
+    if (cached) return cached;
+    if (inProgress.includes(bot.id)) {
+      throw new Error(`Bot inheritance cycle: ${[...inProgress, bot.id].join(' -> ')}`);
+    }
+    if (bot.id === masterId) {
+      resolvedById.set(bot.id, bot);
+      return bot;
+    }
 
     const botRuntime = bot.runtime || 'bot-host';
-    const masterRuntime = master.runtime || 'bot-host';
     if (botRuntime !== masterRuntime) {
       // Different runtime (e.g. hermes): self-contained, no bot-host inheritance.
-      return { ...bot, runtime: botRuntime };
+      const selfContained = { ...bot, runtime: botRuntime };
+      resolvedById.set(bot.id, selfContained);
+      return selfContained;
     }
 
     const parentId = bot.extends || masterId;
-    const parent = bots.find((b) => b.id === parentId);
-    if (!parent) throw new Error(`Bot "${bot.id}" extends unknown bot "${parentId}"`);
     if (parentId === bot.id) throw new Error(`Bot "${bot.id}" cannot extend itself`);
+    const rawParent = byId.get(parentId);
+    if (!rawParent) throw new Error(`Bot "${bot.id}" extends unknown bot "${parentId}"`);
+
+    inProgress.push(bot.id);
+    let parent;
+    try {
+      parent = resolve(rawParent);
+    } finally {
+      inProgress.pop();
+    }
 
     const merged = mergeOnto(
       {
@@ -75,7 +106,7 @@ export function applyMasterDefaults(registry) {
       merged.agent = { ...merged.agent, sharedSkills: [...base, ...bot.agent.skills] };
     }
 
-    return {
+    const out = {
       ...parent,
       ...bot,
       name: merged.name,
@@ -87,7 +118,11 @@ export function applyMasterDefaults(registry) {
       enabled: bot.enabled,
       extends: bot.extends,
     };
-  });
+    resolvedById.set(bot.id, out);
+    return out;
+  }
+
+  const resolved = bots.map((bot) => resolve(bot));
 
   return { ...registry, master: masterId, bots: resolved };
 }

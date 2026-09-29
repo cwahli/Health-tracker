@@ -32,9 +32,26 @@ via systemd `EnvironmentFile` (`bot-host@.service` reads `common.env` + `<id>.en
 
 ## Procedures
 
-**Add a bot:** BotFather → new token → append `NAME_TOKEN=<value>` to master
-`tokens.env` → add registry entry (`tokenEnv` must match) → `sync-bot-tokens.mjs --check`
-→ run without `--check` (add `--restart` for live bot-host bots) → prove one E2E reply.
+**Add a bot:** scaffold the registry row → BotFather → export its new token
+→ add `NAME_TOKEN=<value>` to master `tokens.env` → `sync-bot-tokens.mjs --check`
+→ run without `--check` (add `--restart` for live bot-host bots) → prove one E2E reply
+→ flip `"enabled": true`.
+
+```bash
+node scripts/add-bot.mjs --id=vm3 --name="VM3 Bot"   # thin row, dry-run with --dry-run
+node scripts/assert-bot-clone.mjs                    # prove it is a clone of the master
+```
+
+**A new bot is a thin row, never a copy.** `bots/registry.json` names a `master`
+(`vm`) and `scripts/lib/registry.mjs` `applyMasterDefaults()` merges that master's
+`agent` / `progress` / `session` onto every bot of the same runtime, resolving
+`extends` all the way down a chain. So a row declares only what is genuinely its
+own: `id`, `name`, `runtime`, `enabled`, `extends`, `telegram.tokenEnv`, and at
+most a per-bot screenshot dir. Restating an inherited block is what makes a fleet
+lose its features one bot at a time — the copy keeps the old value the day the
+master moves, and nothing looks wrong. `scripts/assert-bot-clone.mjs` is the gate
+that refuses it (run it before every registry change; CI runs it too), and
+`scripts/assert-bot-clone.test.mjs` proves the gate still fires.
 
 **Rotate a token:** replace the value in master → sync → restart that service only.
 Never restart hosts that don't own the token.
