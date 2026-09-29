@@ -18,6 +18,9 @@ Environment=TUI_BOT_ID=vm2
 Environment=TUI_STATE_ROOT=/home/ubuntu/.local/state/bot-host
 Environment=TUI_WORKTREE=/home/ubuntu/bot-host-r14
 Environment=OPENCODE_BIN=/home/ubuntu/.opencode/bin/opencode
+# Same reason as the vm unit: the attach picks the tool from the chat's lane,
+# and a chat on Cline needs the cline CLI, which is not on this unit's PATH.
+Environment=CLINE_BIN=/home/ubuntu/.npm-global/bin/cline
 # VM-tui-vm2: the location first, like its vm twin, then the bot. Both bots run
 # on the same host, so a name carrying only "opencode-tui" told you neither
 # which location you were on nor which conversation. Separate from VM-tui on

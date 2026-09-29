@@ -16,6 +16,15 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  tuiSurfaceFor,
+  normalizeSurface,
+  surfaceForModel,
+  sessionIdMatchesSurface,
+  resolveTuiLaunch,
+  tuiLaunchCommand,
+  latestClineSessionId,
+} from '../scripts/lib/tui-surface.mjs';
 
 const SANDBOX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tui-shared-'));
 const PRIOR_HOME = process.env.HOME;
@@ -136,6 +145,150 @@ describe('lifecycle: naming, status and closing a pane', () => {
     const help = fs.readFileSync(new URL('../scripts/lib/commands.mjs', import.meta.url), 'utf8');
     expect(help).toMatch(/\/tui status/);
     expect(help).toMatch(/\/tui off/);
+  });
+});
+
+// This file's whole premise is "a TUI and the bot are two clients of ONE
+// session". That is true of opencode and FALSE of cline, and the terminal used
+// to be opencode unconditionally — so a chat on cline opened an opencode TUI on
+// a stale opencode session id: a different agent on a different thread from the
+// one answering in Telegram (live 2026-09-29, prefs said
+// cline:cline-free/deepseek-v4.1-flash, the pane read "Build · MiMo-V2.6-Flash
+// Free OpenCode"). These cases pin the lane decision and the honesty split.
+describe('the terminal launches the lane the chat is on', () => {
+  it('reads the surface off the model, not off the bot default', () => {
+    expect(tuiSurfaceFor('opencode/space-bunny-free').surface).toBe('opencode');
+    expect(tuiSurfaceFor('cline:cline-free/deepseek-v4.1-flash').surface).toBe('cline');
+    expect(tuiSurfaceFor('gemini:gemini-2.5-pro').surface).toBe('gemini');
+    // An unrecognised ref must not invent a lane; opencode is the default.
+    expect(tuiSurfaceFor('').surface).toBe('opencode');
+    expect(tuiSurfaceFor(undefined).surface).toBe('opencode');
+  });
+
+  it('accepts a bare surface name as well as a model ref', () => {
+    // Two sources feed the decision: the live prefs model and the surface
+    // snapshot bot-host writes into tui-open.json. They are spelled differently.
+    expect(normalizeSurface('cline')).toBe('cline');
+    expect(normalizeSurface('cline:cline-free/x')).toBe('cline');
+    expect(normalizeSurface('CLINE')).toBe('cline');
+    expect(normalizeSurface('nonsense')).toBe('opencode');
+    expect(surfaceForModel('gemini:gemini-2.5-pro')).toBe('gemini');
+  });
+
+  it('keeps session ids of one tool from being handed to another', () => {
+    expect(sessionIdMatchesSurface('ses_f227779acffe', 'opencode')).toBe(true);
+    expect(sessionIdMatchesSurface('1790714599861_80trx', 'opencode')).toBe(false);
+    expect(sessionIdMatchesSurface('1790714599861_80trx', 'cline')).toBe(true);
+    expect(sessionIdMatchesSurface('ses_f227779acffe', 'cline')).toBe(false);
+    expect(sessionIdMatchesSurface('', 'cline')).toBe(false);
+  });
+
+  it('opens the cline TUI on the chat lane, resumed onto its own session', () => {
+    const launch = resolveTuiLaunch({
+      surface: 'cline',
+      model: 'cline-free/deepseek-v4.1-flash',
+      sessionId: '1790_abc',
+      workspace: '/ws',
+      opencodeBin: '/oc',
+      clineBin: '/cl',
+    });
+    expect(launch.argv).toEqual(['/cl', '-i', '-P', 'cline', '-m', 'cline-free/deepseek-v4.1-flash', '-c', '/ws', '--id', '1790_abc']);
+    expect(tuiLaunchCommand(launch)).toBe("'/cl' '-i' '-P' 'cline' '-m' 'cline-free/deepseek-v4.1-flash' '-c' '/ws' '--id' '1790_abc'");
+  });
+
+  it('strips this repo s surface prefix before handing a model to the cline CLI', () => {
+    // `cline:` is our own prefix, not cline's spelling. The CLI wants
+    // `cline-free/deepseek-v4.1-flash`; the prefixed form fails like an unknown
+    // model, and the terminal would then be on a different model from the chat.
+    const launch = resolveTuiLaunch({ surface: 'cline', model: 'cline:cline-free/x', clineBin: '/cl' });
+    expect(launch.argv).toContain('cline-free/x');
+    expect(launch.argv).not.toContain('cline:cline-free/x');
+  });
+
+  it('leaves the opencode argv exactly as it was', () => {
+    const launch = resolveTuiLaunch({ surface: 'opencode', sessionId: 'ses_abc', opencodeBin: '/oc' });
+    expect(launch.argv).toEqual(['/oc', '--session', 'ses_abc']);
+    expect(tuiLaunchCommand(launch)).toBe("'/oc' '--session' 'ses_abc'");
+  });
+
+  it('refuses an API-only lane instead of falling back to opencode', () => {
+    // A silent fallback IS the defect wearing a different hat. Gemini has no
+    // screen; a scraped PTY with a badge is not a terminal.
+    const launch = resolveTuiLaunch({ surface: 'gemini' });
+    expect(launch.argv).toBeNull();
+    expect(launch.reason).toMatch(/no terminal/i);
+    expect(tuiLaunchCommand(launch)).toBe('');
+  });
+
+  it('refuses an unknown surface rather than guessing opencode', () => {
+    const launch = resolveTuiLaunch({ surface: 'nope' });
+    expect(launch.argv).toBeNull();
+    expect(launch.reason).toMatch(/unknown surface/i);
+  });
+
+  it('still opens a bare cline TUI when no session has been recorded', () => {
+    const launch = resolveTuiLaunch({ surface: 'cline', clineBin: '/cl' });
+    expect(launch.argv).toEqual(['/cl', '-i']);
+    expect(launch.note).toMatch(/fresh Cline session/i);
+  });
+
+  it('shares a session on opencode and never on cline', () => {
+    // The claim is the other half of the bug: a turn must never be advertised as
+    // visible in a terminal that cannot see it.
+    expect(tuiSurfaceFor('opencode/space-bunny-free').sharedSession).toBe(true);
+    expect(tuiSurfaceFor('cline:cline-free/deepseek-v4.1-flash').sharedSession).toBe(false);
+    expect(tuiSurfaceFor('gemini:gemini-2.5-pro').sharedSession).toBe(false);
+    expect(tuiSurfaceFor('gemini:gemini-2.5-pro').terminal).toBe(false);
+  });
+
+  it('resumes the newest cline thread for the same workspace, and no other', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cline-sessions-'));
+    const write = (id: string, cwd: string, startedAt: string) => {
+      fs.mkdirSync(path.join(dir, id), { recursive: true });
+      fs.writeFileSync(path.join(dir, id, `${id}.json`), JSON.stringify({ cwd, started_at: startedAt }));
+    };
+    write('100_old', '/ws', '2026-01-01T00:00:00.000Z');
+    write('200_new', '/ws', '2026-05-01T00:00:00.000Z');
+    write('300_elsewhere', '/other', '2026-09-01T00:00:00.000Z');
+    try {
+      // The newest session overall belongs to a different checkout and must not
+      // be shown as this chat's thread.
+      expect(latestClineSessionId({ workspace: '/ws', dir })).toBe('200_new');
+      expect(latestClineSessionId({ workspace: '/nowhere', dir })).toBe('');
+      expect(latestClineSessionId({ workspace: '/ws', dir: '/nonexistent' })).toBe('');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the turn note tells the truth about the terminal', () => {
+  const src = () => fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+
+  it('does not claim a shared session on a lane that has none', () => {
+    // "Same session, so it shows up in both" is only true for opencode. On a
+    // cline chat the terminal resumes the LAST cline thread and each new message
+    // starts a fresh one, so the claim would be a lie the user finds by watching
+    // a turn that never appears.
+    expect(src()).toMatch(/openSurface\.sharedSession/);
+    expect(src()).toMatch(/cannot resume a thread headlessly/);
+  });
+
+  it('names the lane in the /tui reply instead of hardcoding opencode', () => {
+    // The literal it replaced: `*opencode TUI*` on a chat that was on cline.
+    expect(src()).not.toMatch(/\*opencode TUI\*/);
+    expect(src()).toMatch(/tuiSurface\.label/);
+  });
+
+  it('refuses a Mini App button for a lane with no terminal', () => {
+    expect(src()).toMatch(/if \(!tuiSurface\.terminal\)/);
+  });
+
+  it('records the surface and that lane s own session id in tui-open.json', () => {
+    // One file, one chat: the attach cannot be told the lane any other way, and
+    // a cline id in sessions.json would be handed to `opencode run --session`.
+    expect(src()).toMatch(/cline-sessions\.json/);
+    expect(src()).toMatch(/surface: tuiSurface\.surface/);
   });
 });
 

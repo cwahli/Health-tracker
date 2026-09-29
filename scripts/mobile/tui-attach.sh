@@ -38,7 +38,10 @@ BOT_ID="${TUI_BOT_ID:-mobile}"
 # phone, and the VM's copy silently read a state directory that does not exist.
 STATE_ROOT="${TUI_STATE_ROOT:-/root/.local/state/bot-host}"
 STATE="${STATE_ROOT}/${BOT_ID}"
-SESSIONS="${STATE}/sessions.json"
+# sessions.json / cline-sessions.json / prefs.json are NOT read here. The
+# resolution step below owns those paths, because which map is correct depends
+# on the lane: a cline id is `<epoch>_<rand>` and an opencode id is `ses_…`, and
+# handing either to the other tool is exactly the defect this reshape fixes.
 LEASES="${STATE}/leases.json"
 TUI_LEASE="${STATE}/tui-lease.json"
 WORKTREE="${TUI_WORKTREE:-/root/Health-tracker}"
@@ -51,8 +54,19 @@ WORKTREE="${TUI_WORKTREE:-/root/Health-tracker}"
 TMUX_NAME="${TUI_TMUX_NAME:-${TUI_LOCATION:-local}-tui}"
 # Per-bot: two ttyd instances (vm, vm2) share this host, and a shared mark file
 # would make each instance reap the other's tmux session on every attach.
+# The mark is `<surface>:<session>`, not just the session: the two tools name
+# their sessions incompatibly, so a bare id cannot tell "same conversation" from
+# "the other tool's conversation", and a lane switch has to reap the old pane or
+# the terminal keeps showing the previous tool (measured 2026-09-29: a chat on
+# cline:cline-free/deepseek-v4.1-flash still rendered "Build · MiMo-V2.6-Flash
+# Free OpenCode" because this script launched $OPENCODE_BIN unconditionally).
 SID_MARK="/tmp/tui-session-id-${BOT_ID}"
 OPENCODE_BIN="${OPENCODE_BIN:-/root/.opencode/bin/opencode}"
+# The ttyd units' PATH is .opencode/bin:.local/bin:/usr/local/bin:/usr/bin:/bin,
+# which does NOT include ~/.npm-global/bin where the cline CLI lives, so a bare
+# `cline` is not resolvable under the unit. The absolute path is the default; the
+# units set it explicitly for the same reason they set OPENCODE_BIN.
+CLINE_BIN="${CLINE_BIN:-$HOME/.npm-global/bin/cline}"
 WAIT_SECONDS="${TUI_WAIT_SECONDS:-180}"
 
 read_json() {
@@ -90,10 +104,16 @@ lease_held() {
   ' "$file" "$max_age_s" 2>/dev/null
 }
 
-# --- which session is the chat on?
+# --- which tool is the chat on, and which session is that tool's?
 #
-# Resolution order, because ttyd runs one static command per bot and cannot be
-# told the chat any other way:
+# The surface is resolved from the chat's LIVE prefs.json model, not from the
+# bot's registry default and not only from the tui-open.json snapshot: a
+# /freemodel switch after the button was sent has to be respected, and the
+# snapshot alone would launch OpenCode for a chat that has since moved to Cline.
+# The snapshot is the fallback when prefs.json has no row for this chat.
+#
+# Resolution order for the chat, because ttyd runs one static command per bot
+# and cannot be told the chat any other way:
 #   1. TUI_CHAT_ID — explicit wins (ops overrides, deterministic tests).
 #   2. tui-open.json — written by bot-host on every /tui: the chat that opened
 #      the Mini App most recently, with the session it was on then.
@@ -110,31 +130,97 @@ if [ -n "$CHAT_ID" ]; then FROM_ENV=1; else
     } catch { /* no tui-open yet: fall through to the legacy pick */ }
   ' "$STATE/tui-open.json" 2>/dev/null || true)
 fi
-# One node step resolves AND labels, so the SOURCE line can never disagree with
-# the SID line: explicit-hit and tui-open-hit mean the session belongs to that
-# chat; legacy-first means the map did not contain it (the S1 failure mode).
-RESOLVED=$(node -e '
-  const fs = require("fs");
-  const want = String(process.argv[2] || "");
-  const fromEnv = process.argv[3] === "1";
-  const hit = (sid, how) => process.stdout.write(`${sid}|${how}`);
-  try {
-    const map = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    if (want && map[want] && /^ses_/.test(String(map[want]))) {
-      hit(String(map[want]), fromEnv ? "explicit-hit" : "tui-open-hit");
-    } else {
-      const ids = Object.values(map).map((v) => String(v || "").trim()).filter((v) => /^ses_/.test(v));
-      hit(ids[0] || "", "legacy-first");
-    }
-  } catch { process.stdout.write("|legacy-first"); }
-' "$SESSIONS" "$CHAT_ID" "$FROM_ENV" 2>/dev/null || echo "|legacy-first")
-SID="${RESOLVED%%|*}"
-CHAT_SOURCE="${RESOLVED##*|}"
+# The launch decision lives in scripts/lib/tui-surface.mjs so the bot, this
+# script and the sensors cannot disagree about it. One node step resolves AND
+# labels, so the SOURCE line can never disagree with the SID line: explicit-hit
+# and tui-open-hit mean the session belongs to that chat; legacy-first means the
+# map did not contain it (the S1 failure mode).
+TUI_SURFACE_MODULE="${TUI_SURFACE_MODULE:-$(cd "$(dirname "$0")/.." && pwd)/lib/tui-surface.mjs}"
+RESOLVED=$(node --input-type=module -e '
+  import { readFileSync } from "node:fs";
+  import path from "node:path";
+  import { pathToFileURL } from "node:url";
+  const [stateDir, want, fromEnv, workspace, ocBin, clBin, modPath] = process.argv.slice(1);
+  const tui = await import(pathToFileURL(modPath).href);
+  const readJson = (p) => { try { return JSON.parse(readFileSync(p, "utf8")); } catch { return null; } };
+  const out = { SURFACE: "opencode", MODEL: "", SID: "", SOURCE: "legacy-first", CMD: "", NOTE: "", REASON: "" };
+  const tuiOpen = readJson(path.join(stateDir, "tui-open.json")) || {};
+  const prefs = readJson(path.join(stateDir, "prefs.json")) || {};
+  const chatId = String(want || tuiOpen.chatId || "");
+  const fromEnvHit = fromEnv === "1";
+  // Live lane first, snapshot second. An unknown chat keeps the snapshot rather
+  // than being pinned to the registry default behind the user back.
+  const prefModel = String((prefs[chatId] || {}).model || "");
+  const model = prefModel || String(tuiOpen.model || "");
+  out.SURFACE = tui.normalizeSurface(model || tuiOpen.surface || "");
+  out.MODEL = model;
+
+  const isCline = out.SURFACE === "cline";
+  const map = readJson(path.join(stateDir, isCline ? "cline-sessions.json" : "sessions.json")) || {};
+  const matches = (v) => tui.sessionIdMatchesSurface(v, out.SURFACE);
+  if (chatId && matches(map[chatId])) {
+    out.SID = String(map[chatId]);
+    out.SOURCE = fromEnvHit ? "explicit-hit" : "tui-open-hit";
+  } else {
+    out.SID = Object.values(map).map((v) => String(v || "").trim()).filter(matches)[0] || "";
+  }
+  // A Cline chat whose turn has not written its map yet still has a thread on
+  // disk. Resuming the newest one for this checkout shows the conversation the
+  // user last had instead of an empty prompt, and says where it came from.
+  if (isCline && !out.SID) {
+    out.SID = tui.latestClineSessionId({ workspace }) || "";
+    if (out.SID) out.SOURCE = "latest-on-disk";
+  }
+
+  const clineModel = model.replace(/^cline:/i, "");
+  const launch = tui.resolveTuiLaunch({
+    surface: out.SURFACE,
+    model: clineModel,
+    sessionId: out.SID,
+    workspace,
+    opencodeBin: ocBin,
+    clineBin: clBin,
+  });
+  out.NOTE = launch.note || "";
+  out.REASON = launch.reason || "";
+  out.CMD = tui.tuiLaunchCommand(launch);
+  for (const [k, v] of Object.entries(out)) process.stdout.write(`${k}=${v}\n`);
+  // argv as discrete words, so the shell hands tmux real arguments and a model
+  // containing a space is not re-split. CMD above stays for the dry run.
+  (launch.argv || []).forEach((word, i) => process.stdout.write(`ARG${i}=${word}\n`));
+' "$STATE" "$CHAT_ID" "$FROM_ENV" "$WORKTREE" "$OPENCODE_BIN" "$CLINE_BIN" "$TUI_SURFACE_MODULE" 2>/dev/null)
+
+SURFACE="opencode"
+MODEL=""
+SID=""
+CHAT_SOURCE="legacy-first"
+LAUNCH_CMD=""
+LAUNCH_NOTE=""
+LAUNCH_REASON=""
+LAUNCH_ARGV=()
+while IFS='=' read -r _key _value; do
+  case "$_key" in
+    SURFACE) SURFACE="$_value" ;;
+    MODEL) MODEL="$_value" ;;
+    SID) SID="$_value" ;;
+    SOURCE) CHAT_SOURCE="$_value" ;;
+    CMD) LAUNCH_CMD="$_value" ;;
+    NOTE) LAUNCH_NOTE="$_value" ;;
+    REASON) LAUNCH_REASON="$_value" ;;
+    ARG*) LAUNCH_ARGV+=("$_value") ;;
+  esac
+done <<EOF
+$RESOLVED
+EOF
 
 # Headless seam for the sensor: print what would be attached without touching
-# tmux, leases, or the model. TUI_DRY_RUN=1 prints SID=<id> SOURCE=<where>.
+# tmux, leases, or the model. TUI_DRY_RUN=1 prints the lane, the model, the
+# session and where the session came from.
 if [ "${TUI_DRY_RUN:-0}" = "1" ]; then
-  echo "SID=${SID} SOURCE=${CHAT_SOURCE}"
+  echo "SURFACE=$SURFACE SID=${SID} SOURCE=$CHAT_SOURCE"
+  [ -n "$MODEL" ] && echo "MODEL=$MODEL"
+  [ -n "$LAUNCH_CMD" ] && echo "CMD=$LAUNCH_CMD"
+  [ -n "$LAUNCH_REASON" ] && echo "REASON=$LAUNCH_REASON"
   exit 0
 fi
 
@@ -162,27 +248,68 @@ if ! lease_held "$LEASES" 1800; then
   exit 0
 fi
 
-# --- reap a tmux session left over from a different conversation
-PREV=$(cat "$SID_MARK" 2>/dev/null || true)
-if [ -n "$PREV" ] && [ "$PREV" != "$SID" ]; then
-  tmux kill-session -t "$TMUX_NAME" 2>/dev/null || true
+# --- refuse rather than fall back. Two different refusals, and they must not be
+# confused: a lane with NO terminal is a policy answer the user can act on
+# (/freemodel), while an empty argv with no reason means the resolver itself
+# failed and guessing OpenCode here would resurrect the exact bug this script
+# was fixed for — silently, and with the old tool.
+if [ "${#LAUNCH_ARGV[@]}" -eq 0 ]; then
+  if [ -n "$LAUNCH_REASON" ]; then
+    echo "No terminal for this chat — ${LAUNCH_REASON}."
+    echo "Move the chat to a lane with a real terminal with /freemodel, or use"
+    echo "/tx on for the live tool feed here."
+  else
+    echo "Could not work out which terminal this chat needs, so nothing was"
+    echo "opened. A bare \`opencode\` here would be a guess, and a guess is how"
+    echo "this ended up on the wrong tool in the first place."
+    echo "Send /tui again, or check that the unit sets CLINE_BIN and"
+    echo "OPENCODE_BIN and that scripts/lib/tui-surface.mjs is present."
+  fi
+  sleep 20
+  exit 0
 fi
 
-if [ -z "$SID" ]; then
-  echo "No chat session recorded yet — starting a fresh one in ${WORKTREE}."
-  echo "Send a message to the bot first and this picks it up on the next attach."
-  echo
-  SID_ARG=()
-else
-  echo "$SID" > "$SID_MARK"
-  echo "This conversation, in ${WORKTREE}."
-  echo "Type here and you are typing to the same thread the bot answers in."
-  echo "Close the Mini App and reopen it any time — tmux keeps your place."
-  echo "The bot keeps answering while you are in here; one turn at a time,"
-  echo "so a message from either side waits for the other's turn to finish."
-  echo
-  SID_ARG=(--session "$SID")
+# --- reap a tmux session left over from a different conversation OR a different
+# tool. The mark is `<surface>:<session>`: the two tools name their sessions
+# incompatibly, so a lane switch has to reap the pane or the terminal keeps
+# showing the previous tool on screen — which is exactly the defect this block
+# was extended for.
+MARK="${SURFACE}:${SID}"
+PREV=$(cat "$SID_MARK" 2>/dev/null || true)
+if [ -n "$PREV" ] && [ "$PREV" != "$MARK" ]; then
+  tmux kill-session -t "$TMUX_NAME" 2>/dev/null || true
 fi
+echo "$MARK" > "$SID_MARK"
+
+case "$SURFACE" in
+  cline)
+    if [ -n "$SID" ]; then
+      echo "Cline, in ${WORKTREE} — ${LAUNCH_NOTE}."
+      echo "This is the last Cline thread for this chat. Cline cannot resume a"
+      echo "thread headlessly, so a new message I answer starts a fresh Cline"
+      echo "thread and will NOT appear here. What you type here is yours."
+    else
+      echo "Cline, in ${WORKTREE} — a fresh thread, because this chat has no"
+      echo "recorded Cline session yet. Send me a message first and the next"
+      echo "attach resumes it."
+    fi
+    echo "Close the Mini App and reopen it any time — tmux keeps your place."
+    echo
+    ;;
+  *)
+    if [ -n "$SID" ]; then
+      echo "OpenCode, in ${WORKTREE} — ${LAUNCH_NOTE}."
+      echo "Type here and you are typing to the same thread I answer in."
+    else
+      echo "No chat session recorded yet — starting a fresh one in ${WORKTREE}."
+      echo "Send a message to the bot first and this picks it up on the next attach."
+    fi
+    echo "Close the Mini App and reopen it any time — tmux keeps your place."
+    echo "I keep answering while you are in here; one turn at a time, so a"
+    echo "message from either side waits for the other's turn to finish."
+    echo
+    ;;
+esac
 
 cd "$WORKTREE" || exit 1
 
@@ -235,7 +362,13 @@ trap cleanup EXIT INT TERM
 # foreground so the pty shows the conversation. A second open re-attaches to
 # the same session; tmux keeps your place between opens. The tmux status bar
 # stays off for these sessions: on a phone screen it is a wasted row and a
-# visual frame, and opencode draws its own status line.
-tmux new-session -d -A -s "$TMUX_NAME" "$OPENCODE_BIN" "${SID_ARG[@]}"
+# visual frame, and the tool draws its own status line.
+#
+# The command is the argv from scripts/lib/tui-surface.mjs, not
+# "$OPENCODE_BIN" "${SID_ARG[@]}": that hardcoded argv WAS the defect — it named
+# OpenCode whatever lane the chat was actually on. It arrives as ARG0/ARG1/…
+# lines rather than one string so tmux gets real argv words and a model with a
+# space in it survives; no eval, no re-splitting.
+tmux new-session -d -A -s "$TMUX_NAME" "${LAUNCH_ARGV[@]}"
 tmux set-option -t "$TMUX_NAME" status off 2>/dev/null || true
 tmux attach-session -t "$TMUX_NAME"

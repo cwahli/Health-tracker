@@ -17,6 +17,12 @@ Environment=TUI_BOT_ID=vm
 Environment=TUI_STATE_ROOT=/home/ubuntu/.local/state/bot-host
 Environment=TUI_WORKTREE=/home/ubuntu/bot-host-r14
 Environment=OPENCODE_BIN=/home/ubuntu/.opencode/bin/opencode
+# Which tool the terminal launches is decided per chat at attach time (see
+# scripts/lib/tui-surface.mjs), and a chat on Cline needs the cline CLI. This
+# unit's PATH has no ~/.npm-global/bin, where cline lives, so a bare `cline`
+# would not resolve and the attach would die on a chat that is on Cline. Both
+# binaries are named because both are live lanes on this bot.
+Environment=CLINE_BIN=/home/ubuntu/.npm-global/bin/cline
 # The tmux session is named for the LOCATION, because a tmux session list is
 # read to answer "which box is this on?". "opencode-tui" said neither location
 # nor bot on a box that runs two of them. vm2's twin is VM-tui-vm2: one

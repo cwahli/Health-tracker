@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 
 import { compressReasoning, cleanReasoning } from '../scripts/lib/reasoning-compress.mjs';
 import {
@@ -64,6 +65,11 @@ import {
   mapClineEvent,
   resolveClineBin,
   CLINE_THINKING_LEVELS,
+  runCline,
+  pickClineSessionId,
+  listClineSessionIds,
+  clineSessionsDir,
+  CLINE_SESSION_ID_RE,
 } from '../scripts/lib/agent-cline.mjs';
 import {
   parseCommand,
@@ -1235,6 +1241,121 @@ describe('agent-cline', () => {
       mapClineEvent({ type: 'agent_event', event: { type: 'tool_use', tool: 'bash', status: 'running' } }),
     ).toMatchObject({ kind: 'tool', tool: 'bash' });
     expect(mapClineEvent(null)).toBeNull();
+  });
+});
+
+// A Cline run has to report the session it created, or there is nothing for the
+// /tui terminal to resume. Before this, runCline resolved `sessionID: null` for
+// every run, so `sessions.json` kept a stale opencode id from before the chat
+// moved to Cline and the terminal opened that instead — a different agent on a
+// different thread. Cline cannot be TOLD which id to use (measured on 3.0.65:
+// `--id` with `--json` answers "interactive mode is unsupported", `--id` without
+// a TTY answers "interactive mode requires a TTY"), so the id can only be read
+// back out of the sessions directory.
+describe('cline session id capture', () => {
+  const meta = (rows: Record<string, { cwd: string; started_at: string }>) => {
+    const table = rows;
+    return (id: string) => {
+      const row = table[id];
+      return row ? { ...row, started_at_epoch: Date.parse(row.started_at) } : null;
+    };
+  };
+
+  it('takes the id this run created', () => {
+    expect(
+      pickClineSessionId({
+        before: ['1_a'],
+        after: ['1_a', '2_b'],
+        workspace: '/w',
+        readMeta: meta({ '2_b': { cwd: '/w', started_at: '2026-01-01T00:00:00Z' } }),
+      }),
+    ).toBe('2_b');
+  });
+
+  it('never returns an id the run did not create', () => {
+    // The before-snapshot is taken before the spawn, so everything in it belongs
+    // to an earlier run. Returning one of those resumes a stale conversation.
+    expect(
+      pickClineSessionId({
+        before: ['1_a', '2_b'],
+        after: ['1_a', '2_b'],
+        workspace: '/w',
+        readMeta: meta({
+          '1_a': { cwd: '/w', started_at: '2026-01-01T00:00:00Z' },
+          '2_b': { cwd: '/w', started_at: '2026-01-02T00:00:00Z' },
+        }),
+      }),
+    ).toBeNull();
+  });
+
+  it('skips another workspace, because the directory is shared host-wide', () => {
+    // A run in /a and a run in /b both land in ~/.cline/data/sessions. An id
+    // from the wrong checkout resumes a conversation with nothing to do with
+    // this chat, and the TUI would show it as this chat's thread.
+    expect(
+      pickClineSessionId({
+        before: [],
+        after: ['9_z'],
+        workspace: '/w',
+        readMeta: meta({ '9_z': { cwd: '/other', started_at: '2026-06-01T00:00:00Z' } }),
+      }),
+    ).toBeNull();
+  });
+
+  it('picks the newest when several runs land in the same workspace', () => {
+    expect(
+      pickClineSessionId({
+        before: [],
+        after: ['1_a', '2_b', '3_c'],
+        workspace: '/w',
+        readMeta: meta({
+          '1_a': { cwd: '/w', started_at: '2026-01-01T00:00:00Z' },
+          '2_b': { cwd: '/w', started_at: '2026-03-01T00:00:00Z' },
+          '3_c': { cwd: '/w', started_at: '2026-02-01T00:00:00Z' },
+        }),
+      }),
+    ).toBe('2_b');
+  });
+
+  it('recognises only real cline session directory names', () => {
+    expect(CLINE_SESSION_ID_RE.test('1790714599861_80trx')).toBe(true);
+    expect(CLINE_SESSION_ID_RE.test('ses_f227779acffe')).toBe(false);
+    expect(CLINE_SESSION_ID_RE.test('README')).toBe(false);
+  });
+
+  it('reads nothing rather than throwing when the directory is absent', () => {
+    expect(listClineSessionIds('/nonexistent/cline/sessions')).toEqual([]);
+    expect(clineSessionsDir('/explicit/dir')).toBe('/explicit/dir');
+  });
+
+  it('runCline resolves the id its own run created', async () => {
+    // The real seam, not the helper: a before/after pair of the sessions
+    // directory, exactly what runCline sees around the spawn.
+    const listings: string[][] = [['1_old'], ['1_old', '2_new']];
+    let call = 0;
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: () => {},
+    });
+    const result = await runCline({
+      prompt: 'hi',
+      model: 'cline-free/deepseek-v4.1-flash',
+      workspace: '/w',
+      clineBin: '/fake/cline',
+      spawnImpl: () => {
+        // Emit one run_result line, then close, the way the real CLI does.
+        setImmediate(() => {
+          child.stdout.emit('data', Buffer.from(`${JSON.stringify({ type: 'run_result', text: 'ok' })}\n`));
+          child.emit('close', 0);
+        });
+        return child;
+      },
+      listSessionIds: () => listings[Math.min(call++, listings.length - 1)],
+      readSessionMeta: () => ({ cwd: '/w', started_at: '2026-05-01T00:00:00Z' }),
+    });
+    expect(result.sessionID).toBe('2_new');
+    expect(result.finalText).toBe('ok');
   });
 });
 

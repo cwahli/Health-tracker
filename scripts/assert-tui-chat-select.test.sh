@@ -18,6 +18,12 @@ check() { # check <name> <got> <want>
   else echo "  FAIL  $1 (got [$2], want [$3])"; FAIL=$((FAIL + 1)); fi
 }
 
+# The dry run prints the decision line first (SURFACE/SID/SOURCE) and then the
+# argv as CMD. Selection cases read the decision line only; the lane cases in
+# section 13 assert on CMD, so a selection regression and a lane regression fail
+# as different things.
+first() { printf '%s\n' "$1" | head -1; }
+
 echo "assert-tui-chat-select:"
 ROOT="$(mktemp -d)"
 STATE="$ROOT/state/bot-host/vm"
@@ -30,16 +36,16 @@ JSON
 
 # 1. Explicit chat wins, even when it is not first in the map.
 out=$(TUI_STATE_ROOT="$ROOT/state/bot-host" TUI_BOT_ID=vm TUI_CHAT_ID=111 TUI_DRY_RUN=1 bash "$ATTACH")
-check "explicit chat resolves its own session" "$out" "SID=ses_A111 SOURCE=explicit-hit"
+check "explicit chat resolves its own session" "$(first "$out")" "SURFACE=opencode SID=ses_A111 SOURCE=explicit-hit"
 
 # 2. tui-open.json (what /tui writes) selects without any env.
 echo '{"chatId":"222","sessionId":"ses_B222","at":"2026-09-27T07:00:00.000Z"}' > "$STATE/tui-open.json"
 out=$(TUI_STATE_ROOT="$ROOT/state/bot-host" TUI_BOT_ID=vm TUI_DRY_RUN=1 bash "$ATTACH")
-check "tui-open selects the opening chat" "$out" "SID=ses_B222 SOURCE=tui-open-hit"
+check "tui-open selects the opening chat" "$(first "$out")" "SURFACE=opencode SID=ses_B222 SOURCE=tui-open-hit"
 
 # 3. Explicit beats a stale tui-open from another chat.
 out=$(TUI_STATE_ROOT="$ROOT/state/bot-host" TUI_BOT_ID=vm TUI_CHAT_ID=111 TUI_DRY_RUN=1 bash "$ATTACH")
-check "explicit beats stale tui-open" "$out" "SID=ses_A111 SOURCE=explicit-hit"
+check "explicit beats stale tui-open" "$(first "$out")" "SURFACE=opencode SID=ses_A111 SOURCE=explicit-hit"
 
 # 4. A chat with no session falls back loudly, not silently to another chat.
 # NOTE: {"222","111"} iterates as 111,222 — integer-like keys sort numerically
@@ -47,12 +53,12 @@ check "explicit beats stale tui-open" "$out" "SID=ses_A111 SOURCE=explicit-hit"
 # is an arbitrary pick and must always be labelled legacy-first.
 rm "$STATE/tui-open.json"
 out=$(TUI_STATE_ROOT="$ROOT/state/bot-host" TUI_BOT_ID=vm TUI_CHAT_ID=999 TUI_DRY_RUN=1 bash "$ATTACH")
-check "unknown chat falls back loudly" "$out" "SID=ses_A111 SOURCE=legacy-first"
+check "unknown chat falls back loudly" "$(first "$out")" "SURFACE=opencode SID=ses_A111 SOURCE=legacy-first"
 
 # 5. A missing map resolves empty, never a garbage session.
 rm "$STATE/sessions.json"
 out=$(TUI_STATE_ROOT="$ROOT/state/bot-host" TUI_BOT_ID=vm TUI_CHAT_ID=111 TUI_DRY_RUN=1 bash "$ATTACH")
-check "missing map resolves empty" "$out" "SID= SOURCE=legacy-first"
+check "missing map resolves empty" "$(first "$out")" "SURFACE=opencode SID= SOURCE=legacy-first"
 
 # 6. The bot-host /tui handler records the opening chat (static check on the
 #    live contract: tui-open.json written on the gateway path, never fatal).
@@ -161,7 +167,108 @@ VM2_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm2.service" | cut -d= -f2
 [ -n "$VM_NAME" ] && [ "$VM_NAME" != "$VM2_NAME" ] \
   && { echo "  PASS  the two bots keep separate sessions ($VM_NAME vs $VM2_NAME)"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the two bots share one session ($VM_NAME)"; FAIL=$((FAIL + 1)); }
-rm -rf "$LEASE_FIX" "$ROOT"
+
+# 13. The terminal launches the tool the CHAT is on, not the bot's default.
+#     This is the class that shipped: the attach hardcoded $OPENCODE_BIN, so a
+#     chat on cline:cline-free/deepseek-v4.1-flash opened an OpenCode TUI on a
+#     stale opencode session id — a different agent on a different thread (live
+#     2026-09-29, prefs said cline, the pane read "Build · MiMo-V2.6-Flash Free
+#     OpenCode"). Pinned per lane, from the chat's own prefs row.
+LANE="$ROOT/lane"
+# TUI_STATE_ROOT is the PARENT of the bot dir; the attach builds
+# $TUI_STATE_ROOT/$TUI_BOT_ID itself, so the files live one level down.
+mkdir -p "$LANE/vm/cline-sessions"
+run_lane() { # run_lane <chat> -> dry-run output
+  TUI_STATE_ROOT="$LANE" TUI_BOT_ID=vm TUI_CHAT_ID="$1" TUI_WORKTREE=/w \
+    OPENCODE_BIN=/oc CLINE_BIN=/cl CLINE_SESSIONS_DIR="$LANE/vm/cline-sessions" \
+    TUI_DRY_RUN=1 bash "$ATTACH" 2>/dev/null
+}
+printf '{"111":"ses_open111"}\n' > "$LANE/vm/sessions.json"
+printf '{"111":"1790_abc111"}\n' > "$LANE/vm/cline-sessions.json"
+
+printf '{"111":{"model":"cline:cline-free/deepseek-v4.1-flash"}}\n' > "$LANE/vm/prefs.json"
+out=$(run_lane 111)
+check "a cline chat launches cline" "$(first "$out")" "SURFACE=cline SID=1790_abc111 SOURCE=explicit-hit"
+printf '%s\n' "$out" | grep -q -- "-i" \
+  && { echo "  PASS  the cline launch asks for the interactive TUI (-i)"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the cline launch is missing -i: $out"; FAIL=$((FAIL + 1)); }
+printf '%s\n' "$out" | grep -q "'--id' '1790_abc111'" \
+  && { echo "  PASS  the cline launch resumes the chat's own cline session"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the cline launch does not resume its session: $out"; FAIL=$((FAIL + 1)); }
+if printf '%s\n' "$out" | grep -q "/oc"; then
+  echo "  FAIL  a cline chat still launches the opencode binary"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  a cline chat never launches the opencode binary"; PASS=$((PASS + 1))
+fi
+if printf '%s\n' "$out" | grep -q "ses_open111"; then
+  echo "  FAIL  a cline chat was handed the opencode session id"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  a cline chat is never handed the opencode session id"; PASS=$((PASS + 1))
+fi
+
+printf '{"111":{"model":"opencode/space-bunny-free"}}\n' > "$LANE/vm/prefs.json"
+out=$(run_lane 111)
+check "an opencode chat is unchanged" "$(first "$out")" "SURFACE=opencode SID=ses_open111 SOURCE=explicit-hit"
+check "the opencode argv is byte-for-byte the old one" \
+  "$(printf '%s\n' "$out" | grep '^CMD=')" "CMD='/oc' '--session' 'ses_open111'"
+
+# An API-only lane has no screen. It must refuse, not silently fall back to
+# opencode — a fallback IS the defect, wearing a different hat.
+printf '{"111":{"model":"gemini:gemini-2.5-pro"}}\n' > "$LANE/vm/prefs.json"
+out=$(run_lane 111)
+check "a gemini chat has no terminal" "$(first "$out")" "SURFACE=gemini SID=ses_open111 SOURCE=explicit-hit"
+if printf '%s\n' "$out" | grep -q '^CMD='; then
+  echo "  FAIL  a gemini chat was given a launch command anyway"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  a gemini chat is given no launch command"; PASS=$((PASS + 1))
+fi
+# The refusal must name the REASON it refused, so the two refusals stay
+# distinguishable: a lane with no terminal is actionable (/freemodel), and a
+# failed resolver is a bug to look at. Collapsing them would report a broken
+# resolver as "this chat has no terminal".
+printf '%s\n' "$out" | grep -q '^REASON=.*no terminal' \
+  && { echo "  PASS  the refusal names the lane reason"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the refusal does not carry a reason: $out"; FAIL=$((FAIL + 1)); }
+grep -q 'Could not work out which terminal' "$ATTACH" \
+  && { echo "  PASS  a failed resolver is reported apart from a lane refusal"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  a failed resolver would be reported as a lane refusal"; FAIL=$((FAIL + 1)); }
+
+# The live lane wins over the tui-open snapshot: a /freemodel switch after the
+# button was sent must not keep launching the old tool.
+printf '{"111":{"model":"cline:cline-free/deepseek-v4.1-flash"}}\n' > "$LANE/vm/prefs.json"
+echo '{"chatId":"111","surface":"opencode","model":"opencode/space-bunny-free","sessionId":"ses_open111"}' > "$LANE/vm/tui-open.json"
+out=$(run_lane 111)
+check "the live lane beats a stale tui-open surface" "$(first "$out")" "SURFACE=cline SID=1790_abc111 SOURCE=explicit-hit"
+
+# The pane mark carries the surface, so a lane switch reaps the previous tool's
+# pane instead of leaving the old screen up.
+grep -q 'MARK="${SURFACE}:${SID}"' "$ATTACH" \
+  && { echo "  PASS  the pane mark is surface-qualified, so a lane switch reaps"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the pane mark does not carry the surface"; FAIL=$((FAIL + 1)); }
+
+# The cline CLI is not on the ttyd units' PATH, so each unit must name it.
+for unit in tui-ttyd-vm tui-ttyd-vm2; do
+  grep -q 'Environment=CLINE_BIN=' "$HERE/$unit.service" 2>/dev/null \
+    && { echo "  PASS  $unit names CLINE_BIN"; PASS=$((PASS + 1)); } \
+    || { echo "  FAIL  $unit does not name CLINE_BIN (cline is off its PATH)"; FAIL=$((FAIL + 1)); }
+done
+
+# The decision lives in one module the bot, the shell and these cases share, so
+# a fix cannot land in one of the three and miss the others.
+[ -f "$HERE/lib/tui-surface.mjs" ] \
+  && { echo "  PASS  the lane decision lives in scripts/lib/tui-surface.mjs"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  scripts/lib/tui-surface.mjs is missing"; FAIL=$((FAIL + 1)); }
+grep -q "lib/tui-surface.mjs" "$ATTACH" \
+  && { echo "  PASS  the attach resolves the surface from that module"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the attach does not read the shared surface module"; FAIL=$((FAIL + 1)); }
+# And the attach must not name the opencode binary as its launch any more.
+if grep -vE "^\s*#" "$ATTACH" | grep -q 'new-session.*"\$OPENCODE_BIN"'; then
+  echo "  FAIL  the attach still launches \$OPENCODE_BIN unconditionally"; FAIL=$((FAIL + 1))
+else
+  echo "  PASS  the attach no longer launches \$OPENCODE_BIN unconditionally"; PASS=$((PASS + 1))
+fi
+
+rm -rf "$LEASE_FIX" "$ROOT" "$LANE"
 echo
 echo "$PASS pass, $FAIL fail"
 [ "$FAIL" -eq 0 ]

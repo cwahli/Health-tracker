@@ -27,6 +27,62 @@ export function resolveClineBin(explicit) {
   return 'cline';
 }
 
+export function clineSessionsDir(explicit) {
+  if (explicit) return explicit;
+  if (process.env.CLINE_SESSIONS_DIR) return process.env.CLINE_SESSIONS_DIR;
+  return path.join(HOME, '.cline', 'data', 'sessions');
+}
+
+/** Session directory names are `<epoch-ms>_<rand>`, e.g. 1790714599861_80trx. */
+export const CLINE_SESSION_ID_RE = /^\d+_[A-Za-z0-9]+$/;
+
+export function listClineSessionIds(dir = clineSessionsDir(), readdirImpl = fs.readdirSync) {
+  try {
+    return readdirImpl(dir).filter((name) => CLINE_SESSION_ID_RE.test(name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The id of the session one run just created.
+ *
+ * Cline 3.0.65 has no headless resume — `cline --id <id> --json` answers
+ * "interactive mode is unsupported" and `cline --id <id>` without a TTY
+ * answers "interactive mode requires a TTY" (both measured on 3.0.65, see
+ * TUI_TG_AUTH_TRAIL.md). So the id cannot be passed IN; it can only be read back
+ * OUT. Every run writes `<sessions>/<epoch>_<rand>/<epoch>_<rand>.json`, and the
+ * before/after diff of that directory is the run's own footprint.
+ *
+ * Candidates are filtered on the run's own workspace, because the directory is
+ * shared by every cline process on the host: a run in /a and a run in /b both
+ * land here, and an id from the wrong checkout resumes a conversation that has
+ * nothing to do with this chat. `cwd` is the discriminator; `started_at` breaks
+ * ties so the newest wins.
+ */
+export function pickClineSessionId({ before = [], after = [], workspace = '', readMeta = defaultReadClineSessionMeta, dir } = {}) {
+  const seen = new Set(before);
+  const fresh = after.filter((id) => !seen.has(id)).sort();
+  const dated = [];
+  for (const id of fresh) {
+    const meta = readMeta(id, dir) || {};
+    if (workspace && meta.cwd && meta.cwd !== workspace) continue;
+    dated.push({ id, started: Number(meta.started_at_epoch) || Date.parse(meta.started_at || '') || 0 });
+  }
+  if (!dated.length) return null;
+  dated.sort((a, b) => b.started - a.started);
+  return dated[0].id;
+}
+
+function defaultReadClineSessionMeta(id, dir = clineSessionsDir()) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, id, `${id}.json`), 'utf8'));
+    return { ...raw, started_at_epoch: Date.parse(raw.started_at || '') || 0 };
+  } catch {
+    return null;
+  }
+}
+
 export function buildClineArgs({ prompt, model, variant, plan = false, timeoutMs = 0, workspace }) {
   const args = ['-P', 'cline', '-m', model, '--json', '--auto-approve', 'true'];
   if (variant && CLINE_THINKING_LEVELS.includes(variant)) args.push('--thinking', variant);
@@ -87,9 +143,16 @@ export function runCline({
   env,
   envMode = 'inherit',
   spawnImpl = spawn,
+  sessionsDir,
+  listSessionIds = listClineSessionIds,
+  readSessionMeta = defaultReadClineSessionMeta,
 }) {
   return new Promise((resolve) => {
     const args = buildClineArgs({ prompt, model, variant, plan, timeoutMs, workspace });
+    // The before/after diff of the sessions directory is the only way to learn
+    // this run's id, because Cline cannot be told which id to use. Taken BEFORE
+    // the spawn, or the run's own directory is already in the snapshot.
+    const before = listSessionIds(sessionsDir);
     const child = spawnImpl(resolveClineBin(clineBin), args, {
       cwd: workspace,
       env: buildChildEnv({ extraEnv: env, mode: envMode }),
@@ -128,9 +191,16 @@ export function runCline({
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      const sessionID = pickClineSessionId({
+        before,
+        after: listSessionIds(sessionsDir),
+        workspace,
+        readMeta: readSessionMeta,
+        dir: sessionsDir,
+      });
       resolve({
         code,
-        sessionID: null,
+        sessionID,
         finalText: finalText.trim(),
         lastError,
         stderr,
