@@ -81,14 +81,22 @@ export async function createOpencodeSession(serverUrl, { title = 'Health-tracker
 
 export function tuiAttachCommand({ serverUrl, workspace, sessionId, opencodeBin } = {}) {
   if (!serverUrl || !workspace || !sessionId) throw new Error('OpenCode TUI attach needs server URL, workspace, and session id');
+  // v2.0.19 has no `attach` subcommand and no `--dir` flag. Both were rejected
+  // like unknown flags: the CLI printed help and exited, so the /tx pane never
+  // opened a session. The v2 spellings are `--server <url>`, `--session <id>`
+  // and a trailing positional directory (verified against the installed binary
+  // 2026-09-29).
+  //
+  // One caveat, deliberately not papered over: `--server` needs
+  // OPENCODE_PASSWORD against a service that requires one, and the caller
+  // supplies that in the child env, not here.
   return [
     shellQuote(resolveOpencodeBin(opencodeBin)),
-    'attach',
+    '--server',
     shellQuote(serverUrl),
-    '--dir',
-    shellQuote(workspace),
     '--session',
     shellQuote(sessionId),
+    shellQuote(workspace),
   ].join(' ');
 }
 

@@ -180,7 +180,7 @@ export function listModelsVerbose(opts = {}) {
   return execOpencode(['models', '--verbose'], { timeoutMs: 60000, ...opts });
 }
 
-export function buildOpencodeArgs({ prompt, model, variant, thinking = true, attachUrl, sessionId, extraArgs = [] }) {
+export function buildOpencodeArgs({ prompt, model, variant, thinking = true, sessionId, extraArgs = [] }) {
   const args = ['run', '--format', 'json'];
   // Provider failures (rate limit, no funds, bad auth) are written to stderr as
   // ERROR log lines, after which opencode sits there forever with an EMPTY
@@ -190,7 +190,15 @@ export function buildOpencodeArgs({ prompt, model, variant, thinking = true, att
   // all|trace|debug|info|warn|warning|error|fatal|none, so "ERROR" is an
   // InvalidValue, the CLI prints help and exits 1 with no output (2026-09-28).
   args.push('--print-logs', '--log-level', 'error');
-  if (attachUrl) args.push('--attach', attachUrl);
+  // No --attach. There is no such flag in opencode v2.0.19: it is rejected like
+  // any unknown flag, the CLI prints help and exits 1, and the turn reports "the
+  // model returned no text output" (verified 2026-09-29 against the installed
+  // CLI, the same failure the --variant note below records). v2 renamed it
+  // --server, which is not a drop-in: it requires OPENCODE_PASSWORD against a
+  // service that demands one, and the bot has no such password. Left off, the
+  // run goes to the opencode background service — the same server the TUI
+  // terminal uses, which is what lets a chat turn and a terminal prompt share
+  // one session instead of racing it.
   if (sessionId) args.push('--session', sessionId);
   if (thinking) args.push('--thinking');
   // The variant is part of the model string now ("provider/model#variant").
@@ -400,7 +408,6 @@ export function runOpencode({
   thinking = true,
   timeoutMs = 900000,
   opencodeBin,
-  attachUrl,
   sessionId,
   onEvent,
   onSpawn,
@@ -411,7 +418,7 @@ export function runOpencode({
   spawnImpl = spawn,
 }) {
   return new Promise((resolve) => {
-    const args = buildOpencodeArgs({ prompt, model, variant, thinking, attachUrl, sessionId, extraArgs });
+    const args = buildOpencodeArgs({ prompt, model, variant, thinking, sessionId, extraArgs });
     const child = spawnImpl(resolveOpencodeBin(opencodeBin), args, {
       cwd: workspace,
       env: buildChildEnv({ extraEnv: env, mode: envMode }),

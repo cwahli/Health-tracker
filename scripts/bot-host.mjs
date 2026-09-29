@@ -2513,7 +2513,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
         `⌨️ *opencode TUI* — a real terminal, driven by touch, attached to *this* conversation in \`${config.agent.workspace}\`.`,
         'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.',
-        'It refuses to attach while I am mid-turn — two agents writing one session corrupts it. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
+        'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } }]] },
       });
@@ -3311,13 +3311,32 @@ export async function runOpencodeWithFailover({ api, config, chatId, prompt, mod
 }
 
 /**
- * Is the TUI holding this conversation right now?
+ * Is a TUI attached to this conversation right now?
  *
- * The TUI is the same opencode session the bot answers in, so a chat turn and
- * an attached terminal cannot both write it. tui-attach.sh publishes a lease
- * with a heartbeat; a lease older than TUI_LEASE_MAX_AGE_MS is treated as
- * free, because the alternative — a phone that dies holding a lease — would
- * block the chat permanently with no way to clear it.
+ * PRESENCE, NOT A LOCK. tui-attach.sh publishes a lease with a heartbeat, and a
+ * heartbeat older than TUI_LEASE_MAX_AGE_MS reads as gone, because a phone that
+ * dies holding one must not leave a mark forever.
+ *
+ * This used to answer "is the TUI holding the conversation", and the answer
+ * gated turns: while a terminal was merely *attached*, every chat message was
+ * queued and no tool ran until the Mini App was closed. That is the opposite of
+ * what /tui promises the user ("what you send here appears there"), and it made
+ * opening the terminal stop all work.
+ *
+ * Why it is safe now: the TUI and the bot are not two writers on one file, they
+ * are two clients of the SAME opencode service (neither passes --server, so
+ * both go through the service manager) reading and writing the SAME session
+ * through it. One server owns the state and serialises the turns, so a chat
+ * turn and a prompt typed in the terminal are two turns on one conversation —
+ * interleaved by the server, not racing it.
+ *
+ * Proven 2026-09-29 against a scratch server and a scratch session, so no live
+ * conversation was touched: a TUI client attached with `--server <url> --session
+ * <id> <dir>`, then `opencode run --server <same url> --session <same id>`
+ * executed a turn. The TUI process survived, and the session history came back
+ * as one coherent user -> assistant -> idle triple with no duplicate or
+ * interleaved write. (That turn ended in a provider 429, which is a model
+ * quota, not a concurrency fault — the write path is what was under test.)
  */
 const TUI_LEASE_MAX_AGE_MS = 90_000;
 
@@ -3325,49 +3344,20 @@ function tuiLeasePath(botId) {
   return path.join(stateDir(botId), 'tui-lease.json');
 }
 
-export function tuiHoldsConversation(botId, sessionId) {
+export function tuiIsAttached(botId, sessionId) {
   let lease;
   try {
     lease = JSON.parse(fs.readFileSync(tuiLeasePath(botId), 'utf8'));
   } catch {
-    return false; // no lease, or unreadable: nobody is holding it
+    return false; // no lease, or unreadable: nobody is attached
   }
   const heartbeat = Number(lease?.heartbeat || 0);
   if (!heartbeat || Date.now() - heartbeat > TUI_LEASE_MAX_AGE_MS) return false;
   const held = String(lease?.session || '');
   const wanted = String(sessionId || '');
-  // A lease with no session id predates the id, so treat it as "the chat is
-  // held" rather than guessing. A lease for a *different* session is not ours
-  // to block.
+  // A lease with no session id predates the id, so treat it as "a TUI is open"
+  // rather than guessing. A lease for a *different* session is not ours.
   return !held || !wanted || held === wanted;
-}
-
-const tuiDrainTimers = new Map();
-
-/**
- * Run whatever was queued while the TUI held the conversation, once it lets go.
- * The queue itself is already bounded (MAX_FOLLOWUPS); this only has to notice
- * the lease clearing, which nothing else is watching for.
- */
-function scheduleTuiQueueDrain(ctx) {
-  const chatId = String(ctx.message.chat.id);
-  if (tuiDrainTimers.has(chatId)) return;
-  const deadline = Date.now() + 30 * 60 * 1000;
-  const tick = async () => {
-    if (ctx.busy.has(ctx.message.chat.id) || Date.now() > deadline) {
-      tuiDrainTimers.delete(chatId);
-      return;
-    }
-    if (tuiHoldsConversation(ctx.config.id, ctx.sessions.get(ctx.message.chat.id))) {
-      setTimeout(tick, 15_000).unref?.();
-      return;
-    }
-    tuiDrainTimers.delete(chatId);
-    if (shiftFollowup(chatId) == null) return;
-    await api.sendMessage(chatId, '▶️ TUI released the conversation — running what you queued.').catch(() => {});
-    await handleMessage({ ...ctx, message: { ...ctx.message, text: shiftFollowup(chatId) || '' }, depth: 1 });
-  };
-  tuiDrainTimers.set(chatId, setTimeout(tick, 15_000));
 }
 
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
@@ -3412,29 +3402,18 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     return;
   }
 
-  // The TUI holds this same conversation while a terminal client is attached,
-  // so a message typed here would race a second writer on one session. Defer
-  // instead: queue it, and say plainly why. tui-attach.sh holds that lease with
-  // a heartbeat, so a phone that dies mid-session does not block the chat
-  // forever — an expired heartbeat reads as free.
-  if (tuiHoldsConversation(config.id, sessions.get(chatId))) {
-    if (hasMedia) {
-      await api.sendMessage(chatId, 'The TUI has this conversation open right now, and photos/files cannot queue. Send it from the terminal, or close the TUI and resend here.');
-      return;
-    }
-    const pos = queueFollowup(chatId, text);
-    if (pos == null) {
-      await api.sendMessage(chatId, `The TUI has this conversation, and the follow-up queue is full (${MAX_FOLLOWUPS}). Close the TUI and resend.`);
-      return;
-    }
-    await api.sendMessage(chatId, [
-      `⌨️ Queued as follow-up #${pos} — you are in the TUI on this same conversation, so I held it rather than write to it from two places.`,
-      'It runs by itself when you close the TUI (or send /abort in there to let go).',
-    ].join('\n'));
-    scheduleTuiQueueDrain({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message });
-    return;
-  }
-
+  // A TUI attached to this same conversation does NOT stop a turn.
+  //
+  // This block used to defer every message while the terminal was open, queue it
+  // as a follow-up, and run nothing until the Mini App was closed — so opening
+  // the TUI silently disabled the bot. The deferral is gone because the premise
+  // behind it is false: the TUI and the bot are two clients of the same opencode
+  // service, driving the same session through it, and the server serialises the
+  // writes. See tuiIsAttached for the probe that established it.
+  //
+  // Presence is still read, and used for one thing only: a note that this turn
+  // is visible in the terminal. That is not decoration — without it a turn that
+  // also renders in the TUI looks like the bot ran something twice.
   // A location request that no worker answered holds the turn instead of
   // quietly running it here. No lane is chosen, so no ledger is touched.
   const heldLocation = getBlockedLocation(chatId);
@@ -3466,6 +3445,21 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     pid: process.pid,
     worktree: config.agent.workspace,
   }).claimed;
+
+  // A TUI attached to this same conversation does NOT stop a turn.
+  //
+  // This used to defer every message while the terminal was open, queue it as a
+  // follow-up, and run nothing until the Mini App was closed — so opening the
+  // TUI silently disabled the bot, the opposite of what /tui promises. The
+  // deferral is gone because its premise is false: the TUI and the bot are two
+  // clients of the same opencode service driving the same session through it,
+  // and the server serialises the turns. See tuiIsAttached for the probe.
+  //
+  // Presence is still read, for one reason: a turn that also renders in the
+  // terminal looks, from the chat, like the bot ran something twice. The note
+  // rides the progress line's first paint rather than being its own message, so
+  // an ordinary turn is not made noisier by it.
+  const tuiWatching = tuiIsAttached(config.id, sessions.get(chatId));
 
   busy.add(chatId);
   const runStartedAt = Date.now();
@@ -3502,6 +3496,12 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // at once; the old lazy path left only bare typing until the first
     // model event, which on a slow lane looks stuck.
     await renderer.announce().catch(() => {});
+    // A TUI is open on this same conversation, so the user can watch this turn
+    // happen in the terminal as well. It shares the session, so what runs here
+    // shows up there — one turn at a time, never two at once.
+    if (tuiWatching) {
+      await api.sendMessage(chatId, '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.').catch(() => {});
+    }
     // Phone controls for the run: Abort kills it like /abort, Watch toggles
     // the per-tool feed. Best-effort and stateless — taps after the run ends
     // just answer what is true then ("nothing running" / pref flip).
@@ -3647,7 +3647,20 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         thinking: config.agent.thinking,
         timeoutMs: config.agent.timeoutMs,
         opencodeBin: config.agent.opencodeBin,
-        attachUrl: workSession.viewMode === 'tui' ? workSession.serverUrl : undefined,
+        // No server flag, on purpose. The turn runs against the opencode
+        // background service, which is the same service the TUI terminal talks
+        // to — that shared server is what lets both stay live on one session.
+        //
+        // This used to pass `attachUrl` here, and buildOpencodeArgs turned it
+        // into `--attach <url>`. opencode v2.0.19 has no `--attach`: the flag
+        // makes the CLI print its help and exit 1, so every turn with a `tx on`
+        // view died with "the model returned no text output" and no artifact —
+        // the same class of failure the neighbouring `--variant` comment
+        // records. v2 spells it `--server`, but that needs OPENCODE_PASSWORD
+        // against a service that requires one (verified: `opencode models
+        // --server <background url>` refuses without it), and the bot holds no
+        // such password. The default service path needs no credential at all,
+        // which is why it is the right one here.
         sessionId: workSession.viewMode === 'tui' ? workSession.opencodeSessionId : undefined,
         onEvent: onObserverEvent,
         onSpawn: (child) => running.set(chatId, { child, aborted: false, serverUrl: workSession.serverUrl, opencodeSessionId: workSession.opencodeSessionId }),
