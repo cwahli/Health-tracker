@@ -1118,6 +1118,7 @@ const followupQueues = new Map();
 // The tunnel URL this process last handed out. A quick tunnel's hostname changes
 // on every reconnect, so this is how /tui knows an older button is now dead.
 let lastMiniappUrl = '';
+let lastBugsUrl = '';
 
 export function watchOn(prefs, chatId) {
   return prefFor(prefs, chatId)?.watch === true;
@@ -2515,6 +2516,41 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         'It refuses to attach while I am mid-turn — two agents writing one session corrupts it. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } }]] },
+      });
+      return;
+    }
+
+    case 'bugs': {
+      // Shared bug board mini app (packet bug-board-miniapp, Node 5). Same
+      // web_app button pattern as /tui, served by the same gateway host under
+      // /bugs/ behind the initData door. Scoped to the bug ticket bot: it owns
+      // the canonical card list.
+      // Served from bot-host bots that hold a gateway token. vm is the
+      // master bot and validates today; bug_ticket stays listed so the scope
+      // is correct if it ever gains a bot-host surface (it is a hermes bot
+      // and has no bot-host command path).
+      const BOARD_BOTS = ['vm', 'bug_ticket'];
+      if (!BOARD_BOTS.includes(config.id)) {
+        await api.sendMessage(chatId, '🐛 The bug board lives on the VM bot — ask it for /bugs and it will hand you the button.');
+        return;
+      }
+      const bugsGatewayUrl = readTuiUrl();
+      if (!bugsGatewayUrl) {
+        const onPhone = String(miniappUrlFile()).includes('/data/data/com.termux/');
+        await api.sendMessage(chatId, onPhone
+          ? '🐛 Bug board is offline — the phone tunnel is down. It restarts itself; try /bugs again in a minute.'
+          : '🐛 Bug board is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /bugs again.');
+        return;
+      }
+      const boardUrl = `${bugsGatewayUrl}/bugs/?bot=${config.id}`;
+      const moved = lastBugsUrl && lastBugsUrl !== boardUrl;
+      lastBugsUrl = boardUrl;
+      await api.sendMessage(chatId, [
+        moved ? '⚠️ *The tunnel was reconnected*, so any earlier /bugs button is dead — use this one.' : null,
+        '🐛 *Bug queue* — the same board as the Health Tracker site (Ready now, Stuck, Bugs open), auto-refreshing.',
+        'What changes here lands in the same list the site shows.',
+      ].filter(Boolean).join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '🐛 Open bug board', web_app: { url: boardUrl } }]] },
       });
       return;
     }

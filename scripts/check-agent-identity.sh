@@ -61,10 +61,12 @@ check_commit() {
     return 0
   fi
   msg=$(git log -1 --format=%B "$sha")
+  # A location-shape trailer satisfies the rule no matter when the commit was
+  # authored (it carries everything the old shape has, plus location); the
+  # cutoff only excuses a *missing* location on older work.
+  printf '%s\n' "$msg" | grep -Eq "$new_pattern" && return 0
   if [ -n "$authored" ] && [ "$authored" \< "$LOCATION_SINCE" ]; then
     printf '%s\n' "$msg" | grep -Eq "$pattern" && return 0
-  else
-    printf '%s\n' "$msg" | grep -Eq "$new_pattern" && return 0
   fi
   echo "Commit $sha has no author identity." >&2
   echo "Required line: Author: <model and version> (<thinking level>) <location> (legacy Agent: accepted, legacy no-location shape accepted before $LOCATION_SINCE)" >&2

@@ -1,0 +1,37 @@
+{
+ "queue": "blocked",
+ "pollsBefore": 5,
+ "pollsSeen": 13,
+ "responses": 13,
+ "ovReqs": [
+  {
+   "ageSec": 137,
+   "done": true
+  },
+  {
+   "ageSec": 112,
+   "done": true
+  },
+  {
+   "ageSec": 87,
+   "done": true
+  },
+  {
+   "ageSec": 62,
+   "done": true
+  },
+  {
+   "ageSec": 37,
+   "done": true
+  },
+  {
+   "ageSec": 12,
+   "done": true
+  }
+ ],
+ "inPage": {
+  "vis": "visible",
+  "ovResources": 6
+ },
+ "boardSawBlocked": true
+}
