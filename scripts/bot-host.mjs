@@ -58,6 +58,7 @@ import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCa
 import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
 import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
+import { tuiSurfaceFor as tuiSurface, latestClineSessionId } from './lib/tui-surface.mjs';
 import { runGemini } from './lib/agent-gemini.mjs';
 import { parseRetryHintMs } from './lib/tool-allowance-ping.mjs';
 import { recordError, noteHealthy, recordRecoveryAttempt, classifyErrorKind, evaluateRecovery } from './lib/error-log.mjs';
@@ -323,6 +324,12 @@ function saveMap(id, file, map) {
 
 const loadSessions = (id) => loadMap(id, 'sessions.json');
 const saveSessions = (id, sessions) => saveMap(id, 'sessions.json', sessions);
+// Cline session ids are NOT opencode session ids. They look nothing alike
+// (`ses_…` vs `<epoch-ms>_<rand>`) and only one of them is valid for the tool
+// that produced it, so they get their own map rather than sharing `sessions.json`
+// — a cline id in that map would be handed straight to `opencode run --session`.
+const loadClineSessions = (id) => loadMap(id, 'cline-sessions.json');
+const saveClineSessions = (id, sessions) => saveMap(id, 'cline-sessions.json', sessions);
 const loadPrefs = (id) => loadMap(id, 'prefs.json');
 const savePrefs = (id, prefs) => saveMap(id, 'prefs.json', prefs);
 const loadTotals = (id) => loadMap(id, 'totals.json');
@@ -418,6 +425,15 @@ function shortProviderModel(model) {
   const { surface, id } = parseModelRef(model);
   if (surface === 'cline') return String(id).replace(/^cline-free\//, '');
   return id;
+}
+
+/**
+ * Which tool the /tui terminal should launch for this chat, and what it may
+ * claim. The table itself lives in lib/tui-surface.mjs so the bot, the attach
+ * script and the sensors cannot disagree about it.
+ */
+export function tuiSurfaceFor(model) {
+  return tuiSurface(model);
 }
 
 function extractEmbeddedMessage(text) {
@@ -2514,10 +2530,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       // The actual TUI: ttyd serves a real PTY and mounts it under the same
       // tunnel and the same login, so this is a terminal you type into from
-      // inside Telegram. It attaches to THIS chat's opencode session in THIS
-      // checkout (resolved per attach by tui-attach.sh), so it is the same
-      // conversation, not a second agent — which is why a message you send
-      // here shows up there.
+      // inside Telegram. It attaches to THIS chat's session in THIS checkout
+      // (resolved per attach by tui-attach.sh).
+      //
+      // WHICH tool it launches follows the chat's effective lane, not the bot's
+      // registry default. It used to be OpenCode unconditionally, so a chat on
+      // Cline opened an OpenCode TUI on a stale opencode session id — a
+      // different agent on a different thread from the one answering here.
       //
       // There is deliberately no /web any more. `opencode web` is a chat client,
       // not a terminal, and every attempt to make it useful from a phone hit a
@@ -2551,15 +2570,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // broken.
       const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
       lastMiniappUrl = tuiUrl;
-      // Record which chat opened the TUI and which session it is on. ttyd runs
-      // one static command per bot, so it cannot be told the chat any other
-      // way — and tui-attach.sh reading only ids[0] attached every chat to
-      // whichever conversation happened to be first in the map. Best-effort and
-      // never fatal: a missing write just leaves the legacy behavior in place.
+      const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      if (!tuiSurface.terminal) {
+        // An API-only lane has no screen to attach to. Handing it a PTY anyway
+        // would be a scraped badge, not a terminal.
+        await api.sendMessage(chatId, [
+          `⌨️ No terminal for this chat — it is on \`${tuiSurface.tool}\`, which answers in one shot and has no session to attach to.`,
+          '`/tx on` still gives you the live tool feed here, and `/freemodel` moves the chat to a lane with a real terminal if you want one.',
+        ].join('\n'));
+        return;
+      }
+      // Record which chat opened the TUI, which lane it is on, and the session
+      // that lane produced. ttyd runs one static command per bot, so it cannot
+      // be told the chat any other way — and tui-attach.sh reading only ids[0]
+      // attached every chat to whichever conversation happened to be first in
+      // the map. `surface` is what stops the attach from launching OpenCode for
+      // a Cline chat; `model` is the lane's own model so the screen names the
+      // model actually answering here. Best-effort and never fatal: a missing
+      // write just leaves the legacy behaviour in place.
       try {
         writeJson(path.join(stateDir(config.id), 'tui-open.json'), {
           chatId: String(chatId),
-          sessionId: sessions.get(chatId) || null,
+          surface: tuiSurface.surface,
+          model: effective(config, prefs, chatId).model,
+          sessionId: tuiSurface.surface === 'cline'
+            ? loadClineSessions(config.id).get(chatId) || null
+            : sessions.get(chatId) || null,
           at: new Date().toISOString(),
         });
       } catch {
@@ -2567,8 +2603,16 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
-        `⌨️ *opencode TUI* — a real terminal, driven by touch, attached to *this* conversation in \`${config.agent.workspace}\`.`,
-        'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.',
+        tuiSurface.sharedSession
+          ? `⌨️ *${tuiSurface.label}* — a real terminal, driven by touch, attached to *this* conversation in \`${config.agent.workspace}\`.`
+          : [
+            `⌨️ *${tuiSurface.label}* — a real ${tuiSurface.tool} terminal in \`${config.agent.workspace}\`, resumed onto the last ${tuiSurface.tool} thread for this chat.`,
+            `This chat is on ${tuiSurface.tool} (\`${shortProviderModel(effective(config, prefs, chatId).model)}\`), so that is the screen you get — not opencode.`,
+            `_Cline cannot resume a thread headlessly, so this is the last ${tuiSurface.tool} thread and not the one I answer each new message in. Work you type here is yours; it does not come back to this chat._`,
+          ].join('\n'),
+        tuiSurface.sharedSession
+          ? 'What you send here appears there and what you type there is this same conversation. It runs under tmux, so closing the Mini App keeps your place.'
+          : 'It runs under tmux, so closing the Mini App keeps your place, and you can reopen the same thread whenever you want.',
         'We both keep working with it open. The terminal waits for a turn I am running, and I wait for a turn you started — one at a time, never two writers at once. Opening it proves you are the Telegram user this chat belongs to, so there is no password to remember.',
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '⌨️ Open the TUI', web_app: { url: `${tuiUrl}/?bot=${config.id}` } }]] },
@@ -3630,8 +3674,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // A TUI is open on this same conversation, so the user can watch this turn
     // happen in the terminal as well. It shares the session, so what runs here
     // shows up there — one turn at a time, never two at once.
+    //
+    // Only true on a lane with a shared session. Cline's terminal resumes the
+    // LAST Cline thread and each new message starts a fresh one, so claiming
+    // "same session" there would be a lie the user discovers by watching a turn
+    // that never appears. Say the true thing instead.
     if (tuiWatching) {
-      await api.sendMessage(chatId, '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.').catch(() => {});
+      const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      await api.sendMessage(chatId, openSurface.sharedSession
+        ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
+        : `⌨️ A ${openSurface.tool} terminal is open, but ${openSurface.tool} cannot resume a thread headlessly — this turn will not appear there. The terminal stays on the last ${openSurface.tool} thread.`
+      ).catch(() => {});
     }
     // Phone controls for the run: Abort kills it like /abort, Watch toggles
     // the per-tool feed. Best-effort and stateless — taps after the run ends
@@ -4101,9 +4154,22 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       }
     }
 
+    // Which surface produced the id decides which map it belongs in. A Cline
+    // id in `sessions.json` would be handed to `opencode run --session` on the
+    // next turn and the turn would die; an opencode id in the Cline map would
+    // be handed to `cline --id`, which is refused outright. Before this, a Cline
+    // turn stored nothing at all (runCline always resolved null), so the TUI
+    // kept attaching to whatever stale opencode id was left in the map.
+    const resultSurface = parseModelRef(lastAttemptModel).surface;
     if (result.sessionID) {
-      sessions.set(chatId, result.sessionID);
-      saveSessions(config.id, sessions);
+      if (resultSurface === 'cline') {
+        const clineSessions = loadClineSessions(config.id);
+        clineSessions.set(chatId, result.sessionID);
+        saveClineSessions(config.id, clineSessions);
+      } else {
+        sessions.set(chatId, result.sessionID);
+        saveSessions(config.id, sessions);
+      }
     }
     // Auto-track (screenshot footer): a quota/rate-limit failure stamps Reset
     // into this bot's OWN free-lane ledger so /allowance goes ❌ with a time.
@@ -4112,7 +4178,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // INFERENCE_CAP_ERROR JSON + stderr tail) into the chat. Summarize them
     // into one actionable line; usage/ledger tracking above keeps the raw result.
     let displayResult = result;
-    const finalSurface = parseModelRef(lastAttemptModel).surface;
+    const finalSurface = resultSurface;
     if (!String(result?.finalText || '').trim() && String(result?.lastError || '').trim() && finalSurface !== 'opencode') {
       const summary = formatProviderFailure({
         surface: finalSurface,
