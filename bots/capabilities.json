@@ -26,7 +26,7 @@
       "test": "T1",
       "scope": "common",
       "status": "done",
-      "prove": "unit test scripts/lib/tg-copy-code.test.mjs",
+      "prove": "live smoke: / popup lists commands on each class; node scripts/assert-command-scope.mjs (popup == handlers == declared per class)",
       "expect": [
         "scripts/lib/tg-copy-code.mjs",
         "scripts/lib/tg-copy-code.test.mjs"
@@ -39,7 +39,7 @@
         "grok_tg": true,
         "collab": true
       },
-      "notes": "Native <pre> copy blocks + copy_text buttons via sendCopyable (bot-host, collab-bot). Hermes gateway renders fenced blocks; buttons are bot-host/collab only."
+      "notes": "bot-host family publishes the canonical BOT_COMMANDS from scripts/lib/commands.mjs. The Grok TG router is a SEPARATE product (it owns /switch, which bot-host lacks) and keeps its own popup list at tools/telegram-provider-router/src/index.js; the per-command grok_tg verdicts in `commands` are the contract between the two, enforced by scripts/assert-command-scope.mjs. /tui is bot-specific (ui-tui row): it needs the bot-host session/chatId model plus a phone tunnel, so the router cannot serve it. Do not add a command to either list without a verdict here."
     },
     {
       "id": "chat-table",
@@ -160,7 +160,8 @@
       "expect": [
         "scripts/lib/commands.mjs",
         "scripts/lib/bot-commands.mjs",
-        "scripts/lib/bot-status.mjs"
+        "scripts/lib/bot-status.mjs",
+        "scripts/assert-command-scope.mjs"
       ],
       "skills": [],
       "classes": {
@@ -170,7 +171,57 @@
         "grok_tg": true,
         "collab": "adapter"
       },
-      "notes": "Single BOT_COMMANDS source published via setMyCommands (bot-host + provider-router). Collab exposes /help text instead of a registered menu."
+      "notes": "Single BOT_COMMANDS source published via setMyCommands (bot-host + provider-router). Collab exposes /help text instead of a registered menu.",
+      "commands": {
+        "start": true,
+        "help": true,
+        "status": true,
+        "new": true,
+        "compact": true,
+        "model": true,
+        "freemodel": true,
+        "allowance": true,
+        "thinking": true,
+        "models": false,
+        "free": false,
+        "agent": false,
+        "build": false,
+        "plan": false,
+        "abort": false,
+        "watch": false,
+        "debug": false,
+        "handoff": false,
+        "resume": false,
+        "tx": false,
+        "project": false,
+        "council": false,
+        "role": false,
+        "location": false,
+        "tui": false,
+        "routerOnly": ["switch", "unlock"],
+        "aliases": ["think"]
+      }
+    },
+    {
+      "id": "ui-tui",
+      "test": "T3",
+      "scope": "bot-specific",
+      "status": "done",
+      "prove": "live smoke: /tui button opens a ttyd-backed terminal in the Telegram Mini App on a bot-host chat",
+      "expect": [
+        "scripts/lib/opencode-tui.mjs",
+        "scripts/tui-gateway.mjs",
+        "scripts/mobile/miniapp-shim.mjs"
+      ],
+      "skills": [],
+      "classes": {
+        "hermes": "adapter",
+        "vps": true,
+        "mobile": true,
+        "grok_tg": false,
+        "collab": false
+      },
+      "notes": "BOT-SPECIFIC, not a propagation gap. /tui is a Telegram Mini App that proxies to ttyd at /tui/ and is bound to the bot-host session/chatId model plus a phone tunnel (bot-host.mjs:1108-1119). The Grok TG computer bot has no session/chat model and no ttyd, so it cannot serve this command by construction; do not port it without first building those. grok_tg=false is deliberate and is enforced by the per-command verdict in the ui-commands row (scripts/assert-command-scope.mjs)."
     },
     {
       "id": "ui-progress",

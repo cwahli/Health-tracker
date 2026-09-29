@@ -3417,7 +3417,7 @@ bot.command("start", async (ctx) => {
       "/model — list/set free model for active provider\n" +
       "/freemodel — tap to select a free model\n" +
       "/status — live provider status (usage, thinking, …)\n" +
-      "/think [level] — show/set thinking effort (cline)\n" +
+      "/thinking [level] — show/set thinking effort (cline)\n" +
       "/allowance — remaining free-lane allowance (best-effort)\n" +
       "/allowance table — same ledger as an HTML grid (opens in chat)\n" +
       "/compact — compact OpenCode session context\n" +
@@ -3435,7 +3435,7 @@ bot.command("help", async (ctx) => {
       "/model [id] — list or set free model for active provider\n" +
       "/freemodel [provider] — tap to select a free model\n" +
       "/status — live usage/thinking (opencode) + Thinking level (cline)\n" +
-      "/think [none|low|medium|high|xhigh] — show/set Cline thinking\n" +
+      "/thinking [none|low|medium|high|xhigh] — show/set Cline thinking\n" +
       "/allowance — free-lane allowance snapshot\n" +
       "/allowance table — free-lane allowance as an HTML grid (pref/lane/status/reset/cooldown)\n" +
       "/compact — compact OpenCode context\n" +
@@ -3568,7 +3568,10 @@ bot.command("switch", async (ctx) => {
   await ctx.reply(`Switched to ${PROVIDERS[arg].label}.\nModel: \`${state.models[arg]}\``);
 });
 
-bot.command("think", async (ctx) => {
+// /thinking is the canonical name (scripts/lib/commands.mjs). /think is kept
+// as a working alias so existing muscle memory and saved shortcuts keep
+// resolving — the popup advertises only the canonical one.
+async function handleThinking(ctx) {
   if (!gate(ctx)) return;
   const raw = String(ctx.message?.text || "").trim().split(/\s+/).slice(1).join(" ").trim();
   const level = raw.toLowerCase();
@@ -3582,13 +3585,13 @@ bot.command("think", async (ctx) => {
     return;
   }
   if (!CLINE_THINK_LEVELS.includes(level)) {
-    await ctx.reply("Unknown thinking level. Use: none|low|medium|high|xhigh\nUsage: /think high");
+    await ctx.reply("Unknown thinking level. Use: none|low|medium|high|xhigh\nUsage: /thinking high");
     return;
   }
   if (p !== "cline") {
     await ctx.reply(
       "Active provider is not Cline, so thinking stays with Cline for now.\n" +
-        "`/switch cline` first, then /think " + level + " to apply it."
+        "`/switch cline` first, then /thinking " + level + " to apply it."
     );
     return;
   }
@@ -3596,7 +3599,10 @@ bot.command("think", async (ctx) => {
   state.thinking.cline = level;
   saveState(state);
   await ctx.reply(`Cline thinking set to \`${level}\`. Applies as \`--thinking ${level}\` on the next run.`);
-});
+}
+
+bot.command("thinking", handleThinking);
+bot.command("think", handleThinking);
 
 bot.command("model", async (ctx) => {
   if (!gate(ctx)) return;
@@ -3959,7 +3965,7 @@ const BOT_COMMANDS = [
   { command: "start", description: "Router ready + current status" },
   { command: "help", description: "List all commands" },
   { command: "status", description: "Live status: usage %, thinking, model" },
-  { command: "think", description: "Show/set thinking effort (cline: none|low|medium|high|xhigh)" },
+  { command: "thinking", description: "Show/set thinking effort (cline: none|low|medium|high|xhigh)" },
   { command: "allowance", description: "Free-lane allowance (add 'table' for the HTML grid)" },
   { command: "compact", description: "Compact OpenCode session context" },
   { command: "switch", description: "Switch provider (opencode, cline, …)" },
