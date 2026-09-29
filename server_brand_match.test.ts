@@ -30,6 +30,14 @@ describe("server_brand_match", () => {
     expect(Number(result.valuesAtBasis?.vitaminC)).toBeGreaterThan(0);
     expect(Number(result.valuesAtBasis?.vitaminC)).not.toBe(1000);
   });
+
+  it("resolves alias dishes for same chain with consensus macros (Yolk Steak Salad)", async () => {
+    const result = await matchBrandMenu("Yolk", "Steak Salad");
+    expect(result.matched).toBe(true);
+    expect(result.status).toBe("HIT");
+    expect(result.lockedKeys).toContain("calories");
+    expect(result.valuesAtBasis?.calories).toBe(650);
+  });
 });
 
 describe("F-11.1 quarantined rows never match", () => {

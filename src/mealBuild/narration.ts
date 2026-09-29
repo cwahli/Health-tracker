@@ -90,5 +90,43 @@ export function reconcileMessageWithLedger(
     });
   }
 
+  // 4. Reconcile cited saturated fat (e.g. "saturated fat (15g)" or "15g of saturated fat")
+  if (summary.saturatedFat !== undefined && summary.saturatedFat !== null) {
+    const formattedSat = Math.round(summary.saturatedFat * 10) / 10;
+    msg = msg.replace(/\b(\d+(?:\.\d+)?)\s*g(\s+(?:of\s+)?saturated\s+fat)\b/gi, (match, num, suffix) => {
+      const cited = parseFloat(num);
+      if (Math.abs(cited - formattedSat) > 0.1) {
+        return `${formattedSat}g${suffix}`;
+      }
+      return match;
+    });
+    msg = msg.replace(/\b(saturated\s+fat\s*\()\s*(\d+(?:\.\d+)?)\s*g\s*\)/gi, (match, prefix, num) => {
+      const cited = parseFloat(num);
+      if (Math.abs(cited - formattedSat) > 0.1) {
+        return `${prefix}${formattedSat}g)`;
+      }
+      return match;
+    });
+  }
+
+  // 5. Reconcile cited sodium (e.g. "sodium (2000mg)" or "2000mg of sodium")
+  if (summary.sodium !== undefined && summary.sodium !== null) {
+    const formattedNa = Math.round(summary.sodium);
+    msg = msg.replace(/\b(\d+(?:\.\d+)?)\s*mg(\s+(?:of\s+)?sodium)\b/gi, (match, num, suffix) => {
+      const cited = parseFloat(num);
+      if (Math.abs(cited - formattedNa) > 10) {
+        return `${formattedNa}mg${suffix}`;
+      }
+      return match;
+    });
+    msg = msg.replace(/\b(sodium\s*\()\s*(\d+(?:\.\d+)?)\s*mg\s*\)/gi, (match, prefix, num) => {
+      const cited = parseFloat(num);
+      if (Math.abs(cited - formattedNa) > 10) {
+        return `${prefix}${formattedNa}mg)`;
+      }
+      return match;
+    });
+  }
+
   return msg;
 }

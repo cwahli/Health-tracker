@@ -18,7 +18,7 @@ export const MEAL_ITEM_FIELDS: string[] = [
   'componentsDetailList', 'hasComponents', 'primaryBase100g',
   'primaryBaseMatchName', 'primaryBaseWeightG', 'labelNutrientsPerServing',
   'rawNutritionLabel', 'lockedNutrientKeys', 'itemLockedKeys',
-  'truthNutrients', 'cookingAdded', 'ingredientsList', 'chainName',
+  'truthNutrients', 'cookingAdded', 'ingredientsList', 'chainName', 'brandName',
   'foodType', 'warnings', 'confidenceRating', 'confidenceComment',
   'physicalFormClassification', 'matchReasonInfo', 'diningEnvironment',
   'saucesDetailList', 'portionChoiceApplied', 'fill', 'boundingBox2D', 'sourceImageIndex'
@@ -27,5 +27,6 @@ export const MEAL_ITEM_FIELDS: string[] = [
 export const CRITICAL_PRESERVE_FIELDS: string[] = [
   'rawNutritionLabel', 'estimatedCalories', 'estimatedWeightGrams', 'components',
   'componentsDetailList', 'dbId', 'dbSource', 'lockedNutrientKeys', 'itemLockedKeys',
-  'primaryBase100g', 'scoutIndex', 'itemId', 'diningEnvironment', 'boundingBox2D', 'sourceImageIndex'
+  'primaryBase100g', 'scoutIndex', 'itemId', 'diningEnvironment', 'boundingBox2D', 'sourceImageIndex',
+  'chainName', 'brandName'
 ];

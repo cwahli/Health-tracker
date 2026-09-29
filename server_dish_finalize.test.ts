@@ -1096,5 +1096,8 @@ describe("server_dish_finalize", () => {
     expect(ledger.nutrients.totalFat).toBe(32);
     expect(ledger.nutrients.carbohydrates).toBe(45);
     expect(ledger.nutrients.sodium).toBe(850);
+
+    const compCalSum = (ledger.componentsDetailList || []).reduce((acc: number, c: any) => acc + (c.calories || 0), 0);
+    expect(compCalSum).toBe(650);
   });
 });

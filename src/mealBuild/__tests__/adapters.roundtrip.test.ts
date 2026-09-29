@@ -8,6 +8,8 @@ describe('adapters roundtrip', () => {
         itemId: '123',
         scoutIndex: 1,
         name: 'Full Item',
+        chainName: 'Yolk',
+        brandName: 'Yolk',
         dbId: 'db-1',
         primaryBase100g: { calories: 200 },
         componentsDetailList: [{ name: 'Comp1' }],
@@ -24,6 +26,9 @@ describe('adapters roundtrip', () => {
     const meal = fromPendingFoodLog(fixture);
     const roundTripped = toPendingFoodLog(meal);
     
+    expect(roundTripped.calories).toBe(400);
+    expect(roundTripped.itemsBreakdown[0].chainName).toBe('Yolk');
+    expect(roundTripped.itemsBreakdown[0].brandName).toBe('Yolk');
     expect(roundTripped.itemsBreakdown[0].dbId).toBe('db-1');
     expect(roundTripped.itemsBreakdown[0].primaryBase100g).toEqual({ calories: 200 });
     expect(roundTripped.itemsBreakdown[0].componentsDetailList).toEqual([{ name: 'Comp1' }]);

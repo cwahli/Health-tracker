@@ -697,6 +697,46 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
         if (!lockedNutrientKeys.includes('sodium')) nutrients.sodium = Math.round(sumNa);
         if (!lockedNutrientKeys.includes('transFat') && sumTrans > 0) nutrients.transFat = Math.round(sumTrans * 10) / 10;
         if (!lockedNutrientKeys.includes('totalFibre') && sumFibre > 0) nutrients.totalFibre = Math.round(sumFibre * 10) / 10;
+
+        // When parent dish has locked brand/label nutrients, rebalance non-label subcomponents
+        // so that the column sum of the subcomponents matches the locked dish total
+        if (lockedNutrientKeys.includes('calories') && nutrients.calories && sumCal > 0 && Math.abs(sumCal - nutrients.calories) >= 2) {
+          const calRatio = nutrients.calories / sumCal;
+          const pRatio = (lockedNutrientKeys.includes('protein') && nutrients.protein && sumProt > 0) ? (nutrients.protein / sumProt) : 1;
+          const fRatio = (lockedNutrientKeys.includes('totalFat') && nutrients.totalFat && sumFat > 0) ? (nutrients.totalFat / sumFat) : 1;
+          const sRatio = (lockedNutrientKeys.includes('saturatedFat') && nutrients.saturatedFat && sumSat > 0) ? (nutrients.saturatedFat / sumSat) : 1;
+          const cRatio = (lockedNutrientKeys.includes('carbohydrates') && nutrients.carbohydrates && sumCarbs > 0) ? (nutrients.carbohydrates / sumCarbs) : 1;
+          const naRatio = (lockedNutrientKeys.includes('sodium') && nutrients.sodium && sumNa > 0) ? (nutrients.sodium / sumNa) : 1;
+
+          for (const c of componentsDetailList) {
+            if (c.dbSource === 'label') continue;
+            c.calories = Math.round((c.calories || 0) * calRatio);
+            if (c.nutrients) c.nutrients.calories = c.calories;
+            if (pRatio !== 1) {
+              c.protein = Math.round((c.protein || 0) * pRatio * 10) / 10;
+              if (c.nutrients) c.nutrients.protein = c.protein;
+            }
+            if (fRatio !== 1) {
+              c.totalFat = Math.round((c.totalFat || 0) * fRatio * 10) / 10;
+              c.fat = c.totalFat;
+              if (c.nutrients) { c.nutrients.totalFat = c.totalFat; c.nutrients.fat = c.totalFat; }
+            }
+            if (sRatio !== 1) {
+              c.saturatedFat = Math.round((c.saturatedFat || 0) * sRatio * 10) / 10;
+              if (c.nutrients) c.nutrients.saturatedFat = c.saturatedFat;
+            }
+            if (cRatio !== 1) {
+              c.carbohydrates = Math.round((c.carbohydrates || 0) * cRatio * 10) / 10;
+              c.carbs = c.carbohydrates;
+              if (c.nutrients) { c.nutrients.carbohydrates = c.carbohydrates; c.nutrients.carbs = c.carbohydrates; }
+            }
+            if (naRatio !== 1) {
+              c.sodium = Math.round((c.sodium || 0) * naRatio);
+              if (c.nutrients) c.nutrients.sodium = c.sodium;
+            }
+          }
+        }
+
         // The child-sum above rewrites totalFat/sat/trans/sodium AFTER step 5
         // derived unsaturatedFat/salt (e.g. from the estimated fallback when the
         // scout dish carries no top-level nutrients). Re-derive so the ledger
