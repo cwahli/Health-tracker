@@ -54,7 +54,7 @@ import { getBlockedLocation, setBlockedLocation, clearBlockedLocation } from './
 import { appendRow, retrieve } from './lib/memory-stores.mjs';
 import { enqueueJob, awaitJob, requeueJob, getJob, DEFAULT_LEASE_MS } from './lib/worker-jobs.mjs';
 import { preflightWorkerTurn, classifyWorkerFailure, retryDelayMs, preflightSummary, relayUrl } from './lib/swap-guards.mjs';
-import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCanaryResult } from './lib/worker-routing.mjs';
+import { routeState, routeFor, armRoute, confirmRoute, rollbackRoute, validateCanaryResult, failedRouteReason } from './lib/worker-routing.mjs';
 import { acquirePollerLease, releasePollerLease, renewPollerLease } from './lib/poller-lease.mjs';
 import { buildPack, packWithContents } from './lib/swap-pack.mjs';
 import { runCline, CLINE_THINKING_LEVELS } from './lib/agent-cline.mjs';
@@ -3822,7 +3822,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       }
       if (wantCanary && routeState(host) === 'failed') {
         const row = routeFor(host);
-        const why = row?.failedReason || 'unknown reason';
+        const why = failedRouteReason(row);
         await say(
           `⏸ *Held:* the route to \`${host}\` was rolled back after a failed canary (${why}).\nNothing ran here either. Send \`/location ${host}\` to arm it again (the first turn is re-checked), or \`/location vps\` to run on this machine.`
         );
