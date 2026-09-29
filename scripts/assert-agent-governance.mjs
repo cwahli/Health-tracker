@@ -38,9 +38,11 @@ const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 
 // AGENTS.md contracts
 const agents = read('AGENTS.md');
-if (!/AI Studio only|commits only via AI Studio|Commit.*AI Studio/i.test(agents) && !/GitHub: commits only via AI Studio/i.test(agents)) {
-  fail('AGENTS.md must state commits/pushes are AI Studio only');
-} else ok('AGENTS.md: commit via AI Studio');
+// fef0913 deliberately retired "Commit/push = AI Studio only": any surface may
+// commit/push after COMPLETE. Pin the current contract, not the removed rule.
+if (!/commit\/push from any surface|commit and push.*after COMPLETE/i.test(agents)) {
+  fail('AGENTS.md must state commit/push from any surface after COMPLETE');
+} else ok('AGENTS.md: commit from any surface after COMPLETE');
 
 if (!/Protected|before.?after|confirmation/i.test(agents)) {
   fail('AGENTS.md must protect process docs with confirmation + before/after');
@@ -63,7 +65,7 @@ if (!/JobStore\.ts/.test(agents) || !/TaskPlaceholderCard/.test(agents) || !/Job
 } else ok('AGENTS.md: job-lifecycle blast list');
 
 const templates = read('docs/agent/TEMPLATES.md');
-if (!/layer: food-calc \| job-session/.test(templates) || !/STALE_TURN/.test(templates)) {
+if (!/layer job-session/.test(templates) || !/STALE_TURN/.test(templates)) {
   fail('TEMPLATES.md IMPACT must include layer + STALE_TURN');
 } else ok('TEMPLATES.md: job-session IMPACT');
 
@@ -82,10 +84,13 @@ if (!/Evolution|deliberately|default/i.test(food)) {
 const sync = read('src/utils/syncUtils.ts');
 if (!/export function mergeDeleteMaps/.test(sync)) fail('syncUtils must export mergeDeleteMaps');
 else ok('mergeDeleteMaps exported');
-if (!/export function filterLogsByTombstone/.test(sync)) fail('syncUtils must export filterLogsByTombstone');
-else ok('filterLogsByTombstone exported');
+// bca0f80 folded tombstone filtering into mergeDeleteMaps and dropped the old
+// filterLogsByTombstone export (its only caller was its own test). Pin the
+// surviving behavior, not the removed name.
+if (!/tombstone/i.test(sync)) fail('syncUtils must keep tombstone filtering (mergeDeleteMaps)');
+else ok('tombstone filtering present');
 
-const scout = read('server_vision_scout.ts');
+const scout = read('src/server/food/scoutGeometry.ts');
 if (!/estimatedCalories:\s*vItem\.estimatedCalories\s*\?\?\s*lItem\.estimatedCalories/.test(scout)) {
   fail('mergeScoutItems must preserve vision estimatedCalories');
 } else ok('mergeScoutItems estimatedCalories preserve');
