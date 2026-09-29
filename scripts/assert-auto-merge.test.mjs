@@ -10,9 +10,9 @@
  *     SAME name (worst wins), and a head SHA with no check runs at all yet
  *     (absence is not permission).
  *  2. `scripts/auto-merge.mjs` is spawned as a child process against a FAKE
- *     GitHub API on a loopback port, and the assertions are about what the fake
- *     server was actually asked to do: the red case must never POST a merge,
- *     and the green case must PUT exactly one.
+ *     GitHub API on a loopback port (shared with the main-verify sensor), and the
+ *     assertions are about what the fake server was actually asked to do: the red
+ *     case must never POST a merge, and the green case must PUT exactly one.
  *
  * The race is reproduced literally: the fake API answers the first poll with no
  * check runs, the way the runner does in the seconds after a push, and only then
@@ -21,12 +21,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { HEAD_SHA, MERGE_SHA, runDriver, startFakeGitHub } from './lib/fake-github.mjs';
 import {
   DECISIONS,
   NON_BLOCKING_CHECKS,
@@ -41,10 +40,8 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
-const DRIVER = path.join(HERE, 'auto-merge.mjs');
 
 const [CI_CHECK, GUARD_CHECK] = requiredNames();
-const SHA = 'a'.repeat(40);
 
 /** A check run as the Checks API reports it. */
 const run = (name, conclusion, status = 'completed') => ({ name, status, conclusion });
@@ -178,87 +175,9 @@ test('a renamed job or a renamed display name is caught, not silently awaited', 
 // 3. The driver, end to end, against a fake GitHub API.
 // ---------------------------------------------------------------------------
 
-/**
- * A fake GitHub API that answers the five endpoints the driver uses and records
- * every MERGE it is asked for. `checkPlans` is consumed one entry per poll, and
- * the last entry repeats — so a test can script "nothing yet, then green".
- */
-function startFakeGitHub({ checkPlans, prs = null } = {}) {
-  const calls = { merge: [], comments: [], deleted: [], checkPolls: 0, checkQueries: [] };
-  const plans = [...checkPlans];
-  const server = http.createServer((req, res) => {
-    const url = new URL(req.url || '/', 'http://127.0.0.1');
-    const send = (code, body) => {
-      res.writeHead(code, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(body));
-    };
-    let body = '';
-    req.on('data', (c) => { body += c; });
-    req.on('end', () => {
-      const route = `${req.method} ${url.pathname}`;
-
-      if (route === 'GET /repos/o/r/pulls') {
-        return send(200, prs === null ? [{ number: 7, state: 'open', draft: false, head: { sha: SHA } }] : prs);
-      }
-      if (route === 'GET /repos/o/r/pulls/7') {
-        return send(200, { number: 7, state: 'open', draft: false, head: { sha: SHA } });
-      }
-      if (/^GET \/repos\/o\/r\/commits\/[^/]+\/check-runs$/.test(route)) {
-        const plan = plans.length > 1 ? plans.shift() : plans[0];
-        calls.checkPolls += 1;
-        // Recorded so the `filter=all` requirement is exercised, not trusted:
-        // the endpoint's default (`latest`) can collapse a red run of a required
-        // name behind a greener one, which is the blindness being fixed.
-        calls.checkQueries.push(url.searchParams.get('filter'));
-        return send(200, { total_count: plan.length, check_runs: plan });
-      }
-      if (route === 'PUT /repos/o/r/pulls/7/merge') {
-        calls.merge.push(JSON.parse(body || '{}'));
-        return send(200, { merged: true, message: 'Pull Request successfully merged' });
-      }
-      if (route === 'POST /repos/o/r/issues/7/comments') {
-        calls.comments.push(JSON.parse(body || '{}').body || '');
-        return send(201, { id: 1 });
-      }
-      if (route.startsWith('DELETE /repos/o/r/git/refs/heads/')) {
-        calls.deleted.push(url.pathname);
-        return send(204, {});
-      }
-      return send(404, { message: `no fake route for ${route}` });
-    });
-  });
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolve({
-        port: server.address().port,
-        calls,
-        close: () => new Promise((done) => server.close(() => done())),
-      });
-    });
-  });
-}
-
-/** Run the driver as a real child process, pointed at the fake API. */
-function runDriver(port, extraArgs = []) {
-  const env = {
-    ...process.env,
-    GH_TOKEN: 'fake-token',
-    GITHUB_API_URL: `http://127.0.0.1:${port}`,
-    GITHUB_REPOSITORY: 'o/r',
-    GITHUB_REF_NAME: 'agent/x',
-  };
-  delete env.GITHUB_TOKEN;
-  return new Promise((resolve) => {
-    // `--pr-wait=0`: the fake API answers the PR lookup on the first call, so the
-    // 90s auto-pr race window would only make the sensor slow.
-    const child = spawn(process.execPath, [DRIVER, '--poll=0', '--pr-wait=0', ...extraArgs], { env, cwd: ROOT });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => { stdout += String(d); });
-    child.stderr.on('data', (d) => { stderr += String(d); });
-    child.on('close', (code) => resolve({ code, stdout, stderr }));
-  });
-}
+// The fake GitHub API and the child-process driver runner live in
+// `scripts/lib/fake-github.mjs`, shared with `assert-main-verify.test.mjs` so
+// both sensors drive one endpoint surface instead of two copies of it.
 
 test('E2E: a green head merges exactly once, and the branch is deleted', async () => {
   const fake = await startFakeGitHub({ checkPlans: [green()] });
@@ -280,6 +199,39 @@ test('E2E: a green head merges exactly once, and the branch is deleted', async (
   }
 });
 
+test('E2E: a merge dispatches the post-merge verification of main, naming the commit', async () => {
+  const fake = await startFakeGitHub({ checkPlans: [green()] });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.dispatches.length, 1, 'exactly one dispatch');
+    assert.equal(fake.calls.dispatches[0].event_type, 'main-verify');
+    assert.equal(
+      fake.calls.dispatches[0].client_payload.sha,
+      MERGE_SHA,
+      'the commit that landed is named, so the run is provably about that merge',
+    );
+    assert.match(fake.calls.comments[0], /main verification dispatched/);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a merge whose verification cannot be dispatched is not reported as a success', async () => {
+  // The merge has happened, so this cannot be undone — but it must not be silent,
+  // and the run must not claim success for a main nobody will verify.
+  const fake = await startFakeGitHub({ checkPlans: [green()], dispatchFails: true });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(fake.calls.merge.length, 1, 'the merge itself still happened');
+    assert.equal(res.code, 1, 'merged, but not a success');
+    assert.match(res.stdout, /main verification NOT dispatched/);
+    assert.match(fake.calls.comments[0], /NOT dispatched/);
+  } finally {
+    await fake.close();
+  }
+});
+
 test('E2E: a red required check NEVER merges, and says which one', async () => {
   const fake = await startFakeGitHub({
     checkPlans: [[run(CI_CHECK, 'failure'), run(GUARD_CHECK, 'success')]],
@@ -289,6 +241,7 @@ test('E2E: a red required check NEVER merges, and says which one', async () => {
     assert.equal(res.code, 1, 'a refusal is a non-zero exit');
     assert.equal(fake.calls.merge.length, 0, 'THE ASSERTION: no merge call was ever made');
     assert.equal(fake.calls.deleted.length, 0);
+    assert.equal(fake.calls.dispatches.length, 0, 'nothing is verified because nothing landed');
     assert.equal(fake.calls.comments.length, 1);
     assert.match(fake.calls.comments[0], /NOT merging/);
     assert.match(fake.calls.comments[0], /concluded failure/);
@@ -357,6 +310,7 @@ test('E2E: --evaluate decides without writing anything', async () => {
     assert.equal(fake.calls.merge.length, 0, 'evaluate never merges');
     assert.equal(fake.calls.comments.length, 0, 'evaluate never comments');
     assert.equal(fake.calls.deleted.length, 0);
+    assert.equal(fake.calls.dispatches.length, 0, 'evaluate never dispatches');
   } finally {
     await fake.close();
   }
@@ -378,7 +332,7 @@ test('E2E: --evaluate on a red head reports the refusal and still writes nothing
 test('E2E: a draft PR is refused before any check is even read', async () => {
   const fake = await startFakeGitHub({
     checkPlans: [green()],
-    prs: [{ number: 7, state: 'open', draft: true, head: { sha: SHA } }],
+    prs: [{ number: 7, state: 'open', draft: true, head: { sha: HEAD_SHA } }],
   });
   try {
     const res = await runDriver(fake.port);
@@ -394,15 +348,7 @@ test('E2E: a draft PR is refused before any check is even read', async () => {
 test('E2E: a missing token refuses to run rather than guessing', async () => {
   const fake = await startFakeGitHub({ checkPlans: [green()] });
   try {
-    const env = { ...process.env, GITHUB_API_URL: `http://127.0.0.1:${fake.port}`, GITHUB_REPOSITORY: 'o/r', GITHUB_REF_NAME: 'agent/x' };
-    delete env.GH_TOKEN;
-    delete env.GITHUB_TOKEN;
-    const res = await new Promise((resolve) => {
-      const child = spawn(process.execPath, [DRIVER], { env, cwd: ROOT });
-      let stderr = '';
-      child.stderr.on('data', (d) => { stderr += String(d); });
-      child.on('close', (code) => resolve({ code, stderr }));
-    });
+    const res = await runDriver(fake.port, [], { token: null });
     assert.equal(res.code, 2);
     assert.match(res.stderr, /GH_TOKEN is not set/);
     assert.equal(fake.calls.merge.length, 0);

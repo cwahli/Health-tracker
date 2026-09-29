@@ -13,6 +13,14 @@
  *                          wait  → sleep, ask again      │
  *                          refuse → comment, exit non-zero
  *
+ * A merge is not the end of it. The squash commit it lands is written by
+ * `GITHUB_TOKEN`, whose pushes do not trigger workflows — so `main` would never
+ * be verified after the merge and the composition of two separately-green PRs
+ * would go unchecked. The driver therefore dispatches the post-merge
+ * verification explicitly (`repository_dispatch`, one of the two suppression-
+ * exempt events) and a merge whose verification cannot be dispatched is not
+ * reported as a success. See `lib/main-verify.mjs`.
+ *
  * FAIL CLOSED, INCLUDING ON ITS OWN ERRORS. Every failure path here (no token,
  * API error, no PR, timeout, a gateway 500) ends in "did not merge" and a
  * non-zero exit. There is no branch that merges because something was unknown —
@@ -44,6 +52,12 @@ import {
   evaluatePrState,
   validateRequiredAgainstWorkflows,
 } from './lib/merge-gate.mjs';
+import {
+  buildDispatch,
+  describeDispatch,
+  dispatchEndpoint,
+  validateMainVerifyWiring,
+} from './lib/main-verify.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -205,6 +219,17 @@ async function main(argv = process.argv.slice(2)) {
     return 2;
   }
 
+  // A dispatch with nobody listening is a silent no-op: the merge would succeed,
+  // this driver would report success, and `main` would be unverified — the exact
+  // state this change exists to end. So a broken safety net stops the merge
+  // rather than riding along with it.
+  const wiring = validateMainVerifyWiring({ readWorkflow });
+  if (!wiring.ok) {
+    console.error('auto-merge: the post-merge verification of main has nowhere to run:');
+    for (const p of wiring.problems) console.error(`  - ${p}`);
+    return 2;
+  }
+
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
   const apiBase = process.env.GITHUB_API_URL || 'https://api.github.com';
   const repoSlug = args.repo || process.env.GITHUB_REPOSITORY || '';
@@ -277,13 +302,18 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   let mergeResult = '';
+  let mergeSha = null;
   try {
     const res = await client.call(`/repos/${owner}/${repo}/pulls/${pr.number}/merge`, {
       method: 'PUT',
       body: { merge_method: 'squash' },
     });
-    mergeResult = `merged=${res?.merged === true} message=${res?.message || ''}`;
-    if (res?.merged) {
+    const merged = res?.merged === true;
+    // The merge response carries the commit it created. That is the commit to
+    // verify, so it is stated in the dispatch rather than left implicit.
+    if (merged) mergeSha = res?.sha ? String(res.sha) : null;
+    mergeResult = `merged=${merged} sha=${mergeSha || 'not reported'} message=${res?.message || ''}`;
+    if (merged) {
       try {
         await client.call(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, { method: 'DELETE' });
         mergeResult += ' | branch deleted';
@@ -295,12 +325,37 @@ async function main(argv = process.argv.slice(2)) {
     mergeResult = `merge failed: ${err.message}`;
   }
 
+  const merged = /merged=true/.test(mergeResult);
+  const dispatch = merged
+    ? await dispatchMainVerify(client, { owner, repo, sha: mergeSha })
+    : { ok: false, sha: null, detail: 'the PR did not merge' };
+  const dispatchLine = describeDispatch(dispatch);
+
   log(`  auto-merge on ${head}: ${mergeResult}`);
+  log(`  ${dispatchLine}`);
   await comment(client, {
     owner, repo, number: pr.number,
-    body: `${describeDecision(result, { head })}\n\n\`\`\`\n${mergeResult}\n\`\`\``,
+    body: `${describeDecision(result, { head })}\n\n\`\`\`\n${mergeResult}\n\`\`\`\n\n${dispatchLine}`,
   });
-  return /merged=true/.test(mergeResult) ? 0 : 1;
+  return merged && dispatch.ok ? 0 : 1;
+}
+
+/**
+ * Ask for the post-merge verification of `main`.
+ *
+ * Returns an outcome instead of throwing: the merge has already happened by the
+ * time this runs, so a failure here cannot be undone — it can only be reported,
+ * and it must not be reported as success.
+ */
+export async function dispatchMainVerify(client, { owner, repo, sha }) {
+  const body = buildDispatch(sha);
+  const stated = body.client_payload.sha || null;
+  try {
+    await client.call(dispatchEndpoint(owner, repo), { method: 'POST', body });
+    return { ok: true, sha: stated, detail: 'dispatched' };
+  } catch (err) {
+    return { ok: false, sha: stated, detail: err.message };
+  }
 }
 
 async function comment(client, { owner, repo, number, body }) {
@@ -312,8 +367,30 @@ async function comment(client, { owner, repo, number, body }) {
   }
 }
 
-const invokedAs = process.argv[1] ? path.resolve(process.argv[1]) : '';
-if (invokedAs === fileURLToPath(import.meta.url)) {
+/**
+ * True when this file is the program being run, compared through `realpath`.
+ *
+ * The usual `argv[1] === import.meta.url` comparison is wrong here, and wrong
+ * silently: Node resolves a module's URL to its real path, so any symlinked
+ * component (`/var` and `/tmp` on macOS, a checkout symlinked into place) makes
+ * the two sides differ, `main()` never runs, and the process exits **0** — which
+ * this driver's own exit contract reads as "a merge happened". A driver that
+ * reports success without merging is the same fail-open class the rest of this
+ * change exists to remove, so it is compared the robust way and the sensor runs
+ * the driver through a symlink to keep it that way.
+ */
+function invokedDirectly() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return fs.realpathSync(entry) === fs.realpathSync(self);
+  } catch {
+    return path.resolve(entry) === self;
+  }
+}
+
+if (invokedDirectly()) {
   main()
     .then((code) => {
       process.exitCode = code;

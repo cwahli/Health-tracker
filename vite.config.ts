@@ -88,6 +88,7 @@ export default defineConfig(() => {
         '**/scripts/assert-allowance-walk.test.mjs',
         '**/scripts/assert-bot-clone.test.mjs',
         '**/scripts/assert-auto-merge.test.mjs',
+        '**/scripts/assert-main-verify.test.mjs',
         '**/scripts/assert-bot-forge.test.mjs',
         '**/scripts/assert-pm-role.test.mjs',
         '**/scripts/assert-bot-role-wiring.test.mjs',
