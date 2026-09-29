@@ -1,10 +1,10 @@
 {
   "slug": "bug-board-miniapp",
   "node": "planner",
-  "at": "2026-09-29T13:08:18.422Z",
+  "at": "2026-09-29T13:16:28.003Z",
   "git": {
-    "head": "6b43ddb9d3ba190daa1e393b2501d69bdfe8d9ca",
-    "stashCommit": "bfe01884bba7afef8d6fd3db02baac5472860e79"
+    "head": "e517d1a13708cac3550df0b44fc993b7ba816f87",
+    "stashCommit": "40a788548a8c2eccdc25d600d9b144ddd1bf316e"
   },
   "files": [
     "docs/agent/standing.json",

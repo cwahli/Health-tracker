@@ -40,14 +40,57 @@ One bug board codebase rendered in two places — the Health Tracker site modal 
 - No `specs/rejected/` entries cover bug board / mini app / WebApp — no pruned hypotheses.
 - Standing rows are journey-scoped (food_log/compare); applicable process law is AGENTS.md L1 (blast radius), L8 (extract, don't rewrite god files), L10/L11 (tsc + named gates), client import boundary (`tests/client_import_boundary.test.ts`), EGRESS_BOMB (light polling only).
 
-## Plan
+## Plan (full execution plan — micro-node graph)
 
-1. **Extract `useBugBoard.ts`** from `BugTrackerModal.tsx` (fetch overview, KPI derive, filter/sort/search, select+detail fetch). Verbatim move, no behavior change. Done when: modal renders identically, `tsc` 0.
-2. **Extract `BugBoard.tsx`** (KPI strip, filters, accordion list, expanded detail) as props-in/callbacks-out; modal becomes a thin portal wrapper. Done when: modal pixel-identical, existing bug-modal interactions green.
-3. **Add polling to the hook**: refetch overview when `generated_at` moves, interval ~20–30s, only while page visible (`document.visibilityState`), manual Refresh kept, header shows `generated_at` + `count`. Payload stays light (no `with_shots`, no reports) per EGRESS_BOMB. Done when: site modal auto-updates on a second client filing a card; no full-table download introduced. (Bonus: this fixes today's "looks disconnected" on the site too.)
-4. **Mini-app entry `src/miniapp/bugs.tsx`**: renders `BugBoard` full-page, Telegram `initData` auth adapter (no Google/Firebase), `table_template.py`-adjacent dark styling to match. Done when: page renders board standalone, client import boundary test green.
-5. **Gateway + `/bugs` command**: serve the mini-app bundle on the existing gateway host (same TLS + initData door as TUI, new path); bug_ticket bot `/bugs` replies with a `web_app` button (`?bot=bug_ticket`), mirroring `/tui` (`bot-host.mjs:2516-2524`). Done when: tapping the button from the bug_ticket bot opens the live board; stale-button warning behavior matches `/tui`.
-6. **Live confirm (budget 3, once)**: open via real TG button, file a card from the site, watch it appear in the mini app within one poll interval; screenshot receipt. Done when: receipt posted, no other live runs.
+Conventions: each node lists target files, pitfalls, and its own done-gate. Builder executes in order, one node at a time. Any node gate red → repair that node only; two failed repairs → STOP, SHEPHERD revert, Reviewer.
+
+### Node 1 — Extract `useBugBoard.ts` (data hook, verbatim move)
+
+- Target: new `src/components/bug-board/useBugBoard.ts`; touch `src/components/BugTrackerModal.tsx` only to import it.
+- Move as-is: overview fetch, `bugTags/allReports/deletionCandidates` state, KPI derive, filter/sort/search, select + `fetchTagDetail`, Refresh. No polling yet, no endpoint change.
+- Pitfalls: dropping the `migrate-inbox` fire-and-forget on open (`BugTrackerModal.tsx:606`); dropping `saveBugTrackerCache`/localStorage seed; changing default filter/sort.
+- Done when: `npx tsc --noEmit` 0; modal behavior identical by inspection; `npx vitest run tests/client_import_boundary.test.ts` green.
+
+### Node 2 — Extract `BugBoard.tsx` (presentational, verbatim move)
+
+- Target: new `src/components/bug-board/BugBoard.tsx`; `BugTrackerModal.tsx` becomes portal chrome + lightbox + mutation-button wiring around it.
+- Props-in/callbacks-out only; no fetching inside; accordion UI unchanged (no table redesign — human-rejected).
+- Pitfalls (Condition, Action, Pitfall): (per-card action tapped, board must call the modal's existing handler, never reimplement the mutation); (expanded detail open, lazy `fetchTagDetail` must still fire once per select, not on every render).
+- Done when: modal pixel-identical; `node scripts/assert-shell-smoke.mjs` green; `tsc` 0.
+
+### Node 3 — Polling in the hook (both surfaces inherit it)
+
+- Target: `src/components/bug-board/useBugBoard.ts` only.
+- Poll `GET /api/bug-tracker/overview`, interval 20–30s, page-visible only (`document.visibilityState`), skip when tab hidden; re-render only if `generated_at` moved; keep manual Refresh; header shows `generated_at` + `count`.
+- Pitfalls: polling with `with_shots`/reports (EGRESS_BOMB — keep the light overview shape); `setInterval` leak on unmount; polling while a mutation is in flight (debounce 5s after any write).
+- Done when: two browsers open — file/link a card in one, it appears in the other within one interval; network tab shows only light overview payloads.
+
+### Node 4 — Mini-app entry (Telegram auth adapter, no board logic)
+
+- Target: new `src/miniapp/bugs.tsx` (+ build wiring next to the existing `miniapp/dist` pattern per `Tui_proposal2b.md:129`).
+- Renders `BugBoard` full-page; auth via Telegram `initData` only (no Firebase/Google code in this entry); dark styling to match board.
+- Pitfalls: importing anything server-only (client boundary test is the gate); importing `App.tsx`/shell (frozen — must stay out); Google-auth components leaking into the mini bundle.
+- Done when: `tsc` 0; boundary test green; page renders board standalone against dev gateway.
+
+### Node 5 — Gateway route + `/bugs` command
+
+- Target: `scripts/tui-gateway.mjs` (new path reusing the initData gate, same host/TLS/Caddy as TUI) and `scripts/bot-host.mjs` (`/bugs` case on the bug_ticket bot mirroring `/tui` at `bot-host.mjs:2516-2524`, including the stale-tunnel warning behavior).
+- Pitfalls: new route bypassing initData validation (never anonymous — same HMAC check); button URL missing `?bot=bug_ticket`; `/bugs` answering on non-bug_ticket bots (scope the command or say which bot serves it).
+- Done when: tapping the button from the bug_ticket bot chat opens the live board; killing/regenerating the tunnel reproduces the stale-button warning, not a silent dead button.
+
+### Node 6 — Agent-run live validation (pre-COMPLETE gate, no phone needed)
+
+Executed by an agent (not the Builder), after Nodes 1–5 gates are green. Uses the gateway URL in a headless browser + server API — no human phone tap required:
+
+1. **Setup**: record gateway base URL, `generated_at`/`count` from `GET /api/bugs/list`, screenshot mini-app board (headless Chromium with stubbed `Telegram.WebApp.initData` per `assert-tui-gateway.test.mjs:316` pattern).
+2. **L1 — Parity**: board header `count`/`generated_at` equals API response; KPI values (Ready/Stuck/Open) equal the site modal's values for the same snapshot. Evidence: screenshot + API dump. Fail if any KPI differs.
+3. **L2 — Auto-update**: POST a new card via `POST /api/bugs` (test card, delete after), wait one poll interval + margin; assert it appears in the mini-app board without reload, header `generated_at` advanced. Evidence: before/after screenshots. Fail if not visible within 90s.
+4. **L3 — Update propagation**: PATCH the test card (state/queue change), assert the board row updates within one interval. Then delete the test card, assert the row disappears. Fail on any stale row.
+5. **L4 — Interaction**: filter by status, text search, expand one card (detail fetch fires once), sort toggle — all client-side, no console errors (`pageerror` listener, per basic-bugs table). Fail on any page error.
+6. **L5 — Egress**: record total bytes of 5 consecutive polls; fail if any poll carries shots/reports payloads or exceeds the light-overview budget recorded in Node 3.
+7. **Cleanup**: test card deleted, evidence bundle (screenshots + API dumps + poll log) attached to the packet checkpoint. Verdict posted as PASS/FAIL per L-step, not a single "looks good".
+
+COMPLETE requires L1–L5 all PASS. Any FAIL → repair the indicated node, re-run that L-step only (never "re-run until green" across unrelated steps).
 
 ## Test plan
 
@@ -56,6 +99,7 @@ npx tsc --noEmit
 npx vitest run tests/client_import_boundary.test.ts
 node scripts/assert-shell-smoke.mjs
 node scripts/journey-guard.mjs bug-board-miniapp
+(live) Node 6 L1–L5 agent-run validation above — pre-COMPLETE gate
 ```
 
 ## Audit plan
