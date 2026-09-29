@@ -632,8 +632,12 @@ jobsRouter.get('/api/debug/job-lock-check', async (req, res) => {
       listInMemoryServerJobs,
     } = await import('./serverJobs.js');
 
-    const lock = activeUserJobLocks.get(uid) || null;
-    const lockAgeMs = lock ? Date.now() - lock.timestamp : null;
+    const locks: any[] = [];
+    for (const [key, entry] of activeUserJobLocks.entries()) {
+      if (key === uid || key.startsWith(uid + ':')) {
+        locks.push({ key, jobId: (entry as any).jobId, ageMs: Date.now() - (entry as any).timestamp, ageSeconds: Math.round((Date.now() - (entry as any).timestamp) / 1000), fingerprint: (entry as any).fingerprint ? String((entry as any).fingerprint).slice(0, 120) : undefined });
+      }
+    }
 
     const memJobs = listInMemoryServerJobs(uid).map((j: any) => ({
       id: j.id,
@@ -665,7 +669,8 @@ jobsRouter.get('/api/debug/job-lock-check', async (req, res) => {
 
     res.json({
       queriedUid: uid,
-      lock: lock ? { jobId: lock.jobId, ageMs: lockAgeMs, ageSeconds: Math.round((lockAgeMs || 0) / 1000) } : null,
+      locks,
+      lock: locks[0] || null,
       inMemoryJobsForUser: memJobs,
       recentSubmissionsForUser: recentSubmissions,
       db: { rows: dbJobs, error: dbError },

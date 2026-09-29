@@ -299,16 +299,23 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                     clearTimeout(sTimer);
                     console.log(`[JobQueueRunner] Submit ok for job ${job.id} (attempt ${sAttempt}/3, ${Date.now() - sStart}ms).`);
                     // M-FIX2: A 200 here does not guarantee THIS job was actually queued.
-                    // The server's per-user in-flight lock can silently redirect a new
-                    // submission onto an older, unrelated, still-running job and return
-                    // duplicatePrevented:true with that OLDER job's id. Previously this
-                    // was indistinguishable from a real success, so the client polled a
-                    // jobId the server never created and only found out 3 minutes later
-                    // via the generic timeout message, with no real analysis ever run.
+                    // The server dedupes rapid double-submits of the SAME content and
+                    // returns duplicatePrevented:true with the EXISTING job's id.
+                    // Distinct concurrent meals now get distinct server jobs (content-scoped
+                    // lock), so this path only fires for true same-content duplicates.
+                    // Poll the server's jobId, then mirror its result onto this local job
+                    // so a double-click duplicate shows the same meal instead of timing out
+                    // polling a jobId the server never created.
                     let resBody: any = null;
                     try { resBody = await res.clone().json(); } catch { /* non-JSON body, treat as normal success */ }
                     if (resBody && resBody.duplicatePrevented) {
-                      console.log(`[JobQueueRunner] Submission for job ${job.id} was handled idempotently by server (status=${resBody.status || 'active'}). Polling job status.`);
+                      const serverJobId = resBody.jobId || job.id;
+                      if (serverJobId !== job.id) {
+                        console.log(`[JobQueueRunner] Submission for job ${job.id} deduped onto server job ${serverJobId} (status=${resBody.status || 'active'}). Polling server job and mirroring onto local job.`);
+                        (job as any)._serverJobId = serverJobId;
+                      } else {
+                        console.log(`[JobQueueRunner] Submission for job ${job.id} was handled idempotently by server (status=${resBody.status || 'active'}). Polling job status.`);
+                      }
                       submitOk = true;
                       break;
                     }
@@ -360,6 +367,10 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
             }
 
             console.log(`[JobQueueRunner] Job ${job.id} is server-owned. Polling /api/jobs/status...`);
+            const pollJobId = (job as any)._serverJobId || job.id;
+            if (pollJobId !== job.id) {
+              console.log(`[JobQueueRunner] Polling deduped server job ${pollJobId} for local job ${job.id}.`);
+            }
             let done = false;
             const pollStartTime = Date.now();
             const maxPollTimeMs = 5 * 60 * 1000; // Extended 5 minute timeout window (was 3 min; large multi-item edits can exceed 3 min)
@@ -380,7 +391,7 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                 const timeoutId = setTimeout(() => statusController.abort(), 20000);
                 let statusRes: Response;
                 try {
-                  statusRes = await fetch(`/api/jobs/status?jobId=${job.id}&userId=${auth.currentUser?.uid || 'anonymous'}`, { signal: statusController.signal });
+                  statusRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${auth.currentUser?.uid || 'anonymous'}`, { signal: statusController.signal });
                 } finally {
                   clearTimeout(timeoutId);
                 }
@@ -430,7 +441,7 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                      // overwrite the fresh edit with stale data. Always fetch the
                      // authoritative full result from the server for this poll cycle instead.
                      try {
-                        const fullRes = await fetch(`/api/jobs/status?jobId=${job.id}&userId=${auth.currentUser?.uid || 'anonymous'}&full=true`);
+                        const fullRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${auth.currentUser?.uid || 'anonymous'}&full=true`);
                         if (fullRes.ok) {
                            const contentType = fullRes.headers.get('content-type');
                            if (contentType && contentType.includes('application/json')) {
@@ -800,7 +811,7 @@ export function useJobRuntime(options: UseJobRuntimeOptions): UseJobRuntimeRetur
                 const timeoutId = setTimeout(() => lateController.abort(), 6000);
                 let lateRes: Response;
                 try {
-                  lateRes = await fetch(`/api/jobs/status?jobId=${job.id}&userId=${auth.currentUser?.uid || 'anonymous'}&full=true`, { signal: lateController.signal });
+                  lateRes = await fetch(`/api/jobs/status?jobId=${pollJobId}&userId=${auth.currentUser?.uid || 'anonymous'}&full=true`, { signal: lateController.signal });
                 } finally {
                   clearTimeout(timeoutId);
                 }

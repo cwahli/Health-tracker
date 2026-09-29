@@ -64,14 +64,46 @@ export interface ServerJobPayload {
 export const inMemoryServerJobs = new Map<string, any>();
 export const recentSubmissionsMap = new Map<string, { jobId: string; timestamp: number; status: string }>();
 
-// Per-user in-flight lock: tracks the single job currently running/queued for a user.
-// This is what actually prevents "double call" duplicate submissions. The client
-// generates a fresh jobId (and a fresh client-supplied idempotencyKey, which embeds
-// that jobId) on every send until the first response lands, so the content/time-bucket
-// fingerprint check below never catches a rapid double-click — it only ever compares a
-// key against itself. This lock is content-independent and userId-scoped instead.
-export const activeUserJobLocks = new Map<string, { jobId: string; timestamp: number }>();
+// Per-user in-flight lock: tracks running/queued jobs per user + kind + content.
+// Previously this was a single slot per user:kind (`${userId}:${kindKey}`),
+// content-independent — so two DISTINCT meals submitted within 15s collided and
+// the second was returned as `duplicatePrevented` with the FIRST job's id. The
+// client then polled a jobId the server never created and timed out after 5min.
+// Now the lock is content-scoped: distinct meals get distinct lock keys and run
+// concurrently; only the same content within 15s is deduped (rapid double-click).
+export const activeUserJobLocks = new Map<string, { jobId: string; timestamp: number; fingerprint?: string }>();
 const USER_LOCK_MAX_AGE_MS = 5 * 60 * 1000; // safety valve: auto-clear if a job never reaches a terminal status
+
+function hashLockString(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(36);
+}
+
+function hashSubmissionImages(images?: string[], imageUrls?: string[]): string {
+  const parts: string[] = [];
+  for (const img of images || []) {
+    if (typeof img !== 'string') continue;
+    // Length + head + tail sample distinguishes distinct photos without storing full base64 in keys.
+    parts.push(`${img.length}:${img.slice(0, 200)}:${img.slice(-100)}`);
+  }
+  for (const u of imageUrls || []) {
+    if (typeof u !== 'string') continue;
+    parts.push(`url:${u.length}:${u.slice(0, 200)}`);
+  }
+  if (parts.length === 0) return 'noimg';
+  return hashLockString(parts.join('|'));
+}
+
+export function fingerprintSubmission(payload: Pick<ServerJobPayload, 'text' | 'images' | 'imageUrls' | 'mode'> & { userSelectedMode?: string }): string {
+  const rawText = (payload.text || '').trim().toLowerCase();
+  const imgCount = (payload.images?.length || 0) + (payload.imageUrls?.length || 0);
+  const modeKey = (payload as any).userSelectedMode || payload.mode || 'review';
+  const imgHash = hashSubmissionImages(payload.images as any, payload.imageUrls as any);
+  return `${rawText}|${imgCount}|${modeKey}|${imgHash}`;
+}
 
 export function releaseUserJobLock(userId: string, jobId: string) {
   for (const [key, lock] of activeUserJobLocks.entries()) {
@@ -81,13 +113,18 @@ export function releaseUserJobLock(userId: string, jobId: string) {
   }
 }
 
-// Clean up old idempotency entries periodically (> 60s)
+// Clean up old idempotency entries periodically (> 60s) + stale content locks.
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     const now = Date.now();
     for (const [key, entry] of recentSubmissionsMap.entries()) {
       if (now - entry.timestamp > 60000) {
         recentSubmissionsMap.delete(key);
+      }
+    }
+    for (const [key, lock] of activeUserJobLocks.entries()) {
+      if (now - lock.timestamp > USER_LOCK_MAX_AGE_MS) {
+        activeUserJobLocks.delete(key);
       }
     }
   }, 30000);
@@ -102,9 +139,14 @@ export async function checkOrRegisterIdempotentSubmission(payload: ServerJobPayl
 
   const isRetry = !!(payload as any).isRetry || payload.mode === 'retry';
 
-  // 0. In-flight lock (kind-scoped per user): scoped to userId + kind to prevent cross-feature blocking
-  // (e.g. a medical extraction starting while a food analysis is running).
-  const lockKey = `${userId}:${kindKey}`;
+  const fingerprint = fingerprintSubmission(payload as any);
+  const fingerprintHash = hashLockString(fingerprint);
+
+  // 0. In-flight lock, content-scoped per user+kind+fingerprint: prevents rapid
+  // UI double-click of the SAME meal while allowing DISTINCT concurrent meals.
+  // (e.g. a medical extraction starting while a food analysis is running, or two
+  // different meals submitted within seconds of each other).
+  const lockKey = `${userId}:${kindKey}:${fingerprintHash}`;
   const existingLock = activeUserJobLocks.get(lockKey);
   if (existingLock && existingLock.jobId !== payload.jobId && !isRetry) {
     const lockedMemJob = inMemoryServerJobs.get(existingLock.jobId);
@@ -112,36 +154,62 @@ export async function checkOrRegisterIdempotentSubmission(payload: ServerJobPayl
     const lockIsStale = (Date.now() - existingLock.timestamp) > USER_LOCK_MAX_AGE_MS;
     const lockedJobStillActive = lockedStatus === 'running' || lockedStatus === 'queued';
 
-    // Only treat as duplicate if it's within 15 seconds on the same kind/action (rapid UI double-click)
+    // Only treat as duplicate if it's within 15 seconds with identical content (rapid UI double-click)
     const isRapidDoubleClick = (Date.now() - existingLock.timestamp < 15000);
 
     if (lockedJobStillActive && !lockIsStale && isRapidDoubleClick) {
-      console.log(`[ServerJobs Idempotency] Blocked rapid double-submit for userId="${userId}" kind="${kindKey}" — reusing in-flight jobId="${existingLock.jobId}".`);
+      console.log(`[ServerJobs Idempotency] Blocked rapid double-submit for userId="${userId}" kind="${kindKey}" fp="${fingerprintHash}" — reusing in-flight jobId="${existingLock.jobId}".`);
       return { isDuplicate: true, jobId: existingLock.jobId, status: lockedStatus || 'running' };
     }
-    activeUserJobLocks.delete(lockKey);
+    if (lockIsStale || !lockedJobStillActive) {
+      activeUserJobLocks.delete(lockKey);
+    }
   }
 
-  // Explicit idempotencyKey or content fingerprint key (12s window)
-  const key = payload.idempotencyKey || `${userId}:${kindKey}:${rawText}:${imgCount}:${modeKey}:${Math.floor(Date.now() / 12000)}`;
+  // Content fingerprint key (12s window) — catches double-clicks that generate a
+  // fresh jobId (and a fresh client idempotencyKey embedding that jobId) on every
+  // send. The client key alone would only ever compare against itself, so the
+  // content key is checked independently of any client-supplied key.
+  const contentKey = `${userId}:${kindKey}:${fingerprint}:${Math.floor(Date.now() / 12000)}`;
 
-  const existing = recentSubmissionsMap.get(key);
-  if (existing && (Date.now() - existing.timestamp < 12000) && !isRetry) {
+  // 1a. Exact client-key match (same job retry with identical key).
+  if (payload.idempotencyKey && !isRetry) {
+    const existingByClientKey = recentSubmissionsMap.get(payload.idempotencyKey);
+    if (existingByClientKey && (Date.now() - existingByClientKey.timestamp < 12000)) {
+      const memJob = inMemoryServerJobs.get(existingByClientKey.jobId);
+      const currentStatus = memJob?.status || existingByClientKey.status || 'queued';
+      if ((currentStatus === 'running' || currentStatus === 'queued') && existingByClientKey.jobId !== payload.jobId) {
+        console.log(`[ServerJobs Idempotency] Blocked duplicate submission clientKey. Reusing active jobId="${existingByClientKey.jobId}" (status="${currentStatus}")`);
+        return { isDuplicate: true, jobId: existingByClientKey.jobId, status: currentStatus };
+      }
+    }
+  }
+
+  // 1b. Same-content match across different jobIds (the double-click case).
+  const existing = recentSubmissionsMap.get(contentKey);
+  if (existing && (Date.now() - existing.timestamp < 12000) && !isRetry && existing.jobId !== payload.jobId) {
     const memJob = inMemoryServerJobs.get(existing.jobId);
     const currentStatus = memJob?.status || existing.status || 'queued';
     if (currentStatus === 'running' || currentStatus === 'queued') {
-      console.log(`[ServerJobs Idempotency] Blocked duplicate submission key="${key}". Reusing active jobId="${existing.jobId}" (status="${currentStatus}")`);
+      console.log(`[ServerJobs Idempotency] Blocked duplicate submission contentKey fp="${fingerprintHash}". Reusing active jobId="${existing.jobId}" (status="${currentStatus}")`);
       return { isDuplicate: true, jobId: existing.jobId, status: currentStatus };
     }
   }
 
-  recentSubmissionsMap.set(key, {
+  if (payload.idempotencyKey) {
+    recentSubmissionsMap.set(payload.idempotencyKey, {
+      jobId: payload.jobId,
+      timestamp: Date.now(),
+      status: 'queued'
+    });
+  }
+  recentSubmissionsMap.set(contentKey, {
     jobId: payload.jobId,
     timestamp: Date.now(),
     status: 'queued'
   });
 
-  activeUserJobLocks.set(lockKey, { jobId: payload.jobId, timestamp: Date.now() });
+  activeUserJobLocks.set(lockKey, { jobId: payload.jobId, timestamp: Date.now(), fingerprint });
 
   return { isDuplicate: false, jobId: payload.jobId };
 }
