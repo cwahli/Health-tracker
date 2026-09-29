@@ -48,6 +48,15 @@ export function routeState(host, opts = {}) {
 }
 
 /**
+ * Why a failed route is held. The reason lives at `row.canary.reason` (see
+ * `rollbackRoute`); `failedReason` is only a legacy fallback. Reading the
+ * wrong field is how a failed canary used to report "(unknown reason)".
+ */
+export function failedRouteReason(row) {
+  return row?.canary?.reason || row?.failedReason || 'unknown reason';
+}
+
+/**
  * Arm a host for a canary. Called when the user names it (`/location`), so a
  * failed host can be re-armed by naming it again. Keeps the previous host so
  * a failure can roll back to the path that was live before.
