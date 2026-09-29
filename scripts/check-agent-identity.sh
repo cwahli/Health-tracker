@@ -2,17 +2,17 @@
 # Mandatory author identity on every non-merge commit.
 #
 # One trailer line, exactly:
-#   Author: <model and version> (<thinking level>)
+#   Author: <model and version> (<thinking level>) <location>
 # Examples:
-#   Author: Grok 4.7 (High)
-#   Author: opencode-go/space-bunny-free (max)
+#   Author: Grok 4.7 (High) VM
+#   Author: opencode-go/space-bunny-free (max) VM
+#
+# The location is where the work ran (VM, vignette hostname, device). A name
+# with no version, a line with no thinking level, or a line with no location
+# is rejected.
 #
 # The legacy `Agent:` prefix is still accepted (branches in flight carry it),
 # but new commits must use `Author:`.
-#
-# The name is the model and version as the provider shows them. The
-# parentheses are the thinking level. A name with no version, or a line
-# with no thinking level, is rejected.
 #
 # Grandfather clause: the rule landed in c8cc6dc (2026-09-26T21:51:04Z). A
 # commit authored before that cannot be judged by a rule it predates, so it is
@@ -23,6 +23,12 @@
 set -u
 
 pattern='^(Agent|Author): [^ ].+ \([^)]+\)$'
+new_pattern='^(Agent|Author): [^ ].+ \([^()]+\) [A-Za-z0-9][A-Za-z0-9._-]*$'
+
+# Commits authored before this timestamp keep the old shape (no location).
+# Anything authored after must name its location. In-flight work rebased
+# after this keeps its original author dates, so it is judged as written.
+LOCATION_SINCE='2026-09-29T16:20:00Z'
 
 # The moment this rule became real. Keep in step with the commit that added it.
 RULE_LANDED_AT='2026-09-26T21:51:04Z'
@@ -31,12 +37,12 @@ grandfather=1
 
 check_file() {
   file=$1
-  if grep -Eq "$pattern" "$file"; then
+  if grep -Eq "$new_pattern" "$file"; then
     return 0
   fi
   echo "Commit rejected. Add one trailer line:" >&2
-  echo "  Author: <model and version> (<thinking level>)" >&2
-  echo "Example: Author: Grok 4.7 (High)" >&2
+  echo "  Author: <model and version> (<thinking level>) <location>" >&2
+  echo "Example: Author: Grok 4.7 (High) VM" >&2
   echo "Set AUTHOR_IDENTITY (or legacy AGENT_IDENTITY) to that text (without the 'Author:' prefix) if a tool commits for you." >&2
   return 1
 }
@@ -55,9 +61,13 @@ check_commit() {
     return 0
   fi
   msg=$(git log -1 --format=%B "$sha")
-  printf '%s\n' "$msg" | grep -Eq "$pattern" && return 0
+  if [ -n "$authored" ] && [ "$authored" \< "$LOCATION_SINCE" ]; then
+    printf '%s\n' "$msg" | grep -Eq "$pattern" && return 0
+  else
+    printf '%s\n' "$msg" | grep -Eq "$new_pattern" && return 0
+  fi
   echo "Commit $sha has no author identity." >&2
-  echo "Required line: Author: <model and version> (<thinking level>) (legacy Agent: accepted)" >&2
+  echo "Required line: Author: <model and version> (<thinking level>) <location> (legacy Agent: accepted, legacy no-location shape accepted before $LOCATION_SINCE)" >&2
   printf '%s\n' "$msg" | head -n 8 >&2
   return 1
 }
