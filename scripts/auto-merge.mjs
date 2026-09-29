@@ -33,6 +33,12 @@
  *   node scripts/auto-merge.mjs                     # in Actions: push to agent/**
  *   node scripts/auto-merge.mjs --pr=346            # judge one PR
  *   node scripts/auto-merge.mjs --pr=346 --evaluate # decide and print; write nothing
+ *   node scripts/auto-merge.mjs --pr=346 --allow-red-main  # operator override; see below
+ *
+ * A red `main` blocks the next merge, which would also block the PR that fixes
+ * it. `--allow-red-main` (or `ALLOW_RED_MAIN=1`) is the deliberate way out: an
+ * operator says so explicitly, the run log and the PR both record it, and it is
+ * never reached by a timeout.
  *
  * Env: GH_TOKEN (or GITHUB_TOKEN), GITHUB_API_URL, GITHUB_REPOSITORY,
  *      GITHUB_REF_NAME. All four are set for us by Actions; the API base is read
@@ -49,6 +55,7 @@ import {
   REQUIRED_CHECKS,
   describeDecision,
   evaluateChecks,
+  evaluateMainHealth,
   evaluatePrState,
   validateRequiredAgainstWorkflows,
 } from './lib/merge-gate.mjs';
@@ -74,6 +81,7 @@ export function parseArgs(argv = []) {
     const arg = String(raw);
     if (arg === '--evaluate' || arg === '--dry-run') args.evaluate = true;
     else if (arg === '--json') args.json = true;
+    else if (arg === '--allow-red-main') args.allowRedMain = true;
     else if (arg.startsWith('--pr=')) args.pr = Number(arg.slice(5));
     else if (arg.startsWith('--branch=')) args.branch = arg.slice(9);
     else if (arg.startsWith('--repo=')) args.repo = arg.slice(7);
@@ -157,15 +165,45 @@ export async function findOpenPr(client, { owner, repo, branch, waitSeconds = DE
 }
 
 /**
+ * Read whether `main` itself is currently verified.
+ *
+ * A read that fails is UNKNOWN, not red: a transient API error must not stop
+ * every merge, and the next verification re-covers the tree either way. Only a
+ * concluded `failure` blocks.
+ */
+export async function readMainHealth(client, { owner, repo, branch = 'main', log = () => {} } = {}) {
+  let sha = '';
+  try {
+    const ref = await client.call(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`);
+    sha = String(ref?.object?.sha || '');
+  } catch (err) {
+    return { health: 'unknown', blocked: false, runs: 0, reason: `could not read ${branch}: ${err.message}` };
+  }
+  if (!sha) return { health: 'unknown', blocked: false, runs: 0, reason: `${branch} reported no commit` };
+  try {
+    const runs = await listCheckRuns(client, { owner, repo, ref: sha });
+    return { ...evaluateMainHealth({ checkRuns: runs, mainSha: sha }), sha };
+  } catch (err) {
+    return { health: 'unknown', blocked: false, runs: 0, sha, reason: `could not read ${branch}'s checks: ${err.message}` };
+  }
+}
+
+/**
  * Wait for a decision, asking the gate after each poll.
  *
  * `waitSeconds` bounds the whole wait. Exhausting it is a REFUSE, not a merge:
  * the PR stays open and the comment says which required check never reported.
+ *
+ * `main` is consulted only once the PR's own checks are green — the PR has to be
+ * mergeable before the state of the branch it lands on matters, and a red PR
+ * already refuses without a second read.
  */
 export async function waitForDecision(client, {
   owner,
   repo,
   head,
+  baseBranch = 'main',
+  allowRedMain = false,
   waitSeconds = DEFAULT_WAIT_SECONDS,
   pollSeconds = DEFAULT_POLL_SECONDS,
   log = () => {},
@@ -176,7 +214,34 @@ export async function waitForDecision(client, {
     const runs = await listCheckRuns(client, { owner, repo, ref: head });
     last = evaluateChecks({ checkRuns: runs, required: REQUIRED_CHECKS });
     log(`  ${describeDecision(last, { head })}`);
-    if (last.decision !== 'wait') return last;
+    if (last.decision === 'refuse') return last;
+
+    if (last.decision === 'merge') {
+      const main = await readMainHealth(client, { owner, repo, branch: baseBranch });
+      log(`  ${baseBranch}: ${main.health} — ${main.reason}`);
+      if (main.blocked && allowRedMain) {
+        // The operator's explicit override. Without it a red main is a deadlock:
+        // the only way to fix main is to merge a fix, and that merge is refused
+        // too. It is opt-in, it is named in the run log and on the PR, and it is
+        // the operator's call — not a timeout the driver takes on its own.
+        log(`  ⚠️  OVERRIDING a red ${baseBranch} (--allow-red-main): ${main.reason}`);
+        return { ...last, baseBranch, mainHealth: 'red', mainOverridden: true, mainReason: main.reason };
+      }
+      if (main.blocked) {
+        return {
+          decision: 'refuse',
+          scope: 'main',
+          reason: main.reason,
+          failed: main.failed,
+          missing: [],
+          pending: [],
+          mainHealth: main.health,
+          counts: { runs: runs.length, missing: 0, pending: 0, failed: (main.failed || []).length },
+        };
+      }
+      return { ...last, baseBranch, mainHealth: main.health, mainReason: main.reason };
+    }
+
     if (Date.now() >= deadline) {
       return {
         ...last,
@@ -234,6 +299,7 @@ async function main(argv = process.argv.slice(2)) {
   const apiBase = process.env.GITHUB_API_URL || 'https://api.github.com';
   const repoSlug = args.repo || process.env.GITHUB_REPOSITORY || '';
   const branch = String(args.branch || process.env.GITHUB_REF_NAME || '').replace(/^refs\/heads\//, '');
+  const allowRedMain = args.allowRedMain === true || process.env.ALLOW_RED_MAIN === '1';
   const waitSeconds = Number.isFinite(args.wait) ? args.wait : Number(process.env.MERGE_WAIT_SECONDS || DEFAULT_WAIT_SECONDS);
   const pollSeconds = Number.isFinite(args.poll) ? args.poll : DEFAULT_POLL_SECONDS;
   // Separate from the check wait: auto-pr.yml races us to create the PR, so the
@@ -275,20 +341,25 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   const head = String(pr.head?.sha || '');
-  log(`auto-merge: PR #${pr.number} (${branch}) head ${head.slice(0, 7)}`);
-  const result = await waitForDecision(client, { owner, repo, head, waitSeconds, pollSeconds, log });
+  const baseBranch = String(pr.base?.ref || 'main');
+  log(`auto-merge: PR #${pr.number} (${branch}) head ${head.slice(0, 7)} onto ${baseBranch}`);
+  const result = await waitForDecision(client, { owner, repo, head, baseBranch, allowRedMain, waitSeconds, pollSeconds, log });
 
   if (result.decision !== 'merge') {
     const body = [
       describeDecision(result, { head }),
       '',
-      'The merge is held until every required check has concluded `success`.',
-      `Required: ${REQUIRED_CHECKS.map((c) => `\`${c.name}\``).join(', ')}`,
+      result.scope === 'main'
+        ? `The merge is held until \`${baseBranch}\` verifies green again. This PR passed its own gates — landing it on a known-broken \`${baseBranch}\` would add a second change to a tree that is already failing, and make the failure harder to attribute.`
+        : 'The merge is held until every required check has concluded `success`.',
+      result.scope === 'main' ? '' : `Required: ${REQUIRED_CHECKS.map((c) => `\`${c.name}\``).join(', ')}`,
       result.failed?.length ? `Failed: ${result.failed.map((f) => `\`${f}\``).join(', ')}` : '',
       result.pending?.length ? `Still running: ${result.pending.map((f) => `\`${f}\``).join(', ')}` : '',
       result.missing?.length ? `Never reported: ${result.missing.map((f) => `\`${f}\``).join(', ')}` : '',
       '',
-      'Push a fix (or a new commit) and this runs again on that push.',
+      result.scope === 'main'
+        ? `Fix \`${baseBranch}\` first; this PR does not need a new commit.`
+        : 'Push a fix (or a new commit) and this runs again on that push.',
     ].filter((l) => l !== '').join('\n');
     if (args.evaluate) log(`[evaluate] would comment on #${pr.number} and NOT merge`);
     else await comment(client, { owner, repo, number: pr.number, body });
@@ -332,10 +403,14 @@ async function main(argv = process.argv.slice(2)) {
   const dispatchLine = describeDispatch(dispatch);
 
   log(`  auto-merge on ${head}: ${mergeResult}`);
+  log(`  ${baseBranch} at merge time: ${result.mainHealth || 'unknown'}${result.mainReason ? ` (${result.mainReason})` : ''}`);
   log(`  ${dispatchLine}`);
+  const overrideNote = result.mainOverridden
+    ? `\n\n⚠️ **Merged over a red \`${baseBranch}\`** on the operator's explicit instruction (\`--allow-red-main\`): ${result.mainReason}`
+    : '';
   await comment(client, {
     owner, repo, number: pr.number,
-    body: `${describeDecision(result, { head })}\n\n\`\`\`\n${mergeResult}\n\`\`\`\n\n${dispatchLine}`,
+    body: `${describeDecision(result, { head })}\n\n\`\`\`\n${mergeResult}\n\`\`\`\n\n${dispatchLine}${overrideNote}`,
   });
   return merged && dispatch.ok ? 0 : 1;
 }
