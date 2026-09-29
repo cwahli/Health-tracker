@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Check, CheckCircle2, Clock, Loader2, X, Trash2, Save, Eye,
+  Check, CheckCircle2, Clock, Copy, Loader2, X, Trash2, Save, Eye,
   Utensils, Stethoscope, RotateCcw, Search, Filter, Sparkles,
   ChevronDown, ChevronUp, FileText, Activity, CheckCheck,
   AlertCircle, AlertTriangle, Scale, Layers
@@ -640,6 +640,33 @@ function AnalysisCard({
   onPreviewImage
 }: AnalysisCardProps) {
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+
+  const handleCopyTechnicalDetails = async () => {
+    const lines = [
+      `Job ID: ${job.id}`,
+      `Kind: ${job.kind}`,
+      `Status: ${job.status}`,
+    ];
+    if (job.inputSnapshot?.text) lines.push(`Prompt: ${job.inputSnapshot.text}`);
+    const text = lines.join('\n');
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (e) {
+      console.error('[AllAnalysesModal] Failed to copy technical details:', e);
+    }
+  };
   const isMedical = job.kind === 'medical';
   const isFood = job.kind === 'food_log' || job.kind === 'food' || job.kind === 'food_compare' || !job.kind;
   
@@ -868,6 +895,16 @@ function AnalysisCard({
 
           {isExpanded && (
             <div className="mt-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[10px] text-slate-400 space-y-1">
+              <div className="flex items-center justify-end">
+                <button
+                  onClick={handleCopyTechnicalDetails}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-sans text-[10px] font-semibold transition-colors cursor-pointer"
+                  title="Copy technical details"
+                >
+                  {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
               <div><span className="text-slate-500">Job ID:</span> {job.id}</div>
               <div><span className="text-slate-500">Kind:</span> {job.kind}</div>
               <div><span className="text-slate-500">Status:</span> {job.status}</div>
