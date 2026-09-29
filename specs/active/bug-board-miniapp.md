@@ -1,6 +1,6 @@
 ---
 id: bug-board-miniapp
-status: draft
+status: locked
 skill: sync-jobs
 edit_mode: patch
 allowed_files:
