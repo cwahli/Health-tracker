@@ -353,10 +353,18 @@ Mobile-first AI dev assistant and compute router for your projects.
       let commitHash = 'unknown';
       try {
         const identity = String(process.env.AGENT_IDENTITY || '');
-        if (!/.+ \([^)]+\)$/.test(identity)) {
-          throw new Error("AGENT_IDENTITY must look like 'Grok 4.7 (High)' — model, version, and thinking level.");
+        // `Author:` is the enforced prefix (#325 renamed it from Agent:), and a
+        // PR body is judged on the strict shape, so the location is required
+        // here too. The thinking level must be a word: `n/a` is a placeholder,
+        // not an answer, so a model with no levels writes (none).
+        if (!/^.+ \([A-Za-z][A-Za-z0-9._-]*\) [A-Za-z0-9][A-Za-z0-9._-]*$/.test(identity)) {
+          throw new Error(
+            "AGENT_IDENTITY must be '<model and version> (<thinking level>) <location>', "
+            + "e.g. 'Grok 4.7 (High) VM'. Use (none) for a model with no thinking levels; "
+            + "'n/a' is not accepted.",
+          );
         }
-        const commitMsg = `fix: ${arg.slice(0, 60)}\n\nAgent: ${identity}`;
+        const commitMsg = `fix: ${arg.slice(0, 60)}\n\nAuthor: ${identity}`;
         execSync('git add -u', { cwd: targetDir, encoding: 'utf8' });
         execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: targetDir, encoding: 'utf8' });
         execSync('git push origin main', { cwd: targetDir, encoding: 'utf8' });

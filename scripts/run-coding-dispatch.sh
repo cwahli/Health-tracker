@@ -972,21 +972,26 @@ self_committed_changes() {
 
 commit_fix() {
   local msg="$1"
-  case "${AGENT_IDENTITY:-}" in
-    *\ \(*\)) ;;
-    *)
-      echo "[Dispatcher] AGENT_IDENTITY must be the model, version, and thinking level, e.g. AGENT_IDENTITY='Grok 4.7 (High)'."
-      return 1
-      ;;
-  esac
+  # The same shape scripts/check-agent-identity.sh enforces, as a literal regex
+  # rather than a shell case: a case pattern can check the shape but not that
+  # the thinking level is a *word*, so it happily passed `n/a` through to a gate
+  # that then rejected the commit. One pattern, checked in one place, is the
+  # only version of this that stays true.
+  if ! printf 'Author: %s\n' "$AGENT_IDENTITY" \
+    | grep -Eq '^Author: [^ ].+ \([A-Za-z][A-Za-z0-9._-]*\) [A-Za-z0-9][A-Za-z0-9._-]*$'; then
+    echo "[Dispatcher] AGENT_IDENTITY must be '<model and version> (<thinking level>) <location>',"
+    echo "              e.g. AGENT_IDENTITY='Grok 4.7 (High) VM'."
+    echo "              Use (none) for a model with no thinking levels; 'n/a' is not accepted."
+    return 1
+  fi
   if git -C "$CODER_DIR" config user.email >/dev/null 2>&1; then
-    git -C "$CODER_DIR" commit -m "$msg" -m "Agent: $AGENT_IDENTITY"
+    git -C "$CODER_DIR" commit -m "$msg" -m "Author: $AGENT_IDENTITY"
   else
     GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-cwahli}" \
     GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-cwahli@users.noreply.github.com}" \
     GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-cwahli}" \
     GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-cwahli@users.noreply.github.com}" \
-    git -C "$CODER_DIR" commit -m "$msg" -m "Agent: $AGENT_IDENTITY"
+    git -C "$CODER_DIR" commit -m "$msg" -m "Author: $AGENT_IDENTITY"
   fi
 }
 

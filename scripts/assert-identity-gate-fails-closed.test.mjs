@@ -165,6 +165,109 @@ console.log('assert-identity-gate-fails-closed:');
   check('the other call site allows nothing', withoutFlag.length === 1 && !/--allow-empty/.test(withoutFlag[0]));
 }
 
+// 6. The `Author:` rename is a gate, not a suggestion. The old regex accepted
+//    either prefix, so nothing stopped an agent writing `Agent:` forever.
+{
+  const dir = scratchRepo();
+  const base = git(dir, 'rev-parse', 'HEAD');
+  const now = commit(dir, 'file.txt', 'b\n', 'fix: x\n\nAgent: Grok 4.7 (High) VM\n');
+  // Force the author date past PREFIX_SINCE so the new-commit rule applies.
+  const recent = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  execFileSync('git', ['commit', '--amend', '--no-edit', '--date', recent], {
+    cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_COMMITTER_DATE: recent },
+  });
+  const r = runGate(dir, '--range', `${base}..HEAD`);
+  check('a new commit with the legacy Agent: prefix is rejected', r.code === 1, `exit ${r.code}`);
+  check('the rejection names the rename and the cutoff', /legacy 'Agent:'/.test(r.out) && /#325/.test(r.out), r.out);
+  check('the rejection says how to fix it', /amend/i.test(r.out), r.out);
+}
+
+// 7. The same trailer, authored BEFORE the cutoff, still lands. Otherwise the
+//    rename would strand every branch already in flight.
+{
+  const dir = scratchRepo();
+  const base = git(dir, 'rev-parse', 'HEAD');
+  commit(dir, 'file.txt', 'b\n', 'fix: x\n\nAgent: Grok 4.7 (High) VM\n');
+  const old = '2026-09-20T10:00:00Z';
+  execFileSync('git', ['commit', '--amend', '--no-edit', '--date', old], {
+    cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_COMMITTER_DATE: old },
+  });
+  const r = runGate(dir, '--range', `${base}..HEAD`);
+  check('the same trailer is accepted when authored before the cutoff', r.code === 0, r.out || `exit ${r.code}`);
+}
+
+// 8. A thinking level must be a word. `n/a` reads as "nobody looked", which is
+//    the failure the field exists to prevent; `none` is an honest word.
+{
+  const cases = [
+    ['Author: Space Bunny Free (n/a) VM', false, 'n/a is not a thinking level'],
+    ['Author: Space Bunny Free (none) VM', true, null],
+    ['Author: Space Bunny Free (max) VM', true, null],
+    ['Author: Grok 4.7 (High) Mac', true, null],
+    ['Author: Muse Spark 1.3 Contributor (xhigh) VM', true, null],
+    ['Author: DeepSeek 4.1 flash (high) VM', true, null],
+  ];
+  for (const [trailer, wantPass, why] of cases) {
+    const body = `## Summary\n\nx\n\n## Status\n\nx\n\n## Left\n\nx\n\n${trailer}\n`;
+    const file = join(mkdtempSync(join(tmpdir(), 'identity-body-')), 'body.md');
+    writeFileSync(file, body);
+    let code = 0;
+    try {
+      execFileSync('sh', [SCRIPT, '--message', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) { code = err.status ?? 1; }
+    dirs.push(join(file, '..'));
+    check(why || `accepts ${trailer}`, (code === 0) === wantPass, `exit ${code}`);
+  }
+}
+
+// 9. A PR body is written now, so it gets the strict shape: Author:, a real
+//    level, and a location. The legacy prefix and the no-location shape are both
+//    commit-level grace, never body-level.
+{
+  const cases = [
+    ['Agent: Grok 4.7 (High) VM', false, 'a PR body must use Author:'],
+    ['Author: Grok 4.7 (High)', false, 'a PR body must name a location'],
+    ['Author: Grok 4.7 (n/a) VM', false, 'a PR body must not say n/a'],
+    ['Author: Grok 4.7 (High) VM', true, null],
+  ];
+  for (const [trailer, wantPass, why] of cases) {
+    const body = `## Summary\n\nx\n\n## Status\n\nx\n\n## Left\n\nx\n\n${trailer}\n`;
+    const file = join(mkdtempSync(join(tmpdir(), 'identity-body2-')), 'body.md');
+    writeFileSync(file, body);
+    let code = 0;
+    try {
+      execFileSync('sh', [SCRIPT, '--message', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) { code = err.status ?? 1; }
+    dirs.push(join(file, '..'));
+    check(why || `accepts body ${trailer}`, (code === 0) === wantPass, `exit ${code}`);
+  }
+}
+
+// 10. Sibling producers. A rule that only the regex knows about is a rule the
+//     tools that commit for an agent will break on, and the breakage lands in a
+//     dispatch nobody is watching.
+{
+  const dispatch = readFileSync(join(ROOT, 'scripts', 'run-coding-dispatch.sh'), 'utf8');
+  const collab = readFileSync(join(ROOT, 'scripts', 'collab-bot.mjs'), 'utf8');
+  check('run-coding-dispatch commits an Author: trailer', dispatch.includes('-m "Author: $AGENT_IDENTITY"'));
+  check('run-coding-dispatch no longer commits an Agent: trailer', !dispatch.includes('-m "Agent: $AGENT_IDENTITY"'));
+  // The gate's own pattern, not a shell case: a case matched `n/a` (it checks
+  // shape, not that the level is a word) and passed a commit the gate would
+  // then reject. Pinned so the two cannot drift.
+  const GATE_SHAPE = '^Author: [^ ].+ \\([A-Za-z][A-Za-z0-9._-]*\\) [A-Za-z0-9][A-Za-z0-9._-]*$';
+  check('run-coding-dispatch validates with the gate pattern', dispatch.includes(`grep -Eq '${GATE_SHAPE}'`));
+  // The identity text carries NO prefix — the commit adds it. Grepping the raw
+  // value against a prefix-anchored pattern rejects everything, which a
+  // source-text check cannot see: only running it does.
+  check('run-coding-dispatch validates the line the commit will carry',
+    dispatch.includes(`printf 'Author: %s\\n' "$AGENT_IDENTITY"`));
+  check('run-coding-dispatch explains n/a is not accepted', dispatch.includes("'n/a' is not accepted"));
+  check('collab-bot commits an Author: trailer', collab.includes('\\n\\nAuthor: ${identity}'));
+  check('collab-bot no longer commits an Agent: trailer', !collab.includes('\\n\\nAgent: ${identity}'));
+  check('collab-bot validates the strict shape', collab.includes('^.+ \\([A-Za-z][A-Za-z0-9._-]*\\) [A-Za-z0-9][A-Za-z0-9._-]*$'));
+  check('collab-bot explains n/a is not accepted', collab.includes("'n/a' is not accepted"));
+}
+
 for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 
 console.log(`\n${passed} pass, ${failed} fail`);

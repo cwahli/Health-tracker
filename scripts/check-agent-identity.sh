@@ -22,8 +22,25 @@
 # cutoff with --since <iso8601>; pass --no-grandfather to judge everything.
 set -u
 
-pattern='^(Agent|Author): [^ ].+ \([^)]+\)$'
-new_pattern='^(Agent|Author): [^ ].+ \([^()]+\) [A-Za-z0-9][A-Za-z0-9._-]*$'
+# A thinking level is a WORD: a letter, then letters/digits/dot/underscore/dash.
+# This rejects `n/a`, which is a placeholder rather than a level — and it is
+# indistinguishable from an agent that had not bothered to look one up. A model
+# that genuinely offers no levels should say `none`, which is a word and still
+# tells the reader the truth.
+LEVEL='\([A-Za-z][A-Za-z0-9._-]*\)'
+# A location token: no spaces, so the shape stays unambiguous.
+LOCATION='[A-Za-z0-9][A-Za-z0-9._-]*'
+
+# Shape, with the prefix left open on purpose. The `Author:` rename is a rule
+# with a date (PREFIX_SINCE below), not a rewrite of the shape, so the two are
+# checked independently: a trailer can have the right shape and the wrong era.
+pattern="^(Agent|Author): [^ ].+ ${LEVEL}\$"
+new_pattern="^(Agent|Author): [^ ].+ ${LEVEL} ${LOCATION}\$"
+# The shape a PR body must have. Bodies are written at the moment of the PR, so
+# there is no "older work" to excuse: `Author:`, a word for the thinking level,
+# and a location. This is also the shape every tool that commits for an agent
+# must produce (see AUTHOR_IDENTITY below).
+author_pattern="^Author: [^ ].+ ${LEVEL} ${LOCATION}\$"
 
 # An empty range is a pass only when the caller says so. See the check below.
 allow_empty=0
@@ -33,6 +50,15 @@ allow_empty=0
 # after this keeps its original author dates, so it is judged as written.
 LOCATION_SINCE='2026-09-29T16:20:00Z'
 
+# Commits authored before this timestamp may use the legacy `Agent:` prefix.
+# After it, `Author:` is required. The prefix rename (#325) shipped as guidance
+# and was never a gate — 16 of the last 60 commits still said `Agent:`, because
+# the regex accepted either prefix unconditionally. This makes the rename real
+# while leaving branches already in flight mergeable: grandfathering is by
+# AUTHOR date, so a commit written before the rule keeps its exemption however
+# late it is rebased or merged.
+PREFIX_SINCE='2026-09-29T21:55:00Z'
+
 # The moment this rule became real. Keep in step with the commit that added it.
 RULE_LANDED_AT='2026-09-26T21:51:04Z'
 since="$RULE_LANDED_AT"
@@ -40,13 +66,20 @@ grandfather=1
 
 check_file() {
   file=$1
-  if grep -Eq "$new_pattern" "$file"; then
+  # A PR body is written at the moment the PR is opened, so there is no older
+  # work to grandfather: the strict Author/location shape is the only one that
+  # passes. This is also the shape every tool that commits for an agent has to
+  # produce, which is why AUTHOR_IDENTITY and AGENT_IDENTITY both go through
+  # here rather than only through check_commit.
+  if grep -Eq "$author_pattern" "$file"; then
     return 0
   fi
-  echo "Commit rejected. Add one trailer line:" >&2
+  echo "Rejected. Add one trailer line, with a real thinking level and a location:" >&2
   echo "  Author: <model and version> (<thinking level>) <location>" >&2
   echo "Example: Author: Grok 4.7 (High) VM" >&2
-  echo "Set AUTHOR_IDENTITY (or legacy AGENT_IDENTITY) to that text (without the 'Author:' prefix) if a tool commits for you." >&2
+  echo "  A model with no thinking levels should write (none). 'n/a' is rejected:" >&2
+  echo "  it reads as 'nobody looked', not as an answer." >&2
+  echo "Set AUTHOR_IDENTITY to that text (without the 'Author:' prefix) if a tool commits for you." >&2
   return 1
 }
 
@@ -67,12 +100,28 @@ check_commit() {
   # A location-shape trailer satisfies the rule no matter when the commit was
   # authored (it carries everything the old shape has, plus location); the
   # cutoff only excuses a *missing* location on older work.
-  printf '%s\n' "$msg" | grep -Eq "$new_pattern" && return 0
+  if printf '%s\n' "$msg" | grep -Eq "$new_pattern"; then
+    # The shape is right, but a commit written after the prefix rename must say
+    # `Author:`. `Agent:` is a shape-valid spelling of a retired convention, so
+    # without this second check the rename stays a suggestion.
+    if [ -n "$authored" ] && [ ! "$authored" \< "$PREFIX_SINCE" ]; then
+      printf '%s\n' "$msg" | grep -Eq '^Author: ' || {
+        echo "Commit $sha uses the legacy 'Agent:' prefix." >&2
+        echo "Renamed to 'Author:' (#325). Required for commits authored after $PREFIX_SINCE." >&2
+        echo "Older commits keep 'Agent:' — the cutoff is by author date, so in-flight" >&2
+        echo "work still lands. Amend the commit message, or set the trailer by hand." >&2
+        return 1
+      }
+    fi
+    return 0
+  fi
   if [ -n "$authored" ] && [ "$authored" \< "$LOCATION_SINCE" ]; then
     printf '%s\n' "$msg" | grep -Eq "$pattern" && return 0
   fi
   echo "Commit $sha has no author identity." >&2
-  echo "Required line: Author: <model and version> (<thinking level>) <location> (legacy Agent: accepted, legacy no-location shape accepted before $LOCATION_SINCE)" >&2
+  echo "Required line: Author: <model and version> (<thinking level>) <location>" >&2
+  echo "  (thinking level must be a word — (none) for a model that has none; n/a is rejected)" >&2
+  echo "  (legacy Agent: accepted before $PREFIX_SINCE; legacy no-location shape accepted before $LOCATION_SINCE)" >&2
   printf '%s\n' "$msg" | head -n 8 >&2
   return 1
 }
