@@ -177,14 +177,14 @@ export async function readMainHealth(client, { owner, repo, branch = 'main', log
     const ref = await client.call(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`);
     sha = String(ref?.object?.sha || '');
   } catch (err) {
-    return { health: 'unknown', blocked: false, runs: 0, reason: `could not read ${branch}: ${err.message}` };
+    return { health: 'unknown', blocked: false, waiting: false, runs: 0, reason: `could not read ${branch}: ${err.message}` };
   }
-  if (!sha) return { health: 'unknown', blocked: false, runs: 0, reason: `${branch} reported no commit` };
+  if (!sha) return { health: 'unknown', blocked: false, waiting: false, runs: 0, reason: `${branch} reported no commit` };
   try {
     const runs = await listCheckRuns(client, { owner, repo, ref: sha });
     return { ...evaluateMainHealth({ checkRuns: runs, mainSha: sha }), sha };
   } catch (err) {
-    return { health: 'unknown', blocked: false, runs: 0, sha, reason: `could not read ${branch}'s checks: ${err.message}` };
+    return { health: 'unknown', blocked: false, waiting: false, runs: 0, sha, reason: `could not read ${branch}'s checks: ${err.message}` };
   }
 }
 
@@ -197,6 +197,15 @@ export async function readMainHealth(client, { owner, repo, branch = 'main', log
  * `main` is consulted only once the PR's own checks are green — the PR has to be
  * mergeable before the state of the branch it lands on matters, and a red PR
  * already refuses without a second read.
+ *
+ * A green PR is not yet a decision, because `main` has three states rather than
+ * two. A KNOWN-BROKEN `main` refuses; a `main` whose post-merge verification is
+ * STILL RUNNING is HELD, and the loop polls again — that is the in-progress
+ * window, and it is the normal state rather than a rare one, since the
+ * verification of the previous merge is usually mid-flight when the next PR's
+ * checks conclude. Holding costs a poll; merging through it forfeits the check.
+ * The hold is bounded by the same budget as everything else, so a verification
+ * that never concludes ends in a refusal rather than a merge.
  */
 export async function waitForDecision(client, {
   owner,
@@ -231,6 +240,7 @@ export async function waitForDecision(client, {
         return {
           decision: 'refuse',
           scope: 'main',
+          mainWaiting: false,
           reason: main.reason,
           failed: main.failed,
           missing: [],
@@ -239,7 +249,34 @@ export async function waitForDecision(client, {
           counts: { runs: runs.length, missing: 0, pending: 0, failed: (main.failed || []).length },
         };
       }
-      return { ...last, baseBranch, mainHealth: main.health, mainReason: main.reason };
+      if (main.waiting) {
+        // `main` is mid-verification — the window a break slips through. Hold the
+        // merge and ask again after the poll: a verification that concludes green
+        // is merged on its result, and one that concludes red is refused by the
+        // `blocked` branch above on the next pass. The hold shares the wait
+        // budget, so a run that never concludes ends in a refusal and never in a
+        // merge through the check it was waiting for.
+        if (Date.now() >= deadline) {
+          return {
+            ...last,
+            decision: 'refuse',
+            scope: 'main',
+            mainWaiting: true,
+            reason: `timed out after ${waitSeconds}s while ${baseBranch} finished its post-merge verification — ${main.reason}`,
+            timedOut: true,
+            mainHealth: main.health,
+            mainReason: main.reason,
+            failed: [],
+            missing: [],
+            pending: main.pending || [],
+            counts: { runs: runs.length, missing: 0, pending: (main.pending || []).length, failed: 0 },
+          };
+        }
+        log(`  holding: ${main.reason}`);
+        await sleep(pollSeconds * 1000);
+        continue;
+      }
+      return { ...last, baseBranch, mainHealth: main.health, mainReason: main.reason, mainWaiting: false };
     }
 
     if (Date.now() >= deadline) {
@@ -350,7 +387,9 @@ async function main(argv = process.argv.slice(2)) {
       describeDecision(result, { head }),
       '',
       result.scope === 'main'
-        ? `The merge is held until \`${baseBranch}\` verifies green again. This PR passed its own gates — landing it on a known-broken \`${baseBranch}\` would add a second change to a tree that is already failing, and make the failure harder to attribute.`
+        ? result.mainWaiting
+          ? `The merge was held while \`${baseBranch}\` finished its post-merge verification, and the wait budget ran out first. This PR passed its own gates — it is held only until that verification concludes, because merging past an unfinished check is exactly the window a break slips through.`
+          : `The merge is held until \`${baseBranch}\` verifies green again. This PR passed its own gates — landing it on a known-broken \`${baseBranch}\` would add a second change to a tree that is already failing, and make the failure harder to attribute.`
         : 'The merge is held until every required check has concluded `success`.',
       result.scope === 'main' ? '' : `Required: ${REQUIRED_CHECKS.map((c) => `\`${c.name}\``).join(', ')}`,
       result.failed?.length ? `Failed: ${result.failed.map((f) => `\`${f}\``).join(', ')}` : '',
@@ -358,7 +397,9 @@ async function main(argv = process.argv.slice(2)) {
       result.missing?.length ? `Never reported: ${result.missing.map((f) => `\`${f}\``).join(', ')}` : '',
       '',
       result.scope === 'main'
-        ? `Fix \`${baseBranch}\` first; this PR does not need a new commit.`
+        ? result.mainWaiting
+          ? `A green verification of \`${baseBranch}\` unblocks this; nothing about this PR needs to change.`
+          : `Fix \`${baseBranch}\` first; this PR does not need a new commit.`
         : 'Push a fix (or a new commit) and this runs again on that push.',
     ].filter((l) => l !== '').join('\n');
     if (args.evaluate) log(`[evaluate] would comment on #${pr.number} and NOT merge`);

@@ -44,16 +44,28 @@
  * here: a `main` whose post-merge verification *failed* refuses the next merge,
  * because landing on a known-broken main is how one break becomes two.
  *
- * What is read is deliberately three-valued, because conflating these would
+ * What is read is deliberately four-valued, because conflating these would
  * either stall the queue or lie about it:
  *
- *   - `failure` / `timed_out` / `startup_failure` -> RED, and it blocks.
+ *   - `failure` / `timed_out` / `startup_failure` -> RED, and it refuses.
  *   - a `success` run                             -> GREEN, and it passes.
- *   - `cancelled`, still running, or absent       -> UNKNOWN, and it does not
+ *   - a run that has not concluded yet            -> RUNNING, and the merge
+ *     WAITS for it. `main` is verified *after* a merge, so by the time the next
+ *     PR's checks conclude, the verification of the merge before it is usually
+ *     still going. Reading that as "not a failure" and merging through it is the
+ *     in-progress window a break slips through — and it is not hypothetical:
+ *     every merge in the log that landed against a mid-flight `main-verify` read
+ *     `unknown` and proceeded. The run concludes on its own in about a minute,
+ *     so holding costs seconds while merging through it forfeits the check. The
+ *     hold is bounded by the driver's own wait budget, so a verification that
+ *     never concludes ends in a refusal, never in a merge.
+ *   - `cancelled`, or absent                      -> UNKNOWN, and it does not
  *     block. A `cancelled` verification means a newer merge superseded it, not
  *     that main is broken; treating it as red would deadlock every merge behind
- *     a run that will never re-fire. Unknown is not a claim of health — the next
- *     verification re-covers the whole tree, so the breakage still surfaces.
+ *     a run that will never re-fire, and waiting on it would deadlock for the
+ *     same reason — so it is neither red nor runnable. Unknown is not a claim of
+ *     health — the next verification re-covers the whole tree, so the breakage
+ *     still surfaces.
  *
  * Everything here is pure: no network, no `gh`, no clock of its own. The driver
  * (`scripts/auto-merge.mjs`) does the I/O; the sensor drives this directly.
@@ -206,6 +218,17 @@ export const MAIN_VERIFICATION_CHECK = /^.*(?:^|\/ )tsc \+ named gates$/;
 /** Conclusions that mean main is known broken. */
 export const MAIN_BROKEN_CONCLUSIONS = new Set(['failure', 'timed_out', 'startup_failure']);
 
+/**
+ * The status GitHub reports for a check that has finished.
+ *
+ * Anything else (`queued`, `pending`, `requested`, `waiting`, `in_progress`) is
+ * a verification that is still on its way, which is a HOLD rather than a pass or
+ * a failure. Kept as "not this one" rather than an allow-list of every running
+ * status, so a status GitHub adds later is a wait by default instead of being
+ * read as concluded.
+ */
+export const MAIN_CONCLUDED_STATUS = 'completed';
+
 /** True when a check name is a verification of main rather than of a PR head. */
 export function isMainVerification(name) {
   return MAIN_VERIFICATION_CHECK.test(String(name || ''));
@@ -216,6 +239,18 @@ const shortSha = (sha) => (sha ? `\`${String(sha).slice(0, 7)}\`` : 'main');
 /**
  * Classify `main` from the check runs on its head commit.
  *
+ * The result carries two independent booleans, because the caller needs to tell
+ * three different things apart and one flag cannot do it:
+ *
+ *   - `blocked`  — `main` is KNOWN broken. The merge is refused; waiting will
+ *                  not help, because the run it is waiting on has already failed.
+ *   - `waiting`  — `main`'s verification is still running. The merge is HELD, and
+ *                  the driver polls again; the run will conclude by itself.
+ *   - neither    — `main` is green, or nothing conclusive was recorded for it.
+ *                  The merge proceeds, exactly as before.
+ *
+ * `health` mirrors that for the logs: `red` | `green` | `running` | `unknown`.
+ *
  * @param {object}   opts
  * @param {object[]} opts.checkRuns raw Checks API runs for main's head
  * @param {string}   opts.mainSha   that commit, for the message
@@ -223,28 +258,49 @@ const shortSha = (sha) => (sha ? `\`${String(sha).slice(0, 7)}\`` : 'main');
 export function evaluateMainHealth({ checkRuns = [], mainSha = '' } = {}) {
   const runs = (Array.isArray(checkRuns) ? checkRuns : []).filter((c) => c && isMainVerification(c.name));
   const at = shortSha(mainSha);
-  const completed = (c) => String(c.status || '') === 'completed';
+  const completed = (c) => String(c.status || '') === MAIN_CONCLUDED_STATUS;
 
+  // Worst wins, as everywhere else here: one concluded failure of a verification
+  // of this commit is the tree being broken, whatever else is also running.
   const broken = runs.filter((c) => completed(c) && MAIN_BROKEN_CONCLUSIONS.has(String(c.conclusion || '')));
   if (broken.length) {
     return {
       health: 'red',
       blocked: true,
+      waiting: false,
       runs: runs.length,
       failed: broken.map((c) => `main ${c.name} concluded ${c.conclusion}`),
       reason: `main itself is red on ${at}: ${broken.map((c) => `\`${c.name}\` concluded \`${c.conclusion}\``).join('; ')}`,
     };
   }
 
+  // A concluded green verification of THIS commit is the tree being verified, so
+  // it outranks a second, redundant run of the same gate that is still going.
   const green = runs.filter((c) => completed(c) && String(c.conclusion || '') === 'success');
   if (green.length) {
-    return { health: 'green', blocked: false, runs: runs.length, reason: `main is verified green on ${at}` };
+    return { health: 'green', blocked: false, waiting: false, runs: runs.length, reason: `main is verified green on ${at}` };
+  }
+
+  // Nothing concluded on either side, and at least one run is still going: this
+  // is the in-progress window. Not a failure — and not permission either.
+  const stillRunning = runs.filter((c) => !completed(c));
+  if (stillRunning.length) {
+    const states = stillRunning.map((c) => String(c.status || 'unknown')).join(', ');
+    return {
+      health: 'running',
+      blocked: false,
+      waiting: true,
+      runs: runs.length,
+      pending: stillRunning.map((c) => `main ${c.name} is ${c.status || 'unknown'}`),
+      reason: `main's verification of ${at} has not concluded yet (${states}) — holding the merge until it does`,
+    };
   }
 
   const states = runs.map((c) => `${c.status || 'unknown'}${c.conclusion ? `/${c.conclusion}` : ''}`).join(', ');
   return {
     health: 'unknown',
     blocked: false,
+    waiting: false,
     runs: runs.length,
     reason: runs.length
       ? `main's verification on ${at} has not concluded successfully (${states}) — not treated as a failure`

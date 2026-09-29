@@ -72,6 +72,10 @@ const ROUTES = {
  * @param {boolean}  opts.merged      what the merge endpoint answers
  * @param {boolean}  opts.dispatchFails  make `POST /dispatches` a 403
  * @param {object[]} opts.mainChecks  the check runs on `main`'s head
+ * @param {object[][]} opts.mainCheckPlans  one list per read of `main`'s checks;
+ *   the last repeats. Needed because the interesting state of `main` is a
+ *   verification that CONCLUDES between two polls — a single static list can
+ *   only ever show one moment of it.
  */
 export function startFakeGitHub({
   checkPlans = [[]],
@@ -80,6 +84,7 @@ export function startFakeGitHub({
   merged = true,
   dispatchFails = false,
   mainChecks = MAIN_GREEN,
+  mainCheckPlans = null,
 } = {}) {
   const calls = {
     merge: [],
@@ -92,6 +97,7 @@ export function startFakeGitHub({
     prListReads: 0,
   };
   const plans = [...checkPlans];
+  const mainPlans = mainCheckPlans ? [...mainCheckPlans] : null;
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
@@ -124,7 +130,12 @@ export function startFakeGitHub({
         const ref = url.pathname.split('/')[5];
         if (ref === MAIN_SHA) {
           calls.mainCheckReads += 1;
-          return send(200, { total_count: mainChecks.length, check_runs: mainChecks });
+          // A sequence, when one is given: `main` is re-read while it is being
+          // verified, and the whole point of that re-read is that the answer
+          // changes. A fixed list would make the driver's behaviour at the
+          // transition — the part that matters — unobservable.
+          const plan = mainPlans ? (mainPlans.length > 1 ? mainPlans.shift() : mainPlans[0]) : mainChecks;
+          return send(200, { total_count: plan.length, check_runs: plan });
         }
         const plan = plans.length > 1 ? plans.shift() : plans[0];
         calls.checkPolls += 1;
