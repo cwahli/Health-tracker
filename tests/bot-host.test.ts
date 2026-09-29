@@ -709,9 +709,14 @@ describe('commands', () => {
       agent: { model: 'opencode-go/deepseek-v4.1-flash', variant: 'high' },
     };
     const text = helpText(config, { model: 'opencode-go/muse-spark-1.3' });
-    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/abort', '/help', '/resume']) {
+    for (const cmd of ['/new', '/status', '/model', '/models', '/freemodel', '/help', '/resume']) {
       expect(text).toContain(cmd);
     }
+    // Run controls are gone: no /abort or /watch anywhere on the surface.
+    expect(text).not.toContain('/abort');
+    expect(text).not.toContain('/watch');
+    expect(COMMAND_NAMES).not.toContain('abort');
+    expect(COMMAND_NAMES).not.toContain('watch');
     expect(text).toContain('opencode-go/muse-spark-1.3');
   });
 
