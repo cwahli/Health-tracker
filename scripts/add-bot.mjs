@@ -38,7 +38,12 @@ import { audit, PER_BOT_KEYS } from './assert-bot-clone.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
-const REGISTRY_PATH = path.join(ROOT, 'bots', 'registry.json');
+const DEFAULT_REGISTRY_PATH = path.join(ROOT, 'bots', 'registry.json');
+
+/** `--registry=<path>` lets the forge (and its tests) drive a scratch registry. */
+export function registryPathFrom(args = {}) {
+  return args.registry ? path.resolve(args.registry) : DEFAULT_REGISTRY_PATH;
+}
 
 const ID_RE = /^[a-z][a-z0-9_]{1,30}$/;
 
@@ -85,7 +90,7 @@ export function disallowedKeys(row) {
 }
 
 function parseArgs(argv) {
-  const args = { dryRun: false, json: false, id: '', name: '', tokenEnv: '', extendsId: '', playwrightOutputDir: '' };
+  const args = { dryRun: false, json: false, id: '', name: '', tokenEnv: '', extendsId: '', playwrightOutputDir: '', registry: '', enable: '' };
   for (const arg of argv) {
     if (arg === '--dry-run') args.dryRun = true;
     else if (arg === '--json') args.json = true;
@@ -94,8 +99,27 @@ function parseArgs(argv) {
     else if (arg.startsWith('--token-env=')) args.tokenEnv = arg.slice('--token-env='.length).trim();
     else if (arg.startsWith('--extends=')) args.extendsId = arg.slice('--extends='.length).trim();
     else if (arg.startsWith('--playwright-output-dir=')) args.playwrightOutputDir = arg.slice('--playwright-output-dir='.length).trim();
+    else if (arg.startsWith('--registry=')) args.registry = arg.slice('--registry='.length).trim();
+    else if (arg.startsWith('--enable=')) args.enable = arg.slice('--enable='.length).trim();
   }
   return args;
+}
+
+/**
+ * Flip a bot's `enabled` flag. The forge calls this only after the token has
+ * answered `getMe`, so "enabled" means "it replies" rather than "we wrote a row".
+ *
+ * It edits the RAW file, never the resolved registry: writing back an inherited
+ * config would expand every thin row into a full copy and undo the contract.
+ */
+export function setBotEnabled(registry, id, enabled) {
+  const problem = validateId(id);
+  if (problem) return { ok: false, reason: problem };
+  const bot = (registry.bots || []).find((b) => b.id === id);
+  if (!bot) return { ok: false, reason: `bot "${id}" is not in the registry` };
+  if (bot.enabled === enabled) return { ok: true, changed: false, registry };
+  const next = { ...registry, bots: registry.bots.map((b) => (b.id === id ? { ...b, enabled } : b)) };
+  return { ok: true, changed: true, registry: next };
 }
 
 /**
@@ -147,8 +171,28 @@ function printNextSteps({ id, tokenEnv, masterId }) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
-  const plan = planAddBot({ registry, ...args });
+  const registryPath = registryPathFrom(args);
+
+  if (args.enable) {
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    const result = setBotEnabled(registry, args.enable, true);
+    if (!result.ok) {
+      console.error(`add-bot: ${result.reason}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (result.changed && !args.dryRun) {
+      fs.writeFileSync(registryPath, `${JSON.stringify(result.registry, null, 2)}\n`);
+    }
+    if (args.json) console.log(JSON.stringify({ ok: true, enabled: args.enable, changed: result.changed, registry: registryPath }, null, 2));
+    else if (result.changed) console.log(`enabled "${args.enable}" in ${registryPath}`);
+    else console.log(`"${args.enable}" was already enabled`);
+    return;
+  }
+
+  const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+  // `registry` must win over `args.registry`, which is the PATH this run reads.
+  const plan = planAddBot({ ...args, registry });
 
   if (!plan.ok) {
     if (args.json) console.log(JSON.stringify({ ok: false, reason: plan.reason, failures: plan.failures || [] }, null, 2));
@@ -166,10 +210,10 @@ function main() {
     return;
   }
 
-  fs.writeFileSync(REGISTRY_PATH, `${JSON.stringify(plan.next, null, 2)}\n`);
-  if (args.json) console.log(JSON.stringify({ ok: true, wrote: REGISTRY_PATH, row: plan.row, master: plan.masterId }, null, 2));
+  fs.writeFileSync(registryPath, `${JSON.stringify(plan.next, null, 2)}\n`);
+  if (args.json) console.log(JSON.stringify({ ok: true, wrote: registryPath, row: plan.row, master: plan.masterId }, null, 2));
   else {
-    console.log(`scaffolded "${plan.row.id}" as a thin clone of "${plan.masterId}" in bots/registry.json (enabled: false)`);
+    console.log(`scaffolded "${plan.row.id}" as a thin clone of "${plan.masterId}" in ${registryPath} (enabled: false)`);
     printNextSteps({ id: plan.row.id, tokenEnv: plan.row.telegram.tokenEnv, masterId: plan.masterId });
   }
 }
