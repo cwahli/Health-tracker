@@ -562,11 +562,13 @@
         "scripts/bugctl.mjs",
         "scripts/lib/bug-pack.mjs",
         "scripts/skills/common/bug-ticket/SKILL.md",
+        "scripts/skills/common/bugs/SKILL.md",
         "src/utils/bugTicketState.ts",
         "serverBugSnapshot.ts"
       ],
       "skills": [
-        "bug-ticket"
+        "bug-ticket",
+        "bugs"
       ],
       "classes": {
         "hermes": true,
