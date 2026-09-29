@@ -11,6 +11,7 @@ This is not the website master scorecard (`npm run scorecard:debug`). Do not edi
 2. Restart the process under test from the commit you are proving. Record `MainPID` and `ActiveEnterTimestamp`.
 3. Send commands through Telegram to the live bot. A unit test may stay. It cannot close a row.
 4. Paste this on every row. A missing line leaves the row open.
+5. **A fix on a branch is not a fix.** It is one once it is in `main`, or the branch is deleted. On 2026-09-28 the socket-token and tmux-attach fixes were committed with green sensors and never merged; on 2026-09-29 main was still serving the broken page and all of it was re-fixed by hand. `scripts/assert-tui-fixes-landed.mjs` now fails CI on a TUI fix older than 24h that is not in the base. Read `TUI_TG_AUTH_TRAIL.md` before re-deriving anything here — the measurements are in it.
 
 ```text
 UTC:
