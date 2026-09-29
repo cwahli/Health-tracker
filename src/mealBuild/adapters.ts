@@ -13,6 +13,8 @@ export function fromPendingFoodLog(log: any, meta?: Partial<MealBuild>): MealBui
     mode: meta?.mode || 'new_log',
     items: items.map((i: any, index: number) => ({
       ...i,
+      chainName: i.chainName || i.brandName || null,
+      brandName: i.brandName || i.chainName || null,
       scoutIndex: i.scoutIndex ?? index,
     })),
     nutrients: log.nutrients || {},
@@ -42,10 +44,16 @@ export function fromPendingFoodLog(log: any, meta?: Partial<MealBuild>): MealBui
 }
 
 export function toPendingFoodLog(meal: MealBuild): any {
+  const mappedItems = (meal.items || []).map((it: any) => ({
+    ...it,
+    chainName: it.chainName || null,
+    brandName: it.brandName || it.chainName || null,
+  }));
   return {
     id: meal.id,
-    itemsBreakdown: meal.items,
-    items: meal.items,
+    calories: meal.nutrients?.calories ?? 0,
+    itemsBreakdown: mappedItems,
+    items: mappedItems,
     nutrients: meal.nutrients || {},
     name: meal.content?.name || 'Meal',
     title: meal.content?.name || 'Meal',

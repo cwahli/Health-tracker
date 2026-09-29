@@ -47,7 +47,7 @@ describe('F-8.10 shard 12 — ledger mapping and modifiers', () => {
     const logs: string[] = [];
     const out = mapLedgersToPrecalcItems({
       ledgers: [{
-        scoutIndex: 0, originalName: 'Rice', keyword: 'rice', weightGrams: 200,
+        scoutIndex: 0, originalName: 'Rice', keyword: 'rice', chainName: 'Yolk', weightGrams: 200,
         nutrients: { calories: 260 }, lockedNutrientKeys: [], dbSource: 'estimated',
         brandLock: null, dbId: null, atwaterFlag: null, ingredients: [], visualIngredients: [],
         ingredientsList: null, dishClass: 'grain', hasComponents: false,
@@ -57,6 +57,8 @@ describe('F-8.10 shard 12 — ledger mapping and modifiers', () => {
     });
     expect(out[0].estimatedWeightGrams).toBe(200);
     expect(out[0].portionMultiplier).toBe(1.0);
+    expect(out[0].chainName).toBe('Yolk');
+    expect(out[0].brandName).toBe('Yolk');
     expect(out[0].components).toBeNull();
     expect(logs.some((m) => m.includes('[Budget]'))).toBe(true);
   });

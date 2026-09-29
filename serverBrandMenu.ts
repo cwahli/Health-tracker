@@ -2238,7 +2238,12 @@ const formatBrandHit = (matchedItem: any, query: string, matchScore: number, all
 
     const normQ = normalizeDishKey(query);
     const isExactOrStrongMatch = matchScore >= 0.92 || normalizeDishKey(matchedItem.dish_name) === normQ;
-    const isOcrCollision = !isExactOrStrongMatch && chainItemsWithSameCals.length >= 1;
+    const hasUnrelatedDifferentDish = chainItemsWithSameCals.some(other => {
+      const qWords = normQ.split('_').filter(w => w.length >= 3);
+      const otherWords = normalizeDishKey(other.dish_name || '').split('_').filter(w => w.length >= 3);
+      return !otherWords.some(ow => qWords.includes(ow));
+    });
+    const isOcrCollision = !isExactOrStrongMatch && chainItemsWithSameCals.length >= 1 && hasUnrelatedDifferentDish;
 
     return {
       id: `brand_menu_${matchedItem.id || matchedItem.dish_name_key || normalizeDishKey(matchedItem.dish_name)}`,
@@ -2249,6 +2254,7 @@ const formatBrandHit = (matchedItem: any, query: string, matchScore: number, all
       chainName: matchedItem.chain_name || matchedItem.chain_key || 'Brand',
       imageUrl: matchedItem.image_url || matchedItem.imageUrl || undefined,
       servingGrams: matchedItem.serving_grams || (matchedItem.basis_type === 'per_100g' ? 100 : null),
+      score: matchScore,
       calories: cals != null ? String(cals) : undefined,
       protein: protein != null ? Number(protein) : undefined,
       fat: fat != null ? Number(fat) : undefined,
@@ -2358,7 +2364,9 @@ export async function searchBrandMenuItems(query: string, explicitChainKey?: str
     const iCoverage = shared / iWords.size; // How specific the match is
     let score = (qCoverage * 0.7) + (iCoverage * 0.3);
 
-    if (chainKey && (qLower.includes(chainKey.replace(/_/g, ' ')) || qLower.includes(chainKey))) {
+    const expChainNorm = explicitChainKey ? explicitChainKey.toLowerCase().replace(/[^a-z0-9]+/g, '_') : '';
+    const chainMatchesExplicit = Boolean(expChainNorm && chainKey && (chainKey.includes(expChainNorm) || expChainNorm.includes(chainKey)));
+    if (chainKey && (qLower.includes(chainKey.replace(/_/g, ' ')) || qLower.includes(chainKey) || chainMatchesExplicit)) {
       score *= 1.3;
     }
     return score;

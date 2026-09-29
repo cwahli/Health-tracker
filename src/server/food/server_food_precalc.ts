@@ -76,6 +76,8 @@ export function mapLedgersToPrecalcItems(args: LedgerMapArgs): any[] {
       scoutIndex: l.scoutIndex,
       originalName: l.originalName,
       keyword: l.keyword || l.originalName,
+      chainName: l.chainName || vItem.chainName || null,
+      brandName: l.chainName || vItem.brandName || vItem.chainName || null,
       foodType: l.dishClass,
       estimatedWeightGrams: l.weightGrams,
       portionMultiplier: 1.0,

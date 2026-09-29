@@ -92,7 +92,15 @@ export async function matchBrandMenu(
     const second = validHits[1];
     const topScore = top.score ?? 0;
     const secondScore = second.score ?? 0;
+
+    const sameChain = Boolean(top.chainName && second.chainName && normalizeChainKey(top.chainName) === normalizeChainKey(second.chainName));
+    const topCal = Number(top.calories ?? top.nutrients?.calories);
+    const secondCal = Number(second.calories ?? second.nutrients?.calories);
+    const consensusCals = sameChain && Number.isFinite(topCal) && Number.isFinite(secondCal) && Math.abs(topCal - secondCal) <= 20;
+
     if (topScore >= 0.92 && (secondScore === 0 || topScore >= 2 * secondScore)) {
+      topHit = top;
+    } else if (consensusCals && (topScore >= 0.5 || top.score === undefined)) {
       topHit = top;
     } else {
       return { matched: false, status: 'MULTI' };

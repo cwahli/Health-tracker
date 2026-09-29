@@ -53,4 +53,17 @@ describe('narration (F-10.4)', () => {
     expect(reconciled).toContain('69.7g of quality protein');
     expect(reconciled).toContain('34g of added sugar');
   });
+
+  it('reconciles cited saturated fat and sodium metrics with finalized ledger values', () => {
+    const draft = 'Watch out for saturated fat (15g) and sodium (2200mg) in this meal, or 15g of saturated fat.';
+    const updatedSummary: FinalizeLedgerSummary = {
+      ...summary,
+      saturatedFat: 18.8,
+      sodium: 1950,
+    };
+    const reconciled = reconcileMessageWithLedger(draft, updatedSummary);
+    expect(reconciled).toContain('saturated fat (18.8g)');
+    expect(reconciled).toContain('sodium (1950mg)');
+    expect(reconciled).toContain('18.8g of saturated fat');
+  });
 });
