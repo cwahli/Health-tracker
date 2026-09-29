@@ -6,7 +6,7 @@ import { dedupeConsecutiveAssistantMessages, dropAnsweredClarifyMessages, dropSt
 import { AgentThoughtBox } from './chat-cards/FoodCard';
 import { trackApiCall, setActiveQueryId, generateQueryId } from '../utils/apiTracker';
 import { saveAgentRequestLog } from '../utils/agentLogsTracker';
-import React, { useState, useRef, useEffect, Suspense } from 'react';
+import React, { useState, useRef, useEffect, Suspense, useMemo } from 'react';
 import { ChatMessage, FoodLog, UserProfile, FoodIdea } from '../types';
 import { translations } from '../utils/translations';
 import { displayStatusLabel, dictionaryFor } from '../utils/i18n';
@@ -45,7 +45,7 @@ import { checkQuotaFlag } from '../utils/firestoreUtils';
 import { get as idbGet } from 'idb-keyval';
 import { pruneLocalStorageToFreeSpace, safeIdbSet } from '../utils/storageUtils';
 import { resolveFoodImage } from '../utils/imageResolver';
-import { removeBracketItem, parseBracketItems, extractAutocompleteQuery, stripSearchResidue } from '../utils/bracketPortionParser';
+import { removeBracketItem, parseBracketItems, extractAutocompleteQuery, stripSearchResidue, extractChatPortion } from '../utils/bracketPortionParser';
 import { JobStore } from '../jobs/JobStore';
 import { mergeFoodEditMessages, shouldMergeFoodEditTurn } from '../jobs/mergeFoodEditMessages';
 import { executeFoodAgent } from '../jobs/FoodAgentExecutor';
@@ -828,7 +828,7 @@ ${logsText}`);
   const [stagedQuery, setStagedQuery] = useState('');
   const [catalogMatches, setCatalogMatches] = useState<any[]>([]);
   const [activeSearchTerms, setActiveSearchTerms] = useState<string>('');
-  const [tagPortionPreFill, setTagPortionPreFill] = useState<number>(100);
+  const tagPortionPreFill = useMemo(() => extractChatPortion(inputText, activeSearchTerms), [inputText, activeSearchTerms]);
   useEffect(() => {
     if (type !== 'food' || inputText.trim().length < 3) {
       setCatalogMatches([]);
@@ -836,14 +836,7 @@ ${logsText}`);
       return;
     }
     const timer = setTimeout(async () => {
-      const regex = /\b(\d+(?:\.\d+)?)\s*(g|ml|oz|servings?|portion|pieces?)\b/i;
-      const match = inputText.match(regex);
-      if (match) {
-        setTagPortionPreFill(parseFloat(match[1]));
-      } else {
-        setTagPortionPreFill(100);
-      }
-      // Strip out anything inside brackets to isolate active search terms
+      // Strip out anything inside brackets and portion prefixes to isolate active search terms
       const searchTerms = extractAutocompleteQuery(inputText);
       if (!searchTerms) {
         setCatalogMatches([]);
@@ -6385,6 +6378,19 @@ ${logsText}`);
                         }
                         return tag;
                       }));
+                    } else {
+                      const chatPortion = extractChatPortion(val);
+                      if (chatPortion && chatPortion > 0) {
+                        setExplicitFoodTags(prev => prev.map(tag => {
+                          const words = (tag.name || '').toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                          const valLower = val.toLowerCase();
+                          const matchesTag = prev.length === 1 || words.some((w: string) => valLower.includes(w));
+                          if (matchesTag) {
+                            return { ...tag, weightGrams: Math.round(chatPortion) };
+                          }
+                          return tag;
+                        }));
+                      }
                     }
                   }
                 }}

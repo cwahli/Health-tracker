@@ -38,6 +38,16 @@ export const FoodSearchMatchesDropdown: React.FC<FoodSearchMatchesDropdownProps>
   setCatalogMatches,
   setActiveSearchTerms,
 }) => {
+  const [customPortions, setCustomPortions] = React.useState<Record<string, number | string>>({});
+  const lastPrefillRef = React.useRef(tagPortionPreFill);
+
+  React.useEffect(() => {
+    if (tagPortionPreFill !== lastPrefillRef.current) {
+      lastPrefillRef.current = tagPortionPreFill;
+      setCustomPortions({});
+    }
+  }, [tagPortionPreFill]);
+
   const seen = new Set<string>();
   const combinedMatches: any[] = [];
   const addMatch = (m: any, listType: 'brand' | 'previous_meal') => {
@@ -60,11 +70,20 @@ export const FoodSearchMatchesDropdown: React.FC<FoodSearchMatchesDropdownProps>
       </div>
       <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
         {filteredMatches.map((item, idx) => {
+          const itemKey = item._listType === 'brand' ? `brand-${item.food_id || idx}` : `prev-${item.id || idx}`;
           const itemName = item.name || item.dish_name || '';
           // T-8: API rows are thin — hydrate nutrients/OCR/images from the full local log.
           const hydratedItem = item._listType === 'previous_meal' ? hydratePreviousMealTag(item, activeFoodLogs) : item;
           const savedImgs = collectSavedMealImageUrls(hydratedItem, activeFoodLogs, { allowSynthesized: false });
           const thumbSrc = savedImgs[0] || '';
+
+          const defaultGrams = tagPortionPreFill ?? (
+            item._listType === 'brand'
+              ? (item.serving_grams || 100)
+              : (item.portionGrams || item.weightGrams || item.weight_grams || 100)
+          );
+          const currentVal = customPortions[itemKey] !== undefined ? customPortions[itemKey] : defaultGrams;
+
           return (
             <div key={item._listType === 'brand' ? (item.food_id || idx) : (item.id || idx)} className="p-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -107,33 +126,22 @@ export const FoodSearchMatchesDropdown: React.FC<FoodSearchMatchesDropdownProps>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {item._listType === 'brand' ? (
-                  <>
-                    <input 
-                      type="number" 
-                      defaultValue={item.serving_grams || tagPortionPreFill || 100}
-                      id={`tag-portion-${item.food_id || idx}`}
-                      className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-center font-mono" 
-                    />
-                    <span className="text-xs text-slate-500">g</span>
-                  </>
-                ) : (
-                  <>
-                    <input 
-                      type="number" 
-                      defaultValue={item.portionGrams || item.weightGrams || item.weight_grams || 100}
-                      id={`prev-portion-${item.id || idx}`}
-                      className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-center font-mono" 
-                    />
-                    <span className="text-xs text-slate-500">g</span>
-                  </>
-                )}
+                <input 
+                  type="number" 
+                  value={currentVal}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCustomPortions(prev => ({ ...prev, [itemKey]: val }));
+                  }}
+                  id={item._listType === 'brand' ? `tag-portion-${item.food_id || idx}` : `prev-portion-${item.id || idx}`}
+                  className="w-12 px-1 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-center font-mono" 
+                />
+                <span className="text-xs text-slate-500">g</span>
                 <button
                   type="button"
                   onClick={() => {
+                    const w = Number(currentVal) > 0 ? Number(currentVal) : defaultGrams;
                     if (item._listType === 'brand') {
-                      const inputEl = document.getElementById(`tag-portion-${item.food_id || idx}`) as HTMLInputElement;
-                      const w = Number(inputEl?.value) || item.serving_grams || tagPortionPreFill || 100;
                       setExplicitFoodTags(prev => [...prev, { 
                         dbId: item.food_id, 
                         name: item.dish_name, 
@@ -143,8 +151,6 @@ export const FoodSearchMatchesDropdown: React.FC<FoodSearchMatchesDropdownProps>
                         item 
                       }]);
                     } else {
-                      const inputEl = document.getElementById(`prev-portion-${item.id || idx}`) as HTMLInputElement;
-                      const w = Number(inputEl?.value) || item.portionGrams || item.weightGrams || item.weight_grams || 100;
                       setExplicitFoodTags(prev => [...prev, { 
                         dbId: hydratedItem.id || hydratedItem.food_id, 
                         name: itemName, 

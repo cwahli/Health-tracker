@@ -5,7 +5,9 @@ import {
   formatBracketItem,
   updateOrAddBracketItem,
   removeBracketItem,
-  stripSearchResidue
+  stripSearchResidue,
+  extractChatPortion,
+  extractAutocompleteQuery
 } from './bracketPortionParser';
 
 describe('bracketPortionParser', () => {
@@ -75,5 +77,44 @@ describe('stripSearchResidue (T-5)', () => {
     expect(stripSearchResidue('is oat healthy', 'oat')).toBe('is oat healthy');
     expect(stripSearchResidue('', 'oat')).toBe('');
     expect(stripSearchResidue('oat', '')).toBe('oat');
+  });
+});
+
+describe('extractChatPortion', () => {
+  it('extracts portions from natural language chat inputs', () => {
+    expect(extractChatPortion('I had 70g of Sainsbury oat + fruit')).toBe(70);
+    expect(extractChatPortion('I had 50g of Sainsbury oat + fruit')).toBe(50);
+    expect(extractChatPortion('70g oat')).toBe(70);
+    expect(extractChatPortion('oats 80g')).toBe(80);
+    expect(extractChatPortion('75 g of oats')).toBe(75);
+    expect(extractChatPortion('100 grams oatmeal')).toBe(100);
+    expect(extractChatPortion('200ml milk')).toBe(200);
+    expect(extractChatPortion('I had 70 of Sainsbury oat')).toBe(70);
+  });
+
+  it('prioritizes portion near contextQuery when multiple foods exist', () => {
+    const text = 'I had 70g of Sainsbury oat + 30g fruit';
+    expect(extractChatPortion(text, 'Sainsbury oat')).toBe(70);
+    expect(extractChatPortion(text, 'fruit')).toBe(30);
+  });
+
+  it('extracts portion from bracket tags', () => {
+    expect(extractChatPortion('[Sainsbury Porridge Oats] [65g]')).toBe(65);
+    expect(extractChatPortion('[Sainsbury Porridge Oats 45g]')).toBe(45);
+  });
+
+  it('returns null when no portion is present', () => {
+    expect(extractChatPortion('')).toBeNull();
+    expect(extractChatPortion('Sainsbury oat')).toBeNull();
+    expect(extractChatPortion('is oat healthy')).toBeNull();
+  });
+});
+
+describe('extractAutocompleteQuery', () => {
+  it('strips portion prefixes along with lead conversational words', () => {
+    expect(extractAutocompleteQuery('I had 70g of Sainsbury oat')).toBe('Sainsbury oat');
+    expect(extractAutocompleteQuery('I had 50g of Sainsbury oat + fruit')).toBe('Sainsbury oat + fruit');
+    expect(extractAutocompleteQuery('70g oat')).toBe('oat');
+    expect(extractAutocompleteQuery('oats')).toBe('oats');
   });
 });

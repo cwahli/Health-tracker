@@ -184,14 +184,95 @@ export function removeBracketItem(currentText: string, name: string): string {
 }
 
 /**
+ * Extracts portion in grams/ml from chat input text.
+ * Checks for bracket scaling [150g], portion near context query,
+ * or general natural language portions like "70g", "70 g", "70grams", "70 grams".
+ */
+export function extractChatPortion(text: string, contextQuery?: string): number | null {
+  if (!text) return null;
+
+  // 1. Check if there are bracket tags with scaling
+  const bracketItems = parseBracketItems(text);
+  if (bracketItems.length > 0) {
+    if (contextQuery) {
+      const qLower = contextQuery.toLowerCase().trim();
+      const matched = bracketItems.find(b => b.name.toLowerCase().includes(qLower) || qLower.includes(b.name.toLowerCase()));
+      if (matched?.scaling && matched.scaling.unit === 'g' && matched.scaling.value > 0) {
+        return matched.scaling.value;
+      }
+    }
+    // Check last bracket item with scaling
+    for (let i = bracketItems.length - 1; i >= 0; i--) {
+      const item = bracketItems[i];
+      if (item.scaling && item.scaling.unit === 'g' && item.scaling.value > 0) {
+        return item.scaling.value;
+      }
+    }
+  }
+
+  // 2. If contextQuery is provided, look for portion adjacent to or preceding contextQuery
+  if (contextQuery && contextQuery.trim().length >= 2) {
+    const words = contextQuery.trim().split(/\s+/).filter(w => w.length >= 2);
+    for (const w of words) {
+      const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Look for: "70g of oats" or "70g oats" or "70 g of oats"
+      const prefixRegex = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(?:g|grams?|ml|oz)\\b(?:\\s+(?:of\\s+)?[^,;+]*?\\b${escaped}\\b)`, 'i');
+      const prefixMatch = text.match(prefixRegex);
+      if (prefixMatch) {
+        const val = parseFloat(prefixMatch[1]);
+        if (!isNaN(val) && val > 0) return val;
+      }
+      // Look for: "oats 70g"
+      const suffixRegex = new RegExp(`\\b${escaped}\\b[^,;+]*?\\s+(\\d+(?:\\.\\d+)?)\\s*(?:g|grams?|ml|oz)\\b`, 'i');
+      const suffixMatch = text.match(suffixRegex);
+      if (suffixMatch) {
+        const val = parseFloat(suffixMatch[1]);
+        if (!isNaN(val) && val > 0) return val;
+      }
+    }
+  }
+
+  // 3. Fallback to general portion regex: "70g", "70 g", "70grams", "70 grams", "200ml", "1.5oz"
+  const generalRegex = /\b(\d+(?:\.\d+)?)\s*(g|grams?|ml|oz)\b/i;
+  const match = text.match(generalRegex);
+  if (match) {
+    const val = parseFloat(match[1]);
+    if (!isNaN(val) && val > 0) {
+      return val;
+    }
+  }
+
+  // 4. Raw number followed by "of" (e.g. "I had 70 of Sainsbury oat")
+  const rawOfRegex = /\b(\d+(?:\.\d+)?)\s+of\b/i;
+  const rawMatch = text.match(rawOfRegex);
+  if (rawMatch) {
+    const val = parseFloat(rawMatch[1]);
+    if (!isNaN(val) && val > 0) {
+      return val;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Strips bracketed food tags from chat input text to isolate active search terms for autocomplete.
  * Returns empty string if the remaining query is shorter than 3 characters.
  */
 export function extractAutocompleteQuery(text: string): string {
   if (!text) return '';
   let strippedInput = text.replace(/\[[^\]]*\]/g, '').trim();
-  // Strip conversational lead words like "i had", "ate", "for lunch", "and"
-  strippedInput = strippedInput.replace(/^(?:i\s+(?:had|ate|have)|had|ate|having|eating|for\s+(?:breakfast|lunch|dinner|snack)|and|plus|\+)\s+/i, '').trim();
+  
+  // Repeatedly strip conversational lead words and portion prefixes
+  let prev = '';
+  while (prev !== strippedInput) {
+    prev = strippedInput;
+    strippedInput = strippedInput
+      .replace(/^(?:i\s+(?:had|ate|have)|had|ate|having|eating|for\s+(?:breakfast|lunch|dinner|snack)|and|plus|\+)\s+/i, '')
+      .replace(/^\d+(?:\.\d+)?\s*(?:g|grams?|ml|oz|servings?|portion|pieces?)\s*(?:of\s+)?/i, '')
+      .trim();
+  }
+
   if (strippedInput.length < 3) return '';
   const words = strippedInput.split(/\s+/);
   return words.slice(Math.max(words.length - 4, 0)).join(' ');
