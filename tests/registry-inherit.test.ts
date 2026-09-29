@@ -154,6 +154,64 @@ describe('loadRegistry', () => {
     ).toThrow(/unknown bot/);
   });
 
+  it('resolves extends transitively through a thin parent', () => {
+    // The thin row is the whole point of the registry: a bot that declares only
+    // its name, token and clone source. A child of such a row must still get the
+    // master's block — merging from the RAW parent would hand it an empty
+    // `agent` and silently drop every inherited feature.
+    const reg = applyMasterDefaults({
+      master: 'opencode',
+      bots: [
+        {
+          id: 'opencode',
+          telegram: { tokenEnv: 'T1', allowedUserIds: [1] },
+          agent: { kind: 'opencode', model: 'm1', sharedSkills: ['a'] },
+          progress: { mode: 'concise', maxChars: 220 },
+          session: { mode: 'per-chat' },
+        },
+        { id: 'thin', name: 'Thin', extends: 'opencode', telegram: { tokenEnv: 'T2' } },
+        { id: 'grandchild', name: 'Grandchild', extends: 'thin', telegram: { tokenEnv: 'T3' } },
+      ],
+    });
+    const grandchild = getBot(reg, 'grandchild');
+    expect(grandchild.agent.kind).toBe('opencode');
+    expect(grandchild.agent.model).toBe('m1');
+    expect(grandchild.agent.sharedSkills).toEqual(['a']);
+    expect(grandchild.progress.maxChars).toBe(220);
+    expect(grandchild.session.mode).toBe('per-chat');
+    expect(grandchild.telegram.tokenEnv).toBe('T3');
+    expect(grandchild.telegram.allowedUserIds).toEqual([1]);
+    expect(grandchild.name).toBe('Grandchild');
+    // The intermediate row keeps its own identity and token.
+    expect(getBot(reg, 'thin').name).toBe('Thin');
+    expect(getBot(reg, 'thin').agent.model).toBe('m1');
+  });
+
+  it('accumulates agent.skills along the chain', () => {
+    const reg = applyMasterDefaults({
+      master: 'opencode',
+      bots: [
+        { id: 'opencode', telegram: { tokenEnv: 'T1' }, agent: { kind: 'opencode', sharedSkills: ['a'] } },
+        { id: 'mid', extends: 'opencode', telegram: { tokenEnv: 'T2' }, agent: { skills: ['b'] } },
+        { id: 'leaf', extends: 'mid', telegram: { tokenEnv: 'T3' }, agent: { skills: ['c'] } },
+      ],
+    });
+    expect(getBot(reg, 'leaf').agent.sharedSkills).toEqual(['a', 'b', 'c']);
+  });
+
+  it('rejects an inheritance cycle instead of recursing forever', () => {
+    expect(() =>
+      applyMasterDefaults({
+        master: 'opencode',
+        bots: [
+          { id: 'opencode', telegram: { tokenEnv: 'T' }, agent: { kind: 'opencode' } },
+          { id: 'a', extends: 'b', telegram: { tokenEnv: 'T2' } },
+          { id: 'b', extends: 'a', telegram: { tokenEnv: 'T3' } },
+        ],
+      }),
+    ).toThrow(/cycle/);
+  });
+
   it('keeps first bot as default getBot target', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reg-'));
     const file = path.join(dir, 'registry.json');

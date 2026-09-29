@@ -28,6 +28,8 @@
     "check:tests": "vitest run src/mealBuild/__tests__",
     "test:from-debug": "tsx scripts/test-from-debug.ts",
     "scorecard:debug": "node scripts/assert-master-scorecard.mjs",
+    "gate:bot-clone": "node scripts/assert-bot-clone.mjs",
+    "add:bot": "node scripts/add-bot.mjs",
     "golden:from-debug": "node scripts/golden-from-debug.mjs",
     "golden:inbox": "vitest run tests/golden_inbox.test.ts",
     "golden:inbox:watch": "vitest tests/golden_inbox.test.ts",

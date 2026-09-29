@@ -83,8 +83,10 @@ export default defineConfig(() => {
       // Adding a new node:test script? Add its path here.
       exclude: [
         '**/node_modules/**', '**/dist/**', '**/studio/**', '**/archive/**', '**/prototype/tests/**',
+        '**/scripts/add-bot.test.mjs',
         '**/scripts/assert-agent-hygiene.test.mjs',
         '**/scripts/assert-allowance-walk.test.mjs',
+        '**/scripts/assert-bot-clone.test.mjs',
         '**/scripts/assert-bot-role-wiring.test.mjs',
         '**/scripts/assert-button-alignment.test.mjs',
         '**/scripts/assert-chat-prefs-survive-restart.test.mjs',

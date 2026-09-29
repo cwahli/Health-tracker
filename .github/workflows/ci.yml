@@ -146,6 +146,18 @@ jobs:
       - name: Sync regression
         run: npm run test:sync
 
+      # The registry's inheritance contract. Every bot-host bot is a thin clone
+      # of the master (`bots/registry.json` "master"), so one edit to the master
+      # reaches the fleet and a new bot cannot quietly re-copy (and later drift
+      # from) the shared surfaces. The sensor drives each failing fixture, so a
+      # gate that never fires is itself caught.
+      - name: Bot clone contract (assert-bot-clone)
+        run: |
+          node scripts/assert-bot-clone.mjs
+          node scripts/assert-bot-clone.test.mjs
+          node scripts/add-bot.test.mjs
+          npx vitest run tests/registry-inherit.test.ts
+
       # V-30.5 bug-ticket lane gates (plan/BUG_TICKET_PIPELINE.md §6.2).
       # ticket-state: derived S-C-lite projection stays pure.
       - name: Ticket state gate (bugTicketState)

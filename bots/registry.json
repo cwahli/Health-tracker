@@ -93,14 +93,13 @@
       "name": "VM2 Bot",
       "runtime": "bot-host",
       "enabled": true,
+      "extends": "vm",
+      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
       "telegram": {
         "tokenEnv": "VM2_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm2",
-        "model": "opencode/nemotron-3.5-lightning-free",
-        "variant": null,
-        "smallModel": "opencode/space-bunny-free"
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm2"
       }
     },
     {
@@ -244,36 +243,13 @@
       "name": "OpenCode Bot",
       "runtime": "bot-host",
       "enabled": true,
+      "extends": "vm",
+      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
       "telegram": {
-        "tokenEnv": "OPENCODE_BOT_TOKEN",
-        "allowedUserIds": [
-          6218257274
-        ]
+        "tokenEnv": "OPENCODE_BOT_TOKEN"
       },
       "agent": {
-        "kind": "opencode",
-        "model": "opencode/nemotron-3.5-lightning-free",
-        "variant": null,
-        "smallModel": "opencode/space-bunny-free",
-        "defaultAgent": "build",
-        "workspace": "/home/ubuntu/src/Health-tracker",
-        "timeoutMs": 900000,
-        "thinking": true,
-        "allowExternalDirectory": true,
-        "playwrightOutputDir": "/tmp/bot-host-shots-opencode",
-        "sharedSkills": [
-          ".agents/skills",
-          "/home/ubuntu/bot-host/scripts/skills/common"
-        ]
-      },
-      "progress": {
-        "mode": "concise",
-        "editIntervalMs": 2500,
-        "maxEdits": 40,
-        "maxChars": 220
-      },
-      "session": {
-        "mode": "per-chat"
+        "playwrightOutputDir": "/tmp/bot-host-shots-opencode"
       }
     },
     {
@@ -281,36 +257,13 @@
       "name": "Android Bot",
       "runtime": "bot-host",
       "enabled": true,
+      "extends": "vm",
+      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
       "telegram": {
-        "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN",
-        "allowedUserIds": [
-          6218257274
-        ]
+        "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
       },
       "agent": {
-        "kind": "opencode",
-        "model": "opencode/nemotron-3.5-lightning-free",
-        "variant": null,
-        "smallModel": "opencode/space-bunny-free",
-        "defaultAgent": "build",
-        "workspace": "/home/ubuntu/src/Health-tracker",
-        "timeoutMs": 900000,
-        "thinking": true,
-        "allowExternalDirectory": true,
-        "playwrightOutputDir": "/tmp/bot-host-shots-android",
-        "sharedSkills": [
-          ".agents/skills",
-          "/home/ubuntu/bot-host/scripts/skills/common"
-        ]
-      },
-      "progress": {
-        "mode": "concise",
-        "editIntervalMs": 2500,
-        "maxEdits": 40,
-        "maxChars": 220
-      },
-      "session": {
-        "mode": "per-chat"
+        "playwrightOutputDir": "/tmp/bot-host-shots-android"
       }
     }
   ]
