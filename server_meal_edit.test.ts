@@ -4071,4 +4071,35 @@ describe('G10 golden — photo edit clarifies ONE dish, adds photo, scales only 
     expect(item.compositeSiblings[0].weightGrams).toBe(60);
     expect(item.compositeSiblings[0].nutrients.calories).toBe(30);
   });
+
+  it('F-14.2: scaling a fruit juice with baseNutrients100g clamps saturatedFat to 0 even if base had hallucinated satFat', () => {
+    const juiceItem = {
+      name: 'Lidl Fruit Juice Blend',
+      originalName: 'Lidl Fruit Juice Blend',
+      weightGrams: 150,
+      nutrients: {
+        calories: 75,
+        protein: 0.9,
+        totalFat: 0.2,
+        saturatedFat: 0.2, // Hallucinated
+        carbohydrates: 18.6,
+        sodium: 5,
+      },
+      baseNutrients100g: {
+        calories: 50,
+        protein: 0.6,
+        totalFat: 0.13,
+        saturatedFat: 0.13, // Hallucinated on 100g basis
+        carbohydrates: 12.4,
+        sodium: 3,
+      },
+    };
+
+    const scaled = scaleItemNutrients(juiceItem, 4, 600);
+    expect(scaled.weightGrams).toBe(600);
+    expect(scaled.nutrients.saturatedFat).toBe(0);
+    expect(scaled.saturatedFat).toBe(0);
+    expect(scaled.nutrients.totalFat).toBeGreaterThan(0);
+    expect(scaled.nutrients.totalFat).toBeGreaterThanOrEqual(scaled.nutrients.saturatedFat);
+  });
 });

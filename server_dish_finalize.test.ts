@@ -1100,4 +1100,63 @@ describe("server_dish_finalize", () => {
     const compCalSum = (ledger.componentsDetailList || []).reduce((acc: number, c: any) => acc + (c.calories || 0), 0);
     expect(compCalSum).toBe(650);
   });
+
+  it('F-14.3: clamps hallucinated saturatedFat on fruit juice to 0 and ensures unsaturatedFat is recomputed', async () => {
+    const item = {
+      scoutIndex: 0,
+      originalName: 'Lidl Fruit Juice Blend',
+      keyword: 'juice blend',
+      estimatedWeightGrams: 150,
+      nutrientBasisWeight: 150,
+      nutrients: {
+        calories: 75,
+        protein: 0.9,
+        totalFat: 0.2,
+        saturatedFat: 0.2, // Hallucinated by scout
+        carbohydrates: 18.6,
+        sodium: 5,
+      },
+    };
+
+    const ledger = await finalizeDishLedger({
+      item,
+      nutrientBasisWeight: 150,
+      consumedWeight: 150,
+    });
+
+    expect(ledger.nutrients.saturatedFat).toBe(0);
+    expect(ledger.nutrients.totalFat).toBe(0.2);
+    expect(ledger.nutrients.unsaturatedFat).toBe(0.2);
+  });
+
+  it('F-14.4: correctly recognizes branded juices (Tropicana, Naked, Ocean Spray, Ribena, Innocent) and clamps satFat to 0', async () => {
+    const brands = [
+      'Tropicana Pure Premium Orange Juice',
+      'Naked Juice Green Machine Smoothie',
+      'Ocean Spray Cranberry Classic Juice',
+      'Ribena Blackcurrant Juice',
+      'Innocent Apple & Raspberry Juice',
+    ];
+
+    for (const name of brands) {
+      const ledger = await finalizeDishLedger({
+        item: {
+          originalName: name,
+          nutrients: {
+            calories: 120,
+            protein: 1,
+            totalFat: 0.4,
+            saturatedFat: 0.3, // Hallucination
+            carbohydrates: 28,
+            sodium: 10,
+          },
+        },
+        nutrientBasisWeight: 250,
+        consumedWeight: 250,
+      });
+
+      expect(ledger.nutrients.saturatedFat, `Failed for ${name}`).toBe(0);
+      expect(ledger.nutrients.totalFat, `Failed for ${name}`).toBe(0.4);
+    }
+  });
 });
