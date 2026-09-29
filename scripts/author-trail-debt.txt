@@ -1,0 +1,51 @@
+# Commits on main that do not satisfy the current author rule.
+#
+# Format:  <sha>  <reason, dated>
+#
+# Read by scripts/assert-author-trail.mjs, which judges EVERY commit on the
+# base rather than only the ones a change adds. The range gate cannot see
+# these: a commit that landed while its range was wrong is never re-judged.
+#
+# This file is a record of debt, not a waiver of the rule — the rule still
+# applies to every new commit. An entry is here because the commit is
+# already on a shared branch and rewriting shared history is not an option
+# we take (see the header of scripts/check-agent-identity.sh).
+#
+# Regenerate with: node scripts/assert-author-trail.mjs --report
+# Delete an entry as soon as its commit stops failing, so this file cannot
+# become a permanent off switch.
+76104b44  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+47ea0d87  thinking level is not a word (n/a and friends); authored 2026-09-29; recorded 2026-09-29
+9c747bd8  thinking level is not a word (n/a and friends); authored 2026-09-29; recorded 2026-09-29
+cdafc3c9  trailer predates the location token (#326); authored 2026-09-29; recorded 2026-09-29
+0a2f830c  trailer predates the location token (#326); authored 2026-09-29; recorded 2026-09-29
+a5beaad2  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+f4438708  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+aeff67bc  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+39b3fb78  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+6b43ddb9  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+0127c7df  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+cf816226  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+9641a2ee  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+a75c75e3  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+59cc9d07  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-29; recorded 2026-09-29
+a823d905  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+218210ad  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+2477c912  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+35eda5f6  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+d5777b37  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+60c95b35  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+1a608b1d  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+9bdd4845  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+4000d137  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+d44987cc  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-26; recorded 2026-09-29
+73ceb7dd  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-26; recorded 2026-09-29
+43c42788  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-26; recorded 2026-09-29
+094c0adb  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+d051630b  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+a5040110  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+750ef681  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+74bcf397  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+1ff8a6f0  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-27; recorded 2026-09-29
+6ed06364  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-26; recorded 2026-09-29
+543de4bd  no Author/Agent trailer; never judged, because a range gate only judges what a change adds (#353 is the provable empty-range case); authored 2026-09-26; recorded 2026-09-29
