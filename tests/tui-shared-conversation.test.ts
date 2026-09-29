@@ -78,6 +78,67 @@ describe('TUI presence is observable', () => {
   });
 });
 
+describe('lifecycle: naming, status and closing a pane', () => {
+  const writeLiveLease = (extra: Record<string, unknown> = {}) =>
+    writeLease({ session: SESSION, pid: 1234, heartbeat: Date.now(), ...extra });
+
+  it('reports no pane when nothing is open', async () => {
+    const { tuiStatusLine } = (await import('../scripts/bot-host.mjs')) as unknown as {
+      tuiStatusLine: (bot: string, session: string) => string;
+    };
+    fs.rmSync(leaseFile(), { force: true });
+    expect(tuiStatusLine(BOT, SESSION)).toMatch(/none open/);
+  });
+
+  it('names the pane, the client count and the age', async () => {
+    const { tuiStatusLine } = (await import('../scripts/bot-host.mjs')) as unknown as {
+      tuiStatusLine: (bot: string, session: string) => string;
+    };
+    const twoHoursAgo = Date.now() - 2 * 60 * 60_000;
+    writeLiveLease({ pane: 'VM-tui-vm2', bot: 'vm2', clients: 2, since: twoHoursAgo });
+    const line = tuiStatusLine(BOT, SESSION);
+    expect(line).toContain('VM-tui-vm2');
+    expect(line).toContain('2 clients attached');
+    expect(line).toContain('up 2h 0m');
+  });
+
+  it('says so when a pane is open but nobody is attached', async () => {
+    const { tuiStatusLine } = (await import('../scripts/bot-host.mjs')) as unknown as {
+      tuiStatusLine: (bot: string, session: string) => string;
+    };
+    writeLiveLease({ pane: 'VM-tui', clients: 0, since: Date.now() - 22 * 60_000 });
+    const line = tuiStatusLine(BOT, SESSION);
+    expect(line).toContain('no client attached');
+    expect(line).toContain('up 22m');
+  });
+
+  it('reports the age in days for a pane that has been up a long time', async () => {
+    // This is the case that went wrong once already: a day-old pane read as
+    // stale when it was in fact the live terminal.
+    const { tuiStatusLine } = (await import('../scripts/bot-host.mjs')) as unknown as {
+      tuiStatusLine: (bot: string, session: string) => string;
+    };
+    writeLiveLease({ pane: 'VM-tui-vm2', clients: 1, since: Date.now() - (25 * 60 * 60_000 + 30 * 60_000) });
+    expect(tuiStatusLine(BOT, SESSION)).toContain('up 1d 1h');
+  });
+
+  it('never invents a pane name when the lease predates the field', async () => {
+    // A lease with no `pane` must not be reported under a guessed name: a wrong
+    // name is what would make /tui off kill the wrong session.
+    const { tuiStatusLine } = (await import('../scripts/bot-host.mjs')) as unknown as {
+      tuiStatusLine: (bot: string, session: string) => string;
+    };
+    writeLiveLease({});
+    expect(tuiStatusLine(BOT, SESSION)).toContain('unknown pane');
+  });
+
+  it('documents both subcommands in help', async () => {
+    const help = fs.readFileSync(new URL('../scripts/lib/commands.mjs', import.meta.url), 'utf8');
+    expect(help).toMatch(/\/tui status/);
+    expect(help).toMatch(/\/tui off/);
+  });
+});
+
 describe('presence is not a lock', () => {
   it('exports no function that gates a turn on the TUI', async () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');

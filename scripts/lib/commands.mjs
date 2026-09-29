@@ -279,6 +279,8 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/tx [on|off|status|debug] shared work view for this chat',
     '/watch [on|off]  live tool feed in this chat (default off)',
     '/tui             open this conversation in a real terminal (Mini App button)',
+    '/tui status      name the open pane, who is attached, how long it has been up',
+    '/tui off         close that pane (add force to close it mid-turn)',
     '/project [name]   view or switch project (/project external 1)',
     '/council [stage]  run council stage (audit, defense, finalize, run)',
     '/role [name]      switch role within project (/role legal, /role sim)',

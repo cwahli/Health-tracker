@@ -2036,6 +2036,10 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           );
         }
       }
+      // Named and aged, because a warm pane and an abandoned one are otherwise
+      // indistinguishable from out here — a tmux session outlives its attacher
+      // by design, so uptime alone never says whether anyone is in it.
+      const tuiLine = tuiStatusLine(config.id, sessions.get(chatId));
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
         platform: effSurface || 'opencode',
@@ -2060,6 +2064,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
                 `debug: ${work.probe?.events ? 'structured events' : 'unavailable'}`,
               ]
             : ['work session: none', 'observer: unavailable', `controller: ${effSurface || 'opencode'}`, 'debug: structured events']),
+          tuiLine,
           ...routeLines,
         ],
       });
@@ -2456,6 +2461,53 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'tui': {
+      // /tui off closes this bot's pane; /tui status reports it. Both live here
+      // rather than in the shell because the pane's name belongs to a service
+      // file the bot does not read: TUI_TMUX_NAME is set in
+      // tui-ttyd-<id>.service, so the only trustworthy source of that name is
+      // the lease the attach script publishes. Guessing `VM-tui-<id>` here would
+      // drift the first time either side changed, and a wrong name means killing
+      // nothing while reporting success.
+      const tuiSub = String(cmd.args || '').trim().toLowerCase();
+      if (tuiSub === 'status') {
+        await api.sendMessage(chatId, `⌨️ ${tuiStatusLine(config.id, sessions.get(chatId))}`);
+        return;
+      }
+      if (tuiSub === 'off' || tuiSub === 'kill' || tuiSub === 'stop') {
+        const lease = readTuiLease(config.id, sessions.get(chatId));
+        if (!lease || !lease.pane) {
+          await api.sendMessage(chatId, '⌨️ No TUI pane is open for this chat — nothing to close. `/tui` opens one.');
+          return;
+        }
+        // Refuse while this bot is mid-turn, unless forced. Killing the pane
+        // takes the terminal's opencode process with it, and if a turn is
+        // running that process may be the one holding the conversation — so say
+        // what would be lost and let the user decide, the way /abort does.
+        if (running.has(chatId) && !/\b(force|yes)\b/.test(tuiSub)) {
+          await api.sendMessage(chatId, [
+            '⏸ A turn is running right now, so I will not close the terminal out from under it.',
+            `Say \`/tui off force\` to close \`${lease.pane}\` anyway, or \`/abort\` first to stop the turn cleanly.`,
+          ].join('\n'));
+          return;
+        }
+        const killed = killTuiPane(lease.pane);
+        // The lease goes with the pane. tui-attach.sh clears it on exit, but a
+        // killed pane never runs its trap, so the bot clears it here or /status
+        // keeps reporting a terminal that no longer exists. It would expire on
+        // its heartbeat anyway; this just makes the answer immediate.
+        try {
+          fs.rmSync(tuiLeasePath(config.id), { force: true });
+        } catch {
+          /* the pane is gone either way */
+        }
+        await api.sendMessage(chatId, killed
+          ? [
+            `💤 Closed \`${lease.pane}\`${lease.session ? ` (session ${lease.session.slice(0, 12)}…)` : ''}.`,
+            'Your scrollback went with it, and it costs nothing while closed. `/tui` opens a fresh one on this same conversation whenever you want it back.',
+          ].join('\n')
+          : `⚠️ Could not close \`${lease.pane}\` — tmux refused. It may already be gone; \`/tui status\` will say.`);
+        return;
+      }
       // The actual TUI: ttyd serves a real PTY and mounts it under the same
       // tunnel and the same login, so this is a terminal you type into from
       // inside Telegram. It attaches to THIS chat's opencode session in THIS
@@ -3345,19 +3397,78 @@ function tuiLeasePath(botId) {
 }
 
 export function tuiIsAttached(botId, sessionId) {
+  return Boolean(readTuiLease(botId, sessionId));
+}
+
+/**
+ * The TUI lease, with its age resolved, or null when there is no live one.
+ *
+ * Returns the whole record because the caller needs more than a boolean: /status
+ * has to name the pane and say how long it has been up, and /tui off has to know
+ * WHICH pane to kill. The pane name is read from the lease rather than derived
+ * from the bot id, because TUI_TMUX_NAME lives in the ttyd service file — the
+ * bot has no other way to know it, and guessing `VM-tui-<id>` would drift from
+ * the service the first time either changed.
+ */
+function readTuiLease(botId, sessionId) {
   let lease;
   try {
     lease = JSON.parse(fs.readFileSync(tuiLeasePath(botId), 'utf8'));
   } catch {
-    return false; // no lease, or unreadable: nobody is attached
+    return null; // no lease, or unreadable: nobody is attached
   }
   const heartbeat = Number(lease?.heartbeat || 0);
-  if (!heartbeat || Date.now() - heartbeat > TUI_LEASE_MAX_AGE_MS) return false;
+  if (!heartbeat || Date.now() - heartbeat > TUI_LEASE_MAX_AGE_MS) return null;
   const held = String(lease?.session || '');
   const wanted = String(sessionId || '');
   // A lease with no session id predates the id, so treat it as "a TUI is open"
   // rather than guessing. A lease for a *different* session is not ours.
-  return !held || !wanted || held === wanted;
+  if (held && wanted && held !== wanted) return null;
+  const since = Number(lease?.since || 0);
+  return {
+    session: held || null,
+    pane: String(lease?.pane || '') || null,
+    bot: String(lease?.bot || '') || null,
+    clients: Number(lease?.clients || 0),
+    since: Number.isFinite(since) && since > 0 ? since : null,
+    heartbeat,
+  };
+}
+
+/** "1d 0h47m" / "22m" / "40s" — coarse on purpose, it is a glance not a timer. */
+function humanAge(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return 'unknown';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+/**
+ * Close a TUI pane. Injected (fake) in tests, like the other tmux callers.
+ *
+ * `kill-session` and not `kill-pane`: the pane is the whole session here — one
+ * window, one opencode client — so this is the same thing without leaving an
+ * empty session behind to be reattached to.
+ */
+function killTuiPane(pane, tmux = defaultTmuxRunner) {
+  return Boolean(tmux(['kill-session', '-t', pane]));
+}
+
+/** One line for /status: is a terminal open, which one, and is anyone in it. */
+export function tuiStatusLine(botId, sessionId) {
+  const lease = readTuiLease(botId, sessionId);
+  if (!lease) return 'tui: none open (open one with /tui)';
+  const who = lease.pane || 'unknown pane';
+  const use = lease.clients > 0
+    ? `${lease.clients} client${lease.clients === 1 ? '' : 's'} attached`
+    : 'no client attached (pane kept for your place)';
+  const age = lease.since ? ` · up ${humanAge(Date.now() - lease.since)}` : '';
+  const sess = lease.session ? ` · ${lease.session.slice(0, 12)}…` : '';
+  return `tui: ${who} · ${use}${age}${sess}`;
 }
 
 async function handleMessage({ api, config, throttle, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, busy, message, depth = 0 }) {
