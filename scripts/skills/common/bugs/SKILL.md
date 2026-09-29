@@ -8,11 +8,11 @@ version: 1.0.0
 
 The user typed `/bugs` or asked for the board. Hand them the live board, not a prose list.
 
-- Emit the board button as an own-line marker (the gateway converts it to a
-  `web_app` button; the host comes from the gateway, never invent a URL):
-  `MINIAPP: 🐛 Open bug board | /bugs/?bot=bug_ticket`
-  alongside a one-line caption. The gateway validates the opener's own
-  Telegram initData, so no secret is needed in chat.
+- Emit the board button as a BARE own-line marker, exactly like this, never in
+  backticks or code fences (the gateway consumes the raw line):
+  MINIAPP: 🐛 Open bug board | /bugs/?bot=bug_ticket
+  alongside a one-line caption. The gateway supplies the host and validates
+  the opener's own Telegram initData, so no secret is needed in chat.
 - If no button renders, hand this deep link instead:
   `https://t.me/VM_19485_bot?start=bugs` — one tap opens the VM bot, one more
   tap on START serves the board button. Final fallback: `Ask the VM bot for
