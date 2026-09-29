@@ -97,6 +97,17 @@ jobs:
           printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
           scripts/check-agent-identity.sh --message "$RUNNER_TEMP/pr-body.txt"
 
+      - name: PR body contract (summary/status/left)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Every PR carries a blurb a human can review: what it does, its
+          # progress status, and what is left. Pattern is owned by
+          # scripts/assert-pr-summary.mjs (trailer + ## Summary/Status/Left).
+          node scripts/assert-pr-summary.mjs
+
       - name: PR must add net change vs base (no empty merges)
         if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
         shell: bash
