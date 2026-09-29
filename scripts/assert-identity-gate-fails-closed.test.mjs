@@ -23,7 +23,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -266,6 +266,73 @@ console.log('assert-identity-gate-fails-closed:');
   check('collab-bot no longer commits an Agent: trailer', !collab.includes('\\n\\nAgent: ${identity}'));
   check('collab-bot validates the strict shape', collab.includes('^.+ \\([A-Za-z][A-Za-z0-9._-]*\\) [A-Za-z0-9][A-Za-z0-9._-]*$'));
   check('collab-bot explains n/a is not accepted', collab.includes("'n/a' is not accepted"));
+}
+
+// 11. The backfill audit. A range gate cannot see a commit that landed while
+//     its range was wrong — it is never re-judged — so the debt is invisible
+//     unless something walks all of the base. EXECUTED against fixture repos,
+//     not grepped: a source-text check on the audit passed happily while the
+//     audit had been neutered, because the failure message still contained the
+//     words it was grepping for.
+{
+  const AUDIT = join(ROOT, 'scripts', 'assert-author-trail.mjs');
+  const runAudit = (repo, debtRel) => {
+    try {
+      const out = execFileSync('node', [AUDIT, '--base=main', `--repo=${repo}`, `--debt=${debtRel}`],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { code: 0, out };
+    } catch (err) {
+      return { code: err.status ?? 1, out: `${err.stdout || ''}${err.stderr || ''}` };
+    }
+  };
+
+  // A fixture with one trailer-less commit: exactly the shape a range gate
+  // cannot see, because nothing ever judges it again.
+  const dir = mkdtempSync(join(tmpdir(), 'author-trail-'));
+  dirs.push(dir);
+  git(dir, 'init', '-q', '-b', 'main');
+  git(dir, 'config', 'user.name', 'audit test');
+  git(dir, 'config', 'user.email', 'audit@test');
+  writeFileSync(join(dir, 'f.txt'), 'a\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'base');
+  commit(dir, 'f.txt', 'b\n', 'fix: a commit with no identity at all\n');
+  const badSha = git(dir, 'rev-parse', 'HEAD');
+
+  // Absolute: the audit resolves --debt against the repo root, so a path
+  // relative to the fixture would be read from the real checkout instead.
+  const debtEmpty = join(dir, 'debt-empty.txt');
+  writeFileSync(debtEmpty, '# empty\n');
+  const unrecorded = runAudit(dir, debtEmpty);
+  check('the audit fails on a trailer-less commit nobody judged', unrecorded.code === 1, `exit ${unrecorded.code}`);
+  check('the audit names the commit', unrecorded.out.includes(badSha.slice(0, 8)), unrecorded.out.slice(0, 200));
+  // The failure message and the debt-file header phrase this differently, and
+  // both are worth saying. Matched on whitespace-normalised output: the
+  // message wraps mid-phrase ("do NOT" / "rewrite shared history"), so a
+  // literal regex over the raw string cannot see it — a green test that proved
+  // nothing.
+  const flat = unrecorded.out.replace(/\s+/g, ' ');
+  check('the audit says not to rewrite history',
+    /do NOT rewrite shared history|rewriting shared history is not an option/.test(flat),
+    unrecorded.out.slice(0, 300));
+
+  // Recorded as debt: same tree, now passes.
+  const debt = join(dir, 'debt.txt');
+  writeFileSync(debt, `${badSha.slice(0, 8)}  no trailer; recorded 2026-09-29\n`);
+  const recorded = runAudit(dir, debt);
+  check('recorded debt passes', recorded.code === 0, recorded.out.split('\n').slice(-2).join(' | '));
+
+  // An entry with no date is a bug wearing a waiver's clothes.
+  writeFileSync(debt, `${badSha.slice(0, 8)}  no trailer, believed fine\n`);
+  const undated = runAudit(dir, debt);
+  check('an undated debt entry fails', undated.code === 1, `exit ${undated.code}`);
+  check('the undated failure says why', /no dated reason/.test(undated.out), undated.out.slice(0, 200));
+
+  // Stale: the commit is fixed, so the entry must be named for pruning rather
+  // than becoming a permanent off switch.
+  git(dir, 'commit', '-q', '--amend', '-m', 'fix: now it has an identity\n\nAuthor: Grok 4.7 (High) VM\n');
+  const stale = runAudit(dir, debt);
+  check('a stale debt entry is reported, not silently kept', /no longer fails/.test(stale.out), stale.out.slice(0, 200));
 }
 
 for (const dir of dirs) rmSync(dir, { recursive: true, force: true });

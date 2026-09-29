@@ -123,6 +123,14 @@ jobs:
               --range "$before..HEAD"
           fi
 
+      # The gate above judges only what a change ADDS, so a commit that landed
+      # while its range was wrong is never re-judged — and stays wrong
+      # invisibly. This walks EVERY commit on the base and fails on debt that is
+      # not recorded in scripts/author-trail-debt.txt. Measured 2026-09-29: 35
+      # of 1350 commits, so this is a ratchet over real debt, not a red gate.
+      - name: Author trail backfill audit (unjudged debt on the base)
+        run: node scripts/assert-author-trail.mjs --base="origin/${{ github.event.repository.default_branch }}"
+
       - name: Author identity in PR body (becomes the squash message)
         if: github.event_name == 'pull_request'
         shell: bash
