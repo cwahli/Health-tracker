@@ -193,17 +193,10 @@ export function scaleItemNutrients(item: any, ratio: number, newWeight?: number)
   next.saturatedFat = base.saturatedFat ?? 0;
   next.carbohydrates = base.carbohydrates ?? 0;
   next.sodium = base.sodium ?? 0;
-  // Keep pack/piece counts proportional if present
+  // Keep pack/piece counts proportional if packGrams is present
   if (typeof next.packGrams === 'number' && next.packGrams > 0 && w >= next.packGrams) {
     next.pieceCount = Math.round(w / next.packGrams);
     next.count = next.pieceCount;
-  } else {
-    if (typeof next.pieceCount === 'number' && next.pieceCount > 0) {
-      next.pieceCount = Math.round(next.pieceCount * ratio * 10) / 10;
-    }
-    if (typeof next.count === 'number' && next.count > 0) {
-      next.count = Math.round(next.count * ratio * 10) / 10;
-    }
   }
   // Recursively scale nested components or sub-items if present
   if (Array.isArray(next.componentsDetailList)) {
