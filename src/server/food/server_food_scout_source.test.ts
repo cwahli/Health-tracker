@@ -307,7 +307,7 @@ describe('F-8.10 shard 16 — shortcut chain seams', () => {
   });
 
   it('backs off longer on 503/UNAVAILABLE than other failures', () => {
-    expect(computeScoutRetryDelay({ message: '503 UNAVAILABLE' })).toBe(2000);
+    expect(computeScoutRetryDelay({ message: '503 UNAVAILABLE' })).toBe(2500);
     expect(computeScoutRetryDelay({ message: 'boom' })).toBe(1000);
     expect(computeScoutRetryDelay(null)).toBe(1000);
   });
@@ -452,8 +452,8 @@ describe('F-8.10 shard 29 — scout retry loop (stubbed LLM)', () => {
       callUnifiedLLM: async () => { throw new Error('503 UNAVAILABLE'); },
       sleep: async (ms: number) => { sleeps503.push(ms); },
     }).catch(() => {});
-    // 503 is not a quota break: 3 attempts, 2 backoffs of 2000
-    expect(sleeps503).toEqual([2000, 2000]);
+    // 503 is not a quota break: 3 attempts, 2 backoffs of 2500
+    expect(sleeps503).toEqual([2500, 2500]);
 
     let quotaCalls = 0;
     const quota = await runScoutRetryLoop({
