@@ -268,6 +268,36 @@ else
   echo "  PASS  the attach no longer launches \$OPENCODE_BIN unconditionally"; PASS=$((PASS + 1))
 fi
 
+# 14. A legacy or junk pane mark migrates instead of flapping. On 2026-09-29
+#     /tmp/tui-session-id-vm held `ses_x` — a bare string with no `surface:`
+#     prefix and no writer anywhere in this tree. A bare mark can never equal a
+#     qualified `<surface>:<session>` mark, so the old compare killed the pane
+#     on EVERY attach without saying why. The decision is a pure function now
+#     (executed here like lease_held): junk reaps once, migrates, and logs.
+eval "$(sed -n '/^pane_mark_decision() {/,/^}/p' "$ATTACH")"
+check "no mark yet means a fresh pane" "$(pane_mark_decision '' 'cline:1790_x')" "fresh"
+check "the same surface and session keeps the pane" \
+  "$(pane_mark_decision 'cline:1790_x' 'cline:1790_x')" "keep"
+check "a lane switch reaps the old tool's pane" \
+  "$(pane_mark_decision 'opencode:ses_old' 'cline:1790_x')" "reap-switch"
+check "a bare legacy session id reaps and migrates" \
+  "$(pane_mark_decision 'ses_f227779acffeXj1OcLC4RXXWTW' 'cline:1790_x')" "reap-legacy"
+check "writer-less junk (ses_x) reaps and migrates, never flaps silently" \
+  "$(pane_mark_decision 'ses_x' 'cline:1790_x')" "reap-legacy"
+# The migration must be observable after the fact: every attach logs its
+# surface, session, source and decision to a per-bot log, and the reap
+# verifies the kill landed before new-session -A (which ignores its command
+# while the session still exists — the stale-tool survival path).
+grep -q 'tui-attach.log' "$ATTACH" \
+  && { echo "  PASS  every attach logs surface/sid/source/decision per bot"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  no per-bot attach log in the attach"; FAIL=$((FAIL + 1)); }
+grep -q 'reap-verdict=lingering' "$ATTACH" \
+  && { echo "  PASS  a lingering session is logged, never silently kept"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  no lingering-session verdict in the attach"; FAIL=$((FAIL + 1)); }
+grep -q 'has-session -t "$TMUX_NAME"' "$ATTACH" \
+  && { echo "  PASS  the reap verifies the kill before new-session -A"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the reap does not verify the kill before new-session -A"; FAIL=$((FAIL + 1)); }
+
 rm -rf "$LEASE_FIX" "$ROOT" "$LANE"
 echo
 echo "$PASS pass, $FAIL fail"

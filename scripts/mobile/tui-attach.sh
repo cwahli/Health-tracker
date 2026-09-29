@@ -307,16 +307,64 @@ if [ "${#LAUNCH_ARGV[@]}" -eq 0 ]; then
   exit 0
 fi
 
+# pane_mark_decision <prev-mark> <new-mark> -> keep|fresh|reap-legacy|reap-switch
+#
+# Pure: no tmux, no files, so the sensor sources this function and executes it
+# (like lease_held). A mark with no `surface:` prefix is legacy (pre-#362 wrote
+# the bare session id) or junk (seen 2026-09-29: /tmp/tui-session-id-vm held
+# `ses_x`, a string no script in this tree writes). A bare mark can never equal
+# a qualified one, so without the legacy branch every attach would kill a
+# healthy pane and say nothing about why.
+pane_mark_decision() {
+  local prev="$1" mark="$2"
+  if [ -z "$prev" ]; then echo fresh; return; fi
+  if [ "$prev" = "$mark" ]; then echo keep; return; fi
+  case "$prev" in
+    *:*) echo reap-switch ;;
+    *) echo reap-legacy ;;
+  esac
+}
+
 # --- reap a tmux session left over from a different conversation OR a different
 # tool. The mark is `<surface>:<session>`: the two tools name their sessions
 # incompatibly, so a lane switch has to reap the pane or the terminal keeps
 # showing the previous tool on screen — which is exactly the defect this block
-# was extended for.
+# was extended for. A legacy bare mark (or junk like ses_x) reaps ONCE and then
+# migrates to the qualified mark, so the next attach compares like with like
+# instead of killing on every open.
 MARK="${SURFACE}:${SID}"
 PREV=$(cat "$SID_MARK" 2>/dev/null || true)
-if [ -n "$PREV" ] && [ "$PREV" != "$MARK" ]; then
-  tmux kill-session -t "$TMUX_NAME" 2>/dev/null || true
-fi
+DECISION=$(pane_mark_decision "$PREV" "$MARK")
+# One line per attach, per bot, so the next stale-pane report starts from what
+# the attach SAW rather than a journal reconstruction: the lane, the session,
+# where the session came from, the previous mark, and whether the pane was
+# kept or reaped. The ses_x mark and vm2's missing session both had to be
+# pieced together after the fact; this file would have answered directly.
+ATTACH_LOG="${STATE}/tui-attach.log"
+attach_log() {
+  printf '%s bot=%s chat=%s surface=%s sid=%s source=%s prev=%s mark=%s %s\n' \
+    "$(date -u +%FT%TZ)" "$BOT_ID" "${CHAT_ID:-unknown}" "$SURFACE" "$SID" \
+    "$CHAT_SOURCE" "$PREV" "$MARK" "$1" >>"$ATTACH_LOG" 2>/dev/null || true
+}
+attach_log "decision=$DECISION"
+case "$DECISION" in
+  reap-legacy|reap-switch)
+    tmux kill-session -t "$TMUX_NAME" 2>/dev/null || true
+    # Verify the kill landed before the new-session -A below: -A ignores its
+    # command argument while the session still exists, so an unverified kill is
+    # how a stale tool survives an attach (the header note). A lingering
+    # session is logged, never silently kept — the -A then re-attaches to it
+    # rather than stacking a second tool beside it.
+    TRIES=0
+    while tmux has-session -t "$TMUX_NAME" 2>/dev/null && [ "$TRIES" -lt 5 ]; do
+      sleep 0.2
+      TRIES=$((TRIES + 1))
+    done
+    if tmux has-session -t "$TMUX_NAME" 2>/dev/null; then
+      attach_log "decision=$DECISION reap-verdict=lingering"
+    fi
+    ;;
+esac
 echo "$MARK" > "$SID_MARK"
 
 case "$SURFACE" in

@@ -145,6 +145,20 @@ ws_none=$(curl -s --http1.1 -o /dev/null -w '%{http_code}' --max-time 10 \
 rm -f "$TOKEN_JAR"
 
 echo
+echo "--- the tmux panes themselves (a missing session means that bot has no terminal)"
+# Presence only, never a verdict: a missing session is recreated on the next
+# /tui by design, but after vm2's unexplained 21:09-22:16 gap on 2026-09-29 the
+# live proof should at least SAY which panes exist. Per-bot attach detail lives
+# in <state>/<bot>/tui-attach.log.
+for _pane in VM-tui VM-tui-vm2; do
+  if tmux has-session -t "$_pane" 2>/dev/null; then
+    printf '  INFO  %-46s present\n' "$_pane"
+  else
+    printf '  INFO  %-46s MISSING - the next /tui recreates it\n' "$_pane"
+  fi
+done
+
+echo
 echo "--- the website hostname must not serve this"
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://health-tracking.duckdns.org/health")
 [ "$code" = "200" ] && printf '  PASS  %-46s HTTP %s (the site, not the gateway)\n' "site /health is the website" "$code" \
