@@ -8,9 +8,21 @@ const body = String(process.env.PR_BODY || '');
 const fail = (m) => { console.error(`assert-pr-summary: ${m}`); process.exit(1); };
 const ok = (m) => console.log(`assert-pr-summary: ${m}`);
 
-const TRAILER = /^(?:Agent|Author): [^ ].+ \([^()]+\) [A-Za-z0-9][A-Za-z0-9._-]*$/m;
+// Kept in step with `author_pattern` in scripts/check-agent-identity.sh, which
+// judges the same body on the same run. Two copies of one rule WILL drift —
+// this one was still accepting `Agent:` and an `n/a` thinking level after the
+// rename was enforced there. A comment naming the other copy is cheaper than a
+// sensor, and the strict check still runs, so drift here fails safe: it can
+// only let something through that the other script then rejects.
+const TRAILER = /^Author: [^ ].+ \([A-Za-z][A-Za-z0-9._-]*\) [A-Za-z0-9][A-Za-z0-9._-]*$/m;
 if (!TRAILER.test(body)) {
-  fail('missing author trailer. Append one line:\n  Author: <model and version> (<thinking level>) <location>\n  e.g. Author: Grok 4.7 (High) VM');
+  fail([
+    'missing author trailer. Append one line:',
+    '  Author: <model and version> (<thinking level>) <location>',
+    '  e.g. Author: Grok 4.7 (High) VM',
+    'The prefix is Author:, not the legacy Agent:. The thinking level must be a',
+    "word: (none) for a model with no levels, n/a is not accepted.",
+  ].join('\n'));
 }
 ok('author trailer present');
 
