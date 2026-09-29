@@ -38,4 +38,20 @@ describe('buildFoodSearchQuerySet', () => {
     const queries = buildFoodSearchQuerySet(scoutItems);
     expect(queries).toContain('McDonalds Big Mac');
   });
+
+  it('prepends chainName to brand item queries when chainName is not already present in the name', () => {
+    const scoutItems = [
+      {
+        originalName: 'Steak and Shoestring Potato Salad',
+        chainName: 'Yolk',
+        components: [
+          { searchQuery: 'bavette steak' },
+          { searchQuery: 'french fries' },
+        ]
+      }
+    ];
+
+    const queries = buildFoodSearchQuerySet(scoutItems);
+    expect(queries).toContain('Yolk Steak and Shoestring Potato Salad');
+  });
 });

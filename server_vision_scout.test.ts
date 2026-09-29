@@ -244,6 +244,42 @@ describe("server_vision_scout", () => {
       expect(result.items.every((it: any) => it.nutrients.calories == null || it.nutrients.calories === undefined)).toBe(true);
     });
 
+    it("keeps integrated salad with compound words together as single dish and prepends chainName to queriesToSearch", () => {
+      const mockOutput = {
+        dishes: [
+          {
+            dishName: "Steak and Shoestring Potato Salad",
+            chainName: "Yolk",
+            estimatedWeightGrams: 350,
+            cookingMethod: "pan_fried",
+            foods: [
+              { foodName: "Seared Beef", weightGrams: 120, nutrients: { protein: 30, totalFat: 10 } },
+              { foodName: "Mixed Salad Greens", weightGrams: 150, nutrients: { protein: 2, totalFat: 0.5 } },
+              { foodName: "Shoestring Potatoes", weightGrams: 80, nutrients: { protein: 2, totalFat: 8 } },
+            ],
+          },
+          {
+            dishName: "Beef Sandwich",
+            chainName: "Yolk",
+            estimatedWeightGrams: 280,
+            cookingMethod: "grilled",
+            foods: [
+              { foodName: "Sandwich Bread", weightGrams: 120, nutrients: { protein: 10, totalFat: 2 } },
+              { foodName: "Sliced Beef Filling", weightGrams: 110, nutrients: { protein: 26, totalFat: 8 } },
+            ],
+          },
+        ],
+      };
+      const result = parseAndHealVisionScout(mockOutput, () => {});
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0].originalName).toBe("Steak and Shoestring Potato Salad");
+      expect(result.items[0].chainName).toBe("Yolk");
+      expect(result.items[1].originalName).toBe("Beef Sandwich");
+      expect(result.items[1].chainName).toBe("Yolk");
+      expect(result.queriesToSearch).toContain("Yolk Steak and Shoestring Potato Salad");
+      expect(result.queriesToSearch).toContain("Yolk Beef Sandwich");
+    });
+
     it("applies the fat overflow correction to raw nutrition label", () => {
       const mockOutput = {
         items: [

@@ -896,8 +896,12 @@ export function parseAndHealVisionScout(
         const compPackGrams = components.length === 1 ? (components[0].packGrams ?? null) : (d.packGrams ?? null);
         const compPackageLabel = components.length === 1 ? (components[0].packageLabelText ?? null) : (d.packageLabelText ?? null);
 
-        const isCompoundDishName = /\b(dan|and|\&|\+|\/)\b/i.test(d.dishName || '') ||
-          (components.length > 1 && compNames.length > 1 && compNames.every(cn => cn.length > 2 && (d.dishName || '').toLowerCase().includes(cn.toLowerCase())));
+        const isIntegratedDish = /\b(salad|sandwich|burger|wrap|roll|soup|bowl|plate|stew|pie|omelette|pizza|curry|pasta|oatmeal|porridge|rice|noodle|noodles|mie|bihun|kwetiau|toast)\b/i.test(d.dishName || '');
+
+        const isCompoundDishName = !isIntegratedDish && (
+          /\b(dan|and|\&|\+|\/)\b/i.test(d.dishName || '') ||
+          (components.length > 1 && compNames.length > 1 && compNames.every(cn => cn.length > 2 && (d.dishName || '').toLowerCase().includes(cn.toLowerCase())))
+        );
 
         if (components.length > 1 && (isCompoundDishName || isSoleEligibleDish)) {
           // Unroll each distinct food component into a standalone scout item
@@ -1669,8 +1673,17 @@ export function parseAndHealVisionScout(
         // Issue #6: Persistent Web Search Override on Generic Items.
         // Restrict queriesToSearch strictly to detected restaurant chains or packaged brand names (chainName !== null).
         if (item.chainName) {
+          const chainPrefix = String(item.chainName).trim();
           if (item.keyword) {
+            if (!item.keyword.toLowerCase().includes(chainPrefix.toLowerCase())) {
+              queriesToSearch.push(`${chainPrefix} ${item.keyword}`);
+            }
             queriesToSearch.push(item.keyword);
+          }
+          if (item.originalName && item.originalName !== item.keyword) {
+            if (!item.originalName.toLowerCase().includes(chainPrefix.toLowerCase())) {
+              queriesToSearch.push(`${chainPrefix} ${item.originalName}`);
+            }
           }
           if (item.components && Array.isArray(item.components) && item.components.length > 0) {
             item.components.forEach((c: any) => {

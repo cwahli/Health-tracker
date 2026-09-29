@@ -45,19 +45,25 @@ export async function matchBrandMenu(
   originalName?: string | null,
   keyword?: string | null
 ): Promise<BrandMatchResult> {
-  const query = (originalName || keyword || '').trim();
+  let query = (originalName || keyword || '').trim();
   if (!query) return { matched: false, status: 'MISS' };
 
   const explicitChain = chainName ? normalizeChainKey(chainName) : undefined;
-  const candidates = await searchBrandMenuItems(query, explicitChain);
+  let candidates = await searchBrandMenuItems(query, explicitChain);
+  let validHits = candidates ? candidates.filter((hit: any) => brandHitFitsQuery(query, hit)) : [];
 
-  if (!candidates || candidates.length === 0) {
-    return { matched: false, status: 'MISS' };
+  if (validHits.length === 0 && keyword && keyword.trim() && keyword.trim().toLowerCase() !== query.toLowerCase()) {
+    const fallbackQuery = keyword.trim();
+    const fallbackCandidates = await searchBrandMenuItems(fallbackQuery, explicitChain);
+    const fallbackValid = fallbackCandidates ? fallbackCandidates.filter((hit: any) => brandHitFitsQuery(fallbackQuery, hit)) : [];
+    if (fallbackValid.length > 0) {
+      query = fallbackQuery;
+      candidates = fallbackCandidates;
+      validHits = fallbackValid;
+    }
   }
 
-  // Filter candidates with brandHitFitsQuery
-  const validHits = candidates.filter((hit: any) => brandHitFitsQuery(query, hit));
-  if (validHits.length === 0) {
+  if (!candidates || candidates.length === 0 || validHits.length === 0) {
     return { matched: false, status: 'MISS' };
   }
 

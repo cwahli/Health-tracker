@@ -83,3 +83,28 @@ describe('label OCR evidence passthrough', () => {
     expect(item.labelNutrientsPerServing).toBeNull();
   });
 });
+
+describe('chainName and brandName preservation', () => {
+  it('preserves chainName and brandName from ledger onto finalized food item', () => {
+    const item = ledgerToFoodItem({
+      originalName: 'Steak Frites Salad',
+      chainName: 'Yolk',
+      weightGrams: 350,
+      nutrients: { calories: 650 },
+    });
+    expect(item.chainName).toBe('Yolk');
+    expect(item.brandName).toBe('Yolk');
+  });
+
+  it('buildMealFromFinalizeLedgers propagates chainName to all meal items', () => {
+    const meal = buildMealFromFinalizeLedgers([
+      { originalName: 'Steak Frites Salad', chainName: 'Yolk', weightGrams: 350, nutrients: { calories: 650 } },
+      { originalName: 'Beef Sandwich', chainName: 'Yolk', weightGrams: 280, nutrients: { calories: 810 } },
+    ]);
+    expect(meal.items).toHaveLength(2);
+    expect(meal.items[0].chainName).toBe('Yolk');
+    expect(meal.items[0].brandName).toBe('Yolk');
+    expect(meal.items[1].chainName).toBe('Yolk');
+    expect(meal.items[1].brandName).toBe('Yolk');
+  });
+});

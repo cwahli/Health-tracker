@@ -58,7 +58,7 @@ export async function executePrecalcPhase(ctx: AnalyzeRunContext, dbDeps?: any):
 
   const uniqueQueries = buildFoodSearchQuerySet(ctx.visionScoutItems || []);
   const detectedChainKey =
-    ctx.visionScoutItems?.map((it: any) => it.originalName || it.keyword || it.name).map(detectChainKeyFromText).find(Boolean) ||
+    ctx.visionScoutItems?.map((it: any) => it.chainName || it.originalName || it.keyword || it.name).map(detectChainKeyFromText).find(Boolean) ||
     uniqueQueries.map(detectChainKeyFromText).find(Boolean);
 
   let registeredChainSources: any[] = [];

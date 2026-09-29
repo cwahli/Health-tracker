@@ -30,6 +30,8 @@ export function ledgerToFoodItem(ledger: any, extras: {
   sourceImageIndex?: number | null;
   foodType?: string | null;
   cookingMethod?: string | null;
+  chainName?: string | null;
+  brandName?: string | null;
 } = {}): any {
   const n = { ...(ledger?.nutrients || {}) };
   const name = ledger?.originalName || ledger?.keyword || ledger?.name || 'Food Item';
@@ -47,6 +49,8 @@ export function ledgerToFoodItem(ledger: any, extras: {
     canonicalDbName: name,
     originalName: name,
     keyword: ledger?.keyword || name,
+    chainName: ledger?.chainName || extras.chainName || null,
+    brandName: ledger?.chainName || extras.chainName || extras.brandName || null,
     weightGrams: weight,
     calories: n.calories ?? 0,
     protein: n.protein ?? 0,
@@ -118,7 +122,14 @@ export function buildMealFromFinalizeLedgers(
       sourceImageIndex: typeof ledger.sourceImageIndex === 'number' ? ledger.sourceImageIndex : 0,
       foodType: dItem?.foodType,
       cookingMethod: dItem?.cookingMethod,
+      chainName: ledger?.chainName || dItem?.chainName || null,
+      brandName: ledger?.chainName || dItem?.brandName || dItem?.chainName || null,
     });
+
+    if (dItem?.chainName && !food.chainName) {
+      food.chainName = dItem.chainName;
+      food.brandName = food.brandName || dItem.chainName;
+    }
 
     if (dItem?.canonicalDbName && String(dItem.canonicalDbName).trim()) {
       const nm = String(dItem.canonicalDbName).trim();
