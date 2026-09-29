@@ -166,6 +166,15 @@ jobs:
       - name: Bot forge gate (assert-bot-forge)
         run: node scripts/assert-bot-forge.test.mjs
 
+      # The PM role projects the fleet from records that already exist and climbs
+      # the retry -> find-another-way -> escalate ladder. The sensor spawns the
+      # real bot-host three times (three processes, so the attempt counters must
+      # survive a restart) against a fixture fleet, and drives the two cases the
+      # ladder must NOT fire on: a fresh failure, and a stale failure whose agent
+      # is still alive.
+      - name: PM role gate (assert-pm-role)
+        run: node scripts/assert-pm-role.test.mjs
+
       # V-30.5 bug-ticket lane gates (plan/BUG_TICKET_PIPELINE.md §6.2).
       # ticket-state: derived S-C-lite projection stays pure.
       - name: Ticket state gate (bugTicketState)
