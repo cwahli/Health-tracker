@@ -14,6 +14,11 @@
  *     running the real driver out of a scratch tree with a broken workflow, so
  *     the claim "the guard reads the files it says it reads" is exercised rather
  *     than trusted.
+ *  4. Verifying `main` is not enough on its own: a red `main` also REFUSES every
+ *     merge, and until now it did so silently — a stalled queue with no issue and
+ *     no line anywhere. The `notice` job, the permissions it needs, and the fact
+ *     that it runs when the gate FAILED (the only case it exists for) are pinned
+ *     here, and the notice script itself is run against the fake API.
  */
 
 import test from 'node:test';
@@ -23,7 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runDriver, startFakeGitHub } from './lib/fake-github.mjs';
+import { MERGE_SHA, runDriver, startFakeGitHub } from './lib/fake-github.mjs';
 import {
   CI_WORKFLOW,
   MAIN_VERIFY_EVENT,
@@ -33,6 +38,11 @@ import {
   dispatchEndpoint,
   validateMainVerifyWiring,
 } from './lib/main-verify.mjs';
+import {
+  AUTO_MERGE_WORKFLOW,
+  MAIN_RED_ISSUE_TITLE,
+  validateNoticeWiring,
+} from './lib/red-main-notice.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -121,7 +131,14 @@ function scratchTree(overrides = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'main-verify-'));
   fs.cpSync(path.join(ROOT, '.github', 'workflows'), path.join(dir, '.github', 'workflows'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'scripts', 'lib'), { recursive: true });
-  for (const rel of ['auto-merge.mjs', 'lib/merge-gate.mjs', 'lib/main-verify.mjs']) {
+  for (const rel of [
+    'auto-merge.mjs',
+    'notify-main-red.mjs',
+    'lib/merge-gate.mjs',
+    'lib/main-verify.mjs',
+    'lib/github-rest.mjs',
+    'lib/red-main-notice.mjs',
+  ]) {
     fs.copyFileSync(path.join(ROOT, 'scripts', rel), path.join(dir, 'scripts', rel));
   }
   for (const [rel, text] of Object.entries(overrides)) {
@@ -154,6 +171,159 @@ test('E2E: the same tree with intact wiring merges and dispatches', async () => 
     assert.equal(res.code, 0, `driver merged (stderr: ${res.stderr})`);
     assert.equal(fake.calls.merge.length, 1);
     assert.equal(fake.calls.dispatches.length, 1);
+  } finally {
+    await fake.close();
+    fs.rmSync(tree.dir, { recursive: true, force: true });
+  }
+});
+
+const NOTICE_DRIVER = path.join(ROOT, 'scripts', 'notify-main-red.mjs');
+
+/** Run the notice entry point the way `main-verify.yml`'s `notice` job does. */
+const runNotice = (port, extraArgs, opts) =>
+  runDriver(port, extraArgs, { driver: NOTICE_DRIVER, defaultArgs: [], ...opts });
+
+// ---------------------------------------------------------------------------
+// 4. The notice. Verifying `main` is not enough on its own, because a red `main`
+// also refuses every merge — and that refusal used to be silent, which made a
+// stalled queue read like a slow runner or an agent that walked away.
+// ---------------------------------------------------------------------------
+
+test('the notice is wired in this repository, right now', () => {
+  const res = validateNoticeWiring({ readWorkflow });
+  assert.deepEqual(res.problems, [], `notice wiring problems: ${res.problems.join('; ')}`);
+  assert.equal(res.ok, true);
+});
+
+test('a notice job that would be skipped exactly when main is red is caught', () => {
+  // `if: always()` is load bearing: without it the job is skipped the moment the
+  // gate fails, i.e. in the only case it exists for. It looks like a harmless
+  // default and is the whole bug.
+  const skipped = read(MAIN_VERIFY_WORKFLOW).replace(/^ {4}if: always\(\)\s*$/m, '    if: success()');
+  const res = validateNoticeWiring({ readWorkflow: (rel) => (rel === MAIN_VERIFY_WORKFLOW ? skipped : readWorkflow(rel)) });
+  assert.equal(res.ok, false);
+  assert.ok(res.problems.some((p) => /if: always\(\)/.test(p)), res.problems.join('; '));
+});
+
+test('a notice with no permission, no needs, or no script is caught before it becomes a 403', () => {
+  const withOverride = (rel, text) => (r) => (r === rel ? text : readWorkflow(r));
+
+  const noPermission = read(MAIN_VERIFY_WORKFLOW).replace(/^ {2}issues: write\s*$/m, '');
+  assert.ok(
+    validateNoticeWiring({ readWorkflow: withOverride(MAIN_VERIFY_WORKFLOW, noPermission) }).problems.some((p) =>
+      /issues: write/.test(p),
+    ),
+    'a missing issues:write is a 403 at the worst possible moment',
+  );
+
+  const noNeeds = read(MAIN_VERIFY_WORKFLOW).replace(/^ {4}needs: gates\s*$/m, '');
+  assert.ok(
+    validateNoticeWiring({ readWorkflow: withOverride(MAIN_VERIFY_WORKFLOW, noNeeds) }).problems.some((p) =>
+      /needs: gates/.test(p),
+    ),
+  );
+
+  const noScript = read(MAIN_VERIFY_WORKFLOW).replace(/notify-main-red\.mjs/g, 'something-else.mjs');
+  assert.ok(
+    validateNoticeWiring({ readWorkflow: withOverride(MAIN_VERIFY_WORKFLOW, noScript) }).problems.some((p) =>
+      /does not run/.test(p),
+    ),
+  );
+
+  const mergeNoPermission = read(AUTO_MERGE_WORKFLOW).replace(/^ {2}issues: write\s*$/m, '');
+  assert.ok(
+    validateNoticeWiring({ readWorkflow: withOverride(AUTO_MERGE_WORKFLOW, mergeNoPermission) }).problems.some((p) =>
+      /could not say why/.test(p),
+    ),
+    'the merge driver runs the same module, so its permission matters too',
+  );
+});
+
+test('a deleted notice job and a missing file are both named', () => {
+  const renamed = read(MAIN_VERIFY_WORKFLOW).replace(/^ {2}notice:$/m, '  notice-renamed:');
+  const res = validateNoticeWiring({ readWorkflow: (rel) => (rel === MAIN_VERIFY_WORKFLOW ? renamed : readWorkflow(rel)) });
+  assert.ok(res.problems.some((p) => /has no "notice" job/.test(p)), res.problems.join('; '));
+
+  const gone = validateNoticeWiring({ readWorkflow: () => { throw new Error('ENOENT'); } });
+  assert.equal(gone.ok, false);
+  assert.equal(gone.problems.length, 2, 'both files are reported, not just the first');
+
+  assert.equal(validateNoticeWiring({}).ok, false, 'a missing reader must not pass vacuously');
+});
+
+test('E2E: a failed verification files the standing issue, and a pass closes it', async () => {
+  const red = await startFakeGitHub({ openIssues: [] });
+  try {
+    const res = await runNotice(red.port, ['--result=failure', `--sha=${MERGE_SHA}`], {
+      env: { GITHUB_ACTIONS: 'true' },
+    });
+    assert.equal(res.code, 0, `the notice ran (stderr: ${res.stderr})`);
+    assert.equal(red.calls.issuesCreated.length, 1, 'THE ASSERTION: the outage has a record');
+    assert.equal(red.calls.issuesCreated[0].title, MAIN_RED_ISSUE_TITLE);
+    assert.ok(red.calls.issuesCreated[0].body.includes(MERGE_SHA.slice(0, 7)), 'it names the commit that failed');
+    assert.match(res.stdout, /::error::/, 'and it is an annotation, not a line in a log nobody opens');
+    assert.match(res.stderr, /MAIN IS RED/);
+  } finally {
+    await red.close();
+  }
+
+  const green = await startFakeGitHub({ openIssues: [{ number: 100, title: MAIN_RED_ISSUE_TITLE, state: 'open' }] });
+  try {
+    const res = await runNotice(green.port, ['--result=success', `--sha=${MERGE_SHA}`], {});
+    assert.equal(res.code, 0, `the notice ran (stderr: ${res.stderr})`);
+    assert.deepEqual(green.calls.issuesClosed, [100], 'THE ASSERTION: the notice does not outlive the outage');
+    assert.match(green.calls.issueComments[0], /unblocked/);
+  } finally {
+    await green.close();
+  }
+
+  const quiet = await startFakeGitHub({ openIssues: [] });
+  try {
+    const res = await runNotice(quiet.port, ['--result=success'], {});
+    assert.equal(res.code, 0);
+    assert.equal(quiet.calls.issueComments.length, 0, 'a green main with no notice open touches nothing');
+    assert.equal(quiet.calls.issuesClosed.length, 0);
+  } finally {
+    await quiet.close();
+  }
+});
+
+test('E2E: cancelled and skipped are NOT announced as a broken main', async () => {
+  // A superseded verification is the normal state of this workflow's concurrency
+  // group. Announcing an outage for it would raise one on every second merge.
+  for (const result of ['cancelled', 'skipped']) {
+    const fake = await startFakeGitHub({ openIssues: [] });
+    try {
+      const res = await runNotice(fake.port, [`--result=${result}`, `--sha=${MERGE_SHA}`], {});
+      assert.equal(res.code, 0, result);
+      assert.equal(fake.calls.issuesCreated.length, 0, `an issue was filed for ${result}`);
+      assert.equal(fake.calls.issueListReads, 0, `it looked for a notice to file for ${result}`);
+      assert.doesNotMatch(res.stderr, /MAIN IS RED/, result);
+    } finally {
+      await fake.close();
+    }
+  }
+});
+
+test('E2E: the notice refuses to run when it has nowhere to file', async () => {
+  // A notifier that cannot notify IS the silent no-op being removed, so it must
+  // refuse rather than report "nothing to report" while main is red. Run out of
+  // a scratch tree with the permission stripped, so the guard is exercised
+  // against the files it actually reads.
+  const fake = await startFakeGitHub({ openIssues: [] });
+  const tree = scratchTree({
+    [MAIN_VERIFY_WORKFLOW]: read(MAIN_VERIFY_WORKFLOW).replace(/^ {2}issues: write\s*$/m, ''),
+  });
+  try {
+    const res = await runDriver(fake.port, ['--result=failure'], {
+      driver: path.join(tree.dir, 'scripts', 'notify-main-red.mjs'),
+      cwd: tree.dir,
+      defaultArgs: [],
+    });
+    assert.equal(res.code, 2, 'the entry point refused');
+    assert.match(res.stderr, /issues: write/);
+    assert.match(res.stderr, /nowhere to land/);
+    assert.equal(fake.calls.issuesCreated.length, 0, 'THE ASSERTION: it did not pretend there was nothing to report');
   } finally {
     await fake.close();
     fs.rmSync(tree.dir, { recursive: true, force: true });

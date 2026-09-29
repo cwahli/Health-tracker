@@ -48,6 +48,11 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # For the standing red-`main` issue. A refusal scoped to `main` is the one
+  # decision here whose cause is not in the PR, and recording it is what turns a
+  # stalled queue into something a human can find. See
+  # `scripts/lib/red-main-notice.mjs`.
+  issues: write
 
 jobs:
   merge:
