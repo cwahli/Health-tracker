@@ -1,11 +1,14 @@
 #!/bin/sh
-# Mandatory agent identity on every non-merge commit.
+# Mandatory author identity on every non-merge commit.
 #
 # One trailer line, exactly:
-#   Agent: <model and version> (<thinking level>)
+#   Author: <model and version> (<thinking level>)
 # Examples:
-#   Agent: Grok 4.7 (High)
-#   Agent: opencode-go/space-bunny-free (max)
+#   Author: Grok 4.7 (High)
+#   Author: opencode-go/space-bunny-free (max)
+#
+# The legacy `Agent:` prefix is still accepted (branches in flight carry it),
+# but new commits must use `Author:`.
 #
 # The name is the model and version as the provider shows them. The
 # parentheses are the thinking level. A name with no version, or a line
@@ -19,7 +22,7 @@
 # cutoff with --since <iso8601>; pass --no-grandfather to judge everything.
 set -u
 
-pattern='^Agent: [^ ].+ \([^)]+\)$'
+pattern='^(Agent|Author): [^ ].+ \([^)]+\)$'
 
 # The moment this rule became real. Keep in step with the commit that added it.
 RULE_LANDED_AT='2026-09-26T21:51:04Z'
@@ -32,9 +35,9 @@ check_file() {
     return 0
   fi
   echo "Commit rejected. Add one trailer line:" >&2
-  echo "  Agent: <model and version> (<thinking level>)" >&2
-  echo "Example: Agent: Grok 4.7 (High)" >&2
-  echo "Set AGENT_IDENTITY to that text (without the 'Agent:' prefix) if a tool commits for you." >&2
+  echo "  Author: <model and version> (<thinking level>)" >&2
+  echo "Example: Author: Grok 4.7 (High)" >&2
+  echo "Set AUTHOR_IDENTITY (or legacy AGENT_IDENTITY) to that text (without the 'Author:' prefix) if a tool commits for you." >&2
   return 1
 }
 
@@ -53,8 +56,8 @@ check_commit() {
   fi
   msg=$(git log -1 --format=%B "$sha")
   printf '%s\n' "$msg" | grep -Eq "$pattern" && return 0
-  echo "Commit $sha has no agent identity." >&2
-  echo "Required line: Agent: <model and version> (<thinking level>)" >&2
+  echo "Commit $sha has no author identity." >&2
+  echo "Required line: Author: <model and version> (<thinking level>) (legacy Agent: accepted)" >&2
   printf '%s\n' "$msg" | head -n 8 >&2
   return 1
 }

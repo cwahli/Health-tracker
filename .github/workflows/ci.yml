@@ -31,7 +31,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Agent identity on each new commit
+      - name: Author identity on each new commit
         shell: bash
         run: |
           # Only the commits this change ADDS are its responsibility. An agent
@@ -83,7 +83,7 @@ jobs:
               --range "$before..HEAD"
           fi
 
-      - name: Agent identity in PR body (becomes the squash message)
+      - name: Author identity in PR body (becomes the squash message)
         if: github.event_name == 'pull_request'
         shell: bash
         env:
