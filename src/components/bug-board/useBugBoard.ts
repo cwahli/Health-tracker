@@ -39,11 +39,20 @@ const overviewPayloadKey = (json: any): string => {
   const tags: any[] = Array.isArray(json?.bugTags) ? json.bugTags : [];
   const reports: any[] = Array.isArray(json?.allReports) ? json.allReports : [];
   const del: any[] = Array.isArray(json?.deletionCandidates) ? json.deletionCandidates : [];
+  // The overview rows carry no updated_at, so id+status alone is blind to
+  // PATCH updates (queue/bug/edits leave both unchanged) and the poller
+  // would skip setData forever on a real change. Fold the work_item content
+  // into the key: any mutation the server persisted changes this string.
+  const tagKey = (tag: any): string => {
+    const wi = tag?.work_item;
+    const wiStr = typeof wi === 'string' ? wi : JSON.stringify(wi ?? null);
+    return `${tag?.id}:${tag?.updated_at || ''}:${tag?.status || ''}:${wiStr}`;
+  };
   return [
     tags.length,
     reports.length,
     del.length,
-    tags.map((tag: any) => `${tag.id}:${tag.updated_at || ''}:${tag.status || ''}`).join(','),
+    tags.map(tagKey).join(','),
   ].join('|');
 };
 

@@ -1,0 +1,60 @@
+{
+ "steps": {
+  "setup": {
+   "verdict": "PASS",
+   "appPath": "/bugs/app?token=…"
+  },
+  "L1-parity": {
+   "verdict": "PASS",
+   "headerCount": 18,
+   "overviewCount": 18,
+   "listCount": 18,
+   "kpis": {
+    "ready": "11",
+    "stuck": "1",
+    "open": "14",
+    "done": "4"
+   }
+  },
+  "L2-auto-update": {
+   "verdict": "PASS",
+   "tagId": "tag_mumtt83t_ad77wi"
+  },
+  "L3-propagation": {
+   "verdict": "PASS",
+   "stuckBefore": "1",
+   "stuckAfter": "2",
+   "doneHidden": true
+  },
+  "L4-interaction": {
+   "verdict": "PASS",
+   "pageerrors": 0
+  },
+  "L5-egress": {
+   "verdict": "PASS",
+   "polls": 13,
+   "last5": [
+    46749,
+    46749,
+    46749,
+    46749,
+    46749
+   ],
+   "max": 46749
+  },
+  "cleanup": {
+   "verdict": "PASS",
+   "deleted": true
+  }
+ },
+ "evidence": [
+  "/tmp/opencode/bugval/ev/l1-board.png",
+  "/tmp/opencode/bugval/ev/l2-before.png",
+  "/tmp/opencode/bugval/ev/l2-after.png",
+  "/tmp/opencode/bugval/ev/l3-blocked.png",
+  "/tmp/opencode/bugval/ev/l3-done-gone.png",
+  "/tmp/opencode/bugval/ev/l4-search.png",
+  "/tmp/opencode/bugval/ev/l4-interactions.png"
+ ],
+ "pageerrors": []
+}
