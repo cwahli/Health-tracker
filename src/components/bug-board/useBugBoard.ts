@@ -31,6 +31,23 @@ import { overlayAutoRemaining } from '../../utils/bugTapeReview';
 import { t } from '../../utils/i18n';
 
 /**
+ * Lightweight change fingerprint for the overview payload. The overview
+ * endpoint carries no generated_at, so the poller compares this key and
+ * skips setData (no re-render) when nothing moved.
+ */
+const overviewPayloadKey = (json: any): string => {
+  const tags: any[] = Array.isArray(json?.bugTags) ? json.bugTags : [];
+  const reports: any[] = Array.isArray(json?.allReports) ? json.allReports : [];
+  const del: any[] = Array.isArray(json?.deletionCandidates) ? json.deletionCandidates : [];
+  return [
+    tags.length,
+    reports.length,
+    del.length,
+    tags.map((tag: any) => `${tag.id}:${tag.updated_at || ''}:${tag.status || ''}`).join(','),
+  ].join('|');
+};
+
+/**
  * Shared bug-board data hook (packet bug-board-miniapp, Node 1).
  * Verbatim extraction of BugTrackerModal state + data logic. One writer:
  * both the site modal and the Telegram mini app consume this hook, so a fix
@@ -56,6 +73,10 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
   const selectedTagIdRef = useRef<string | null>(null);
   selectedTagIdRef.current = selectedTagId;
   const detailFetchGen = useRef(0);
+  const loadingRef = useRef(false);
+  loadingRef.current = loading;
+  const lastLoadEndRef = useRef(0);
+  const lastPayloadKeyRef = useRef<string | null>(null);
   const [selectedTagDetail, setSelectedTagDetail] = useState<{
     bug?: any;
     now?: BugNow;
@@ -273,13 +294,18 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
     }
   };
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (quiet?: boolean) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/bug-tracker/overview');
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      const key = overviewPayloadKey(json);
+      if (quiet && lastPayloadKeyRef.current !== null && key === lastPayloadKeyRef.current) {
+        return;
+      }
+      lastPayloadKeyRef.current = key;
       setData(json);
       saveBugTrackerCache(json);
       const nowStr = new Date().toLocaleTimeString();
@@ -301,7 +327,8 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
     } catch (err: any) {
       setError(err?.message || 'Failed to load bug tracker data');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
+      lastLoadEndRef.current = Date.now();
     }
   };
 
@@ -564,6 +591,22 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
       load();
       fetch('/api/bugs/migrate-inbox', { method: 'POST' }).catch(() => {});
     }
+  }, [isOpen]);
+
+  // Shared-board auto-refresh (packet bug-board-miniapp, Node 3). Quiet poll:
+  // no spinner, page-visible only, skipped while a load is in flight or within
+  // 5s of the last one. The fingerprint check inside load() skips setData when
+  // nothing moved, so an idle board does not re-render. Both the site modal
+  // and the Telegram mini app inherit this through the hook.
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (loadingRef.current) return;
+      if (Date.now() - lastLoadEndRef.current < 5000) return;
+      load(true);
+    }, 25000);
+    return () => clearInterval(id);
   }, [isOpen]);
 
   const handleSelectTag = (tagId: string) => {
