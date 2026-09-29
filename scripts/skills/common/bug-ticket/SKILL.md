@@ -129,6 +129,22 @@ For a new defect:
 
 For a split or duplicate, name every resulting card and its current state. Do not hide a sibling in prose.
 
+### Board handoff (mini app)
+
+When the user asks for the tickets, the list, or the board — or after any
+list/show answer — hand them the live board, not just prose:
+- If the platform supports reply buttons, attach a `web_app` button opening
+  `<gateway>/bugs/?bot=bug_ticket` alongside the text answer, where
+  `<gateway>` is the same host the vm bot's `/bugs` button uses. The gateway
+  validates the opener's own Telegram initData, so no secret is needed in
+  chat. If the button fails to render, report it once as a platform
+  limitation and fall back to the pointer below.
+- Never paste the board URL as a plain link: a plain browser open carries no
+  initData and lands on a dead bootstrap page.
+- If buttons are unavailable, or the gateway is not serving `/bugs`, end the
+  answer with: `Ask the VM bot for /bugs — it serves the bug board button.`
+  Never invent a gateway URL.
+
 ### The Three Laws
 
 1. If it is not on a card, it does not exist. The canonical list is the card store.
