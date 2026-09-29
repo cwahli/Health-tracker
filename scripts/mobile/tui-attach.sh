@@ -186,6 +186,14 @@ fi
 
 cd "$WORKTREE" || exit 1
 
+# How long the PANE has existed, as opposed to how long this process has. tmux
+# sessions outlive their attacher by design (detach does not kill the pane), so
+# `ps` on this script reports minutes while the terminal the user is looking at
+# is a day old. Reporting the pane's real age is the whole point: it is what
+# separates "warm and in use" from "abandoned", which are otherwise identical
+# from the outside.
+PANE_SINCE="$(tmux display-message -p -t "$TMUX_NAME" '#{session_created}' 2>/dev/null || echo 0)"
+
 # Claim the conversation for as long as a client is attached. The heartbeat is
 # what makes a crashed holder recoverable: without it a killed phone would
 # leave a lease that blocks the chat forever. The heartbeat runs in a
@@ -199,9 +207,19 @@ cd "$WORKTREE" || exit 1
 announce() {
   node -e '
     const fs = require("fs");
-    const payload = { session: process.argv[2], pid: process.pid, heartbeat: Date.now() };
+    const payload = {
+      session: process.argv[2],
+      pid: process.pid,
+      heartbeat: Date.now(),
+      pane: process.argv[3],
+      bot: process.argv[4],
+      // Announced on every heartbeat, not only at start, so a client that
+      // attached later shows up without the bot guessing.
+      clients: Number(process.argv[5] || 0),
+      since: Number(process.argv[6] || 0),
+    };
     fs.writeFileSync(process.argv[1], JSON.stringify(payload));
-  ' "$TUI_LEASE" "$SID" 2>/dev/null || true
+  ' "$TUI_LEASE" "$SID" "$TMUX_NAME" "$BOT_ID" "$(tmux list-clients -t "$TMUX_NAME" 2>/dev/null | wc -l | tr -d ' ')" "$PANE_SINCE" 2>/dev/null || true
 }
 announce
 ( while true; do sleep 15; announce; done ) &
