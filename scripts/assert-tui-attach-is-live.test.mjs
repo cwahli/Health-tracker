@@ -51,7 +51,19 @@ check('the drop clears the server url', /viewMode: 'headless', serverUrl: null, 
 // The replacement guards are the stronger claim: no server directive reappears
 // on the turn path, and an attached TUI can no longer gate a turn.
 check('the turn pins no server url', !/attachUrl:/.test(src));
-check('the turn still pins the session when a tui view is live', /sessionId: workSession\.viewMode === 'tui' \? workSession\.opencodeSessionId : undefined/.test(src));
+// CHANGED 2026-09-29, deliberately, and this one is the actual bug this sensor
+// should have caught. It asserted that the turn pins the session only for a tui
+// view — which is the same as saying a turn with no /tx view passes NO session,
+// so opencode picks or creates one in the bot's workspace while the TUI shows
+// whatever sessions.json names. That is how the TUI and the bot ended up on two
+// different conversations (2026-09-29: a vm /tui rendered a PIP Defense Council
+// session while the bot answered from Health-tracker).
+//
+// The session is now workspace-scoped and always passed, so a project switch
+// yields a fresh session rather than the previous project's.
+check('the turn always passes a session', /sessionId: turnSessionId,/.test(src));
+check('no turn path leaves the session undefined again', !/sessionId: workSession\.viewMode === 'tui'/.test(src));
+check('the session is resolved per workspace', /turnSessionId = sessionForWorkspace\(sessions, chatId, effectiveWorkspace\)/.test(src));
 check('an attached TUI no longer defers a turn', !/tuiHoldsConversation/.test(src));
 check('the TUI is presence, not a lock', /export function tuiIsAttached/.test(src));
 check('the /tui copy no longer promises a refusal', !/refuses to attach while I am mid-turn/.test(src));

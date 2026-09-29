@@ -308,18 +308,127 @@ describe('presence is not a lock', () => {
 
   it('still tells the user a TUI is watching, or the turn looks like it ran twice', async () => {
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    expect(src).toMatch(/const tuiWatching = tuiIsAttached\(/);
-    expect(src).toMatch(/if \(tuiWatching\) \{/);
+    expect(src).toMatch(/if \(tuiIsAttached\(config\.id, turnSessionId\)\) \{/);
+  });
+
+  it('reads presence per session, so a terminal on another project is not claimed', async () => {
+    // Presence is scoped to a session id. Checking a bare chat-wide id made a
+    // terminal on one project claim to be watching a turn in another.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/tuiIsAttached\(config\.id, sessions\.get\(/);
   });
 
   it('does not tell the user on a turn with no TUI attached', async () => {
     // The note is inside the presence check, not unconditional — otherwise every
     // ordinary turn in every chat grows a line about a terminal that is not there.
     const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
-    const start = src.indexOf('const tuiWatching = tuiIsAttached(');
+    const guard = 'if (tuiIsAttached(config.id, turnSessionId)) {';
+    const start = src.indexOf(guard);
     expect(start).toBeGreaterThan(-1);
     const noteAt = src.indexOf('A TUI is open on this conversation');
     expect(noteAt).toBeGreaterThan(start);
-    expect(src.slice(start, noteAt)).toMatch(/if \(tuiWatching\)/);
+    // The note sits between the guard and its closing brace, so it cannot fire
+    // on a turn with no terminal attached.
+    const body = src.slice(start + guard.length, noteAt);
+    expect(body).not.toMatch(/\}\s*$/);
+    expect(body.trim()).not.toMatch(/^\}/);
+  });
+});
+
+describe('a chat session belongs to exactly one workspace', () => {
+  // The 2026-09-29 defect: three bots had their chat row pointing at PIP Defense
+  // Council sessions while /tui advertised /home/ubuntu/src/Health-tracker, so
+  // the terminal showed a council conversation and the bot answered from the
+  // website repo. sessions.json held one bare id per chat with nothing recording
+  // which project it belonged to, so nothing could notice.
+  const HT = '/home/ubuntu/src/Health-tracker';
+  const EXT = '/home/ubuntu/projects/external-2';
+  let mod: {
+    sessionForWorkspace: (s: Map<string, string>, c: string, w: string) => string | null;
+    bindSessionForWorkspace: (s: Map<string, string>, c: string, w: string, id: string) => boolean;
+  };
+
+  beforeAll(async () => {
+    mod = (await import('../scripts/bot-host.mjs')) as never;
+  });
+
+  it('returns the session when the workspace matches', () => {
+    const s = new Map<string, string>();
+    mod.bindSessionForWorkspace(s, '1', HT, 'ses_a');
+    expect(mod.sessionForWorkspace(s, '1', HT)).toBe('ses_a');
+  });
+
+  it('returns nothing after a project switch, so the next turn starts fresh', () => {
+    const s = new Map<string, string>();
+    mod.bindSessionForWorkspace(s, '1', HT, 'ses_a');
+    expect(mod.sessionForWorkspace(s, '1', EXT)).toBeNull();
+  });
+
+  it('never hands back another project session after switching back and forth', () => {
+    const s = new Map<string, string>();
+    mod.bindSessionForWorkspace(s, '1', HT, 'ses_a');
+    mod.bindSessionForWorkspace(s, '1', EXT, 'ses_ext');
+    expect(mod.sessionForWorkspace(s, '1', HT)).toBeNull();
+    expect(mod.sessionForWorkspace(s, '1', EXT)).toBe('ses_ext');
+  });
+
+  it('treats a bare id from before scoping as belonging to nothing', () => {
+    // Every existing row on disk looks like this. Guessing its project is how the
+    // council sessions got adopted in the first place.
+    const s = new Map([['1', 'ses_legacy']]);
+    expect(mod.sessionForWorkspace(s, '1', HT)).toBeNull();
+    expect(mod.sessionForWorkspace(s, '1', EXT)).toBeNull();
+  });
+
+  it('treats a different directory under the same project as a different session', () => {
+    // The vm bot runs from deploy/Health-tracker while its registry says
+    // src/Health-tracker. Those are different conversations to opencode.
+    const s = new Map<string, string>();
+    mod.bindSessionForWorkspace(s, '1', HT, 'ses_a');
+    expect(mod.sessionForWorkspace(s, '1', '/home/ubuntu/deploy/Health-tracker')).toBeNull();
+  });
+
+  it('keeps one row per chat, so a switch cannot leave two behind', () => {
+    const s = new Map<string, string>();
+    mod.bindSessionForWorkspace(s, '1', HT, 'ses_a');
+    mod.bindSessionForWorkspace(s, '1', EXT, 'ses_ext');
+    expect(s.size).toBe(1);
+  });
+
+  it('refuses to bind an empty session id', () => {
+    const s = new Map<string, string>();
+    expect(mod.bindSessionForWorkspace(s, '1', HT, '')).toBe(false);
+    expect(s.size).toBe(0);
+  });
+
+  it('leaves no unscoped read of this chat session in the turn path', async () => {
+    // Every reader has to go through the scoped helper, or one of them will hand
+    // back a foreign project's session and the two drift apart again.
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/sessions\.get\(chatId\)/);
+  });
+
+  it('passes the resolved session to the run instead of leaving it undefined', async () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    // This was `viewMode === 'tui' ? … : undefined`, so a turn with no tx view ran
+    // with no session at all and opencode picked its own — the original split.
+    expect(src).not.toMatch(/sessionId: workSession\.viewMode === 'tui'/);
+    expect(src).toMatch(/sessionId: turnSessionId,/);
+  });
+
+  it('tells tui-attach.sh which workspace to open', async () => {
+    const src = fs.readFileSync(new URL('../scripts/bot-host.mjs', import.meta.url), 'utf8');
+    expect(src).toMatch(/workspace: tuiWorkspace,/);
+  });
+
+  it('makes tui-attach.sh prefer the recorded workspace over the static guess', async () => {
+    const sh = fs.readFileSync(new URL('../scripts/mobile/tui-attach.sh', import.meta.url), 'utf8');
+    expect(sh).toMatch(/tui-open\.json/);
+    expect(sh).toMatch(/SESSION_WORKSPACE="\$TUI_SESSION_WORKSPACE"/);
+    // The fallback must be the env var, never the other way round.
+    expect(sh).toMatch(/\[ -n "\$SESSION_WORKSPACE" \] \|\| SESSION_WORKSPACE="\$WORKTREE"/);
+    // A recorded-but-missing directory is refused out loud rather than silently
+    // opening the wrong project.
+    expect(sh).toMatch(/\[ ! -d "\$SESSION_WORKSPACE" \]/);
   });
 });
