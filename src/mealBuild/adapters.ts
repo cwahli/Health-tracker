@@ -44,11 +44,38 @@ export function fromPendingFoodLog(log: any, meta?: Partial<MealBuild>): MealBui
 }
 
 export function toPendingFoodLog(meal: MealBuild): any {
-  const mappedItems = (meal.items || []).map((it: any) => ({
-    ...it,
-    chainName: it.chainName || null,
-    brandName: it.brandName || it.chainName || null,
-  }));
+  const mappedItems = (meal.items || []).map((it: any) => {
+    const n = it.nutrients || {};
+    const satFat = Number(n.saturatedFat ?? it.saturatedFat ?? 0) || 0;
+    const rawTotalFat = Number(n.totalFat ?? it.totalFat ?? it.fat ?? 0) || 0;
+    const safeTotalFat = Math.max(rawTotalFat, satFat);
+    const cal = Number(n.calories ?? it.calories ?? it.estimatedCalories ?? 0) || 0;
+    const prot = Number(n.protein ?? it.protein ?? 0) || 0;
+    const carbs = Number(n.carbohydrates ?? it.carbohydrates ?? it.carbs ?? 0) || 0;
+    const sod = Number(n.sodium ?? it.sodium ?? 0) || 0;
+    return {
+      ...it,
+      chainName: it.chainName || null,
+      brandName: it.brandName || it.chainName || null,
+      calories: cal,
+      protein: prot,
+      carbohydrates: carbs,
+      carbs: carbs,
+      totalFat: safeTotalFat,
+      fat: safeTotalFat,
+      saturatedFat: satFat,
+      sodium: sod,
+      nutrients: {
+        ...n,
+        calories: cal,
+        protein: prot,
+        carbohydrates: carbs,
+        totalFat: safeTotalFat,
+        saturatedFat: satFat,
+        sodium: sod,
+      },
+    };
+  });
   return {
     id: meal.id,
     calories: meal.nutrients?.calories ?? 0,

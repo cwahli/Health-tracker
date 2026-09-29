@@ -190,8 +190,10 @@ export function scaleItemNutrients(item: any, ratio: number, newWeight?: number)
   next.calories = base.calories ?? 0;
   next.protein = base.protein ?? 0;
   next.totalFat = base.totalFat ?? 0;
+  next.fat = base.totalFat ?? 0;
   next.saturatedFat = base.saturatedFat ?? 0;
   next.carbohydrates = base.carbohydrates ?? 0;
+  next.carbs = base.carbohydrates ?? 0;
   next.sodium = base.sodium ?? 0;
   // Keep pack/piece counts proportional if packGrams is present
   if (typeof next.packGrams === 'number' && next.packGrams > 0 && w >= next.packGrams) {
@@ -536,6 +538,7 @@ export async function applyMealEdits(opts: {
   scoutItems?: any[] | null;
   priorLocks?: UserLockedSlot[] | null;
   turn?: number;
+  portionChoices?: any;
 }): Promise<MealEditResult & { userLockedSlots?: UserLockedSlot[]; appliedCommands?: MealEditCommand[] }> {
   const notes: string[] = [];
   const snapshotOf = (rows: any[]) =>

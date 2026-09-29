@@ -464,6 +464,56 @@ export function diffScoutToEditCommands(args: {
         }
       }
     }
+    // 2b. Process direct portion selection syntax (e.g. "Portion Selection: Lidl Fruit Juice Blend: 600g, Lidl Diced Mango: 100g")
+    const portionSelectionMatch = args.userMessage.match(/Portion Selection:\s*(.+)$/i);
+    if (portionSelectionMatch) {
+      const rest = portionSelectionMatch[1];
+      const itemGramsRegex = /([a-zA-Z0-9\s/'-]+?):\s*(\d+(?:\.\d+)?)\s*g/gi;
+      let pm: RegExpExecArray | null;
+      let matchedAny = false;
+      while ((pm = itemGramsRegex.exec(rest)) !== null) {
+        matchedAny = true;
+        const matchedName = pm[1].trim();
+        const targetGrams = Math.round(Number(pm[2]));
+        if (targetGrams > 0) {
+          const priorIdx = priorItems.findIndex((p, i) => !usedPrior.has(i) && (namesReferSame(displayName(p), matchedName) || namesShareSubstance(displayName(p), matchedName)));
+          if (priorIdx >= 0) {
+            const prior = priorItems[priorIdx];
+            const pName = displayName(prior);
+            const pWeight = weightOf(prior);
+            if (Math.abs(targetGrams - pWeight) >= 1 && !commands.some(c => c.action === 'set_weight' && c.itemName === pName)) {
+              commands.push({
+                action: 'set_weight',
+                itemName: pName,
+                newWeightGrams: targetGrams,
+                scoutIndex: scoutIndexOf(prior, priorIdx),
+                targetDbId: prior.dbId || null,
+              });
+              usedPrior.add(priorIdx);
+            }
+          }
+        }
+      }
+      if (!matchedAny && priorItems.length === 1 && !usedPrior.has(0)) {
+        const singleWeightMatch = rest.match(/(\d+(?:\.\d+)?)\s*g/i);
+        if (singleWeightMatch) {
+          const targetGrams = Math.round(Number(singleWeightMatch[1]));
+          const prior = priorItems[0];
+          const pName = displayName(prior);
+          const pWeight = weightOf(prior);
+          if (targetGrams > 0 && Math.abs(targetGrams - pWeight) >= 1 && !commands.some(c => c.action === 'set_weight' && c.itemName === pName)) {
+            commands.push({
+              action: 'set_weight',
+              itemName: pName,
+              newWeightGrams: targetGrams,
+              scoutIndex: scoutIndexOf(prior, 0),
+              targetDbId: prior.dbId || null,
+            });
+            usedPrior.add(0);
+          }
+        }
+      }
+    }
   }
 
   const pair = findPackagePreparedPair(priorItems);

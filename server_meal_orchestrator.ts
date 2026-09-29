@@ -87,23 +87,48 @@ export function attachHappyPathMealBuild(opts: {
 export function buildSavableMealFromParsed(preCalcItems: any[], activeMeal: any, aggregatedNutrients: any, rawFoodData: any): MealBuild {
   let base = migrateMealSchema(activeMeal || {});
   base = consolidateMeal(base, {
-    items: preCalcItems.map(p => ({
-      itemId: p.itemId,
-      scoutIndex: p.scoutIndex,
-      name: p.originalName || p.keyword || 'Food Item',
-      chainName: p.chainName || null,
-      brandName: p.brandName || p.chainName || null,
-      estimatedCalories: p.estimatedCalories || (p.primaryBase100g ? p.primaryBase100g.calories : 0),
-      nutrients: p.nutrients || {},
-      weightGrams: p.weightGrams || p.estimatedWeightGrams || 100,
-      dbId: p.bestMatchDbId,
-      dbSource: p.bestMatchDbSource,
-      componentsDetailList: p.componentsDetailList,
-      primaryBase100g: p.primaryBase100g,
-      rawNutritionLabel: p.rawNutritionLabel,
-      boundingBox2D: p.boundingBox2D || null,
-      sourceImageIndex: typeof p.sourceImageIndex === 'number' ? p.sourceImageIndex : 0,
-    })),
+    items: preCalcItems.map(p => {
+      const pNuts = p.nutrients || {};
+      const sat = Number(pNuts.saturatedFat ?? p.saturatedFat ?? 0) || 0;
+      const tf = Math.max(Number(pNuts.totalFat ?? p.totalFat ?? p.fat ?? 0) || 0, sat);
+      const cal = Number(pNuts.calories ?? p.estimatedCalories ?? p.calories ?? 0) || 0;
+      const prot = Number(pNuts.protein ?? p.protein ?? 0) || 0;
+      const carbs = Number(pNuts.carbohydrates ?? p.carbohydrates ?? p.carbs ?? 0) || 0;
+      const sod = Number(pNuts.sodium ?? p.sodium ?? 0) || 0;
+      return {
+        itemId: p.itemId,
+        scoutIndex: p.scoutIndex,
+        name: p.originalName || p.keyword || 'Food Item',
+        chainName: p.chainName || null,
+        brandName: p.brandName || p.chainName || null,
+        calories: cal,
+        protein: prot,
+        carbohydrates: carbs,
+        carbs,
+        totalFat: tf,
+        fat: tf,
+        saturatedFat: sat,
+        sodium: sod,
+        estimatedCalories: p.estimatedCalories || cal || (p.primaryBase100g ? p.primaryBase100g.calories : 0),
+        nutrients: {
+          ...pNuts,
+          calories: cal,
+          protein: prot,
+          carbohydrates: carbs,
+          totalFat: tf,
+          saturatedFat: sat,
+          sodium: sod,
+        },
+        weightGrams: p.weightGrams || p.estimatedWeightGrams || 100,
+        dbId: p.bestMatchDbId,
+        dbSource: p.bestMatchDbSource,
+        componentsDetailList: p.componentsDetailList,
+        primaryBase100g: p.primaryBase100g,
+        rawNutritionLabel: p.rawNutritionLabel,
+        boundingBox2D: p.boundingBox2D || null,
+        sourceImageIndex: typeof p.sourceImageIndex === 'number' ? p.sourceImageIndex : 0,
+      };
+    }),
     nutrients: aggregatedNutrients || {},
   }, 'calculation');
   return base;
