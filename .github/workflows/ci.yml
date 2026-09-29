@@ -158,6 +158,14 @@ jobs:
           node scripts/add-bot.test.mjs
           npx vitest run tests/registry-inherit.test.ts
 
+      # The forge creates a bot end to end. The sensor drives the whole paste
+      # path against a scratch tree and a fake Bot API (a real child process and
+      # real sockets), so a create that half-finishes — a row with no token, a
+      # token with no unit, an enabled bot whose token never answered — fails
+      # here instead of on the host.
+      - name: Bot forge gate (assert-bot-forge)
+        run: node scripts/assert-bot-forge.test.mjs
+
       # V-30.5 bug-ticket lane gates (plan/BUG_TICKET_PIPELINE.md §6.2).
       # ticket-state: derived S-C-lite projection stays pure.
       - name: Ticket state gate (bugTicketState)

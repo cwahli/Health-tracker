@@ -32,15 +32,41 @@ via systemd `EnvironmentFile` (`bot-host@.service` reads `common.env` + `<id>.en
 
 ## Procedures
 
-**Add a bot:** scaffold the registry row → BotFather → export its new token
-→ add `NAME_TOKEN=<value>` to master `tokens.env` → `sync-bot-tokens.mjs --check`
-→ run without `--check` (add `--restart` for live bot-host bots) → prove one E2E reply
-→ flip `"enabled": true`.
+**Add a bot (one command):**
+
+```bash
+node scripts/bot-forge.mjs --create --name="VM3 Bot" --token=<token from @BotFather>
+```
+
+The forge is the one creation path: it validates the name/token, writes the thin
+registry row through `add-bot.mjs`, adds the master token line, runs
+`sync-bot-tokens.mjs`, generates the user-scope unit and checks that the unit's
+`EnvironmentFile` is the file the sync just wrote, proves the token with `getMe`,
+publishes the command menu, and only then flips `"enabled": true`. A step that
+fails stops the pipeline and names itself, so a half-created bot is never
+reported as created. `--dry-run` plans it and writes nothing.
+
+With a userbot session it can also mint the token itself (`node
+scripts/bot-forge.mjs --create --name="VM3 Bot"` with no `--token`), and
+`node scripts/bot-forge.mjs --serve` puts the same pipeline behind a Mini App
+page for a phone. Both are optional: the paste path above needs neither.
+
+**Add a bot (by hand)** — the same steps, one at a time:
 
 ```bash
 node scripts/add-bot.mjs --id=vm3 --name="VM3 Bot"   # thin row, dry-run with --dry-run
 node scripts/assert-bot-clone.mjs                    # prove it is a clone of the master
 ```
+
+Then BotFather → add `NAME_TOKEN=<value>` to master `tokens.env` →
+`sync-bot-tokens.mjs --check`, then without it → `systemctl --user enable --now
+bot-host@<id>` → prove one E2E reply → `node scripts/add-bot.mjs --enable=vm3`.
+
+**Supervision (user scope).** The forge generates `bot-host@.service` into
+`~/.config/systemd/user/` from the repo's own `systemd/bot-host@.service`, so the
+live unit and the generated one cannot drift. One host-level step needs root,
+once: `loginctl enable-linger <user>`. Without it a user unit stops when the
+last session ends.
 
 **A new bot is a thin row, never a copy.** `bots/registry.json` names a `master`
 (`vm`) and `scripts/lib/registry.mjs` `applyMasterDefaults()` merges that master's
