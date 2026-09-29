@@ -26,7 +26,7 @@
       "test": "T1",
       "scope": "common",
       "status": "done",
-      "prove": "live smoke: / popup lists commands on each class; node scripts/assert-command-scope.mjs (popup == handlers == declared per class)",
+      "prove": "live smoke: / popup lists commands on each class; node scripts/assert-command-scope.mjs (popup == handlers == declared per class); node scripts/assert-project-registry-parity.mjs (/project aliases agree between bot-host and the standalone router)",
       "expect": [
         "scripts/lib/tg-copy-code.mjs",
         "scripts/lib/tg-copy-code.test.mjs"
@@ -161,7 +161,9 @@
         "scripts/lib/commands.mjs",
         "scripts/lib/bot-commands.mjs",
         "scripts/lib/bot-status.mjs",
-        "scripts/assert-command-scope.mjs"
+        "scripts/assert-command-scope.mjs",
+        "scripts/assert-project-registry-parity.mjs",
+        "tools/telegram-provider-router/src/project-registry.mjs"
       ],
       "skills": [],
       "classes": {
@@ -193,7 +195,7 @@
         "handoff": false,
         "resume": false,
         "tx": false,
-        "project": false,
+        "project": true,
         "council": false,
         "role": false,
         "location": false,
