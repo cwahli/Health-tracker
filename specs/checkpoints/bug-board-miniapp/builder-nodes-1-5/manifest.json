@@ -1,0 +1,16 @@
+{
+  "slug": "bug-board-miniapp",
+  "node": "builder-nodes-1-5",
+  "at": "2026-09-29T13:39:54.139Z",
+  "git": {
+    "head": "f6e981049b5f226d33a0db0a0b740128b990c106",
+    "stashCommit": null
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/bug-board-miniapp.md"
+  ]
+}
