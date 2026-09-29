@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, ttydFor, ttydPathFor, createGateway, COOKIE_NAME } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, ttydFor, ttydPathFor, createGateway, COOKIE_NAME } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -175,6 +175,20 @@ console.log('assert-tui-gateway:');
   check('a per-bot token is preferred', tokenFor('vm', env) === 'vm-token');
   check('an unlisted bot falls back to the shared token', tokenFor('other', env) === 'shared');
   check('a bot id with punctuation still maps', tokenFor('vm2', { TUI_BOT_TOKEN_VM2: 'x' }) === 'x');
+}
+
+// 9b. Env-file whitespace must not break one bot's HMAC while the other works.
+//     A trailing newline/space in tui-gateway.env is the classic single-bot
+//     "hash mismatch": the vm token is clean, the vm2 line is not.
+{
+  check('a padded per-bot token is trimmed', tokenFor('vm2', { TUI_BOT_TOKEN_VM2: 'x\n' }) === 'x');
+  check('a padded shared token is trimmed', tokenFor('other', { TUI_BOT_TOKEN: '  shared\r\n' }) === 'shared');
+  const paddedEnv = { TUI_BOT_TOKEN_VM: TOKEN, TUI_BOT_TOKEN_VM2: ` ${TOKEN} ` };
+  const init = makeInitData(fresh());
+  check('initData verifies against a padded vm2 token',
+    validateInitData(init, tokenFor('vm2', paddedEnv), { now }).ok === true);
+  const names = configuredTokenBots({ TUI_BOT_TOKEN_VM: 'a', TUI_BOT_TOKEN_VM2: 'b', TUI_BOT_TOKEN_EMPTY: '  ', OTHER: 'x' });
+  check('configured bots are listed for refusal logs', JSON.stringify(names) === JSON.stringify(['vm', 'vm2']));
 }
 
 // 10. The session binds to the CHAT when Telegram sends one. Binding to the

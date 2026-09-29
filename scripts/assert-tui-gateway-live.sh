@@ -18,7 +18,9 @@ CHAT_ID="${TUI_CHAT_ID:-6218257274}"
 # what the gateway's tokenFor() does. Building it any other way finds nothing
 # and the proof exits as "no token" instead of testing the auth.
 TOKEN_KEY="TUI_BOT_TOKEN_$(printf '%s' "$BOT_ID" | tr '[:lower:]-' '[:upper:]_')"
-TOKEN=$(grep -E "^${TOKEN_KEY}=" "$ENV_FILE" | cut -d= -f2-)
+# Strip whitespace/CR: a padded line in the env file signs a different HMAC and
+# every case fails as "hash mismatch". The gateway trims on read; so must we.
+TOKEN=$(grep -E "^${TOKEN_KEY}=" "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]')
 if [ -z "$TOKEN" ]; then echo "no ${TOKEN_KEY} in $ENV_FILE — cannot sign"; exit 2; fi
 
 sign() { # sign <auth_date_epoch> [user_id] -> initData query string
