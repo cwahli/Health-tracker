@@ -1,0 +1,16 @@
+{
+  "slug": "bug-board-miniapp",
+  "node": "planner",
+  "at": "2026-09-29T13:08:18.422Z",
+  "git": {
+    "head": "6b43ddb9d3ba190daa1e393b2501d69bdfe8d9ca",
+    "stashCommit": "bfe01884bba7afef8d6fd3db02baac5472860e79"
+  },
+  "files": [
+    "docs/agent/standing.json",
+    "server_vision_scout.ts",
+    "src/server/food/server_food_analyze_schema.ts",
+    "prototype/meallog/compare/scout_only_compare_instructions.ts",
+    "specs/active/bug-board-miniapp.md"
+  ]
+}
