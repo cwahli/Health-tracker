@@ -108,6 +108,7 @@ import { scoreLabelFor, benchmarkLabel, walkTierRank, tierForModel } from './lib
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
   parseCommand,
+  resolveCommandName,
   isAddressedToUs,
   chatKind,
   BOT_COMMANDS,
@@ -2010,7 +2011,9 @@ async function resumePacketText(rawArg) {
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
   const eff = effective(config, prefs, chatId);
 
-  switch (cmd.name) {
+  // Deep links (`t.me/<bot>?start=<payload>`) arrive as `/start <payload>`.
+  const route = resolveCommandName(cmd);
+  switch (route) {
     case 'start':
     case 'help':
       await api.sendMessage(chatId, helpText(config, eff));

@@ -45,6 +45,20 @@ export function toTelegramCommands() {
   return BOT_COMMANDS.map(({ command, description }) => ({ command, description }));
 }
 
+/**
+ * Deep-link routing: `t.me/<bot>?start=<payload>` arrives as `/start <payload>`.
+ * A `bugs` payload routes to the board handler so one tap from another chat
+ * lands on the button. Pure (tested in tests/bot-host.test.ts); add new
+ * payloads here, not as `case` branches in bot-host.mjs.
+ */
+export function resolveCommandName(cmd) {
+  if (String(cmd?.name || '').toLowerCase() === 'start'
+    && String(cmd?.args || '').trim().toLowerCase() === 'bugs') {
+    return 'bugs';
+  }
+  return cmd?.name;
+}
+
 /** Validate against Telegram Bot API limits; throws on violation. */
 export function assertValidCommands(commands = BOT_COMMANDS) {
   const seen = new Set();
