@@ -237,12 +237,17 @@ export function BugBoard({
               <button
                 type="button"
                 disabled={loading || busy}
-                onClick={load}
+                onClick={() => load()}
                 className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 transition-colors cursor-pointer"
                 title="Refresh bug queue"
               >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
+              {lastUpdated && (
+                <span className="text-[10px] font-mono text-white/50 whitespace-nowrap" title="Last refreshed">
+                  {lastUpdated} · {bugTags.length}
+                </span>
+              )}
 
               {/* Flag issue button (Icon-only) */}
               <button
