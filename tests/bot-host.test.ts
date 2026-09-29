@@ -67,6 +67,7 @@ import {
 } from '../scripts/lib/agent-cline.mjs';
 import {
   parseCommand,
+  resolveCommandName,
   BOT_COMMANDS,
   COMMAND_NAMES,
   toTelegramCommands,
@@ -686,6 +687,14 @@ describe('commands', () => {
     expect(parseCommand('/foobar').name).toBe('foobar');
     expect(parseCommand('hello')).toBeNull();
     expect(parseCommand('')).toBeNull();
+  });
+
+  it('routes deep links (/start bugs) to the board handler', () => {
+    expect(resolveCommandName(parseCommand('/start bugs'))).toBe('bugs');
+    expect(resolveCommandName(parseCommand('/start BUGS'))).toBe('bugs');
+    expect(resolveCommandName(parseCommand('/start'))).toBe('start');
+    expect(resolveCommandName(parseCommand('/start foo'))).toBe('start');
+    expect(resolveCommandName(parseCommand('/bugs'))).toBe('bugs');
   });
 
   it('lists the real command surface in help', () => {
