@@ -181,3 +181,23 @@ jobs:
       # server on a loopback port in a throwaway cache — no phone, no tunnel.
       - name: Screenshot bridge gate (scripts/mobile/test-pull-shot.sh)
         run: bash scripts/mobile/test-pull-shot.sh
+
+      # /tui was the one surface whose sensors ran nowhere: 60+ cases lived on
+      # a laptop while main served a broken page, twice (2026-09-28, 2026-09-29).
+      # These are the cases that must stay green or the phone finds out first.
+      - name: TUI gateway gate (assert-tui-gateway)
+        run: node scripts/assert-tui-gateway.test.mjs
+
+      - name: TUI chat-select gate (assert-tui-chat-select)
+        run: bash scripts/assert-tui-chat-select.test.sh
+
+      # The ratchet for the class, not the symptom: a TUI fix that is committed
+      # but never merged. Both halves of that gate are proven in its own sensor
+      # against throwaway repos — a gate never seen red is a gate nobody trusts.
+      - name: TUI fixes-landed ratchet (unlanded branch is a regression)
+        run: |
+          node scripts/assert-tui-fixes-landed.test.mjs
+          # The base is the branch under test, not a name this file hardcodes:
+          # a PR's own head must not be judged against itself.
+          node scripts/assert-tui-fixes-landed.mjs \
+            --base="origin/${{ github.event.repository.default_branch }}"
