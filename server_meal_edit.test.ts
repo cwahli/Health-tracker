@@ -3902,4 +3902,173 @@ describe('G10 golden — photo edit clarifies ONE dish, adds photo, scales only 
     // The initial create result (turn 1) is not lost to the edit.
     expect(md).toContain('Nutrient-Dense Whole Foods Selection');
   });
+
+  it('contract: replace_component scales baseNutrients100g and calories accurately when portion changes (e.g. 6 milk pods)', async () => {
+    const milkItem = {
+      name: 'Lakeland Dairies Semi-Skimmed Milk',
+      canonicalDbName: 'Lakeland Dairies Semi-Skimmed Milk',
+      originalName: 'Lakeland Dairies Semi-Skimmed Milk',
+      weightGrams: 10,
+      estimatedWeightGrams: 10,
+      nutrientBasisWeight: 10,
+      packGrams: 10,
+      pieceCount: 1,
+      count: 1,
+      lockedNutrientKeys: ['calories', 'protein', 'totalFat', 'saturatedFat', 'carbohydrates', 'sodium'],
+      nutrients: {
+        calories: 5,
+        protein: 0.4,
+        totalFat: 0.2,
+        saturatedFat: 0.1,
+        carbohydrates: 0.5,
+        sodium: 4,
+        unsaturatedFat: 0.1,
+        salt: 0.01,
+      },
+      baseNutrients100g: {
+        calories: 50,
+        protein: 3.6,
+        totalFat: 1.8,
+        saturatedFat: 1.1,
+        carbohydrates: 4.8,
+        sodium: 44,
+      },
+      components: [
+        {
+          name: 'Lakeland Dairies Semi-Skimmed Milk',
+          foodName: 'Lakeland Dairies Semi-Skimmed Milk',
+          weightGrams: 10,
+          estimatedWeightGrams: 10,
+          nutrientBasisWeight: 10,
+          packGrams: 10,
+          pieceCount: 1,
+          count: 1,
+          nutrients: {
+            calories: 5,
+            protein: 0.4,
+            totalFat: 0.2,
+            saturatedFat: 0.1,
+            carbohydrates: 0.5,
+            sodium: 4,
+            unsaturatedFat: 0.1,
+            salt: 0.01,
+          },
+          baseNutrients100g: {
+            calories: 50,
+            protein: 3.6,
+            totalFat: 1.8,
+            saturatedFat: 1.1,
+            carbohydrates: 4.8,
+            sodium: 44,
+          },
+        },
+      ],
+      componentsDetailList: [
+        {
+          name: 'Lakeland Dairies Semi-Skimmed Milk',
+          foodName: 'Lakeland Dairies Semi-Skimmed Milk',
+          weightGrams: 10,
+          estimatedWeightGrams: 10,
+          nutrientBasisWeight: 10,
+          packGrams: 10,
+          pieceCount: 1,
+          count: 1,
+          nutrients: {
+            calories: 5,
+            protein: 0.4,
+            totalFat: 0.2,
+            saturatedFat: 0.1,
+            carbohydrates: 0.5,
+            sodium: 4,
+            unsaturatedFat: 0.1,
+            salt: 0.01,
+          },
+          baseNutrients100g: {
+            calories: 50,
+            protein: 3.6,
+            totalFat: 1.8,
+            saturatedFat: 1.1,
+            carbohydrates: 4.8,
+            sodium: 44,
+          },
+        },
+      ],
+      compositeSiblings: [
+        {
+          name: 'Lakeland Dairies Semi-Skimmed Milk',
+          foodName: 'Lakeland Dairies Semi-Skimmed Milk',
+          weightGrams: 10,
+          estimatedWeightGrams: 10,
+          nutrientBasisWeight: 10,
+          packGrams: 10,
+          pieceCount: 1,
+          count: 1,
+          nutrients: {
+            calories: 5,
+            protein: 0.4,
+            totalFat: 0.2,
+            saturatedFat: 0.1,
+            carbohydrates: 0.5,
+            sodium: 4,
+            unsaturatedFat: 0.1,
+            salt: 0.01,
+          },
+          baseNutrients100g: {
+            calories: 50,
+            protein: 3.6,
+            totalFat: 1.8,
+            saturatedFat: 1.1,
+            carbohydrates: 4.8,
+            sodium: 44,
+          },
+        },
+      ],
+      hasComponents: true,
+    };
+
+    const result = await applyMealEdits({
+      items: [milkItem],
+      commands: [
+        {
+          action: 'replace_component',
+          itemName: 'Lakeland Dairies Semi-Skimmed Milk',
+          componentName: 'Lakeland Dairies Semi-Skimmed Milk',
+          newItemName: 'Lakeland Dairies Semi-Skimmed Milk',
+          newWeightGrams: 60,
+          estimate: {
+            protein: 3,
+            saturatedFat: 1,
+            carbohydrates: 2.9,
+            sodium: 25,
+            // calories and totalFat omitted to simulate partial scout estimate
+          },
+        },
+      ],
+      userMessage: 'I had 6 of these',
+    });
+
+    const item = result.items[0];
+    expect(item.weightGrams).toBe(60);
+    expect(item.estimatedWeightGrams).toBe(60);
+    expect(item.nutrientBasisWeight).toBe(60);
+    expect(item.pieceCount).toBe(6);
+    expect(item.nutrients.calories).toBe(30);
+    expect(item.nutrients.totalFat).toBe(1.1);
+    expect(item.nutrients.saturatedFat).toBe(0.7);
+    expect(item.nutrients.protein).toBe(2.2);
+    expect(item.nutrients.carbohydrates).toBe(2.9);
+    expect(item.nutrients.sodium).toBe(26.4);
+    expect(item.nutrients.totalFat).toBeGreaterThanOrEqual(item.nutrients.saturatedFat);
+
+    // Component parity
+    const comp = item.components[0];
+    expect(comp.weightGrams).toBe(60);
+    expect(comp.nutrientBasisWeight).toBe(60);
+    expect(comp.nutrients.calories).toBe(30);
+    expect(comp.pieceCount).toBe(6);
+
+    // Composite siblings parity
+    expect(item.compositeSiblings[0].weightGrams).toBe(60);
+    expect(item.compositeSiblings[0].nutrients.calories).toBe(30);
+  });
 });

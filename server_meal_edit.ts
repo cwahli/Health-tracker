@@ -145,20 +145,38 @@ export function applyModifierToItemName(orig: string, modifier: string): string 
 }
 
 export function scaleItemNutrients(item: any, ratio: number, newWeight?: number): any {
+  if (!item || typeof item !== 'object') return item;
   const next = { ...item };
   const oldW = Number(item.weightGrams) || 0;
   const w = newWeight != null ? newWeight : Math.round(oldW * ratio);
   next.weightGrams = w;
+  next.estimatedWeightGrams = w;
+  next.nutrientBasisWeight = w;
   const base = { ...(item.nutrients || {}) };
-  for (const k of NUTRIENT_KEYS) {
-    const v = base[k] ?? item[k];
-    if (typeof v === 'number' && Number.isFinite(v)) {
-      base[k] = Math.round(v * ratio * 10) / 10;
+  if (item.baseNutrients100g && typeof item.baseNutrients100g === 'object' && w > 0) {
+    const scale = w / 100;
+    for (const k of NUTRIENT_KEYS) {
+      const bv = item.baseNutrients100g[k];
+      if (typeof bv === 'number' && Number.isFinite(bv)) {
+        base[k] = Math.round(bv * scale * 10) / 10;
+      }
+    }
+  } else {
+    for (const k of NUTRIENT_KEYS) {
+      const v = base[k] ?? item[k];
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        base[k] = Math.round(v * ratio * 10) / 10;
+      }
     }
   }
   const locked = Array.isArray(item.lockedNutrientKeys) ? item.lockedNutrientKeys : [];
-  if (!locked.includes('calories')) {
+  if (!locked.includes('calories') || base.calories == null || base.calories === 0) {
     base.calories = computeCaloriesFromMacros(base.protein, base.carbohydrates, base.totalFat);
+  }
+  if (typeof base.saturatedFat === 'number' && base.saturatedFat > 0) {
+    if (base.totalFat == null || base.totalFat < base.saturatedFat) {
+      base.totalFat = base.saturatedFat;
+    }
   }
   // Same class as the finalize child-sum: a linear scale preserves
   // unsat = total-sat-trans only when the source row was consistent, so one
@@ -175,11 +193,27 @@ export function scaleItemNutrients(item: any, ratio: number, newWeight?: number)
   next.saturatedFat = base.saturatedFat ?? 0;
   next.carbohydrates = base.carbohydrates ?? 0;
   next.sodium = base.sodium ?? 0;
+  // Keep pack/piece counts proportional if present
+  if (typeof next.packGrams === 'number' && next.packGrams > 0 && w >= next.packGrams) {
+    next.pieceCount = Math.round(w / next.packGrams);
+    next.count = next.pieceCount;
+  } else {
+    if (typeof next.pieceCount === 'number' && next.pieceCount > 0) {
+      next.pieceCount = Math.round(next.pieceCount * ratio * 10) / 10;
+    }
+    if (typeof next.count === 'number' && next.count > 0) {
+      next.count = Math.round(next.count * ratio * 10) / 10;
+    }
+  }
+  // Recursively scale nested components or sub-items if present
   if (Array.isArray(next.componentsDetailList)) {
     next.componentsDetailList = next.componentsDetailList.map((c: any) => scaleItemNutrients(c, ratio));
   }
   if (Array.isArray(next.components) && next.components[0] && typeof next.components[0] === 'object') {
     next.components = next.components.map((c: any) => (typeof c === 'object' ? scaleItemNutrients(c, ratio) : c));
+  }
+  if (Array.isArray(next.compositeSiblings) && next.compositeSiblings[0] && typeof next.compositeSiblings[0] === 'object') {
+    next.compositeSiblings = next.compositeSiblings.map((c: any) => (typeof c === 'object' ? scaleItemNutrients(c, ratio) : c));
   }
   if (Array.isArray(next.foods) && next.foods[0] && typeof next.foods[0] === 'object') {
     next.foods = next.foods.map((c: any) => (typeof c === 'object' ? scaleItemNutrients(c, ratio) : c));
@@ -1132,6 +1166,22 @@ export async function applyMealEdits(opts: {
       comps[cIdx] = scaleItemNutrients(comp, newW / oldW, newW);
       item.components = comps;
       item.componentsDetailList = comps;
+      if (Array.isArray(item.compositeSiblings)) {
+        item.compositeSiblings = item.compositeSiblings.map((s: any) => {
+          const sn = String(s.name || s.searchQuery || s.keyword || s.foodName || '').toLowerCase();
+          if (sn && (sn.includes(String(raw.componentName || '').toLowerCase()) || String(raw.componentName || '').toLowerCase().includes(sn))) {
+            return { ...s, ...comps[cIdx] };
+          }
+          return s;
+        });
+      }
+      if (comps.length === 1) {
+        item.nutrientBasisWeight = newW;
+        if (typeof item.packGrams === 'number' && item.packGrams > 0 && newW >= item.packGrams) {
+          item.pieceCount = Math.round(newW / item.packGrams);
+          item.count = item.pieceCount;
+        }
+      }
       items[idx] = reaggregateDishWeightFromComponents({ ...item, components: comps, componentsDetailList: comps, hasComponents: true });
       notes.push(`update_component_weight "${raw.componentName}" ${oldW}g → ${newW}g`);
     } else if (action === 'remove_component') {
@@ -1239,51 +1289,204 @@ export async function applyMealEdits(opts: {
       const oldComp = comps[cIdx];
       const oldW = Number(oldComp.weightGrams ?? oldComp.estimatedWeightGrams) || 0;
       const newW = Number(raw.newWeightGrams) > 0 ? Number(raw.newWeightGrams) : oldW;
-      const compNutrients = raw.estimate?.nutrients || raw.estimate || oldComp.nutrients || {};
-      const replacedComp = {
-        ...oldComp,
-        name: newCompName,
-        foodName: newCompName,
-        canonicalDbName: newCompName,
-        originalName: newCompName,
-        keyword: newCompName.toLowerCase(),
-        weightGrams: newW,
-        estimatedWeightGrams: newW,
-        nutrients: compNutrients,
-        sourceImageIndex: typeof raw.sourceImageIndex === 'number' ? raw.sourceImageIndex : (oldComp.sourceImageIndex ?? item.sourceImageIndex ?? null),
-      };
-      comps[cIdx] = replacedComp;
-      const oldN = oldComp.nutrients || {};
-      const base = { ...(item.nutrients || {}) };
-      for (const k of NUTRIENT_KEYS) {
-        const iv = base[k] ?? (item as any)[k];
-        const ov = oldN[k] ?? (oldComp as any)[k];
-        const nv = compNutrients[k] ?? (replacedComp as any)[k];
-        if (typeof iv === 'number' && Number.isFinite(iv)) {
-          let updatedVal = iv;
-          if (typeof ov === 'number' && Number.isFinite(ov)) updatedVal -= ov;
-          if (typeof nv === 'number' && Number.isFinite(nv)) updatedVal += nv;
-          base[k] = Math.max(0, Math.round(updatedVal * 10) / 10);
-        } else if (typeof nv === 'number' && Number.isFinite(nv)) {
-          base[k] = nv;
+
+      const norm = (s: any) => String(s || '').trim().toLowerCase();
+      const isSameFood = !raw.newItemName ||
+        norm(raw.newItemName) === norm(raw.componentName) ||
+        norm(oldComp.name) === norm(newCompName) ||
+        norm(oldComp.canonicalDbName) === norm(newCompName) ||
+        norm(oldComp.foodName) === norm(newCompName) ||
+        norm(oldComp.originalName) === norm(newCompName) ||
+        norm(oldComp.name).includes(norm(newCompName)) ||
+        norm(newCompName).includes(norm(oldComp.name));
+
+      let replacedComp: any;
+      if (isSameFood && oldW > 0 && newW > 0 && Math.abs(newW - oldW) >= 0.5) {
+        const ratio = newW / oldW;
+        if (oldComp.baseNutrients100g && typeof oldComp.baseNutrients100g === 'object') {
+          const scaledNutrients: Record<string, any> = {};
+          const scale = newW / 100;
+          for (const k of NUTRIENT_KEYS) {
+            const bv = oldComp.baseNutrients100g[k];
+            if (typeof bv === 'number' && Number.isFinite(bv)) {
+              scaledNutrients[k] = Math.round(bv * scale * 10) / 10;
+            }
+          }
+          if (scaledNutrients.calories == null) {
+            scaledNutrients.calories = computeCaloriesFromMacros(scaledNutrients.protein, scaledNutrients.carbohydrates, scaledNutrients.totalFat);
+          }
+          if (typeof scaledNutrients.saturatedFat === 'number' && scaledNutrients.saturatedFat > 0) {
+            if (scaledNutrients.totalFat == null || scaledNutrients.totalFat < scaledNutrients.saturatedFat) {
+              scaledNutrients.totalFat = scaledNutrients.saturatedFat;
+            }
+          }
+          reapplyDerivedNutrients(scaledNutrients);
+          replacedComp = {
+            ...oldComp,
+            name: newCompName,
+            foodName: newCompName,
+            canonicalDbName: newCompName,
+            originalName: newCompName,
+            keyword: newCompName.toLowerCase(),
+            weightGrams: newW,
+            estimatedWeightGrams: newW,
+            nutrientBasisWeight: newW,
+            nutrients: scaledNutrients,
+            calories: scaledNutrients.calories ?? 0,
+            protein: scaledNutrients.protein ?? 0,
+            totalFat: scaledNutrients.totalFat ?? 0,
+            saturatedFat: scaledNutrients.saturatedFat ?? 0,
+            carbohydrates: scaledNutrients.carbohydrates ?? 0,
+            sodium: scaledNutrients.sodium ?? 0,
+            sourceImageIndex: typeof raw.sourceImageIndex === 'number' ? raw.sourceImageIndex : (oldComp.sourceImageIndex ?? item.sourceImageIndex ?? null),
+          };
+        } else {
+          replacedComp = scaleItemNutrients(oldComp, ratio, newW);
+          replacedComp.name = newCompName;
+          replacedComp.canonicalDbName = newCompName;
+          replacedComp.originalName = newCompName;
+          replacedComp.keyword = newCompName.toLowerCase();
+          replacedComp.nutrientBasisWeight = newW;
+        }
+      } else {
+        const rawN = raw.estimate?.nutrients || raw.estimate || oldComp.nutrients || {};
+        const compNutrients = { ...rawN };
+        const estWeight = Number(raw.estimate?.weightGrams || raw.estimate?.estimatedWeightGrams);
+        if (estWeight > 0 && newW > 0 && Math.abs(estWeight - newW) > 1) {
+          const estRatio = newW / estWeight;
+          for (const k of NUTRIENT_KEYS) {
+            if (typeof compNutrients[k] === 'number') {
+              compNutrients[k] = Math.round(compNutrients[k] * estRatio * 10) / 10;
+            }
+          }
+        }
+        if (compNutrients.calories == null || compNutrients.calories === 0) {
+          const p = Number(compNutrients.protein) || 0;
+          const c = Number(compNutrients.carbohydrates ?? compNutrients.carbs) || 0;
+          const tf = Number(compNutrients.totalFat ?? compNutrients.fat) || 0;
+          if (p > 0 || c > 0 || tf > 0) {
+            compNutrients.calories = computeCaloriesFromMacros(p, c, tf);
+          } else if (oldComp.baseNutrients100g?.calories) {
+            compNutrients.calories = Math.round(oldComp.baseNutrients100g.calories * (newW / 100));
+          } else if (oldComp.calories && oldW > 0) {
+            compNutrients.calories = Math.round(oldComp.calories * (newW / oldW));
+          }
+        }
+        if (typeof compNutrients.saturatedFat === 'number' && compNutrients.saturatedFat > 0) {
+          if (compNutrients.totalFat == null || compNutrients.totalFat < compNutrients.saturatedFat) {
+            compNutrients.totalFat = compNutrients.saturatedFat;
+          }
+        }
+        reapplyDerivedNutrients(compNutrients);
+        replacedComp = {
+          ...oldComp,
+          name: newCompName,
+          foodName: newCompName,
+          canonicalDbName: newCompName,
+          originalName: newCompName,
+          keyword: newCompName.toLowerCase(),
+          weightGrams: newW,
+          estimatedWeightGrams: newW,
+          nutrientBasisWeight: newW,
+          nutrients: compNutrients,
+          calories: compNutrients.calories ?? 0,
+          protein: compNutrients.protein ?? 0,
+          totalFat: compNutrients.totalFat ?? 0,
+          saturatedFat: compNutrients.saturatedFat ?? 0,
+          carbohydrates: compNutrients.carbohydrates ?? 0,
+          sodium: compNutrients.sodium ?? 0,
+          sourceImageIndex: typeof raw.sourceImageIndex === 'number' ? raw.sourceImageIndex : (oldComp.sourceImageIndex ?? item.sourceImageIndex ?? null),
+        };
+        if (!isSameFood) {
+          delete (replacedComp as any).baseNutrients100g;
+          if (newW > 0) {
+            const b100: Record<string, any> = {};
+            const factor = 100 / newW;
+            for (const k of NUTRIENT_KEYS) {
+              if (typeof compNutrients[k] === 'number') {
+                b100[k] = Math.round(compNutrients[k] * factor * 10) / 10;
+              }
+            }
+            replacedComp.baseNutrients100g = b100;
+          }
         }
       }
-      const locked = Array.isArray(item.lockedNutrientKeys) ? item.lockedNutrientKeys : [];
-      if (!locked.includes('calories')) {
-        base.calories = computeCaloriesFromMacros(base.protein, base.carbohydrates, base.totalFat);
+
+      const packG = oldComp.packGrams || item.packGrams;
+      if (packG && newW >= packG) {
+        replacedComp.packGrams = packG;
+        replacedComp.pieceCount = Math.round(newW / packG);
+        replacedComp.count = replacedComp.pieceCount;
       }
+
+      comps[cIdx] = replacedComp;
+      let base: Record<string, any>;
+      if (comps.length === 1) {
+        base = { ...(replacedComp.nutrients || {}) };
+      } else {
+        const oldN = oldComp.nutrients || {};
+        base = { ...(item.nutrients || {}) };
+        for (const k of NUTRIENT_KEYS) {
+          const iv = base[k] ?? (item as any)[k];
+          const ov = oldN[k] ?? (oldComp as any)[k];
+          const nv = replacedComp.nutrients?.[k] ?? (replacedComp as any)[k];
+          if (typeof iv === 'number' && Number.isFinite(iv)) {
+            let updatedVal = iv;
+            if (typeof ov === 'number' && Number.isFinite(ov)) updatedVal -= ov;
+            if (typeof nv === 'number' && Number.isFinite(nv)) updatedVal += nv;
+            base[k] = Math.max(0, Math.round(updatedVal * 10) / 10);
+          } else if (typeof nv === 'number' && Number.isFinite(nv)) {
+            base[k] = nv;
+          }
+        }
+        const locked = Array.isArray(item.lockedNutrientKeys) ? item.lockedNutrientKeys : [];
+        if (!locked.includes('calories') || base.calories == null || base.calories === 0) {
+          base.calories = computeCaloriesFromMacros(base.protein, base.carbohydrates, base.totalFat);
+        }
+        if (typeof base.saturatedFat === 'number' && base.saturatedFat > 0) {
+          if (base.totalFat == null || base.totalFat < base.saturatedFat) {
+            base.totalFat = base.saturatedFat;
+          }
+        }
+      }
+      reapplyDerivedNutrients(base);
+
       const compWTotal = comps.reduce((a: number, c: any) => a + (Number(c.weightGrams ?? c.estimatedWeightGrams) || 0), 0);
       const next = {
         ...item,
         nutrients: base,
         weightGrams: Math.round(compWTotal),
         estimatedWeightGrams: Math.round(compWTotal),
+        nutrientBasisWeight: Math.round(compWTotal),
         components: comps,
         componentsDetailList: comps,
         hasComponents: true,
       };
+      if (comps.length === 1) {
+        next.name = newCompName;
+        next.canonicalDbName = newCompName;
+        next.originalName = newCompName;
+        next.keyword = newCompName.toLowerCase();
+        if (packG && newW >= packG) {
+          next.packGrams = packG;
+          next.pieceCount = Math.round(newW / packG);
+          next.count = next.pieceCount;
+        }
+      }
       for (const k of ['calories', 'protein', 'totalFat', 'saturatedFat', 'carbohydrates', 'sodium'] as const) {
         if (typeof (base as any)[k] === 'number') (next as any)[k] = (base as any)[k];
+      }
+      if (Array.isArray(item.compositeSiblings)) {
+        next.compositeSiblings = item.compositeSiblings.map((s: any) => {
+          const sn = String(s.name || s.searchQuery || s.keyword || s.foodName || '').toLowerCase();
+          if (sn && (sn.includes(String(raw.componentName || '').toLowerCase()) || String(raw.componentName || '').toLowerCase().includes(sn))) {
+            return {
+              ...s,
+              ...replacedComp,
+            };
+          }
+          return s;
+        });
       }
       items[idx] = reaggregateDishWeightFromComponents({ ...next, hasComponents: true });
       notes.push(`replace_component "${raw.componentName}" → "${newCompName}" (${newW}g) in "${itemName}"`);
