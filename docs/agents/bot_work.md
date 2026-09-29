@@ -36,6 +36,7 @@ Reference transcript: stuck meal-analysis card (`STALE_TURN`, `jobPreview.ts` tu
 - BOT-1 through BOT-23 are history. V-30.1 through V-30.5 are history. CB-6 as written (push to `origin/main`) is superseded. Do not resume CB-7 or CB-8.
 - Bot commands ship everywhere or not at all: every `/command` needs a handler, a `/` autocomplete entry, a `/help` line, and a `ui-commands` verdict in `bots/capabilities.json`. Bot-host serves via `scripts/lib/commands.mjs`; Hermes serves via `scripts/skills/common/<name>/SKILL.md` (auto-synced to every profile, autocomplete via the skill menu). A runtime that cannot serve answers with the pointer, never `Unknown command`.
 - A bot that opens a Mini App board needs its token at the door: every bot id in `?bot=<id>` must have `TUI_BOT_TOKEN_<ID>` in `/home/ubuntu/.config/bot-host/tui-gateway.env`, or the door 401s its users' initData (the `/bugs/` log names the configured set on every refusal — read it before touching code).
+- TG bot work is not complete until proven live end to end: drive the real chain with live data (menu/button render, door exchange, board page, live cards, attack cases), read the delivered bytes from the gateway log or delivery ledger when a tap misbehaves, and capture the loaded screen to confirm data on glass — "it loads" is not done, "loaded with live data, seen" is done. Never ask for blind re-taps. Phone-side rendering (popups, taps) can only be witnessed on-device: confirm it from the user's own screenshot, not from server logs.
 
 ## Do not
 
