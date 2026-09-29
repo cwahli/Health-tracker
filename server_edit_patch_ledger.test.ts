@@ -6,6 +6,8 @@ import {
   invalidateStaleIdentityMetadata,
   buildEditExpertDispatch,
   reaggregateDishWeightFromComponents,
+  collapsePackagePreparedScoutItems,
+  findPackagePreparedPair,
 } from './server_edit_patch_ledger.js';
 
 describe('edit patch ledger', () => {
@@ -685,4 +687,42 @@ describe('F-13.1 live T2 (foods[]-only add/delete, no dish action)', () => {
     expect(removes.some((c) => /Big Mac/i.test(String(c.itemName)))).toBe(false);
     expect(cmds.some((c) => c.action === 'remove_component')).toBe(false);
   });
+
+  describe('collapsePackagePreparedScoutItems anti-double-counting', () => {
+    it('collapses 1kg grocery oats package into prepared oatmeal, preserving prepared portion and label truth', () => {
+      const items = [
+        {
+          dishName: 'Scottish Whole Rolled Jumbo Oats Pack',
+          originalName: 'Scottish Whole Rolled Jumbo Oats Pack',
+          estimatedWeightGrams: 1000,
+          packGrams: 1000,
+          cookingMethod: 'raw',
+          sourceImageIndex: 0,
+          rawNutritionLabel: { servingSize: '40g', calories: '362' },
+          foods: [{ foodName: 'Scottish Whole Rolled Jumbo Oats', weightGrams: 1000 }],
+        },
+        {
+          dishName: 'Prepared Oatmeal',
+          originalName: 'Prepared Oatmeal',
+          estimatedWeightGrams: 80,
+          cookingMethod: 'boiled',
+          sourceImageIndex: 2,
+          rawNutritionLabel: { servingSize: '40g', calories: '145' },
+          foods: [{ foodName: 'Scottish Whole Rolled Jumbo Oats', weightGrams: 80 }],
+        },
+      ];
+
+      const pair = findPackagePreparedPair(items);
+      expect(pair).not.toBeNull();
+      expect(pair?.pkgIdx).toBe(0);
+      expect(pair?.preparedIdx).toBe(1);
+
+      const collapsed = collapsePackagePreparedScoutItems(items);
+      expect(collapsed).toHaveLength(1);
+      expect(collapsed[0].estimatedWeightGrams).toBe(80);
+      expect(collapsed[0].cookingMethod).toBe('boiled');
+      expect(collapsed[0].rawNutritionLabel).toBeDefined();
+    });
+  });
 });
+

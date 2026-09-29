@@ -73,6 +73,9 @@ describe('F-8.10 shard 15 — scout verdict and advice ladders', () => {
     expect(t({ totalSugar: 0, totalSatFat: 0, totalP: 25 })).toContain('25');
     expect(t({ totalSugar: 40, totalSatFat: 0, totalP: 0 })).toContain('40');
     expect(t({ totalSugar: 0, totalSatFat: 0, totalP: 0 }, 'Rice')).toContain('Rice');
+    const undefAdvice = decideScoutAdvice({ rawAdvice: '', totals: { totalSugar: 0, totalSatFat: 0, totalP: 0 } as any, mealName: undefined, language: 'en' });
+    expect(undefAdvice).not.toContain('undefined');
+    expect(undefAdvice).toContain('Balanced Meal');
     expect(t({ totalSugar: 0, totalSatFat: 0, totalP: 0 }, 'Rice', 'Custom note')).toBe('Custom note');
 
     // Narrative macro synchronization with authoritative ledger totals

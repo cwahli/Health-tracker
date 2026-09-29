@@ -620,6 +620,16 @@ describe('Agent-output verification rows (15-19)', () => {
       dispatches: [{ id: 't1/scout', output: stdEmission() }],
     });
     expect(law(full, 'Dishes: fields populated')?.result).toBe('PASS');
+
+    const withBreakdown = buildCanonicalRunTree({
+      pack: 'food', jobId: 'j_dish_breakdown', status: 'succeeded',
+      pendingFoodLog: {
+        nutrients: fullNuts({ calories: 420 }),
+        itemsBreakdown: [{ canonicalDbName: 'Oats', weightGrams: 80 }],
+      },
+      dispatches: [{ id: 't1/scout', output: stdEmission() }],
+    });
+    expect(law(withBreakdown, 'Dishes: fields populated')?.result).toBe('PASS');
   });
 
   it('fails awaiting_user with no question payload, passes shown splits', () => {

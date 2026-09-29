@@ -119,6 +119,41 @@ describe('F-8.10 shard 10 — scout-prep seams', () => {
     expect(items[0].chainName).toBe('Acme Citrus');
   });
 
+  it('binds catalog tags to fuzzy matching visual items, preserving boundingBox and coordinates', () => {
+    const logs: string[] = [];
+    const vision: any[] = [
+      {
+        scoutIndex: 0,
+        keyword: 'sainsbury oatmeal',
+        originalName: 'Sainsbury Oatmeal',
+        estimatedWeightGrams: 150,
+        boundingBox2D: [250, 0, 811, 378],
+        sourceImageIndex: 0,
+      },
+    ];
+    injectExplicitFoodTags({
+      visionScoutItems: vision,
+      explicitFoodTags: [
+        {
+          name: "Sainsbury's Porridge Oats",
+          weightGrams: 70,
+          dbId: 'brand_menu_local_sainsbury_sainsbury_porridge_oats',
+          nutrients: { calories: 254, protein: 7.7 },
+        },
+      ],
+      onLog: (m) => logs.push(m),
+    });
+    expect(vision).toHaveLength(1);
+    expect(vision[0].scoutIndex).toBe(0);
+    expect(vision[0].boundingBox2D).toEqual([250, 0, 811, 378]);
+    expect(vision[0].sourceImageIndex).toBe(0);
+    expect(vision[0].originalName).toBe("Sainsbury's Porridge Oats");
+    expect(vision[0].estimatedWeightGrams).toBe(70);
+    expect(vision[0].dbSource).toBe('brand_official');
+    expect(vision[0].nutrients.calories).toBe(254);
+    expect(logs.some((m) => m.includes('Bound tag "Sainsbury\'s Porridge Oats"'))).toBe(true);
+  });
+
   it('maps text queries with cooking-method sniffing', () => {
     expect(mapTextQueriesToScoutItems(['grilled salmon', 'rice'])).toEqual([
       { scoutIndex: 0, keyword: 'grilled salmon', originalName: 'grilled salmon', estimatedWeightGrams: 100, source: 'text_query', cookingMethod: 'grilled', visualIngredients: [] },

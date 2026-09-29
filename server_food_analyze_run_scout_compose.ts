@@ -128,16 +128,17 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
         portionChoices: (ctx.req.body as any)?.portionChoices,
       });
       const totals = sumPrecalcTotals(priorItems);
+      const effectiveMealName = ctx.activeMeal?.name || resolveCreateMealTitle(ctx.rawScoutData, scoutDishes, ctx.userProfile?.language);
       const scoutVerdict = decideScoutVerdict({
         scoutVerdict: ctx.rawScoutData?.verdict || null,
         totals,
-        mealName: ctx.activeMeal?.name,
+        mealName: effectiveMealName,
         language: ctx.userProfile?.language,
       });
       const rawAdvice = decideScoutAdvice({
         rawAdvice: ctx.rawScoutData?.clinicalAdvice || ctx.rawScoutData?.message || '',
         totals,
-        mealName: ctx.activeMeal?.name,
+        mealName: effectiveMealName,
         language: ctx.userProfile?.language,
       });
       const systemCurrentDate = new Date().toISOString().split('T')[0];
@@ -151,7 +152,7 @@ export async function executeScoutComposePhase(ctx: AnalyzeRunContext): Promise<
         verdict: scoutVerdict,
         modificationCommand: editCommands,
         foodData: {
-          name: ctx.activeMeal?.name,
+          name: effectiveMealName,
           date: mealDate,
         },
       };

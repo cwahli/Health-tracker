@@ -247,6 +247,14 @@ export function clusterSpatialCompositeDishes(
         continue;
       }
 
+      // Never cluster distinct whole fresh fruits / produce into a single composite dish
+      const isProduceOrFreshFruit = (n: string): boolean => {
+        return /\b(grape|grapes|plum|plums|apple|apples|orange|oranges|mandarin|mandarins|clementine|clementines|tangerine|tangerines|banana|bananas|peach|peaches|pear|pears|strawberry|strawberries|blueberry|blueberries|raspberry|raspberries|blackberry|blackberries|cherry|cherries|kiwi|kiwis|mango|mangoes|lemon|lemons|lime|limes|avocado|avocados)\b/i.test(n);
+      };
+      if (isProduceOrFreshFruit(nameA) && isProduceOrFreshFruit(nameB)) {
+        continue;
+      }
+
       if (isDefaultBox(boxA)) {
         continue;
       }
@@ -260,7 +268,20 @@ export function clusterSpatialCompositeDishes(
       const { overlap, iou } = getOverlapRatio(boxA, boxB);
       // High spatial co-location inside the exact same container / bowl / plate
       const hasSeparateComponents = (primary.components?.length > 1 && other.components?.length > 1);
-      if (!hasSeparateComponents && (overlap >= 0.70 || iou >= 0.55)) {
+      if (hasSeparateComponents) continue;
+
+      const areaA = getArea(boxA);
+      const areaB = getArea(boxB);
+      const areaRatio = Math.max(areaA, areaB) / Math.max(1, Math.min(areaA, areaB));
+
+      // Asymmetric box guard: if one box is > 2.5x larger than the other,
+      // require higher IoU (>= 0.40) so a large or dispersed box spanning across
+      // multiple dishes/containers does not swallow smaller distinct items.
+      if (areaRatio > 2.5 && iou < 0.40) {
+        continue;
+      }
+
+      if (iou >= 0.55 || (overlap >= 0.70 && iou >= 0.30)) {
         coLocatedIndices.push(j);
       }
     }

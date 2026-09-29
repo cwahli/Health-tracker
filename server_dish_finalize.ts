@@ -137,6 +137,20 @@ export function parseOcrLabel(rawLabel: any, targetWeight: number, defaultR: num
     }
   }
 
+  // European/UK label column mismatch guard:
+  // Nutrition tables list per 100g first, then per serving (e.g. 362 kcal / 100g vs 145 kcal / 40g).
+  // If the extracted ocrCal paired with ocrServingGrams exceeds the physical maximum density of pure fat (> 8.8 kcal/g),
+  // but ocrCal / 100 is plausible (1.0 - 5.5 kcal/g), then ocrCal is from the per-100g column.
+  if (ocrServingGrams && ocrServingGrams > 0 && ocrServingGrams <= 50 && Number.isFinite(ocrCal) && ocrCal > 200) {
+    const rawDensity = ocrCal / ocrServingGrams;
+    if (rawDensity > 8.8) {
+      const per100Density = ocrCal / 100;
+      if (per100Density >= 1.0 && per100Density <= 5.5) {
+        ocrServingGrams = 100;
+      }
+    }
+  }
+
   const isPer100g = !!(isPer100gFlag || ocrServingGrams === 100);
   // Serving text without parseable grams: never apply an R>9 leftover from a 1g basis.
   const fallbackScale = (hadServingText && defaultR > 9.2) ? 1 : defaultR;

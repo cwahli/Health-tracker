@@ -877,6 +877,18 @@ describe("server_dish_finalize", () => {
     }
   });
 
+  it('corrects per-100g calories when paired with smaller serving size (e.g. 362 kcal / 40g oats -> 100g basis)', () => {
+    const { ocrNutrients } = parseOcrLabel({
+      servingSize: '40g',
+      calories: '362',
+      protein: '11g',
+      totalFat: '6.6g',
+      carbohydrates: '60g',
+    }, 1000, 25);
+    // 362 kcal is the per 100g value; for 1000g container it should scale by 10 (3620 kcal), NOT by 25 (9050 kcal)
+    expect(ocrNutrients.calories).toBe(3620);
+  });
+
   it('finalizes a 70g labeled serving at 90 kcal, not 6300', async () => {
     const ledger = await finalizeDishLedger({
       item: {

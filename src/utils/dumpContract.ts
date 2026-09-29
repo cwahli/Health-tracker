@@ -885,9 +885,10 @@ function evaluateFoodAgentOutput(tree: CanonicalRunTree, isFoodPack: boolean): C
   // S5 fix (job_a3jwhqvwk B5): the old text flatMapped ALL emissions, so a
   // 2-turn run reported 6/6 while listing 5 names incl. the deleted dish.
   // Count the FINAL ledger (pendingFoodLog) when present; fall back to emissions.
-  const finalDishes: any[] = Array.isArray((tree as any).pendingFoodLog?.dishes)
-    ? (tree as any).pendingFoodLog.dishes
-    : (Array.isArray((tree as any).pendingFoodLog?.itemsBreakdown) ? (tree as any).pendingFoodLog.itemsBreakdown : []);
+  const rawFinalDishes = (tree as any).pendingFoodLog?.dishes;
+  const finalDishes: any[] = Array.isArray(rawFinalDishes) && rawFinalDishes.length > 0
+    ? rawFinalDishes
+    : [];
   const dishEmissions = (tree.dispatches || [])
     .map((d) => d?.rawEmission || d?.output)
     .filter((o) => o && typeof o === 'object');

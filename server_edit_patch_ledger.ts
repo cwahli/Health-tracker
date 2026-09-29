@@ -192,6 +192,21 @@ function printedCalories(it: any): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function packageServingWeight(pkg: any, prepared: any): number {
+  const wPkg = Number(pkg?.weightGrams || pkg?.estimatedWeightGrams) || 0;
+  const wPrep = Number(prepared?.weightGrams || prepared?.estimatedWeightGrams) || 0;
+  const pack = Number(pkg?.packGrams) || 0;
+  // If package weight is strictly less than full container, it's an intended portion (e.g. 100g or 140g out of 800g pack)
+  if (wPkg > 0 && pack > 0 && wPkg < pack) return wPkg;
+  // If package weight equals full multi-serving container (e.g. 1000g of 1000g pack), use prepared portion
+  if (wPrep > 0) return wPrep;
+  if (wPkg > 0) return wPkg;
+  const labelServing = pkg?.rawNutritionLabel?.servingSize || pkg?.rawNutritionLabel?.serving;
+  const parsedServing = labelServing ? parseFloat(String(labelServing).replace(/[^\d.]/g, '')) : 0;
+  if (parsedServing > 0) return parsedServing;
+  return 0;
+}
+
 /** Package/label row + prepared row of the same food. Never pairs two distinctly labeled products. */
 export function findPackagePreparedPair(items: any[]): { pkgIdx: number; preparedIdx: number } | null {
   if (!Array.isArray(items) || items.length < 2) return null;
@@ -200,23 +215,16 @@ export function findPackagePreparedPair(items: any[]): { pkgIdx: number; prepare
     for (let j = 0; j < items.length; j++) {
       if (i === j) continue;
       if (!itemsShareSubstance(items[i], items[j])) continue;
-      const calA = printedCalories(items[i]);
-      const calB = printedCalories(items[j]);
-      if (calA != null && calB != null && Math.abs(calA - calB) >= 2) continue;
       if (isPreparedDishItem(items[j]) || !hasPrintedLabel(items[j])) {
         return { pkgIdx: i, preparedIdx: j };
       }
+      const calA = printedCalories(items[i]);
+      const calB = printedCalories(items[j]);
+      if (calA != null && calB != null && Math.abs(calA - calB) >= 2) continue;
+      return { pkgIdx: i, preparedIdx: j };
     }
   }
   return null;
-}
-
-function packageServingWeight(pkg: any, prepared: any): number {
-  const wPkg = Number(pkg?.weightGrams || pkg?.estimatedWeightGrams) || 0;
-  const wPrep = Number(prepared?.weightGrams || prepared?.estimatedWeightGrams) || 0;
-  if (wPkg > 0) return wPkg;
-  if (wPrep > 0) return wPrep;
-  return 0;
 }
 
 /**
@@ -238,8 +246,8 @@ export function collapsePackagePreparedScoutItems(items: any[], addDebugLog?: (m
       mergedName = `${brand} ${mergedName}`;
     }
     const survivor = {
-      ...prep,
       ...pkg,
+      ...prep,
       originalName: mergedName,
       keyword: mergedName,
       dishName: mergedName,

@@ -21,7 +21,7 @@ import {
   priorScoutHasLabelLocks,
   REFINE_SCALE_ONLY_LOG,
 } from '../../../server_refine_scale.js';
-import { applyUserLockedSlots, namesShareSubstance, type UserLockedSlot } from '../../../server_edit_patch_ledger.js';
+import { applyUserLockedSlots, namesShareSubstance, significantTokens, type UserLockedSlot } from '../../../server_edit_patch_ledger.js';
 
 export interface ScoutInheritArgs {
   isModifySession: boolean;
@@ -218,12 +218,123 @@ export interface ExplicitTagsArgs {
   onLog: (msg: string) => void;
 }
 
-/** Injects catalog tags directly into vision items (unique offset scoutIndex). */
+function stemToken(w: string): string {
+  return w.toLowerCase().replace(/(?:ies|es|s)$/, '');
+}
+
+export function isFuzzyFoodMatch(nameA: string, nameB: string): boolean {
+  const normA = (nameA || '').toLowerCase().trim();
+  const normB = (nameB || '').toLowerCase().trim();
+  if (!normA || !normB) return false;
+  if (normA === normB || normA.includes(normB) || normB.includes(normA)) return true;
+
+  const rawTokensA = significantTokens(nameA);
+  const rawTokensB = significantTokens(nameB);
+  if (rawTokensA.length === 0 || rawTokensB.length === 0) return false;
+
+  const tokensA = rawTokensA.map(stemToken);
+  const tokensB = rawTokensB.map(stemToken);
+
+  let shared = 0;
+  for (const ta of tokensA) {
+    if (tokensB.some(tb => ta === tb || (ta.length >= 3 && tb.length >= 3 && (ta.startsWith(tb) || tb.startsWith(ta))))) {
+      shared++;
+    }
+  }
+
+  const minTokens = Math.min(tokensA.length, tokensB.length);
+  if (shared >= 2 && shared / minTokens >= 0.5) return true;
+  if (minTokens === 1 && shared === 1) return true;
+
+  // Specific food synonyms (e.g. porridge / oat / oatmeal / bubur)
+  const OAT_TERMS = ['oat', 'oatmeal', 'porridg', 'bubur'];
+  const isOatA = tokensA.some(t => OAT_TERMS.some(o => t.includes(o)));
+  const isOatB = tokensB.some(t => OAT_TERMS.some(o => t.includes(o)));
+  if (isOatA && isOatB) {
+    const brandA = tokensA.filter(t => !OAT_TERMS.some(o => t.includes(o)));
+    const brandB = tokensB.filter(t => !OAT_TERMS.some(o => t.includes(o)));
+    if (brandA.length === 0 || brandB.length === 0) return true;
+    if (brandA.some(ba => brandB.some(bb => ba === bb || ba.startsWith(bb) || bb.startsWith(ba)))) return true;
+  }
+
+  return false;
+}
+
+export function matchExplicitTagToVisualItem(tag: any, visualItems: any[], excludedIndices?: Set<number>): any | undefined {
+  if (!tag || !Array.isArray(visualItems) || visualItems.length === 0) return undefined;
+
+  // 1. Direct dbId match
+  if (tag.dbId) {
+    const byId = visualItems.find((vi: any, idx: number) => !excludedIndices?.has(idx) && vi.dbId === tag.dbId);
+    if (byId) return byId;
+  }
+
+  // 2. Direct exact name/keyword match
+  const tagNames = [tag.name, tag.originalName, tag.keyword, tag.canonicalDbName].filter(Boolean);
+  for (let i = 0; i < visualItems.length; i++) {
+    if (excludedIndices?.has(i)) continue;
+    const vi = visualItems[i];
+    const viNames = [vi.name, vi.originalName, vi.keyword, vi.canonicalDbName, vi.dishName].filter(Boolean);
+    for (const tn of tagNames) {
+      if (viNames.some((vn: string) => String(vn).toLowerCase().trim() === String(tn).toLowerCase().trim())) {
+        return vi;
+      }
+    }
+  }
+
+  // 3. Substance / fuzzy match (e.g. "Sainsbury's Porridge Oats" vs "Sainsbury Oatmeal")
+  for (let i = 0; i < visualItems.length; i++) {
+    if (excludedIndices?.has(i)) continue;
+    const vi = visualItems[i];
+    const viNames = [vi.name, vi.originalName, vi.keyword, vi.canonicalDbName, vi.dishName].filter(Boolean);
+    for (const tn of tagNames) {
+      for (const vn of viNames) {
+        if (namesShareSubstance(String(tn), String(vn)) || isFuzzyFoodMatch(String(tn), String(vn))) {
+          return vi;
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/** Injects or binds catalog tags into vision items (inheriting bounding boxes when matched). */
 export function injectExplicitFoodTags(args: ExplicitTagsArgs): void {
   const { visionScoutItems, explicitFoodTags, onLog } = args;
+  const boundIndices = new Set<number>();
   explicitFoodTags.forEach((tag: any, idx: number) => {
-    const existing = visionScoutItems.find((vi: any) => vi.dbId === tag.dbId || vi.keyword === tag.name);
-    if (!existing) {
+    const existing = matchExplicitTagToVisualItem(tag, visionScoutItems, boundIndices);
+    const dbSource = tag.source === 'previous_meal'
+      ? 'previous_meal'
+      : (tag.dbSource || (String(tag.dbId || '').includes('brand_menu_') ? 'brand_official' : 'internal_catalog'));
+    const brandGuess = tag.chainName || tag.brand || tag.brandName || inferChainNameFromPackageLabel(tag.name);
+
+    if (existing) {
+      const existingIdx = visionScoutItems.indexOf(existing);
+      if (existingIdx !== -1) boundIndices.add(existingIdx);
+
+      // Bind tag to existing visual item, retaining its visual crop / spatial coordinates
+      existing.keyword = tag.name;
+      existing.originalName = tag.name;
+      existing.name = tag.name;
+      existing.dishName = tag.name;
+      if (tag.weightGrams) existing.estimatedWeightGrams = tag.weightGrams;
+      existing.source = tag.source || 'catalog_tag';
+      existing.dbId = tag.dbId;
+      existing.dbSource = dbSource;
+      if (brandGuess) existing.chainName = brandGuess;
+      if (tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0]) {
+        existing.imageUrl = tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0];
+      }
+      if (tag.nutrients || tag.originalLog?.nutrients) {
+        existing.nutrients = tag.nutrients || tag.originalLog?.nutrients;
+      }
+      if (tag.rawNutritionLabel) existing.rawNutritionLabel = tag.rawNutritionLabel;
+      if (tag.brandLock) existing.brandLock = tag.brandLock;
+      if (tag.labelNutrientsPerServing) existing.labelNutrientsPerServing = tag.labelNutrientsPerServing;
+      onLog(`[Explicit Food Tags] Bound tag "${tag.name}" to visual item "${existing.originalName || existing.keyword}" (preserving bbox [${existing.boundingBox2D}]).`);
+    } else {
       visionScoutItems.push({
         scoutIndex: 1000 + idx, // unique offset
         keyword: tag.name,
@@ -231,13 +342,18 @@ export function injectExplicitFoodTags(args: ExplicitTagsArgs): void {
         estimatedWeightGrams: tag.weightGrams,
         source: tag.source || 'catalog_tag',
         dbId: tag.dbId,
-        dbSource: tag.source === 'previous_meal' ? 'previous_meal' : 'internal_catalog',
+        dbSource,
+        chainName: brandGuess || undefined,
         imageUrl: tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0] || undefined,
         nutrients: tag.nutrients || tag.originalLog?.nutrients || undefined,
+        rawNutritionLabel: tag.rawNutritionLabel || undefined,
+        brandLock: tag.brandLock || undefined,
+        labelNutrientsPerServing: tag.labelNutrientsPerServing || undefined,
       });
+      onLog(`[Explicit Food Tags] Injected standalone catalog tag "${tag.name}" into vision items.`);
     }
   });
-  onLog(`[Explicit Food Tags] Injected ${explicitFoodTags.length} catalog tags directly into vision items.`);
+  onLog(`[Explicit Food Tags] Processed ${explicitFoodTags.length} catalog tag(s).`);
 }
 
 /** Infers chainName from package labels on packaged-bind items. */

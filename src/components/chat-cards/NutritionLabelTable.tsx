@@ -175,9 +175,11 @@ function getSourceBadge(item: any) {
       className: 'bg-emerald-100/90 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
     };
   }
-  if (isBrand && brandTitle) {
+  if (isBrand) {
+    const rawBrand = brandTitle || (String(item.dbId || '').includes('brand_menu_local_') ? String(item.dbId).split('_')[3] : '') || '';
+    const formattedTitle = rawBrand ? (rawBrand.charAt(0).toUpperCase() + rawBrand.slice(1) + ' ') : '';
     return {
-      text: `${brandTitle} Official`,
+      text: `${formattedTitle}Official`,
       className: 'bg-indigo-100/90 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
     };
   }
@@ -199,6 +201,12 @@ function getSourceBadge(item: any) {
     return {
       text: 'USDA FoodData Central',
       className: 'bg-blue-100/90 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+    };
+  }
+  if (item.dbSource === 'internal_catalog' || item.source === 'catalog_tag') {
+    return {
+      text: 'Verified Catalog',
+      className: 'bg-indigo-100/90 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
     };
   }
   return {

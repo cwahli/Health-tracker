@@ -73,4 +73,27 @@ describe('q-9 Node3 scoutGeometry parity (verbatim extract, hypothesis 2)', () =
     const out = validateOrFallback(schema, { items: [{ a: 'x' }] }, 'raw', 't', { items: [] }, () => {});
     expect(out).toEqual({ items: [{ a: 'x' }] });
   });
+
+  it('does not merge separate whole fruits or produce across containers into composite dishes', () => {
+    const items = [
+      {
+        originalName: 'Green Grapes',
+        keyword: 'green grapes',
+        estimatedWeightGrams: 80,
+        sourceImageIndex: 0,
+        boundingBox2D: [390, 110, 860, 880],
+      },
+      {
+        originalName: 'Plum',
+        keyword: 'plum',
+        estimatedWeightGrams: 100,
+        sourceImageIndex: 0,
+        boundingBox2D: [631, 658, 920, 882],
+      },
+    ];
+    const clustered = clusterSpatialCompositeDishes(items, () => {});
+    expect(clustered).toHaveLength(2);
+    expect(clustered[0].originalName).toBe('Green Grapes');
+    expect(clustered[1].originalName).toBe('Plum');
+  });
 });

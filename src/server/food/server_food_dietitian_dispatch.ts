@@ -103,7 +103,10 @@ export function decideScoutAdvice(args: {
     } else if (totals.totalSugar >= 30) {
       rawAdvice = t(language, 'adviceHighSugar').replace('{grams}', String(Math.round(totals.totalSugar)));
     } else {
-      rawAdvice = t(language, 'adviceLoggedBalanced').replace('{name}', String(mealName));
+      const displayName = (mealName && String(mealName).trim() && String(mealName).trim().toLowerCase() !== 'undefined')
+        ? String(mealName).trim()
+        : (t(language, 'balancedMealFallbackName') || 'your meal');
+      rawAdvice = t(language, 'adviceLoggedBalanced').replace('{name}', displayName);
     }
   } else {
     // Synchronize cited macro quantities with authoritative ledger totals
