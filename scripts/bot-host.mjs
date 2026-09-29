@@ -2525,8 +2525,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // web_app button pattern as /tui, served by the same gateway host under
       // /bugs/ behind the initData door. Scoped to the bug ticket bot: it owns
       // the canonical card list.
-      if (config.id !== 'bug_ticket') {
-        await api.sendMessage(chatId, '🐛 The bug board lives with the bug ticket bot — ask it for /bugs and it will hand you the button.');
+      // Served from bot-host bots that hold a gateway token. vm is the
+      // master bot and validates today; bug_ticket stays listed so the scope
+      // is correct if it ever gains a bot-host surface (it is a hermes bot
+      // and has no bot-host command path).
+      const BOARD_BOTS = ['vm', 'bug_ticket'];
+      if (!BOARD_BOTS.includes(config.id)) {
+        await api.sendMessage(chatId, '🐛 The bug board lives on the VM bot — ask it for /bugs and it will hand you the button.');
         return;
       }
       const bugsGatewayUrl = readTuiUrl();

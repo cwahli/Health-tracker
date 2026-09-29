@@ -76,9 +76,10 @@ Conventions: each node lists target files, pitfalls, and its own done-gate. Buil
 
 ### Node 5 — Gateway route + `/bugs` command
 
-- Target: `scripts/tui-gateway.mjs` (new path reusing the initData gate, same host/TLS/Caddy as TUI) and `scripts/bot-host.mjs` (`/bugs` case on the bug_ticket bot mirroring `/tui` at `bot-host.mjs:2516-2524`, including the stale-tunnel warning behavior).
+- Target: `scripts/tui-gateway.mjs` (new path reusing the initData gate, same host/TLS/Caddy as TUI) and `scripts/bot-host.mjs` (`/bugs` case mirroring `/tui` at `bot-host.mjs:2516-2524`, including the stale-tunnel warning behavior).
+- Serving bot is `vm` (master, holds `TUI_BOT_TOKEN_VM` so the exchange validates with zero new secrets). `bug_ticket` is a hermes bot with no bot-host command surface, so it cannot serve the button; it stays in the scope list for correctness. Other bot-host bots get a pointer to vm.
 - Pitfalls: new route bypassing initData validation (never anonymous — same HMAC check); button URL missing `?bot=bug_ticket`; `/bugs` answering on non-bug_ticket bots (scope the command or say which bot serves it).
-- Done when: tapping the button from the bug_ticket bot chat opens the live board; killing/regenerating the tunnel reproduces the stale-button warning, not a silent dead button.
+- Done when: tapping the button from the vm bot chat opens the live board; killing/regenerating the tunnel reproduces the stale-button warning, not a silent dead button.
 - Build wiring (human-approved 2026-09-29): `vite.config.ts` gains a `rollupOptions.input` entry for `bugs.html` so `vite build` emits it into dist; the gateway proxies the built page from the app upstream. Done when: `vite build` emits `bugs.html` + its assets and the gateway `/bugs/app` serves them (Node 6 L-steps). No other build config changes.
 
 ### Node 6 — Agent-run live validation (pre-COMPLETE gate, no phone needed)
