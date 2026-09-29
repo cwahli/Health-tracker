@@ -13,6 +13,12 @@
  *                          wait  → sleep, ask again      │
  *                          refuse → comment, exit non-zero
  *
+ * A refusal scoped to `main` is also REPORTED, not only enforced: the gate that
+ * refuses while `main` is red used to be the quietest thing in the repository —
+ * the queue stalled and nothing said why. That is what `lib/red-main-notice.mjs`
+ * is for, and it runs before the refusal, so a broken notifier cannot become a
+ * merge that was not refused.
+ *
  * A merge is not the end of it. The squash commit it lands is written by
  * `GITHUB_TOKEN`, whose pushes do not trigger workflows — so `main` would never
  * be verified after the merge and the composition of two separately-green PRs
@@ -65,6 +71,8 @@ import {
   dispatchEndpoint,
   validateMainVerifyWiring,
 } from './lib/main-verify.mjs';
+import { makeClient } from './lib/github-rest.mjs';
+import { describeNotice, syncRedMainNotice } from './lib/red-main-notice.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -93,42 +101,6 @@ export function parseArgs(argv = []) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** A tiny REST client. `apiBase` is the seam the sensor uses. */
-export function makeClient({ token, apiBase, fetchImpl = globalThis.fetch } = {}) {
-  const base = String(apiBase || 'https://api.github.com').replace(/\/$/, '');
-  return {
-    base,
-    async call(pathname, { method = 'GET', body } = {}) {
-      const res = await fetchImpl(`${base}${pathname}`, {
-        method,
-        headers: {
-          accept: 'application/vnd.github+json',
-          'user-agent': 'health-tracker-auto-merge',
-          'x-github-api-version': '2022-11-28',
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      const text = await res.text();
-      let json = null;
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch {
-        json = null;
-      }
-      if (!res.ok) {
-        const detail = json?.message || text.slice(0, 200) || `HTTP ${res.status}`;
-        const err = new Error(`${method} ${pathname} -> HTTP ${res.status} ${detail}`);
-        err.status = res.status;
-        err.body = json;
-        throw err;
-      }
-      return json;
-    },
-  };
-}
 
 /**
  * Every check run GitHub reports for a commit, paginated.
@@ -206,6 +178,11 @@ export async function readMainHealth(client, { owner, repo, branch = 'main', log
  * checks conclude. Holding costs a poll; merging through it forfeits the check.
  * The hold is bounded by the same budget as everything else, so a verification
  * that never concludes ends in a refusal rather than a merge.
+ *
+ * `notice` is called once, on the red path only, and its outcome is carried onto
+ * the refusal so the PR comment can say where the report went. It is deliberately
+ * not called for a hold or for `unknown`: neither is `main` being broken, and an
+ * alarm on those would be an alarm nobody could act on.
  */
 export async function waitForDecision(client, {
   owner,
@@ -216,9 +193,11 @@ export async function waitForDecision(client, {
   waitSeconds = DEFAULT_WAIT_SECONDS,
   pollSeconds = DEFAULT_POLL_SECONDS,
   log = () => {},
+  notice = async () => null,
 } = {}) {
   const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
   let last = null;
+  let mainNotice = null;
   for (;;) {
     const runs = await listCheckRuns(client, { owner, repo, ref: head });
     last = evaluateChecks({ checkRuns: runs, required: REQUIRED_CHECKS });
@@ -228,13 +207,22 @@ export async function waitForDecision(client, {
     if (last.decision === 'merge') {
       const main = await readMainHealth(client, { owner, repo, branch: baseBranch });
       log(`  ${baseBranch}: ${main.health} — ${main.reason}`);
+      if (main.blocked) {
+        // The one refusal whose cause is not in this PR, and historically the
+        // quietest thing here: the merge stopped, the queue stalled, and nothing
+        // anywhere said so. Report it BEFORE acting on it, and report it on the
+        // override path too — landing on a known-broken tree is the loudest
+        // version of the same fact, not an exception to it.
+        mainNotice = await notice({ state: 'red', main, head });
+        if (mainNotice) log(`  ${describeNotice(mainNotice)}`);
+      }
       if (main.blocked && allowRedMain) {
         // The operator's explicit override. Without it a red main is a deadlock:
         // the only way to fix main is to merge a fix, and that merge is refused
         // too. It is opt-in, it is named in the run log and on the PR, and it is
         // the operator's call — not a timeout the driver takes on its own.
         log(`  ⚠️  OVERRIDING a red ${baseBranch} (--allow-red-main): ${main.reason}`);
-        return { ...last, baseBranch, mainHealth: 'red', mainOverridden: true, mainReason: main.reason };
+        return { ...last, baseBranch, mainHealth: 'red', mainOverridden: true, mainReason: main.reason, notice: mainNotice };
       }
       if (main.blocked) {
         return {
@@ -246,6 +234,7 @@ export async function waitForDecision(client, {
           missing: [],
           pending: [],
           mainHealth: main.health,
+          notice: mainNotice,
           counts: { runs: runs.length, missing: 0, pending: 0, failed: (main.failed || []).length },
         };
       }
@@ -380,7 +369,26 @@ async function main(argv = process.argv.slice(2)) {
   const head = String(pr.head?.sha || '');
   const baseBranch = String(pr.base?.ref || 'main');
   log(`auto-merge: PR #${pr.number} (${branch}) head ${head.slice(0, 7)} onto ${baseBranch}`);
-  const result = await waitForDecision(client, { owner, repo, head, baseBranch, allowRedMain, waitSeconds, pollSeconds, log });
+  // `--evaluate` writes nothing, and "write nothing" includes not filing an
+  // issue: a dry run that raised an alarm would be worse than no dry run.
+  const notice = args.evaluate
+    ? async () => null
+    : ({ state, main }) =>
+        syncRedMainNotice({
+          call: client.call,
+          owner,
+          repo,
+          state,
+          details: {
+            mainSha: main.sha || head,
+            mainReason: main.reason,
+            conclusion: 'failure',
+            failed: main.failed || [],
+            blockedBy: `PR #${pr.number} (\`${branch}\`)`,
+            overridden: allowRedMain,
+          },
+        });
+  const result = await waitForDecision(client, { owner, repo, head, baseBranch, allowRedMain, waitSeconds, pollSeconds, log, notice });
 
   if (result.decision !== 'merge') {
     const body = [
@@ -395,6 +403,9 @@ async function main(argv = process.argv.slice(2)) {
       result.failed?.length ? `Failed: ${result.failed.map((f) => `\`${f}\``).join(', ')}` : '',
       result.pending?.length ? `Still running: ${result.pending.map((f) => `\`${f}\``).join(', ')}` : '',
       result.missing?.length ? `Never reported: ${result.missing.map((f) => `\`${f}\``).join(', ')}` : '',
+      // The report has a home, and the person reading this stalled PR should not
+      // have to go looking for it.
+      result.notice ? `Notice: ${describeNotice(result.notice)}` : '',
       '',
       result.scope === 'main'
         ? result.mainWaiting

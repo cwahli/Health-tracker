@@ -29,6 +29,11 @@ run-name: main-verify ${{ github.event.client_payload.sha || github.sha }}
 
 permissions:
   contents: read
+  # For the `notice` job below: the issue it files is how a red `main` stops
+  # blocking the queue in silence. Granted here rather than on the job so there
+  # is one place to look for what this run may do; the gates themselves still
+  # declare `contents: read` on `ci.yml`, so this does not widen their reach.
+  issues: write
 
 concurrency:
   group: main-verify-${{ github.ref }}
@@ -37,3 +42,38 @@ concurrency:
 jobs:
   gates:
     uses: ./.github/workflows/ci.yml
+
+  # Report the result. The gate above can refuse a merge; it cannot tell anybody,
+  # and for a long time it did not — a red `main` stalled the whole queue with no
+  # issue, no annotation and no line anywhere a human would look, which is
+  # indistinguishable from a slow runner or an agent that walked away. This job is
+  # the sentence that was missing, and the durable record of it.
+  #
+  # `needs: gates` + `if: always()` is the load-bearing part: it must run when the
+  # gate FAILED, which is the only case it exists for and the case a plain `if:`
+  # would skip. It is a separate job rather than a step inside `ci.yml` so a
+  # notification bug can fail loudly here without turning a green verification of
+  # `main` red. Full reasoning: `scripts/lib/red-main-notice.mjs`.
+  notice:
+    needs: gates
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Report main's verification result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_RESULT: ${{ needs.gates.result }}
+        run: |
+          # The job result is passed through verbatim rather than turned into
+          # red/green here: `cancelled` and `skipped` must NOT be announced as a
+          # broken `main` (a superseded verification is the normal state of this
+          # workflow's concurrency group), and `scripts/lib/red-main-notice.mjs`
+          # owns that mapping so this workflow and the merge driver cannot
+          # disagree about what "red" means.
+          node scripts/notify-main-red.mjs \
+            --result="$GATE_RESULT" \
+            --sha="${{ github.event.client_payload.sha || github.sha }}"

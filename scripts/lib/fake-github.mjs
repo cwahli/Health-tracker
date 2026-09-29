@@ -62,6 +62,11 @@ const ROUTES = {
   comment: /^POST \/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/,
   deleteRef: /^DELETE \/repos\/[^/]+\/[^/]+\/git\/refs\/heads\//,
   dispatch: /^POST \/repos\/[^/]+\/[^/]+\/dispatches$/,
+  // The red-`main` notice (`scripts/lib/red-main-notice.mjs`). The list route is
+  // exact and comes first: it is the only one that is not about a numbered issue.
+  issueList: /^GET \/repos\/[^/]+\/[^/]+\/issues$/,
+  issueCreate: /^POST \/repos\/[^/]+\/[^/]+\/issues$/,
+  issuePatch: /^PATCH \/repos\/[^/]+\/[^/]+\/issues\/\d+$/,
 };
 
 /**
@@ -76,6 +81,10 @@ const ROUTES = {
  *   the last repeats. Needed because the interesting state of `main` is a
  *   verification that CONCLUDES between two polls — a single static list can
  *   only ever show one moment of it.
+ * @param {object[]} opts.openIssues  what `GET /issues` answers (issues AND pull
+ *   requests, as the real endpoint does, so the callers' filtering is exercised)
+ * @param {boolean}  opts.issueFails  make every issue route a 403, so the
+ *   "could not report" path is drivable and not just claimed
  */
 export function startFakeGitHub({
   checkPlans = [[]],
@@ -85,6 +94,8 @@ export function startFakeGitHub({
   dispatchFails = false,
   mainChecks = MAIN_GREEN,
   mainCheckPlans = null,
+  openIssues = [],
+  issueFails = false,
 } = {}) {
   const calls = {
     merge: [],
@@ -95,9 +106,16 @@ export function startFakeGitHub({
     checkQueries: [],
     mainCheckReads: 0,
     prListReads: 0,
+    issueListReads: 0,
+    issuesCreated: [],
+    issueComments: [],
+    issuesClosed: [],
   };
   const plans = [...checkPlans];
   const mainPlans = mainCheckPlans ? [...mainCheckPlans] : null;
+  // Created issues are appended, so a second create is visible as a second issue
+  // rather than silently overwriting the first — the duplicate is the bug.
+  const issues = [...openIssues];
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
@@ -154,7 +172,16 @@ export function startFakeGitHub({
         });
       }
       if (ROUTES.comment.test(route)) {
-        calls.comments.push(json().body || '');
+        // One endpoint serves both, so the recording has to tell them apart: a
+        // comment on the PR under judgement is what the merge assertions count,
+        // and a comment on the standing red-`main` issue is a different fact.
+        // Splitting them is what makes "it created ONE issue and did not pile up
+        // a second" and "it posted exactly one PR comment" both checkable.
+        const number = Number(url.pathname.split('/')[5]);
+        const prNumber = prs === null ? OPEN_PR.number : prs[0] && prs[0].number;
+        const body = json().body || '';
+        if (number === prNumber) calls.comments.push(body);
+        else calls.issueComments.push(body);
         return send(201, { id: 1 });
       }
       if (ROUTES.deleteRef.test(route)) {
@@ -165,6 +192,36 @@ export function startFakeGitHub({
         if (dispatchFails) return send(403, { message: 'Resource not accessible by integration' });
         calls.dispatches.push(json());
         return send(204, {});
+      }
+      if (ROUTES.issueList.test(route)) {
+        calls.issueListReads += 1;
+        if (issueFails) return send(403, { message: 'Resource not accessible by integration' });
+        return send(200, issues);
+      }
+      if (ROUTES.issueCreate.test(route)) {
+        if (issueFails) return send(403, { message: 'Resource not accessible by integration' });
+        const body = json();
+        // Numbered off the count SO FAR, so the first issue this fake ever creates
+        // is #100 in every test rather than wherever a previous create left it.
+        const number = 100 + calls.issuesCreated.length;
+        calls.issuesCreated.push(body);
+        const created = {
+          number,
+          state: 'open',
+          html_url: `https://example.invalid/issues/${number}`,
+          title: body.title,
+          body: body.body,
+        };
+        issues.push(created);
+        return send(201, created);
+      }
+      if (ROUTES.issuePatch.test(route)) {
+        const number = Number(url.pathname.split('/').pop());
+        if (issueFails) return send(403, { message: 'Resource not accessible by integration' });
+        calls.issuesClosed.push(number);
+        const found = issues.find((i) => i.number === number);
+        if (found) found.state = json().state || 'closed';
+        return send(200, found || { number, state: 'closed' });
       }
       return send(404, { message: `no fake route for ${route}` });
     });
@@ -187,7 +244,17 @@ export function startFakeGitHub({
  * `driver` is a parameter because one sensor also runs the driver out of a
  * scratch tree, to prove the startup guards read the workflows they claim to.
  */
-export function runDriver(port, extraArgs = [], { driver = DRIVER, cwd = ROOT, env: extraEnv = {}, token = 'fake-token' } = {}) {
+export function runDriver(port, extraArgs = [], {
+  driver = DRIVER,
+  cwd = ROOT,
+  env: extraEnv = {},
+  token = 'fake-token',
+  // `--pr-wait=0`: the fake API answers the PR lookup on the first call, so the
+  // 90s auto-pr race window would only make the sensor slow. Overridable because
+  // the notice worker (`scripts/notify-main-red.mjs`) is spawned the same way and
+  // knows none of these flags.
+  defaultArgs = ['--poll=0', '--pr-wait=0'],
+} = {}) {
   const env = {
     ...process.env,
     GITHUB_API_URL: `http://127.0.0.1:${port}`,
@@ -199,9 +266,7 @@ export function runDriver(port, extraArgs = [], { driver = DRIVER, cwd = ROOT, e
   delete env.GITHUB_TOKEN;
   if (token) env.GH_TOKEN = token;
   return new Promise((resolve) => {
-    // `--pr-wait=0`: the fake API answers the PR lookup on the first call, so the
-    // 90s auto-pr race window would only make the sensor slow.
-    const child = spawn(process.execPath, [driver, '--poll=0', '--pr-wait=0', ...extraArgs], { env, cwd });
+    const child = spawn(process.execPath, [driver, ...defaultArgs, ...extraArgs], { env, cwd });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => { stdout += String(d); });
