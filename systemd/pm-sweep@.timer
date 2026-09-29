@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly PM sweep for %i
+Documentation=file:///home/ubuntu/deploy/Health-tracker/specs/active/PM-2.md
+
+[Timer]
+OnCalendar=*:15
+Persistent=true
+Unit=pm-sweep@%i.service
+
+[Install]
+WantedBy=timers.target

@@ -119,7 +119,7 @@ export async function flushTurns(bot, deps, { home, limit = 50 } = {}) {
     }
     return { ok: true, skipped: item.kind };
   };
-  const report = await flushSpool(bot, send, { home, limit });
+  const report = await flushSpool(bot, send, { home, limit, accept: (item) => item.kind === 'sheet-row' || item.kind === 'drive-object' });
   if (report.failed === 0) pruneFlushed(bot, { home });
   return report;
 }

@@ -7,7 +7,7 @@
       "runtime": "tg-provider-router",
       "enabled": true,
       "path": "tools/telegram-provider-router",
-      "notes": "Unified Telegram long-poller \u2192 OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
+      "notes": "Unified Telegram long-poller → OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
       "telegram": {
         "tokenEnv": "TELEGRAM_BOT_TOKEN",
         "onePollerOnly": true
@@ -264,6 +264,17 @@
       },
       "agent": {
         "playwrightOutputDir": "/tmp/bot-host-shots-android"
+      }
+    },
+    {
+      "id": "pm",
+      "name": "PM Bot",
+      "runtime": "bot-host",
+      "enabled": false,
+      "extends": "vm",
+      "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
+      "telegram": {
+        "tokenEnv": "PM_BOT_TOKEN"
       }
     }
   ]
