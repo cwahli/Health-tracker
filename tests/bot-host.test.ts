@@ -872,6 +872,11 @@ describe('pickers', () => {
     }
     expect(COMMAND_NAMES).toContain('free');
     expect(COMMAND_NAMES).toContain('compact');
+    // every advertised command has a help line (menu/help/handlers stay one surface)
+    const help = helpText({ name: 'b', agent: {} }, {});
+    for (const name of COMMAND_NAMES) {
+      expect(help).toContain(`/${name}`);
+    }
     expect(helpText({ name: 'b', agent: {} }, {})).toContain('/free');
     expect(toTelegramCommands().find((c) => c.command === 'free')?.description.length).toBeGreaterThan(0);
     expect(BOT_COMMANDS.length).toBe(new Set(COMMAND_NAMES).size);
