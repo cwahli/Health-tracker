@@ -1,0 +1,17 @@
+[Unit]
+Description=PM sweep (project-manager cycle for %i)
+Documentation=file:///home/ubuntu/deploy/Health-tracker/specs/active/PM-2.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/deploy/Health-tracker
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/ubuntu/.config/bot-host/common.env
+EnvironmentFile=-/home/ubuntu/.config/bot-host/%i.env
+ExecStart=/usr/bin/node /home/ubuntu/deploy/Health-tracker/scripts/pm-sweep.mjs --id=%i
+NoNewPrivileges=true

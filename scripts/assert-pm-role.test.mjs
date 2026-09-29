@@ -577,3 +577,49 @@ test('stallMs is a knob, not a constant baked into a report', () => {
   assert.equal(DEFAULT_STALL_MS, 30 * 60 * 1000);
   assert.equal(humanAge(4 * HOUR), '4h');
 });
+
+test('unknown PM subcommand errors with the valid list, never bare status', async () => {
+  const nope = await runPmCommand({ sub: 'frobnicate', botId: 'vm', env: {}, home: os.tmpdir() });
+  assert.equal(nope.ok, false);
+  assert.match(nope.text, /Unknown PM subcommand/);
+  assert.match(nope.text, /\/role pm run/);
+});
+
+test('an empty nudge result is not delivery', async () => {
+  const res = await deliverNudge({ chatId: '1', text: 'x', send: async () => undefined });
+  assert.equal(res.ok, false);
+  assert.match(res.reason, /empty nudge result/);
+});
+
+test('a recovered fleet prunes the ladder and a chatless bot warns', async () => {
+  const home = makeFleetHome();
+  try {
+    const stalledReader = () => ({
+      specs: [], bugs: [],
+      lanes: laneItems([{ at: new Date(Date.now() - 4 * HOUR).toISOString(), surface: 'vm', outcome: 'escalated' }]),
+      beats: {},
+      sources: { specsDir: home.specsDir, specsOk: true, specsReason: '', ledger: home.ledger, ledgerRows: 1, heartbeatDir: home.beats, beats: 0, tickets: 'api', ticketsError: '', ticketsCount: 0 },
+    });
+    const send = async () => ({ ok: false, reason: 'no session' });
+    const one = await runCycle({ botId: 'vm', operatorChatId: '', home: home.home, env: {}, reader: stalledReader, send });
+    assert.match(renderCycle(one), /No operator chat is configured/);
+    const ladder = ladderFile('vm', { home: home.home });
+    assert.ok(readLadder(ladder).counters['lane:vm'], 'stalled work keeps its counter');
+    const healthyReader = () => ({
+      specs: [], bugs: [],
+      lanes: laneItems([{ at: new Date().toISOString(), surface: 'vm', outcome: 'ok' }]),
+      beats: {},
+      sources: { specsDir: home.specsDir, specsOk: true, specsReason: '', ledger: home.ledger, ledgerRows: 1, heartbeatDir: home.beats, beats: 0, tickets: 'api', ticketsError: '', ticketsCount: 0 },
+    });
+    await runCycle({ botId: 'vm', operatorChatId: '', home: home.home, env: {}, reader: healthyReader, send });
+    assert.deepEqual(readLadder(ladder).counters, {}, 'recovered work is pruned so the file cannot grow forever');
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('a throwing cycle reports honestly instead of escaping to the poller', async () => {
+  const res = await runPmCommand({ sub: 'run', botId: 'vm', env: {}, home: os.tmpdir(), reader: () => { throw new Error('ENOSPC simulated'); } });
+  assert.equal(res.ok, false);
+  assert.match(res.text, /failed before it could report honestly/);
+});

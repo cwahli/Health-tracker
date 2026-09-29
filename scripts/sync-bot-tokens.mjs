@@ -15,6 +15,12 @@
  *   runtime "collab"   -> ~/.config/bot-host/<id>.env   as <tokenEnv>=<value>
  * Hermes env files keep all their other keys; only the token line is touched.
  *
+ * Door tokens: every bot WITH a token also gets TUI_BOT_TOKEN_<UPPERID> in
+ * ~/.config/bot-host/tui-gateway.env (same value). The /bugs/ + /tui/ doors
+ * validate openers against exactly that set — a bot missing here serves a
+ * button that 401s (proven live 2026-09-29). Additive only: keys for bots
+ * without tokens are left untouched, never removed.
+ *
  * The master file is never read by a running bot — it is the single place you edit.
  *
  * Usage:
@@ -137,6 +143,7 @@ function printHelp() {
 Master file (edit this):  ~/.config/bot-host/tokens.env
   bot-host output:        ~/.config/bot-host/<id>.env
   hermes output:          ~/.hermes[ /profiles/<p>]/.env  (token line only)
+  door output:            ~/.config/bot-host/tui-gateway.env as TUI_BOT_TOKEN_<ID>
 `);
 }
 
@@ -168,7 +175,17 @@ function main() {
 
   let written = 0;
   let hermesChanged = 0;
+  let doorChanged = 0;
   const missing = [];
+
+  // Door-token env (tui-gateway.env): additive upsert only. Bots without a
+  // master token keep whatever is there; nothing is ever removed here.
+  const doorPath = path.join(configDir, 'tui-gateway.env');
+  let doorText = fs.existsSync(doorPath) ? fs.readFileSync(doorPath, 'utf8') : '';
+  const doorBefore = doorText;
+  const doorUpsert = (id, value) => {
+    doorText = upsertEnvVar(doorText, `TUI_BOT_TOKEN_${id.toUpperCase()}`, value);
+  };
 
   for (const bot of registry.bots) {
     const envName = bot.telegram?.tokenEnv;
@@ -179,6 +196,9 @@ function main() {
     }
 
     const runtime = bot.runtime || 'bot-host';
+
+    // Door token rides along with every synced token (except device-owned).
+    if (runtime !== 'device') doorUpsert(bot.id, value);
 
     if (runtime === 'device') {
       // Runs on the phone (Termux/proot), not this host — token is owned there.
@@ -213,8 +233,12 @@ function main() {
 
     // runtime bot-host
     const target = path.join(configDir, `${bot.id}.env`);
-    const content = `${envName}=${value}\n`;
-    const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
+    // Upsert: live files carry hand-added keys beside the token
+    // (e.g. TUI_GATEWAY_URL) — a blind overwrite would delete them and break
+    // that bot's buttons. Proven live 2026-09-29 on vm.env/vm2.env.
+    const prev = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
+    const content = upsertEnvVar(prev, envName, value);
+    const existing = fs.existsSync(target) ? prev : null;
 
     if (existing === content) {
       console.log(`= ${bot.id.padEnd(20)} unchanged`);
@@ -235,6 +259,16 @@ function main() {
   }
 
   console.log('');
+  if (doorText !== doorBefore) {
+    if (args.check) {
+      console.log(`~ tui-gateway.env would gain/update door token(s)`);
+    } else {
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(doorPath, doorText);
+      console.log(`+ tui-gateway.env door token(s) updated — restart tui-gateway to apply`);
+      doorChanged += 1;
+    }
+  }
   if (missing.length) {
     console.log(`No token in master (left existing files untouched): ${missing.join(', ')}`);
   }
@@ -244,7 +278,7 @@ function main() {
   console.log(
     args.check
       ? `Check done: ${written} bot-host + ${hermesChanged} hermes file(s) would change.`
-      : `Done: ${written} bot-host + ${hermesChanged} hermes file(s) written.`,
+      : `Done: ${written} bot-host + ${hermesChanged} hermes file(s) written${doorChanged ? ' + door tokens' : ''}.`,
   );
 }
 

@@ -167,6 +167,7 @@ export function sheetSend(writer, env = process.env, { appendRows: append = appe
   const sheetId = pmSheetId(env);
   return async (item) => {
     if (!sheetId) return { ok: false, error: 'GOOGLE_PM_SHEET_ID is not set (the sheet is found by id, never by name)' };
+    if (!writer || !writer.token) return { ok: false, error: 'no Google token on the writer (google-authorize first)' };
     const res = await append(sheetId, item.tab || PM_TAB, [item.values], writer.token);
     if (res && res.ok) return { ok: true };
     return { ok: false, error: redact(res?.error || `HTTP ${res?.status || '?'}`) };
@@ -196,7 +197,7 @@ export async function flushSheet(botId, {
     const queued = readItems(botId, { home });
     return { ok: false, reason: w.reason || 'the store is not ready', hostCommands: sheetReadiness(env).hostCommands, sent: 0, failed: 0, queued: queued.length };
   }
-  const report = await flushSpool(botId, recipient || sheetSend(w, env), { home, limit });
+  const report = await flushSpool(botId, recipient || sheetSend(w, env), { home, limit, accept: (item) => item.kind === 'pm-project-row' });
   return {
     ok: report.failed === 0,
     reason: report.firstError || '',

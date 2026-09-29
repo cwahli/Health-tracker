@@ -45,7 +45,7 @@ import {
   readFleetSources,
   renderFleet,
 } from './pm-fleet.mjs';
-import { attemptFor, ladderFile, readLadder, recordAttempts, rungMessage } from './pm-ladder.mjs';
+import { attemptFor, forgetCounters, ladderFile, readLadder, recordAttempts, rungMessage } from './pm-ladder.mjs';
 import { flushSheet, renderFlush, spoolFleetRows } from './pm-sheet.mjs';
 import { sendAsUser, userbotState } from './tg-userbot.mjs';
 
@@ -68,7 +68,7 @@ export async function deliverNudge({ chatId, text, env = process.env, send = nul
   const doSend = send || ((to, body) => sendAsUser(to, body, { env }));
   try {
     const res = await doSend(chatId, text);
-    if (res && res.ok === false) return { ok: false, reason: res.reason || 'the send was refused' };
+    if (!res || res.ok === false) return { ok: false, reason: (res && res.reason) || 'empty nudge result' };
     return { ok: true, reason: '' };
   } catch (err) {
     return { ok: false, reason: String(err?.message || err).slice(0, 200) };
@@ -80,6 +80,9 @@ export function renderCycle(cycle) {
   const { fleet, decisions, spool, flush, nudgeState } = cycle;
   const lines = [];
   lines.push(`🧭 *PM cycle — ${fleet.counts.total} item(s), ${decisions.length} stalled*`);
+  if (cycle.operatorChatWarning) {
+    lines.push('*No operator chat is configured for this bot — every nudge below reports not delivered.*');
+  }
   if (!decisions.length) {
     lines.push('Nothing is stalled, so the ladder stayed put.');
   } else {
@@ -109,6 +112,7 @@ export function renderCycle(cycle) {
  */
 export async function runCycle({
   botId = 'vm',
+  chatId = '',
   operatorChatId = '',
   env = process.env,
   home = os.homedir(),
@@ -132,6 +136,9 @@ export async function runCycle({
     ladder,
     fleet.stalled.map((item) => ({ key: item.key, at, note: item.stallReason })),
   );
+  // Prune counters for work that recovered: the file tracks live stalls only,
+  // so it cannot grow forever, and a re-stall correctly restarts at retry.
+  forgetCounters(ladder, fleet.stalled.map((item) => item.key));
 
   const nudgeState = await userbotState(env);
   const decisions = [];
@@ -163,7 +170,7 @@ export async function runCycle({
   });
   const flush = await flushSheet(botId, { env, home, writer, recipient });
 
-  return { fleet, sources: raw.sources, decisions, spool, flush, nudgeState, ladderFile: ladder, at };
+  return { fleet, sources: raw.sources, decisions, spool, flush, nudgeState, ladderFile: ladder, at, requestChatId: chatId, operatorChatWarning: !operatorChatId };
 }
 
 /** Status only: the projection, with no writes and no sends. */
@@ -179,7 +186,9 @@ export async function runStatus({ env = process.env, home = os.homedir(), now = 
  *
  * Returns the text to send plus whether the caller should reset the chat's role.
  * It never sends to the requester itself: bot-host owns the reply, exactly as it
- * does for every other `/role` branch.
+ * does for every other `/role` branch. It never throws either: a disk-full
+ * spool or ladder write surfaces here as honest text, so a cycle failure can
+ * never escape into the poller.
  */
 export async function runPmCommand({
   sub = '',
@@ -194,7 +203,30 @@ export async function runPmCommand({
   writer = null,
   recipient = null,
 } = {}) {
+  try {
+    return await runPmCommandInner({ sub, botId, chatId, operatorChatId, env, home, now, send, reader, writer, recipient });
+  } catch (err) {
+    return { ok: false, text: `PM cycle failed before it could report honestly: ${String(err?.message || err).slice(0, 200)}`, resetRole: false };
+  }
+}
+
+async function runPmCommandInner({
+  sub = '',
+  botId = 'vm',
+  chatId = '',
+  operatorChatId = '',
+  env = process.env,
+  home = os.homedir(),
+  now = Date.now(),
+  send = null,
+  reader = null,
+  writer = null,
+  recipient = null,
+} = {}) {
   const verb = String(sub || '').trim().toLowerCase();
+  if (verb && !PM_SUBCOMMANDS.includes(verb)) {
+    return { ok: false, text: `Unknown PM subcommand \`${mdSafe(verb)}\` — try ${PM_SUBCOMMANDS.filter(Boolean).map((s) => `\`/role pm ${s}\``).join(', ')}.`, resetRole: false };
+  }
   if (verb === 'reset') {
     return { ok: true, text: 'Role reset. Back to general collaborative mode — the PM ladder and its counters stay on disk.', resetRole: true };
   }
