@@ -254,6 +254,7 @@ export function enrichScoutComponentsWithMatches(visionScoutItems: any[], databa
     visionScoutItems.forEach((item: any) => {
       if (Array.isArray(item.components)) {
         item.components.forEach((c: any) => {
+          if (c._explicitTagBound || c.source === 'catalog_tag') return;
           const cQuery = String(c.searchQuery || c.name || c.keyword || '').toLowerCase().trim();
           if (!cQuery) return;
           const match = databaseMatchesArray.find((m: any) => {

@@ -10,7 +10,7 @@ import { isPackagedBindItem, inferChainNameFromPackageLabel } from '../../../ser
 import { userSafeScoutFailureMessage, parseAndHealVisionScout } from '../../../server_vision_scout.js';
 import { isGeminiQuotaError, isGeminiUnavailableError, nextGeminiFallbackEngine } from '../../../server_gemini_retry.js';
 import { t, withScoutLanguage } from '../../utils/i18n.js';
-import { extractFoodSearchQueriesFromText } from './server_food_analyze_helpers.js';
+import { extractFoodSearchQueriesFromText, detectChainKeyFromText } from './server_food_analyze_helpers.js';
 import { scoutSystemInstruction } from '../../../agents/scoutInstructions.js';
 import { scoutOnlyCompareSystemInstruction } from '../../../prototype/meallog/compare/scout_only_compare_instructions.js';
 import { enrichBilingualItemName } from '../../../server_pure_helpers.js';
@@ -260,29 +260,99 @@ export function isFuzzyFoodMatch(nameA: string, nameB: string): boolean {
   return false;
 }
 
-export function matchExplicitTagToVisualItem(tag: any, visualItems: any[], excludedIndices?: Set<number>): any | undefined {
+export interface ExplicitTagMatch {
+  item: any;
+  matchedComponent?: any;
+}
+
+function getDishComponents(vi: any): any[] {
+  if (!vi || typeof vi !== 'object') return [];
+  if (Array.isArray(vi.components) && vi.components.length > 0) return vi.components;
+  if (Array.isArray(vi.componentsDetailList) && vi.componentsDetailList.length > 0) return vi.componentsDetailList;
+  if (Array.isArray(vi.foods) && vi.foods.length > 0) return vi.foods;
+  if (Array.isArray(vi.compositeSiblings) && vi.compositeSiblings.length > 0) return vi.compositeSiblings;
+  return [];
+}
+
+export function matchExplicitTagToVisualItem(
+  tag: any,
+  visualItems: any[],
+  excludedIndices?: Set<number>,
+  boundComponents?: Set<any>
+): ExplicitTagMatch | undefined {
   if (!tag || !Array.isArray(visualItems) || visualItems.length === 0) return undefined;
 
-  // 1. Direct dbId match
+  // 1. Direct dbId match on top-level item
   if (tag.dbId) {
-    const byId = visualItems.find((vi: any, idx: number) => !excludedIndices?.has(idx) && vi.dbId === tag.dbId);
-    if (byId) return byId;
+    for (let i = 0; i < visualItems.length; i++) {
+      if (excludedIndices?.has(i)) continue;
+      const vi = visualItems[i];
+      if (vi.dbId === tag.dbId) return { item: vi };
+    }
   }
 
-  // 2. Direct exact name/keyword match
+  // 2. Direct dbId match on component
+  if (tag.dbId) {
+    for (let i = 0; i < visualItems.length; i++) {
+      if (excludedIndices?.has(i)) continue;
+      const vi = visualItems[i];
+      const comps = getDishComponents(vi);
+      for (const comp of comps) {
+        if (boundComponents?.has(comp)) continue;
+        if (comp.dbId === tag.dbId) return { item: vi, matchedComponent: comp };
+      }
+    }
+  }
+
   const tagNames = [tag.name, tag.originalName, tag.keyword, tag.canonicalDbName].filter(Boolean);
+
+  // 3. Direct exact name/keyword match on component
+  for (let i = 0; i < visualItems.length; i++) {
+    if (excludedIndices?.has(i)) continue;
+    const vi = visualItems[i];
+    const comps = getDishComponents(vi);
+    for (const comp of comps) {
+      if (boundComponents?.has(comp)) continue;
+      const compNames = [comp.name, comp.originalName, comp.keyword, comp.canonicalDbName, comp.searchQuery].filter(Boolean);
+      for (const tn of tagNames) {
+        if (compNames.some((cn: string) => String(cn).toLowerCase().trim() === String(tn).toLowerCase().trim())) {
+          return { item: vi, matchedComponent: comp };
+        }
+      }
+    }
+  }
+
+  // 4. Direct exact name/keyword match on top-level item
   for (let i = 0; i < visualItems.length; i++) {
     if (excludedIndices?.has(i)) continue;
     const vi = visualItems[i];
     const viNames = [vi.name, vi.originalName, vi.keyword, vi.canonicalDbName, vi.dishName].filter(Boolean);
     for (const tn of tagNames) {
       if (viNames.some((vn: string) => String(vn).toLowerCase().trim() === String(tn).toLowerCase().trim())) {
-        return vi;
+        return { item: vi };
       }
     }
   }
 
-  // 3. Substance / fuzzy match (e.g. "Sainsbury's Porridge Oats" vs "Sainsbury Oatmeal")
+  // 5. Substance / fuzzy match on component (e.g. "Sainsbury's Porridge Oats" vs component "Sainsbury Oat")
+  for (let i = 0; i < visualItems.length; i++) {
+    if (excludedIndices?.has(i)) continue;
+    const vi = visualItems[i];
+    const comps = getDishComponents(vi);
+    for (const comp of comps) {
+      if (boundComponents?.has(comp)) continue;
+      const compNames = [comp.name, comp.originalName, comp.keyword, comp.canonicalDbName, comp.searchQuery].filter(Boolean);
+      for (const tn of tagNames) {
+        for (const cn of compNames) {
+          if (namesShareSubstance(String(tn), String(cn)) || isFuzzyFoodMatch(String(tn), String(cn))) {
+            return { item: vi, matchedComponent: comp };
+          }
+        }
+      }
+    }
+  }
+
+  // 6. Substance / fuzzy match on top-level item (e.g. "Sainsbury's Porridge Oats" vs dish "Sainsbury Oatmeal")
   for (let i = 0; i < visualItems.length; i++) {
     if (excludedIndices?.has(i)) continue;
     const vi = visualItems[i];
@@ -290,7 +360,7 @@ export function matchExplicitTagToVisualItem(tag: any, visualItems: any[], exclu
     for (const tn of tagNames) {
       for (const vn of viNames) {
         if (namesShareSubstance(String(tn), String(vn)) || isFuzzyFoodMatch(String(tn), String(vn))) {
-          return vi;
+          return { item: vi };
         }
       }
     }
@@ -303,37 +373,151 @@ export function matchExplicitTagToVisualItem(tag: any, visualItems: any[], exclu
 export function injectExplicitFoodTags(args: ExplicitTagsArgs): void {
   const { visionScoutItems, explicitFoodTags, onLog } = args;
   const boundIndices = new Set<number>();
+  const boundComponents = new Set<any>();
+
   explicitFoodTags.forEach((tag: any, idx: number) => {
-    const existing = matchExplicitTagToVisualItem(tag, visionScoutItems, boundIndices);
+    const match = matchExplicitTagToVisualItem(tag, visionScoutItems, boundIndices, boundComponents);
     const dbSource = tag.source === 'previous_meal'
       ? 'previous_meal'
       : (tag.dbSource || (String(tag.dbId || '').includes('brand_menu_') ? 'brand_official' : 'internal_catalog'));
-    const brandGuess = tag.chainName || tag.brand || tag.brandName || inferChainNameFromPackageLabel(tag.name);
+    const detectedChain = detectChainKeyFromText(tag.name);
+    const brandGuess = tag.chainName || tag.brand || tag.brandName || tag.item?.chainName || tag.item?.brand ||
+      (detectedChain ? (detectedChain.charAt(0).toUpperCase() + detectedChain.slice(1)) : inferChainNameFromPackageLabel(tag.name));
 
-    if (existing) {
+    if (match) {
+      const existing = match.item;
+      const matchedComponent = match.matchedComponent;
       const existingIdx = visionScoutItems.indexOf(existing);
-      if (existingIdx !== -1) boundIndices.add(existingIdx);
 
-      // Bind tag to existing visual item, retaining its visual crop / spatial coordinates
-      existing.keyword = tag.name;
-      existing.originalName = tag.name;
-      existing.name = tag.name;
-      existing.dishName = tag.name;
-      if (tag.weightGrams) existing.estimatedWeightGrams = tag.weightGrams;
-      existing.source = tag.source || 'catalog_tag';
-      existing.dbId = tag.dbId;
-      existing.dbSource = dbSource;
-      if (brandGuess) existing.chainName = brandGuess;
-      if (tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0]) {
-        existing.imageUrl = tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0];
+      if (matchedComponent) {
+        boundComponents.add(matchedComponent);
+        const comps = getDishComponents(existing);
+        if (comps.length > 0 && comps.every((c: any) => boundComponents.has(c))) {
+          if (existingIdx !== -1) boundIndices.add(existingIdx);
+        }
+
+        matchedComponent.name = tag.name;
+        matchedComponent.originalName = tag.name;
+        matchedComponent.keyword = tag.name;
+        matchedComponent.searchQuery = tag.name;
+        if (tag.weightGrams) {
+          matchedComponent.weightGrams = tag.weightGrams;
+          matchedComponent.estimatedWeightGrams = tag.weightGrams;
+          matchedComponent.nutrientBasisWeight = tag.weightGrams;
+        }
+        matchedComponent.source = tag.source || 'catalog_tag';
+        matchedComponent.dbId = tag.dbId;
+        matchedComponent.dbSource = dbSource;
+        matchedComponent._explicitTagBound = true;
+        if (brandGuess) {
+          matchedComponent.chainName = brandGuess;
+          matchedComponent.brand = brandGuess;
+        }
+        if (tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0]) {
+          matchedComponent.imageUrl = tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0];
+        }
+        if (tag.rawNutritionLabel) matchedComponent.rawNutritionLabel = tag.rawNutritionLabel;
+        if (tag.brandLock) matchedComponent.brandLock = tag.brandLock;
+        if (tag.labelNutrientsPerServing) matchedComponent.labelNutrientsPerServing = tag.labelNutrientsPerServing;
+
+        const tagNuts = tag.nutrients || tag.originalLog?.nutrients;
+        if (tagNuts) {
+          matchedComponent.nutrients = { ...tagNuts };
+          if (tagNuts.calories != null) matchedComponent.calories = tagNuts.calories;
+          if (tagNuts.protein != null) matchedComponent.protein = tagNuts.protein;
+          const fatVal = tagNuts.totalFat ?? tagNuts.fat;
+          if (fatVal != null) {
+            matchedComponent.totalFat = fatVal;
+            matchedComponent.fat = fatVal;
+          }
+          if (tagNuts.saturatedFat != null) matchedComponent.saturatedFat = tagNuts.saturatedFat;
+          const carbVal = tagNuts.carbohydrates ?? tagNuts.carbs;
+          if (carbVal != null) {
+            matchedComponent.carbohydrates = carbVal;
+            matchedComponent.carbs = carbVal;
+          }
+          if (tagNuts.sodium != null) matchedComponent.sodium = tagNuts.sodium;
+          const fibVal = tagNuts.totalFibre ?? tagNuts.fiber;
+          if (fibVal != null) matchedComponent.totalFibre = fibVal;
+          if (tagNuts.solubleFibre != null) matchedComponent.solubleFibre = tagNuts.solubleFibre;
+        }
+
+        if (brandGuess && !existing.chainName) existing.chainName = brandGuess;
+        if (Array.isArray(existing.visualIngredients)) {
+          const vIdx = existing.visualIngredients.findIndex((vName: string) =>
+            vName === matchedComponent.name || namesShareSubstance(vName, tag.name) || isFuzzyFoodMatch(vName, tag.name)
+          );
+          if (vIdx !== -1) {
+            existing.visualIngredients[vIdx] = tag.name;
+          }
+          existing.ingredientsList = existing.visualIngredients.join(', ');
+        }
+        if (Array.isArray(existing.ingredients)) {
+          const iIdx = existing.ingredients.findIndex((iName: string) =>
+            iName === matchedComponent.name || namesShareSubstance(iName, tag.name) || isFuzzyFoodMatch(iName, tag.name)
+          );
+          if (iIdx !== -1) {
+            existing.ingredients[iIdx] = tag.name;
+          }
+        }
+
+        if (comps.length > 0) {
+          const compWeightSum = comps.reduce((acc: number, c: any) => acc + (Number(c.weightGrams ?? c.estimatedWeightGrams) || 0), 0);
+          if (compWeightSum > 0) {
+            existing.estimatedWeightGrams = Math.max(Number(existing.estimatedWeightGrams) || 0, compWeightSum);
+            existing.weightGrams = existing.estimatedWeightGrams;
+          }
+        }
+
+        onLog(`[Explicit Food Tags] Bound tag "${tag.name}" to subcomponent "${matchedComponent.originalName || matchedComponent.name}" in dish "${existing.originalName || existing.keyword}" (preserving component bbox [${matchedComponent.boundingBox2D}] and dish bbox [${existing.boundingBox2D}]).`);
+      } else {
+        if (existingIdx !== -1) boundIndices.add(existingIdx);
+
+        existing.keyword = tag.name;
+        existing.originalName = tag.name;
+        existing.name = tag.name;
+        existing.dishName = tag.name;
+        if (tag.weightGrams) existing.estimatedWeightGrams = tag.weightGrams;
+        existing.source = tag.source || 'catalog_tag';
+        existing.dbId = tag.dbId;
+        existing.dbSource = dbSource;
+        if (brandGuess) existing.chainName = brandGuess;
+        if (tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0]) {
+          existing.imageUrl = tag.imageUrl || tag.originalLog?.imageUrl || tag.originalLog?.imageUrls?.[0];
+        }
+        if (tag.nutrients || tag.originalLog?.nutrients) {
+          existing.nutrients = tag.nutrients || tag.originalLog?.nutrients;
+        }
+        if (tag.rawNutritionLabel) existing.rawNutritionLabel = tag.rawNutritionLabel;
+        if (tag.brandLock) existing.brandLock = tag.brandLock;
+        if (tag.labelNutrientsPerServing) existing.labelNutrientsPerServing = tag.labelNutrientsPerServing;
+
+        const comps = getDishComponents(existing);
+        if (comps.length === 1) {
+          const c = comps[0];
+          c.name = tag.name;
+          c.originalName = tag.name;
+          c.keyword = tag.name;
+          c.searchQuery = tag.name;
+          if (tag.weightGrams) {
+            c.weightGrams = tag.weightGrams;
+            c.estimatedWeightGrams = tag.weightGrams;
+            c.nutrientBasisWeight = tag.weightGrams;
+          }
+          c.source = tag.source || 'catalog_tag';
+          c.dbId = tag.dbId;
+          c.dbSource = dbSource;
+          c._explicitTagBound = true;
+          if (brandGuess) {
+            c.chainName = brandGuess;
+            c.brand = brandGuess;
+          }
+          if (existing.nutrients) c.nutrients = { ...existing.nutrients };
+          boundComponents.add(c);
+        }
+
+        onLog(`[Explicit Food Tags] Bound tag "${tag.name}" to visual item "${existing.originalName || existing.keyword}" (preserving bbox [${existing.boundingBox2D}]).`);
       }
-      if (tag.nutrients || tag.originalLog?.nutrients) {
-        existing.nutrients = tag.nutrients || tag.originalLog?.nutrients;
-      }
-      if (tag.rawNutritionLabel) existing.rawNutritionLabel = tag.rawNutritionLabel;
-      if (tag.brandLock) existing.brandLock = tag.brandLock;
-      if (tag.labelNutrientsPerServing) existing.labelNutrientsPerServing = tag.labelNutrientsPerServing;
-      onLog(`[Explicit Food Tags] Bound tag "${tag.name}" to visual item "${existing.originalName || existing.keyword}" (preserving bbox [${existing.boundingBox2D}]).`);
     } else {
       visionScoutItems.push({
         scoutIndex: 1000 + idx, // unique offset

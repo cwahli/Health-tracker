@@ -45,7 +45,7 @@ describe('MultiItemComposition & Explicit Tag Preservation', () => {
     expect(brandItem).toBeDefined();
     expect(brandItem.keyword).toBe('Pret Latte');
     expect(brandItem.source).toBe('catalog_tag');
-    expect(brandItem.dbSource).toBe('internal_catalog');
+    expect(brandItem.dbSource).toBe('brand_official');
     expect(brandItem.imageUrl).toBe('/photos/brand_pret_latte.jpg');
     expect(brandItem.nutrients.calories).toBe(150);
 
@@ -57,7 +57,7 @@ describe('MultiItemComposition & Explicit Tag Preservation', () => {
     expect(savedItem.dbSource).toBe('previous_meal');
     expect(savedItem.imageUrl).toBe('/photos/toast.jpg');
 
-    expect(logs.some(l => l.includes('Injected 2 catalog tags'))).toBe(true);
+    expect(logs.some(l => l.includes('Processed 2 catalog tag(s)'))).toBe(true);
   });
 
   it('prevents duplicate injection if a tag is already present in visionScoutItems', () => {

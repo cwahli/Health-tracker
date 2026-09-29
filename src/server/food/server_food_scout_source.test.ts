@@ -154,6 +154,143 @@ describe('F-8.10 shard 10 — scout-prep seams', () => {
     expect(logs.some((m) => m.includes('Bound tag "Sainsbury\'s Porridge Oats"'))).toBe(true);
   });
 
+  it('binds explicit tag to subcomponent inside composite dish and prevents duplicate injection', () => {
+    const logs: string[] = [];
+    const vision: any[] = [
+      {
+        scoutIndex: 0,
+        keyword: 'Oatmeal with Grapes',
+        originalName: 'Oatmeal with Grapes',
+        estimatedWeightGrams: 70,
+        boundingBox2D: [250, 0, 811, 377],
+        sourceImageIndex: 0,
+        visualIngredients: ['Sainsbury Oat', 'Green Grapes'],
+        components: [
+          {
+            name: 'Sainsbury Oat',
+            originalName: 'Sainsbury Oat',
+            searchQuery: 'rolled oats',
+            weightGrams: 70,
+            estimatedWeightGrams: 70,
+            boundingBox2D: [360, 45, 600, 280],
+            sourceImageIndex: 0,
+          },
+          {
+            name: 'Green Grapes',
+            originalName: 'Green Grapes',
+            searchQuery: 'green grapes',
+            weightGrams: 40,
+            estimatedWeightGrams: 40,
+            boundingBox2D: [390, 110, 600, 255],
+            sourceImageIndex: 0,
+          },
+        ],
+      },
+      {
+        scoutIndex: 1,
+        keyword: 'Fresh Fruit Platter',
+        originalName: 'Fresh Fruit Platter',
+        estimatedWeightGrams: 460,
+        boundingBox2D: [225, 375, 988, 1000],
+        sourceImageIndex: 0,
+      },
+    ];
+
+    injectExplicitFoodTags({
+      visionScoutItems: vision,
+      explicitFoodTags: [
+        {
+          name: "Sainsbury's Porridge Oats",
+          chainName: "Sainsbury's",
+          weightGrams: 70,
+          dbId: 'brand_menu_local_sainsbury_sainsbury_porridge_oats',
+          nutrients: { calories: 254, protein: 7.7, totalFat: 4.2, carbohydrates: 43.4 },
+        },
+      ],
+      onLog: (m) => logs.push(m),
+    });
+
+    // Exactly 2 dishes retained — NO duplicate 3rd standalone item injected!
+    expect(vision).toHaveLength(2);
+    expect(vision[0].originalName).toBe('Oatmeal with Grapes');
+    expect(vision[0].chainName).toBe("Sainsbury's");
+    expect(vision[0].estimatedWeightGrams).toBe(110); // 70g + 40g
+    expect(vision[0].boundingBox2D).toEqual([250, 0, 811, 377]);
+    expect(vision[0].visualIngredients).toEqual(["Sainsbury's Porridge Oats", 'Green Grapes']);
+
+    // Component 0 correctly adopted catalog truth while preserving bounding box
+    const oatComp = vision[0].components[0];
+    expect(oatComp.name).toBe("Sainsbury's Porridge Oats");
+    expect(oatComp.weightGrams).toBe(70);
+    expect(oatComp.dbId).toBe('brand_menu_local_sainsbury_sainsbury_porridge_oats');
+    expect(oatComp.dbSource).toBe('brand_official');
+    expect(oatComp.chainName).toBe("Sainsbury's");
+    expect(oatComp.calories).toBe(254);
+    expect(oatComp.protein).toBe(7.7);
+    expect(oatComp.boundingBox2D).toEqual([360, 45, 600, 280]);
+
+    // Component 1 untouched
+    expect(vision[0].components[1].name).toBe('Green Grapes');
+    expect(vision[0].components[1].weightGrams).toBe(40);
+
+    // Logs verify subcomponent binding
+    expect(logs.some((m) => m.includes('Bound tag "Sainsbury\'s Porridge Oats" to subcomponent'))).toBe(true);
+  });
+
+  it('binds multiple explicit tags to distinct subcomponents in the same composite dish', () => {
+    const logs: string[] = [];
+    const vision: any[] = [
+      {
+        scoutIndex: 0,
+        keyword: 'Oatmeal with Grapes',
+        originalName: 'Oatmeal with Grapes',
+        estimatedWeightGrams: 70,
+        boundingBox2D: [250, 0, 811, 377],
+        sourceImageIndex: 0,
+        components: [
+          {
+            name: 'Sainsbury Oat',
+            originalName: 'Sainsbury Oat',
+            weightGrams: 70,
+            boundingBox2D: [360, 45, 600, 280],
+          },
+          {
+            name: 'Green Grapes',
+            originalName: 'Green Grapes',
+            weightGrams: 40,
+            boundingBox2D: [390, 110, 600, 255],
+          },
+        ],
+      },
+    ];
+
+    injectExplicitFoodTags({
+      visionScoutItems: vision,
+      explicitFoodTags: [
+        {
+          name: "Sainsbury's Porridge Oats",
+          weightGrams: 70,
+          dbId: 'brand_menu_sainsbury_oats',
+          nutrients: { calories: 254 },
+        },
+        {
+          name: 'Green Grapes',
+          weightGrams: 50,
+          dbId: 'internal_green_grapes',
+          nutrients: { calories: 35 },
+        },
+      ],
+      onLog: (m) => logs.push(m),
+    });
+
+    expect(vision).toHaveLength(1);
+    expect(vision[0].components[0].name).toBe("Sainsbury's Porridge Oats");
+    expect(vision[0].components[0].calories).toBe(254);
+    expect(vision[0].components[1].name).toBe('Green Grapes');
+    expect(vision[0].components[1].weightGrams).toBe(50);
+    expect(vision[0].components[1].calories).toBe(35);
+  });
+
   it('maps text queries with cooking-method sniffing', () => {
     expect(mapTextQueriesToScoutItems(['grilled salmon', 'rice'])).toEqual([
       { scoutIndex: 0, keyword: 'grilled salmon', originalName: 'grilled salmon', estimatedWeightGrams: 100, source: 'text_query', cookingMethod: 'grilled', visualIngredients: [] },
