@@ -14,6 +14,8 @@ The user typed `/bugs` or asked for the board. Hand them the live board, not a p
   validates the opener's own Telegram initData (auto-matching any configured
   bot token), so no secret is needed in chat. If the button fails to render,
   report it once as a platform limitation and fall back to the pointer below.
+- Hermes agents have no `web_app` send path, so the button never applies to
+  you: answer with the pointer directly. No gateway URL is needed for that.
 - Never paste the board URL as a plain link: a plain browser open carries no
   initData and lands on a dead bootstrap page.
 - If buttons are unavailable, or the gateway is not serving `/bugs`, end the
