@@ -153,6 +153,7 @@ import {
   composeExternalPrompt,
   formatProjectsSummary,
 } from './lib/project-registry.mjs';
+import { runPmCommand } from './lib/pm-run.mjs';
 import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-runner.mjs';
 
 const HOME = os.homedir();
@@ -2736,6 +2737,22 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
     }
 
     case 'role': {
+      // `/role pm` is the Project Manager's own surface (PM-1). It is answered
+      // here, ahead of the generic role switch, because the PM is not a persona
+      // to adopt — it is a cycle to run: project the fleet, climb the ladder,
+      // nudge, record. See scripts/lib/pm-run.mjs for the whole implementation.
+      if (cmd.args === 'pm' || cmd.args.startsWith('pm ')) {
+        const sub = cmd.args.replace(/^pm\s*/, '').trim();
+        const pm = await runPmCommand({
+          sub,
+          botId: config.id,
+          chatId,
+          operatorChatId: String(config.telegram?.allowedUserIds?.[0] || ''),
+        });
+        if (pm.resetRole) resetChatRole(chatId);
+        await api.sendMessage(chatId, pm.text, { parse_mode: 'Markdown' });
+        return;
+      }
       const activeProj = getChatProject(chatId);
       const currentRoles = getProjectRoles(activeProj.id);
       if (!cmd.args) {

@@ -46,6 +46,13 @@ const CORE_PROJECT_ROLES = [
     instructions: 'You are the Reliability & Infrastructure Ops Engineer. You manage Caddy SSL configurations, monitor systemd units (health-tracker.service, tmux-health), tune fail2ban rules, inspect watchdog logs, and ensure 99.9% host uptime.',
     tools: ['read', 'systemctl', 'caddy_reload', 'netstat'],
   },
+  {
+    id: 'pm',
+    name: 'Project Manager',
+    description: 'Projects the fleet from its existing records, climbs the retry → find-another-way → escalate ladder, and keeps the ongoing-projects sheet current',
+    instructions: 'You are the Project Manager (see scripts/lib/pm-run.mjs, which is the whole implementation). Your three jobs: (1) project fleet status from records that already exist — specs/active packet frontmatter, `bugctl list --json`, the run ledger, and the agent-heartbeat liveness store — and never keep a board of your own, because a fifth write is the one that goes stale; (2) for anything stalled, climb the ladder exactly one rung per cycle (retry → find another way → escalate to the operator) with the attempt counter persisted on disk, so a host restart cannot reset it; (3) keep the ongoing-projects Google Sheet current through the governed writer (spool, then flush), never by opening a second Google client, and never inside a project folder. `/role pm` prints the projection; `/role pm run` runs one cycle. Nudges go out as the operator, from the session scripts/lib/tg-userbot.mjs already manages; when that session is not configured, say so and print the commands only the operator can run — never report a message that did not go out.',
+    tools: ['read', 'grep', 'status'],
+  },
 ];
 
 const COUNCIL_ROLES = [
@@ -157,6 +164,11 @@ export const ROLE_ALIASES = {
   ops: 'reliability_ops',
   infra: 'reliability_ops',
   reliability: 'reliability_ops',
+  // Project Manager: a role on the existing bot, never a bot per role
+  // (plan/ROADMAP.md). Resolved here so `/role pm` cannot fall through to the
+  // council aliases below.
+  pm: 'pm',
+  projectmanager: 'pm',
 
   // Project 2 Council Roles
   accuracy: 'accuracy_review',
