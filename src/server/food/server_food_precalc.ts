@@ -72,6 +72,13 @@ export function mapLedgersToPrecalcItems(args: LedgerMapArgs): any[] {
     onLog(`[Budget] Finalized ledger for "${l.originalName}": ${l.nutrients.calories} kcal (${l.weightGrams}g, source=${l.dbSource})`);
     const vItem = visionScoutItems[l.scoutIndex] || {};
     const comps = l.componentsDetailList || l.components || vItem.componentsDetailList || vItem.components || vItem.compositeSiblings || [];
+    const lNuts = l.nutrients || {};
+    const sat = Number(lNuts.saturatedFat ?? 0) || 0;
+    const tf = Math.max(Number(lNuts.totalFat ?? 0) || 0, sat);
+    const cal = Number(lNuts.calories ?? 0) || 0;
+    const prot = Number(lNuts.protein ?? 0) || 0;
+    const carbs = Number(lNuts.carbohydrates ?? 0) || 0;
+    const sod = Number(lNuts.sodium ?? 0) || 0;
     return {
       scoutIndex: l.scoutIndex,
       originalName: l.originalName,
@@ -80,6 +87,14 @@ export function mapLedgersToPrecalcItems(args: LedgerMapArgs): any[] {
       brandName: l.chainName || vItem.brandName || vItem.chainName || null,
       foodType: l.dishClass,
       estimatedWeightGrams: l.weightGrams,
+      calories: cal,
+      protein: prot,
+      totalFat: tf,
+      fat: tf,
+      saturatedFat: sat,
+      carbohydrates: carbs,
+      carbs: carbs,
+      sodium: sod,
       portionMultiplier: 1.0,
       nutrients: l.nutrients,
       nutrients100g: {},

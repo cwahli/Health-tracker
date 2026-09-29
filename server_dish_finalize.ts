@@ -530,6 +530,18 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
     }
   }
 
+  // Physical invariant: totalFat must always be at least saturatedFat
+  const isFruitJuice = /\b(fruit juice|apple juice|orange juice|grape juice|juice blend)\b/i.test(originalName) ||
+    (/\bjuice\b/i.test(originalName) && !/\b(coconut|avocado)\b/i.test(originalName));
+  if (isFruitJuice && !lockedNutrientKeys.includes('saturatedFat') && (nutrients.totalFat ?? 0) <= 0.5) {
+    nutrients.saturatedFat = 0;
+  }
+  if (typeof nutrients.saturatedFat === 'number' && nutrients.saturatedFat > 0) {
+    if (nutrients.totalFat == null || nutrients.totalFat < nutrients.saturatedFat) {
+      nutrients.totalFat = nutrients.saturatedFat;
+    }
+  }
+
   // 5. Derive Unsaturated Fat, Salt, and Soluble Fibre
   nutrients.unsaturatedFat = computeUnsaturatedFat(nutrients.totalFat, nutrients.saturatedFat, nutrients.transFat);
   nutrients.salt = computeSaltFromSodium(nutrients.sodium);
@@ -741,6 +753,11 @@ export async function finalizeDishLedger(input: FinalizeInput): Promise<DishLedg
         // derived unsaturatedFat/salt (e.g. from the estimated fallback when the
         // scout dish carries no top-level nutrients). Re-derive so the ledger
         // can never print unsat > totalFat or salt from a stale sodium.
+        if (typeof nutrients.saturatedFat === 'number' && nutrients.saturatedFat > 0) {
+          if (nutrients.totalFat == null || nutrients.totalFat < nutrients.saturatedFat) {
+            nutrients.totalFat = nutrients.saturatedFat;
+          }
+        }
         reapplyDerivedNutrients(nutrients);
         
         // Update missing locks

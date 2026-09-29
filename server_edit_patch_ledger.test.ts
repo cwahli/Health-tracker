@@ -177,6 +177,25 @@ describe('edit patch ledger', () => {
     expect(cmds[0].newWeightGrams).toBe(30);
   });
 
+  it('diffs multi-dish portion update from userMessage with "Portion Selection:" syntax', () => {
+    const prior = [
+      { scoutIndex: 0, name: 'Lidl Fruit Juice Blend', weightGrams: 150, nutrients: { calories: 85 } },
+      { scoutIndex: 1, name: 'Lidl Diced Mango', weightGrams: 30, nutrients: { calories: 21 } },
+      { scoutIndex: 2, name: 'Co-op Cooked Beef Topside', weightGrams: 25, nutrients: { calories: 47 } },
+    ];
+    const cmds = diffScoutToEditCommands({
+      priorItems: prior,
+      scoutItems: [],
+      userMessage: 'Portion Selection: Lidl Fruit Juice Blend: 600g, Lidl Diced Mango: 100g, Co-op Cooked Beef Topside: 100g',
+    });
+    expect(cmds.length).toBe(3);
+    expect(cmds.map(c => ({ action: c.action, name: c.itemName, g: c.newWeightGrams }))).toEqual([
+      { action: 'set_weight', name: 'Lidl Fruit Juice Blend', g: 600 },
+      { action: 'set_weight', name: 'Lidl Diced Mango', g: 100 },
+      { action: 'set_weight', name: 'Co-op Cooked Beef Topside', g: 100 },
+    ]);
+  });
+
   it('aligns scout partial dish update to correct item in multi-dish meal without deleting others', () => {
     const prior = [
       { scoutIndex: 0, name: 'Beef and Vegetable Hotpot', weightGrams: 300, sourceImageIndex: 0 },

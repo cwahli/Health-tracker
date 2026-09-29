@@ -21,6 +21,22 @@ export function mergeFoodItem(prev: MealFoodItem | undefined, patch: Partial<Mea
     }
     merged[key] = value;
   }
+  if (patch.nutrients && typeof patch.nutrients === 'object') {
+    const n = patch.nutrients;
+    if (n.calories != null) merged.calories = n.calories;
+    if (n.protein != null) merged.protein = n.protein;
+    if (n.carbohydrates != null) {
+      merged.carbohydrates = n.carbohydrates;
+      (merged as any).carbs = n.carbohydrates;
+    }
+    if (n.saturatedFat != null) merged.saturatedFat = n.saturatedFat;
+    if (n.totalFat != null) {
+      const safeFat = Math.max(Number(n.totalFat) || 0, Number(merged.saturatedFat ?? n.saturatedFat ?? 0));
+      merged.totalFat = safeFat;
+      (merged as any).fat = safeFat;
+    }
+    if (n.sodium != null) merged.sodium = n.sodium;
+  }
   return merged;
 }
 

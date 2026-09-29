@@ -391,6 +391,7 @@ export async function executeFinalizePhase(
       scoutItems: ctx.visionScoutItems || ctx.preCalculatedItems || [],
       priorLocks: activeMeal?.userLockedSlots || [],
       turn: scoutTurnNumberForEdit,
+      portionChoices: ctx.req.body?.portionChoices,
     });
     for (const note of result.notes) ctx.addDebugLog(`[Single-Path Edit] ${note}`);
     if (Array.isArray((result as any).appliedCommands) && (result as any).appliedCommands.length > 0) {
@@ -498,9 +499,39 @@ export async function executeFinalizePhase(
         ctx.addDebugLog(`[PatchLedger] persisted ${activeMeal.userLockedSlots.length} lock(s) on job ${ctx.req.body.jobId}`);
       }
     }
+    const syncedEditItems = (result.items || []).map((it: any) => {
+      const n = it.nutrients || {};
+      const satFat = Number(n.saturatedFat ?? it.saturatedFat ?? 0) || 0;
+      const totalFat = Math.max(Number(n.totalFat ?? it.totalFat ?? it.fat ?? 0) || 0, satFat);
+      const cal = Number(n.calories ?? it.calories ?? 0) || 0;
+      const prot = Number(n.protein ?? it.protein ?? 0) || 0;
+      const carbs = Number(n.carbohydrates ?? it.carbohydrates ?? it.carbs ?? 0) || 0;
+      const sod = Number(n.sodium ?? it.sodium ?? 0) || 0;
+      return {
+        ...it,
+        calories: cal,
+        protein: prot,
+        carbohydrates: carbs,
+        carbs,
+        totalFat,
+        fat: totalFat,
+        saturatedFat: satFat,
+        sodium: sod,
+        nutrients: {
+          ...n,
+          calories: cal,
+          protein: prot,
+          carbohydrates: carbs,
+          totalFat,
+          saturatedFat: satFat,
+          sodium: sod,
+        },
+      };
+    });
+    activeMeal.itemsBreakdown = syncedEditItems;
     if (pendingFoodLog) {
-      pendingFoodLog.itemsBreakdown = result.items;
-      pendingFoodLog.items = result.items;
+      pendingFoodLog.itemsBreakdown = syncedEditItems;
+      pendingFoodLog.items = syncedEditItems;
       pendingFoodLog.nutrients = result.nutrients;
       pendingFoodLog.weightGrams = result.weightGrams;
       if (activeMeal.date) pendingFoodLog.date = activeMeal.date;
