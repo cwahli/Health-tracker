@@ -26,6 +26,7 @@ export const BOT_COMMANDS = [
   { command: 'abort', description: 'Cancel the running request' },
   { command: 'watch', description: 'Live tool feed on|off|status (TG-native work view)' },
   { command: 'tui', description: 'Open the opencode TUI for this conversation (Mini App)' },
+  { command: 'bugs', description: 'Open the shared bug board (Mini App)' },
   { command: 'debug', description: 'Show the active work-session debug view' },
   { command: 'handoff', description: 'Checkpoint this work session for continuation' },
   { command: 'resume', description: 'Print the current bug-ticket packet' },
