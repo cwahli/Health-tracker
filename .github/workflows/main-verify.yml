@@ -1,0 +1,39 @@
+name: main-verify
+
+# Gives every commit that lands on `main` a CI run — which a token-driven merge
+# cannot get on its own. Full reasoning: `scripts/lib/main-verify.mjs`.
+#
+# `ci.yml` triggers on `push: branches: [main]`, and every commit on main is a
+# squash merge performed by `merge-agent-pr` with the repository's GITHUB_TOKEN.
+# GitHub suppresses workflow triggers for token-driven pushes ("with the
+# exception of workflow_dispatch and repository_dispatch"), so that path never
+# fires. Measured, not assumed: the last eight commits on main report no workflow
+# run at all — only the PR head is ever verified, and the composition of two
+# separately-green PRs is never checked together.
+#
+# `repository_dispatch` is one of the two exempt events, so `scripts/auto-merge.mjs`
+# dispatches this after a successful merge. The gates are deliberately NOT
+# re-listed here: the job calls `ci.yml` through `workflow_call`, so main runs the
+# same suite from the same definition the PR ran, and no second list can drift.
+
+on:
+  repository_dispatch:
+    types: [main-verify]
+  # Manual re-verification of main, and exempt from the suppression for the same
+  # reason the dispatch is.
+  workflow_dispatch:
+
+# Names the commit being verified, so a run is provably about a merge and not
+# just "main at some point".
+run-name: main-verify ${{ github.event.client_payload.sha || github.sha }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    uses: ./.github/workflows/ci.yml

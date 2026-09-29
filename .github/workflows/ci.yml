@@ -13,6 +13,12 @@ on:
   # on the PR head SHA. See docs/agent/GITHUB_WORKFLOW.md.
   push:
     branches: [main, 'agent/**']
+  # Reusable, so `main-verify.yml` can run this same job on `main` after a merge.
+  # It has to be a call and not the `push` trigger above: every commit on main is
+  # a squash merge written by `merge-agent-pr` with GITHUB_TOKEN, and GitHub
+  # suppresses workflow triggers for token-driven pushes, so that `push: [main]`
+  # path has never fired once. See `scripts/lib/main-verify.mjs`.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -183,6 +189,14 @@ jobs:
       # required check must never produce a merge call.
       - name: Merge gate (assert-auto-merge)
         run: node scripts/assert-auto-merge.test.mjs
+
+      # The merge gate above protects the PR. This one protects `main`: a
+      # GITHUB_TOKEN squash merge triggers no workflow, so the driver dispatches
+      # the post-merge run explicitly. The sensor proves the dispatch is sent,
+      # that it names the merge commit, and that a dispatch with nowhere to land
+      # stops the merge instead of riding along with it.
+      - name: Main verification wiring (assert-main-verify)
+        run: node scripts/assert-main-verify.test.mjs
 
       # V-30.5 bug-ticket lane gates (plan/BUG_TICKET_PIPELINE.md §6.2).
       # ticket-state: derived S-C-lite projection stays pure.
