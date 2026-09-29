@@ -330,6 +330,58 @@ const saveSessions = (id, sessions) => saveMap(id, 'sessions.json', sessions);
 // — a cline id in that map would be handed straight to `opencode run --session`.
 const loadClineSessions = (id) => loadMap(id, 'cline-sessions.json');
 const saveClineSessions = (id, sessions) => saveMap(id, 'cline-sessions.json', sessions);
+
+/**
+ * The opencode session a chat is on, but only if it belongs to the workspace
+ * this turn runs in. Cline is excluded on purpose: its ids are not opencode
+ * ids, and it keeps its own map.
+ *
+ * A chat had exactly one session row, and nothing in it said which project that
+ * session belonged to. So switching project left the row pointing at the old
+ * project's conversation: the TUI dutifully attached it (the pane showed a PIP
+ * Defense Council session while the bot answered from Health-tracker), and the
+ * bot's own turn passed no session at all, so it silently started or picked a
+ * different one. The two drifted apart and neither noticed.
+ *
+ * The scope is stored beside the id as `<workspace>\u0000<sessionId>`, so a row
+ * written before this change (a bare id, no scope) reads as belonging to
+ * nothing and is therefore dropped — the honest reading: we do not know where it
+ * came from, and a wrong session is worse than a fresh one.
+ */
+const SESSION_SCOPE_SEP = '\u0000';
+
+function scopeSessionId(workspace, sessionId) {
+  const ws = String(workspace || '').trim();
+  const sid = String(sessionId || '').trim();
+  if (!sid) return null;
+  // No workspace means we cannot scope it. Store the id alone so the next read
+  // treats it as unscoped rather than silently binding it to wherever.
+  return ws ? `${ws}${SESSION_SCOPE_SEP}${sid}` : sid;
+}
+
+function unscopeSessionId(scoped) {
+  const raw = String(scoped || '');
+  const cut = raw.indexOf(SESSION_SCOPE_SEP);
+  return cut === -1 ? null : { workspace: raw.slice(0, cut), sessionId: raw.slice(cut + 1) };
+}
+
+/** The session id for this chat in this workspace, or null when there is none. */
+export function sessionForWorkspace(sessions, chatId, workspace) {
+  const row = sessions?.get?.(String(chatId)) ?? sessions?.get?.(chatId);
+  const parts = unscopeSessionId(row);
+  if (!parts) return null;
+  // Exact match only. A near-miss (same project, moved directory) is a
+  // different conversation to the tool, and reusing it is the bug this guards.
+  return parts.workspace === String(workspace || '') ? parts.sessionId : null;
+}
+
+/** Record the chat's session for a workspace, replacing any other workspace's. */
+export function bindSessionForWorkspace(sessions, chatId, workspace, sessionId) {
+  const sid = String(sessionId || '').trim();
+  if (!sid) return false;
+  sessions.set(String(chatId), scopeSessionId(workspace, sid));
+  return true;
+}
 const loadPrefs = (id) => loadMap(id, 'prefs.json');
 const savePrefs = (id, prefs) => saveMap(id, 'prefs.json', prefs);
 const loadTotals = (id) => loadMap(id, 'totals.json');
@@ -2059,13 +2111,19 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // Named and aged, because a warm pane and an abandoned one are otherwise
       // indistinguishable from out here — a tmux session outlives its attacher
       // by design, so uptime alone never says whether anyone is in it.
-      const tuiLine = tuiStatusLine(config.id, sessions.get(chatId));
+      // Scoped: a row belonging to another project is not this chat's session,
+      // and printing it is how a Health-tracker /status came to advertise a PIP
+      // Defense Council conversation.
+      const statusProject = getChatProject(chatId);
+      const statusWorkspace = statusProject.type === 'external' ? statusProject.workspace : config.agent.workspace;
+      const activeStatusSession = sessionForWorkspace(sessions, chatId, statusWorkspace);
+      const tuiLine = tuiStatusLine(config.id, activeStatusSession);
       const snap = buildStatusSnapshot({
         bot: { id: config.id, name: config.name },
         platform: effSurface || 'opencode',
         capabilities: { compact: true, costTracking: true, backends: false },
         effective: eff,
-        session: sessions.get(chatId) ? { id: sessions.get(chatId) } : null,
+        session: activeStatusSession ? { id: activeStatusSession, workspace: statusWorkspace } : null,
         handoff: Boolean((prefFor(prefs, chatId)).handoff),
         usage: lastUsage?.get(chatId) || null,
         totals: totals?.get(chatId) || null,
@@ -2111,7 +2169,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         await api.sendMessage(chatId, 'A request is already running. Send /abort to cancel it first.');
         return;
       }
-      const compactSessionId = sessions.get(chatId);
+      const compactProject = getChatProject(chatId);
+      const compactSessionId = sessionForWorkspace(
+        sessions,
+        chatId,
+        compactProject.type === 'external' ? compactProject.workspace : config.agent.workspace,
+      );
       if (!compactSessionId) {
         await api.sendMessage(chatId, 'Nothing to compact — no active session in this chat yet.');
         return;
@@ -2144,7 +2207,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           const brief = result.finalText.trim().slice(0, 2000);
           setPref(prefs, chatId, { handoff: brief });
           savePrefs(config.id, prefs);
-          sessions.delete(chatId);
+          // Drop the old project's session row. Without this the chat kept a
+        // session id from the workspace it just left, and the TUI — which
+        // resolves its session from this same file — went on attaching the
+        // previous project's conversation after a switch.
+        sessions.delete(String(chatId));
           saveSessions(config.id, sessions);
           const compactUsage = await noteUsage({ chatId, result, eff, config, caches, totals, lastUsage });
           await api.sendMessage(
@@ -2457,7 +2524,16 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       await api.sendMessage(chatId, 'Aborting the running request...');
       const workId = sessionKey({ location: workLocation(), chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });
-      abortSession(workId, { transcriptRef: sessions.get(chatId) || null });
+      // Scoped, like every other read: a transcript reference from another
+      // project would abort nothing.
+      const abortProject = getChatProject(chatId);
+      abortSession(workId, {
+        transcriptRef: sessionForWorkspace(
+          sessions,
+          chatId,
+          abortProject.type === 'external' ? abortProject.workspace : config.agent.workspace,
+        ) || null,
+      });
       return;
     }
 
@@ -2490,11 +2566,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // nothing while reporting success.
       const tuiSub = String(cmd.args || '').trim().toLowerCase();
       if (tuiSub === 'status') {
-        await api.sendMessage(chatId, `⌨️ ${tuiStatusLine(config.id, sessions.get(chatId))}`);
+        await api.sendMessage(chatId, `⌨️ ${tuiStatusLine(config.id, tuiSessionId)}`);
         return;
       }
       if (tuiSub === 'off' || tuiSub === 'kill' || tuiSub === 'stop') {
-        const lease = readTuiLease(config.id, sessions.get(chatId));
+        const lease = readTuiLease(config.id, tuiSessionId);
         if (!lease || !lease.pane) {
           await api.sendMessage(chatId, '⌨️ No TUI pane is open for this chat — nothing to close. `/tui` opens one.');
           return;
@@ -2571,6 +2647,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const moved = lastMiniappUrl && lastMiniappUrl !== tuiUrl;
       lastMiniappUrl = tuiUrl;
       const tuiSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
+      // The workspace this chat is actually in right now — the same expression
+      // the turn uses. Advertising config.agent.workspace unconditionally is what
+      // let a /tui in an external chat promise the website repo while the chat
+      // was pointed somewhere else entirely.
+      const tuiProject = getChatProject(chatId);
+      const tuiWorkspace = tuiProject.type === 'external' ? tuiProject.workspace : config.agent.workspace;
+      // Scoped, so /tui hands tui-attach.sh the session for the workspace the
+      // chat is in — the identical id the next turn passes.
+      const tuiSessionId = sessionForWorkspace(sessions, chatId, tuiWorkspace);
       if (!tuiSurface.terminal) {
         // An API-only lane has no screen to attach to. Handing it a PTY anyway
         // would be a scraped badge, not a terminal.
@@ -2595,7 +2680,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
           model: effective(config, prefs, chatId).model,
           sessionId: tuiSurface.surface === 'cline'
             ? loadClineSessions(config.id).get(chatId) || null
-            : sessions.get(chatId) || null,
+            : tuiSessionId,
+          // The workspace, so tui-attach.sh opens THIS project and not the static
+          // TUI_WORKTREE in its service file. See the script for why that guess
+          // was showing one project's conversation under another's button.
+          workspace: tuiWorkspace,
           at: new Date().toISOString(),
         });
       } catch {
@@ -2604,9 +2693,9 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /tui button is dead — use this one.' : null,
         tuiSurface.sharedSession
-          ? `⌨️ *${tuiSurface.label}* — a real terminal, driven by touch, attached to *this* conversation in \`${config.agent.workspace}\`.`
+          ? `⌨️ *${tuiSurface.label}* — a real terminal, driven by touch, attached to *this* conversation in \`${tuiWorkspace}\`.`
           : [
-            `⌨️ *${tuiSurface.label}* — a real ${tuiSurface.tool} terminal in \`${config.agent.workspace}\`, resumed onto the last ${tuiSurface.tool} thread for this chat.`,
+            `⌨️ *${tuiSurface.label}* — a real ${tuiSurface.tool} terminal in \`${tuiWorkspace}\`, resumed onto the last ${tuiSurface.tool} thread for this chat.`,
             `This chat is on ${tuiSurface.tool} (\`${shortProviderModel(effective(config, prefs, chatId).model)}\`), so that is the screen you get — not opencode.`,
             `_Cline cannot resume a thread headlessly, so this is the last ${tuiSurface.tool} thread and not the one I answer each new message in. Work you type here is yours; it does not come back to this chat._`,
           ].join('\n'),
@@ -2711,7 +2800,11 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       try {
         const proj = switchChatProject(chatId, cmd.args);
-        sessions.delete(chatId);
+        // Drop the old project's session row. Without this the chat kept a
+        // session id from the workspace it just left, and the TUI — which
+        // resolves its session from this same file — went on attaching the
+        // previous project's conversation after a switch.
+        sessions.delete(String(chatId));
         saveSessions(config.id, sessions);
         const roleInfo =
           proj.type === 'external'
@@ -3634,7 +3727,10 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
   // terminal looks, from the chat, like the bot ran something twice. The note
   // rides the progress line's first paint rather than being its own message, so
   // an ordinary turn is not made noisier by it.
-  const tuiWatching = tuiIsAttached(config.id, sessions.get(chatId));
+  // Assigned inside the turn body, once the workspace is known. Declared out here
+  // because the presence note below is emitted before that code runs. Absent
+  // means "no session for this workspace yet" — the first turn after a switch.
+  let turnSessionId = null;
 
   busy.add(chatId);
   const runStartedAt = Date.now();
@@ -3679,7 +3775,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     // LAST Cline thread and each new message starts a fresh one, so claiming
     // "same session" there would be a lie the user discovers by watching a turn
     // that never appears. Say the true thing instead.
-    if (tuiWatching) {
+    if (tuiIsAttached(config.id, turnSessionId)) {
       const openSurface = tuiSurfaceFor(effective(config, prefs, chatId).model);
       await api.sendMessage(chatId, openSurface.sharedSession
         ? '⌨️ A TUI is open on this conversation — you can watch this turn in the terminal. Same session, so it shows up in both; one turn at a time.'
@@ -3720,6 +3816,13 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const activeRole = getChatRole(chatId);
     const isExternalTurn = activeProject.type === 'external';
     const effectiveWorkspace = isExternalTurn ? activeProject.workspace : config.agent.workspace;
+    // The session this chat owns in the workspace THIS turn runs in. Null means
+    // "start one here", which is the correct answer after a project switch and
+    // also when the stored row belongs to another project.
+    turnSessionId = sessionForWorkspace(sessions, chatId, effectiveWorkspace)
+      || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
+        ? workSession.opencodeSessionId
+        : undefined);
     // An external folder's child is built from a list, so it never holds the
     // website's git or deploy credentials. Project 1 keeps inheriting them.
     const turnEnvMode = isExternalTurn ? 'project' : 'inherit';
@@ -3787,7 +3890,11 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // view reconcile is best-effort — the run continues on the observer log
       }
     }
-    if (workSession.viewMode !== 'tui' && sessions.get(chatId)) extraArgs.push('--session', sessions.get(chatId));
+    // Only when a tx view is NOT live: with one, the session comes from the
+    // work-session row instead. The id is workspace-scoped now, so a chat that
+    // switched project passes nothing here rather than the previous project's
+    // conversation — which the tool would happily resume, in the wrong tree.
+    if (workSession.viewMode !== 'tui' && turnSessionId) extraArgs.push('--session', turnSessionId);
     try { observer = createObserver(workSession); } catch {}
     observerContext = { model: eff.model, attempt: 1, surface: ref.surface, provider: ref.surface };
     // Local fanout: headline + observer log always; thinking + per-tool TG
@@ -3845,7 +3952,15 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // --server <background url>` refuses without it), and the bot holds no
         // such password. The default service path needs no credential at all,
         // which is why it is the right one here.
-        sessionId: workSession.viewMode === 'tui' ? workSession.opencodeSessionId : undefined,
+        // The session this chat is on IN THIS WORKSPACE, not the row's bare id.
+        //
+        // This used to be `workSession.viewMode === 'tui' ? … : undefined`, so a
+        // turn with no /tx view passed NO session at all: the tool picked or
+        // created one in the bot's workspace while the TUI showed the session from
+        // sessions.json, which by then could be a different project's
+        // conversation entirely. That is the whole reason the TUI and the bot
+        // disagreed — this value, not the gateway.
+        sessionId: turnSessionId,
         onEvent: onObserverEvent,
         onSpawn: (child) => running.set(chatId, { child, aborted: false, serverUrl: workSession.serverUrl, opencodeSessionId: workSession.opencodeSessionId }),
         onAbort: () => abortOpencodeSession({ serverUrl: workSession.serverUrl, sessionId: workSession.opencodeSessionId }).catch(() => false),
@@ -3902,7 +4017,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         project: isExternalTurn ? activeProject.id : 'health-tracker',
         role: activeRole || '',
         workspace: effectiveWorkspace,
-        sessionId: sessionOverride !== null ? sessionOverride : sessions.get(chatId) || '',
+        sessionId: sessionOverride !== null ? sessionOverride : turnSessionId || '',
         envMode: turnEnvMode,
         canary: wantCanary,
         preflightFull: wantCanary,
@@ -3921,7 +4036,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // Exactly once per turn, retry fresh with an explicit notice naming the
         // lost thread. Malformed ids and opencode outages still hold.
         if (!freshRetried && isStaleSessionPreflight(handed.preflight)) {
-          const lost = sessionOverride !== null ? sessionOverride : sessions.get(chatId) || '';
+          const lost = sessionOverride !== null ? sessionOverride : turnSessionId || '';
           await say(
             `⚠️ Previous thread \`${lost || 'unknown'}\` is gone from \`${host}\` — running this turn fresh so the chat is not stuck.`
           );
@@ -3938,7 +4053,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // session row is never touched until it passes, so a bad canary costs
         // nothing but the canary. settleCanary is the same function the swap
         // drill runs, so what is proven there is what happens here.
-        const settled = settleCanary({ host, result: handed, sessionId: sessions.get(chatId) || '', jobId: handed.jobId || '' });
+        const settled = settleCanary({ host, result: handed, sessionId: turnSessionId || '', jobId: handed.jobId || '' });
         if (!settled.ok) {
           const back = settled.route?.previous || 'vps';
           await say(
@@ -3951,7 +4066,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
       // The thread id the worker ran is now ours too, so the next turn —
       // here or there — resumes the same conversation.
       if (handed.sessionID) {
-        sessions.set(chatId, handed.sessionID);
+        bindSessionForWorkspace(sessions, chatId, effectiveWorkspace, handed.sessionID);
         // The view is built from this record, so the record has to name the
         // thread that just ran — otherwise /tx keeps showing the conversation
         // from the previous host until something else rewrites it.
@@ -4167,7 +4282,9 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         clineSessions.set(chatId, result.sessionID);
         saveClineSessions(config.id, clineSessions);
       } else {
-        sessions.set(chatId, result.sessionID);
+        // Scoped to the workspace the turn actually ran in, so the next turn —
+        // and the TUI — resume this conversation rather than a stale one.
+        bindSessionForWorkspace(sessions, chatId, effectiveWorkspace, result.sessionID);
         saveSessions(config.id, sessions);
       }
     }
