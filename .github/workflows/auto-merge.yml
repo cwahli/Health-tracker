@@ -28,6 +28,22 @@ name: auto-merge
 on:
   push:
     branches: ['agent/**']
+  # A red `main` blocks the next merge — which would also block the PR that fixes
+  # it, because the only way to change `main` is to merge. This is the operator's
+  # explicit way out: pick the PR, say you mean it, and the override is recorded on
+  # the run and on the PR. It is never reached by a timeout or by the driver's own
+  # judgement. Full reasoning: `scripts/lib/merge-gate.mjs`.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Pull request number to merge'
+        required: true
+        type: string
+      allow_red_main:
+        description: "Merge even though main's post-merge verification is red — for landing the fix"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -47,4 +63,5 @@ jobs:
       - name: Merge only when the required checks have concluded successfully
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/auto-merge.mjs
+          ALLOW_RED_MAIN: ${{ inputs.allow_red_main && '1' || '' }}
+        run: node scripts/auto-merge.mjs ${{ inputs.pr && format('--pr={0}', inputs.pr) || '' }}

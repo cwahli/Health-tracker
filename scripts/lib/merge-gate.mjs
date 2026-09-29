@@ -36,6 +36,25 @@
  * setting cannot be committed (it is owner-only UI, and this repo has it off —
  * `main` is currently unprotected), so this list is the enforcement.
  *
+ * AND IT READS MAIN, NOT ONLY THE PR.
+ *
+ * A green PR is not a green repository. Two PRs can each pass their own gates and
+ * still break `main` together — the one failure mode a per-PR gate structurally
+ * cannot see — which is why `main-verify` exists at all. Its result is consumed
+ * here: a `main` whose post-merge verification *failed* refuses the next merge,
+ * because landing on a known-broken main is how one break becomes two.
+ *
+ * What is read is deliberately three-valued, because conflating these would
+ * either stall the queue or lie about it:
+ *
+ *   - `failure` / `timed_out` / `startup_failure` -> RED, and it blocks.
+ *   - a `success` run                             -> GREEN, and it passes.
+ *   - `cancelled`, still running, or absent       -> UNKNOWN, and it does not
+ *     block. A `cancelled` verification means a newer merge superseded it, not
+ *     that main is broken; treating it as red would deadlock every merge behind
+ *     a run that will never re-fire. Unknown is not a claim of health — the next
+ *     verification re-covers the whole tree, so the breakage still surfaces.
+ *
  * Everything here is pure: no network, no `gh`, no clock of its own. The driver
  * (`scripts/auto-merge.mjs`) does the I/O; the sensor drives this directly.
  */
@@ -172,6 +191,67 @@ export function describeDecision(result, { head = '' } = {}) {
  * total, so it is checked against the real YAML text instead of trusted. Returns
  * every problem rather than the first, so one run names all of them.
  */
+/**
+ * The check a post-merge verification of `main` reports as.
+ *
+ * `main-verify.yml` calls `ci.yml` through `workflow_call`, so GitHub names the
+ * check `<caller job> / <called job name>` — observed live as
+ * `gates / tsc + named gates` on every commit on main. A human pushing straight
+ * to main runs `ci.yml` directly and the same job reports as plain
+ * `tsc + named gates`. Both are the same gate, so the suffix is what is matched
+ * and a rename of the caller's job cannot silently stop this from firing.
+ */
+export const MAIN_VERIFICATION_CHECK = /^.*(?:^|\/ )tsc \+ named gates$/;
+
+/** Conclusions that mean main is known broken. */
+export const MAIN_BROKEN_CONCLUSIONS = new Set(['failure', 'timed_out', 'startup_failure']);
+
+/** True when a check name is a verification of main rather than of a PR head. */
+export function isMainVerification(name) {
+  return MAIN_VERIFICATION_CHECK.test(String(name || ''));
+}
+
+const shortSha = (sha) => (sha ? `\`${String(sha).slice(0, 7)}\`` : 'main');
+
+/**
+ * Classify `main` from the check runs on its head commit.
+ *
+ * @param {object}   opts
+ * @param {object[]} opts.checkRuns raw Checks API runs for main's head
+ * @param {string}   opts.mainSha   that commit, for the message
+ */
+export function evaluateMainHealth({ checkRuns = [], mainSha = '' } = {}) {
+  const runs = (Array.isArray(checkRuns) ? checkRuns : []).filter((c) => c && isMainVerification(c.name));
+  const at = shortSha(mainSha);
+  const completed = (c) => String(c.status || '') === 'completed';
+
+  const broken = runs.filter((c) => completed(c) && MAIN_BROKEN_CONCLUSIONS.has(String(c.conclusion || '')));
+  if (broken.length) {
+    return {
+      health: 'red',
+      blocked: true,
+      runs: runs.length,
+      failed: broken.map((c) => `main ${c.name} concluded ${c.conclusion}`),
+      reason: `main itself is red on ${at}: ${broken.map((c) => `\`${c.name}\` concluded \`${c.conclusion}\``).join('; ')}`,
+    };
+  }
+
+  const green = runs.filter((c) => completed(c) && String(c.conclusion || '') === 'success');
+  if (green.length) {
+    return { health: 'green', blocked: false, runs: runs.length, reason: `main is verified green on ${at}` };
+  }
+
+  const states = runs.map((c) => `${c.status || 'unknown'}${c.conclusion ? `/${c.conclusion}` : ''}`).join(', ');
+  return {
+    health: 'unknown',
+    blocked: false,
+    runs: runs.length,
+    reason: runs.length
+      ? `main's verification on ${at} has not concluded successfully (${states}) — not treated as a failure`
+      : `no post-merge verification has been recorded for ${at}, so this merge neither blocks nor is excused`,
+  };
+}
+
 export function validateRequiredAgainstWorkflows({ required = REQUIRED_CHECKS, readWorkflow } = {}) {
   const problems = [];
   if (typeof readWorkflow !== 'function') return { ok: false, problems: ['no workflow reader was provided'] };

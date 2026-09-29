@@ -25,15 +25,26 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { HEAD_SHA, MERGE_SHA, runDriver, startFakeGitHub } from './lib/fake-github.mjs';
+import {
+  HEAD_SHA,
+  MAIN_GREEN,
+  MAIN_SHA,
+  MAIN_VERIFICATION_NAME,
+  MERGE_SHA,
+  mainRun,
+  runDriver,
+  startFakeGitHub,
+} from './lib/fake-github.mjs';
 import {
   DECISIONS,
   NON_BLOCKING_CHECKS,
   REQUIRED_CHECKS,
   describeDecision,
   evaluateChecks,
+  evaluateMainHealth,
   evaluatePrState,
   isGreen,
+  isMainVerification,
   requiredNames,
   validateRequiredAgainstWorkflows,
 } from './lib/merge-gate.mjs';
@@ -135,6 +146,72 @@ test('the PR state is judged separately from the checks', () => {
   assert.equal(evaluatePrState({ state: 'closed', draft: false }).decision, 'refuse');
   assert.equal(evaluatePrState(null).decision, 'refuse');
   assert.match(describeDecision({ decision: 'refuse', reason: 'x' }), /NOT merging/);
+});
+
+// ---------------------------------------------------------------------------
+// 1b. Whether `main` itself is safe to land on.
+//
+// A green PR is not a green repository: two PRs can each pass their own gates and
+// still break main together, which is the whole reason `main-verify` exists. Its
+// result is consumed here, and the three-valued classification is the part worth
+// pinning — getting it wrong in either direction is a real failure (a deadlocked
+// merge queue, or a merge onto a tree that is already known broken).
+// ---------------------------------------------------------------------------
+
+test('a failed post-merge verification of main is red, and blocks', () => {
+  const res = evaluateMainHealth({ checkRuns: [mainRun('failure')], mainSha: MAIN_SHA });
+  assert.equal(res.health, 'red');
+  assert.equal(res.blocked, true);
+  assert.match(res.reason, /main itself is red/);
+  assert.match(res.reason, /concluded `failure`/);
+  assert.equal(res.failed.length, 1);
+  for (const conclusion of ['timed_out', 'startup_failure']) {
+    assert.equal(evaluateMainHealth({ checkRuns: [mainRun(conclusion)] }).blocked, true, conclusion);
+  }
+});
+
+test('a green verification of main passes', () => {
+  const res = evaluateMainHealth({ checkRuns: MAIN_GREEN, mainSha: MAIN_SHA });
+  assert.equal(res.health, 'green');
+  assert.equal(res.blocked, false);
+  assert.match(res.reason, /verified green/);
+});
+
+test('a superseded (cancelled) verification is UNKNOWN, not red', () => {
+  // Live, this is the normal state of a commit that a second merge overtook: the
+  // concurrency group cancels the older run. Reading that as red would deadlock
+  // every merge behind a run that will never fire again.
+  const res = evaluateMainHealth({ checkRuns: [mainRun('cancelled')], mainSha: MAIN_SHA });
+  assert.equal(res.health, 'unknown');
+  assert.equal(res.blocked, false);
+  assert.match(res.reason, /not treated as a failure/);
+});
+
+test('main with no verification at all is UNKNOWN, and does not block', () => {
+  const res = evaluateMainHealth({ checkRuns: [], mainSha: MAIN_SHA });
+  assert.equal(res.health, 'unknown');
+  assert.equal(res.blocked, false);
+  assert.match(res.reason, /no post-merge verification/);
+  assert.equal(evaluateMainHealth({}).blocked, false);
+  assert.equal(evaluateMainHealth({ checkRuns: null }).health, 'unknown');
+});
+
+test('main is only red if MAIN VERIFICATION failed — another red check is not main being broken', () => {
+  const res = evaluateMainHealth({ checkRuns: [run('no-overlap', 'failure'), run('open-pr', 'failure')], mainSha: MAIN_SHA });
+  assert.equal(res.health, 'unknown');
+  assert.equal(res.blocked, false);
+});
+
+test("main's verification is recognised under both names it really reports as", () => {
+  // `main-verify.yml` calls `ci.yml` through `workflow_call`, so GitHub prefixes
+  // the check with the calling job; a human pushing straight to main runs ci.yml
+  // directly. Both are the same gate and both were observed on real commits.
+  assert.equal(MAIN_VERIFICATION_NAME, 'gates / tsc + named gates');
+  assert.equal(isMainVerification('gates / tsc + named gates'), true);
+  assert.equal(isMainVerification('tsc + named gates'), true);
+  assert.equal(isMainVerification('no-overlap'), false);
+  assert.equal(isMainVerification('gates / tsc + named gates (v2)'), false);
+  assert.equal(isMainVerification(undefined), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -324,6 +401,94 @@ test('E2E: --evaluate on a red head reports the refusal and still writes nothing
     assert.match(res.stdout, /\[evaluate\] would comment/);
     assert.equal(fake.calls.merge.length, 0);
     assert.equal(fake.calls.comments.length, 0);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a green PR does NOT merge while main itself is red', async () => {
+  const fake = await startFakeGitHub({ checkPlans: [green()], mainChecks: [mainRun('failure')] });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 1, 'a red main is a refusal, not a merge');
+    assert.equal(fake.calls.merge.length, 0, 'THE ASSERTION: it did not land on a tree that is already failing');
+    assert.equal(fake.calls.dispatches.length, 0);
+    assert.equal(fake.calls.mainCheckReads, 1, 'it looked at main before deciding');
+    assert.equal(fake.calls.comments.length, 1);
+    assert.match(fake.calls.comments[0], /main itself is red/);
+    assert.match(fake.calls.comments[0], /does not need a new commit/, 'the PR is not what has to change');
+    assert.doesNotMatch(fake.calls.comments[0], /Required: /, 'the required list is not the reason, so it is not printed as one');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: the operator can land the fix on a red main, and it is recorded as an override', async () => {
+  // Without this there is no way out of a red main: the only way to change main is
+  // to merge, and every merge is refused. The override is opt-in and loud, so the
+  // failure stays closed by default and recoverable on purpose.
+  const fake = await startFakeGitHub({ checkPlans: [green()], mainChecks: [mainRun('failure')] });
+  try {
+    // `--pr=7` as well: that is how the operator reaches this, through the
+    // workflow_dispatch entry point, and it must judge the PR they named rather
+    // than whichever PR happens to be on the current branch.
+    const res = await runDriver(fake.port, ['--pr=7', '--allow-red-main']);
+    assert.equal(fake.calls.merge.length, 1, 'the override merges');
+    assert.equal(res.code, 0);
+    assert.equal(fake.calls.prListReads, 0, 'it used the PR it was given, not a branch lookup');
+    assert.match(res.stdout, /OVERRIDING a red main/);
+    assert.match(fake.calls.comments[0], /Merged over a red `main`/);
+    assert.equal(fake.calls.dispatches.length, 1, 'and main is re-verifiable right after');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: without the override the same red main still refuses', async () => {
+  // The pair of tests above and here is the point: the escape hatch is a decision,
+  // not a default.
+  const fake = await startFakeGitHub({ checkPlans: [green()], mainChecks: [mainRun('failure')] });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 1);
+    assert.equal(fake.calls.merge.length, 0);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a superseded verification of main does not wedge the merge queue', async () => {
+  const fake = await startFakeGitHub({ checkPlans: [green()], mainChecks: [mainRun('cancelled')] });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(fake.calls.merge.length, 1, 'unknown main must not stop a green PR forever');
+    assert.equal(res.code, 0);
+    assert.match(res.stdout, /main: unknown/);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: main with no verification yet merges, and says that is unknown rather than green', async () => {
+  const fake = await startFakeGitHub({ checkPlans: [green()], mainChecks: [] });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(fake.calls.merge.length, 1);
+    assert.match(res.stdout, /no post-merge verification/);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a red PR is refused without even reading main', async () => {
+  const fake = await startFakeGitHub({
+    checkPlans: [[run(CI_CHECK, 'failure'), run(GUARD_CHECK, 'success')]],
+    mainChecks: MAIN_GREEN,
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 1);
+    assert.equal(fake.calls.mainCheckReads, 0, 'the PR has to be mergeable before main matters');
   } finally {
     await fake.close();
   }

@@ -25,12 +25,38 @@ export const DRIVER = path.join(ROOT, 'scripts', 'auto-merge.mjs');
 export const HEAD_SHA = 'a'.repeat(40);
 /** The commit a squash merge creates, as the real merge endpoint reports it. */
 export const MERGE_SHA = 'b'.repeat(40);
+/** The commit `main` currently points at. */
+export const MAIN_SHA = 'e'.repeat(40);
 
-export const OPEN_PR = { number: 7, state: 'open', draft: false, head: { sha: HEAD_SHA } };
+/**
+ * What a post-merge verification of `main` reports as, live: `main-verify.yml`
+ * calls `ci.yml` through `workflow_call`, so GitHub prefixes the check with the
+ * calling job.
+ */
+export const MAIN_VERIFICATION_NAME = 'gates / tsc + named gates';
+
+/** A `main`-verification check run. */
+export const mainRun = (conclusion, status = 'completed') => ({
+  name: MAIN_VERIFICATION_NAME,
+  status,
+  conclusion,
+});
+
+/** A green verification of `main`, so tests that do not care about it can pass. */
+export const MAIN_GREEN = [mainRun('success')];
+
+export const OPEN_PR = {
+  number: 7,
+  state: 'open',
+  draft: false,
+  base: { ref: 'main' },
+  head: { sha: HEAD_SHA },
+};
 
 const ROUTES = {
   prList: /^GET \/repos\/[^/]+\/[^/]+\/pulls$/,
   pr: /^GET \/repos\/[^/]+\/[^/]+\/pulls\/\d+$/,
+  gitRef: /^GET \/repos\/[^/]+\/[^/]+\/git\/ref\/heads\//,
   checks: /^GET \/repos\/[^/]+\/[^/]+\/commits\/[^/]+\/check-runs$/,
   merge: /^PUT \/repos\/[^/]+\/[^/]+\/pulls\/\d+\/merge$/,
   comment: /^POST \/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/,
@@ -45,6 +71,7 @@ const ROUTES = {
  * @param {string}   opts.mergeSha    the commit the merge reports (`null` to omit it)
  * @param {boolean}  opts.merged      what the merge endpoint answers
  * @param {boolean}  opts.dispatchFails  make `POST /dispatches` a 403
+ * @param {object[]} opts.mainChecks  the check runs on `main`'s head
  */
 export function startFakeGitHub({
   checkPlans = [[]],
@@ -52,6 +79,7 @@ export function startFakeGitHub({
   mergeSha = MERGE_SHA,
   merged = true,
   dispatchFails = false,
+  mainChecks = MAIN_GREEN,
 } = {}) {
   const calls = {
     merge: [],
@@ -60,6 +88,8 @@ export function startFakeGitHub({
     dispatches: [],
     checkPolls: 0,
     checkQueries: [],
+    mainCheckReads: 0,
+    prListReads: 0,
   };
   const plans = [...checkPlans];
 
@@ -81,9 +111,21 @@ export function startFakeGitHub({
         }
       };
 
-      if (ROUTES.prList.test(route)) return send(200, prs === null ? [OPEN_PR] : prs);
+      if (ROUTES.prList.test(route)) {
+        calls.prListReads += 1;
+        return send(200, prs === null ? [OPEN_PR] : prs);
+      }
       if (ROUTES.pr.test(route)) return send(200, (prs && prs[0]) || OPEN_PR);
+      if (ROUTES.gitRef.test(route)) return send(200, { object: { sha: MAIN_SHA } });
       if (ROUTES.checks.test(route)) {
+        // Main's head is a different commit from the PR head, and the driver reads
+        // both: `main-verify`'s result is what decides whether main is safe to
+        // land on. Answering the same list for both would hide that.
+        const ref = url.pathname.split('/')[5];
+        if (ref === MAIN_SHA) {
+          calls.mainCheckReads += 1;
+          return send(200, { total_count: mainChecks.length, check_runs: mainChecks });
+        }
         const plan = plans.length > 1 ? plans.shift() : plans[0];
         calls.checkPolls += 1;
         // Recorded so the `filter=all` requirement is exercised, not trusted: the
