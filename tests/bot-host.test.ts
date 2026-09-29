@@ -345,13 +345,23 @@ describe('agent-opencode event mapping', () => {
     expect(args[args.indexOf('-m') + 1]).toBe('opencode/mimo');
    });
 
-   it('builds attached TUI-session args', () => {
+   it('never passes a server flag, so the turn shares the service with the TUI', () => {
     const args = buildOpencodeArgs({
       prompt: 'fix it',
-      attachUrl: 'http://127.0.0.1:4096',
       sessionId: 'ses_tui',
       thinking: false,
     });
+    // No --attach and no --server. Both were checked against the installed CLI
+    // (v2.0.19) and both fail: `--attach` is not a flag at all, so the CLI
+    // prints help and exits 1 with no output on stdout — the "model returned no
+    // text output" dead end. `--server` exists but demands OPENCODE_PASSWORD
+    // against a service that requires one, and the bot holds no such password.
+    // With neither, the run goes to the opencode background service, which is
+    // the same server the TUI terminal uses — the whole point, since that shared
+    // server is what lets a chat turn and a terminal prompt both run on one
+    // session.
+    expect(args.join(' ')).not.toMatch(/--attach/);
+    expect(args.join(' ')).not.toMatch(/--server/);
     expect(args).toEqual([
       'run',
       '--format',
@@ -359,8 +369,6 @@ describe('agent-opencode event mapping', () => {
       '--print-logs',
       '--log-level',
       'error',
-      '--attach',
-      'http://127.0.0.1:4096',
       '--session',
       'ses_tui',
       'fix it',

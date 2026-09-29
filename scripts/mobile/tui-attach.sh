@@ -14,15 +14,22 @@
 #    a daemon that outlives ttyd. So the id the session was created with is
 #    recorded next to it and a mismatch kills the session first.
 #
-# One writer at a time, in BOTH directions, because this is the same
-# conversation the bot is in:
+# One turn at a time, in BOTH directions, because this is the same conversation
+# the bot is in — but the terminal stays open the whole time:
 #
 # - A bot turn in flight -> wait for it to finish, then attach. Refusing (as
 #   this did at first) dead-ends the user at exactly the moment they are most
 #   likely to open the terminal: while chatting.
-# - A terminal client attached -> publish a lease with a heartbeat, so the bot
-#   defers instead of opening a second writer. The lease is released when this
-#   process exits, which is when ttyd has torn the client down.
+# - While attached, publish PRESENCE, not ownership. This used to be a claim:
+#   the bot read it and queued every message instead of answering, so opening
+#   the terminal stopped all tool execution until the Mini App was closed. That
+#   contradicted what /tui promises and was never necessary — the terminal and
+#   the bot are two clients of the same opencode service driving the same
+#   session, and the server serialises the turns (verified 2026-09-29: a TUI
+#   client attached for the duration of a `run` turn, survived it, and the
+#   session history stayed one coherent user -> assistant -> idle triple).
+#   The heartbeat still matters: it is how the bot knows a TUI is open at all,
+#   and an expired one must not leave that mark behind.
 set -u
 
 BOT_ID="${TUI_BOT_ID:-mobile}"
@@ -171,7 +178,8 @@ else
   echo "This conversation, in ${WORKTREE}."
   echo "Type here and you are typing to the same thread the bot answers in."
   echo "Close the Mini App and reopen it any time — tmux keeps your place."
-  echo "The bot defers new messages while you are in here."
+  echo "The bot keeps answering while you are in here; one turn at a time,"
+  echo "so a message from either side waits for the other's turn to finish."
   echo
   SID_ARG=(--session "$SID")
 fi
@@ -185,15 +193,18 @@ cd "$WORKTREE" || exit 1
 # stays in the FOREGROUND — a backgrounded tmux client dies instantly with
 # "open terminal failed: not a terminal" (2026-09-28), which was the reconnect
 # loop: banner printed, session never created, overlay forever.
-claim() {
+#
+# announce, not claim: this records that a TUI is open so the bot can say so,
+# and nothing more. The bot runs turns while this file is live.
+announce() {
   node -e '
     const fs = require("fs");
     const payload = { session: process.argv[2], pid: process.pid, heartbeat: Date.now() };
     fs.writeFileSync(process.argv[1], JSON.stringify(payload));
   ' "$TUI_LEASE" "$SID" 2>/dev/null || true
 }
-claim
-( while true; do sleep 15; claim; done ) &
+announce
+( while true; do sleep 15; announce; done ) &
 HEARTBEAT_PID=$!
 
 cleanup() {
