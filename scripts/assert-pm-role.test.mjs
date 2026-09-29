@@ -617,3 +617,9 @@ test('a recovered fleet prunes the ladder and a chatless bot warns', async () =>
     home.cleanup();
   }
 });
+
+test('a throwing cycle reports honestly instead of escaping to the poller', async () => {
+  const res = await runPmCommand({ sub: 'run', botId: 'vm', env: {}, home: os.tmpdir(), reader: () => { throw new Error('ENOSPC simulated'); } });
+  assert.equal(res.ok, false);
+  assert.match(res.text, /failed before it could report honestly/);
+});

@@ -186,9 +186,31 @@ export async function runStatus({ env = process.env, home = os.homedir(), now = 
  *
  * Returns the text to send plus whether the caller should reset the chat's role.
  * It never sends to the requester itself: bot-host owns the reply, exactly as it
- * does for every other `/role` branch.
+ * does for every other `/role` branch. It never throws either: a disk-full
+ * spool or ladder write surfaces here as honest text, so a cycle failure can
+ * never escape into the poller.
  */
 export async function runPmCommand({
+  sub = '',
+  botId = 'vm',
+  chatId = '',
+  operatorChatId = '',
+  env = process.env,
+  home = os.homedir(),
+  now = Date.now(),
+  send = null,
+  reader = null,
+  writer = null,
+  recipient = null,
+} = {}) {
+  try {
+    return await runPmCommandInner({ sub, botId, chatId, operatorChatId, env, home, now, send, reader, writer, recipient });
+  } catch (err) {
+    return { ok: false, text: `PM cycle failed before it could report honestly: ${String(err?.message || err).slice(0, 200)}`, resetRole: false };
+  }
+}
+
+async function runPmCommandInner({
   sub = '',
   botId = 'vm',
   chatId = '',
