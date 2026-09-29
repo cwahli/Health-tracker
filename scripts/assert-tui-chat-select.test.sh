@@ -139,6 +139,28 @@ grep -q 'HEARTBEAT_PID' "$ATTACH" \
 grep -q 'set-option -t "$TMUX_NAME" status off' "$ATTACH" \
   && { echo "  PASS  the tmux frame stays off the phone screen"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the tmux frame stays off the phone screen"; FAIL=$((FAIL + 1)); }
+
+# 12. A tmux session list is read to answer "which location is this on?". The
+#     name used to be "opencode-tui", which on a box running two of them said
+#     neither location nor bot (2026-09-29). The default now comes from
+#     TUI_LOCATION, and the shipped units name themselves by location.
+grep -q 'TUI_LOCATION:-local}-tui' "$ATTACH" \
+  && { echo "  PASS  the session name carries the location"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the session name carries the location"; FAIL=$((FAIL + 1)); }
+for unit in tui-ttyd-vm tui-ttyd-vm2; do
+  name=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/$unit.service" 2>/dev/null | head -1 | cut -d= -f2)
+  case "$name" in
+    VM-tui*) echo "  PASS  $unit names its session for the location ($name)"; PASS=$((PASS + 1)) ;;
+    *) echo "  FAIL  $unit session name says no location (got '${name:-none}')"; FAIL=$((FAIL + 1)) ;;
+  esac
+done
+# Two bots on one host must not share a session: that would put two chats on
+# one terminal, which is the isolation vm2's unit exists to protect.
+VM_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm.service" | cut -d= -f2)
+VM2_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm2.service" | cut -d= -f2)
+[ -n "$VM_NAME" ] && [ "$VM_NAME" != "$VM2_NAME" ] \
+  && { echo "  PASS  the two bots keep separate sessions ($VM_NAME vs $VM2_NAME)"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the two bots share one session ($VM_NAME)"; FAIL=$((FAIL + 1)); }
 rm -rf "$LEASE_FIX" "$ROOT"
 echo
 echo "$PASS pass, $FAIL fail"

@@ -18,7 +18,11 @@ Environment=TUI_BOT_ID=vm2
 Environment=TUI_STATE_ROOT=/home/ubuntu/.local/state/bot-host
 Environment=TUI_WORKTREE=/home/ubuntu/bot-host-r14
 Environment=OPENCODE_BIN=/home/ubuntu/.opencode/bin/opencode
-Environment=TUI_TMUX_NAME=opencode-tui-vm2
+# VM-tui-vm2: the location first, like its vm twin, then the bot. Both bots run
+# on the same host, so a name carrying only "opencode-tui" told you neither
+# which location you were on nor which conversation. Separate from VM-tui on
+# purpose — one session for both would put two chats on one terminal.
+Environment=TUI_TMUX_NAME=VM-tui-vm2
 # Same credential file as the vm instance (0600, not in git — see the comment
 # in tui-ttyd-vm.service). One credential for both sockets keeps a single
 # secret; per-bot isolation lives in the gateway's token, not here.

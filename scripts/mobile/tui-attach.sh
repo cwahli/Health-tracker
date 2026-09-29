@@ -35,7 +35,13 @@ SESSIONS="${STATE}/sessions.json"
 LEASES="${STATE}/leases.json"
 TUI_LEASE="${STATE}/tui-lease.json"
 WORKTREE="${TUI_WORKTREE:-/root/Health-tracker}"
-TMUX_NAME="${TUI_TMUX_NAME:-opencode-tui}"
+# The session name says WHERE it is, because that is what a tmux session list
+# is read for: "opencode-tui" on a box with two of them gave no way to tell
+# which was which. <LOCATION>-tui is the name; a second bot at the same
+# location appends its bot id (VM-tui, VM-tui-vm2) so the two conversations
+# stay separate — one shared session would put two chats on one terminal.
+# TUI_TMUX_NAME still wins, so an operator can name a session anything.
+TMUX_NAME="${TUI_TMUX_NAME:-${TUI_LOCATION:-local}-tui}"
 # Per-bot: two ttyd instances (vm, vm2) share this host, and a shared mark file
 # would make each instance reap the other's tmux session on every attach.
 SID_MARK="/tmp/tui-session-id-${BOT_ID}"

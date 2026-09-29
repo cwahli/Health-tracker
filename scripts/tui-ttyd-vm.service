@@ -17,7 +17,11 @@ Environment=TUI_BOT_ID=vm
 Environment=TUI_STATE_ROOT=/home/ubuntu/.local/state/bot-host
 Environment=TUI_WORKTREE=/home/ubuntu/bot-host-r14
 Environment=OPENCODE_BIN=/home/ubuntu/.opencode/bin/opencode
-Environment=TUI_TMUX_NAME=opencode-tui
+# The tmux session is named for the LOCATION, because a tmux session list is
+# read to answer "which box is this on?". "opencode-tui" said neither location
+# nor bot on a box that runs two of them. vm2's twin is VM-tui-vm2: one
+# session per bot, so the two chats never share a terminal.
+Environment=TUI_TMUX_NAME=VM-tui
 # ttyd's own credential. It lives here, 0600, and is expanded into ExecStart by
 # systemd — it is NOT in this file. An earlier version had the credential only in
 # the INSTALLED unit, so reinstalling from scripts/ silently dropped it and ttyd
