@@ -30,6 +30,10 @@ export default defineConfig(() => {
       sourcemap: false,
       chunkSizeWarningLimit: 4000,
       rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          bugs: path.resolve(__dirname, 'bugs.html'),
+        },
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
