@@ -13,10 +13,15 @@ allowed_files:
   - scripts/lib/pm-ladder.mjs
   - scripts/lib/pm-sheet.mjs
   - scripts/lib/pm-run.mjs
+  - scripts/pm-sweep.mjs
+  - systemd/pm-sweep@.service
+  - systemd/pm-sweep@.timer
   - scripts/assert-pm-role.test.mjs
   - scripts/bot-forge.mjs
   - scripts/lib/bot-forge-core.mjs
   - scripts/sync-bot-tokens.mjs
+  - scripts/assert-sync-tokens.test.mjs
+  - vite.config.ts
   - scripts/lib/project-registry.mjs
   - scripts/bot-host.mjs
   - package.json

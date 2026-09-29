@@ -215,6 +215,9 @@ jobs:
       - name: PM role gate (assert-pm-role)
         run: node scripts/assert-pm-role.test.mjs
 
+      - name: Token sync gate (assert-sync-tokens)
+        run: node scripts/assert-sync-tokens.test.mjs
+
       # The merge gate that protects this branch. `auto-merge` used to merge PRs
       # whose required checks had FAILED (#340 raced ahead of CI; #346 landed with
       # `tsc + named gates` red in both runs). The sensor drives the decision

@@ -91,6 +91,7 @@ export default defineConfig(() => {
         '**/scripts/assert-main-verify.test.mjs',
         '**/scripts/assert-bot-forge.test.mjs',
         '**/scripts/assert-pm-role.test.mjs',
+        '**/scripts/assert-sync-tokens.test.mjs',
         '**/scripts/assert-bot-role-wiring.test.mjs',
         '**/scripts/assert-button-alignment.test.mjs',
         '**/scripts/assert-chat-prefs-survive-restart.test.mjs',

@@ -2787,12 +2787,17 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       // nudge, record. See scripts/lib/pm-run.mjs for the whole implementation.
       if (cmd.args === 'pm' || cmd.args.startsWith('pm ')) {
         const sub = cmd.args.replace(/^pm\s*/, '').trim();
-        const pm = await runPmCommand({
-          sub,
-          botId: config.id,
-          chatId,
-          operatorChatId: String(config.telegram?.allowedUserIds?.[0] || ''),
-        });
+        let pm;
+        try {
+          pm = await runPmCommand({
+            sub,
+            botId: config.id,
+            chatId,
+            operatorChatId: String(config.telegram?.allowedUserIds?.[0] || ''),
+          });
+        } catch (err) {
+          pm = { ok: false, text: `PM cycle failed before it could report honestly: ${String(err?.message || err).slice(0, 200)}`, resetRole: false };
+        }
         if (pm.resetRole) resetChatRole(chatId);
         await api.sendMessage(chatId, pm.text, { parse_mode: 'Markdown' });
         return;

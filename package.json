@@ -32,6 +32,7 @@
     "add:bot": "node scripts/add-bot.mjs",
     "forge": "node scripts/bot-forge.mjs",
     "gate:pm-role": "node scripts/assert-pm-role.test.mjs",
+    "gate:sync-tokens": "node scripts/assert-sync-tokens.test.mjs",
     "gate:auto-merge": "node scripts/assert-auto-merge.test.mjs",
     "gate:main-verify": "node scripts/assert-main-verify.test.mjs",
     "auto-merge": "node scripts/auto-merge.mjs",

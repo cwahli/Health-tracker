@@ -202,6 +202,11 @@ export function laneItems(rows) {
  * No match means `null` — "not linked" — never "dead".
  */
 export function heartbeatFor(item, beats = {}) {
+  // Substring convention, kept deliberately loose: heartbeat branches are
+  // free-form (`agent/pm-1`, `bot-host-vm`) while item ids are short (`vm`,
+  // `#901`). Tightening to segment-match would drop real links, so a short id
+  // can over-match (`vm` ∋ `agent/vm2`) — per-agent routing is not modelled
+  // (see packet residual); the ladder only fires on failed+old+not-live.
   const needle = String(item?.id || '').toLowerCase().replace(/^#/, '');
   if (!needle) return null;
   for (const rec of Object.values(beats || {})) {
@@ -211,8 +216,10 @@ export function heartbeatFor(item, beats = {}) {
   return null;
 }
 
-/** Why this item is not progressing, or '' when it is. */
-export function stalledReason(item, { now = Date.now(), stallMs = DEFAULT_STALL_MS, liveFn = isLive } = {}) {
+/** Why this item is not progressing, or '' when it is. Liveness arrives
+ * precomputed as `item.live` (projectFleet runs liveFn); there is deliberately
+ * no liveFn here so stalled-ness stays a pure function of the item. */
+export function stalledReason(item, { now = Date.now(), stallMs = DEFAULT_STALL_MS } = {}) {
   if (item?.blocked) return item.blockedReason || 'blocked';
   if (!item?.lastOutcome || !FAILED_OUTCOMES.has(item.lastOutcome)) return '';
   if (item.live === true) return '';
@@ -270,7 +277,7 @@ export function projectFleet({
     }
     return { ...it, live: alive, branch: beat ? String(beat.branch || '') : '' };
   });
-  for (const it of items) it.stallReason = stalledReason(it, { now, stallMs, liveFn });
+  for (const it of items) it.stallReason = stalledReason(it, { now, stallMs });
   const stalled = items.filter((it) => it.stallReason);
   return {
     generatedAt: new Date(now).toISOString(),
@@ -293,17 +300,21 @@ export function readFleetSources({ paths, env = process.env, execFileSync } = {}
   const specs = readSpecDir(p.specsDir);
 
   let ledger = [];
+  let ledgerError = '';
   try {
     ledger = loadLedger(p.ledgerPath);
-  } catch {
+  } catch (err) {
     ledger = [];
+    ledgerError = String(err?.message || err).slice(0, 200);
   }
 
   let beats = {};
+  let beatsError = '';
   try {
     beats = readBeatsFrom(p.heartbeatDir);
-  } catch {
+  } catch (err) {
     beats = {};
+    beatsError = String(err?.message || err).slice(0, 200);
   }
 
   const tickets = readTickets({ env, execFileSync });
@@ -318,8 +329,10 @@ export function readFleetSources({ paths, env = process.env, execFileSync } = {}
       specsReason: specs.reason,
       ledger: p.ledgerPath,
       ledgerRows: ledger.length,
+      ledgerError,
       heartbeatDir: p.heartbeatDir,
       beats: Object.keys(beats).length,
+      beatsError,
       tickets: tickets.source,
       ticketsError: tickets.error,
       ticketsCount: tickets.rows.length,
@@ -406,8 +419,8 @@ export function renderFleet(fleet, { limit = 12, sources = null } = {}) {
     lines.push('*Sources:*');
     lines.push(`• packets: ${mdSafe(sources.specsOk ? sources.specsDir : sources.specsReason)}`);
     lines.push(`• tickets: ${mdSafe(sources.tickets)}${sources.ticketsError ? ` (${mdSafe(sources.ticketsError)})` : ''} — ${sources.ticketsCount ?? 0} row(s)`);
-    lines.push(`• ledger: ${sources.ledgerRows} row(s)`);
-    lines.push(`• heartbeats: ${sources.beats}`);
+    lines.push(`• ledger: ${sources.ledgerRows} row(s)${sources.ledgerError ? ` (${mdSafe(sources.ledgerError)})` : ''}`);
+    lines.push(`• heartbeats: ${sources.beats}${sources.beatsError ? ` (${mdSafe(sources.beatsError)})` : ''}`);
   }
   return lines.join('\n');
 }

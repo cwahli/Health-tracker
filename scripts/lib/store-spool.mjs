@@ -137,10 +137,18 @@ export function pruneFlushed(botId, { home = os.homedir(), keepDays = 7, now = D
  * each success. Stops at the first failure on purpose: keeping the remaining items
  * in order means a transient Google failure cannot reorder the turn log.
  */
-export async function flushSpool(botId, send, { home = os.homedir(), limit = 50 } = {}) {
+export async function flushSpool(botId, send, { home = os.homedir(), limit = 50, accept = null } = {}) {
   const items = readItems(botId, { home });
   const report = { attempted: 0, sent: 0, failed: 0, errors: [], firstError: '', remaining: items.length };
-  for (const item of items.slice(0, limit)) {
+  // The per-bot spool is shared by kind (turn sheet-rows, drive-objects, PM
+  // rows). A flusher only owns its kinds: foreign rows are skipped WITHOUT
+  // advancing the cursor, so the owning flusher still sees them, and the
+  // limit counts attempted sends (a wall of foreign rows must not starve us).
+  let attempted = 0;
+  for (const item of items) {
+    if (attempted >= limit) break;
+    if (accept && !accept(item)) continue;
+    attempted += 1;
     report.attempted += 1;
     try {
       const res = await send(item);
