@@ -538,6 +538,27 @@ M30 assert retarget = confirmed before→after on `assert-food-curator-m30.mjs` 
 
 ---
 
+### F-14 — Portion-selection desync follow-up (2026-09-29)
+
+**Context:** PR #341 fixed the core `Portion Selection:` parse bug and the `saturatedFat > totalFat` invariant across 10 files. The items below are the residual gaps identified in the post-fix review. Each is a separate, ordered work item. Do not conflate them.
+
+**Named sensor already green (21 tests, PR #341):** `server_edit_patch_ledger.test.ts` — *diffs multi-dish portion update from userMessage with "Portion Selection:" syntax*.
+
+| ID | Class | Item | Done when | Do not |
+|---|---|---|---|---|
+| **F-14.1** | `STALE_BUILD_INPUT` | Move `syncedEditItems` assignment **before** `attachHappyPathMealBuild` in `server_food_analyze_run_finalize.ts` so `mealBuild.items` (debug tree / narration) reflects scaled macros, not stale Turn-1 values. Currently `syncedEditItems` is set at L531 but `attachHappyPathMealBuild` reads `activeMeal.itemsBreakdown` at L477. | `activeMeal.itemsBreakdown = syncedEditItems` set before `attachHappyPathMealBuild` call; existing `server_meal_edit.test.ts` and `server_edit_patch_ledger.test.ts` still green; `tsc` 0 | Touch job-lifecycle files; widen blast radius beyond `server_food_analyze_run_finalize.ts` |
+| **F-14.2** | `SCALE_CLAMP_MISS` | Add `isFruitJuice + totalFat ≤ 0.5g → saturatedFat = 0` guard inside `scaleItemNutrients` (or the `syncedEditItems` map step) so Turn-2 scaling of `baseNutrients100g.saturatedFat` does not re-introduce a hallucinated juice satFat that bypasses the Turn-1 `finalizeDishLedger` clamp. | Named vitest proving juice item scaled to 600g has `saturatedFat = 0` after `scaleItemNutrients`; `server_dish_finalize.test.ts` still green | Touch scout model prompt here — that is F-14.3 |
+| **F-14.3** | `SCOUT_HALLUCINATION` | Add a post-model validation guard (code, not just English prose in the prompt) that forces `saturatedFat: 0` for items identified as fruit juices or clear juices before their ledger row is persisted in `finalizeDishLedger`. Scout instruction update is secondary; the code guard is the sensor. | New named vitest in `server_dish_finalize.test.ts` — juice item with `saturatedFat > 0` from scout is clamped to 0 before `baseNutrients100g` is written | Change `finalizeDishLedger` basis math; guess per-100g locks on prose alone |
+| **F-14.4** | `TAXONOMY_MISS` | Replace the narrow `isFruitJuice` name-string regex in `server_dish_finalize.ts` with a food-category / taxonomy check (`foodCategory`, `dbSource` tag, or a curated list of juice brand substrings) so branded juices (Tropicana, Naked, Ocean Spray, Ribena, Innocent) are correctly identified. Blocked on F-14.2/F-14.3 merging first. | Curated list or category field catches the existing regex AND at least 5 brand name variants; existing tests unaffected | Invent a catalog primitive; add a new god-file |
+| **F-14.5** | `CALORIES_ZERO` | In `syncedEditItems` map (`server_food_analyze_run_finalize.ts` ~L506), fall back to `computeCaloriesFromMacros(prot, carbs, totalFat)` when `n.calories === 0` and macros are non-zero, preventing a zero-calorie item being written to `pendingFoodLog`. | Unit test: item with `nutrients.calories = 0` but non-zero macros → `syncedEditItems` produces correct calories; `tsc` 0 | Add a second calorie computation model |
+| **F-14.6** | `STALE_DB_ROWS` | *(Low urgency — after F-14.1–F-14.5 land)* One-time Supabase repair script (`scripts/repair-satfat-invariant.mjs`) that finds ledger rows where `nutrients->>'saturatedFat' > nutrients->>'totalFat'` and corrects them in place. Dry-run flag required. | Script runs dry-run with count > 0 on a known broken row, then live on confirmed set; no test needed (script is not part of app code) | Change application logic; touch `src/`; run without dry-run flag first |
+
+**Ordering rule:** F-14.1 and F-14.5 may run in parallel (both touch `server_food_analyze_run_finalize.ts` — one agent at a time). F-14.2 before F-14.3. F-14.4 after F-14.2/F-14.3. F-14.6 last.
+
+**Gates (each item):** `npx tsc --noEmit` + named vitest for the item's sensor row + `server_edit_patch_ledger.test.ts server_meal_edit.test.ts server_dish_finalize.test.ts src/mealBuild/__tests__/` still green.
+
+---
+
 ## Track R — Reliability (core done; start only on trigger)
 
 **Architecture:** `RELIABILITY.md`  
