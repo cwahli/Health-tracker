@@ -180,10 +180,12 @@ test('a green verification of main passes', () => {
 test('a superseded (cancelled) verification is UNKNOWN, not red', () => {
   // Live, this is the normal state of a commit that a second merge overtook: the
   // concurrency group cancels the older run. Reading that as red would deadlock
-  // every merge behind a run that will never fire again.
+  // every merge behind a run that will never fire again — and waiting on it would
+  // deadlock for the same reason, so it is neither red nor runnable.
   const res = evaluateMainHealth({ checkRuns: [mainRun('cancelled')], mainSha: MAIN_SHA });
   assert.equal(res.health, 'unknown');
   assert.equal(res.blocked, false);
+  assert.equal(res.waiting, false, 'a run that cannot conclude is not something to hold on');
   assert.match(res.reason, /not treated as a failure/);
 });
 
@@ -191,6 +193,7 @@ test('main with no verification at all is UNKNOWN, and does not block', () => {
   const res = evaluateMainHealth({ checkRuns: [], mainSha: MAIN_SHA });
   assert.equal(res.health, 'unknown');
   assert.equal(res.blocked, false);
+  assert.equal(res.waiting, false, 'nothing to wait for is not the same as something running');
   assert.match(res.reason, /no post-merge verification/);
   assert.equal(evaluateMainHealth({}).blocked, false);
   assert.equal(evaluateMainHealth({ checkRuns: null }).health, 'unknown');
@@ -200,6 +203,53 @@ test('main is only red if MAIN VERIFICATION failed — another red check is not 
   const res = evaluateMainHealth({ checkRuns: [run('no-overlap', 'failure'), run('open-pr', 'failure')], mainSha: MAIN_SHA });
   assert.equal(res.health, 'unknown');
   assert.equal(res.blocked, false);
+});
+
+// The in-progress window. `main` is verified AFTER a merge, so by the time the
+// next PR's checks conclude, the verification of the merge before it is usually
+// still running. The gate used to read that as "unknown, does not block" and
+// merge through the one check that had not finished — the window a break slips
+// through. It is a HOLD now, and these cases pin every way it must not drift
+// back into permission.
+
+test('a still-running verification of main is a WAIT, not a pass', () => {
+  const res = evaluateMainHealth({ checkRuns: [mainRun(null, 'in_progress')], mainSha: MAIN_SHA });
+  assert.equal(res.health, 'running');
+  assert.equal(res.blocked, false, 'mid-verification is not a failure');
+  assert.equal(res.waiting, true, 'and it is not permission either');
+  assert.match(res.reason, /has not concluded yet/);
+  assert.equal(res.pending.length, 1);
+});
+
+test('every non-concluded status holds — only `completed` concludes anything', () => {
+  // An allow-list of "running" statuses would be one GitHub rename away from
+  // silently passing again, so the default is the hold.
+  for (const status of ['queued', 'pending', 'requested', 'waiting', 'in_progress', '']) {
+    const res = evaluateMainHealth({ checkRuns: [mainRun(null, status)] });
+    assert.equal(res.waiting, true, `status ${JSON.stringify(status)}`);
+    assert.equal(res.blocked, false, `status ${JSON.stringify(status)}`);
+  }
+});
+
+test('only a concluded state ends the hold — green passes, red refuses, cancelled does not wedge', () => {
+  assert.equal(evaluateMainHealth({ checkRuns: MAIN_GREEN }).waiting, false);
+  assert.equal(evaluateMainHealth({ checkRuns: MAIN_GREEN }).health, 'green');
+  assert.equal(evaluateMainHealth({ checkRuns: [mainRun('failure')] }).waiting, false);
+  assert.equal(evaluateMainHealth({ checkRuns: [mainRun('failure')] }).blocked, true);
+  assert.equal(evaluateMainHealth({ checkRuns: [mainRun('cancelled')] }).waiting, false);
+  assert.equal(evaluateMainHealth({ checkRuns: [] }).waiting, false);
+});
+
+test('a green run outranks a redundant running one; a red one outranks both', () => {
+  assert.equal(
+    evaluateMainHealth({ checkRuns: [...MAIN_GREEN, mainRun(null, 'in_progress')] }).health,
+    'green',
+    'a second, redundant run of a gate that already passed is not a reason to wait',
+  );
+  const red = evaluateMainHealth({ checkRuns: [mainRun('failure'), mainRun(null, 'in_progress')] });
+  assert.equal(red.health, 'red', 'worst wins: a concluded failure is not excused by a sibling still running');
+  assert.equal(red.blocked, true);
+  assert.equal(red.waiting, false);
 });
 
 test("main's verification is recognised under both names it really reports as", () => {
@@ -475,6 +525,66 @@ test('E2E: main with no verification yet merges, and says that is unknown rather
     const res = await runDriver(fake.port);
     assert.equal(fake.calls.merge.length, 1);
     assert.match(res.stdout, /no post-merge verification/);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a green PR HOLDS while main is mid-verification, then merges on its result', async () => {
+  // The in-progress window, end to end. The fake answers the first read of main's
+  // checks with a verification still running and the second with its conclusion,
+  // so the driver has to hold and re-read instead of deciding on one look.
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    mainCheckPlans: [[mainRun(null, 'in_progress')], [mainRun('success')]],
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.ok(fake.calls.mainCheckReads >= 2, `it re-read main after holding (saw ${fake.calls.mainCheckReads})`);
+    assert.equal(fake.calls.merge.length, 1, 'THE ASSERTION: it merged, but only once the verification concluded');
+    assert.equal(fake.calls.dispatches.length, 1);
+    assert.match(res.stdout, /has not concluded yet/);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: it does NOT merge through an unfinished verification of main', async () => {
+  // The sharpest open hole before this change: main is often mid-verification when
+  // the next merge arrives, so the gate read `unknown` and proceeded. Absence of a
+  // red light is not a green light here either — the merge waits, and a
+  // verification that never concludes runs the budget out into a refusal.
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    mainCheckPlans: [[mainRun(null, 'in_progress')]],
+  });
+  try {
+    const res = await runDriver(fake.port, ['--wait=0']);
+    assert.equal(res.code, 1, 'the wait budget ran out, so the PR stays open');
+    assert.equal(fake.calls.merge.length, 0, 'THE ASSERTION: no merge was landed through the window');
+    assert.equal(fake.calls.dispatches.length, 0);
+    assert.equal(fake.calls.comments.length, 1);
+    assert.match(fake.calls.comments[0], /held while `main` finished its post-merge verification/);
+    assert.match(fake.calls.comments[0], /Still running/);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a verification that goes RED while the merge is held refuses it', async () => {
+  // The hold has to be able to end the other way too: this is the break the window
+  // was letting through, so the driver must catch it rather than ride past it.
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    mainCheckPlans: [[mainRun(null, 'in_progress')], [mainRun('failure')]],
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 1);
+    assert.equal(fake.calls.merge.length, 0, 'THE ASSERTION: it did not land on the tree it had just watched fail');
+    assert.equal(fake.calls.dispatches.length, 0);
+    assert.match(fake.calls.comments[0], /main itself is red/);
   } finally {
     await fake.close();
   }
