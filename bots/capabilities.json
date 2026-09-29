@@ -200,6 +200,7 @@
         "role": false,
         "location": false,
         "tui": false,
+        "bugs": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think"]
       }
