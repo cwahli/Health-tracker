@@ -74,6 +74,13 @@ import {
 } from './lib/main-verify.mjs';
 import { makeClient } from './lib/github-rest.mjs';
 import { describeNotice, syncRedMainNotice } from './lib/red-main-notice.mjs';
+import { checkRange, git } from './lib/no-undo.mjs';
+import {
+  PREMERGE_DECISIONS,
+  decideBranchUndo,
+  describePremergeRefusal,
+  describePremergeUnknown,
+} from './lib/premerge-undo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -330,6 +337,38 @@ export async function waitForDecision(client, {
   }
 }
 
+/**
+ * Judge this branch's own diff against what has landed, using the PR body as
+ * the declaration source.
+ *
+ * The judgement is `checkRange`'s — the same pure code the CI step and the
+ * post-merge verification run — so the rule has exactly one implementation and
+ * three call sites rather than one implementation and three opinions. `base` is
+ * passed as `origin/<branch>`: `checkRange` resolves the fork point itself, and
+ * judging the branch side (not a two-tree diff against moving main) is what
+ * keeps another agent's later commits from reading as this branch's deletions.
+ */
+export function judgeBranchAgainstLandedWork({ pr, baseBranch = 'main', repo = process.cwd() } = {}) {
+  // `origin/<base>` is the ref in CI, where the job checks out a pushed branch.
+  // A local clone (or the sensor's scratch repo) has no remote, and judging
+  // against the local branch is the same comparison — falling back beats
+  // degrading to `unknown` for want of a remote that is not the point.
+  let landedRef = `origin/${baseBranch}`;
+  try {
+    git(repo, 'rev-parse', '--verify', '--quiet', landedRef);
+  } catch {
+    landedRef = baseBranch;
+  }
+  const head = String(pr?.head?.sha || '');
+  if (!head) return decideBranchUndo({ error: 'the PR has no head SHA to judge', baseBranch });
+  try {
+    const { violations = [], error = '' } = checkRange(repo, landedRef, head, landedRef, String(pr?.body || ''));
+    return decideBranchUndo({ violations, error, baseBranch });
+  } catch (err) {
+    return decideBranchUndo({ error: err?.message || String(err), baseBranch });
+  }
+}
+
 function readWorkflow(rel) {
   return fs.readFileSync(path.join(ROOT, rel), 'utf8');
 }
@@ -414,6 +453,29 @@ async function main(argv = process.argv.slice(2)) {
     log(`  ${describeDecision(prState, { head: pr.head?.sha })}`);
     if (!args.evaluate) await comment(client, { owner, repo, number: pr.number, body: describeDecision(prState, { head: pr.head?.sha }) });
     return 1;
+  }
+
+  // Judge this branch against landed work BEFORE waiting on the checks. The
+  // landed-work rule has never had a pre-merge home for this repo's PRs: push
+  // `ci` deliberately skips it (no PR body in the event) and auto-pr's
+  // token-opened PRs run zero jobs, so the rule was only ever judged after the
+  // merge — which is how `d18568f6` turned `main` red and stalled the queue.
+  // See scripts/lib/premerge-undo.mjs. An early, precise comment on the PR is
+  // worth more than one that arrives after the merge was already attempted.
+  const undoBase = String(pr.base?.ref || 'main');
+  const undoVerdict = judgeBranchAgainstLandedWork({ pr, baseBranch: undoBase });
+  if (undoVerdict.decision === PREMERGE_DECISIONS.REFUSE) {
+    log(`  🛑 ${undoVerdict.reason}`);
+    if (!args.evaluate) {
+      await comment(client, { owner, repo, number: pr.number, body: describePremergeRefusal({ ...undoVerdict, baseBranch: undoBase }) });
+    }
+    return 1;
+  }
+  if (undoVerdict.decision === PREMERGE_DECISIONS.UNKNOWN) {
+    // Logged, never commented. A degradation signal that shares a channel with
+    // the refusal is a signal people learn to skip; the run log is where a
+    // broken environment is diagnosed. See scripts/lib/premerge-undo.mjs.
+    log(`  ${describePremergeUnknown({ reason: undoVerdict.reason, baseBranch: undoBase })}`);
   }
 
   const head = String(pr.head?.sha || '');

@@ -23,6 +23,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -50,6 +52,14 @@ import {
   requiredNames,
   validateRequiredAgainstWorkflows,
 } from './lib/merge-gate.mjs';
+import {
+  PREMERGE_DECISIONS,
+  decideBranchUndo,
+  describePremergeRefusal,
+  describePremergeUnknown,
+  formatViolations,
+} from './lib/premerge-undo.mjs';
+import { judgeBranchAgainstLandedWork } from './auto-merge.mjs';
 import {
   MAIN_RED_ISSUE_TITLE,
   MAIN_RED_MARKER,
@@ -1024,4 +1034,187 @@ test('E2E: --evaluate raises no alarm and files nothing', async () => {
   } finally {
     await fake.close();
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pre-merge landed-work judgement.
+//
+// The landed-work rule ("a change may extend landed work and may not silently
+// erase it") was only ever judged post-merge for this repo's PRs: push `ci`
+// skips the step because its event carries no PR body, and auto-pr's
+// token-opened PRs run zero jobs. `d18568f6` landed three rewritten lines with
+// no declaration that way and turned `main` red, stalling every agent PR behind
+// it. So the rule is now judged before the merge, where a mistake is a comment
+// on the PR instead of a broken main.
+//
+// These tests drive the real judgement against real git. A stubbed diff would
+// prove the wiring and nothing about the rule.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const gitIn = (dir, ...argv) =>
+  execFileSync('git', ['-C', dir, ...argv], { encoding: 'utf8' }).trim();
+
+const scratchDirs = [];
+function scratchRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'premerge-undo-'));
+  scratchDirs.push(dir);
+  gitIn(dir, 'init', '-q', '-b', 'main');
+  gitIn(dir, 'config', 'user.name', 'premerge test');
+  gitIn(dir, 'config', 'user.email', 'premerge@test');
+  return dir;
+}
+
+function commitIn(dir, files, message) {
+  for (const [file, text] of Object.entries(files)) {
+    const p = path.join(dir, file);
+    if (text === null) fs.rmSync(p, { force: true });
+    else fs.writeFileSync(p, text);
+  }
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-q', '-m', message);
+  return gitIn(dir, 'rev-parse', 'HEAD');
+}
+
+/**
+ * `main` carries a distinctive landed line, and a branch is forked from it.
+ *
+ * The branch matters: the judgement compares the branch's own diff against what
+ * `main` has landed, so a fixture that commits "the change" straight onto `main`
+ * makes the landed ref and the head the same commit — nothing to attribute, and
+ * a gate that silently finds nothing in that setup would look exactly like a
+ * working one.
+ */
+function repoWithLandedLine() {
+  const dir = scratchRepo();
+  commitIn(dir, { 'base.txt': 'a file\n' }, 'seed');
+  const owner = commitIn(
+    dir,
+    { 'feat.txt': 'keep me\nTHE DISTINCTIVE LANDED LINE\nand me\n' },
+    'land a feature\n\nAuthor: Test Model 1.0 (high) VM\n',
+  );
+  gitIn(dir, 'checkout', '-q', '-b', 'agent/probe');
+  return { dir, owner };
+}
+
+const judge = (repo, head, body = '') =>
+  judgeBranchAgainstLandedWork({ pr: { head: { sha: head }, body }, baseBranch: 'main', repo });
+
+test.after(() => {
+  for (const dir of scratchDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the decision has exactly three answers', () => {
+  assert.deepEqual(Object.values(PREMERGE_DECISIONS).sort(), ['merge', 'refuse', 'unknown']);
+});
+
+test('an add-only branch is judged clean and merges', () => {
+  const { dir } = repoWithLandedLine();
+  const head = commitIn(dir, { 'new.txt': 'brand new\n' }, 'add a file');
+  assert.equal(judge(dir, head).decision, PREMERGE_DECISIONS.MERGE);
+});
+
+test('an undeclared rewrite of a landed line refuses, and names its owner', () => {
+  const { dir, owner } = repoWithLandedLine();
+  const head = commitIn(dir, { 'feat.txt': 'keep me\nand me\n' }, 'quietly drop the landed line');
+  const v = judge(dir, head, '## Summary\nAn ordinary-looking PR body.\n');
+  assert.equal(v.decision, PREMERGE_DECISIONS.REFUSE);
+  assert.equal(v.violations.length, 1);
+  assert.match(v.violations[0].file, /feat\.txt/);
+  assert.ok(String(v.violations[0].owner).startsWith(owner.slice(0, 8)), 'the violation names the owning commit');
+});
+
+test('the same branch merges once the PR body declares the rewrite', () => {
+  const { dir, owner } = repoWithLandedLine();
+  const head = commitIn(dir, { 'feat.txt': 'keep me\nand me\n' }, 'drop it, deliberately');
+  const v = judge(dir, head, `Reverts: ${owner} — this is a deliberate change to landed work\n`);
+  assert.equal(v.decision, PREMERGE_DECISIONS.MERGE);
+});
+
+test('declaring a DIFFERENT commit does not wave the violation through', () => {
+  // The cheapest way to neuter this gate would be for any declaration to pass.
+  const { dir } = repoWithLandedLine();
+  const head = commitIn(dir, { 'feat.txt': 'keep me\nand me\n' }, 'drop it');
+  const v = judge(dir, head, 'Reverts: 0000000 — declares something else entirely\n');
+  assert.equal(v.decision, PREMERGE_DECISIONS.REFUSE);
+});
+
+test('a deleted landed file is refused too, not only edited lines', () => {
+  const dir = scratchRepo();
+  commitIn(dir, { 'a.txt': 'keep\n' }, 'seed');
+  commitIn(dir, { 'gone.txt': 'landed content here\n' }, 'land a file');
+  gitIn(dir, 'checkout', '-q', '-b', 'agent/probe');
+  const head = commitIn(dir, { 'gone.txt': null }, 'delete a landed file');
+  const v = judge(dir, head, '');
+  assert.equal(v.decision, PREMERGE_DECISIONS.REFUSE);
+});
+
+test('a head with no SHA is unknown, never a silent pass', () => {
+  const { dir } = repoWithLandedLine();
+  const v = judge(dir, '');
+  assert.equal(v.decision, PREMERGE_DECISIONS.UNKNOWN);
+  assert.match(v.reason, /head SHA/);
+});
+
+test('an unresolvable base is unknown, never a silent pass', () => {
+  const { dir } = repoWithLandedLine();
+  const head = commitIn(dir, { 'x.txt': 'x\n' }, 'a commit');
+  const v = judgeBranchAgainstLandedWork({ pr: { head: { sha: head } }, baseBranch: 'no-such-branch', repo: dir });
+  assert.equal(v.decision, PREMERGE_DECISIONS.UNKNOWN);
+});
+
+test('unknown does not block: a gate that deadlocks on noise gets switched off', () => {
+  assert.equal(decideBranchUndo({ error: 'no merge-base' }).decision, PREMERGE_DECISIONS.UNKNOWN);
+  assert.equal(decideBranchUndo({ error: 'no merge-base' }).decision !== PREMERGE_DECISIONS.REFUSE, true);
+});
+
+test('the refusal names the owner and both valid ways out', () => {
+  const v = decideBranchUndo({ violations: [{ file: 'feat.txt', line: 2, owner: 'abcdef1234' }] });
+  const body = describePremergeRefusal(v);
+  assert.match(body, /Merge refused/);
+  assert.match(body, /feat\.txt/, 'names the file');
+  assert.match(body, /abcdef12/, 'names the owning commit');
+  assert.match(body, /Extend, don't erase/, 'offers the first way out');
+  assert.match(body, /Reverts: <sha>/, 'offers the declaration');
+});
+
+test('the refusal is not posted for a merge or an unknown', () => {
+  assert.equal(describePremergeRefusal({ decision: PREMERGE_DECISIONS.MERGE, violations: [] }), '');
+  assert.equal(describePremergeRefusal({ decision: PREMERGE_DECISIONS.UNKNOWN, violations: [] }), '');
+});
+
+test('a violation that is already a string still formats', () => {
+  assert.deepEqual(formatViolations(['feat.txt: raw text form']), ['- feat.txt: raw text form']);
+});
+
+test('a degraded environment logs loudly but is NOT commented on the PR', () => {
+  // The reason is specific: this shares a channel with the refusal that must be
+  // read. A signal that fires on infrastructure noise is one people stop reading.
+  const line = describePremergeUnknown({ reason: 'no merge-base for main..abc' });
+  assert.match(line, /did not run/);
+  assert.match(line, /not blocking/);
+  assert.match(line, /main/, 'says where the rule is still enforced');
+  assert.doesNotMatch(line, /^#/m, 'it is a log line, not a markdown block');
+});
+
+test('the workflow gives the job the history the judgement needs', () => {
+  // fetch-depth 1 (the default) checks out one commit: no origin/main, no fork
+  // point, so the gate would degrade to `unknown` on every PR — which is
+  // indistinguishable from a gate nobody turned on.
+  const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/auto-merge.yml'), 'utf8');
+  assert.match(wf, /fetch-depth:\s*0/, 'auto-merge must check out the history it judges against');
+});
+
+test('the same judgement is the one CI and post-merge run', () => {
+  // One implementation, three call sites — not three implementations.
+  const driver = fs.readFileSync(path.join(ROOT, 'scripts/auto-merge.mjs'), 'utf8');
+  assert.match(driver, /from '\.\/lib\/no-undo\.mjs'/, 'the driver reuses checkRange');
+  assert.match(driver, /judgeBranchAgainstLandedWork/, 'and calls it before merging');
+  // Anchor on the CALL, not the definition: `waitForDecision` is also declared
+  // near the top of the file, and matching that would compare against the wrong
+  // line and pass on a driver that had the judgement wired in after the wait.
+  const idx = driver.indexOf('judgeBranchAgainstLandedWork({ pr, baseBranch: undoBase })');
+  const waitIdx = driver.indexOf('await waitForDecision(client, {');
+  assert.ok(idx > 0, 'the judgement is called');
+  assert.ok(waitIdx > 0, 'the wait is called');
+  assert.ok(idx < waitIdx, 'the judgement runs BEFORE waiting on checks, so a rewrite is reported early');
 });

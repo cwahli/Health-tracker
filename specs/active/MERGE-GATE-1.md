@@ -7,6 +7,7 @@ skill: debug-contract
 auto_go: false
 allowed_files:
   - scripts/lib/merge-gate.mjs
+  - scripts/lib/premerge-undo.mjs
   - scripts/auto-merge.mjs
   - scripts/assert-auto-merge.test.mjs
   - .github/workflows/auto-merge.yml
@@ -143,3 +144,61 @@ reported yet holds the merge instead.
   check*; the refusal is exercised against the fake API and the two historical
   red PRs are cited as evidence. The clean path is exercised on this change's own
   PR end to end.
+
+## Extension (2026-09-30) — the second thing this gate must refuse
+
+Added while closing out the health work, because it is the same defect class and
+it cost this repo an hour.
+
+**What was missing.** The landed-work rule ("a change may extend landed work and
+may not silently erase it") had no pre-merge home for this repo's PRs. Push-event
+`ci` deliberately skips the step — its event carries no PR body, so judging
+commit messages there fails work the body already declares — and auto-pr's
+`GITHUB_TOKEN`-opened PRs run **zero jobs**, because GitHub does not run
+workflows in response to its own token's events. The rule therefore ran *only*
+post-merge, against the squash message. `d18568f6` landed three rewritten lines
+with no `Reverts:` that way and turned `main` red, which fail-closed every agent
+PR behind it (issue #401). The queue stalled on a violation that had not been
+judged, not on one that was judged and ignored.
+
+**What changed.** `scripts/lib/premerge-undo.mjs` (pure, and the only new file)
+plus a call in `auto-merge.mjs` before it waits on checks — `auto-merge` is the
+one job that already runs on the same push, already waits for the PR to be
+opened (`findOpenPr`), and already holds the PR body, which is the declaration
+source that actually exists. The judgement itself is **`checkRange` from
+`lib/no-undo.mjs`** — the same code the CI step and the post-merge verification
+run — so the rule has one implementation and three call sites rather than one
+implementation and three opinions. `.github/workflows/auto-merge.yml` gains
+`fetch-depth: 0`: at the default depth 1 there is no `origin/main`, no fork point
+and no owning commits, so the gate would degrade to "could not judge" on every PR
+— indistinguishable from a gate nobody enabled.
+
+**Three decisions, and why the third does not block.** `merge` (judged clean),
+`refuse` (judged, and it erases landed work undeclared — a hard stop, never
+waivable, and deliberately **not** waived by `allow_red_main`, which exists to
+land a fix onto a red main and says nothing about this branch's own diff), and
+`unknown` (could not judge). `unknown` logs loudly and does **not** comment on the
+PR: a gate that deadlocks the queue on infrastructure noise gets switched off,
+and a signal that fires on noise destroys the signal it shares a channel with.
+The post-merge check remains the backstop.
+
+**Gate additions.** Eleven tests in `assert-auto-merge.test.mjs`, driven against
+**real git** (`mkdir` + `git init` + commits), not a stub: an add-only branch
+merges; an undeclared rewrite refuses and names the owning commit; the same
+branch merges once the body declares it; **declaring a different commit does not
+wave it through**; a deleted landed file refuses; a missing head SHA and an
+unresolvable base are `unknown`, never a silent pass; the refusal names the owner
+and both valid moves; and the workflow pins `fetch-depth: 0`.
+
+**Proven red, three ways.** Removing `fetch-depth: 0` fails the workflow test;
+dropping the PR body from the judgement fails the declaration test; reverting
+the loader-style wiring in the driver fails the ordering test. The scratch-repo
+fixture caught its own bug first — a fixture that commits "the change" onto
+`main` makes the landed ref and the head the same commit, so the gate finds
+nothing and looks exactly like a working one.
+
+**Still out of scope.** `ci.yml` is untouched: it is claimed by another lane
+(#405), and the one-file-one-owner rule holds. The `pull_request` run that never
+fires is *not* repaired here — auto-merge is used as the pre-merge venue instead,
+which needs no workflow-trigger change and cannot be starved by the
+token-event rule.
