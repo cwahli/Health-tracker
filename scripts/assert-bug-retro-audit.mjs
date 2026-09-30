@@ -119,7 +119,9 @@ if (card) {
   answers['Q2 (tried and burned?)'] = burned || '(missing)';
 
   // Q3 — What is the exact next command?
-  const q3 = `node scripts/bugctl.mjs packet --id=#${card.public_n} --format=text`;
+  // cwd-independent: this string is written into the audit's answer key, so a
+  // relative path here teaches an agent the form that lost the store in 2026-09-30.
+  const q3 = `bugctl packet --id=#${card.public_n} --format=text`;
   const q3ok = /bugctl packet|packet --id/.test(roles) && plan?.plan?.gates?.length > 0;
   check('Q3 answerable from disk (packet command in BUG_PIPELINE + plan gates posted)', q3ok, q3);
   answers['Q3 (exact next command)'] = q3;

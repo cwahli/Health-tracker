@@ -1,0 +1,38 @@
+#!/bin/sh
+# bugctl — cwd-independent entry point to the canonical bug-card store.
+#
+# WHY THIS EXISTS (measured 2026-09-30). The bug-ticket skill told the steward
+# to run `node scripts/bugctl.mjs list --json`. That is a RELATIVE path, and the
+# hermes gateway's working directory is not the repo — it is /home/ubuntu. So
+# node failed with:
+#
+#   Error: Cannot find module '/home/ubuntu/scripts/bugctl.mjs'   (exit 1)
+#
+# and the steward, instead of reporting the failed read, rebuilt the list from
+# its own conversation history. The user was shown four cards including a #2
+# that no longer exists, and eleven real cards were missing — then told "That's
+# all of them."
+#
+# The store was fine the whole time. The tool was unreachable, and the failure
+# was invisible because the fallback was silent.
+#
+# The fix is to make the trap impossible rather than documented. bugctl.mjs
+# already resolves the repo from import.meta.url, so it is fully
+# cwd-independent once the FILE is found; this shim puts it on PATH so there is
+# no working directory left to get wrong. A note in a memory file was not
+# enough — that is what was tried first and it did not hold.
+#
+# If the checkout moves, this fails LOUDLY and says how to repair itself. A
+# missing tool must never look like an answer.
+
+set -e
+SCRIPT="@@BUGCTL_SCRIPT@@"
+
+if [ ! -f "$SCRIPT" ]; then
+  echo "bugctl: the store moved — $SCRIPT does not exist." >&2
+  echo "bugctl: this is a TOOL failure, not an answer. Do NOT answer from history." >&2
+  echo "bugctl: repair with: node <new-repo>/scripts/install-bugctl-shim.mjs" >&2
+  exit 70
+fi
+
+exec node "$SCRIPT" "$@"

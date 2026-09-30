@@ -340,6 +340,15 @@ jobs:
       # screen for 20s. Same class as the two row sets.
       - name: Bug board truth sensor (dispositions + cache invalidation)
         run: node scripts/assert-bug-board-truth.mjs
+      # The steward must not be able to LOSE the store. On 2026-09-30 the
+      # skill's relative `node scripts/bugctl.mjs` failed under the hermes
+      # gateway's cwd, and the agent answered from its own history instead of
+      # reporting the failure — the user saw a #2 that no longer exists and was
+      # told "That's all of them." Needs node_modules/.bin, so it lives here
+      # after Install.
+      - name: Bugctl reachability sensor (store cannot be lost again)
+        run: node scripts/assert-bugctl-is-reachable.mjs
+
       # Meal QA loop (plan/MEAL_QA_LOOP.md). Four ratchets, all offline.
       # resolve: saved meals stay reachable — the three provenance tiers and the
       #   no-overclaim guard on photo_only edit-history observability.

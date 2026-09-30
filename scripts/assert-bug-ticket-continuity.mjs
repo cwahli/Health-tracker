@@ -112,7 +112,13 @@ if (fs.existsSync(ctlPath)) {
   check('bugctl writes journal', ctl.includes('bug-journal'));
   check('bugctl offline queue', ctl.includes('.bugctl-queue.jsonl') || ctl.includes('BUGCTL_QUEUE'));
   const skill = read('scripts/skills/common/bug-ticket/SKILL.md');
-  check('steward skill uses canonical list', skill.includes('bugctl.mjs list --json'));
+  // Either spelling is the canonical list. The shim (PR #404) moved the skill to
+  // the cwd-independent `bugctl list --json`; the old relative form is what lost
+  // the store on 2026-09-30, but pinning one SPELLING rather than the intent
+  // would forbid the fix. What must hold is that the skill tells the agent to
+  // read the canonical list at all.
+  check('steward skill uses canonical list', /bugctl(\.mjs)? list --json/.test(skill));
+  check('steward skill does not teach the cwd-dependent path', !/node scripts\/bugctl\.mjs/.test(skill));
   check('steward skill forbids dispatch', skill.includes('orchestrator-dispatcher') && /never/i.test(skill));
 }
 
