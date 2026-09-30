@@ -196,6 +196,39 @@ function scaleFromPer100(per100Map, weightGrams, fdcId) {
   return { nutrients, fdcId: fdcId || null, unresolved };
 }
 
+/**
+ * Resolve a nutrient the catalog did not carry, from an explicit declared value
+ * plus a citable source. This is the difference between an unsourced number and
+ * a sourced one: the catalog stores macros and a few minerals, so a real meal
+ * cannot be audited from it alone — but a micronutrient with a named reference
+ * (a USDA FDC id, a product label) is a real datum, not a guess.
+ *
+ * A declared value with NO source is rejected, because that is precisely the
+ * fabrication this whole tool exists to refuse. `--allow-unsourced` remains the
+ * deliberate, named escape hatch and does not go through here.
+ */
+export function resolveDeclared(key, declared, factor) {
+  if (!declared || typeof declared !== 'object') return null;
+  const entry = declared[key];
+  if (entry === null || entry === undefined) return null;
+  const value = typeof entry === 'number' ? entry : (entry.value ?? entry.per100g ?? entry.amount);
+  const source = typeof entry === 'object' ? (entry.source || entry.ref || entry.fdcId || null) : null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (!source) {
+    throw new Error(
+      `declared '${key}' has no source. A nutrient value without a citable ` +
+      'reference is a guess; add "source" (e.g. a USDA FDC id) or omit it so the ' +
+      'tool reports the audit as incomplete.'
+    );
+  }
+  // per100g and amount are both accepted: a per-100 g reference is the same
+  // shape the catalog uses, and a whole-portion amount is already final.
+  const scaled = (entry.per100g !== undefined || entry.value === undefined && typeof entry === 'object' && entry.amount === undefined)
+    ? value * factor
+    : (typeof entry === 'number' ? value * factor : value);
+  return { value: scaled, source: String(source) };
+}
+
 // The API lookup is async, but scaleDish is used synchronously inside buildDish.
 // Populate this cache once via primeCatalog() before scaling api: keys.
 const API_CACHE = new Map();
@@ -231,6 +264,8 @@ export function buildDish(dish) {
   const out = { dishName: name, canonicalDbName: dish.canonicalDbName || name, ingredients: [], nutrients: {} };
   const total = { nutrients: {} };
   const unresolved = new Set();
+  const missingIn = new Set();
+  const declaredSources = {};
 
   for (const c of components) {
     const g = Number(c.weightGrams);
@@ -238,10 +273,33 @@ export function buildDish(dish) {
     const scaled = scaleDish(c);
     out.ingredients.push({ name: c.catalogKey, grams: g, fdcId: scaled.fdcId });
     for (const k of NUTRIENT_KEYS) total.nutrients[k] = (total.nutrients[k] || 0) + scaled.nutrients[k];
-    for (const k of (scaled.unresolved || [])) unresolved.add(k);
+    // Track which components lacked a key, but only a key that NO component
+    // supplied is genuinely unsourced. Flagging per-component made oats' missing
+    // vitaminC hide the plum that had it, so a real audit was reported incomplete.
+    for (const k of (scaled.unresolved || [])) missingIn.add(k);
   }
-  // Recorded on the dish so a reader can see which nutrients are unsourced.
+  for (const k of NUTRIENT_KEYS) {
+    if (missingIn.has(k) && !(total.nutrients[k] > 0)) unresolved.add(k);
+  }
+
+  // Second pass: fill what the catalog could not, from a citable declared value.
+  // Done after the components so a dish-level declaration is compared against the
+  // summed total and only the genuine remainder is overridden.
+  const declared = dish.declaredNutrients;
+  for (const k of [...unresolved]) {
+    const fix = resolveDeclared(k, declared, 1);
+    if (fix) {
+      // The dish total already holds the component sum; the declared value is the
+      // authoritative figure for the whole dish, so it REPLACES rather than adds.
+      total.nutrients[k] = fix.value;
+      declaredSources[k] = fix.source;
+      unresolved.delete(k);
+    }
+  }
+  // Recorded on the dish so a reader can see which nutrients are unsourced and
+  // which came from a named reference rather than the catalog.
   out.unsourcedNutrients = [...unresolved].sort();
+  out.declaredSources = declaredSources;
 
   out.weightGrams = components.reduce((s, c) => s + Number(c.weightGrams), 0);
   for (const k of NUTRIENT_KEYS) out.nutrients[k] = total.nutrients[k] || 0;
@@ -336,7 +394,7 @@ async function main() {
     schemaVersion: 2.1,
     title: spec.title || o.bundle,
     provenance: o.provenance || spec.provenance || 'catalog_scaled',
-    note: 'Nutrients are catalog per-100g values scaled to the declared weight. Calories are derived from macros (Atwater).',
+    note: 'Nutrients are catalog per-100g values scaled to the declared weight, plus any declaredNutrients that carry a citable source. Calories are derived from macros (Atwater).',
     unsourcedNutrients: unsourced,
     passes: [{ turnIndex: 1, turnId: 'single-turn', userPrompt: 'Analyze this meal photo.', dishes, imageCount: 0, addedPhotos: [] }],
   };

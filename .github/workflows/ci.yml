@@ -347,12 +347,15 @@ jobs:
       #   mechanical criteria and idempotent idem-keys.
       # loop:    the driver stays bounded, per-card capped, author != verifier.
       # assist:  refuses to invent nutrients rather than emit false findings.
-      - name: Meal audit loop gates (resolve, ticket, loop, assist)
+      # handoff:  the loop actually queues work for the meal-audit agent, and a
+      #   completed hand-off is adopted rather than re-fetched.
+      - name: Meal audit loop gates (resolve, ticket, loop, assist, handoff)
         run: |
           node scripts/assert-meal-audit-resolve.mjs
           node scripts/assert-meal-audit-ticket.mjs
           node scripts/assert-meal-audit-loop.mjs
           node scripts/assert-meal-audit-assist.mjs
+          node scripts/assert-meal-audit-handoff.mjs
 
       # The audit-only nutrient route the meal-audit agent reads from. Pins that it
       # serves active rows only, returns per-100g values unscaled, clamps its limit,
