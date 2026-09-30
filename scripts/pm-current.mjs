@@ -10,9 +10,10 @@
  *   - state/blocked/stall live from the fleet projection (packets, tickets,
  *     ledger, heartbeats — the same four sources the sweep uses);
  *   - rung/attempts from the ladder file (the sweep's own counters);
- *   - author: the packet file's git author (specs), the last curator (cards),
- *     the last runner provider/model (lanes) — blank where no source records
- *     one, never guessed;
+ *   - author: the agent behind the work — the commit `Author:` trailer on
+ *     the packet file (specs), the linked PR's body trailer (cards with a
+ *     GitHub match), the last curator (cards without one), the last runner
+ *     (lanes). Blank where nothing records one, never guessed;
  *   - github: newest open/merged PR whose head branch names the item
  *     (substring match on the item id) — blank where nothing matches;
  *   - tree: the linked ~/dev worktree if it exists on disk (with its branch),
@@ -40,6 +41,8 @@ import { attemptFor, ladderFile, readLadder } from './lib/pm-ladder.mjs';
 import { USER_AGENT } from './lib/google-store.mjs';
 
 export const CURRENT_TAB = 'current';
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
 export const CURRENT_COLUMNS = [
   'key',
@@ -125,14 +128,53 @@ export function linkedTree(kind, id, {
   return '';
 }
 
-/** Packet file's git author — the only recorded authorship specs have. */
+/**
+ * Who wrote the packet: the newest commit touching the file that carries an
+ * `Author:` (or legacy `Agent:`) trailer — i.e. the agent, not the git
+ * identity. Packets from before the trailer rule (2026-09-26) fall back to
+ * the git author. Blank when git cannot answer.
+ */
 export function specAuthor(root, file, { exec = nodeExecFileSync } = {}) {
   try {
-    const out = String(exec('git', ['log', '-1', '--format=%an %as', '--', file], { encoding: 'utf8', timeout: 15000, cwd: root })).trim();
-    return out || '';
+    const out = String(exec('git', ['log', '--follow', '--format=COMMIT:%H%nWHO:%an%nWHEN:%as%n%B%x1e', '-n', '20', '--', file], { encoding: 'utf8', timeout: 15000, cwd: root }));
+    const blocks = out.split('\x1e').map((b) => b.trim()).filter(Boolean);
+    let fallback = '';
+    for (const b of blocks) {
+      const who = (/^WHO:(.+)$/m.exec(b) || [])[1]?.trim() || '';
+      const when = (/^WHEN:(.+)$/m.exec(b) || [])[1]?.trim() || '';
+      if (!fallback && who) fallback = when ? `${who} ${when}` : who;
+      const trailer = (/^(?:Author|Agent):\s*(.+?)\s*$/m.exec(b) || [])[1]?.trim() || '';
+      if (trailer) return when ? `${trailer} ${when}` : trailer;
+    }
+    return fallback;
   } catch {
     return '';
   }
+}
+
+/** The agent behind a PR: the `Author:` trailer in its body (the squash keeps
+ * it), else the newest branch commit carrying one. Older PRs predate both —
+ * blank, never guessed. */
+export function prAuthor(number, { exec = nodeExecFileSync } = {}) {
+  const trailerOf = (text) => (/^(?:Author|Agent):\s*(.+?)\s*$/m.exec(String(text || '')) || [])[1]?.trim() || '';
+  try {
+    const body = String(exec('gh', ['pr', 'view', String(number), '--json', 'body', '-q', '.body'], { encoding: 'utf8', timeout: 30000, cwd: ROOT }));
+    const fromBody = trailerOf(body);
+    if (fromBody) return fromBody;
+  } catch {
+    return '';
+  }
+  try {
+    const out = exec('gh', ['api', `repos/cwahli/Health-tracker/pulls/${Number(number)}/commits`, '--paginate', '-q', '.[].commit.message'], { encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024, cwd: ROOT });
+    const messages = String(out || '').split('\n');
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const hit = trailerOf(messages[i]);
+      if (hit) return hit;
+    }
+  } catch {
+    // a PR whose commits cannot be read stays blank
+  }
+  return '';
 }
 
 /** specs/active/<file> by packet id, via frontmatter `id:` (first match wins). */
@@ -158,7 +200,7 @@ export function specFileFor(specsDir, id, { read = (f) => fs.readFileSync(f, 'ut
 /** Open + merged PRs, best-effort: a failed list means blank github cells. */
 export function listPrs({ exec = nodeExecFileSync } = {}) {
   try {
-    const out = exec('gh', ['pr', 'list', '--state', 'all', '--limit', '100', '--json', 'number,state,headRefName'], { encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
+    const out = exec('gh', ['pr', 'list', '--state', 'all', '--limit', '100', '--json', 'number,state,headRefName'], { encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024, cwd: ROOT });
     const rows = JSON.parse(String(out || '[]'));
     return Array.isArray(rows) ? rows : [];
   } catch {
@@ -240,6 +282,8 @@ async function main() {
 
   const rows = fleet.items.map((item) => {
     const att = attemptFor(ladder, item.key);
+    const gh = matchPr(prs, item.id);
+    const prNum = /^#(\d+)\b/.exec(gh)?.[1] || '';
     let author = '';
     let lastActivity = String(item.lastActivityAt || '');
     if (item.kind === 'spec') {
@@ -251,7 +295,9 @@ async function main() {
     } else if (item.kind === 'card') {
       const tag = String(item.key).replace(/^card:/, '');
       const row = byTag.get(tag);
-      author = String(row?.last_curation?.actor || '');
+      // A committed PR names its agent in the body trailer; otherwise the
+      // last curator, otherwise blank.
+      author = (prNum && prAuthor(prNum)) || String(row?.last_curation?.actor || '');
       lastActivity = String(row?.updated_at || '') || lastActivity;
     } else if (item.kind === 'lane') {
       author = item.lastOutcome && item.owner ? `${item.owner} via ${item.lastOutcome}` : String(item.owner || '');
@@ -264,7 +310,7 @@ async function main() {
         rung: att.rung || '',
         attempts: att.attempts || 0,
         author,
-        github: matchPr(prs, item.id),
+        github: gh,
         tree,
         lastActivity,
       }),
