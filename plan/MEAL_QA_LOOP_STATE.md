@@ -146,9 +146,10 @@ clinical ticket.
 2. **Weigh, don't estimate.** My 60 g + 90 g was an eyeball judgement. Core-nutrient
    verdicts are only as good as the declared weight, so a real audit wants a scale
    or the product's `standard_serving_g` — not a photo.
-3. **Decide on `journey/bug-board-miniapp`** — a pre-existing 28 h branch that
-   fails `TUI fixes-landed ratchet` and blocks this PR's merge. Land it, waive
-   it, or declare it dead in `TUI_TG_AUTH_TRAIL.md`. Not mine to decide.
+3. **Decide on `journey/bug-board-miniapp`** — RESOLVED 2026-09-30. The branch is
+   gone from the remote and its work merged via #328 ("shared board + Telegram
+   mini app"), so the `TUI fixes-landed ratchet` failure it caused is over. No
+   action left here.
 4. **Enable dispatch** (`MEAL_QA_ALLOW_DISPATCH=1`) and install the cron line —
    only after 1–2. The mechanism is proven; the evidence is not yet good enough to
    let it file unattended.
