@@ -33,9 +33,38 @@ import { t } from '../../utils/i18n';
 /**
  * Lightweight change fingerprint for the overview payload. The overview
  * endpoint carries no generated_at, so the poller compares this key and
- * skips setData (no re-render) when nothing moved.
+ * skips setData (no re-render) when nothing moved. The key must cover
+ * steward-mutated work_item fields (class/queue/block/repro/curation):
+ * those rewrite work_item JSON without always bumping updated_at/status,
+ * and a blind key leaves the board stale while `bugctl list` (fresh
+ * bugState() per read) already shows the new Class/State.
  */
-const overviewPayloadKey = (json: any): string => {
+export const workItemChangeKey = (tag: any): string => {
+  const raw = (tag as any)?.work_item;
+  let w: any = null;
+  try {
+    w = typeof raw === 'string' ? JSON.parse(raw) : raw || null;
+  } catch {
+    return `rawlen:${String(raw || '').length}`;
+  }
+  if (!w || typeof w !== 'object') return '-';
+  const commits = Array.isArray(w.commits) ? w.commits.length : 0;
+  const remaining = Array.isArray(w.remaining) ? w.remaining.length : 0;
+  const done = Array.isArray(w.done) ? w.done.length : 0;
+  return [
+    w.public_n ?? '',
+    w.queue ?? '',
+    w.class ?? '',
+    w.blocked_reason ? 1 : 0,
+    w.duplicate_of ? 1 : 0,
+    w.repro?.status ?? '',
+    w.verify?.result ?? '',
+    commits,
+    remaining,
+    done,
+  ].join('.');
+};
+export const overviewPayloadKey = (json: any): string => {
   const tags: any[] = Array.isArray(json?.bugTags) ? json.bugTags : [];
   const reports: any[] = Array.isArray(json?.allReports) ? json.allReports : [];
   const del: any[] = Array.isArray(json?.deletionCandidates) ? json.deletionCandidates : [];
