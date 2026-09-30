@@ -40,6 +40,7 @@ import {
   isCapped,
   rungFor,
   runComparison,
+  postPlan,
 } from './meal-audit-loop.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -65,7 +66,62 @@ console.log('assert-meal-audit-loop — bounded, resumable, author != verifier r
 
 const K = 'meal-audit|Meal-X-01|core_nutrient_drift|protein';
 
+/** The gate postPlan would record, without touching the store. */
+function postPlanDry() {
+  const r = postPlan(1, {
+    bundleDir: '/tmp/meal-loop-gate/Meal-X-01',
+    actualPath: '/tmp/meal-loop-gate/actual.json',
+    taxonomy: 'core_nutrient_drift',
+    key: 'protein',
+    dryRun: true,
+  });
+  return r.gate || '';
+}
+
 // --- 1. the attempt cap -------------------------------------------------------
+
+// --- the gate must be the comparator, not a generic vitest --------------------
+// This is the defect the first end-to-end run exposed. The card's `criteria`
+// text does reach the coder prompt, but the dispatcher resolves TICKET_GATES
+// from plan.gates — and with no plan it silently falls back to
+// `npx vitest run src/utils/bug*.test.ts`. A meal-audit card closed on that gate
+// would be "verified" by a bug-utils test that never reads the 32-nutrient
+// ledger: the loop would close cards on evidence that proves nothing.
+
+check('postPlan makes the comparator the card gate, not a generic vitest', () => {
+  const gate = postPlanDry();
+  assert.match(gate, /meal-audit-compare\.mjs/,
+    'the gate must be the meal comparator');
+  assert.ok(!/vitest/.test(gate), 'a generic vitest gate proves nothing about meals');
+});
+
+check('the gate uses an ABSOLUTE bundle path (the coder runs in another worktree)', () => {
+  const gate = postPlanDry();
+  const m = gate.match(/--bundle="([^"]+)"/);
+  assert.ok(m, 'gate must quote the bundle path');
+  assert.ok(path.isAbsolute(m[1]), `gate path must be absolute, got ${m[1]}`);
+});
+
+check('the gate carries the actual path when one is known', () => {
+  const gate = postPlanDry();
+  assert.match(gate, /--actual="[^"]+"/, 'gate must name the live capture to compare against');
+});
+
+check('a plan failure blocks dispatch rather than shipping an unverifiable card', () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'meal-audit-loop.mjs'), 'utf8');
+  const planIdx = src.indexOf('postPlan(');
+  const dispatchIdx = src.indexOf('dispatchCard(primary.publicN');
+  assert.ok(planIdx > -1 && dispatchIdx > -1, 'both stages must exist');
+  assert.ok(planIdx < dispatchIdx, 'the plan must be posted BEFORE dispatch');
+  assert.match(src, /if \(!planned\.ok\)[\s\S]{0,400}?continue;/,
+    'a failed plan must abort the pass instead of dispatching anyway');
+});
+
+check('verify posts the SAME gate the plan recorded', () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'meal-audit-loop.mjs'), 'utf8');
+  assert.match(src, /--command=\$\{planned\.gate\}/,
+    'verify must close on the evidence the card was opened with');
+});
 
 check('MAX_ATTEMPTS is a small finite number (not unbounded)', () => {
   assert.ok(Number.isFinite(MAX_ATTEMPTS), 'MAX_ATTEMPTS must be finite');

@@ -349,6 +349,35 @@ export function fileTickets(bundleDir, { actualPath, dryRun }) {
   return { ok: r.status === 0 || r.status === 2, status: r.status, plan: parsed, stderr: r.stderr, stdout: r.stdout };
 }
 
+/**
+ * Stage 4b — post the PLAN so the comparator becomes the card's real gate.
+ *
+ * Without this the dispatcher falls back to a generic gate
+ * (`npx vitest run src/utils/bug*.test.ts`), which knows nothing about meals.
+ * The card's own `criteria` text does reach the coder prompt, but a prompt is
+ * not a gate: the dispatcher resolves TICKET_GATES from `plan.gates`, and that
+ * is what a verifier later runs to close the card. So a meal-audit card would be
+ * "verified" green by a bug-utils vitest that never touches the 32-nutrient
+ * ledger — the loop would close cards on evidence that proves nothing.
+ */
+export function postPlan(publicN, { bundleDir, actualPath, taxonomy, key, dryRun }) {
+  if (!publicN) return { ok: false, error: 'no card number to plan' };
+  const actualArg = actualPath ? ` --actual="${actualPath}"` : '';
+  // The gate is the exact comparator invocation for THIS bundle. Note the
+  // absolute path: the coder runs in a separate dispatch worktree, and a
+  // relative artifacts/ path would not resolve there.
+  const gate = `node scripts/meal-audit-compare.mjs --bundle="${bundleDir}"${actualArg}`;
+  if (dryRun) return { ok: true, dryRun: true, gate, command: `bugctl plan --id=${publicN} --gates="${gate}"` };
+  const r = runNode('bugctl.mjs', [
+    'plan', `--id=${publicN}`,
+    `--hyp=${taxonomy} on ${key}: the ${taxonomy} path in this pipeline disagrees with audited ground truth; correct the class, not this one number`,
+    '--files=server_meal_edit.ts,server_food_analyze_run_finalize.ts,server_meal_compiler.ts',
+    `--gates=${gate}`,
+    '--by=orchestrator',
+  ], { timeout: 60000 });
+  return { ok: r.status === 0, status: r.status, gate, stderr: r.stderr, stdout: r.stdout };
+}
+
 /** Stage 5 — dispatch a coder. The AUTHOR. Never verifies its own work. */
 export function dispatchCard(publicN, { attempt, dryRun }) {
   if (!publicN) return { ok: false, error: 'no public card number to dispatch' };
@@ -507,6 +536,25 @@ async function main() {
       results.push(rec);
       continue;
     }
+
+    // Post the plan FIRST: this is what makes the comparator the card's gate
+    // rather than a generic bug-utils vitest that never reads the ledger.
+    const planned = postPlan(primary.publicN, {
+      bundleDir: bundle.bundleDir,
+      actualPath: o.actual,
+      taxonomy: primary.class,
+      key: primary.key,
+      dryRun: false,
+    });
+    rec.stages.plan = { posted: planned.ok, gate: planned.gate || null, stderr: planned.stderr || null };
+    if (!planned.ok) {
+      // Without a real gate the card would be closed on irrelevant evidence, so
+      // refuse to dispatch rather than ship a loop that verifies the wrong thing.
+      rec.error = `plan: ${planned.stderr || `exit ${planned.status}`}`;
+      hardFailure = true;
+      results.push(rec);
+      continue;
+    }
     const attempt = attemptsFor(state, primary.idemKey) + 1;
     const d = dispatchCard(primary.publicN, { attempt, dryRun: false });
     rec.stages.dispatch = { card: primary.publicN, attempt, rung: d.rung, ok: d.ok, dryRun: !!d.dryRun };
@@ -535,9 +583,11 @@ async function main() {
       rec.outcome = 'fixed';
       if (!o.dryRun) {
         // Only a non-author may post this; the loop never authored the fix.
+        // The command posted is the SAME gate the plan recorded, so the card
+        // closes on the evidence it was opened with.
         const v = runNode('bugctl.mjs', [
           'verify', `--id=${primary.publicN}`, '--result=green',
-          `--command=node scripts/meal-audit-compare.mjs --bundle="${bundle.bundleDir}" --actual="${o.actual || ''}"`,
+          `--command=${planned.gate}`,
           `--evidence=comparison.json`, '--by=qa_meal',
         ], { timeout: 60000 });
         rec.stages.verify = { posted: v.ok, status: v.status, stderr: v.stderr };

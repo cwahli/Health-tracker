@@ -85,15 +85,46 @@ Every audit is packaged as a standardized benchmark bundle:
 
 ### Workflow 3 — Review Any Existing Meal (comparison report)
 *Triggered when the user asks to review/compare a meal already saved on the site.*
-1. Locate the meal with the same refs as Workflow 2 (`--timestamp` / `--name` / `--job-id` / `--debug-file`).
+1. **Resolve the meal to evidence first.** Most saved meals have no debug payload
+   (~39 of the last 50 on the live store), so `--job-id` alone dead-ends. Run:
+   ```bash
+   node scripts/meal-audit-resolve.mjs --latest=10 --list
+   ```
+   It returns one of three provenances — `debug_payload` (full multi-turn replay),
+   `photo_only` (single turn from saved photos), or `unreproducible` (fails loud).
+   For `photo_only`, `--emit-skeletons` writes a `flow_skeleton.json` you audit the
+   normal way. **A `photo_only` bundle has no edit history: never file
+   `turn_mismatch` or `edit_not_applied` against one.**
 2. Reconstruct the benchmark locally (same audit steps as W1/W2).
 3. Fetch the site-stored values for the same meal (debug `pendingFoodLog` / food-log row).
 4. Emit a side-by-side comparison table into `meal_result.md` and `comparison.json`
    using the tolerance matrix in `plan/MEAL_AUDIT_PAYLOAD_CONTRACT.md` (exact OCR/name,
    core ≤10%, other ≤30%, bbox IoU ≥0.5, Atwater ≤10%, turn structure exact).
-5. Verdicts: `PASS` / `FAIL(<taxonomy_code>)` / `DIVERGED`. On FAIL, append a line to
-   `artifacts/meal_audits/issue_ledger.jsonl` and (if asked) hand a V-29 ticket to
-   `@Orchestrator`.
+5. Verdicts: `PASS` / `FAIL(<taxonomy_code>)` / `DIVERGED`. On FAIL the ticket is
+   **no longer a manual step** — hand the bundle to the bridge and it files one
+   card per finding, most-structural first:
+   ```bash
+   node scripts/meal-audit-ticket.mjs --bundle=<bundleDir> --actual=<actual.json>
+   ```
+   It is idempotent per `(bundle, taxonomy, key)`, so re-running after a failed fix
+   reuses the card instead of filing a duplicate. Add `--dry-run` to plan only.
+
+### Workflow 4 — Closed loop (resolve → audit → ticket → fix → re-verify)
+*Triggered by the scheduled sweep, or when asked to "run the meal QA loop".*
+```bash
+node scripts/meal-audit-loop.mjs --latest=3 --dry-run   # plan only
+node scripts/meal-audit-loop.mjs --status               # attempts per card
+```
+The loop runs the same stages above unattended: it resolves a window of saved
+meals, compares, files cards, posts a plan whose gate is the comparator itself,
+dispatches a coder, waits for the rebuild, then **re-runs the same comparison** to
+verify. Attempts are capped at 3 and then the card is blocked for a human.
+
+Do not reimplement any of this by hand. If a meal needs auditing, the loop reports
+it as `needs_audit` and the correct action is to audit that bundle — not to
+hand-file a card for a meal nobody has checked.
+
+Runbook: `plan/MEAL_QA_LOOP.md`.
 
 ---
 
