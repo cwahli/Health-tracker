@@ -215,9 +215,27 @@ export function checkRange(repo, base, head, landedRef, body, opts = {}) {
   // touched (proven on a real behind-branch: 30 false flags, zero true).
   // For a squash on main the fork point IS the parent, so post-merge runs
   // are unchanged.
+  // CI checks out refs/pull/N/merge on a pull_request run, so `head` is a
+  // MERGE commit: parents are [main tip, branch head]. `merge-base base head`
+  // is then `base` itself (base is an ancestor of the merge), which makes the
+  // diff span every main-side commit made since the branch forked — so another
+  // agent's later work reads as this branch's deletions. Measured on PR #391:
+  // 11 false flags on scripts/pm-current.mjs and bot-forge-server.mjs, files
+  // that branch had never touched.
+  //
+  // Fix: judge the branch side. For a merge, that is the LAST parent (GitHub
+  // puts the PR head there); its fork against `base` is the branch's real
+  // starting point. A non-merge head is already the branch side.
+  let branchHead = head;
+  try {
+    const parents = git(repo, 'rev-list', '--parents', '-n', '1', head).split(/\s+/).slice(1);
+    if (parents.length > 1) branchHead = parents[parents.length - 1];
+  } catch {
+    /* single-parent or unreadable: head is already the branch side */
+  }
   let fork;
   try {
-    fork = git(repo, 'merge-base', base, head);
+    fork = git(repo, 'merge-base', base, branchHead);
   } catch {
     return {
       violations: [],
@@ -225,6 +243,7 @@ export function checkRange(repo, base, head, landedRef, body, opts = {}) {
       error: `no merge-base for ${base}..${head}`,
     };
   }
+  head = branchHead;
   const own = ownSet(repo, fork, head);
   const violations = [];
   const skipped = [];
