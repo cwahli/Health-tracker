@@ -145,6 +145,31 @@ export function forgePageHtml({ apiBase = '/api' } = {}) {
 const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
 
+// Same three-step order as the TUI exchange page: the bare Telegram global,
+// then window.Telegram, then the tgWebAppData launch param in the URL hash.
+// Some clients never inject window.Telegram but still carry the launch params
+// in the hash. A plain browser (no Telegram, no hash) yields '' and fails
+// closed at the server exactly as before.
+function forgeInitData() {
+  try {
+    if (typeof Telegram !== 'undefined' && Telegram && Telegram.WebApp && Telegram.WebApp.initData) {
+      return String(Telegram.WebApp.initData);
+    }
+  } catch (e) {}
+  try {
+    if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+      return String(window.Telegram.WebApp.initData);
+    }
+  } catch (e) {}
+  try {
+    if (typeof location !== 'undefined' && location && location.hash) {
+      var data = new URLSearchParams(String(location.hash).replace(/^#/, '')).get('tgWebAppData');
+      if (data) return String(data);
+    }
+  } catch (e) {}
+  return '';
+}
+
 const el = (id) => document.getElementById(id);
 const stepsEl = el('steps');
 const noteEl = el('note');
@@ -209,7 +234,7 @@ function fillExisting(bots) {
 async function loadState() {
   try {
     const res = await fetch('${apiBase}/state', {
-      headers: { 'x-telegram-init-data': tg ? String(tg.initData || '') : '' },
+      headers: { 'x-telegram-init-data': forgeInitData() },
     });
     const state = await res.json();
     if (!state.ok) {
@@ -237,7 +262,7 @@ async function post(input) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-telegram-init-data': tg ? String(tg.initData || '') : '',
+        'x-telegram-init-data': forgeInitData(),
       },
       body: JSON.stringify(input),
     });
