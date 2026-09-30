@@ -160,13 +160,24 @@ for unit in tui-ttyd-vm tui-ttyd-vm2; do
     *) echo "  FAIL  $unit session name says no location (got '${name:-none}')"; FAIL=$((FAIL + 1)) ;;
   esac
 done
-# Two bots on one host must not share a session: that would put two chats on
-# one terminal, which is the isolation vm2's unit exists to protect.
+# Bots on one host must not share a session: that would put two chats on one
+# terminal, which is the isolation vm2's and vm3's units exist to protect.
 VM_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm.service" | cut -d= -f2)
 VM2_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm2.service" | cut -d= -f2)
-[ -n "$VM_NAME" ] && [ "$VM_NAME" != "$VM2_NAME" ] \
-  && { echo "  PASS  the two bots keep separate sessions ($VM_NAME vs $VM2_NAME)"; PASS=$((PASS + 1)); } \
-  || { echo "  FAIL  the two bots share one session ($VM_NAME)"; FAIL=$((FAIL + 1)); }
+VM3_NAME=$(grep -o 'TUI_TMUX_NAME=.*' "$HERE/tui-ttyd-vm3.service" | cut -d= -f2)
+[ -n "$VM_NAME" ] && [ -n "$VM2_NAME" ] && [ -n "$VM3_NAME" ] \
+  && [ "$VM_NAME" != "$VM2_NAME" ] && [ "$VM_NAME" != "$VM3_NAME" ] && [ "$VM2_NAME" != "$VM3_NAME" ] \
+  && { echo "  PASS  the three bots keep separate sessions ($VM_NAME / $VM2_NAME / $VM3_NAME)"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  bots share one session ($VM_NAME / $VM2_NAME / $VM3_NAME)"; FAIL=$((FAIL + 1)); }
+
+# The phone-vs-VM tell must be the platform, not the URL file's path: that path
+# defaults to a Termux location on every host, so a VM bot with no gateway URL
+# was told its "phone tunnel" was down (vm3, live 2026-09-30). The markers are
+# the ones freemodels.mjs already uses for the mobile lane.
+TELL=$(grep -c 'const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);' "$HERE/bot-host.mjs" || true)
+[ "$TELL" = "2" ] \
+  && { echo "  PASS  the phone-vs-VM tell is the platform, not the URL path"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the phone-vs-VM tell is the platform, not the URL path (found $TELL of 2)"; FAIL=$((FAIL + 1)); }
 
 # 13. The terminal launches the tool the CHAT is on, not the bot's default.
 #     This is the class that shipped: the attach hardcoded $OPENCODE_BIN, so a

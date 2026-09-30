@@ -15,10 +15,12 @@ BOT_ID="${TUI_BOT_ID:-vm}"
 CHAT_ID="${TUI_CHAT_ID:-6218257274}"
 
 # The terminal page is per-bot (gateway TTYD_ROUTES): vm2 lives under /tty2/,
-# every other bot under /tty/. Probing a vm2 token against /tty/ is refused by
-# design (bot isolation), so the proof must ask for this bot's own path.
+# vm3 under /tty3/, every other bot under /tty/. Probing a bot's token against
+# another bot's path is refused by design (bot isolation), so the proof must
+# ask for this bot's own path.
 TTY_PATH="/tty/"
 if [ "$BOT_ID" = "vm2" ]; then TTY_PATH="/tty2/"; fi
+if [ "$BOT_ID" = "vm3" ]; then TTY_PATH="/tty3/"; fi
 
 # The env key is the bot id UPPER-CASED with punctuation folded to "_", which is
 # what the gateway's tokenFor() does. Building it any other way finds nothing
