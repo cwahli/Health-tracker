@@ -427,9 +427,19 @@ async function main(argv = process.argv.slice(2)) {
   let mergeResult = '';
   let mergeSha = null;
   try {
+    // The squash commit is the durable record: `git log` is what the next agent
+    // reads, and GitHub mints the squash body from the branch's commit list
+    // unless told otherwise — which dropped the PR body's `## Left` on every
+    // merge (measured 2026-09-30: 0 of 16 squash commits preserved it). Passing
+    // the PR title+body as the squash message keeps Done and Left in history.
+    // `commit_message` is omitted when the body is empty so auto-PR bodies with
+    // only a trailer do not mint blank squash bodies.
+    const mergeBody = { merge_method: 'squash' };
+    if (pr.title) mergeBody.commit_title = String(pr.title);
+    if (pr.body && String(pr.body).trim()) mergeBody.commit_message = String(pr.body);
     const res = await client.call(`/repos/${owner}/${repo}/pulls/${pr.number}/merge`, {
       method: 'PUT',
-      body: { merge_method: 'squash' },
+      body: mergeBody,
     });
     const merged = res?.merged === true;
     // The merge response carries the commit it created. That is the commit to
