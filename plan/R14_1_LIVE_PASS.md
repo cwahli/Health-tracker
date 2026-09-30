@@ -254,8 +254,15 @@ not the physical devices.
   `worker-standin@.service`. A real Colab runtime and a real phone are the only
   way QS-1/QS-3/QS-4/QS-9 go green, and the bot already labels them honestly in
   its own reply.
-- **A `failed` route still replies "(unknown reason)"** — re-arming works, but the
-  user is told a canary failed without being told why.
+- ~~**A `failed` route still replies "(unknown reason)"**~~ — **fixed after this
+  note was written** (re-checked 2026-09-30).
+  [#346](https://github.com/cwahli/Health-tracker/pull/346) added
+  `failedRouteReason()` to `scripts/lib/worker-routing.mjs` and wired it into the
+  held-message call site in `scripts/bot-host.mjs`, so the reason is read from
+  `row.canary.reason` — the field `rollbackRoute` actually writes. Sensor:
+  `assert-worker-routing.test.mjs` **16/16** on `main` at `ced03e4`. A failed route
+  staying *held* until the user re-arms it with `/location <host>` is the designed
+  behaviour and was never the defect.
 
 ---
 
@@ -401,6 +408,14 @@ with **PR #315 open** — another agent's in-flight TUI auth/attach work.
 Deploying `main` over it would pull the serving bot out from under an open PR;
 running card 9 against that branch would not be "the commit under test" for
 these cards. Nothing was restarted and nothing was deployed.
+
+**Re-checked 2026-09-30: that particular obstruction has gone.** PR #315 is
+**closed, not merged** — superseded by the TUI attach work that landed as #365 and
+#367 — so there is no open PR to avoid deploying over any more. What remains is
+VPS-side and unchanged in kind: rule 4 needs `bot-host@vm` restarted from the
+commit under test, so the serving tree has to be moved onto `main` (it was four
+commits ahead at `5434923`) by whoever operates that box. None of that is
+decidable from a laptop checkout.
 
 Still true, and still blocking the mobile half: the phone is down.
 `ping -c1 -W2 114.79.4.158` → 1 transmitted, 0 received, 100% packet loss, so
