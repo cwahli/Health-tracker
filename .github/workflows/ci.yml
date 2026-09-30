@@ -132,10 +132,16 @@ jobs:
       # body is the PR body; on post-merge runs it is the squash message,
       # which carries the PR body since the squash keeps it (#377).
       - name: Landed-work preservation (no silent undo)
+        if: github.event_name == 'pull_request' || github.event_name == 'repository_dispatch'
         shell: bash
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          # PR and post-merge runs only — same gating as the contract steps.
+          # A push run has no PR body (its event carries none), and judging
+          # commit messages there would fail work the PR body already declares
+          # (proven on this step's own PR: push run red, PR run green on the
+          # same head). Single-push branches are covered post-merge instead.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base='${{ github.event.pull_request.base.ref }}'
             before='${{ github.event.pull_request.base.sha }}'
