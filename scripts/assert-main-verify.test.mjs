@@ -138,6 +138,13 @@ function scratchTree(overrides = {}) {
     'lib/main-verify.mjs',
     'lib/github-rest.mjs',
     'lib/red-main-notice.mjs',
+    // The driver judges landed work before merging (MERGE-GATE-1 extension).
+    // This fixture copies the driver's real import graph, so the graph growing
+    // is a change here too — otherwise the scratch tree crashes with
+    // ERR_MODULE_NOT_FOUND and every E2E in this file fails for the wrong
+    // reason.
+    'lib/no-undo.mjs',
+    'lib/premerge-undo.mjs',
   ]) {
     fs.copyFileSync(path.join(ROOT, 'scripts', rel), path.join(dir, 'scripts', rel));
   }
