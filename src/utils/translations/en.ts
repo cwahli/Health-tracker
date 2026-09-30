@@ -2000,4 +2000,12 @@ export const en = {
   "tableShowLess": "Show less",
   "tableShowing": "Showing {a}-{b} / {c}",
   "tableUnmapped": "Unmapped biomarkers detected in raw clinical records. Select checkbox on any row to approve/add as custom biomarker.",
+  "bugCardDeclined": "declined",
+  "bugCardFixed": "fixed",
+  "bugCardStuck": "stuck",
+  "bugCardHumanToDo": "human to do",
+  "bugCardAgentToDo": "agent to do",
+  "bugCardUnactioned": "un-actioned",
+  "bugKpiDeclined": "Declined",
+  "bugFilterDeclined": "Declined / not work"
 } as const;

@@ -18,6 +18,7 @@ import { claimPublicNumbers, loadIssueTags } from './serverBugNumbers.js';
 import { bugState } from './src/utils/bugTicketState';
 import { bugReportShotFields, bugShotContentType, bugShotExt, bugShotKey, parseDataUrl } from './src/utils/bugSnapshot';
 import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
+import { onIssueTagsWrite } from './serverIssueTagEvents';
 
 // ---------------------------------------------------------------------------
 // D-2: D1-only data access for the issue tracker. D1 stores JSON columns
@@ -574,11 +575,25 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
   const addDebugLog = deps.addDebugLog || ((m: string) => console.log(m));
 
   // Short TTL cache: this dashboard doesn't need per-request freshness, and the
-  // underlying query does 2-3 sequential Supabase round trips including a jsonb
-  // payload column. Cache is in-memory/per-server-instance and intentionally has
-  // no write-side invalidation (see TASK_5 instructions for the tradeoff).
+  // underlying query does 2-3 sequential D1 round trips including a TEXT
+  // payload column.
+  //
+  // The TTL used to be the ONLY expiry. It was also busted by three hand-placed
+  // `overviewCache = null` statements, all in this file, which meant a write
+  // from serverBugSnapshot.ts — the agent posting an attempt, a verify, a
+  // curation, an auto-file that mints a new card — left the board showing a
+  // stale COUNT for up to 20s (measured 2026-09-30). A second surface with its
+  // own idea of the truth, which is the defect class this board keeps hitting.
+  //
+  // Now the cache subscribes to the write signal emitted by d1Query itself, so
+  // every write to issue_tags busts it from one place and a future write route
+  // is covered by existing rather than by remembering. The TTL stays as a
+  // backstop for anything that bypasses D1.
   const OVERVIEW_CACHE_TTL_MS = 20_000;
   let overviewCache: { data: any; expiresAt: number } | null = null;
+  const stopOverviewInvalidation = onIssueTagsWrite(() => {
+    overviewCache = null;
+  });
 
   app.get('/api/bug-tracker/overview', async (_req: Request, res: Response) => {
     if (overviewCache && overviewCache.expiresAt > Date.now()) {

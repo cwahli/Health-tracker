@@ -328,6 +328,19 @@ jobs:
       - name: Bug ticket continuity gate (assert-bug-ticket-continuity)
         run: node scripts/assert-bug-ticket-continuity.mjs
 
+      # One row set and one number per card across the board and `bugctl list`
+      # (#391). These two need `tsx` from node_modules, so they live here and
+      # NOT above the Install step — the count-parity sensor shipped in #391 was
+      # never wired into CI at all, which is why it could not have caught that.
+      - name: Bug ticket count parity sensor (board == list)
+        run: node scripts/assert-bug-ticket-count-parity.mjs
+
+      # The board's own numbers must be true: an ignored card read "fixed" and
+      # counted as done, and a write from the agent left a stale card count on
+      # screen for 20s. Same class as the two row sets.
+      - name: Bug board truth sensor (dispositions + cache invalidation)
+        run: node scripts/assert-bug-board-truth.mjs
+
       # capability: structural checks on every row, then the V-30.5 ticket-scoped
       # strict (the 5 foreign partials stay owned by BOT-11, never marked done).
       - name: Capability propagation gate (strict, ticket-scoped)

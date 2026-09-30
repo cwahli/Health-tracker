@@ -2000,4 +2000,12 @@ export const id = {
   "tableShowLess": "Tampilkan lebih sedikit",
   "tableShowing": "Menampilkan {a}-{b} / {c}",
   "tableUnmapped": "Biomarker tak terpetakan terdeteksi dalam rekam klinis mentah. Centang kotak pada baris mana pun untuk menyetujui/menambah sebagai biomarker kustom.",
+  "bugCardDeclined": "ditolak",
+  "bugCardFixed": "selesai",
+  "bugCardStuck": "macet",
+  "bugCardHumanToDo": "perlu manusia",
+  "bugCardAgentToDo": "perlu agent",
+  "bugCardUnactioned": "belum acted",
+  "bugKpiDeclined": "Ditolak",
+  "bugFilterDeclined": "Ditolak / bukan pekerjaan"
 } as const;

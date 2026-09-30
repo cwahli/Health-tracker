@@ -29,8 +29,15 @@ const BASELINE_TOTAL_KEYS = 3960;
  * deliberate-act rule `scripts/assert-parity.mjs` documents. Growth is what
  * this file already permits — parity and the `>=` count floor below exist so
  * the pack can grow without anyone editing existing copy in silence.
+ *
+ * Re-recorded again for the bug board's card dispositions (PR #392), which
+ * added eight keys per pack: the six row-badge words plus the declined KPI
+ * tile and its filter. Those words were previously hardcoded English inside
+ * BugBoard.tsx, and `dispositionLabel()`'s second argument exists so they stop
+ * being. Still growth only — no existing copy value was edited, which is the
+ * rule this digest is for.
  */
-const FROZEN_DIGESTS = { en: '177f712afc6183e0', id: '8ce5e793a8b246c9' } as const;
+const FROZEN_DIGESTS = { en: 'e382604d4ed04cd6', id: '39a1785088c34a73' } as const;
 
 const stablePairs = (pack: Record<string, unknown>) =>
   JSON.stringify(Object.keys(pack).sort().map((key) => [key, pack[key]]));
