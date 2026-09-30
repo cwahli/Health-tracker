@@ -51,7 +51,13 @@ describe('ticket-list source of truth (cross-agent consistency)', () => {
 
   it('bug-ticket SKILL: canonical list, no MEMORY.md, fail-loud, comparable answers', () => {
     const skill = read('scripts/skills/common/bug-ticket/SKILL.md');
-    expect(skill).toMatch(/node scripts\/bugctl\.mjs list --json/);
+    // Either spelling reaches the store. The cwd-independent `bugctl …` is the
+    // shim (PR #406); the relative `node scripts/bugctl.mjs` is what lost the
+    // store on 2026-09-30, so it is now BANNED below rather than merely allowed.
+    // What this asserts is the intent: the skill tells the agent to read the
+    // canonical list.
+    expect(skill).toMatch(/bugctl(\.mjs)? list --json/);
+    expect(skill).not.toMatch(/node scripts\/bugctl\.mjs/);
     expect(skill).toMatch(/Never answer from `MEMORY\.md`/);
     expect(skill).toMatch(/paste the error/);
     expect(skill).toContain('generated_at');
