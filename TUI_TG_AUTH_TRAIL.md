@@ -464,3 +464,54 @@ The lesson is the same one as the rest of this file: a claim on a branch is
 not evidence. `2bf613a` sat unlanded for 25 hours with "every turn failed" in
 its subject line, and the thing that proved it was running the installed
 binary, not reading the commit.
+
+## 2026-09-30: lane-shared page-key scroll + multi-client TUI (branch `fix/tui-scroll-multiclient`, commit `3d105884`)
+
+Two user-facing defects, one branch:
+
+1. **Mobile scroll dead on the VM bot, fine on VM2.** Root cause: the
+   terminal is per-lane (opencode OR cline, chosen at attach time in
+   `scripts/lib/tui-surface.mjs`) and the lanes scroll on DIFFERENT keys —
+   opencode `ctrl+alt+b/f/u/d/y/e` (docs: https://opencode.ai/docs/nb/keybinds/),
+   cline `ctrl+meta+b/f/u/d` + `ctrl+g` (`TRANSCRIPT_KEYBINDS` in
+   `sdk/apps/cli/src/tui/hooks/transcript-keybinds.ts`). The old
+   `TOUCH_SCROLL_JS` bridge sent only `ctrl+alt+e/u`: opencode scrolled, a
+   cline lane felt dead. Same gateway, same phone — the lane in front
+   differed. Fix: the bridge sends bare PageUp/PageDown, the one binding
+   both lanes share (no modifiers for xterm to swallow), paced to 300ms,
+   max 3 per touchmove, fling capped at 6. Sensors rewritten to pin the
+   shared-key contract (`assert-tui-gateway` 121/0).
+2. **Second device stuck on "tap Enter to reconnect".** Root cause: both
+   ttyd units ran `--max-clients 1`. ttyd spawns one `tui-attach.sh` per
+   browser client and both attach to the SAME tmux session — so the desktop
+   held the only slot and the phone got no PTY, overlay forever. Fix
+   (multi-open, not kick-the-other): `--max-clients 0` on both units;
+   `cleanup()` only clears the lease when `tmux list-clients` is 0;
+   `aggressive-resize on` so the pane sizes to the largest client. Sensors
+   10b–10d in `assert-tui-chat-select` (50/0).
+
+### For the next agent: NOT done — verify before merging
+
+- [ ] **Deploy first, then prove.** `sudo cp scripts/tui-ttyd-vm.service
+      scripts/tui-ttyd-vm2.service /etc/systemd/system/ && sudo systemctl
+      daemon-reload && sudo systemctl restart tui-ttyd-vm tui-ttyd-vm2
+      tui-gateway`. The VM still runs the old units until this happens.
+- [ ] **Live phone proof, both lanes.** Desktop `/tui`, then mobile `/tui`
+      (both share the session — task 2). Drag-scroll on an opencode chat
+      AND a cline chat (task 1). `/tui status` correct while both attached
+      and after the first detaches.
+- [ ] **Known gaps, in priority order:**
+  1. Scroll is now page-granularity, not line-granularity — the price of
+     the only key both lanes share. Follow-up: lane-aware bridge (gateway
+     reads the chat's `tui-open.json` surface, serves ctrl+alt for opencode
+     / ctrl+meta for cline).
+  2. tmux session is per-bot (`VM-tui`, `VM-tui-vm2`), not per-chat. Two
+     different chats on one bot share a terminal — multi-device works,
+     multi-chat collides. Per-chat sessions would fix it but change the
+     attach/lease contract.
+  3. PageUp/PageDown pass-through is assumed from docs + xterm behaviour,
+     not measured by firing bytes into the installed cline binary (the way
+     the old opencode numbers were). The live test above is the proof; if
+     cline's opentui build swallows them, go lane-aware (gap 1).
+  4. Confirm the `assert-tui-chat-select` CI job runs on the PR — the new
+     10b–10d cases only gate if the script runs.

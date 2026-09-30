@@ -392,7 +392,14 @@ HEARTBEAT_PID=$!
 
 cleanup() {
   kill "$HEARTBEAT_PID" 2>/dev/null || true
-  rm -f "$TUI_LEASE" 2>/dev/null || true
+  # Only clear the lease when nobody is left in the tmux session. ttyd spawns
+  # ONE tui-attach.sh per browser client, so desktop + phone on the same
+  # session means TWO holders: the first client to detach must not delete the
+  # lease out from under the second, or the bot reports "none open" while the
+  # phone is still looking at the terminal.
+  if [ "$(tmux list-clients -t "$TMUX_NAME" 2>/dev/null | wc -l | tr -d ' ')" = "0" ]; then
+    rm -f "$TUI_LEASE" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -402,6 +409,11 @@ trap cleanup EXIT INT TERM
 # stays off for these sessions: on a phone screen it is a wasted row and a
 # visual frame, and the tool draws its own status line.
 #
+# aggressive-resize: with desktop + phone on the same session the pane would
+# otherwise size to the SMALLEST client, shrinking the desktop to phone width.
+# `aggressive-resize on` sizes the pane to the LARGEST client instead, so each
+# screen keeps its own width (xterm reflows per client).
+#
 # The command is the argv from scripts/lib/tui-surface.mjs, not
 # "$OPENCODE_BIN" "${SID_ARG[@]}": that hardcoded argv WAS the defect — it named
 # OpenCode whatever lane the chat was actually on. It arrives as ARG0/ARG1/…
@@ -409,4 +421,5 @@ trap cleanup EXIT INT TERM
 # space in it survives; no eval, no re-splitting.
 tmux new-session -d -A -s "$TMUX_NAME" "${LAUNCH_ARGV[@]}"
 tmux set-option -t "$TMUX_NAME" status off 2>/dev/null || true
+tmux set-window-option -t "$TMUX_NAME" aggressive-resize on 2>/dev/null || true
 tmux attach-session -t "$TMUX_NAME"

@@ -879,86 +879,89 @@ export const LAYOUT_JS = [
 ].join('\n');
 
 /**
- * Touch drag -> the app's own scroll keys, so a finger can scroll a fullscreen
+ * Touch drag -> transcript scroll keys, so a finger can scroll a fullscreen
  * TUI on a phone.
  *
- * Every number here is measured against the installed opencode: keys fired as
- * exact bytes into the real binary, pane diffs counted, and REPEATABILITY
- * tested (fire 4, see how many land). Repeatability is the whole game - a key
- * that fires once and then goes dead makes dragging feel broken.
+ * The terminal is per-lane (opencode OR cline, chosen at attach time in
+ * scripts/lib/tui-surface.mjs), and the two lanes scroll on DIFFERENT keys:
  *
- *   key                  moves        repeats?
- *   alt+ArrowUp / Down   1 line       NO - 1 of 4 applies, at any gap
- *   ctrl+alt+y (doc'd    1 line       n/a - xterm never sends it at all
- *     line UP)
- *   ctrl+alt+e           1 line       YES - 4 of 4, 1 line each
- *   ctrl+alt+u / d       half page    YES - 4 of 4, 8 lines each
- *   ctrl+alt+b, PageUp   full page    partly
- *   SGR wheel (ESC[65/66) none        n/a - the app ignores wheel entirely
+ *   opencode lane: messages_page_up = PageUp / ctrl+alt+b,
+ *                  messages_page_down = PageDown / ctrl+alt+f,
+ *                  half page = ctrl+alt+u / ctrl+alt+d,
+ *                  line = ctrl+alt+y / ctrl+alt+e
+ *                  (docs: https://opencode.ai/docs/nb/keybinds/)
+ *   cline lane:    messages_page_up = PageUp / ctrl+meta+b,
+ *                  messages_page_down = PageDown / ctrl+meta+f,
+ *                  half page = ctrl+meta+u / ctrl+meta+d,
+ *                  first/last = ctrl+g / ctrl+meta+g
+ *                  (sdk/apps/cli/src/tui/hooks/transcript-keybinds.ts:
+ *                  TRANSCRIPT_KEYBINDS)
  *
- * So: scrolling DOWN is 1 line per step (ctrl+alt+e) and scrolling UP is a
- * half page per step (ctrl+alt+u). An up drag is nudged with a page key
- * first - the app ignores a same-direction key inside a few hundred ms of
- * the last one, so the nudge also re-arms it. That is the finest repeatable
- * scrolling this app can do from a browser, and it is why the earlier
- * "one line each way" version felt like it was not scrolling at all.
+ * The bridge therefore sends the keys BOTH lanes honour: bare PageUp /
+ * PageDown. The ctrl+alt / ctrl+meta variants differ per lane (opencode wants
+ * alt, cline wants meta), and the line keys differ too (ctrl+alt+e vs
+ * nothing comparable on cline) — so the old ctrl+alt+e / ctrl+alt+u bridge
+ * scrolled the opencode lane and did nothing on a cline lane. That is the
+ * "scrolls on VM2, dead on VM" shape: the lane in front differs, not the
+ * gateway or the phone. xterm passes bare PageUp/PageDown through to the PTY
+ * (no modifiers for it to swallow), and both lanes bind them to page scroll.
  *
- * Feel: one step per ~1/24th of the screen, up to 6 keys per touchmove so a
- * fast drag is never throttled, a decaying fling for momentum, `preventDefault`
- * only once a drag is really scrolling (a tap still types), multi-touch left
- * alone so pinch-zoom survives, and one accumulator per gesture.
+ * Feel: one page-key per ~1/8th of the screen would jump too far (a full page
+ * per step), so the accumulator keeps the old ~1/24th-of-screen step: a drag
+ * of one page-key worth of travel emits ONE page key, not one per line-px.
+ * Both directions are paced to COOLDOWN_MS — page keys are the coarsest move
+ * either lane has, and firing them flat out on a fast drag would jump whole
+ * screens per touchmove. Up to MAX_KEYS per touchmove so a fast drag is never
+ * throttled, a decaying fling for momentum, `preventDefault` only once a drag
+ * is really scrolling (a tap still types), multi-touch left alone so
+ * pinch-zoom survives, and one accumulator per gesture.
  */
 export const TOUCH_SCROLL_JS = [
   '(function(){',
   'try{',
-  '// One line per step. alt+ArrowUp/alt+ArrowDown are the finest scroll the',
-  '// app has (measured: 1 line) AND the finest pair the browser can send',
-  '// (xterm emits ESC[1;5A / ESC[1;5B; ctrl+alt+y never leaves the browser).',
-  '// Line DOWN (ctrl+alt+e, keyCode 69) repeats 4-for-4; the matching line UP',
-  '// (ctrl+alt+y) is swallowed by xterm and alt+ArrowUp fires only once, so up',
-  '// scrolls a half page (ctrl+alt+u, keyCode 85) and is re-armed with a page',
-  '// key (ctrl+alt+b, keyCode 66) - the app ignores a same-direction key sent',
-  '// too soon after the last one.',
-  'var DOWN=69,UP=85,MAX_KEYS=6,COOLDOWN_MS=300,',
-  'FLING_PX_PER_STEP=55,MAX_FLING_STEPS=10;',
+  '// PageUp / PageDown: the scroll keys BOTH lanes honour (opencode keybinds +',
+  '// cline TRANSCRIPT_KEYBINDS). The old ctrl+alt+e / ctrl+alt+u bridge scrolled',
+  '// opencode only — cline wants ctrl+meta, not ctrl+alt — so a cline lane felt',
+  '// dead. Bare page keys need no modifiers, so xterm passes them through.',
+  '// One page key per PAGE_PX of travel (an eighth of the screen): finer steps',
+  '// would jump full pages per line-px of drag.',
+  'var PGUP=33,PGDN=34,MAX_KEYS=3,COOLDOWN_MS=300,',
+  'FLING_PX_PER_STEP=160,MAX_FLING_STEPS=6;',
   'var t=null,y0=0,acc=0,v=0,v0=0,last=0,active=0,lastDir=0,lastKeyAt=0;',
   'function screen(){return document.querySelector(".xterm-screen")||document.querySelector(".xterm");}',
   'function keys(){return document.querySelector(".xterm-helper-textarea")||screen();}',
   'function now(){try{return performance.now();}catch(e){return Date.now();}}',
-  'function lineH(){',
+  'function pagePx(){',
   'try{',
   'var h=(screen()?(screen().clientHeight||0):0);',
-  '// one step of finger travel, derived from the viewport so no font size or',
-  '// screen size is baked in',
-  'return Math.max(8,Math.min(24,Math.round(h/24)));',
-  '}catch(e){return 12;}',
+  '// one page key per eighth of the screen: a full page per step is the',
+  '// coarsest move either lane has, so finer would jump screens per touchmove',
+  'return Math.max(48,Math.round(h/8));',
+  '}catch(e){return 96;}',
   '}',
-  'function step(){return lineH();}',
   'function press(code){',
   'var el=keys();if(!el)return;',
   'try{',
-  '// xterm reads keys from its textarea and only emits the ESC prefix when',
-  '// ctrl+alt are set, so both modifiers travel with every key here.',
+  '// Bare page keys: no modifiers for xterm to swallow, and both lanes bind',
+  '// them (opencode messages_page_up/down, cline TRANSCRIPT_KEYBINDS).',
   'if(typeof el.focus==="function")el.focus();',
-  'var ch=code===DOWN?"e":"u";',
+  'var isUp=(code===PGUP);',
   'var o={bubbles:true,cancelable:true,keyCode:code,which:code,',
-  'key:ch,code:("Key"+ch.toUpperCase()),ctrlKey:true,altKey:true};',
+  'key:isUp?"PageUp":"PageDown",code:isUp?"PageUp":"PageDown",',
+  'ctrlKey:false,altKey:false,metaKey:false,shiftKey:false};',
   'el.dispatchEvent(new KeyboardEvent("keydown",o));',
   'el.dispatchEvent(new KeyboardEvent("keyup",o));',
   '}catch(e){}',
   '}',
-  '// Down needs no rate limit: ctrl+alt+e applies 4-for-4 at any speed. Up does,',
-  '// because ctrl+alt+u lands ~4-for-4 at 300ms and less when fired flat out -',
-  '// so an up-drag is paced instead of dropped. No page-key nudge: measured',
-  '// repeats say the half page is enough, and a page nudge would jump 30 lines.',
+  '// Both directions paced: page keys jump a full page, so an unpaced drag',
+  '// would skip whole screens per touchmove on either lane.',
   'function emit(dir){',
-  'if(dir>0){press(DOWN);lastDir=1;lastKeyAt=now();return;}',
   'var t=now();',
   'if(t-lastKeyAt<COOLDOWN_MS)return;',
-  'press(UP);lastDir=-1;lastKeyAt=t;',
+  'press(dir>0?PGDN:PGUP);lastDir=dir>0?1:-1;lastKeyAt=t;',
   '}',
   'function drain(){',
-  'var s=step(),n=0;',
+  'var s=pagePx(),n=0;',
   'while(acc>=s&&n<MAX_KEYS){acc-=s;emit(1);n++;}',
   'while(acc<=-s&&n<MAX_KEYS){acc+=s;emit(-1);n++;}',
   '}',
@@ -970,7 +973,7 @@ export const TOUCH_SCROLL_JS = [
   'if(!t||!e.touches||e.touches.length!==1)return;',
   'var y=e.touches[0].clientY,dy=y0-y,n=now();',
   'y0=y;',
-  'if(!active&&Math.abs(acc+dy)>=step()){active=1;}',
+  'if(!active&&Math.abs(acc+dy)>=pagePx()){active=1;}',
   'acc+=dy;',
   'v=dy/Math.max(1,n-last);last=n;',
   'v0=v;',
@@ -984,7 +987,7 @@ export const TOUCH_SCROLL_JS = [
   '// glides instead of stopping dead. Capped, and it ends on its own.',
   'var steps=0;',
   'try{',
-  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/step()));',
+  'steps=Math.min(MAX_FLING_STEPS,Math.round(Math.abs(v)*FLING_PX_PER_STEP/pagePx()));',
   '}catch(e){}',
   'var dir=v>0?1:-1;',
   'acc=0;active=0;v=0;',

@@ -142,6 +142,31 @@ fi
 grep -q 'HEARTBEAT_PID' "$ATTACH" \
   && { echo "  PASS  the lease heartbeat survives the reshape"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the lease heartbeat survives the reshape"; FAIL=$((FAIL + 1)); }
+# 10b. Desktop + phone share one tmux session (ttyd spawns one tui-attach.sh
+#      per browser client), so the first client to detach must not clear the
+#      lease out from under the second — only a detach with no clients left
+#      may remove it, or the bot reports "none open" while the phone is still
+#      looking at the terminal.
+grep -q 'list-clients -t "$TMUX_NAME"' "$ATTACH" \
+  && { echo "  PASS  the lease survives while a second client is attached"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the lease is cleared on first detach even with clients left"; FAIL=$((FAIL + 1)); }
+# 10c. With two clients on one session tmux would otherwise size the pane to
+#      the smallest (the phone), shrinking the desktop. aggressive-resize
+#      sizes to the largest instead.
+grep -q 'aggressive-resize on' "$ATTACH" \
+  && { echo "  PASS  the pane keeps the largest client size"; PASS=$((PASS + 1)); } \
+  || { echo "  FAIL  the pane shrinks to the smallest client"; FAIL=$((FAIL + 1)); }
+# 10d. Both shipped units must allow several browser clients on the one shell:
+#      --max-clients 1 is the "tap Enter, never reconnects" loop (the desktop
+#      holds the only slot, the phone gets no PTY, ttyd shows its overlay
+#      forever). 0 = no cap.
+for unit in tui-ttyd-vm tui-ttyd-vm2; do
+  if grep -q -- '--max-clients 0' "$HERE/$unit.service" 2>/dev/null; then
+    echo "  PASS  $unit allows several clients on one shell"; PASS=$((PASS + 1))
+  else
+    echo "  FAIL  $unit caps clients (second device gets the reconnect loop)"; FAIL=$((FAIL + 1))
+  fi
+done
 grep -q 'set-option -t "$TMUX_NAME" status off' "$ATTACH" \
   && { echo "  PASS  the tmux frame stays off the phone screen"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the tmux frame stays off the phone screen"; FAIL=$((FAIL + 1)); }
