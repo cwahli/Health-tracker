@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, ttydRoutes, tokenRoutes, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -566,11 +566,63 @@ console.log('assert-tui-gateway:');
   check('the landing sends vm to /tty/', ttydPathFor('vm') === '/tty/');
   check('the landing sends vm2 to /tty2/', ttydPathFor('vm2') === '/tty2/');
   check('an unknown bot lands on /tty/', ttydPathFor('nosuchbot') === '/tty/');
+
+  // A third agent (the standalone Grok TG router) opens the same door, so the
+  // route table is extensible from the deployment env instead of hardcoded. A
+  // typo must register nothing rather than proxy somewhere unexpected.
+  const THIRD = { TUI_ROUTE_GROK_TG_PATH: '/ttyg/' };
+  check('a registered bot gets its own page route',
+    ttydRoutes(THIRD)['/ttyg/']?.bot === 'grok_tg' && ttydRoutes(THIRD)['/ttyg']?.bot === 'grok_tg');
+  check('a registered bot lands on its own path', ttydPathFor('grok_tg', THIRD) === '/ttyg/');
+  check('its socket-token route is derived, not hand-kept',
+    tokenRoutes(THIRD)['/ttyg/token'] === 'grok_tg');
+  check('the built-ins survive the extension',
+    ttydRoutes(THIRD)['/tty/']?.bot === 'vm' && tokenRoutes(THIRD)['/tty2/token'] === 'vm2');
+  check('a path with no leading slash registers nothing',
+    !Object.values(ttydRoutes({ TUI_ROUTE_X_PATH: 'ttyx/' })).some((r) => r.bot === 'x'));
+  check('the bare root is refused',
+    !Object.values(ttydRoutes({ TUI_ROUTE_X_PATH: '/' })).some((r) => r.bot === 'x'));
 }
 
 // 14. The page door is per-bot. A vm token on /tty2/ (and vice versa) is
 //     refused even though the token itself is valid — otherwise the sessions
-//     map the attach script reads would belong to the wrong bot.
+//     map the attach script reads would belong to the wrong bot. The same
+//     check runs for a bot registered from the env: its own page opens, an
+//     unregistered path does not, and the built-ins are untouched.
+{
+  const serveRegistered = async (path, env, bot) => {
+    const ttyd = http.createServer((rq, rs) => {
+      rs.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      rs.end('<html><body>registered</body></html>');
+    });
+    await new Promise((r) => ttyd.listen(0, '127.0.0.1', r));
+    const full = {
+      ...env,
+      TUI_GATEWAY_SECRET: SECRET,
+      TUI_BOT_TOKEN_GROK_TG: TOKEN,
+      TUI_BOT_TOKEN_VM: TOKEN,
+      TUI_TTYD_URL: `http://127.0.0.1:${ttyd.address().port}`,
+      TUI_TTYD_URL_GROK_TG: `http://127.0.0.1:${ttyd.address().port}`,
+      TUI_TTYD_CREDENTIAL: Buffer.from('tui:x').toString('base64'),
+    };
+    const token = issueToken({ botId: bot, chatId: '6218257274', secret: SECRET, ttlSec: 900 });
+    const handle = createGateway({ env: full, log: () => {} });
+    const code = await new Promise((resolve, reject) => {
+      const res = { writeHead: (c) => resolve(c), end: () => {} };
+      handle({ method: 'GET', url: path,
+        headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } }, res).catch(reject);
+    });
+    ttyd.close();
+    return code;
+  };
+  const ENV = { TUI_ROUTE_GROK_TG_PATH: '/ttyg/' };
+  check('a registered bot opens its own page', await serveRegistered('/ttyg/', ENV, 'grok_tg') === 200);
+  check('a registered bot gets its socket-token route', await serveRegistered('/ttyg/token', ENV, 'grok_tg') === 200);
+  check('the unregistered twin path is still 404', await serveRegistered('/ttyg2/', {}, 'grok_tg') === 404);
+  // Registering a bot must not change what the built-ins already served.
+  check('the vm page still opens', await serveRegistered('/tty/', ENV, 'vm') === 200);
+}
+
 {
   const serve = async (bot, path) => {
     let upstreamPort = 0;

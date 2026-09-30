@@ -5,7 +5,7 @@
  */
 import "dotenv/config";
 import { Bot, GrammyError, HttpError, InlineKeyboard, InputFile } from "grammy";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, openSync, closeSync, renameSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, rmSync, openSync, closeSync, renameSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn, execSync } from "child_process";
@@ -48,6 +48,22 @@ import {
   readBrief,
   resolveProjectId,
 } from "./project-registry.mjs";
+// /tui: the same Telegram Mini App door bot-host opens. Commit 86e284f declared
+// it out of scope for this bot; the terminal is a gateway service, not a bot
+// feature, so the router hands out the same button. See src/tui-miniapp.js.
+import {
+  TUI_OPEN_FILE,
+  botIdFromToken,
+  readTuiOpen,
+  resolveTuiUrl,
+  tuiButtonUrl,
+  tuiOffText,
+  tuiOfflineText,
+  tuiOpenPath,
+  tuiOpenText,
+  tuiStatusLine,
+  writeTuiOpen,
+} from "./tui-miniapp.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -64,6 +80,14 @@ const PID_PATH = join(RUN_DIR, "router.pid");
 const LEGACY_PID_PATHS = ["/tmp/tg-router.pid"];
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+// The Mini App's `?bot=` id. Telegram's id is the left half of the token; the
+// token itself is never put in a URL, a log line, or state.
+const ROUTER_BOT_ID = botIdFromToken(TOKEN);
+// A quick tunnel's hostname changes on every reconnect, so the button that was
+// sent a minute ago can be dead. Remember the last URL this process handed out
+// so the next /tui can say so. Process-local on purpose: a restart is a
+// reconnect too.
+let lastTuiUrl = "";
 const ALLOWED = String(process.env.TELEGRAM_USER_ID || process.env.TELEGRAM_ALLOWED_USER_ID || "").trim();
 // Import/test mode (scripts/test-quota-parse.mjs): expose the quota helpers
 // without acquiring the poller lock or starting Telegram long-polling.
@@ -3515,6 +3539,7 @@ bot.command("start", async (ctx) => {
       "/thinking [level] — show/set thinking effort (cline)\n" +
       "/allowance — remaining free-lane allowance (best-effort)\n" +
       "/allowance table — same ledger as an HTML grid (opens in chat)\n" +
+      "/tui — open a real terminal for this chat (Mini App)\n" +
       "/compact — compact OpenCode session context\n" +
       "/new — new OpenCode session\n" +
       "/help — this\n\n" +
@@ -3534,6 +3559,7 @@ bot.command("help", async (ctx) => {
       "/thinking [none|low|medium|high|xhigh] — show/set Cline thinking\n" +
       "/allowance — free-lane allowance snapshot\n" +
       "/allowance table — free-lane allowance as an HTML grid (pref/lane/status/reset/cooldown)\n" +
+      "/tui [status|off] — open a real terminal for this chat, as a Telegram Mini App\n" +
       "/compact — compact OpenCode context\n" +
       "/new — fresh OpenCode session\n" +
       "/unlock — cancel stuck work and unlock the bot\n" +
@@ -3794,6 +3820,70 @@ bot.command("freemodel", async (ctx) => {
   } catch (e) {
     await ctx.reply(`freemodel failed: ${String(e.message || e).slice(0, 500)}`);
   }
+});
+
+// /tui — a real terminal for THIS chat, as a Telegram Mini App.
+//
+// The router does not run ttyd and holds no terminal credential: it hands out
+// the gateway URL exactly like bot-host does, and the gateway does the
+// `initData` HMAC with this bot's own token. The record written here is what a
+// per-chat attach on the gateway host reads, so the terminal lands on this
+// chat's session instead of whichever conversation happened to be first.
+bot.command("tui", async (ctx) => {
+  if (!gate(ctx)) return;
+  const chatId = String(ctx.chat.id);
+  const sub = String(ctx.match || "").trim().toLowerCase().split(/\s+/)[0] || "";
+  const gatewayUrl = resolveTuiUrl();
+
+  if (sub === "status") {
+    const record = readTuiOpen({ stateDir: STATE_DIR });
+    await ctx.reply(
+      tuiStatusLine(record) +
+        `\nGateway: ${gatewayUrl || "not configured (TUI_GATEWAY_URL unset)"}` +
+        `\nBot id: ${ROUTER_BOT_ID}`
+    );
+    return;
+  }
+
+  if (sub === "off" || sub === "kill" || sub === "stop") {
+    const record = readTuiOpen({ stateDir: STATE_DIR });
+    try {
+      if (record) rmSync(tuiOpenPath(STATE_DIR), { force: true });
+    } catch {
+      /* the record is best-effort; the pane lives on the gateway host */
+    }
+    await ctx.reply(tuiOffText(record));
+    return;
+  }
+
+  if (sub && sub !== "on" && sub !== "open") {
+    await ctx.reply("Usage: /tui (open) · /tui status · /tui off");
+    return;
+  }
+
+  if (!gatewayUrl) {
+    await ctx.reply(tuiOfflineText());
+    return;
+  }
+
+  const url = tuiButtonUrl({ gatewayUrl, botId: ROUTER_BOT_ID });
+  const moved = Boolean(lastTuiUrl) && lastTuiUrl !== url;
+  lastTuiUrl = url;
+  writeTuiOpen(
+    {
+      chatId,
+      botId: ROUTER_BOT_ID,
+      provider: state.provider,
+      model: state.models?.[state.provider] || null,
+      sessionId: getChatSid(state, chatId) || null,
+      gatewayUrl,
+      at: new Date().toISOString(),
+    },
+    { stateDir: STATE_DIR }
+  );
+  await ctx.reply(tuiOpenText({ botId: ROUTER_BOT_ID, workspace: WORKSPACE, moved }), {
+    reply_markup: { inline_keyboard: [[{ text: "⌨️ Open the TUI", web_app: { url } }]] },
+  });
 });
 
 bot.callbackQuery(/^fm/, async (ctx) => {
@@ -4121,6 +4211,7 @@ const BOT_COMMANDS = [
   { command: "status", description: "Live status: usage %, thinking, model" },
   { command: "thinking", description: "Show/set thinking effort (cline: none|low|medium|high|xhigh)" },
   { command: "allowance", description: "Free-lane allowance (add 'table' for the HTML grid)" },
+  { command: "tui", description: "Open the OpenCode terminal for this chat (Mini App)" },
   { command: "compact", description: "Compact OpenCode session context" },
   { command: "switch", description: "Switch provider (opencode, cline, …)" },
   { command: "project", description: "Switch project workspace (e.g. /project external 4)" },
@@ -4298,6 +4389,8 @@ export {
   freeModelDepletion,
   formatFreeLine,
   FREEMODEL_HEADER,
+  ROUTER_BOT_ID,
+  TUI_OPEN_FILE,
   FREEMODEL_BUTTON_WIDTH,
   leftishButtonLabel,
   freemodelProviderTag,

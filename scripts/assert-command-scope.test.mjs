@@ -176,11 +176,28 @@ test('every canonical command carries a grok_tg verdict in the registry', () => 
   assert.deepEqual(missing, [], `no grok_tg verdict for: ${missing.join(', ')}`);
 });
 
-test('the ui-tui row records the decision so it is not re-litigated', () => {
+// The reversal, pinned. 86e284f declared /tui out of scope for grok_tg and this
+// test used to assert that declaration was deliberate. The terminal turned out
+// to be a gateway service rather than a bot-host feature, so the router serves
+// it too — and the row, the verdict and the router surface must say so
+// together, or the next reader re-litigates the question from a stale note.
+test('the ui-tui row records the reversal so it is not re-litigated', () => {
   const caps = JSON.parse(readFileSync(path.join(ROOT, 'bots', 'capabilities.json'), 'utf8'));
   const row = caps.capabilities.find((c) => c.id === 'ui-tui');
   assert.ok(row, 'ui-tui row must exist');
-  assert.equal(row.scope, 'bot-specific');
-  assert.equal(row.classes.grok_tg, false);
-  assert.match(row.notes, /deliberate/);
+  assert.equal(row.scope, 'runtime-adapter');
+  assert.equal(row.classes.grok_tg, true);
+  assert.ok(row.expect.includes('tools/telegram-provider-router/src/tui-miniapp.js'),
+    'the router half of /tui must be in the row\'s expect list');
+  assert.match(row.notes, /TUI_ROUTE_<BOT>_PATH/,
+    'the note must name where the per-bot route is configured');
+
+  const commands = caps.capabilities.find((c) => c.id === 'ui-commands');
+  assert.equal(commands.commands.tui, true, 'the per-command grok_tg verdict must agree with the row');
+});
+
+test('the router really publishes and handles /tui, not just declares it', () => {
+  const { published, handled } = readRouterSurface();
+  assert.ok(published.includes('tui'), 'the router popup must list /tui');
+  assert.ok(handled.includes('tui'), 'the router must register a /tui handler');
 });
