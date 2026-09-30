@@ -43,7 +43,11 @@ import { spoolItem, flushSpool, readItems } from './store-spool.mjs';
 /** The tab every PM row lands on. */
 export const PM_TAB = 'ongoing_projects';
 
-/** The row layout, in order. `sheetRow` is the only writer, so it cannot drift. */
+/** The row layout, in order. `sheetRow` is the only writer, so it cannot drift.
+ * The last four columns are the agent's own status: branch + note come from
+ * the heartbeat the agent beats, worktree is the `agent/<area>` → `~/dev/<area>`
+ * convention, live is the liveness verdict. Agents never write the sheet —
+ * they beat a heartbeat and the sweep carries it here. */
 export const SHEET_COLUMNS = [
   'at',
   'key',
@@ -56,6 +60,10 @@ export const SHEET_COLUMNS = [
   'attempts',
   'owner',
   'source',
+  'agent_branch',
+  'agent_note',
+  'worktree',
+  'live',
 ];
 
 /** The spreadsheet id, configured not discovered. */
@@ -89,6 +97,10 @@ export function sheetRow(item, { at = new Date().toISOString(), rung = '', attem
     String(Number(attempts) || 0),
     cell(item.owner),
     cell(item.source),
+    cell(item.branch),
+    cell(item.note),
+    cell(item.worktree),
+    item.live === true ? 'live' : item.live === false ? 'stale' : '',
   ];
 }
 

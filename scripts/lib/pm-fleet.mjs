@@ -216,6 +216,18 @@ export function heartbeatFor(item, beats = {}) {
   return null;
 }
 
+/**
+ * The worktree an agent branch implies, by the one convention worktrees share:
+ * `agent/<area>` works in `~/dev/<area>` (`~/dev/new-worktree.sh <area>`).
+ * Any other branch shape means "unknown", never a guessed path — a heartbeat
+ * branch is free-form, and a wrong directory is worse than a blank cell.
+ */
+export function worktreeFor(branch) {
+  const m = String(branch || '').match(/^agent\/([^/\s]+)/);
+  if (!m) return '';
+  return `~/dev/${m[1]}`;
+}
+
 /** Why this item is not progressing, or '' when it is. Liveness arrives
  * precomputed as `item.live` (projectFleet runs liveFn); there is deliberately
  * no liveFn here so stalled-ness stays a pure function of the item. */
@@ -275,7 +287,13 @@ export function projectFleet({
         alive = false;
       }
     }
-    return { ...it, live: alive, branch: beat ? String(beat.branch || '') : '' };
+    // The agent's own words travel with the item: branch + note are the
+    // heartbeat the agent beats (`agent-heartbeat.mjs --branch=… --note=…`),
+    // worktree is the convention that branch implies. The sheet serialises
+    // these, so "who is on it and where" is automatic every sweep — no agent
+    // ever writes the sheet directly.
+    const branch = beat ? String(beat.branch || '') : '';
+    return { ...it, live: alive, branch, note: beat ? String(beat.note || '') : '', worktree: worktreeFor(branch) };
   });
   for (const it of items) it.stallReason = stalledReason(it, { now, stallMs });
   const stalled = items.filter((it) => it.stallReason);
@@ -407,7 +425,8 @@ export function renderFleet(fleet, { limit = 12, sources = null } = {}) {
     lines.push('');
     lines.push('*Stalled:*');
     for (const it of fleet.stalled.slice(0, limit)) {
-      lines.push(`• \`${mdSafe(it.id)}\` — ${mdSafe(it.stallReason)}`);
+      const who = it.branch ? ` — ${mdSafe(it.branch)}${it.note ? `: ${mdSafe(it.note)}` : ''}` : '';
+      lines.push(`• \`${mdSafe(it.id)}\` — ${mdSafe(it.stallReason)}${who}`);
     }
     if (fleet.stalled.length > limit) lines.push(`• …and ${fleet.stalled.length - limit} more`);
   } else {
