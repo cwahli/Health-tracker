@@ -86,6 +86,34 @@ describe('planAssignments', () => {
   it('returns nothing when every card already has a number', () => {
     expect(planAssignments(damaged.filter((c) => publicNOf(c) > 0))).toEqual([]);
   });
+
+  // The hole I shipped in #391 and then walked into on 2026-09-30: a scratch
+  // card took #18, was deleted, and #18 was handed to a real defect four
+  // minutes later. The floor is the retired set, not the live rows.
+  it('does NOT reissue a number whose card was deleted (the incident)', () => {
+    const live = [card('low', 1, '2026-09-01'), card('high', 17, '2026-09-01')];
+    const fresh = { id: 'newcomer', created_at: '2026-09-30', work_item: { public_n: 0 } };
+    // Without the floor: #18, the same number a citation already points at.
+    expect(planAssignments([...live, fresh]).map((x) => x.to)).toContain(18);
+    // With it: above the highest retired number.
+    expect(planAssignments([...live, fresh], [], [18]).map((x) => x.to)).toEqual([19]);
+  });
+
+  it('skips a retired number sitting in the middle of the range', () => {
+    const rows = [card('a', 1, '2026-09-01'), { id: 'b', created_at: '2026-09-30', work_item: { public_n: 0 } }];
+    expect(planAssignments(rows, [], [7]).map((x) => x.to)).toEqual([8]);
+  });
+
+  it('a retired number outranks a reserve for the same slot', () => {
+    const rows = [card('a', 1, '2026-09-01'), { id: 'b', created_at: '2026-09-30', work_item: { public_n: 0 } }];
+    expect(planAssignments(rows, [2], [3]).map((x) => x.to)).toEqual([4]);
+  });
+
+  it('a repair does not hand a retired number to the card it is moving', () => {
+    const rows = [card('p', 5, '2026-01-01'), card('q', 5, '2026-02-01')];
+    expect(planRenumber(rows, [6]).moves).toEqual([{ id: 'q', from: 5, to: 7 }]);
+    expect(planRenumber(rows).moves).toEqual([{ id: 'q', from: 5, to: 6 }]);
+  });
 });
 
 describe('duplicateNumbers / hasDuplicateNumbers', () => {
