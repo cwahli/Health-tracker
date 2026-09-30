@@ -123,6 +123,56 @@ jobs:
               --range "$before..HEAD"
           fi
 
+      # A merge may not silently erase landed work (#143 re-added a file a later
+      # PR had deleted; five empty squashes re-landed what was already on
+      # main; #371 hand-reverted a hunk to dodge overlap). scripts/no-undo.mjs
+      # judges the same range as the identity gate above: deleted lines/files
+      # and resurrected files owned by landed commits fail unless the judged
+      # body declares `Reverts: <sha>` / `Resurrects: <path>`. On PR runs the
+      # body is the PR body; on post-merge runs it is the squash message,
+      # which carries the PR body since the squash keeps it (#377).
+      - name: Landed-work preservation (no silent undo)
+        if: github.event_name == 'pull_request' || github.event_name == 'repository_dispatch'
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # PR and post-merge runs only — same gating as the contract steps.
+          # A push run has no PR body (its event carries none), and judging
+          # commit messages there would fail work the PR body already declares
+          # (proven on this step's own PR: push run red, PR run green on the
+          # same head). Single-push branches are covered post-merge instead.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base='${{ github.event.pull_request.base.ref }}'
+            before='${{ github.event.pull_request.base.sha }}'
+            printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/no-undo-body.txt"
+          elif [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            base='${{ github.event.repository.default_branch }}'
+            landed='${{ github.event.client_payload.sha }}'
+            if [ -n "$landed" ]; then
+              before="$(git rev-parse "$landed^" 2>/dev/null || true)"
+            fi
+            if [ -z "$before" ]; then
+              before="$(git rev-parse "origin/$base^" 2>/dev/null || true)"
+            fi
+            git log -1 --format=%B "$landed" > "$RUNNER_TEMP/no-undo-body.txt" 2>/dev/null || : > "$RUNNER_TEMP/no-undo-body.txt"
+          else
+            base='${{ github.event.repository.default_branch }}'
+            before='${{ github.event.before }}'
+            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              before=""
+            fi
+            git log --format=%B "$before..HEAD" > "$RUNNER_TEMP/no-undo-body.txt" 2>/dev/null || : > "$RUNNER_TEMP/no-undo-body.txt"
+          fi
+          git fetch --no-tags --quiet origin "$base"
+          if [ -z "$before" ]; then
+            before="$(git rev-parse "origin/$base")"
+          fi
+          node scripts/no-undo.mjs --range "$before..HEAD" --landed-ref "origin/$base" --body-file "$RUNNER_TEMP/no-undo-body.txt"
+
+      - name: No-undo sensor (preservation rule fails closed)
+        run: node scripts/assert-no-undo.test.mjs
+
       # The gate above judges only what a change ADDS, so a commit that landed
       # while its range was wrong is never re-judged — and stays wrong
       # invisibly. This walks EVERY commit on the base and fails on debt that is
@@ -155,6 +205,12 @@ jobs:
           # progress status, and what is left. Pattern is owned by
           # scripts/assert-pr-summary.mjs (trailer + ## Summary/Status/Left).
           node scripts/assert-pr-summary.mjs
+
+      - name: 'PR body contract sensor (Next: pointer fails closed)'
+        run: node scripts/assert-pr-summary.test.mjs
+
+      - name: Work queue sensor (generated list fails closed)
+        run: node scripts/assert-work-queue.test.mjs
 
       - name: PR must add net change vs base (no empty merges)
         if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'

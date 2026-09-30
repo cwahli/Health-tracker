@@ -63,6 +63,7 @@ import {
   evaluateChecks,
   evaluateMainHealth,
   evaluatePrState,
+  parseDependsOn,
   validateRequiredAgainstWorkflows,
 } from './lib/merge-gate.mjs';
 import {
@@ -194,11 +195,60 @@ export async function waitForDecision(client, {
   pollSeconds = DEFAULT_POLL_SECONDS,
   log = () => {},
   notice = async () => null,
+  depNumbers = [],
+  prNumber = null,
 } = {}) {
   const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
   let last = null;
   let mainNotice = null;
+  // Sequencing before gating: a PR held behind another PR must not burn its
+  // budget racing checks, and must say so on the PR (the wait path below
+  // comments via describeDecision). Unknown dep state holds, never merges —
+  // a typo'd number ends in a refusal that names the number, not a merge.
+  const readDeps = async () => {
+    const open = [];
+    const unreadable = [];
+    for (const n of depNumbers) {
+      if (prNumber !== null && n === prNumber) {
+        return { selfRef: true, open, unreadable };
+      }
+      try {
+        const dep = await client.call(`/repos/${owner}/${repo}/pulls/${n}`);
+        if (dep && String(dep.state || 'open') === 'open' && !dep.merged_at) open.push(n);
+      } catch (err) {
+        unreadable.push(n);
+      }
+    }
+    return { selfRef: false, open, unreadable };
+  };
   for (;;) {
+    const deps = depNumbers.length ? await readDeps() : { selfRef: false, open: [], unreadable: [] };
+    if (deps.selfRef) {
+      return {
+        decision: 'refuse',
+        scope: 'deps',
+        reason: `Depends-On names this PR itself (#${prNumber}) — fix the line, it can never clear`,
+        deps: depNumbers,
+      };
+    }
+    if (deps.open.length || deps.unreadable.length) {
+      const why = [
+        ...deps.open.map((n) => `#${n} still open`),
+        ...deps.unreadable.map((n) => `#${n} unreadable`),
+      ].join(', ');
+      last = {
+        decision: 'wait',
+        scope: 'deps',
+        reason: `held behind ${why} — merges when it lands; nothing about this PR needs to change`,
+        deps: depNumbers,
+      };
+      log(`  ${describeDecision(last, { head })}`);
+      if (Date.now() >= deadline) {
+        return { ...last, decision: 'refuse', timedOut: true };
+      }
+      await sleep(pollSeconds * 1000);
+      continue;
+    }
     const runs = await listCheckRuns(client, { owner, repo, ref: head });
     last = evaluateChecks({ checkRuns: runs, required: REQUIRED_CHECKS });
     log(`  ${describeDecision(last, { head })}`);
@@ -388,7 +438,10 @@ async function main(argv = process.argv.slice(2)) {
             overridden: allowRedMain,
           },
         });
-  const result = await waitForDecision(client, { owner, repo, head, baseBranch, allowRedMain, waitSeconds, pollSeconds, log, notice });
+  const result = await waitForDecision(client, {
+    owner, repo, head, baseBranch, allowRedMain, waitSeconds, pollSeconds, log, notice,
+    depNumbers: parseDependsOn(pr.body), prNumber: pr.number,
+  });
 
   if (result.decision !== 'merge') {
     const body = [

@@ -70,6 +70,12 @@ jobs:
             body="$managed"
             if [ -n "$(printf '%s' "$preserved" | tr -d '[:space:]')" ]; then
               body="$(printf '%s\n\n%s' "$body" "$preserved")"
+            else
+              # No author content yet (fresh auto-PR, or a wiped body): seed
+              # the contract skeleton so the next push has something to fill.
+              # The bare `Next:` fails the body gate on purpose — the sections
+              # must be written, not inherited blank.
+              body="$(printf '%s\n\n## Summary\n\n## Status\n\n## Left\n\nNext: ' "$body")"
             fi
             if [ -n "$trailers" ]; then
               body="$(printf '%s\n\n%s' "$body" "$trailers")"
