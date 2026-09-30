@@ -227,6 +227,7 @@ jobs:
           git log -1 --format=%B HEAD > "$RUNNER_TEMP/landed.txt"
           PR_BODY="$(cat "$RUNNER_TEMP/landed.txt")" node scripts/assert-pr-summary.mjs
 
+
       - name: PR must add net change vs base (no empty merges)
         if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
         shell: bash
