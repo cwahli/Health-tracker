@@ -184,6 +184,21 @@ export function evaluatePrState(pr) {
   return { decision: 'merge', reason: 'the PR is open' };
 }
 
+/**
+ * Sequencing between PRs: `Depends-On: #n` lines in a PR body hold this PR
+ * until #n is merged or closed. Pure parse; the driver resolves states.
+ * Numbers only — anything else on the line is ignored, and duplicates
+ * collapse. A merged-or-closed dependency is satisfied silently.
+ */
+export function parseDependsOn(body) {
+  const out = [];
+  for (const raw of String(body || '').split('\n')) {
+    const m = raw.trim().match(/^Depends-On:\s*#?(\d+)\b/i);
+    if (m && !out.includes(Number(m[1]))) out.push(Number(m[1]));
+  }
+  return out;
+}
+
 /** One line a human can read in a PR comment or a run log. */
 export function describeDecision(result, { head = '' } = {}) {
   const where = head ? ` on \`${String(head).slice(0, 7)}\`` : '';

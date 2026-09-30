@@ -46,6 +46,7 @@ import {
   evaluatePrState,
   isGreen,
   isMainVerification,
+  parseDependsOn,
   requiredNames,
   validateRequiredAgainstWorkflows,
 } from './lib/merge-gate.mjs';
@@ -149,6 +150,14 @@ test('a custom required set is honoured (the gate is not hardcoded to two)', () 
   assert.equal(res.decision, 'merge');
   const red = evaluateChecks({ checkRuns: [run('only-me', 'failure')], required: [{ name: 'only-me' }] });
   assert.equal(red.decision, 'refuse');
+});
+
+test('Depends-On lines parse to numbers, duplicates collapse', () => {
+  assert.deepEqual(parseDependsOn('Depends-On: #365'), [365]);
+  assert.deepEqual(parseDependsOn('depends-on: 8\nDepends-On: #8\nDepends-On: #372'), [8, 372]);
+  assert.deepEqual(parseDependsOn('no deps here'), []);
+  assert.deepEqual(parseDependsOn('Depends-On: someday'), []);
+  assert.deepEqual(parseDependsOn(null), []);
 });
 
 test('the PR state is judged separately from the checks', () => {
@@ -461,6 +470,69 @@ test('E2E: an empty PR body mints no blank squash message', async () => {
     assert.equal(fake.calls.merge.length, 1, 'exactly one merge call');
     assert.equal(fake.calls.merge[0].commit_title, 'fix: auto');
     assert.ok(!('commit_message' in fake.calls.merge[0]), 'no blank commit_message sent');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: an open dependency holds the merge and names the blocker', async () => {
+  // The #365/#372 class: landing out of order is how hunks get hand-reverted.
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, body: '## Left\n\nNext: #9\n\nDepends-On: #8\n' }],
+    pullStates: { 8: { state: 'open' } },
+  });
+  try {
+    await runDriver(fake.port, ['--wait=0']);
+    assert.equal(fake.calls.merge.length, 0, 'THE ASSERTION: no merge while #8 is open');
+    assert.match(fake.calls.comments[0], /held behind #8/, 'the hold names the blocker on the PR');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: the hold releases when the dependency lands', async () => {
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, body: '## Left\n\nNext: #9\n\nDepends-On: #8\n' }],
+    pullPlans: { 8: [{ state: 'open' }, { state: 'closed', merged_at: '2026-09-30T00:00:00Z' }] },
+  });
+  try {
+    // Bounded budget: a broken release burns 20s, never the 900s default.
+    const res = await runDriver(fake.port, ['--wait=20']);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'THE ASSERTION: held, then merged exactly once');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a merged dependency is satisfied silently', async () => {
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, body: '## Left\n\nNext: #9\n\nDepends-On: #8\n' }],
+    pullStates: { 8: { state: 'closed', merged_at: '2026-09-30T00:00:00Z' } },
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'merges');
+    assert.equal(fake.calls.comments.length, 1, 'no hold comment — only the merge result');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: depending on itself refuses immediately', async () => {
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, number: 7, body: '## Left\n\nNext: #9\n\nDepends-On: #7\n' }],
+  });
+  try {
+    const res = await runDriver(fake.port, ['--wait=0']);
+    assert.equal(res.code, 1);
+    assert.equal(fake.calls.merge.length, 0, 'never merges');
+    assert.match(fake.calls.comments[0], /itself/, 'the refusal names the self-reference');
   } finally {
     await fake.close();
   }
