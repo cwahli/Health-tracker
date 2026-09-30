@@ -60,7 +60,10 @@ const src = readFileSync(SRC, "utf8");
 
 // T1) the bot id is the token's left half, and a non-token falls back rather
 // than putting a secret-shaped string in a URL.
-check("T1 botIdFromToken reads the numeric id", tui.botIdFromToken("123456789:AA-abc") === "123456789");
+// Deliberately not token-shaped: this file must not trip the secret scanners
+// that read every diff, and a fixture is the one place a token-shaped literal
+// looks the same as the real thing.
+check("T1 botIdFromToken reads the numeric id", tui.botIdFromToken("987654321:NOTAREALTOKEN") === "987654321");
 check("T1b botIdFromToken ignores a password-shaped token", tui.botIdFromToken("not-a-token") === tui.DEFAULT_BOT_ID);
 
 // T2) the gateway origin contract, copied from bot-host's readTuiUrl: a bare
