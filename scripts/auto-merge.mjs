@@ -338,6 +338,37 @@ export async function waitForDecision(client, {
 }
 
 /**
+ * Re-read the PR from the API onto `pr`, in place.
+ *
+ * The body is two things at once: the squash message (so `git log` keeps the
+ * `## Left` a reader needs) and the only place `Reverts:` declarations exist.
+ * Reading it once at the start is not enough — it can be edited while this run
+ * waits for checks, and a stale read has already cost this repo a red `main`:
+ * measured 2026-09-30, #414's declaration was patched onto the PR during the
+ * wait, the squash carried the auto-PR skeleton instead, the post-merge
+ * verification judged the skeleton, found seven undeclared lines, and the merge
+ * queue stalled behind it (issue #416).
+ *
+ * A read failure is swallowed on purpose: the body already held is the one we
+ * use, because a failed re-read must not become a failed merge. It cannot pass
+ * a judgement silently either — the judgement re-reads for itself and reports
+ * `unknown` when it cannot see.
+ */
+export async function refreshPr(client, { owner, repo, number, pr } = {}) {
+  try {
+    const fresh = await client.call(`/repos/${owner}/${repo}/pulls/${number}`);
+    if (fresh && typeof fresh === 'object') {
+      if (typeof fresh.body === 'string') pr.body = fresh.body;
+      if (typeof fresh.title === 'string') pr.title = fresh.title;
+      return true;
+    }
+  } catch {
+    /* keep what we have */
+  }
+  return false;
+}
+
+/**
  * Judge this branch's own diff against what has landed, using the PR body as
  * the declaration source.
  *
@@ -463,12 +494,28 @@ async function main(argv = process.argv.slice(2)) {
   // See scripts/lib/premerge-undo.mjs. An early, precise comment on the PR is
   // worth more than one that arrives after the merge was already attempted.
   const undoBase = String(pr.base?.ref || 'main');
-  const undoVerdict = judgeBranchAgainstLandedWork({ pr, baseBranch: undoBase });
-  if (undoVerdict.decision === PREMERGE_DECISIONS.REFUSE) {
-    log(`  🛑 ${undoVerdict.reason}`);
+
+  // One judgement, two moments. The body is re-read first because it is the
+  // declaration source and it can change while the checks run: judging the
+  // start-time body is how a declared rewrite reads as undeclared and is refused
+  // for nothing. The EARLY call below is for feedback — the agent hears about a
+  // problem without waiting out the checks. The call immediately before the
+  // merge is the authoritative one, because only there is the body known to be
+  // the body that will be squashed.
+  const judgeNow = async () => {
+    await refreshPr(client, { owner, repo, number: pr.number, pr });
+    return judgeBranchAgainstLandedWork({ pr, baseBranch: undoBase });
+  };
+  const refuseUndo = async (verdict) => {
+    log(`  🛑 ${verdict.reason}`);
     if (!args.evaluate) {
-      await comment(client, { owner, repo, number: pr.number, body: describePremergeRefusal({ ...undoVerdict, baseBranch: undoBase, prNumber: pr.number }) });
+      await comment(client, { owner, repo, number: pr.number, body: describePremergeRefusal({ ...verdict, baseBranch: undoBase, prNumber: pr.number }) });
     }
+  };
+
+  const undoVerdict = await judgeNow();
+  if (undoVerdict.decision === PREMERGE_DECISIONS.REFUSE) {
+    await refuseUndo(undoVerdict);
     return 1;
   }
   if (undoVerdict.decision === PREMERGE_DECISIONS.UNKNOWN) {
@@ -537,6 +584,16 @@ async function main(argv = process.argv.slice(2)) {
   if (args.evaluate) {
     log(`[evaluate] would merge PR #${pr.number} (${result.reason})`);
     return 0;
+  }
+
+  // The authoritative judgement, at the last moment before the merge PUT.
+  // Everything above is feedback; this is the decision. The body re-read here is
+  // also the body that becomes the squash message, so what was judged and what
+  // lands are the same document — the gap that red-mained `main` on #414.
+  const finalVerdict = await judgeNow();
+  if (finalVerdict.decision === PREMERGE_DECISIONS.REFUSE) {
+    await refuseUndo(finalVerdict);
+    return 1;
   }
 
   let mergeResult = '';

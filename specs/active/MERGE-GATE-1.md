@@ -207,3 +207,43 @@ nothing and looks exactly like a working one.
 fires is *not* repaired here — auto-merge is used as the pre-merge venue instead,
 which needs no workflow-trigger change and cannot be starved by the
 token-event rule.
+
+### The body re-read, and why it is part of this change
+
+A declaration is only as good as the body that carries it, so the gate re-reads
+the PR before it judges. That re-read was proposed separately (#417, measured
+from #414) and **did not land**: `11d79b3f`, whose squash title reads *"the merge
+driver re-reads the PR body; the canary sensor follows the bind"*, contains **only
+`scripts/assert-swap-guards.test.mjs`**. `grep fresh scripts/auto-merge.mjs` on
+main returns nothing, and `assert-auto-merge.test.mjs` on main carries no test for
+it. The auto-merge half was dropped before the merge — the PR's final file list is
+one file — leaving the root cause of the #416 stall unfixed behind a title that
+says otherwise.
+
+That matters here rather than being someone else's cleanup, because a stale body
+breaks this gate in both directions: a declared rewrite reads as undeclared (a
+refusal for nothing, which is what `d18568f6`'s cousin did to #414), and an
+undeclared rewrite that later declares is let through on a skeleton. So the
+declaration source is re-read, and the judgement runs twice:
+
+- **early**, before the check wait, so a refusal arrives as a comment on the PR
+  instead of after several minutes of polling;
+- **immediately before the merge PUT**, which is the decision — only there is the
+  body known to be the body that will be squashed.
+
+`refreshPr` takes only strings, so a `null` body cannot erase a declaration, and a
+failed read keeps the body in hand rather than failing the merge. Both moments
+call the same judgement, so there is still one implementation.
+
+**Gate additions.** Four E2E in `assert-auto-merge.test.mjs`, run against a real
+scratch repo and the real driver with only GitHub faked: a declaration added
+during the wait is seen and the PR merges (a stale read would refuse it); a
+declaration *removed* before the merge is still caught and nothing merges; an
+undeclared rewrite is refused before the checks are even polled; and a re-read
+that fails or returns `null` cannot throw or wipe the body. Proven red both ways:
+neutering the re-read fails the first, removing the final judgement fails the
+second.
+
+**Residual.** The re-read costs two extra `GET /pulls/:n` per merge. The early
+judgement can still be superseded by the final one, which is the point — it is
+feedback, not the decision.

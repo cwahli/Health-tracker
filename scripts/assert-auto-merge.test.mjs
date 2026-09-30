@@ -59,7 +59,7 @@ import {
   describePremergeUnknown,
   formatViolations,
 } from './lib/premerge-undo.mjs';
-import { judgeBranchAgainstLandedWork } from './auto-merge.mjs';
+import { judgeBranchAgainstLandedWork, refreshPr } from './auto-merge.mjs';
 import {
   MAIN_RED_ISSUE_TITLE,
   MAIN_RED_MARKER,
@@ -1215,6 +1215,120 @@ test('a degraded environment logs loudly but is NOT commented on the PR', () => 
   assert.match(line, /not blocking/);
   assert.match(line, /main/, 'says where the rule is still enforced');
   assert.doesNotMatch(line, /^#/m, 'it is a log line, not a markdown block');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The body is the declaration source, and it can change while the checks run.
+//
+// Measured 2026-09-30: #414's `Reverts:` line was patched onto its PR during the
+// wait, the driver had read the body once at the start, the squash carried the
+// auto-PR skeleton instead, the post-merge verification judged the skeleton,
+// found seven undeclared lines and red-mained `main` (issue #416). The same
+// staleness produces the mirror-image failure in the other direction: a branch
+// that DOES declare reads as undeclared and gets refused for nothing.
+//
+// These E2E run the real driver in a real scratch repo, so the judgement is the
+// real judgement and the only thing faked is GitHub.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A branch that really erases a landed line, in a repo the driver can judge. */
+function scratchRewriteTree() {
+  const dir = scratchRepo();
+  commitIn(dir, { 'seed.txt': 'seed\n' }, 'seed');
+  const owner = commitIn(
+    dir,
+    { 'feat.txt': 'keep me\nTHE DISTINCTIVE LANDED LINE\nand me\n' },
+    'land a feature\n\nAuthor: Test Model 1.0 (high) VM\n',
+  );
+  gitIn(dir, 'checkout', '-q', '-b', 'agent/rewrite');
+  const head = commitIn(dir, { 'feat.txt': 'keep me\nand me\n' }, 'erase it');
+  return { dir, head, owner };
+}
+
+test('E2E: a declaration added while the checks ran is seen — no refusal for nothing', async () => {
+  const tree = scratchRewriteTree();
+  const stale = '## Summary\n\nGreen head, body not written yet.\n';
+  const fresh = `## Summary\n\nPatched during the wait.\n\nReverts: ${tree.owner} — deliberate.\n`;
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    // The LIST route (how the driver finds the PR) keeps serving the stale body;
+    // the numbered route is the re-read and answers the fresh one.
+    prs: [{ ...OPEN_PR, head: { sha: tree.head }, body: stale }],
+    pullPlans: { 7: [{ body: fresh, head: { sha: tree.head } }] },
+  });
+  try {
+    const res = await runDriver(fake.port, [], { cwd: tree.dir });
+    assert.equal(res.code, 0, `expected a merge (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'the fresh declaration was honoured');
+    // The driver comments the merge result, so the assertion is on what was NOT
+    // said: no refusal. Asserting `comments.length === 0` would fail on the
+    // success notice and prove nothing about the gate.
+    assert.equal(
+      fake.calls.comments.filter((c) => /Merge refused/.test(String(c.body || ''))).length,
+      0,
+      'nothing was refused',
+    );
+    assert.equal(fake.calls.merge[0].commit_message, fresh, 'the squash carries the body read at merge time');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: a declaration REMOVED before the merge is still caught', async () => {
+  // The early judgement is feedback; the one before the merge PUT is the
+  // decision. If the body stops declaring between the two, the merge must not
+  // proceed — otherwise the gate can be satisfied by an edit nobody counted on.
+  const tree = scratchRewriteTree();
+  const declared = `## Summary\n\nDeclared at first.\n\nReverts: ${tree.owner} — deliberate.\n`;
+  const skeleton = '## Summary\n\n## Status\n\n## Left\n';
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, head: { sha: tree.head }, body: declared }],
+    // First read (early judgement) declares; second read (before the merge)
+    // does not.
+    pullPlans: { 7: [{ body: declared, head: { sha: tree.head } }, { body: skeleton, head: { sha: tree.head } }] },
+  });
+  try {
+    const res = await runDriver(fake.port, [], { cwd: tree.dir });
+    assert.equal(res.code, 1, 'the merge was refused');
+    assert.equal(fake.calls.merge.length, 0, 'THE ASSERTION: no merge on an undeclared rewrite');
+    assert.equal(fake.calls.comments.length, 1, 'and the refusal is on the PR');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: an undeclared rewrite is refused before the checks are even polled', async () => {
+  const tree = scratchRewriteTree();
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, head: { sha: tree.head }, body: '## Summary\n\nNothing declared.\n' }],
+  });
+  try {
+    const res = await runDriver(fake.port, [], { cwd: tree.dir });
+    assert.equal(res.code, 1);
+    assert.equal(fake.calls.merge.length, 0);
+    assert.equal(fake.calls.checkPolls, 0, 'refused on the branch, before waiting out the checks');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('a failed re-read keeps the body at hand and never throws', async () => {
+  const pr = { body: 'the body we have\n', title: 'the title we have' };
+  const client = { call: async () => { throw new Error('503'); } };
+  const ok = await refreshPr(client, { owner: 'o', repo: 'r', number: 7, pr });
+  assert.equal(ok, false);
+  assert.equal(pr.body, 'the body we have\n', 'a read failure is not a merge failure');
+  assert.equal(pr.title, 'the title we have');
+});
+
+test('a re-read takes only strings, so a null body cannot erase a declaration', async () => {
+  const pr = { body: 'Reverts: abc1234 — declared\n', title: 't' };
+  const client = { call: async () => ({ body: null, title: 42 }) };
+  await refreshPr(client, { owner: 'o', repo: 'r', number: 7, pr });
+  assert.match(pr.body, /Reverts: abc1234/, 'a null body must not wipe what we have');
+  assert.equal(pr.title, 't');
 });
 
 test('the workflow gives the job the history the judgement needs', () => {
