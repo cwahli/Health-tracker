@@ -153,8 +153,10 @@ check('a well-formed spec produces a payload the real generator accepts', () => 
     }],
   }));
   const outDir = path.join(tmp, 'bundle');
+  // ranch_dressing carries no transFat/omega3, so the completeness guard fires.
+  // --allow-unsourced is the explicit acknowledgement that the gap is accepted.
   const r = spawnSync('node', [path.join(REPO_ROOT, 'scripts', 'meal-audit-assist.mjs'),
-    `--spec=${spec}`, '--bundle=Meal-Dressing-01', `--output-dir=${outDir}`],
+    `--spec=${spec}`, '--bundle=Meal-Dressing-01', `--output-dir=${outDir}`, '--allow-unsourced'],
     { encoding: 'utf8', timeout: 60000 });
   assert.equal(r.status, 0, `assist failed: ${r.stderr}`);
 
@@ -167,6 +169,38 @@ check('a well-formed spec produces a payload the real generator accepts', () => 
   assert.equal(gen.status, 0, `generator rejected the assist payload:\n${gen.stdout}\n${gen.stderr}`);
   assert.ok(fs.existsSync(path.join(outDir, 'bundle', 'meal_result.json')));
   assert.ok(fs.existsSync(path.join(outDir, 'bundle', 'expected.json')));
+});
+
+check('an INCOMPLETE audit is REFUSED by default, not silently emitted', () => {
+  // The failure this prevents: an audit missing 18 micronutrients stores them as
+  // 0, and the comparator scores 0-vs-real as 100% drift. The loop would then file
+  // confident bug cards against the AUDIT rather than the product.
+  const spec = path.join(tmp, 'gap.json');
+  fs.writeFileSync(spec, JSON.stringify({
+    title: 'Gap test',
+    dishes: [{
+      dishName: 'Ranch dressing', catalogKey: 'ranch_dressing', weightGrams: 20,
+      boundingBox2D: [100, 100, 500, 500],
+    }],
+  }));
+  const outDir = path.join(tmp, 'gapout');
+  const r = spawnSync('node', [path.join(REPO_ROOT, 'scripts', 'meal-audit-assist.mjs'),
+    `--spec=${spec}`, '--bundle=Meal-Gap-01', `--output-dir=${outDir}`],
+    { encoding: 'utf8', timeout: 60000 });
+  assert.equal(r.status, 4, `incomplete audit must exit 4, got ${r.status}`);
+  assert.match(r.stderr, /INCOMPLETE AUDIT/);
+  assert.match(r.stderr, /no catalog source/);
+  assert.ok(!fs.existsSync(path.join(outDir, 'audit_payload.json')),
+    'no payload may be written when the audit is knowingly incomplete');
+});
+
+check('unsourced nutrients are named on the dish, not hidden as zeros', () => {
+  const d = buildDish({ dishName: 'Ranch dressing', catalogKey: 'ranch_dressing', weightGrams: 20 });
+  assert.ok(Array.isArray(d.unsourcedNutrients), 'the gap must be recorded on the dish');
+  assert.ok(d.unsourcedNutrients.includes('transFat'),
+    `expected transFat in the gap, got ${JSON.stringify(d.unsourcedNutrients)}`);
+  // The value is still 0 because the generator requires a finite number.
+  assert.equal(d.nutrients.transFat, 0);
 });
 
 check('the catalog is small enough that hand-population is NOT viable', () => {

@@ -327,6 +327,12 @@ jobs:
           node scripts/assert-meal-audit-loop.mjs
           node scripts/assert-meal-audit-assist.mjs
 
+      # The audit-only nutrient route the meal-audit agent reads from. Pins that it
+      # serves active rows only, returns per-100g values unscaled, clamps its limit,
+      # and reaches no user data.
+      - name: Audit food-nutrients route contract
+        run: npx vitest run server_audit_food_nutrients.test.ts
+
       # capability: structural checks on every row, then the V-30.5 ticket-scoped
       # strict (the 5 foreign partials stay owned by BOT-11, never marked done).
       - name: Capability propagation gate (strict, ticket-scoped)

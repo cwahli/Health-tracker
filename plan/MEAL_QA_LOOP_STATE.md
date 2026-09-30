@@ -35,17 +35,55 @@ calories via Atwater so the generator's own gate passes, requires `boundingBox2D
 when photos are present, and fails loudly on an unknown key rather than filling
 zeros. It is a scaling helper, **not** an audit, and it does not pretend to be one.
 
-## The real fix: read nutrients from the app's own catalog
+## The real fix: read nutrients from the app's own catalog — DONE
 
 `food_items` in D1 is the authoritative source the product already resolves
-against — `resolveInternalFood()` reads `nutrients_per_100g` from it. The gap is
-that no **agent-facing** endpoint exposes it. There is exactly one audit-only
-read route today, `/api/audit/food-search`, and it only covers `food_logs`.
+against — `resolveInternalFood()` reads `nutrients_per_100g` from it. The gap was
+that no **agent-facing** endpoint exposed it.
 
-Adding a sibling route (e.g. `GET /api/audit/food-nutrients?q=`) would give the
-meal-audit agent a real, FDC-traceable nutrition source, and would make
-`meal-audit-assist.mjs` able to serve real meals instead of dressings. That is a
-small, well-scoped change and it is the honest unblocker.
+**Shipped:** `GET /api/audit/food-nutrients?q=` (`server_routes_jobs.ts`), a
+sibling to the existing audit route. Read-only, unauthenticated like the other
+audit reads, clamped to 50 rows, `status = 'active'` only (a candidate row's
+numbers are not ground truth), returning per-100g values **unscaled** plus
+`fdc_id` and `standard_serving_g`. Verified live against the dev server:
+
+```
+q=oats    -> Rolled Oats (379 kcal/100g, std serving 100g), Sainsbury Rolled Oats
+q=grapes  -> Grapes      q=steak -> Steak Sandwich, beef steak, sliced steak
+q=pasta   -> Macaroni Pasta   q=milk -> Whole Cow Milk, milk, oat milk
+```
+
+`meal-audit-assist.mjs` now accepts `api:<query>` catalog keys, so a real meal is
+auditable end to end. Proven on a live example — "cooked rolled oats with green
+grapes", 60 g oats + 90 g grapes:
+
+```
+assist      -> 150 g, 298 kcal, Atwater balanced (0.0% difference)
+generator   -> Meal-OatsGrapes-01 bundle written
+compare     -> verdict FAIL, 6 core + 18 micro findings vs the app's logged values
+```
+
+## The limit of the catalog, and what it does to the loop
+
+That live compare is also the reason the loop is still dry-run. **18 of the 24
+findings were artifacts of my own audit, not product defects.** `food_items` rows
+for oats and grapes carry macros and a few minerals but omit most micronutrients,
+so they scaled to 0 — and the comparator scores 0-vs-real as 100% drift. Filing
+those would have produced a wall of bug cards against the audit itself.
+
+So `meal-audit-assist.mjs` now **refuses to emit a knowingly incomplete audit**
+(exit 4, nothing written) and names every unsourced nutrient. `--allow-unsourced`
+is the explicit acknowledgement. Unresolved keys are also recorded per dish as
+`unsourcedNutrients` and in the payload, so a reader can see the gap instead of
+inferring it from a suspicious zero.
+
+The six *core* findings that remain are the trustworthy ones — `totalFibre`
+−21.7%, `potassium` −58.9%, `sodium` −466.7% — and even those are only as good as
+my declared 60 g + 90 g weighing, which is an estimate, not a measurement.
+
+**So the honest position: the mechanism is complete and proven, and the corpus is
+still not trustworthy enough to file from unattended.** The next real step is
+micronutrient coverage in `food_items`, not more loop machinery.
 
 ## One real finding, recorded rather than filed
 
@@ -101,13 +139,18 @@ clinical ticket.
 
 ## What is left, in order
 
-1. **Add a food-nutrients audit route** over `food_items` (small change). This is
-   the unblocker for a real corpus.
-2. **Re-run the audit with a real nutrition source**, then let the loop file.
+1. **Micronutrient coverage in `food_items`.** The blocker now. Oats and grapes
+   carry macros but not vitamins, so any audit of them is incomplete and the
+   assist tool (correctly) refuses to emit one. Until the catalog carries the full
+   32, the loop cannot file from a photo-only audit without manufacturing findings.
+2. **Weigh, don't estimate.** My 60 g + 90 g was an eyeball judgement. Core-nutrient
+   verdicts are only as good as the declared weight, so a real audit wants a scale
+   or the product's `standard_serving_g` — not a photo.
 3. **Decide on `journey/bug-board-miniapp`** — a pre-existing 28 h branch that
    fails `TUI fixes-landed ratchet` and blocks this PR's merge. Land it, waive
-   it, or say it is dead in `TUI_TG_AUTH_TRAIL.md`. Not mine to decide.
+   it, or declare it dead in `TUI_TG_AUTH_TRAIL.md`. Not mine to decide.
 4. **Enable dispatch** (`MEAL_QA_ALLOW_DISPATCH=1`) and install the cron line —
-   only after 1–2, so the loop has real evidence to close cards on.
+   only after 1–2. The mechanism is proven; the evidence is not yet good enough to
+   let it file unattended.
 
-Next: this file, §"The real fix"
+Next: this file, §"The limit of the catalog"
