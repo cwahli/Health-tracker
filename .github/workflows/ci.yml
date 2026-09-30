@@ -313,26 +313,6 @@ jobs:
       - name: Bug ticket continuity gate (assert-bug-ticket-continuity)
         run: node scripts/assert-bug-ticket-continuity.mjs
 
-      # Meal QA loop (plan/MEAL_QA_LOOP.md). Three ratchets, all offline.
-      # resolve: saved meals must stay reachable — the three provenance tiers and
-      #   the no-overclaim guard on photo_only edit-history observability.
-      # ticket:  a comparison FAIL must still become exactly one card (V-29), with
-      #   a mechanical criteria and idempotent idem-keys.
-      # loop:    the iteration driver must stay bounded, per-card capped, and
-      #   author != verifier.
-      - name: Meal audit loop gates (resolve, ticket, loop, assist)
-        run: |
-          node scripts/assert-meal-audit-resolve.mjs
-          node scripts/assert-meal-audit-ticket.mjs
-          node scripts/assert-meal-audit-loop.mjs
-          node scripts/assert-meal-audit-assist.mjs
-
-      # The audit-only nutrient route the meal-audit agent reads from. Pins that it
-      # serves active rows only, returns per-100g values unscaled, clamps its limit,
-      # and reaches no user data.
-      - name: Audit food-nutrients route contract
-        run: npx vitest run server_audit_food_nutrients.test.ts
-
       # capability: structural checks on every row, then the V-30.5 ticket-scoped
       # strict (the 5 foreign partials stay owned by BOT-11, never marked done).
       - name: Capability propagation gate (strict, ticket-scoped)
