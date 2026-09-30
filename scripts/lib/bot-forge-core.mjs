@@ -21,6 +21,16 @@
 export const TOKEN_SOURCES = ['paste', 'userbot'];
 
 /**
+ * The two ways a bot reaches the fleet.
+ *
+ * `create` writes a new registry row. `attach` finishes a row that is already
+ * there but has no token — a hand-written or scaffolded row (`pm`) whose only
+ * missing surface is the token. It is the same pipeline with the registry step
+ * turned off, not a second creation path.
+ */
+export const FORGE_MODES = ['create', 'attach'];
+
+/**
  * The pipeline, in order. `hostOnly` marks the steps that need a live Telegram
  * account or the VPS — the ones the forge must be able to describe and refuse
  * rather than pretend to have done.
@@ -189,14 +199,90 @@ export function parseBotFatherToken(text) {
 }
 
 /**
- * Decide a creation before anything is written.
+ * Decide a run before anything is written.
+ *
+ * `mode: 'create'` decides a bot that is not there yet; `mode: 'attach'` decides
+ * the token for a row that already is, borrowing that row's own name and tokenEnv
+ * so the operator does not retype what the registry knows. Both answer in the
+ * same shape, because both drive the same pipeline.
  *
  * Everything here is a fact about the current registry plus the request, which
  * is why it can be proven with fixtures. The engine's own refusals
  * (`scripts/add-bot.mjs`) still run at write time — this is the early, cheap
  * one that can explain itself in the browser.
  */
-export function planForge({ registry = {}, name = '', id = '', token = '', tokenEnv = '', tokenSource = 'paste' } = {}) {
+export function planForge({ registry = {}, name = '', id = '', token = '', tokenEnv = '', tokenSource = 'paste', mode = 'create' } = {}) {
+  if (!FORGE_MODES.includes(mode)) {
+    return { ok: false, step: 'plan', reason: `unknown mode "${mode}" (expected ${FORGE_MODES.join(' or ')})` };
+  }
+  if (!TOKEN_SOURCES.includes(tokenSource)) {
+    return { ok: false, step: 'plan', reason: `unknown token source "${tokenSource}" (expected ${TOKEN_SOURCES.join(' or ')})` };
+  }
+
+  const bots = Array.isArray(registry.bots) ? registry.bots : [];
+
+  // attach — the row is already there and is the one thing NOT to rewrite. Its
+  // own name and tokenEnv come from the registry, so the operator does not retype
+  // what the fleet already knows, and no name is needed for the common case.
+  if (mode === 'attach') {
+    const botId = String(id || '').trim() || slugifyName(name);
+    const idProblem = validateId(botId);
+    if (idProblem) return { ok: false, step: 'plan', reason: idProblem };
+    const row = bots.find((b) => b.id === botId) || null;
+    if (!row) {
+      return {
+        ok: false,
+        step: 'plan',
+        reason: `"${botId}" is not in the registry, so there is no row for a token to finish — create it instead of attaching`,
+      };
+    }
+    // @BotFather mints one token per bot, at creation. An existing bot's token
+    // can only be pasted, so the userbot route is refused here rather than
+    // reported as a later "token" failure.
+    if (tokenSource !== 'paste') {
+      return {
+        ok: false,
+        step: 'plan',
+        reason: `attaching needs the token you already have — @BotFather cannot mint a second one for a bot that exists (paste "${row.telegram?.tokenEnv || tokenEnvFor(botId)}")`,
+      };
+    }
+    const displayName = String(name || row.name || botId).trim();
+    const nameProblem = validateBotName(displayName);
+    if (nameProblem) {
+      return { ok: false, step: 'plan', reason: `the registry row for "${botId}" has no usable name (${nameProblem})` };
+    }
+    const shape = validateToken(token);
+    if (!shape.ok) return { ok: false, step: 'plan', reason: shape.reason };
+    const env = tokenEnv || row.telegram?.tokenEnv || tokenEnvFor(botId);
+    for (const bot of bots) {
+      if (bot.id !== botId && bot.telegram?.tokenEnv === env) {
+        return { ok: false, step: 'plan', reason: `tokenEnv "${env}" is already used by "${bot.id}"` };
+      }
+    }
+    // A token under another bot's row is a second poller. The row's own env key
+    // is exempt: re-attaching to it is how a token gets rotated.
+    if (bots.some((b) => b.id !== botId && b.telegram?.token === shape.token)) {
+      return { ok: false, step: 'plan', reason: 'that token is already registered to another bot — one token is one poller' };
+    }
+    return {
+      ok: true,
+      step: 'plan',
+      plan: {
+        mode,
+        id: botId,
+        name: displayName,
+        tokenEnv: env,
+        token: shape.token,
+        telegramBotId: String(shape.botId),
+        tokenSource,
+        masterId: registry.master || bots[0]?.id || '',
+        attached: true,
+        wasEnabled: row.enabled !== false,
+        runtime: row.runtime || 'bot-host',
+      },
+    };
+  }
+
   const nameProblem = validateBotName(name);
   if (nameProblem) return { ok: false, step: 'plan', reason: nameProblem };
 
@@ -204,13 +290,8 @@ export function planForge({ registry = {}, name = '', id = '', token = '', token
   const idProblem = validateId(botId);
   if (idProblem) return { ok: false, step: 'plan', reason: idProblem };
 
-  if (!TOKEN_SOURCES.includes(tokenSource)) {
-    return { ok: false, step: 'plan', reason: `unknown token source "${tokenSource}" (expected ${TOKEN_SOURCES.join(' or ')})` };
-  }
-
-  const bots = Array.isArray(registry.bots) ? registry.bots : [];
   if (bots.some((b) => b.id === botId)) {
-    return { ok: false, step: 'plan', reason: `bot "${botId}" is already in the registry — pick another name, or use /${botId}` };
+    return { ok: false, step: 'plan', reason: `bot "${botId}" is already in the registry — pick another name, or attach a token to it with --attach=${botId}` };
   }
 
   const env = tokenEnv || tokenEnvFor(botId);
@@ -236,14 +317,14 @@ export function planForge({ registry = {}, name = '', id = '', token = '', token
     return {
       ok: true,
       step: 'plan',
-      plan: { id: botId, name: String(name).trim(), tokenEnv: env, token: shape.token, telegramBotId: claimed, tokenSource, masterId },
+      plan: { mode: 'create', id: botId, name: String(name).trim(), tokenEnv: env, token: shape.token, telegramBotId: claimed, tokenSource, masterId },
     };
   }
 
   return {
     ok: true,
     step: 'plan',
-    plan: { id: botId, name: String(name).trim(), tokenEnv: env, token: '', telegramBotId: null, tokenSource, masterId },
+    plan: { mode: 'create', id: botId, name: String(name).trim(), tokenEnv: env, token: '', telegramBotId: null, tokenSource, masterId },
   };
 }
 

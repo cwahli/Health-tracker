@@ -12,8 +12,9 @@
 3. LIVE (bots read these)        per-runtime env files (below) — never edit by hand
 ```
 
-You do not hand-edit layer 1 to create a bot: the forge writes the master line
-and runs the sync itself (below). Edit it by hand only to rotate one token.
+You do not hand-edit layer 1 to create a bot, nor to finish one whose registry row
+already exists but has no token: the forge writes the master line and runs the
+sync itself (below). Edit it by hand only when the forge cannot reach the host.
 
 The master file is **never read by a running bot**. Services load only layer 3
 via systemd `EnvironmentFile` (`bot-host@.service` reads `common.env` + `<id>.env`).
@@ -44,6 +45,16 @@ from the userbot asking @BotFather when a session is configured; otherwise paste
 the token @BotFather gave you into the page. (The page is served by the TUI
 gateway at `/forge` behind the same initData door as `/tui` and `/bugs`.)
 
+**Finish a bot that has no token yet (one tap, same page):** a row can already be
+in the registry — hand-written, or scaffolded before its token existed — and still
+have no token, which is the one surface a row cannot supply itself. Pick it under
+"Finish a row that exists", paste the token @BotFather gave the bot, and Attach.
+The row is kept exactly as it is; the run adds the master line, syncs the env
+files, generates and checks the unit, proves the token with `getMe`, publishes the
+command menu, and flips `enabled` — nothing else is written. The userbot cannot
+help here: @BotFather mints a token once, at creation, so an existing bot's token
+can only be pasted.
+
 **Add a bot (one command):**
 
 ```bash
@@ -57,6 +68,18 @@ registry row through `add-bot.mjs`, adds the master token line, runs
 publishes the command menu, and only then flips `"enabled": true`. A step that
 fails stops the pipeline and names itself, so a half-created bot is never
 reported as created. `--dry-run` plans it and writes nothing.
+
+**Finish a bot that has no token yet (one command)** — the same pipeline with the
+registry write turned off, for a row that is already there:
+
+```bash
+node scripts/bot-forge.mjs --attach=pm --token=<token from @BotFather>
+```
+
+`--attach=<id>` takes the name and the token key from the row, so `pm` does not
+have to be retyped, and it refuses an id nobody registered (there would be no row
+to finish) as well as a missing or malformed token. Use `--create` only for a bot
+that does not exist yet.
 
 With a userbot session it can also mint the token itself (`node
 scripts/bot-forge.mjs --create --name="VM3 Bot"` with no `--token`), and

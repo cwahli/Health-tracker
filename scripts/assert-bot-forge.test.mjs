@@ -185,6 +185,48 @@ test('a token already used by another registry bot is refused', () => {
   assert.match(plan.reason, /one token is one poller/);
 });
 
+test('an attach plan finishes a row that exists and borrows its name', () => {
+  const registry = registryFixture();
+  registry.bots.push({ id: 'pm', name: 'PM Bot', runtime: 'bot-host', enabled: false, extends: 'vm', telegram: { tokenEnv: 'PM_BOT_TOKEN' } });
+
+  const planned = planForge({ registry, mode: 'attach', id: 'pm', token: TOKEN });
+  assert.equal(planned.ok, true, planned.reason);
+  assert.equal(planned.plan.attached, true);
+  assert.equal(planned.plan.id, 'pm');
+  assert.equal(planned.plan.name, 'PM Bot', 'the row already knows its name');
+  assert.equal(planned.plan.tokenEnv, 'PM_BOT_TOKEN', 'and its own token key');
+  assert.equal(planned.plan.wasEnabled, false);
+
+  // A row that is already enabled is a rotation, not a new bot.
+  const rotate = planForge({ registry, mode: 'attach', id: 'vm', token: OTHER_TOKEN });
+  assert.equal(rotate.ok, true, rotate.reason);
+  assert.equal(rotate.plan.wasEnabled, true);
+
+  // Create still refuses the id, and now says which verb finishes it instead.
+  const clash = planForge({ registry, mode: 'create', name: 'PM Bot', token: OTHER_TOKEN });
+  assert.equal(clash.ok, false);
+  assert.match(clash.reason, /already in the registry/);
+  assert.match(clash.reason, /--attach=pm/);
+});
+
+test('attach refuses what it cannot do, and names the reason', () => {
+  const registry = registryFixture();
+  assert.match(planForge({ registry, mode: 'attach', id: 'vm9', token: TOKEN }).reason, /not in the registry/);
+  const userbot = planForge({ registry, mode: 'attach', id: 'vm2', tokenSource: 'userbot' });
+  assert.equal(userbot.ok, false);
+  assert.match(userbot.reason, /cannot mint a second one/);
+  assert.match(planForge({ registry, mode: 'attach', id: 'vm2', token: 'not-a-token' }).reason, /does not look like a bot token/);
+  assert.match(planForge({ registry: { bots: [] }, mode: 'typo', name: 'X Bot' }).reason, /unknown mode/);
+});
+
+test('attaching a token another row already carries is refused', () => {
+  const registry = registryFixture();
+  registry.bots[1].telegram.token = TOKEN; // vm2 holds it, and only one poller may
+  const planned = planForge({ registry, mode: 'attach', id: 'vm', token: TOKEN });
+  assert.equal(planned.ok, false);
+  assert.match(planned.reason, /one token is one poller/);
+});
+
 test('a token that is already the value of another master key is refused', () => {
   assert.match(tokenOwnershipConflict({ VM_BOT_TOKEN: TOKEN }, { token: TOKEN, tokenEnv: 'VM3_BOT_TOKEN' }), /already the value/);
   assert.equal(tokenOwnershipConflict({ VM3_BOT_TOKEN: TOKEN }, { token: TOKEN, tokenEnv: 'VM3_BOT_TOKEN' }), '');
@@ -320,6 +362,10 @@ test('the page posts to the one endpoint and carries initData', () => {
   assert.match(html, /Telegram\.WebApp/);
   assert.match(html, /BotFather/);
   for (const step of PIPELINE_STEPS) assert.ok(html.includes(step.title) || html.includes(step.id), `page does not show ${step.id}`);
+  // The attach path is on the page the operator already has — a registered row
+  // with no token must not send anyone back to a shell.
+  assert.match(html, /id="existing"/);
+  assert.match(html, /mode: 'attach'/);
 });
 
 /**
@@ -345,7 +391,7 @@ function makeDom({ telegram = null } = {}) {
     append(...kids) { this.children.push(...kids); },
     addEventListener(ev, fn) { this.handlers[ev] = fn; },
   });
-  for (const id of ['forge', 'name', 'token', 'tokenHint', 'steps', 'note', 'submit']) elements.set(id, element());
+  for (const id of ['forge', 'name', 'token', 'tokenHint', 'steps', 'note', 'submit', 'attach', 'attachLede', 'existing', 'attachToken', 'attachSubmit']) elements.set(id, element());
   const document = {
     getElementById: (id) => elements.get(id) || null,
     createElement: () => element(),
@@ -354,9 +400,33 @@ function makeDom({ telegram = null } = {}) {
   const fetch = async (url, options = {}) => {
     calls.push({ url, options });
     if (String(url).includes('/api/state')) {
-      return { ok: true, status: 200, json: async () => ({ ok: true, master: 'vm', bots: ['vm', 'vm2'], userbot: { configured: false, reason: 'no session', hostCommands: ['x'] } }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          master: 'vm',
+          // vm already works; vm2 is the row that still has no token, which is
+          // exactly the distinction the page has to draw.
+          bots: [
+            { id: 'vm', name: 'VM Bot', enabled: true, tokenEnv: 'VM_BOT_TOKEN' },
+            { id: 'vm2', name: 'VM2 Bot', enabled: false, tokenEnv: 'VM2_BOT_TOKEN' },
+          ],
+          userbot: { configured: false, reason: 'no session', hostCommands: ['x'] },
+        }),
+      };
     }
-    return { ok: true, status: 200, json: async () => ({ ok: true, bot: { id: 'vm3', name: 'VM3 Bot' }, steps: PIPELINE_STEPS.map((s) => ({ ...s, status: 'done', detail: 'ok' })) }) };
+    let input = {};
+    try { input = JSON.parse(options.body || '{}'); } catch { input = {}; }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        bot: { id: input.id || 'vm3', name: input.name || 'VM3 Bot', attached: input.mode === 'attach' },
+        steps: PIPELINE_STEPS.map((s) => ({ ...s, status: 'done', detail: 'ok' })),
+      }),
+    };
   };
   return { document, calls, fetch, window: { Telegram: telegram ? { WebApp: telegram } : undefined }, elements };
 }
@@ -413,6 +483,25 @@ test('the button reports a refusal instead of claiming success', async () => {
   assert.equal(note.className, 'note err');
 });
 
+test('the page offers the attach path and posts it as a mode', async () => {
+  const dom = runPageScript(makeDom());
+  await new Promise((resolve) => setTimeout(resolve, 0)); // let loadState() resolve
+
+  const select = dom.document.getElementById('existing');
+  assert.deepEqual(select.children.map((o) => o.value), ['vm', 'vm2'], 'every row is offered');
+  assert.match(select.children[1].textContent, /VM2 Bot/);
+  assert.match(select.children[1].textContent, /no token yet/, 'the row that needs a token says so');
+
+  select.value = 'vm2';
+  dom.document.getElementById('attachToken').value = OTHER_TOKEN;
+  await dom.document.getElementById('attach').handlers.submit({ preventDefault() {} });
+
+  const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
+  assert.deepEqual(JSON.parse(forged.options.body), { mode: 'attach', id: 'vm2', token: OTHER_TOKEN });
+  assert.match(dom.document.getElementById('note').textContent, /attached the token to vm2/);
+  assert.equal(dom.document.getElementById('attachToken').value, '', 'the token box is cleared after an attach');
+});
+
 // ------------------------------------------------------- the HTTP surface
 
 async function startForge(runCreate, { allowLocal }) {
@@ -433,7 +522,10 @@ test('the Mini App backend serves the page and the fleet state', async () => {
     assert.equal(page.status, 200);
     assert.match(await page.text(), /Bot forge/);
     const state = await (await fetch(`${base}/api/state`)).json();
-    assert.deepEqual(state.bots, ['vm', 'vm2']);
+    assert.deepEqual(state.bots, [
+      { id: 'vm', name: 'VM Bot', enabled: true, tokenEnv: 'VM_BOT_TOKEN', runtime: 'bot-host' },
+      { id: 'vm2', name: 'VM2 Bot', enabled: true, tokenEnv: 'VM2_BOT_TOKEN', runtime: 'bot-host' },
+    ]);
     assert.equal(state.master, 'vm');
     assert.equal(state.userbot.configured, false, 'no session on a dev box: the page must say so');
     assert.ok(state.userbot.hostCommands.length > 0, 'the operator must be told what to run');
@@ -539,7 +631,7 @@ test('a mounted forge serves its own prefix and yields every other path', async 
 
     const state = await (await fetch(`${base}/forge/api/state`)).json();
     assert.equal(state.ok, true);
-    assert.deepEqual(state.bots, ['vm', 'vm2']);
+    assert.deepEqual(state.bots.map((b) => b.id), ['vm', 'vm2']);
 
     const created = await fetch(`${base}/forge/api/forge`, {
       method: 'POST',
@@ -754,6 +846,78 @@ test('END TO END: an unreachable Telegram stops at publish and does NOT enable t
   assert.deepEqual(run.json.summary.remaining, ['publish', 'enable']);
 });
 
+test('END TO END: attach finishes a registered row that has no token', async () => {
+  const dir = scratch();
+  const registryPath = path.join(dir, 'registry.json');
+  const tokensPath = path.join(dir, 'tokens.env');
+  const registry = registryFixture();
+  registry.bots.push({ id: 'pm', name: 'PM Bot', runtime: 'bot-host', enabled: false, extends: 'vm', telegram: { tokenEnv: 'PM_BOT_TOKEN' } });
+  fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
+  fs.writeFileSync(tokensPath, 'VM_BOT_TOKEN=123456789:master-token-not-real-000000000000\n');
+
+  const api = await startFakeTelegram();
+  try {
+    const run = await runCliAsync([
+      '--attach=pm',
+      `--token=${TOKEN}`,
+      `--registry=${registryPath}`,
+      `--tokens=${tokensPath}`,
+      `--config-dir=${path.join(dir, 'config')}`,
+      `--unit-dir=${path.join(dir, 'units')}`,
+      `--bot-host-root=${path.join(dir, 'host')}`,
+      `--api-base=http://127.0.0.1:${api.port}`,
+      '--no-start',
+      '--json',
+    ]);
+
+    assert.equal(run.status, 0, `attach failed: ${run.stdout}\n${run.stderr}`);
+    assert.equal(run.json.ok, true, JSON.stringify(run.json, null, 2));
+    assert.equal(run.json.summary.ok, true);
+    assert.deepEqual(run.json.summary.remaining, [], 'every step should have run — attach is the same pipeline');
+    assert.equal(run.json.bot.attached, true);
+    assert.equal(run.json.bot.name, 'PM Bot');
+    assert.equal(run.json.bot.telegramBotId, '123456789');
+
+    // The whole point: the only change to the row is the enable flip at the end.
+    // Anything else means attach rewrote a row it was supposed to leave alone.
+    const expected = structuredClone(registry);
+    expected.bots.find((b) => b.id === 'pm').enabled = true;
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(registryPath, 'utf8')),
+      expected,
+      'attach must not rewrite the row it attached a token to',
+    );
+
+    // And the token really reached every surface the row needs.
+    assert.equal(readMasterTokens(tokensPath).PM_BOT_TOKEN, TOKEN);
+    assert.equal(readMasterTokens(tokensPath).VM_BOT_TOKEN, '123456789:master-token-not-real-000000000000');
+    assert.equal(fs.readFileSync(path.join(dir, 'config', 'pm.env'), 'utf8').trim(), `PM_BOT_TOKEN=${TOKEN}`);
+    assert.deepEqual(api.calls.map((c) => c.method), ['getMe', 'setMyCommands']);
+    assert.ok(run.json.steps.some((s) => s.id === 'registry' && /kept as it is/.test(s.detail)), 'the receipt must say the row was kept');
+  } finally {
+    api.server.close();
+  }
+});
+
+test('END TO END: attach on an id nobody registered writes nothing', () => {
+  const dir = scratch();
+  const registryPath = path.join(dir, 'registry.json');
+  fs.writeFileSync(registryPath, JSON.stringify(registryFixture(), null, 2));
+  const before = fs.readFileSync(registryPath, 'utf8');
+
+  const run = runCli([
+    '--attach=vm9', `--token=${TOKEN}`,
+    `--registry=${registryPath}`, `--tokens=${path.join(dir, 'tokens.env')}`,
+    `--config-dir=${path.join(dir, 'config')}`, `--unit-dir=${path.join(dir, 'units')}`,
+    '--bot-host-root=/tmp/host', '--no-start', '--json',
+  ]);
+  assert.equal(run.status, 1);
+  assert.equal(run.json.failedStep, 'plan');
+  assert.match(run.json.reason, /not in the registry/);
+  assert.equal(fs.readFileSync(registryPath, 'utf8'), before);
+  assert.equal(fs.existsSync(path.join(dir, 'tokens.env')), false);
+});
+
 test('a dry run plans without writing', () => {
   const dir = scratch();
   const registryPath = path.join(dir, 'registry.json');
@@ -767,6 +931,20 @@ test('a dry run plans without writing', () => {
   ]);
   assert.equal(run.status, 0);
   assert.equal(run.json.dryRun, true);
+  assert.equal(fs.readFileSync(registryPath, 'utf8'), before);
+  assert.equal(fs.existsSync(path.join(dir, 'tokens.env')), false);
+
+  // The attach variant plans just as harmlessly.
+  const attachRun = runCli([
+    '--attach=vm2', `--token=${OTHER_TOKEN}`,
+    `--registry=${registryPath}`, `--tokens=${path.join(dir, 'tokens.env')}`,
+    `--config-dir=${path.join(dir, 'config')}`, `--unit-dir=${path.join(dir, 'units')}`,
+    '--bot-host-root=/tmp/host', '--dry-run', '--json',
+  ]);
+  assert.equal(attachRun.status, 0, attachRun.stdout);
+  assert.equal(attachRun.json.dryRun, true);
+  assert.equal(attachRun.json.bot.attached, true);
+  assert.equal(attachRun.json.bot.tokenEnv, 'VM2_BOT_TOKEN');
   assert.equal(fs.readFileSync(registryPath, 'utf8'), before);
   assert.equal(fs.existsSync(path.join(dir, 'tokens.env')), false);
 });
