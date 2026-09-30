@@ -395,6 +395,8 @@ test('the page posts to the one endpoint and carries initData', () => {
   assert.match(html, /\/api\/forge/);
   assert.match(html, /x-telegram-init-data/);
   assert.match(html, /Telegram\.WebApp/);
+  assert.match(html, /forgeInitData/);
+  assert.match(html, /tgWebAppData/);
   assert.match(html, /BotFather/);
   for (const step of PIPELINE_STEPS) assert.ok(html.includes(step.title) || html.includes(step.id), `page does not show ${step.id}`);
   // The attach path is on the page the operator already has — a registered row
@@ -501,6 +503,87 @@ test('the button sends Telegram initData when a Mini App opened it', async () =>
   await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
   const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
   assert.equal(forged.options.headers['x-telegram-init-data'], 'auth_date=1&user=%7B%22id%22%3A1%7D&hash=abc');
+});
+
+test('the button sends bare-global Telegram initData when window.Telegram is missing', async () => {
+  const saved = globalThis.Telegram;
+  globalThis.Telegram = { WebApp: { ready() {}, expand() {}, initData: 'auth_date=2&hash=bare' } };
+  try {
+    const dom = runPageScript(makeDom());
+    dom.document.getElementById('name').value = 'VM3 Bot';
+    await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+    const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
+    assert.equal(forged.options.headers['x-telegram-init-data'], 'auth_date=2&hash=bare');
+  } finally {
+    if (saved === undefined) delete globalThis.Telegram;
+    else globalThis.Telegram = saved;
+  }
+});
+
+test('the page falls back to the tgWebAppData hash param on both fetches', async () => {
+  const saved = globalThis.location;
+  const initData = 'auth_date=3&user=%7B%22id%22%3A3%7D&hash=fromhash';
+  globalThis.location = { hash: `#tgWebAppData=${encodeURIComponent(initData)}&tgWebAppVersion=7.0` };
+  try {
+    const dom = runPageScript(makeDom());
+    await new Promise((resolve) => setTimeout(resolve, 0)); // let loadState() resolve
+    const state = dom.calls.find((c) => String(c.url).includes('/api/state'));
+    assert.ok(state, 'the page did not load state');
+    assert.equal(state.options.headers['x-telegram-init-data'], initData);
+
+    dom.document.getElementById('name').value = 'VM3 Bot';
+    await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+    const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
+    assert.equal(forged.options.headers['x-telegram-init-data'], initData);
+  } finally {
+    if (saved === undefined) delete globalThis.location;
+    else globalThis.location = saved;
+  }
+});
+
+test('initData resolution prefers the bare global, then window.Telegram, then the hash', async () => {
+  const savedTelegram = globalThis.Telegram;
+  const savedLocation = globalThis.location;
+  const initData = 'auth_date=4&hash=winner';
+  globalThis.location = { hash: `#tgWebAppData=${encodeURIComponent('auth_date=4&hash=hashloser')}&tgWebAppVersion=7.0` };
+  try {
+    // window.Telegram beats the hash.
+    let dom = runPageScript(makeDom({ telegram: { ready() {}, expand() {}, initData } }));
+    dom.document.getElementById('name').value = 'VM3 Bot';
+    await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+    assert.equal(
+      dom.calls.find((c) => String(c.url).includes('/api/forge')).options.headers['x-telegram-init-data'],
+      initData,
+    );
+
+    // The bare global beats window.Telegram.
+    globalThis.Telegram = { WebApp: { ready() {}, expand() {}, initData } };
+    dom = runPageScript(makeDom({ telegram: { ready() {}, expand() {}, initData: 'auth_date=4&hash=windowloser' } }));
+    dom.document.getElementById('name').value = 'VM3 Bot';
+    await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+    assert.equal(
+      dom.calls.find((c) => String(c.url).includes('/api/forge')).options.headers['x-telegram-init-data'],
+      initData,
+    );
+  } finally {
+    if (savedTelegram === undefined) delete globalThis.Telegram;
+    else globalThis.Telegram = savedTelegram;
+    if (savedLocation === undefined) delete globalThis.location;
+    else globalThis.location = savedLocation;
+  }
+});
+
+test('an empty environment sends no initData on either fetch (fails closed)', async () => {
+  const dom = runPageScript(makeDom());
+  await new Promise((resolve) => setTimeout(resolve, 0)); // let loadState() resolve
+  const state = dom.calls.find((c) => String(c.url).includes('/api/state'));
+  assert.ok(state, 'the page did not load state');
+  assert.equal(state.options.headers['x-telegram-init-data'], '');
+
+  dom.document.getElementById('name').value = 'VM3 Bot';
+  await dom.document.getElementById('forge').handlers.submit({ preventDefault() {} });
+  const forged = dom.calls.find((c) => String(c.url).includes('/api/forge'));
+  assert.equal(forged.options.headers['x-telegram-init-data'], '');
 });
 
 test('the button reports a refusal instead of claiming success', async () => {
