@@ -130,6 +130,44 @@ if [ -n "$CHAT_ID" ]; then FROM_ENV=1; else
     } catch { /* no tui-open yet: fall through to the legacy pick */ }
   ' "$STATE/tui-open.json" 2>/dev/null || true)
 fi
+# --- which workspace?
+#
+# TUI_WORKTREE in the service file is a STATIC guess. It is right only while the
+# chat stays in the bot's own project, and wrong the moment /project points the
+# chat elsewhere - the pane then opens a different project's checkout, so the
+# tool renders a conversation unrelated to the one the bot is answering in. That
+# is not cosmetic: the bot's replies never appear, and the pane confidently shows
+# the wrong conversation. (Seen 2026-09-29: a vm /tui showed a PIP Defense
+# Council session while the bot answered from Health-tracker.)
+#
+# The chat's own workspace is the truth, so the bot records it in tui-open.json
+# and this reads it back. TUI_WORKTREE stays the fallback for a cold attach with
+# no tui-open row - a brand new chat, or before the first /tui.
+SESSION_WORKSPACE=""
+if [ -n "${TUI_SESSION_WORKSPACE:-}" ]; then
+  SESSION_WORKSPACE="$TUI_SESSION_WORKSPACE"
+elif [ -f "$STATE/tui-open.json" ]; then
+  SESSION_WORKSPACE=$(node -e '
+    const fs = require("fs");
+    try {
+      const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      if (m && typeof m.workspace === "string") process.stdout.write(m.workspace);
+    } catch { /* nothing recorded: fall through to the env */ }
+  ' "$STATE/tui-open.json" 2>/dev/null || true)
+fi
+# A path that is not a directory makes the tool fail with FileSystem.access on
+# attach, which is the 2026-09-27 reconnect loop. Caught here, where the message
+# can say what is actually wrong instead of showing a dead terminal.
+if [ -n "$SESSION_WORKSPACE" ] && [ ! -d "$SESSION_WORKSPACE" ]; then
+  echo "This conversation belongs in ${SESSION_WORKSPACE}, which does not exist"
+  echo "on this host, so I will not open a terminal in the wrong place instead."
+  echo "Send /project to see which project this chat is on."
+  echo
+  SESSION_WORKSPACE=""
+fi
+[ -n "$SESSION_WORKSPACE" ] || SESSION_WORKSPACE="$WORKTREE"
+WORKTREE="$SESSION_WORKSPACE"
+
 # The launch decision lives in scripts/lib/tui-surface.mjs so the bot, this
 # script and the sensors cannot disagree about it. One node step resolves AND
 # labels, so the SOURCE line can never disagree with the SID line: explicit-hit
