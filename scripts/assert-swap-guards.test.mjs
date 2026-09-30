@@ -184,7 +184,11 @@ try {
   check('an unreachable host holds the turn instead of running it here', /if \(!remoteStatus\.reachable\)/.test(turnPath) && /setBlockedLocation\(chatId, host/.test(turnPath));
   check('a route left failed holds the turn too', /routeState\(host\) === 'failed'/.test(turnPath));
   check('the first turn on a host is a canary', /wantCanary/.test(turnPath) && /routeState\(host\) !== 'active'/.test(bot));
-  check('the canary is settled before the session row changes', turnPath.indexOf('settleCanary(') !== -1 && turnPath.indexOf('settleCanary(') < turnPath.indexOf('sessions.set(chatId, handed.sessionID)'));
+  // The row write is workspace-scoped since #365 (`bindSessionForWorkspace`);
+  // the check follows the bind, not the bare `sessions.set(chatId, ...)` it
+  // replaced — the old pattern matched nothing and the check failed silently
+  // against a green tree.
+  check('the canary is settled before the session row changes', turnPath.indexOf('settleCanary(') !== -1 && turnPath.indexOf('settleCanary(') < turnPath.indexOf('bindSessionForWorkspace(sessions, chatId'));
   check('a dry worker comes back unanswered for the chain, not delivered',
     /dry: true/.test(turnPath) && /isQuotaOrLimitError\(String\(handed\.error/.test(turnPath));
   check('the exhausted branch and the dry path both walk the chain',
