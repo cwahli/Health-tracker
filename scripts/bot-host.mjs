@@ -157,7 +157,7 @@ import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-run
 // The Personal Health Coach's data loop. `/health` is deliberately not gated on
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
-import { runHealthVerify, runHealthIngest, getHealthStatus, formatVerifyText, formatStatusText } from './health-runner.mjs';
+import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText } from './health-runner.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -2909,6 +2909,35 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         } catch (err) {
           await api.sendMessage(chatId, `❌ Ingest failed: ${err.message}`);
         }
+        return;
+      }
+      if (sub === 'refresh') {
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before refreshing the documents.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          '📄 *Refreshing the four documents — verify first, then publish into the project folder...*',
+          { parse_mode: 'Markdown' },
+        );
+        try {
+          const res = await runHealthRefresh({ projectId, botId: config.id });
+          if (!res.ok) {
+            await api.sendMessage(chatId, `❌ Refresh could not run (${res.stage}): ${res.error}`);
+            return;
+          }
+          await api.sendMessage(chatId, formatRefreshText(res), { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Refresh failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'analyze') {
+        // The gate refusal is the answer this command exists to give, so it is
+        // reported as a plain refusal (no crash path, no markdown parse risk).
+        const res = runHealthAnalyze({ projectId });
+        await api.sendMessage(chatId, formatAnalyzeText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
         return;
       }
       // Anything else (including no argument) is the status answer.

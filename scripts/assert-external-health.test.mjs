@@ -7,7 +7,8 @@ import { assertReadOnlySql, parseEnvFile, loadD1Config, createD1Reader, resolveP
 import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, sheetRecord, MARKER_LABELS } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesEqual, FIX_LIST } from './lib/health/reconcile.mjs';
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
-import { runHealthVerify, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, healthPaths } from './health-runner.mjs';
+import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile } from './health-runner.mjs';
+import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, refusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore } from './lib/health/docs.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -312,6 +313,329 @@ const brokenRows = [
   const paths = healthPaths('external-health', { env: {} });
   check('paths point at the workspace, not at the repo', !paths.workspace.startsWith(ROOT), paths.workspace);
   check('every marker label is human-readable', Object.values(MARKER_LABELS).every((v) => typeof v === 'string' && v.length > 0));
+}
+
+// ---------------------------------------------------------------- 7. the four documents
+const TEMPLATE_DIR = path.join(ROOT, 'projects/external-health/templates');
+const readTemplates = () => Object.fromEntries(DOC_SPECS.map((s) => [s.key, fs.readFileSync(path.join(TEMPLATE_DIR, s.template), 'utf8')]));
+
+const FIX_TITLES = {
+  'H-1': 'Profile demographics match the sheet',
+  'H-2': 'One app row per date (no duplicate rows)',
+  'H-3': 'No empty app rows',
+  'H-4': 'No app row carries another date’s results',
+  'H-5': 'No value disagrees with the sheet on the same date',
+  'H-6': 'Every sheet value is present in the app',
+  'H-7': 'No unexplained app rows',
+  'H-8': 'No app results newer than the sheet',
+};
+const fixtureArtifact = (state = 'open') => ({
+  at: '2026-10-01T09:00:00.000Z',
+  projectId: 'external-health',
+  profile: { uid: 'real', rows: 41, source: 'most-lab-rows', fields: { age: 28, height: 178, weight: 74 } },
+  sheet: {
+    file: '/tmp/sources/medical-test-results-chiwah_2026-09-30_19-32-41.json',
+    title: 'Medical Test Results - Chiwah',
+    tab: 'Medical Test Results - Chiwah',
+    fetchedAt: '2026-09-30T19:32:41.000Z',
+    rows: 140,
+    dates: Array.from({ length: 14 }, (_, i) => `2026-06-${String(i + 1).padStart(2, '0')}`),
+    newestDate: '2026-06-09',
+    unmapped: [{ test: 'Brand new assay', count: 1 }],
+  },
+  app: { rows: 41, newestDate: '2026-09-06', newerThanSheet: ['2026-07-08', '2026-09-06'] },
+  matches: [
+    { key: 'hba1c', label: 'HbA1c', value: 40, unit: 'mmol/mol', date: '2026-06-05' },
+    { key: 'creatinine', label: 'Creatinine', value: 100, unit: 'umol/L', date: '2026-06-05' },
+  ],
+  missing: [{ key: 'ldl', label: 'LDL', value: 2.1, unit: 'mmol/L', date: '2026-06-03' }],
+  appOnly: [{ key: 'hba1c', label: 'HbA1c', value: 40, date: '2026-07-08' }],
+  gaps: [{ date: '2026-06-05', test: 'GPPAQ usual level of walking pace - fast' }],
+  fixList: {
+    closed: state === 'open' ? 0 : 8,
+    open: state === 'open' ? 8 : 0,
+    waived: 0,
+    items: Object.entries(FIX_TITLES).map(([id, title]) => ({ id, title, state: state === 'open' ? 'open' : 'closed', detail: state === 'open' ? `${title} — one detail line` : '' })),
+    nextAction: state === 'open' ? { id: 'H-1', title: FIX_TITLES['H-1'] } : null,
+  },
+});
+
+const ANALYSIS_MARKER = 'HBA1C-TREND-CLAIM-MARKER';
+const analysisPayload = () => Object.fromEntries(
+  Object.values(SECTION_SOURCES).filter((s) => s.startsWith('analysis.')).map((s) => [s, [`- ${ANALYSIS_MARKER}: HbA1c 39 (2026-03-04) → 40 (2026-06-05), +1 mmol/mol.`]]),
+);
+
+/** A fake store: records every call, so create/update/skip is judged on what was asked. */
+function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix = 'doc_' } = {}) {
+  const calls = [];
+  const files = { ...preloaded };
+  let seq = 0;
+  return {
+    calls,
+    files,
+    async create(folderId, title, text, token) {
+      seq += 1;
+      const id = `${idPrefix}${seq}`;
+      calls.push({ op: 'create', folderId, title, text, token, id });
+      files[id] = text;
+      return { ok: true, id, title, modifiedTime: `2026-10-01T09:0${seq}:00.000Z` };
+    },
+    async replace(docId, text, token) {
+      calls.push({ op: 'replace', docId, text, token });
+      files[docId] = text;
+      return { ok: true, id: docId, modifiedTime: '2026-10-01T10:00:00.000Z' };
+    },
+    async stat(docId) {
+      calls.push({ op: 'stat', docId });
+      return missing.has(docId) ? { ok: false, missing: true, status: 404, error: 'File not found' } : { ok: true, file: { id: docId } };
+    },
+    async read(docId) {
+      calls.push({ op: 'read', docId });
+      return files[docId] === undefined ? { ok: false, error: 'File not found' } : { ok: true, bytes: Buffer.from(files[docId]) };
+    },
+    async list() {
+      calls.push({ op: 'list' });
+      return { ok: true, files: listing };
+    },
+  };
+}
+
+{
+  const templates = readTemplates();
+  // Every template heading must have a renderer, or a template edit silently
+  // drops a section from the published document.
+  for (const spec of DOC_SPECS) {
+    eq(`${spec.title}: every template section has a source`, unknownSections(templates[spec.key]), []);
+    check(`${spec.title}: the template declares sections`, sectionPlan(templates[spec.key]).length >= 3, String(sectionPlan(templates[spec.key]).length));
+  }
+  eq('an unknown template section is refused', renderDoc({ spec: DOC_SPECS[0], templateText: '# t\n\n## A section nobody mapped\n', artifact: fixtureArtifact(), registry: {} }).ok, false);
+
+  const open = fixtureArtifact('open');
+  const openGate = gateFromArtifact(open);
+  check('the gate is closed only when nothing is open', openGate.allowed === false && openGate.open.length === 8, JSON.stringify(openGate));
+  check('a waived item is not an open item', gateFromArtifact({ fixList: { items: [{ id: 'H-1', state: 'waived' }, { id: 'H-2', state: 'closed' }] } }).allowed === true);
+
+  const snapshot = renderDoc({ spec: DOC_SPECS[0], templateText: templates.snapshot, artifact: open, analysis: analysisPayload(), registry: {}, now: new Date('2026-10-01T09:00:00Z') });
+  check('the snapshot renders', snapshot.ok === true, snapshot.error || '');
+  check('the header carries the pending-gate banner', /DRAFT — the data gate is OPEN \(8 items: H-1/.test(snapshot.text), snapshot.text.split('\n').slice(0, 3).join(' | '));
+  check('the header carries dated provenance', snapshot.text.includes('medical-test-results-chiwah_2026-09-30_19-32-41.json') && snapshot.text.includes('real') && snapshot.text.includes('2026-10-01'), 'provenance missing');
+  check('the header names the open items', snapshot.text.includes('(H-1, H-2, H-3, H-4, H-5, H-6, H-7, H-8)'), 'item list missing');
+  check('data sections still render the verified facts', snapshot.text.includes('HbA1c 40 mmol/mol — 2026-06-05') && snapshot.text.includes('LDL: the sheet has 1 value'), 'data sections missing');
+  eq('the snapshot has no analysis section to refuse (it is the data document)', snapshot.refused, []);
+
+  // Conditions & Actions is where the refusal has to be visible.
+  const conditionsOpen = renderDoc({ spec: DOC_SPECS[1], templateText: templates.conditions, artifact: open, analysis: analysisPayload(), registry: {}, now: new Date('2026-10-01T09:00:00Z') });
+  eq('every analysis section of the conclusions document is refused', conditionsOpen.refused.length, 4);
+  check('the refusal names the open items', conditionsOpen.text.includes(refusalText(openGate)), 'refusal text missing');
+  check('no analysis content reaches an open-gate document', !conditionsOpen.text.includes(ANALYSIS_MARKER), 'the payload leaked into a draft');
+  check('the refusal is in the published bytes, not just in the metadata', conditionsOpen.text.split('\n').filter((l) => l.includes('Not published while the data gate is open')).length === 4, 'refusal sentence count wrong');
+
+  // The read-back is the proof path, and alt=media is refused for Docs files
+  // (live 403). It must go through the export endpoint.
+  const exported = await exportDocText('doc_1', 't', { fetchImpl: async (url) => ({ ok: true, status: 200, text: async () => `read from ${url}` }) });
+  check('the read-back exports a Doc instead of using alt=media', exported.ok && exported.bytes.toString('utf8').includes('/export?mimeType=text%2Fplain'), exported.bytes?.toString('utf8'));
+  const refusedExport = await exportDocText('doc_1', 't', { fetchImpl: async () => ({ ok: false, status: 403, text: async () => 'nope' }) });
+  check('a refused export is reported, not thrown', refusedExport.ok === false && refusedExport.status === 403, JSON.stringify(refusedExport));
+  check('the real store reads through that export path', googleDocsStore().read === exportDocText);
+  eq('readDocText hands back the document text', (await readDocText('doc_1', { token: 't', store: fakeStore({ preloaded: { doc_1: 'the bytes' } }) })).text, 'the bytes');
+
+  const insights = renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: open, analysis: analysisPayload(), registry: {}, now: new Date('2026-10-01T09:00:00Z') });
+  check('the renewal log is dated history, not analysis', /\| 2026-10-01 \| documents published — 8 fix-list item\(s\) open at the time \|/.test(insights.text), insights.text.slice(-240));
+  check('a reappearance of the same day does not change the log', renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: open, analysis: analysisPayload(), registry: { renewals: { insights: { '2026-10-01': { open: 8 } } } }, now: new Date('2026-10-01T18:00:00Z') }).hash === insights.hash, 'renewal log is not stable within a day');
+
+  // The same payload with the gate closed: the refusal lifts, the analysis renders.
+  const closed = fixtureArtifact('closed');
+  const closedDoc = renderDoc({ spec: DOC_SPECS[1], templateText: templates.conditions, artifact: closed, analysis: analysisPayload(), registry: {}, now: new Date('2026-10-01T09:00:00Z') });
+  check('a closed gate publishes the analysis', closedDoc.ok && closedDoc.text.includes(ANALYSIS_MARKER) && closedDoc.refused.length === 0, JSON.stringify(closedDoc.refused || []));
+  check('a closed gate says so in the header', /Data gate closed/.test(closedDoc.text), closedDoc.text.split('\n')[2]);
+  check('the same inputs give the same hash', contentHash(snapshot.text) === contentHash(snapshot.text) && snapshot.hash.length === 16);
+}
+
+// ---------------------------------------------------------------- 8. idempotent publishing
+{
+  const templates = readTemplates();
+  const artifact = fixtureArtifact('open');
+  const at = new Date('2026-10-01T09:00:00Z');
+
+  const first = planPublish({ artifact, analysis: analysisPayload(), templates, registry: { docs: {}, history: [] }, now: at });
+  eq('a fresh registry plans four creates', first.items.map((i) => i.action), ['create', 'create', 'create', 'create']);
+  eq('the run is a draft while the gate is open', first.mode, 'draft');
+
+  const store = fakeStore();
+  const run1 = await publishDocs({ items: first.items, token: 't', folderId: 'folder1', store });
+  eq('the first publish creates four documents', [run1.created, run1.updated, run1.skipped, run1.failed], [4, 0, 0, 0]);
+  eq('the fake store saw four creates', store.calls.filter((c) => c.op === 'create').length, 4);
+  const registry1 = applyReceipts({ docs: {}, history: [] }, run1.receipts, { now: at, folderId: 'folder1', projectId: 'external-health' });
+  eq('the registry holds one id per document', Object.keys(registry1.docs).sort(), ['conditions', 'insights', 'snapshot', 'test_plan']);
+  check('every id came back from the store', Object.values(registry1.docs).every((d) => /^doc_\d+$/.test(d.id)), JSON.stringify(registry1.docs));
+  eq('the renewal log grew four entries', registry1.history.length, 4);
+  check('the published bytes carry the refusal, not the analysis', !store.files[registry1.docs.snapshot.id].includes(ANALYSIS_MARKER) && store.files[registry1.docs.snapshot.id].includes('DRAFT — the data gate is OPEN'), 'published bytes wrong');
+
+  // Second run, same inputs: nothing is written and no second file appears.
+  const beforeCalls = store.calls.length;
+  const second = planPublish({ artifact, analysis: analysisPayload(), templates, registry: registry1, now: new Date('2026-10-01T11:30:00Z') });
+  eq('a same-day rerun plans four skips', second.items.map((i) => i.action), ['skip', 'skip', 'skip', 'skip']);
+  const run2 = await publishDocs({ items: second.items, token: 't', folderId: 'folder1', store });
+  eq('a rerun writes nothing', [run2.created, run2.updated, run2.skipped], [0, 0, 4]);
+  eq('a rerun asks the store for nothing', store.calls.length, beforeCalls);
+  const idsOf = (reg) => Object.values(reg.docs).map((d) => d.id).sort();
+  eq('a rerun keeps the same doc ids', idsOf(registry1), idsOf(applyReceipts(registry1, run2.receipts, { now: at, folderId: 'folder1' })));
+
+  // A real input change (one item waived) must update in place, never duplicate.
+  const waivedArtifact = { ...artifact, fixList: { ...artifact.fixList, waived: 1, items: artifact.fixList.items.map((i) => (i.id === 'H-3' ? { ...i, state: 'waived' } : i)) } };
+  const third = planPublish({ artifact: waivedArtifact, analysis: analysisPayload(), templates, registry: registry1, now: at });
+  eq('a changed fix list plans four updates', third.items.map((i) => i.action), ['update', 'update', 'update', 'update']);
+  const run3 = await publishDocs({ items: third.items, token: 't', folderId: 'folder1', store });
+  eq('the update is in place, not a second file', [run3.created, run3.updated], [0, 4]);
+  eq('the replace calls name the ids the registry already had', store.calls.filter((c) => c.op === 'replace').map((c) => c.docId).sort(), Object.values(registry1.docs).map((d) => d.id).sort());
+  const registry3 = applyReceipts(registry1, run3.receipts, { now: at, folderId: 'folder1' });
+  eq('the ids are unchanged after an update', Object.entries(registry3.docs).map(([k, v]) => [k, v.id]), Object.entries(registry1.docs).map(([k, v]) => [k, v.id]));
+  check('the waived item shows in the updated bytes', store.files[registry3.docs.snapshot.id].includes('H-3'), 'waiver not reflected');
+
+  // A doc the human deleted is recreated, not patched into a 404.
+  const gone = fakeStore({ missing: new Set([registry1.docs.snapshot.id]), idPrefix: 'new_' });
+  const fourth = planPublish({ artifact: waivedArtifact, analysis: analysisPayload(), templates, registry: registry1, now: new Date('2026-10-02T09:00:00Z') });
+  const run4 = await publishDocs({ items: fourth.items, token: 't', folderId: 'folder1', store: gone });
+  eq('a deleted document is recreated', run4.receipts.find((r) => r.key === 'snapshot').action, 'recreate');
+  check('the recreated document got a new id', run4.receipts.find((r) => r.key === 'snapshot').docId !== registry1.docs.snapshot.id);
+
+  // Adoption: a registry that lost its ids must not mint twins of docs that exist.
+  const listing = [{ id: 'existing_snapshot', name: 'Health Snapshot', mimeType: 'application/vnd.google-apps.document' }];
+  const adopted = adoptFromListing(listing);
+  eq('adoption finds a document by title', adopted, { snapshot: 'existing_snapshot' });
+  const adoptStore = fakeStore({ listing, preloaded: { existing_snapshot: 'old bytes' } });
+  const fifth = planPublish({ artifact, analysis: analysisPayload(), templates, registry: { docs: {}, history: [] }, now: at });
+  for (const item of fifth.items) if (adopted[item.key]) { item.docId = adopted[item.key]; item.action = 'update'; }
+  const run5 = await publishDocs({ items: fifth.items, token: 't', folderId: 'folder1', store: adoptStore });
+  eq('an adopted document is updated, not created twice', run5.receipts.find((r) => r.key === 'snapshot').action, 'update');
+  eq('adoption still creates the three the folder did not have', [run5.created, run5.updated], [3, 1]);
+}
+
+// ---------------------------------------------------------------- 9. refresh and analyze, end to end
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-refresh-'));
+  fs.mkdirSync(path.join(dir, 'sources'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'sources', 'sheet_2026-09-30.json'), JSON.stringify({
+    source: { title: 'Medical Test Results - Chiwah', fetchedAt: '2026-09-30T18:33:28.031Z' },
+    data: { 'Medical Test Results - Chiwah': sheetRows.map((r) => [`"${r.dateRaw}","${r.test}","${r.resultRaw}","${r.range}","${r.comment}"`]) },
+  }));
+  const env = { CLOUDFLARE_API_TOKEN: 'tok', CLOUDFLARE_D1_DATABASE_ID: 'dbb', HEALTH_PROFILE_UID: 'real', HEALTH_DOCS_FOLDER: 'folder1' };
+  const sheetFixture = () => [
+    { id: 'row_ok', firebase_uid: 'real', date: '2026-06-05', biomarkers: JSON.stringify({ hba1c: 40, creatinine: 100 }), note: '' },
+    { id: 'row_bp', firebase_uid: 'real', date: '2024-03-27', biomarkers: JSON.stringify({ blood_pressure: '109 / 53 mmHg' }), note: '' },
+  ];
+  // The whole sheet, so a closed gate is reachable; the two-row subset leaves
+  // H-6 open, which is the fixture the draft path is judged on.
+  const fullFixture = () => [
+    { id: 'row_ok', firebase_uid: 'real', date: '2026-06-05', biomarkers: JSON.stringify({ hba1c: 40, creatinine: 100, hemoglobin: 166 }), note: '' },
+    { id: 'row_lipids', firebase_uid: 'real', date: '2025-06-25', biomarkers: JSON.stringify({ total_cholesterol: 5.7 }), note: '' },
+    { id: 'row_w', firebase_uid: 'real', date: '2024-10-23', biomarkers: JSON.stringify({ weight: 62 }), note: '' },
+    { id: 'row_bp', firebase_uid: 'real', date: '2024-03-27', biomarkers: JSON.stringify({ blood_pressure: '109 / 53 mmHg' }), note: '' },
+  ];
+  const makeFetch = (profile, rows = sheetFixture) => async (url, init = {}) => {
+    const json = (body) => ({ ok: true, status: 200, json: async () => body });
+    if (String(url).includes('/accounts?per_page=1')) return json({ success: true, result: [{ id: 'acct' }] });
+    const payload = JSON.parse(init.body || '{}');
+    if (/from biomarker_logs group by firebase_uid/.test(payload.sql)) return json({ success: true, result: [{ results: [{ firebase_uid: 'real', rows: rows().length }] }] });
+    if (/from profiles/.test(payload.sql)) return json({ success: true, result: [{ results: [{ id: 'p', firebase_uid: 'real', data: JSON.stringify({ profile }) }] }] });
+    if (/from biomarker_logs/.test(payload.sql)) return json({ success: true, result: [{ results: rows() }] });
+    return json({ success: false, errors: [{ message: `unexpected sql: ${payload.sql}` }] });
+  };
+
+  const store = fakeStore();
+  const first = await runHealthRefresh({
+    workspace: dir,
+    env,
+    fetchImpl: makeFetch({ age: 28, height: 178, weight: 74 }),
+    now: new Date('2026-10-01T09:00:00Z'),
+    token: 't',
+    store,
+    templates: readTemplates(),
+  });
+  check('refresh runs end to end with fixtures', first.ok === true, first.error || '');
+  if (first.ok) {
+    eq('refresh publishes four drafts while the gate is open', [first.artifact.mode, first.artifact.counts.created, first.artifact.counts.updated], ['draft', 4, 0]);
+    check('refresh reports the withheld analysis sections', first.artifact.refused.length > 0, JSON.stringify(first.artifact.refused));
+    check('refresh writes its artifacts', ['health-refresh.json', 'health-refresh.md', 'health-docs.json'].every((f) => fs.existsSync(path.join(dir, 'result', f))));
+    const registry = loadDocsRegistry(path.join(dir, 'result', 'health-docs.json'));
+    eq('the registry on disk names the four documents', Object.keys(registry.docs).sort(), ['conditions', 'insights', 'snapshot', 'test_plan']);
+    const text = store.files[registry.docs.conditions.id];
+    check('the published Conditions document carries the banner', /DRAFT — the data gate is OPEN/.test(text), text.slice(0, 120));
+    check('the published Conditions document carries the refusal', /Not published while the data gate is open/.test(text), 'refusal missing from the published bytes');
+    check('the published Conditions document has no analysis', !text.includes(ANALYSIS_MARKER), 'analysis leaked');
+    const status = getHealthStatus({ workspace: dir, env });
+    eq('status reports the documents as published', [status.docs.published, Object.keys(status.docs.ids).length], [true, 4]);
+    check('the status reply names the documents', /Docs: 4 published/.test(formatStatusText(status)), formatStatusText(status).split('\n').slice(-2).join(' | '));
+    check('the refresh reply carries the counts and the folder', /created 4/.test(formatRefreshText(first)) && formatRefreshText(first).includes('folder1'), formatRefreshText(first).slice(0, 160));
+
+    // Rerun: same day, same inputs — skips, no new ids, no writes.
+    const before = store.calls.length;
+    const again = await runHealthRefresh({
+      workspace: dir, env, fetchImpl: makeFetch({ age: 28, height: 178, weight: 74 }),
+      now: new Date('2026-10-01T15:00:00Z'), token: 't', store, templates: readTemplates(),
+    });
+    eq('a same-day rerun skips every document', [again.artifact.counts.created, again.artifact.counts.skipped], [0, 4]);
+    check('a same-day rerun touches Drive only to list or stat', store.calls.slice(before).every((c) => ['list', 'stat'].includes(c.op)), store.calls.slice(before).map((c) => c.op).join(','));
+    const registry2 = loadDocsRegistry(path.join(dir, 'result', 'health-docs.json'));
+    eq('the ids are the same after the rerun', Object.entries(registry2.docs).map(([k, v]) => [k, v.id]), Object.entries(registry.docs).map(([k, v]) => [k, v.id]));
+  }
+
+  // A closed gate: the very same payload that was refused above renders into
+  // the published bytes — through the runner, with the analysis file on disk.
+  const closedStore = fakeStore();
+  const closedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-refresh-closed-'));
+  fs.cpSync(path.join(dir, 'sources'), path.join(closedDir, 'sources'), { recursive: true });
+  fs.mkdirSync(path.join(closedDir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(closedDir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+  const closedRun = await runHealthRefresh({
+    workspace: closedDir,
+    env,
+    fetchImpl: makeFetch({ age: 43, height: 163, weight: 62, dateOfBirth: '1983-06-15' }, fullFixture),
+    now: new Date('2026-10-01T09:00:00Z'),
+    token: 't',
+    store: closedStore,
+    templates: readTemplates(),
+  });
+  check('a closed gate publishes the analysis, not a refusal', closedRun.ok === true, closedRun.error || '');
+  if (closedRun.ok) {
+    eq('the closed run is in analysis mode', closedRun.artifact.mode, 'analysis');
+    eq('nothing is withheld once the gate is closed', closedRun.artifact.refused, []);
+    const closedText = closedStore.files[closedRun.registry.docs.conditions.id];
+    check('the published bytes carry the analysis payload', closedText.includes(ANALYSIS_MARKER), closedText.slice(0, 200));
+    check('the published bytes carry no refusal', !/Not published while the data gate is open/.test(closedText), 'refusal text left in a closed-gate document');
+  }
+
+  // Fail closed: no folder configured, no template on disk.
+  const noFolder = await runHealthRefresh({ workspace: dir, env: { ...env, HEALTH_DOCS_FOLDER: '' }, fetchImpl: makeFetch({}), token: 't', store: fakeStore(), templates: readTemplates() });
+  check('refresh fails closed with no documents folder', noFolder.ok === false && noFolder.stage === 'config', JSON.stringify({ stage: noFolder.stage, error: noFolder.error }));
+  eq('the folder can also come from the store env map', docsFolder({ env: { GOOGLE_FOLDER_EXTERNAL_HEALTH: 'folderFromMap' } }), 'folderFromMap');
+  const noTemplate = await runHealthRefresh({ workspace: dir, env, fetchImpl: makeFetch({}), token: 't', store: fakeStore(), templates: { ...readTemplates(), insights: '' } });
+  check('refresh fails closed on a template that cannot render', noTemplate.ok === false && noTemplate.stage === 'template', JSON.stringify({ stage: noTemplate.stage, error: noTemplate.error }));
+
+  // Analyze: the entry point refuses while the gate is open and names the inputs when it closes.
+  const refused = runHealthAnalyze({ workspace: dir, env });
+  check('analyze refuses while the gate is open', refused.ok === false && refused.stage === 'gate', JSON.stringify(refused));
+  eq('the refusal names every open item', (refused.openItems || []).map((i) => i.id), ['H-1', 'H-6']);
+  check('the refusal carries each item title', (refused.openItems || []).every((i) => i.title === FIX_TITLES[i.id]), JSON.stringify(refused.openItems));
+  check('the refusal reply names the items', /H-1 Profile demographics match the sheet/.test(formatAnalyzeText(refused)), formatAnalyzeText(refused));
+  const never = runHealthAnalyze({ workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'health-no-verify-')), env });
+  check('analyze refuses when nothing was verified yet', never.ok === false && never.stage === 'verify', JSON.stringify(never));
+  eq('analyze could not read a broken analysis file', loadAnalysisFile(path.join(dir, 'nope.json')).ok, false);
+
+  const closedArtifact = { ...fixtureArtifact('closed') };
+  const analyzeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-analyze-closed-'));
+  fs.mkdirSync(path.join(analyzeDir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(analyzeDir, 'result', 'health-verify.json'), JSON.stringify(closedArtifact));
+  const ready = runHealthAnalyze({ workspace: analyzeDir, env });
+  check('analyze opens when the gate is closed', ready.ok === true, JSON.stringify(ready));
+  if (ready.ok) {
+    eq('the entry point names the analyst role', ready.ready.role, 'health_analyst');
+    eq('the entry point names every analysis section', ready.ready.sections.length, Object.values(SECTION_SOURCES).filter((s) => s.startsWith('analysis.')).length);
+    eq('the entry point names the four documents', ready.ready.documents.length, 4);
+    check('the entry point names the payload file', /health-analysis\.json$/.test(ready.ready.analysisFile), ready.ready.analysisFile);
+    check('the ready reply names the payload', /Data gate closed/.test(formatAnalyzeText(ready)), formatAnalyzeText(ready).slice(0, 120));
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} pass, ${failed} fail\n`);

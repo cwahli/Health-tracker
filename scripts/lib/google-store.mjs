@@ -765,8 +765,10 @@ export async function createDocWithContent(folderId, name, text, token) {
  * This is an *edit*, and it is a replacement, not an append — said plainly because
  * the plan's law is append by default. An edit requested by a caller is a different
  * operation from a generated rollup: it changes named text on purpose, and the
- * caller (here, the scorecard) records that it did. The append path stays preferred
- * and stays red while it is challenged.
+ * caller records that it did — the scorecard when it rewrites its own proof, and
+ * `lib/health/docs.mjs` when a living document is renewed in place (same id, new
+ * text) instead of being duplicated. The append path stays preferred and stays red
+ * while it is challenged.
  */
 export async function replaceDocContent(docId, text, token) {
   const boundary = 'fleetstoredocedit';
