@@ -84,6 +84,22 @@ export function resolveProjectId(raw) {
   ) {
     return "external-2";
   }
+  // The Personal Health Coach project (external-health). Mirror of bot-host's
+  // grammar: `/project health` there must mean the same project here, and
+  // `assert-project-registry-parity` fails if these two copies drift.
+  if (
+    s === "health" ||
+    s === "health coach" ||
+    s === "health-coach" ||
+    s === "personal health" ||
+    s === "personal-health" ||
+    s === "external health" ||
+    s === "external-health" ||
+    s === "externalhealth" ||
+    s === "coach"
+  ) {
+    return "external-health";
+  }
   // "external 4", "external-4", "external_4", "ext 4", "4", "project 4", "4th"
   const m = s.match(/^(?:project|external|ext)?[\s_-]*(\d+)(?:st|nd|rd|th)?$/);
   if (m) {
@@ -97,6 +113,15 @@ export function resolveProjectId(raw) {
 /** Describe a project id without touching the filesystem. */
 export function describeProject(id) {
   if (id === "health-tracker") return { ...DEFAULT_PROJECT };
+  if (id === "external-health") {
+    return {
+      id,
+      name: "Personal Health Coach (External Health)",
+      type: "external",
+      projectNumber: null,
+      workspace: path.join(PROJECTS_HOME, "external-health-coach"),
+    };
+  }
   const m = String(id).match(/^external-(\d+)$/);
   if (!m) return null;
   const num = Number(m[1]);
@@ -111,7 +136,7 @@ export function describeProject(id) {
 
 /** Human list for the /project error and help text. */
 export function knownProjectList() {
-  return ["health-tracker (Project 1)", "external-2 (Project 2)"];
+  return ["health-tracker (Project 1)", "external-2 (Project 2)", "external-health (Personal Health Coach)"];
 }
 
 /**

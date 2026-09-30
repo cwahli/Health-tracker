@@ -64,7 +64,67 @@ const COUNCIL_ROLES = [
   { id: 'final_case_builder', name: 'Final Case Builder (Executive Publisher)', file: 'final_case_builder.md' },
 ];
 
+/**
+ * The Personal Health Coach project's roles (Mission: external-health).
+ *
+ * Five seats, because the four documents have four different failure modes: the
+ * steward owns what the data *is*, the analyst owns what it *means*, the planner
+ * owns what is tested next, the research lead owns what the literature says, and
+ * the safety reviewer is the one seat whose job is to say no. A council of
+ * six/seven that all speak about everything is how a health document gets
+ * confident claims with no owner.
+ */
+const HEALTH_PROJECT_ROLES = [
+  {
+    id: 'data_steward',
+    name: 'Data Steward',
+    file: 'data_steward.md',
+    description: 'Owns what the app stored, what the sheet says, and every open fix-list item',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'health_analyst',
+    name: 'Health Analyst',
+    file: 'health_analyst.md',
+    description: 'Turns verified markers into candidate conditions and next actions',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'test_planner',
+    name: 'Test Planner',
+    file: 'test_planner.md',
+    description: 'Confirm/renew test list with due windows, reconciled with the app\u2019s pending actions',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'research_lead',
+    name: 'Research Lead',
+    file: 'research_lead.md',
+    description: 'Cited, dated literature for this profile\u2019s markers',
+    tools: ['read', 'grep'],
+  },
+  {
+    id: 'safety_reviewer',
+    name: 'Safety Reviewer',
+    file: 'safety_reviewer.md',
+    description: 'Strips any claim that cannot be traced to the data or a citation; owns the guardrails',
+    tools: ['read', 'grep'],
+  },
+];
+
 export const KNOWN_PROJECTS = {
+  'external-health': {
+    id: 'external-health',
+    name: 'Personal Health Coach (External Health)',
+    type: 'external',
+    projectNumber: null,
+    workspace: path.join(os.homedir(), 'projects', 'external-health-coach'),
+    templateDir: path.join(REPO_ROOT, 'projects', 'external-health'),
+    allowGit: false,
+    gdriveFolder: 'External-Personal-Health-Coach',
+    description: 'Four living health documents built from verified lab data and managed from Telegram',
+    roles: HEALTH_PROJECT_ROLES,
+  },
   'health-tracker': {
     id: 'health-tracker',
     name: 'Health Tracker Website (Project 1)',
@@ -169,6 +229,21 @@ export const ROLE_ALIASES = {
   // council aliases below.
   pm: 'pm',
   projectmanager: 'pm',
+
+  // Personal Health Coach roles (external-health). Kept distinct from the council
+  // aliases on purpose: `/role analyst` must mean the health analyst only in a
+  // project that has that seat, and never silently borrow a council seat.
+  steward: 'data_steward',
+  data_steward: 'data_steward',
+  analyst: 'health_analyst',
+  health_analyst: 'health_analyst',
+  planner: 'test_planner',
+  test_planner: 'test_planner',
+  research: 'research_lead',
+  research_lead: 'research_lead',
+  literature: 'research_lead',
+  safety: 'safety_reviewer',
+  safety_reviewer: 'safety_reviewer',
 
   // Project 2 Council Roles
   accuracy: 'accuracy_review',
@@ -394,6 +469,23 @@ export function resolveProjectId(raw) {
   }
   if (s === 'external 1' || s === 'external-1' || s === 'external1') {
     return 'external-1';
+  }
+  // Personal Health Coach (the brief's own project folder). "health" alone is
+  // deliberate: this is the project the chat is about, and "ht" still means the
+  // website. Pinned by scripts/assert-project-registry-parity.mjs so the
+  // standalone router cannot drift from this grammar.
+  if (
+    s === 'external health' ||
+    s === 'external-health' ||
+    s === 'externalhealth' ||
+    s === 'health' ||
+    s === 'health-coach' ||
+    s === 'health coach' ||
+    s === 'personal-health' ||
+    s === 'personal health' ||
+    s === 'coach'
+  ) {
+    return 'external-health';
   }
 
   // Dynamic project 3+ check (e.g. "external 3", "project 3", "3", "external-4")

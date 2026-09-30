@@ -198,6 +198,7 @@
         "project": true,
         "council": false,
         "role": false,
+  "health": false,
         "location": false,
         "tui": true,
         "bugs": false,

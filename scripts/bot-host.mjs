@@ -154,6 +154,10 @@ import {
 } from './lib/project-registry.mjs';
 import { runPmCommand } from './lib/pm-run.mjs';
 import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-runner.mjs';
+// The Personal Health Coach's data loop. `/health` is deliberately not gated on
+// the chat's active project: the command names its own project, so a verify can
+// be run from any chat, and the reply says which one it read.
+import { runHealthVerify, runHealthIngest, getHealthStatus, formatVerifyText, formatStatusText } from './health-runner.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -2854,6 +2858,62 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       } catch (err) {
         await api.sendMessage(chatId, `❌ Role error: ${err.message}`);
       }
+      return;
+    }
+
+    case 'health': {
+      const projectId = 'external-health';
+      const sub = (cmd.args || '').trim().toLowerCase();
+      if (sub === 'verify') {
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before verifying the health data.');
+          return;
+        }
+        await api.sendMessage(
+          chatId,
+          '🩺 *Running /health verify — re-reading the app (read-only) and diffing it against the sheet...*',
+          { parse_mode: 'Markdown' },
+        );
+        try {
+          const res = await runHealthVerify({ projectId });
+          if (!res.ok) {
+            // No parse_mode on the failure path: an error string is not ours to
+            // format, and Telegram rejects a message whose markdown it cannot parse.
+            await api.sendMessage(chatId, `❌ Verify could not run (${res.stage}): ${res.error}`);
+            return;
+          }
+          await api.sendMessage(chatId, formatVerifyText(res.artifact), { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Verify failed: ${err.message}`);
+        }
+        return;
+      }
+      if (sub === 'ingest') {
+        if (running.get(chatId)) {
+          await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish before the ingest.');
+          return;
+        }
+        await api.sendMessage(chatId, '📥 *Reading the Brief folder (sheets + docs, read-only)...*', { parse_mode: 'Markdown' });
+        try {
+          const res = await runHealthIngest({ projectId, botId: config.id });
+          if (!res.ok) {
+            await api.sendMessage(chatId, `❌ Ingest could not run (${res.stage}): ${res.error}`);
+            return;
+          }
+          const lines = [`📥 *Ingested into* \`${res.paths.sources}\``];
+          for (const w of res.manifest.written) lines.push(`• \`${w.file}\` — ${w.kind}${w.tabs ? `, ${w.tabs} tabs` : ''}`);
+          for (const s of res.manifest.skipped) lines.push(`• skipped ${s.name}: ${s.reason}`);
+          lines.push('');
+          lines.push('Run `/health verify` to diff the app against it.');
+          await api.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+        } catch (err) {
+          await api.sendMessage(chatId, `❌ Ingest failed: ${err.message}`);
+        }
+        return;
+      }
+      // Anything else (including no argument) is the status answer.
+      const status = getHealthStatus({ projectId });
+      await api.sendMessage(chatId, formatStatusText(status), { parse_mode: 'Markdown' });
       return;
     }
 
