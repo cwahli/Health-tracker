@@ -21,9 +21,9 @@ import {
   validateToken,
   describeUserbot,
 } from './lib/bot-forge-core.mjs';
-import { negotiateBotToken, resolveTeleproto } from './lib/tg-userbot.mjs';
+import { createBot, negotiateBotToken, resolveTeleproto } from './lib/tg-userbot.mjs';
 import { authorizeForge, createForgeHandler, forgePageHtml, isLoopback } from './lib/bot-forge-server.mjs';
-import { renderUserUnit, readMasterTokens, upsertMasterToken } from './bot-forge.mjs';
+import { runForge, renderUserUnit, readMasterTokens, upsertMasterToken } from './bot-forge.mjs';
 import { toTelegramCommands } from './lib/commands.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -303,6 +303,25 @@ test('every username taken is a clean refusal naming the candidates', async () =
   });
   assert.equal(result.ok, false);
   assert.match(result.reason, /taken/);
+});
+
+test('createBot without api credentials refuses before touching the network', async () => {
+  // No TELEGRAM_API_ID / TELEGRAM_API_HASH: userbotState refuses, so createBot
+  // must return before connect() (no teleproto login, no @BotFather). The
+  // session path points at a scratch dir to prove nothing on the real host is
+  // read either. Fixtures only — never a live @BotFather conversation.
+  const dir = scratch();
+  const result = await createBot({
+    name: 'VM3 Bot',
+    env: {
+      TELEGRAM_API_ID: '',
+      TELEGRAM_API_HASH: '',
+      TELEGRAM_USER_SESSION: path.join(dir, 'tg-user.session'),
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /TELEGRAM_API_ID/);
+  assert.equal(fs.existsSync(path.join(dir, 'tg-user.session')), false);
 });
 
 // ------------------------------------------------- teleproto import shape
@@ -941,6 +960,52 @@ test('END TO END: the userbot path refuses cleanly when unconfigured', () => {
   assert.match(run.json.reason, /teleproto|session|TELEGRAM_API_ID/);
   assert.ok(run.json.hostCommands.some((c) => /teleproto|userbot-login/.test(c)), 'the operator must be told what to run');
   assert.deepEqual(JSON.parse(fs.readFileSync(registryPath, 'utf8')).bots.map((b) => b.id), ['vm', 'vm2']);
+});
+
+test('the injected userbot transport mints the token the pipeline publishes (wiring contract)', async () => {
+  // The production call sites pass createBot into runForge's io; this proves
+  // the contract from the inside with a fake transport — no account, no
+  // @BotFather, the fake Telegram above answers getMe/setMyCommands.
+  const dir = scratch();
+  const registryPath = path.join(dir, 'registry.json');
+  const tokensPath = path.join(dir, 'tokens.env');
+  const configDir = path.join(dir, 'config');
+  const unitDir = path.join(dir, 'units');
+  const hostRoot = path.join(dir, 'bot-host');
+  fs.writeFileSync(registryPath, JSON.stringify(registryFixture(), null, 2));
+  fs.writeFileSync(tokensPath, 'VM_BOT_TOKEN=123456789:master-token-not-real-000000000000\n');
+
+  const seen = [];
+  const fakeCreateBot = async ({ name, username, env }) => {
+    seen.push({ name, username });
+    assert.ok(env, 'runForge forwards its env to the transport');
+    return { ok: true, token: TOKEN, username: '', turns: [] };
+  };
+
+  const api = await startFakeTelegram();
+  try {
+    const result = await runForge(
+      {
+        name: 'VM3 Bot',
+        paths: { registryPath, tokensPath, configDir, unitDir, botHostRoot: hostRoot, repoRoot: ROOT },
+        apiBase: `http://127.0.0.1:${api.port}`,
+      },
+      { env: process.env, createBot: fakeCreateBot, allowStart: false },
+    );
+    assert.equal(result.ok, true, JSON.stringify(result, null, 2));
+    assert.deepEqual(seen.map((s) => s.name), ['VM3 Bot']);
+    assert.equal(result.bot.id, 'vm3');
+    assert.equal(result.bot.tokenSource, 'userbot');
+    const tokenStep = result.steps.find((s) => s.id === 'token');
+    assert.equal(tokenStep.status, 'done');
+    assert.equal(tokenStep.detail, 'minted through @BotFather');
+    assert.ok(!JSON.stringify(result).includes(TOKEN), 'the minted token must not appear in the receipt');
+    assert.ok(!tokenStep.detail.includes(TOKEN), 'the token-step detail must stay token-free');
+    assert.equal(readMasterTokens(tokensPath).VM3_BOT_TOKEN, TOKEN);
+    assert.deepEqual(api.calls.map((c) => c.method), ['getMe', 'setMyCommands']);
+  } finally {
+    api.server.close();
+  }
 });
 
 test('END TO END: an unreachable Telegram stops at publish and does NOT enable the bot', () => {

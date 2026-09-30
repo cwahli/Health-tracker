@@ -48,6 +48,7 @@ import { PIPELINE_STEPS, planForge, slugifyName, summarizeRun, tokenEnvFor, toke
 import { toTelegramCommands, assertValidCommands } from './lib/commands.mjs';
 import { loadRegistry, resolveRegistryPath } from './lib/registry.mjs';
 import { forgePageHtml, createForgeServer } from './lib/bot-forge-server.mjs';
+import { createBot as createBotViaUserbot } from './lib/tg-userbot.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -489,7 +490,7 @@ async function cmdServe(args) {
     runCreate: (input) =>
       runForge(
         { ...input, paths, apiBase: args.apiBase || DEFAULT_API_BASE },
-        { allowStart: args.start === undefined ? null : args.start },
+        { env: process.env, createBot: createBotViaUserbot, allowStart: args.start === undefined ? null : args.start },
       ),
   });
   const port = Number(args.port || 8787);
