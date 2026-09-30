@@ -3,7 +3,13 @@
 Any agent can pick up the next open card. Read this file, then `plan/LOCATION_AGNOSTIC_AGENTS.md`, then stop. `plan/LOCATION_AGNOSTIC_PROJECT_COUNCIL.md` is retired and empty. Do not reconstruct it.
 
 **Product plan:** `plan/LOCATION_AGNOSTIC_AGENTS.md`
-**Landed code:** the website checkout on `main`. No R-14.1 card is closed. One piece of card 6 is already there: `stampDepleted` in `scripts/lib/free-lanes.mjs` (around line 1076), called from `trackRunQuota` in `scripts/bot-host.mjs` (around line 473, and again on the message path around lines 1941 and 1954). It stores the vendor retry hint and refuses doc-like noise. It does not choose the next lane. `markDepleted`, `isDepleted`, and `nextFailoverRoutes` are not referenced from `bot-host.mjs`.
+**Card state and evidence:** [`R14_1_LIVE_PASS.md`](./R14_1_LIVE_PASS.md) — read it before touching a card. Cards 1–8 are implemented on `main`, each with a named sensor, and each carries a Telegram-sourced evidence block in that file. **Card 9 is the only open card, and it is paused on a human gate, not on code.**
+
+**Re-verified 2026-09-30 on `main` at `2ead5aa`, so nobody rebuilds a finished card:** `assert-bot-role-wiring` (card 1), `assert-council-no-invented-case` (2), `assert-external-child-env` (3), `assert-location-needs-a-worker` (4), `assert-ledger-dir-override` (5), `assert-allowance-walk` (6), `assert-cooldown-and-dead-ends` (6b), `assert-work-view` (6c), `assert-project3-is-blank` (7) — all exit 0. `assert-worker-relay` (6c) is 31/34 on a box without an `opencode` binary: its three conversation rows spawn that CLI, so that is the environment, not the code.
+
+**Card 9 needs a human first.** It re-runs card 6, whose live proof is also required on the Grok router bot, and no router bot exists (no router token, poller, or profile) — standing one up needs a @BotFather token. `mobile` has never connected either, so card 5's mobile half and the locations sweep cannot go green. Unblock: a human creates the router bot and installs its token, **or** the owner explicitly re-scopes card 9 to the non-router half on the record. The closer has to be someone who did not author the patches; the 2026-09-27 matrix in `R14_1_LIVE_PASS.md` is self-run and closes nothing.
+
+**Landed code (history — this paragraph was the starting point, and card 6 now goes past it):** one piece of card 6 was already on `main`: `stampDepleted` in `scripts/lib/free-lanes.mjs` (around line 1076), called from `trackRunQuota` in `scripts/bot-host.mjs` (around line 473, and again on the message path around lines 1941 and 1954). It stores the vendor retry hint and refuses doc-like noise. It does not choose the next lane. `markDepleted`, `isDepleted`, and `nextFailoverRoutes` are not referenced from `bot-host.mjs`. The walk around that stamp is wired now (`assert-allowance-walk`).
 
 **Do not land** the uncommitted `~/bot-host` change that defaults the ledger to `~/.local/state/shared-free-lanes` unless `FREE_LANES_PER_BOT=1`. Cards 5 and 6 need one ledger per worker. That shared default is not part of this work.
 **Roadmap row R-14.1 is OPEN.** `assert-external-projects.test.mjs` (55 pass) never sends a Telegram command and never checks where the process runs. Do not mark R-14.1 done. Do not edit the roadmap row to COMPLETE.
@@ -67,9 +73,12 @@ Do not describe this as self-learning. Wiring it is a separate card, after the R
 
 The external scaffold includes `index.md` (one page, links only, every role reads it first), `log.md` (one appended line per turn, archived at 200 lines), and the rule that each role writes only its own output. The charter and the evidence change only when the user changes them, or when accuracy appends a strike. A contradiction stays as two dated lines. The prompt is the role file plus `index.md`, not the whole folder. Do not import `scripts/lib/memory-stores.mjs` into the project. Do not put the folder in a public git repo.
 
-## What is already true
+## What is already true — the pre-card snapshot
 
-Checked on `main` at `0d67dbd`.
+Checked on `main` at `0d67dbd`, before cards 1–8 landed. These are the defects
+the cards fixed, kept so the change each card made stays legible. They are **not**
+the state of `main` today — see the card-state block at the top of this file and
+`R14_1_LIVE_PASS.md`.
 
 - `/project`, `/role`, `/role check`, `/role add`, `/role remove`, `/role reset`, and `/council` exist in `scripts/bot-host.mjs`.
 - External turns call `composeExternalPrompt` and set the workspace to `~/projects/external-<n>`.
