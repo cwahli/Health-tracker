@@ -23,8 +23,18 @@ items says so in its header — it never reads as if the data were clean.
 
 The analysis pass does not open until the fix list is closed or explicitly
 waived. `/health verify` is the gate: it re-reads the app, diffs it against the
-sheet, and answers closed/open per item. Nothing is published from this folder
-before the gate says so.
+sheet, and answers closed/open per item.
+
+**Drafts are allowed; analysis is not.** While an item is open, `/health refresh`
+publishes the documents as drafts: the header carries the banner and the open
+item ids, the data sections carry the dated facts, and every analysis section
+carries a refusal naming the items instead of a claim. `/health analyze` refuses
+outright. When the last item closes, the same command publishes the analysis.
+
+**Idempotence.** The documents are updated in place, by doc id, recorded in
+`result/health-docs.json`. A refresh that changes nothing writes nothing, and a
+document is never duplicated — a rerun on a new machine adopts the document
+that already exists.
 
 ## Ground rules
 
@@ -39,8 +49,11 @@ before the gate says so.
 ## Operational boundary
 
 - **Workspace**: ~/projects/external-health-coach (sources banked in `sources/`,
-  verify artifacts in `result/`)
-- **Drive**: `External-Personal-Health-Coach`, with the brief and the source
-  spreadsheet in its `Brief` folder
+  verify artifacts, the doc-id registry and the refresh receipts in `result/`)
+- **Drive**: `External-Personal-Health-Coach` — the four documents live beside
+  the `Brief` folder, which holds the brief and the source spreadsheet
+- **Commands**: `/health verify` (the gate) · `/health ingest` (the Brief folder) ·
+  `/health refresh` (publish or update the four documents) · `/health analyze`
+  (the analysis entry point) · `/health status`
 - **Data**: the app's Cloudflare D1, read-only, via `scripts/lib/health/d1.mjs`
 - **Cadence**: verify on demand; the Insights document renews monthly
