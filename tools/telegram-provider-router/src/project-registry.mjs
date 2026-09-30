@@ -136,7 +136,7 @@ export function describeProject(id) {
 
 /** Human list for the /project error and help text. */
 export function knownProjectList() {
-  return ["health-tracker (Project 1)", "external-2 (Project 2)", "external-health (Personal Health Coach)"];
+  return ["health-tracker (Project 1)", "external-2 (Project 2)"];
 }
 
 /**
