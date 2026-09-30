@@ -1,0 +1,41 @@
+# /etc/systemd/system/tui-ttyd-vm3.service
+[Unit]
+Description=Typeable TUI terminal for the vm3 bot's chats (ttyd, behind the gateway)
+Documentation=file:///home/ubuntu/bot-host/scripts/tui-gateway.mjs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bot-host
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.opencode/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+# TUI_BOT_ID=vm3: the attach script reads THIS bot's sessions.json, so a vm3
+# chat lands in a vm3 conversation. Pointing two bots at one ttyd would attach
+# every vm3 chat to another bot's session — the wrong conversation, silently.
+Environment=TUI_BOT_ID=vm3
+Environment=TUI_STATE_ROOT=/home/ubuntu/.local/state/bot-host
+Environment=TUI_WORKTREE=/home/ubuntu/bot-host
+Environment=OPENCODE_BIN=/home/ubuntu/.opencode/bin/opencode
+# VM-tui-vm3: the location first, then the bot. One session per bot — three
+# chats on one terminal is the failure this name prevents.
+Environment=TUI_TMUX_NAME=VM-tui-vm3
+# Same credential file as the vm/vm2 instances (0600, not in git).
+EnvironmentFile=-/home/ubuntu/.config/bot-host/tui-ttyd.env
+# Loopback only. Base-path /tty3 keeps this socket's page and websocket under
+# /tty3/, so Caddy routes vm3's socket to its own ttyd.
+ExecStart=/usr/bin/ttyd --port 8900 --interface 127.0.0.1 --base-path /tty3 \
+  --writable --max-clients 1 --once=false \
+  -c ${TUI_TTYD_USER}:${TUI_TTYD_PASSWORD} \
+  --check-origin --terminal-type xterm-256color \
+  --client-option fontSize=13 \
+  --ping-interval 20 \
+  /home/ubuntu/bot-host/scripts/mobile/tui-attach.sh
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

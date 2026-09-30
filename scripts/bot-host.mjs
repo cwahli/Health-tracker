@@ -2492,10 +2492,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const tuiUrl = readTuiUrl();
       if (!tuiUrl) {
         // Say what is actually true. This used to blame a phone tunnel, which
-        // is only the story on the phone: the URL file defaults to a Termux
-        // path, so on the VM it can never exist and the reply named a tunnel
-        // this bot has no relationship with.
-        const onPhone = String(miniappUrlFile()).includes('/data/data/com.termux/');
+        // is only the story on the phone: the URL file's default path is a
+        // Termux path on EVERY host, so the path cannot be the tell — the
+        // platform can (the same markers freemodels.mjs uses for the mobile
+        // lane). Measured 2026-09-30: vm3, a VM bot with no gateway URL, was
+        // told its "phone tunnel" was down — a tunnel it has no relationship
+        // with.
+        const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
         await api.sendMessage(chatId, onPhone
           ? '⌨️ TUI is offline — the phone tunnel is down. It restarts itself; try /tui again in a minute.'
           : [
@@ -2590,7 +2593,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
       const bugsGatewayUrl = readTuiUrl();
       if (!bugsGatewayUrl) {
-        const onPhone = String(miniappUrlFile()).includes('/data/data/com.termux/');
+        const onPhone = Boolean(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT);
         await api.sendMessage(chatId, onPhone
           ? '🐛 Bug board is offline — the phone tunnel is down. It restarts itself; try /bugs again in a minute.'
           : '🐛 Bug board is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /bugs again.');
