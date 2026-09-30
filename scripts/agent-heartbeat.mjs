@@ -13,6 +13,11 @@
  * Without --once it rewrites the file every 5 minutes until killed. Run it beside
  * the agent (same pattern as the poller-lease renewer): a dead agent stops beating
  * without needing an exit hook.
+ *
+ * Each beat records `cwd` — where the beating process runs, i.e. its git tree.
+ * The PM reads it as ground truth for "where is this work happening" (a branch
+ * convention is only the fallback). Dispatches launch this beside the run, so
+ * ticket work attributes itself with no agent action.
  */
 
 import fs from 'node:fs';
@@ -36,7 +41,7 @@ export function beat(branch, { note = '', home = os.homedir() } = {}) {
   const dir = path.join(home, '.local', 'state', 'bot-host', 'agent-heartbeat');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${slug(branch)}.json`);
-  fs.writeFileSync(file, JSON.stringify({ pid: process.pid, branch, updatedAt: new Date().toISOString(), note: String(note).slice(0, 200) }) + '\n', { mode: 0o600 });
+  fs.writeFileSync(file, JSON.stringify({ pid: process.pid, branch, updatedAt: new Date().toISOString(), note: String(note).slice(0, 200), cwd: String(process.cwd() || '').slice(0, 400) }) + '\n', { mode: 0o600 });
   return file;
 }
 

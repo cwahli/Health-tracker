@@ -358,6 +358,26 @@ test('a heartbeat note rides the projection into the sheet row', () => {
   assert.equal(quiet[SHEET_COLUMNS.indexOf('live')], '');
 });
 
+test('the beat cwd (where the agent runs) beats the branch convention', () => {
+  const old = laneItems([{ at: new Date(Date.now() - 4 * HOUR).toISOString(), surface: 'card-8', outcome: 'unresolved' }]);
+  // A dispatch companion beats from inside the tree: cwd is ground truth,
+  // even when the branch follows no convention (e.g. a SHEPHERD journey fork).
+  const withCwd = projectFleet({
+    lanes: old,
+    beats: { 'journey-x': { pid: process.pid, branch: 'journey/card-8', updatedAt: new Date().toISOString(), note: 'dispatch #8', cwd: '/home/ubuntu/dev/dispatch-8' } },
+    now: Date.now(),
+  }).items[0];
+  assert.equal(withCwd.worktree, '/home/ubuntu/dev/dispatch-8');
+  // No cwd (an old beat, a hand beat from elsewhere): the convention answers.
+  const conventional = laneItems([{ at: new Date(Date.now() - 4 * HOUR).toISOString(), surface: 'f-13', outcome: 'unresolved' }]);
+  const noCwd = projectFleet({
+    lanes: conventional,
+    beats: { 'agent-f-13': { pid: process.pid, branch: 'agent/f-13', updatedAt: new Date().toISOString(), note: 'n' } },
+    now: Date.now(),
+  }).items[0];
+  assert.equal(noCwd.worktree, '~/dev/f-13');
+});
+
 test('the sheet is found by id, and an unset id is named, not guessed', () => {
   assert.equal(pmSheetId({ GOOGLE_PM_SHEET_ID: ' "sheet-123" ' }), 'sheet-123');
   assert.equal(pmSheetId({}), '');

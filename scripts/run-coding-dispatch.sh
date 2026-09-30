@@ -681,6 +681,19 @@ stop_heartbeat() {
     wait "$HEARTBEAT_PID" 2>/dev/null || true
     HEARTBEAT_PID=""
   fi
+  # The PM-sheet liveness companion dies with the run (same bounded pattern —
+  # a stuck beat must never stall attempt close).
+  if [ -n "${AGENT_BEAT_PID:-}" ]; then
+    kill "$AGENT_BEAT_PID" 2>/dev/null || true
+    local ab_i=0
+    while kill -0 "$AGENT_BEAT_PID" 2>/dev/null && [ "$ab_i" -lt 4 ]; do
+      sleep 0.5
+      ab_i=$((ab_i + 1))
+    done
+    kill -9 "$AGENT_BEAT_PID" 2>/dev/null || true
+    wait "$AGENT_BEAT_PID" 2>/dev/null || true
+    AGENT_BEAT_PID=""
+  fi
 }
 
 RUN_LOCK_FILE="$(lock_file_for "$BUG_ID")"
@@ -737,6 +750,18 @@ if [ -z "$WORKTREE_BASE" ]; then
   if [ -f "$REPO_DIR/.env" ] && [ ! -f "$WORKTREE_BASE/.env" ]; then cp "$REPO_DIR/.env" "$WORKTREE_BASE/.env" 2>/dev/null || true; fi
 fi
 CODER_DIR="$WORKTREE_BASE"
+
+# Agent liveness for the PM sheet: a looping agent-heartbeat names this run's
+# branch + ticket while the dispatch lives. Its pid dies with the run (killed
+# in stop_heartbeat, which the EXIT/INT/TERM trap always reaches), so the PM
+# reads it stale afterwards — "who is on it and where" with no agent action.
+# Best-effort throughout: never fail a dispatch over a status file.
+AGENT_BEAT_PID=""
+BEAT_BRANCH="$(git -C "$CODER_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+if [ -n "$BEAT_BRANCH" ] && [ "$BEAT_BRANCH" != "main" ] && command -v node >/dev/null 2>&1; then
+  ( cd "$CODER_DIR" && node "$REPO_DIR/scripts/agent-heartbeat.mjs" --branch="$BEAT_BRANCH" --note="dispatch ${BUG_ID} (${REQUESTED_TOOL:-coder})" ) >/dev/null 2>&1 &
+  AGENT_BEAT_PID=$!
+fi
 
 # File claims: explicit --files plus paths scraped from the task. Advisory
 # only — conflicts warn and steer the prompt, they never block the run.
