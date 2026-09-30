@@ -21,7 +21,7 @@ import {
   validateToken,
   describeUserbot,
 } from './lib/bot-forge-core.mjs';
-import { negotiateBotToken } from './lib/tg-userbot.mjs';
+import { negotiateBotToken, resolveTeleproto } from './lib/tg-userbot.mjs';
 import { authorizeForge, createForgeHandler, forgePageHtml, isLoopback } from './lib/bot-forge-server.mjs';
 import { renderUserUnit, readMasterTokens, upsertMasterToken } from './bot-forge.mjs';
 import { toTelegramCommands } from './lib/commands.mjs';
@@ -303,6 +303,41 @@ test('every username taken is a clean refusal naming the candidates', async () =
   });
   assert.equal(result.ok, false);
   assert.match(result.reason, /taken/);
+});
+
+// ------------------------------------------------- teleproto import shape
+//
+// teleproto@1.229.0 (gramjs-derived) exports TelegramClient at top level but
+// keeps StringSession under the `sessions` namespace. A flat destructure of
+// both died with `StringSession is not a constructor` and killed
+// `userbot-login` instantly; resolveTeleproto is the one place that knows the
+// shape. Fixtures only — no account, no network, no client.connect().
+
+test('resolveTeleproto resolves a gramjs-shaped module', () => {
+  function FakeClient() {}
+  function FakeSession() {}
+  const resolved = resolveTeleproto({ TelegramClient: FakeClient, sessions: { StringSession: FakeSession } });
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.TelegramClient, FakeClient);
+  assert.equal(resolved.StringSession, FakeSession);
+});
+
+test('resolveTeleproto refuses a module missing the sessions namespace with a sentence', () => {
+  function FakeClient() {}
+  const resolved = resolveTeleproto({ TelegramClient: FakeClient });
+  assert.equal(resolved.ok, false);
+  assert.match(resolved.reason, /sessions\.StringSession/);
+  assert.match(resolved.reason, /unexpected shape/);
+});
+
+test('the real teleproto module resolves and constructs a client without touching the network', async () => {
+  const mod = await import('teleproto');
+  const resolved = resolveTeleproto(mod);
+  assert.equal(resolved.ok, true, resolved.reason);
+  const session = new resolved.StringSession('');
+  const client = new resolved.TelegramClient(session, 12345, 'hash-not-real', { connectionRetries: 3 });
+  assert.ok(client, 'construction must not throw');
+  assert.equal(typeof client.disconnect, 'function');
 });
 
 // ------------------------------------------------------------ supervision
