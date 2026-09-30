@@ -27,12 +27,22 @@ Negative-check output:
 5. Read bytes back over the public URL. A screenshot is not the bytes.
 6. Do not dual-poll a token. Do not deploy the website. Do not push the coder's commit to `origin/main`. Do not spend the real free-model allowance to prove a 429. Use a ledger copy. Do not compile `node-pty` on the phone.
 
-## Already true
+## Already true — snapshot, partly superseded
 
-- `scripts/mobile/tui-attach.sh` prints `ids[0]`, the first session in the map, not this chat's session.
+Re-checked 2026-09-30 on `main` at `ced03e4`. Two lines below were true when this
+section was written and are now history; they are marked in place rather than
+deleted, because step 1's change is exactly what removed the first one. Read the
+markers before treating a line as the current state.
+
+- ~~`scripts/mobile/tui-attach.sh` prints `ids[0]`, the first session in the map,
+  not this chat's session.~~ — **fixed** (#367). The resolution order is now
+  `TUI_CHAT_ID`, then `tui-open.json` (written by bot-host on every `/tui`), then a
+  legacy first-session fallback that logs and migrates. Sensor
+  `scripts/assert-tui-chat-select.test.sh` **54/54**, and it is a live CI gate
+  ("TUI chat-select"). Step 1's change below is therefore partly already in.
 - `scripts/mobile/miniapp-shim.mjs` holds the gzip, `permessage-deflate`, `Origin`, and `Upgrade` fixes, and also the password form. Keep the four fixes. Remove the password.
 - `scripts/lib/work-session.mjs` names the stable view `work-view` and `workViewTarget(sessionId)`.
-- `stampDepleted` and `trackRunQuota` already record a quota error. Bot-host does not yet walk to the next lane. The 2026-09-25 12:29Z Muse `429` was pasted into the chat as raw JSON.
+- `stampDepleted` and `trackRunQuota` already record a quota error. ~~Bot-host does not yet walk to the next lane.~~ — the walk **is** wired now (R-14.1 card 6): sensor `scripts/assert-allowance-walk.test.mjs`, exit 0 on `main` at `ced03e4`. The 2026-09-25 12:29Z Muse `429` was pasted into the chat as raw JSON; that specimen is what card 6 fixed.
 - Caddy already serves `health-tracking.duckdns.org`. The TUI does not go on that hostname.
 
 ## Step 1 — this chat, and a button that still means something
