@@ -230,7 +230,8 @@ export function worktreeFor(branch) {
 
 /** Why this item is not progressing, or '' when it is. Liveness arrives
  * precomputed as `item.live` (projectFleet runs liveFn); there is deliberately
- * no liveFn here so stalled-ness stays a pure function of the item. */export function stalledReason(item, { now = Date.now(), stallMs = DEFAULT_STALL_MS } = {}) {
+ * no liveFn here so stalled-ness stays a pure function of the item. */
+export function stalledReason(item, { now = Date.now(), stallMs = DEFAULT_STALL_MS } = {}) {
   if (item?.blocked) return item.blockedReason || 'blocked';
   if (!item?.lastOutcome || !FAILED_OUTCOMES.has(item.lastOutcome)) return '';
   if (item.live === true) return '';
