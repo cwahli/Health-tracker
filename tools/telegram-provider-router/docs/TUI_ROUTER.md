@@ -17,11 +17,36 @@ and `scripts/assert-command-scope.mjs` now enforces both halves.
 | Subcommand | Behaviour |
 |-----------|-----------|
 | `/tui` | Validates `TUI_GATEWAY_URL`, records `state/tui-open.json`, replies with an `Open the TUI` `web_app` button at `<gateway>/?bot=<botId>` |
-| `/tui status` | The recorded chat/lane/session/age, plus the configured gateway and the bot id |
+| `/tui status` | The recorded chat/lane/session/age, the active provider + model, whether it has a terminal, plus the configured gateway and the bot id |
 | `/tui off` | Clears the local record and says plainly that the pane lives on the gateway host, not here |
 
 `botId` is the numeric left half of `TELEGRAM_BOT_TOKEN`. The token itself is
 never put in a URL, a log line, or a state file.
+
+### The terminal matches the ACTIVE provider
+
+`/tui` opens the conversation the chat is actually using, not always OpenCode.
+Since 2026-09-30 the provider decides the door (`src/tui-provider.js`):
+
+| Provider | Terminal |
+|----------|----------|
+| `opencode` | `opencode attach <url> --dir <ws> -s <ses_…>` — the chat's OpenCode session |
+| `cline` | `cline -i --id <task> -m <model> -c <ws>` — resumes the chat's Cline task |
+| `freebuff`, `tokenharbor`, `commandcode` | none — the router says which provider is answering and offers buttons to switch to one with a terminal |
+
+The box attach script (`box/tui-attach-router.sh`) mirrors that mapping, and
+`scripts/test-tui-provider.mjs` pins it (including the mismatch where the chat's
+provider is Cline but the terminal used to run `opencode attach …`).
+
+### Cline turns share one task
+
+The router used to run `cline --json "<prompt>"` for every Telegram turn, which
+starts a **new** Cline task each time — so the chat had no conversation to
+resume. Cline's CLI cannot resume one-shot (`--id` forces an interactive TTY),
+so the router speaks **ACP** (`cline --acp`, `src/cline-acp.js`): `session/new`
+returns the task id, `session/load` continues it, and the id is stored per chat
+(`src/provider-sessions.js`). Telegram turns and the TUI therefore land in the
+the same task, in both directions.
 
 ## What the deployment does
 

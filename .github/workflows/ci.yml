@@ -337,6 +337,20 @@ jobs:
       - name: Project alias parity gate (bot-host vs router)
         run: node scripts/assert-project-registry-parity.mjs
 
+      # /tui used to open an OpenCode terminal no matter which provider was
+      # answering: live on 2026-09-30 the chat's provider was Cline (Muse Spark
+      # 1.3), so the TUI showed a different model and a different conversation.
+      # The provider -> attach mapping, the per-chat Cline task store, and the
+      # ACP resume driver now live in the standalone router, whose suite ran
+      # nowhere in CI. These three files are dependency-free, so they run here
+      # without installing the router's own node_modules.
+      - name: Router TUI-provider gates (mapping, task store, ACP resume)
+        run: |
+          cd tools/telegram-provider-router
+          node scripts/test-tui-provider.mjs
+          node scripts/test-provider-sessions.mjs
+          node scripts/test-cline-acp.mjs
+
       # §4.10: the amnesia gate belongs in CI — answers from disk alone.
       - name: Bug retro-audit gate (§4.10 answers from disk)
         run: node scripts/assert-bug-retro-audit.mjs

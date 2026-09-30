@@ -124,8 +124,9 @@ export function tuiStatusLine(record, { now = Date.now() } = {}) {
     : "";
   const sess = record.sessionId ? ` · ${String(record.sessionId).slice(0, 12)}…` : "";
   const lane = record.provider ? ` · ${record.provider}` : "";
+  const model = record.modelLabel ? ` · ${record.modelLabel}` : "";
   const gw = record.gatewayUrl ? ` · ${record.gatewayUrl}` : "";
-  return `tui: open for chat ${record.chatId}${lane}${sess}${age}${gw}`;
+  return `tui: open for chat ${record.chatId}${lane}${model}${sess}${age}${gw}`;
 }
 
 /**
@@ -133,10 +134,11 @@ export function tuiStatusLine(record, { now = Date.now() } = {}) {
  * sends no `parse_mode`, so markdown here would reach the user as asterisks and
  * backticks rather than emphasis.
  */
-export function tuiOpenText({ botId, workspace, moved = false } = {}) {
+export function tuiOpenText({ botId, workspace, moved = false, providerLabel = "OpenCode", modelLabel = "" } = {}) {
   return [
     moved ? "⚠️ The tunnel was reconnected, so any earlier /tui button is dead — use this one." : null,
-    `⌨️ Terminal — a real OpenCode terminal for this chat${workspace ? ` in ${workspace}` : ""}.`,
+    `⌨️ Terminal — a real ${providerLabel} terminal for this chat${workspace ? ` in ${workspace}` : ""}.`,
+    modelLabel ? `The header shows the same model your Telegram replies sign with: ${modelLabel}.` : null,
     "It runs under tmux on the gateway host, so closing the Mini App keeps your place.",
     "We both keep working with it open: the terminal waits for a turn I am running, and I wait for a turn you started — one writer at a time.",
     `Opening it proves you are the Telegram user this chat belongs to (the gateway checks the Mini App initData against bot ${botId}), so there is no password to remember.`,
