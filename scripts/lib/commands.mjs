@@ -23,8 +23,6 @@ export const BOT_COMMANDS = [
   { command: 'build', description: 'Switch to the build agent' },
   { command: 'plan', description: 'Switch to the plan agent' },
   { command: 'thinking', description: 'Pick the thinking level (variant)' },
-  { command: 'abort', description: 'Cancel the running request' },
-  { command: 'watch', description: 'Live tool feed on|off|status (TG-native work view)' },
   { command: 'tui', description: 'Open the opencode TUI for this conversation (Mini App)' },
   { command: 'bugs', description: 'Open the shared bug board (Mini App)' },
   { command: 'debug', description: 'Show the active work-session debug view' },
@@ -297,7 +295,6 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/handoff          checkpoint this work session for continuation',
     '/resume [n]       print the current bug-ticket packet (n = card #)',
     '/tx [on|off|status|debug] shared work view for this chat',
-    '/watch [on|off]  live tool feed in this chat (default off)',
     '/tui             open this conversation in a real terminal (Mini App button)',
     '/tui status      name the open pane, who is attached, how long it has been up',
     '/tui off         close that pane (add force to close it mid-turn)',
@@ -306,7 +303,6 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/council [stage]  run council stage (audit, defense, finalize, run)',
     '/role [name]      switch role within project (/role legal, /role sim)',
     '/location [name]  show or switch compute location / quota pool',
-    '/abort            cancel the running request',
     '/help             this message',
   ].join('\n');
 }
