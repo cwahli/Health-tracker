@@ -13,11 +13,14 @@ import assert from 'node:assert/strict';
 import {
   CURRENT_COLUMNS,
   currentRow,
+  goalFor,
   linkedTree,
   matchPr,
   prAuthor,
   specAuthor,
   specFileFor,
+  tenWords,
+  todoFor,
 } from './pm-current.mjs';
 
 const PRS = [
@@ -85,13 +88,44 @@ test('a current row is the declared layout with author, github, tree', () => {
     key: 'card:t', kind: 'card', id: '#8', state: 'new', blocked: false,
     stallReason: '', owner: '', source: 'bugctl', branch: '', note: '', worktree: '', live: null,
   };
-  const row = currentRow(item, { at: 'T', author: 'a', github: 'g', tree: '/t', lastActivity: 'L' });
+  const row = currentRow(item, { at: 'T', author: 'a', github: 'g', goal: 'go', todo: 'do', tree: '/t', lastActivity: 'L' });
   assert.equal(row.length, CURRENT_COLUMNS.length);
-  for (const col of ['key', 'id', 'author', 'github', 'tree', 'last_activity', 'built_at']) {
+  for (const col of ['key', 'id', 'author', 'github', 'goal', 'todo', 'tree', 'last_activity', 'built_at']) {
     assert.ok(row[CURRENT_COLUMNS.indexOf(col)] !== undefined, col);
   }
   assert.equal(row[CURRENT_COLUMNS.indexOf('author')], 'a');
+  assert.equal(row[CURRENT_COLUMNS.indexOf('goal')], 'go');
+  assert.equal(row[CURRENT_COLUMNS.indexOf('todo')], 'do');
   assert.equal(row[CURRENT_COLUMNS.indexOf('built_at')], 'T');
+});
+
+test('goal is ten words from the packet goal, title, or ticket', () => {
+  assert.equal(tenWords('one two three four five six seven eight nine ten eleven'), 'one two three four five six seven eight nine ten …');
+  assert.equal(tenWords('short'), 'short');
+  const spec = { kind: 'spec', id: 'PM-2' };
+  assert.equal(
+    goalFor(spec, { specBody: '---\nid: PM-2\n---\n\n## Goal\nOne sentence, checkable: a dedicated project-manager bot runs here today\n' }),
+    'One sentence, checkable: a dedicated project-manager bot runs here today',
+  );
+  assert.equal(goalFor(spec, { specBody: '# Packet: Case-12 T2 — same-thread meal edit (add/remove)\n' }), 'Case-12 T2 — same-thread meal edit (add/remove)');
+  assert.equal(goalFor(spec, { specBody: 'no headings at all' }), '');
+  assert.equal(goalFor({ kind: 'card', title: 'Inbox leftover: Fruit Salad + Croissant + 3 more' }), 'Inbox leftover: Fruit Salad + Croissant + 3 more');
+  assert.equal(goalFor({ kind: 'card' }), '');
+});
+
+test('todo names the next step from live state', () => {
+  assert.equal(todoFor({ kind: 'card', state: 'new' }), 'awaiting triage and dispatch');
+  assert.equal(todoFor({ kind: 'card', state: 'in_fix' }), 'fix in progress');
+  assert.equal(
+    todoFor({ kind: 'card', state: 'packed', blocked: true, blockedReason: 'dispatch failed: opencode did not resolve (no fix committed) extra words here' }),
+    'blocked: dispatch failed: opencode did not resolve (no fix committed) …',
+  );
+  assert.equal(todoFor({ kind: 'card', state: 'packed', blocked: false }), 'packed, awaiting dispatch');
+  assert.equal(todoFor({ kind: 'spec', state: 'draft' }), 'draft packet, not started');
+  assert.equal(todoFor({ kind: 'spec', state: 'locked' }), 'active contract, in progress');
+  assert.equal(todoFor({ kind: 'lane', state: 'committed', lastOutcome: 'committed', owner: 'o' }), 'steady state, nothing pending');
+  assert.equal(todoFor({ kind: 'card', state: 'packed', blocked: true, blockedReason: 'x' }, { rung: 'escalate' }), 'needs operator decision');
+  assert.equal(todoFor({ kind: 'card', state: 'new' }, { rung: 'retry' }), 'retry the work');
 });
 
 test('the author is the agent from the commit trailer, else the git identity', () => {
