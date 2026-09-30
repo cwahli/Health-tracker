@@ -14,6 +14,7 @@ import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import { normalizeChainKey } from './serverBrandMenu.js';
 import { assignMissingPublicNs, hydrateWorkItem, lastCommit, publicId } from './src/utils/bugWorkItem';
+import { bugState } from './src/utils/bugTicketState';
 import { bugReportShotFields, bugShotContentType, bugShotExt, bugShotKey, parseDataUrl } from './src/utils/bugSnapshot';
 import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
 
@@ -49,6 +50,35 @@ export function normBacklogRow(row: any): any {
   return {
     ...row,
     payload: typeof row.payload === 'string' ? safeJsonParse(row.payload, null) : (row.payload ?? null),
+  };
+}
+
+/**
+ * Canonical read-path projection for one overview tag (packet
+ * bug-board-parity, Node 1). Runs the same hydrateWorkItem() + bugState()
+ * the canonical `GET /api/bugs/list` route uses
+ * (`serverBugSnapshot.ts:1515-1528`), so the board and `bugctl list` agree
+ * on public_n/Class/State/queue for the same snapshot. Nested under
+ * `canonical` (additive — existing top-level readers are untouched) and
+ * shot-free by design (no R2/egress beyond the light overview shape).
+ */
+export function projectCanonicalRow(t: any): {
+  public_n: number;
+  class: string | null;
+  fingerprint: string | null;
+  state: string;
+  flags: Record<string, unknown>;
+  queue: string;
+} {
+  const item = hydrateWorkItem(t);
+  const ticket = bugState(item);
+  return {
+    public_n: item.public_n,
+    class: item.class || null,
+    fingerprint: item.fingerprint || null,
+    state: ticket.state,
+    flags: ticket.flags,
+    queue: ticket.queue,
   };
 }
 
@@ -601,6 +631,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         t.public_n = wi.public_n;
         t.public_id = publicId(wi, t.id);
         t.last_commit = lastCommit(wi);
+        t.canonical = projectCanonicalRow(t);
       }
 
       // A report is a deletion candidate once it had a tag and now has none left.
