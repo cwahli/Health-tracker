@@ -106,7 +106,15 @@ export function describePremergeRefusal({ decision, violations = [], reason = ''
     `The declaration is recorded on the squash, so the history says why rather than ` +
       `looking like an accident. \`Resurrects: <path> — why\` is the same move for a ` +
       `file a later PR deleted.`,
-    prNumber ? `` : null,
+    ``,
+    // Without this the refusal is a dead end: the gate runs on PUSH, and
+    // editing a PR body is not a push, so nothing re-runs it. A gate that
+    // refuses and does not say how to proceed is a stall, and this repo treats
+    // a stall as a bug to report rather than a reason to give up.
+    prNumber
+      ? `Then re-run the merge: \`gh workflow run auto-merge.yml -f pr=${prNumber}\` ` +
+        `(or push any commit — the judgement re-runs on every push to this branch).`
+      : `Then re-run the merge job, or push any commit — the judgement re-runs on every push.`,
   ].join('\n');
 }
 

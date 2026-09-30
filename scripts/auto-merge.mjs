@@ -467,7 +467,7 @@ async function main(argv = process.argv.slice(2)) {
   if (undoVerdict.decision === PREMERGE_DECISIONS.REFUSE) {
     log(`  🛑 ${undoVerdict.reason}`);
     if (!args.evaluate) {
-      await comment(client, { owner, repo, number: pr.number, body: describePremergeRefusal({ ...undoVerdict, baseBranch: undoBase }) });
+      await comment(client, { owner, repo, number: pr.number, body: describePremergeRefusal({ ...undoVerdict, baseBranch: undoBase, prNumber: pr.number }) });
     }
     return 1;
   }

@@ -10,6 +10,11 @@ allowed_files:
   - scripts/lib/premerge-undo.mjs
   - scripts/auto-merge.mjs
   - scripts/assert-auto-merge.test.mjs
+  # The driver's import graph grew, and this fixture copies it file by file —
+  # without the two new modules the scratch tree dies with
+  # ERR_MODULE_NOT_FOUND and every E2E in that file fails for the wrong reason.
+  # (Shared with MAIN-VERIFY-1, which already lists auto-merge.mjs too.)
+  - scripts/assert-main-verify.test.mjs
   - .github/workflows/auto-merge.yml
   - .github/workflows/ci.yml
   - package.json

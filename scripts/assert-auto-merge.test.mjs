@@ -1177,6 +1177,27 @@ test('the refusal names the owner and both valid ways out', () => {
   assert.match(body, /Reverts: <sha>/, 'offers the declaration');
 });
 
+test('the refusal says how to proceed, because editing a body is not a push', () => {
+  // This gate runs on PUSH. Editing a PR body is not a push, so nothing re-runs
+  // it — a refusal that does not say so is a dead end, and a dead end is a
+  // stall. Found live: this gate refused its own PR for a declaration added
+  // minutes later, and the comment had to be read to learn the next move.
+  const v = decideBranchUndo({ violations: [{ file: 'a.md', line: 1, owner: 'abc12345' }] });
+  const withPr = describePremergeRefusal({ ...v, prNumber: 415 });
+  assert.match(withPr, /gh workflow run auto-merge\.yml -f pr=415/, 'names the exact re-run command');
+  assert.match(withPr, /push any commit/, 'and the alternative');
+  const withoutPr = describePremergeRefusal(v);
+  assert.match(withoutPr, /re-run the merge job/, 'still says something useful with no PR number');
+});
+
+test('a refusal with no PR number never renders a literal null', () => {
+  const v = decideBranchUndo({ violations: [{ file: 'a.md', line: 1, owner: 'abc12345' }] });
+  const body = describePremergeRefusal(v);
+  assert.doesNotMatch(body, /(^|\n)null(\n|$)/, 'a missing optional must not leak into prose');
+  assert.doesNotMatch(body, /undefined/);
+  assert.equal(body.trimEnd().endsWith('.'), true, 'and it ends on a sentence, not a stray token');
+});
+
 test('the refusal is not posted for a merge or an unknown', () => {
   assert.equal(describePremergeRefusal({ decision: PREMERGE_DECISIONS.MERGE, violations: [] }), '');
   assert.equal(describePremergeRefusal({ decision: PREMERGE_DECISIONS.UNKNOWN, violations: [] }), '');
