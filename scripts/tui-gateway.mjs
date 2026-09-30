@@ -790,6 +790,10 @@ async function loadForgeRoute({ env, log }) {
     return serverMod.createForgeHandler({
       env,
       registry,
+      // The registry file is written by the create pipeline; the handler
+      // re-reads it per state request so a bot created after gateway start
+      // appears without a restart. `registry` above is only the fallback.
+      registryPath: paths.registryPath,
       basePath: '/forge',
       // The gateway is public and this writes credentials: no loopback
       // admission (behind Caddy every request is loopback), initData only.
