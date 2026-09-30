@@ -15,6 +15,8 @@ import {
   currentRow,
   linkedTree,
   matchPr,
+  prAuthor,
+  specAuthor,
   specFileFor,
 } from './pm-current.mjs';
 
@@ -68,8 +70,7 @@ test('a linked tree needs the directory on disk, with its branch', () => {
   );
 });
 
-test('the packet file is found by frontmatter id', () => {
-  const files = {
+test('the packet file is found by frontmatter id', () => {  const files = {
     'card-3.md': '---\nid: V-30.4-proof\nstatus: locked\n---\n',
     'F-13.md': '---\nid: F-13\nstatus: locked\n---\n',
   };
@@ -91,4 +92,51 @@ test('a current row is the declared layout with author, github, tree', () => {
   }
   assert.equal(row[CURRENT_COLUMNS.indexOf('author')], 'a');
   assert.equal(row[CURRENT_COLUMNS.indexOf('built_at')], 'T');
+});
+
+test('the author is the agent from the commit trailer, else the git identity', () => {
+  const log = [
+    'COMMIT:aaa',
+    'WHO:Your Name',
+    'WHEN:2026-09-17',
+    'fix(food): something',
+    '',
+    '\x1e',
+    'COMMIT:bbb',
+    'WHO:cwahli',
+    'WHEN:2026-09-16',
+    'Author: Muse Spark 1.3 (none) VM',
+    'older work',
+    '',
+  ].join('\n');
+  const exec = () => log;
+  assert.equal(
+    specAuthor('/r', 'F.md', { exec }),
+    'Muse Spark 1.3 (none) VM 2026-09-16',
+    'newest commit with a trailer wins, not the newest commit',
+  );
+  const noTrailer = 'COMMIT:aaa\nWHO:Your Name\nWHEN:2026-09-17\nfix(food): something\n';
+  assert.equal(specAuthor('/r', 'F.md', { exec: () => noTrailer }), 'Your Name 2026-09-17', 'pre-trailer history falls back to git identity');
+  assert.equal(specAuthor('/r', 'F.md', { exec: () => { throw new Error('gone'); } }), '', 'git failure means blank, never a guess');
+});
+
+test('a PR names its agent in the body trailer, old PRs stay blank', () => {
+  const exec = () => 'Title\n\nSome description.\n\nAuthor: opencode-go/deepseek-v4.1-flash (max) VM\n';
+  assert.equal(prAuthor(389, { exec }), 'opencode-go/deepseek-v4.1-flash (max) VM');
+  assert.equal(prAuthor(1, { exec: () => { throw new Error('gone'); } }), '');
+});
+
+test('a body without a trailer falls back to the newest commit trailer', () => {
+  const exec = (bin, args) => {
+    const cmd = [bin, ...(args || [])].join(' ');
+    if (cmd.includes('pr view')) return 'Title with no trailer';
+    if (cmd.includes('/commits')) return 'first work\nAgent: Pixel Canary (xhigh)\n\nsecond work\nno trailer here\n';
+    throw new Error('unexpected');
+  };
+  assert.equal(prAuthor(317, { exec }), 'Pixel Canary (xhigh)');
+  const none = (bin, args) => {
+    const cmd = [bin, ...(args || [])].join(' ');
+    return cmd.includes('pr view') ? 'no trailer' : 'work\nmore work\n';
+  };
+  assert.equal(prAuthor(2, { exec: none }), '', 'no trailer anywhere stays blank');
 });
