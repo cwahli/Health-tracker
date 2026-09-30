@@ -212,6 +212,10 @@ async function loadState() {
       headers: { 'x-telegram-init-data': tg ? String(tg.initData || '') : '' },
     });
     const state = await res.json();
+    if (!state.ok) {
+      say(state.reason || 'could not read forge state', true);
+      return;
+    }
     const bots = Array.isArray(state.bots) ? state.bots : [];
     fillExisting(bots);
     const list = bots.map(botLabel).join(', ') || 'none';
