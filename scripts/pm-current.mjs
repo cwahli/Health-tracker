@@ -18,6 +18,9 @@
  *     (substring match on the item id) — blank where nothing matches;
  *   - tree: the linked ~/dev worktree if it exists on disk (with its branch),
  *     else the heartbeat cwd (see below);
+ *   - goal: what the item is trying to do (≤10 words, from the packet goal
+ *     or the ticket title);
+ *   - todo: what's still to be done (≤10 words, derived from live state);
  *   - agent_branch/agent_note/agent_live from heartbeats (blank until an
  *     agent beats one — dispatches do this automatically).
  *
@@ -61,9 +64,65 @@ export const CURRENT_COLUMNS = [
   'agent_live',
   'author',
   'github',
+  'goal',
+  'todo',
   'last_activity',
   'built_at',
 ];
+
+/** First 10 words plus an ellipsis when longer. Summaries stay scannable. */
+export function tenWords(text) {
+  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (words.length <= 10) return words.join(' ');
+  return `${words.slice(0, 10).join(' ')} …`;
+}
+
+/**
+ * What the item is trying to do, in ≤10 words. Specs: the `## Goal` section's
+ * first line, else the packet title. Cards/lanes: their title. Never invented:
+ * no goal section and no title means blank.
+ */
+export function goalFor(item, { specBody = '' } = {}) {
+  if (item?.kind === 'spec' && specBody) {
+    const lines = String(specBody).split('\n');
+    const at = lines.findIndex((l) => /^##\s*goal\s*$/i.test(l.trim()));
+    if (at >= 0) {
+      const first = lines.slice(at + 1).map((l) => l.trim()).find((l) => l && !l.startsWith('#'));
+      if (first) return tenWords(first.replace(/^[*-]\s+/, ''));
+    }
+    const title = lines.map((l) => l.trim()).find((l) => l.startsWith('# '));
+    if (title) return tenWords(title.replace(/^#\s*/, '').replace(/^packets?:?\s*/i, ''));
+    return '';
+  }
+  return tenWords(item?.title || '');
+}
+
+/**
+ * What's still to be done, in ≤10 words — derived from live state, not prose:
+ * blocked cards name their block, stalled items name the ladder's verdict,
+ * untouched work says what comes next. A steady lane says so.
+ */
+export function todoFor(item, { rung = '' } = {}) {
+  const state = String(item?.state || '').toLowerCase();
+  if (rung === 'escalate' || /escalate/i.test(String(item?.stallReason || ''))) return 'needs operator decision';
+  if (item?.blocked) return tenWords(`blocked: ${item.blockedReason || item.stallReason || 'waiting'}`);
+  if (rung === 'retry') return 'retry the work';
+  if (rung === 'another-way') return 'find another way';
+  if (item?.kind === 'card') {
+    if (state === 'new') return 'awaiting triage and dispatch';
+    if (state === 'in_fix') return 'fix in progress';
+    if (state === 'packed') return 'packed, awaiting dispatch';
+    if (state === 'done') return 'verify and close';
+    return `move state ${state || 'unknown'} forward`;
+  }
+  if (item?.kind === 'spec') {
+    if (state === 'draft') return 'draft packet, not started';
+    if (state === 'blocked' || state === 'stalled' || state === 'paused') return 'unblock the packet';
+    return 'active contract, in progress';
+  }
+  if (String(item?.lastOutcome || '') && ['ok', 'committed'].includes(String(item.lastOutcome))) return 'steady state, nothing pending';
+  return 'in progress';
+}
 
 /**
  * Newest PR (open or merged) whose head branch names the item id.
@@ -215,6 +274,8 @@ export function currentRow(item, {
   attempts = 0,
   author = '',
   github = '',
+  goal = '',
+  todo = '',
   tree = '',
   lastActivity = '',
 } = {}) {
@@ -236,6 +297,8 @@ export function currentRow(item, {
     item.live === true ? 'live' : item.live === false ? 'stale' : '',
     cell(author),
     cell(github),
+    cell(goal),
+    cell(todo),
     cell(lastActivity),
     cell(at),
   ];
@@ -286,14 +349,19 @@ async function main() {
     const prNum = /^#(\d+)\b/.exec(gh)?.[1] || '';
     let author = '';
     let lastActivity = String(item.lastActivityAt || '');
+    let specBody = '';
     if (item.kind === 'spec') {
       const file = specFileFor(paths.specsDir, item.id);
       if (file) {
         author = specAuthor(root, path.join('specs', 'active', file));
         lastActivity = mtimeOf(path.join(paths.specsDir, file)) || lastActivity;
+        try {
+          specBody = fs.readFileSync(path.join(paths.specsDir, file), 'utf8');
+        } catch {
+          specBody = '';
+        }
       }
-    } else if (item.kind === 'card') {
-      const tag = String(item.key).replace(/^card:/, '');
+    } else if (item.kind === 'card') {      const tag = String(item.key).replace(/^card:/, '');
       const row = byTag.get(tag);
       // A committed PR names its agent in the body trailer; otherwise the
       // last curator, otherwise blank.
@@ -311,6 +379,8 @@ async function main() {
         attempts: att.attempts || 0,
         author,
         github: gh,
+        goal: goalFor(item, { specBody }),
+        todo: todoFor(item, { rung: att.rung || '' }),
         tree,
         lastActivity,
       }),
