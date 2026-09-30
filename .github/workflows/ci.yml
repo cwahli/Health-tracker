@@ -320,6 +320,23 @@ jobs:
           node scripts/check-capability-propagation.mjs
           node scripts/check-capability-propagation.mjs --strict --ids=svc-bug-ticket,proc-ticket-state,sess-ticket-resume,svc-repro
 
+      # User-visible command surface: every canonical command needs an explicit
+      # per-class verdict, and the Grok TG router's popup must match its handlers.
+      # /tui shipped missing on the router because the DECLARE step (§14.7) was
+      # skipped and nothing checked command-level truth.
+      - name: Command scope gate (popup == handlers == declared)
+        run: node scripts/assert-command-scope.mjs
+
+      - name: Command scope gate unit tests
+        run: node --test scripts/assert-command-scope.test.mjs
+
+      # /project aliases are duplicated between bot-host's project-registry and
+      # the standalone router's copy. The router cannot import scripts/ (it ships
+      # standalone), so this pins the shared grammar against silent drift — the
+      # same class of failure as /tui going missing unnoticed.
+      - name: Project alias parity gate (bot-host vs router)
+        run: node scripts/assert-project-registry-parity.mjs
+
       # §4.10: the amnesia gate belongs in CI — answers from disk alone.
       - name: Bug retro-audit gate (§4.10 answers from disk)
         run: node scripts/assert-bug-retro-audit.mjs
