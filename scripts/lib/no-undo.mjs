@@ -209,12 +209,28 @@ export function checkRange(repo, base, head, landedRef, body, opts = {}) {
   const verbose = !!opts.verbose;
   const window = opts.window === undefined ? 150 : Number(opts.window);
   const { reverts, resurrects } = parseDeclarations(body);
-  const own = ownSet(repo, base, head);
+  // Judge the branch's OWN changes: diff from the fork point, not from a
+  // moving base. A two-tree diff against current main shows every main-side
+  // addition since the fork as a "deletion" and flags work the branch never
+  // touched (proven on a real behind-branch: 30 false flags, zero true).
+  // For a squash on main the fork point IS the parent, so post-merge runs
+  // are unchanged.
+  let fork;
+  try {
+    fork = git(repo, 'merge-base', base, head);
+  } catch {
+    return {
+      violations: [],
+      skipped: [],
+      error: `no merge-base for ${base}..${head}`,
+    };
+  }
+  const own = ownSet(repo, fork, head);
   const violations = [];
   const skipped = [];
   const covers = (sha) => reverts.some((d) => sha.startsWith(d) || d.startsWith(sha));
 
-  for (const { file, line } of deletedLines(repo, base, head)) {
+  for (const { file, line } of deletedLines(repo, fork, head)) {
     const { owner, reason } = lineOwner(repo, file, line, landedRef, own);
     if (!owner) {
       if (verbose) skipped.push(`${file}: ${reason}: ${line.slice(0, 60)}`);
@@ -235,7 +251,7 @@ export function checkRange(repo, base, head, landedRef, body, opts = {}) {
     });
   }
 
-  const { added, deleted } = changedFiles(repo, base, head);
+  const { added, deleted } = changedFiles(repo, fork, head);
   for (const path of deleted) {
     const adder = fileAdder(repo, path, landedRef);
     if (!adder || own.has(adder)) continue;

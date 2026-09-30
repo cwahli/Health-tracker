@@ -63,7 +63,11 @@ if (args.get('body-file')) {
     process.exit(2);
   }
 }
-const { violations, skipped } = checkRange(repo, m[1], m[2], landedRef, body, { verbose, window });
+const { violations, skipped, error } = checkRange(repo, m[1], m[2], landedRef, body, { verbose, window });
+if (error) {
+  console.error(`no-undo: ${error}`);
+  process.exit(2);
+}
 if (verbose) {
   for (const s of skipped) console.log(`  skip  ${s}`);
 }

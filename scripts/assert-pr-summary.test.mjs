@@ -44,8 +44,8 @@ console.log('assert-pr-summary:');
 
 // 1. Full contract with each accepted pointer shape.
 for (const next of [
-  'Next: TUI_TG_AUTH_TRAIL.md#current-blocker',
-  'Next: plan/ROADMAP.md#r-16',
+  'Next: TUI_TG_AUTH_TRAIL.md#live-state-left-for-you',
+  'Next: plan/ROADMAP.md#current-work-one-sequence-2026-09-26',
   'Next: agent/tui-lifecycle',
   'Next: #369',
 ]) {
@@ -79,6 +79,20 @@ for (const next of [
   check('Agent: prefix rejected', run(badPrefix).code === 1);
   const badLevel = good('- x\n\nNext: #1').replace('(high)', '(n/a)');
   check('n/a level rejected', run(badLevel).code === 1);
+}
+
+// 6. Pointer resolvability: roadmap anchors and files must exist.
+{
+  const anchor = 'plan/ROADMAP.md#current-work-one-sequence-2026-09-26';
+  const r = run(good(`- x\n\nNext: ${anchor}`));
+  check('real roadmap anchor passes', r.code === 0, `exit ${r.code}: ${r.out.slice(0, 200)}`);
+  const bad = run(good('- x\n\nNext: plan/ROADMAP.md#no-such-row'));
+  check('missing anchor fails', bad.code === 1, `exit ${bad.code}`);
+  check('missing anchor names candidates', /no such section/.test(bad.out), bad.out.slice(0, 300));
+  const nofile = run(good('- x\n\nNext: docs/no-such-file.md'));
+  check('missing file fails', nofile.code === 1, `exit ${nofile.code}`);
+  const barefile = run(good('- x\n\nNext: TUI_TG_AUTH_TRAIL.md'));
+  check('existing file without section passes', barefile.code === 0, `exit ${barefile.code}: ${barefile.out.slice(0, 200)}`);
 }
 
 console.log('');

@@ -203,6 +203,9 @@ jobs:
       - name: 'PR body contract sensor (Next: pointer fails closed)'
         run: node scripts/assert-pr-summary.test.mjs
 
+      - name: Work queue sensor (generated list fails closed)
+        run: node scripts/assert-work-queue.test.mjs
+
       - name: PR must add net change vs base (no empty merges)
         if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
         shell: bash

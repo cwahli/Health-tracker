@@ -194,6 +194,22 @@ console.log('assert-no-undo:');
   check('bad range exits 2', r.code === 2, `exit ${r.code}`);
 }
 
+// 9b. A branch behind main is judged on its own changes only: main-side
+// additions since the fork must not read as deletions (measured 30 false
+// flags on a real behind-branch before the fork-point fix).
+{
+  const dir = scratchRepo();
+  commit(dir, { 'a.txt': 'keep\n' }, 'base');
+  git(dir, 'checkout', '-q', '-b', 'feature');
+  commit(dir, { 'b.txt': 'branch work here\n' }, 'branch change');
+  git(dir, 'checkout', '-q', 'main');
+  commit(dir, { 'c.txt': 'MAIN SIDE DISTINCTIVE ADDITION 99\n' }, 'main advances');
+  const head = git(dir, 'rev-parse', 'feature');
+  const main = git(dir, 'rev-parse', 'main');
+  const r = runCLI(dir, '--range', `${main}..${head}`, '--landed-ref', 'main');
+  check('behind-branch passes on main-side additions', r.code === 0, `exit ${r.code}: ${r.out.slice(0, 300)}`);
+}
+
 // 10. Declaration parsing: units.
 {
   const d = parseDeclarations('Reverts: abc1234 — reason\nRESURRECTS: ignored\nResurrects: ./docs/x.md\nReverts: 9f8e7d6c5b4a\n');
