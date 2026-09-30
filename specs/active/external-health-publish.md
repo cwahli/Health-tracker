@@ -60,6 +60,26 @@ the other five are dated facts about the sheet and the app copy.
 
 ## Findings (do not redo)
 
+- **A malformed analysis payload published itself into the documents — and into
+  Drive.** `loadAnalysisFile` read `parsed?.sections || {}` with no shape check
+  and `renderSection` coerced a non-array through `String(text)`. A section
+  value that was an object stringified to `[object Object]`, a number became a
+  bare `42` reading as a measurement, and a nested array was spliced in raw —
+  each indistinguishable from a real claim to the reader. Reverting only the
+  loader wiring shows the cost: the refresh made **five Drive writes** instead
+  of refusing. `validateAnalysisSections` now refuses at the door
+  (`{sections: {knownKey: string[]}}`: sections must be a plain object, every
+  key a real `analysis.*` source, every value an array of strings) and the run
+  stops at `stage: 'analysis'` having written nothing — the same fail-closed
+  shape as a template that will not render, because publishing three good
+  documents while substituting "awaiting" for a broken claim is the silent drop
+  this module exists to refuse. A misspelt key (`analysis.condition`) is a
+  refusal, not a silently withheld section. Claim *wording* is deliberately not
+  judged here: striking a diagnosis or a dose is the safety reviewer's seat, and
+  a blocklist that guessed would block honest prose ("what is not settled by the
+  literature") as surely as it blocked "you have".
+- **`alt=media` cannot read a Google Doc.**
+
 - **`alt=media` cannot read a Google Doc.** Drive answers
   `403 Only files with binary content can be downloaded. Use Export with Docs
   Editors files.` The read-back (the only proof a publish landed) goes through

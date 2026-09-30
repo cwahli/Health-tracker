@@ -8,7 +8,7 @@ import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, she
 import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesEqual, FIX_LIST } from './lib/health/reconcile.mjs';
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
 import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile } from './health-runner.mjs';
-import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, refusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore } from './lib/health/docs.mjs';
+import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -605,6 +605,29 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     check('the published bytes carry no refusal', !/Not published while the data gate is open/.test(closedText), 'refusal text left in a closed-gate document');
   }
 
+  // A malformed payload is the same shape of failure as a template that will not
+  // render: publishing three good documents while silently substituting
+  // "awaiting the analysis pass" for a broken claim is the silent-drop this
+  // module exists to refuse — so the run stops having written nothing.
+  const badRunDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-refresh-badpayload-'));
+  fs.cpSync(path.join(dir, 'sources'), path.join(badRunDir, 'sources'), { recursive: true });
+  fs.mkdirSync(path.join(badRunDir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(badRunDir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: { 'analysis.conditions': { marker: 'LDL', value: 4.3 } } }));
+  const badStore = fakeStore();
+  const badRun = await runHealthRefresh({
+    workspace: badRunDir,
+    env,
+    fetchImpl: makeFetch({ age: 43, height: 163, weight: 62, dateOfBirth: '1983-06-15' }, fullFixture),
+    now: new Date('2026-10-01T09:00:00Z'),
+    token: 't',
+    store: badStore,
+    templates: readTemplates(),
+  });
+  check('refresh fails closed on a malformed analysis payload', badRun.ok === false && badRun.stage === 'analysis', JSON.stringify({ stage: badRun.stage, error: badRun.error }));
+  eq('a refused payload writes nothing at all', badStore.calls.length, 0);
+  check('the refusal names the offending key', /analysis\.conditions/.test(badRun.error || ''), badRun.error);
+  check('the refusal never quotes the malformed value', !/4\.3/.test(badRun.error || ''), 'the malformed claim leaked into the refusal');
+
   // Fail closed: no folder configured, no template on disk.
   const noFolder = await runHealthRefresh({ workspace: dir, env: { ...env, HEALTH_DOCS_FOLDER: '' }, fetchImpl: makeFetch({}), token: 't', store: fakeStore(), templates: readTemplates() });
   check('refresh fails closed with no documents folder', noFolder.ok === false && noFolder.stage === 'config', JSON.stringify({ stage: noFolder.stage, error: noFolder.error }));
@@ -621,6 +644,60 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   const never = runHealthAnalyze({ workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'health-no-verify-')), env });
   check('analyze refuses when nothing was verified yet', never.ok === false && never.stage === 'verify', JSON.stringify(never));
   eq('analyze could not read a broken analysis file', loadAnalysisFile(path.join(dir, 'nope.json')).ok, false);
+
+  // ── The payload boundary ──────────────────────────────────────────────────
+  // A payload is written by the analyst seat and read by the publisher, and it
+  // arrives holding health claims. Unchecked it does not fail loudly — it fails
+  // quietly INTO the document: an object stringifies to `[object Object]`, a
+  // number becomes a bare `42` that reads as a measurement, and a nested array
+  // is spliced in raw. Each is indistinguishable from a real claim to the reader.
+  console.log('\n  — analysis payload shape —');
+  eq('there are eleven analysis keys', ANALYSIS_SECTIONS.length, 11);
+  check('every analysis key is a real analysis source', ANALYSIS_SECTIONS.every((k) => k.startsWith('analysis.')), ANALYSIS_SECTIONS.join(' '));
+  check('an absent payload is not an error', validateAnalysisSections(undefined).ok === true, 'the default file simply not existing yet must stay normal');
+  check('an empty payload is not an error', validateAnalysisSections({}).ok === true, JSON.stringify(validateAnalysisSections({})));
+  const goodPayload = validateAnalysisSections({ 'analysis.conditions': ['- LDL 4.3 mmol/L (2026-06-03).'] });
+  check('a well-formed payload passes through', goodPayload.ok === true && goodPayload.sections['analysis.conditions'].length === 1, JSON.stringify(goodPayload));
+  check('an empty array is a legitimate empty answer', validateAnalysisSections({ 'analysis.conditions': [] }).ok === true, 'an empty list must render as awaiting, not refuse');
+  for (const [label, sections] of [
+    ['sections as an array', []],
+    ['sections as a string', 'conditions'],
+    ['an object where lines belong', { 'analysis.conditions': { marker: 'LDL' } }],
+    ['a bare number', { 'analysis.conditions': 42 }],
+    ['null', { 'analysis.conditions': null }],
+    ['a non-string line', { 'analysis.conditions': ['ok', 7] }],
+  ]) {
+    const r = validateAnalysisSections(sections);
+    check(`refuses ${label}`, r.ok === false, JSON.stringify(r));
+  }
+  const typo = validateAnalysisSections({ 'analysis.condition': ['x'] });
+  check('refuses a misspelt key rather than silently withholding its section', typo.ok === false && /analysis\.condition"/.test(typo.error), JSON.stringify(typo));
+  check('names the keys it accepts so the analyst can correct it', /expected one of analysis\.conditions/.test(typo.error || ''), typo.error);
+  check('refuses a data key smuggled into the payload', validateAnalysisSections({ 'data.trusted': ['x'] }).ok === false, 'an analysis file has no business claiming a data section');
+
+  // The loader is the real door: valid JSON with a malformed claim must refuse.
+  const badDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-analysis-shape-'));
+  const writePayload = (obj) => {
+    const f = path.join(badDir, 'health-analysis.json');
+    fs.writeFileSync(f, JSON.stringify(obj));
+    return f;
+  };
+  const badPayload = loadAnalysisFile(writePayload({ at: '2026-10-01T08:00:00Z', sections: { 'analysis.conditions': { marker: 'LDL' } } }));
+  check('the loader refuses valid JSON with a malformed claim', badPayload.ok === false, JSON.stringify(badPayload));
+  check('the refusal is attributed to the payload, not to parsing', /analysis payload refused/.test(badPayload.error || ''), badPayload.error);
+  const typoPayload = loadAnalysisFile(writePayload({ sections: { 'analysis.conditionss': ['x'] } }));
+  check('the loader refuses a misspelt key', typoPayload.ok === false, JSON.stringify(typoPayload));
+  const okPayload = loadAnalysisFile(writePayload({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+  check('the loader still accepts the well-formed payload', okPayload.ok === true && Object.keys(okPayload.sections).length === 11, JSON.stringify(okPayload).slice(0, 200));
+  eq('the loader carries the payload date through', okPayload.at, '2026-10-01T08:00:00Z');
+
+  // Defence in depth: rendering straight from an unvalidated object must not be
+  // able to publish `[object Object]` either.
+  const rawSection = (value) => renderSection({ heading: 'Candidate conditions', source: 'analysis.conditions', artifact: fixtureArtifact('open'), gate: { allowed: true }, analysis: { 'analysis.conditions': value }, registry: {}, spec: DOC_SPECS[1], now: new Date('2026-10-01T09:00:00Z') });
+  check('an object section is refused, not stringified', rawSection({ marker: 'LDL' }).refused === true, JSON.stringify(rawSection({ marker: 'LDL' })));
+  check('the refusal never prints the value', !JSON.stringify(rawSection({ marker: 'LDL' })).includes('[object Object]'), '[object Object] reached the renderer');
+  check('a number section is refused, not read as a measurement', rawSection(42).refused === true, JSON.stringify(rawSection(42)));
+  check('a missing section still renders the awaiting placeholder', rawSection(undefined).refused === false && /Awaiting the analysis pass/.test(rawSection(undefined).body.join('\n')), JSON.stringify(rawSection(undefined)));
 
   const closedArtifact = { ...fixtureArtifact('closed') };
   const analyzeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-analyze-closed-'));
