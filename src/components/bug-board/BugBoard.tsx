@@ -244,8 +244,8 @@ export function BugBoard({
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
               {lastUpdated && (
-                <span className="text-[10px] font-mono text-white/50 whitespace-nowrap" title="Last refreshed">
-                  {lastUpdated} · {bugTags.length}
+                <span className="text-[10px] font-mono text-white/50 whitespace-nowrap" title={`Last refreshed. Showing ${sortedQueueTags.length} of ${bugTags.length} cards under filter ${statusFilter} / ${activeTab} — switch to All Statuses to see done cards`}>
+                  {lastUpdated} · {sortedQueueTags.length}/{bugTags.length} · {statusFilter}
                 </span>
               )}
 
