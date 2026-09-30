@@ -68,7 +68,21 @@ const ROOT = path.resolve(HERE, '..');
 const [CI_CHECK, GUARD_CHECK] = requiredNames();
 
 /** A check run as the Checks API reports it. */
-const run = (name, conclusion, status = 'completed') => ({ name, status, conclusion });
+// `extra` carries the API's timestamps. They are what lets evaluateChecks tell
+// a stale verdict from a current one, so a fixture that omits them keeps the
+// historical worst-wins behaviour.
+const run = (name, conclusion, extra = {}) => {
+  // Older call sites pass a bare status string; newer ones pass an object with
+  // the API's timestamps. Both are supported so the helper change above does
+  // not silently reinterpret existing cases.
+  const opts = typeof extra === 'string' ? { status: extra } : (extra || {});
+  return {
+    name,
+    status: opts.status || 'completed',
+    conclusion,
+    ...('completed_at' in opts || 'started_at' in opts ? opts : {}),
+  };
+};
 
 const green = () => [run(CI_CHECK, 'success'), run(GUARD_CHECK, 'success')];
 
@@ -158,6 +172,43 @@ test('Depends-On lines parse to numbers, duplicates collapse', () => {
   assert.deepEqual(parseDependsOn('no deps here'), []);
   assert.deepEqual(parseDependsOn('Depends-On: someday'), []);
   assert.deepEqual(parseDependsOn(null), []);
+});
+
+// Measured 2026-09-30 on PR #396: a required name can have two runs on ONE sha
+// (ci and claim-guard both fire on `push: agent/**` and on `pull_request`), so
+// the same check is judged against two snapshots. `no-overlap` concluded
+// failure at 19:53:50 and success at 20:13:58 on the same sha, and the union
+// made it permanently red — the queue could not drain.
+test('the newest run of a check wins, so a stale red does not outlive the world', () => {
+  const green = run('tsc + named gates', 'success', { completed_at: '2026-09-30T20:13:58Z' });
+  const staleRed = run('no-overlap', 'failure', { completed_at: '2026-09-30T19:53:50Z' });
+  const freshGreen = run('no-overlap', 'success', { completed_at: '2026-09-30T20:14:01Z' });
+  const res = evaluateChecks({ checkRuns: [staleRed, freshGreen, green] });
+  assert.equal(res.decision, 'merge', `reason: ${res.reason}`);
+  assert.equal(res.failed.length, 0);
+});
+
+test('a newer red still refuses — recency is not an excuse to ignore a failure', () => {
+  const olderGreen = run('no-overlap', 'success', { completed_at: '2026-09-30T19:53:50Z' });
+  const newerRed = run('no-overlap', 'failure', { completed_at: '2026-09-30T20:14:01Z' });
+  const res = evaluateChecks({ checkRuns: [olderGreen, newerRed, run('tsc + named gates', 'success')] });
+  assert.equal(res.decision, 'refuse');
+  assert.match(res.reason, /not green/);
+});
+
+test('a still-running newest run waits rather than reading as a pass', () => {
+  const done = run('no-overlap', 'failure', { completed_at: '2026-09-30T19:53:50Z' });
+  const rerunning = { name: 'no-overlap', status: 'in_progress', conclusion: null, completed_at: '2026-09-30T20:14:01Z' };
+  const res = evaluateChecks({ checkRuns: [done, rerunning, run('tsc + named gates', 'success')] });
+  assert.equal(res.decision, 'wait', `reason: ${res.reason}`);
+});
+
+test('unstamped runs keep worst-wins, so bare fixtures behave as before', () => {
+  const res = evaluateChecks({
+    checkRuns: [run('tsc + named gates', 'success'), run('no-overlap', 'success'), run('no-overlap', 'failure')],
+  });
+  assert.equal(res.decision, 'refuse');
+  assert.match(res.reason, /not green/);
 });
 
 test('the PR state is judged separately from the checks', () => {
