@@ -199,8 +199,9 @@
         "council": false,
         "role": false,
         "location": false,
-        "tui": false,
-        "bugs": false,
+    "tui": false,
+    "bugs": false,
+    "forge": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think"]
       }

@@ -22,7 +22,7 @@ import {
   describeUserbot,
 } from './lib/bot-forge-core.mjs';
 import { negotiateBotToken } from './lib/tg-userbot.mjs';
-import { authorizeForge, forgePageHtml, isLoopback } from './lib/bot-forge-server.mjs';
+import { authorizeForge, createForgeHandler, forgePageHtml, isLoopback } from './lib/bot-forge-server.mjs';
 import { renderUserUnit, readMasterTokens, upsertMasterToken } from './bot-forge.mjs';
 import { toTelegramCommands } from './lib/commands.mjs';
 
@@ -487,6 +487,114 @@ test('the page GET is public — it holds no secret and the create still needs a
   try {
     assert.equal((await fetch(`${base}/`)).status, 200);
     assert.equal((await fetch(`${base}/api/nope`)).status, 404);
+  } finally {
+    server.close();
+  }
+});
+
+// ------------------------------------------------------- the mounted forge
+//
+// The gateway does not publish the forge on its own port; it mounts this
+// handler under /forge and keeps its own initData door. That means the handler
+// must (a) use the prefix for BOTH the page and the API, and (b) yield every
+// path that is not its own so the mounting server can answer it.
+
+test('the page posts to the mounted prefix when the forge is mounted', () => {
+  const html = forgePageHtml({ apiBase: '/forge/api' });
+  assert.match(html, /\/forge\/api\/forge/);
+  assert.match(html, /\/forge\/api\/state/);
+  // the standalone page still posts to /api/* — the default is unchanged
+  assert.match(forgePageHtml(), /\/api\/forge/);
+});
+
+async function startMountedForge(handler) {
+  const server = http.createServer((req, res) => {
+    handler(req, res)
+      .then((handled) => {
+        if (handled || res.headersSent) return;
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ mounted: false }));
+      })
+      .catch(() => {});
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { server, base: `http://127.0.0.1:${server.address().port}` };
+}
+
+test('a mounted forge serves its own prefix and yields every other path', async () => {
+  const handler = createForgeHandler({
+    env: {},
+    registry: registryFixture(),
+    basePath: '/forge',
+    allowLocal: false,
+    requireStateAuth: true,
+    authorize: () => ({ ok: true, via: 'initData:vm' }),
+    runCreate: async (input, meta) => ({ ok: true, bot: { id: 'vm3', name: input.name }, via: meta.via, steps: [] }),
+  });
+  const { server, base } = await startMountedForge(handler);
+  try {
+    const page = await fetch(`${base}/forge`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /\/forge\/api\/forge/);
+
+    const state = await (await fetch(`${base}/forge/api/state`)).json();
+    assert.equal(state.ok, true);
+    assert.deepEqual(state.bots, ['vm', 'vm2']);
+
+    const created = await fetch(`${base}/forge/api/forge`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'VM3 Bot' }),
+    });
+    assert.equal(created.status, 200);
+    assert.equal((await created.json()).via, 'initData:vm');
+
+    // Not the forge's prefix: the mounting server owns /api, not the forge.
+    assert.equal((await fetch(`${base}/api/state`)).status, 404);
+    assert.equal((await fetch(`${base}/nope`)).status, 404);
+  } finally {
+    server.close();
+  }
+});
+
+test('a mounted forge keeps the injected door: a refusal is a refusal', async () => {
+  const handler = createForgeHandler({
+    env: {},
+    registry: registryFixture(),
+    basePath: '/forge',
+    authorize: () => ({ ok: false, status: 401, reason: 'no initData — open the forge from the /forge button in Telegram' }),
+    runCreate: async () => ({ ok: true, steps: [] }),
+  });
+  const { server, base } = await startMountedForge(handler);
+  try {
+    const denied = await fetch(`${base}/forge/api/forge`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'VM3 Bot' }),
+    });
+    assert.equal(denied.status, 401);
+    assert.match((await denied.json()).reason, /initData/);
+
+    // The mounted prefix still owns its state route when requireStateAuth is
+    // off (the standalone server's posture) — the door is the caller's choice.
+    assert.equal((await fetch(`${base}/forge/api/state`)).status, 200);
+  } finally {
+    server.close();
+  }
+});
+
+test('a mounted forge refuses an unauthenticated state read when the door asks', async () => {
+  const handler = createForgeHandler({
+    env: {},
+    registry: registryFixture(),
+    basePath: '/forge',
+    requireStateAuth: true,
+    authorize: () => ({ ok: false, status: 401, reason: 'no initData' }),
+    runCreate: async () => ({ ok: true, steps: [] }),
+  });
+  const { server, base } = await startMountedForge(handler);
+  try {
+    assert.equal((await fetch(`${base}/forge/api/state`)).status, 401);
   } finally {
     server.close();
   }

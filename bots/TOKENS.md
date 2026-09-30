@@ -7,10 +7,13 @@
 ## The three layers
 
 ```
-1. MASTER (edit this)      ~/.config/bot-host/tokens.env      one KEY=value per bot
-2. PROPAGATE (run this)    node scripts/sync-bot-tokens.mjs [--check] [--restart]
-3. LIVE (bots read these)  per-runtime env files (below) — never edit by hand
+1. MASTER (the forge writes it)  ~/.config/bot-host/tokens.env   one KEY=value per bot
+2. PROPAGATE (the forge runs it) node scripts/sync-bot-tokens.mjs [--check] [--restart]
+3. LIVE (bots read these)        per-runtime env files (below) — never edit by hand
 ```
+
+You do not hand-edit layer 1 to create a bot: the forge writes the master line
+and runs the sync itself (below). Edit it by hand only to rotate one token.
 
 The master file is **never read by a running bot**. Services load only layer 3
 via systemd `EnvironmentFile` (`bot-host@.service` reads `common.env` + `<id>.env`).
@@ -31,6 +34,15 @@ via systemd `EnvironmentFile` (`bot-host@.service` reads `common.env` + `<id>.en
 `loadRegistry` enforces one token per poller (BOT-5): duplicate `tokenEnv` fails fast.
 
 ## Procedures
+
+**Add a bot (one tap, in Telegram):** on the master bot, `/forge` sends a Mini App
+button. Type a name and Create — the page calls the gateway's `/forge/api/*`, and
+the run mints or accepts the token, writes the registry row, adds the master
+line, syncs the env files, generates and checks supervision, proves the token
+with `getMe`, and enables the bot. Nothing is edited by hand. The token comes
+from the userbot asking @BotFather when a session is configured; otherwise paste
+the token @BotFather gave you into the page. (The page is served by the TUI
+gateway at `/forge` behind the same initData door as `/tui` and `/bugs`.)
 
 **Add a bot (one command):**
 

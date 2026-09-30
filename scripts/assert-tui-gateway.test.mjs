@@ -5,7 +5,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import assert from 'node:assert/strict';
-import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor } from './tui-gateway.mjs';
+import { validateInitData, issueToken, verifyToken, tokenFor, configuredTokenBots, describeInitData, ttydFor, ttydPathFor, createGateway, COOKIE_NAME, TOKEN_ROUTES, withPhoneViewport, withFullscreenButton, FULLSCREEN_WIDGET_JS, LAYOUT_JS, TOUCH_SCROLL_JS, landingLocationFor, authorizeForgeAtGateway } from './tui-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -633,6 +633,55 @@ console.log('assert-tui-gateway:');
   check('a vm token is refused the vm2 socket token', (await serveToken('vm', '/tty2/token')).code === 401);
   check('a vm2 token is refused the vm socket token', (await serveToken('vm2', '/tty/token')).code === 401);
   check('no cookie gets no socket token', (await serveToken('vm', '/tty/token', false)).code === 401);
+}
+
+// 12. The bot forge mounted under /forge: the gateway owns the hostname and the
+// door, and the creation is the injected handler — the gateway never learns how
+// to create a bot, so there is still one creation path.
+{
+  const seen = [];
+  const forge = async (rq, rs) => {
+    seen.push(rq.url);
+    rs.writeHead(200, { 'content-type': 'application/json' });
+    rs.end(JSON.stringify({ ok: true, mounted: true }));
+    return true;
+  };
+  const handle = createGateway({ env: { TUI_GATEWAY_SECRET: SECRET }, log: () => {}, forge });
+  const forged = await new Promise((resolve) => {
+    const rs = { writeHead: (code, h) => resolve({ code, h: h || {} }), end: () => resolve({ code: 0, h: {} }) };
+    handle({ method: 'POST', url: '/forge/api/forge', headers: {} }, rs).catch(() => {});
+    setTimeout(() => resolve({ code: 0, h: {} }), 2000).unref?.();
+  });
+  check('the forge handler is reached under /forge', seen.length === 1 && seen[0] === '/forge/api/forge');
+  check('the mounted forge answers', forged.code === 200);
+
+  const handledPaths = seen.length;
+  const other = await new Promise((resolve) => {
+    const rs = { writeHead: (code) => resolve({ code }), end: () => resolve({ code: 0 }) };
+    handle({ method: 'GET', url: '/nope', headers: {} }, rs).catch(() => {});
+    setTimeout(() => resolve({ code: 0 }), 2000).unref?.();
+  });
+  check('the forge does not shadow non-forge paths', seen.length === handledPaths && other.code === 404);
+
+  const bare = createGateway({ env: { TUI_GATEWAY_SECRET: SECRET }, log: () => {} });
+  const noForge = await new Promise((resolve) => {
+    const rs = { writeHead: (code) => resolve({ code }), end: () => resolve({ code: 0 }) };
+    bare({ method: 'GET', url: '/forge', headers: {} }, rs).catch(() => {});
+    setTimeout(() => resolve({ code: 0 }), 2000).unref?.();
+  });
+  check('no forge on this host is a 404, not a crash', noForge.code === 404);
+}
+
+// 13. The forge door is THIS gateway's door: initData against its own token set.
+{
+  const env = { TUI_BOT_TOKEN_VM: TOKEN };
+  const good = authorizeForgeAtGateway({ initData: makeInitData(fresh()), env, now });
+  check('the forge door admits a fleet bot initData', good.ok === true && /^initData:vm$/.test(good.via));
+  check('the forge door refuses no initData', authorizeForgeAtGateway({ initData: '', env, now }).ok === false);
+  const forged = `${makeInitData(fresh()).split('&hash=')[0]}&hash=${'0'.repeat(64)}`;
+  check('the forge door refuses a forged hash', authorizeForgeAtGateway({ initData: forged, env, now }).ok === false);
+  const otherKey = crypto.createHmac('sha256', 'WebAppData').update('987654:OTHER-BOT-TOKEN').digest();
+  check('the forge door refuses a token this gateway does not hold', authorizeForgeAtGateway({ initData: makeInitData(fresh(), { secretKey: otherKey }), env, now }).ok === false);
 }
 
 console.log(`\n${passed} pass, ${failed} fail`);

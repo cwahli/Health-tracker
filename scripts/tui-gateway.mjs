@@ -32,6 +32,7 @@
  *   TUI_SESSION_TTL_SEC   default 900
  */
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
 import { URL } from 'node:url';
 
@@ -186,6 +187,31 @@ export function describeInitData(initData) {
   } catch {
     return 'initData unparseable';
   }
+}
+
+/**
+ * The forge door, expressed against THIS gateway's token set.
+ *
+ * `bot-forge-server.mjs` has its own initData check, but it reads the registry's
+ * `<ID>_BOT_TOKEN` while the gateway holds `TUI_BOT_TOKEN_<ID>` — the names
+ * `sync-bot-tokens` actually writes for the doors. Same HMAC, same
+ * `validateInitData`; this is the gateway's one door applied to the forge POST,
+ * not a second check with its own rules.
+ */
+export function authorizeForgeAtGateway({ initData = '', env = process.env, now = Date.now() } = {}) {
+  if (!initData) {
+    return { ok: false, status: 401, reason: 'no initData — open the forge from the /forge button in Telegram' };
+  }
+  for (const [key, raw] of Object.entries(env)) {
+    if (!key.startsWith('TUI_BOT_TOKEN_')) continue;
+    const token = String(raw || '').trim();
+    if (!token) continue;
+    const verdict = validateInitData(initData, token, { now });
+    if (verdict.ok) {
+      return { ok: true, via: `initData:${key.slice('TUI_BOT_TOKEN_'.length).toLowerCase()}`, chatId: verdict.chatId };
+    }
+  }
+  return { ok: false, status: 401, reason: 'initData did not verify against any bot token this gateway holds (stale, forged, or from a bot this host does not serve)' };
 }
 
 /**
@@ -449,7 +475,7 @@ function cookieValue(req, name) {
   return '';
 }
 
-export function createGateway({ env = process.env, log = () => {} } = {}) {
+export function createGateway({ env = process.env, log = () => {}, forge = null } = {}) {
   const secret = env.TUI_GATEWAY_SECRET || '';
   const ttl = Number(env.TUI_SESSION_TTL_SEC || 900);
   // ttyd's own credential, base64 of user:password. It is substituted for the
@@ -687,9 +713,54 @@ export function createGateway({ env = process.env, log = () => {} } = {}) {
       return proxyPass(req, res, boardUpstream(env) + url.pathname + url.search);
     }
 
+    // One-click bot forge. The gateway owns the hostname and the initData
+    // door, so the forge is mounted here under /forge rather than published on
+    // its own port; the page and the create API are the same handler the CLI's
+    // `--serve` runs, prefixed. `createForgeHandler` decides the paths and
+    // returns false for anything that is not its own.
+    if (forge && (url.pathname === '/forge' || url.pathname.startsWith('/forge/'))) {
+      const handled = await forge(req, res);
+      if (handled) return;
+    }
+
     res.writeHead(404, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({ ok: false, error: 'not found' }));
   };
+}
+
+/**
+ * Build the forge route the gateway mounts, or null when this host cannot forge
+ * (no repo, unreadable registry). Imported dynamically on purpose: `bot-forge.mjs`
+ * imports this module for `validateInitData`, so a static import here would
+ * close a load-time cycle.
+ */
+async function loadForgeRoute({ env, log }) {
+  try {
+    const [forgeMod, serverMod] = await Promise.all([
+      import('./bot-forge.mjs'),
+      import('./lib/bot-forge-server.mjs'),
+    ]);
+    const paths = forgeMod.resolvePaths({ env });
+    const registry = JSON.parse(fs.readFileSync(paths.registryPath, 'utf8'));
+    return serverMod.createForgeHandler({
+      env,
+      registry,
+      basePath: '/forge',
+      // The gateway is public and this writes credentials: no loopback
+      // admission (behind Caddy every request is loopback), initData only.
+      allowLocal: false,
+      requireStateAuth: true,
+      authorize: (input) => authorizeForgeAtGateway({ initData: input.initData, env }),
+      log,
+      runCreate: (input) => forgeMod.runForge(
+        { ...input, paths, apiBase: forgeMod.DEFAULT_API_BASE },
+        { env },
+      ),
+    });
+  } catch (err) {
+    log(`forge route unavailable: ${err.message}`);
+    return null;
+  }
 }
 
 /**
@@ -1086,10 +1157,12 @@ function serveTtydPage(req, res, ttydBase, upstreamPath = '/tty/', ttydCredentia
   upstream.end();
 }
 
-export function start(env = process.env) {
+export async function start(env = process.env) {
   const port = Number(env.TUI_GATEWAY_PORT || 8897);
   const bind = env.TUI_GATEWAY_BIND || '127.0.0.1';
-  const handle = createGateway({ env, log: (m) => console.log('[tui-gateway]', m) });
+  const log = (m) => console.log('[tui-gateway]', m);
+  const forge = await loadForgeRoute({ env, log });
+  const handle = createGateway({ env, log, forge });
   const server = http.createServer((req, res) => {
     // A 500 with no reason is a dead end for whoever is debugging it at 2am.
     handle(req, res).catch((err) => {
@@ -1102,4 +1175,9 @@ export function start(env = process.env) {
   return server;
 }
 
-if (process.argv[1] && process.argv[1].endsWith('tui-gateway.mjs')) start();
+if (process.argv[1] && process.argv[1].endsWith('tui-gateway.mjs')) {
+  start().catch((err) => {
+    console.error('[tui-gateway] start failed:', err && err.stack ? err.stack : err);
+    process.exit(1);
+  });
+}
