@@ -2605,6 +2605,32 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       return;
     }
 
+    case 'forge': {
+      // One-click bot forge (Mini App). Same web_app button + initData door as
+      // /tui and /bugs: the page calls the gateway's /forge/api/* and the whole
+      // creation is the single `runForge` pipeline. Scoped to the master bot —
+      // it is the one that holds a gateway token and owns the fleet.
+      const FORGE_BOTS = ['vm'];
+      if (!FORGE_BOTS.includes(config.id)) {
+        await api.sendMessage(chatId, '🛠 The bot forge lives on the master bot — ask it for /forge and it will hand you the button.');
+        return;
+      }
+      const forgeGatewayUrl = readTuiUrl();
+      if (!forgeGatewayUrl) {
+        await api.sendMessage(chatId, '🛠 Bot forge is not served from this machine yet. Set TUI_GATEWAY_URL to the gateway host and try /forge again.');
+        return;
+      }
+      const forgeUrl = `${forgeGatewayUrl}/forge?bot=${config.id}`;
+      await api.sendMessage(chatId, [
+        '🛠 *Bot forge* — type a name, get a working bot.',
+        'One run gets the token, writes the registry row, syncs the env files, wires supervision, proves the token with `getMe`, and enables it — you never edit a `.env` file.',
+        'With a userbot session it asks @BotFather itself; otherwise paste the token @BotFather gave you into the page.',
+      ].join('\n'), {
+        reply_markup: { inline_keyboard: [[{ text: '🛠 Open bot forge', web_app: { url: forgeUrl } }]] },
+      });
+      return;
+    }
+
     case 'debug': {
       const location = workLocation();
       const workId = sessionKey({ location, chat: String(chatId), workspace: config.agent.workspace, project: projectIdForWorkspace(config.agent.workspace) });

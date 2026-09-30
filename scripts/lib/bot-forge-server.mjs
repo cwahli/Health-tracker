@@ -73,8 +73,14 @@ export function authorizeForge({ initData = '', remoteAddress = '', registry = {
   };
 }
 
-/** The page. One string, no bundler, no second copy of any formatter. */
-export function forgePageHtml() {
+/**
+ * The page. One string, no bundler, no second copy of any formatter.
+ *
+ * `apiBase` is where this page's own API lives: `/api` when the forge owns its
+ * own port, `/forge/api` when the gateway mounts it under a prefix. Inlined at
+ * generation time, so the served HTML still carries the literal paths.
+ */
+export function forgePageHtml({ apiBase = '/api' } = {}) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -154,7 +160,9 @@ function say(text, isError) {
 
 async function loadState() {
   try {
-    const res = await fetch('/api/state');
+    const res = await fetch('${apiBase}/state', {
+      headers: { 'x-telegram-init-data': tg ? String(tg.initData || '') : '' },
+    });
     const state = await res.json();
     const bots = (state.bots || []).join(', ') || 'none';
     const userbot = state.userbot && state.userbot.configured
@@ -179,7 +187,7 @@ el('forge').addEventListener('submit', async (event) => {
   say('creating ' + name + '…');
   stepsEl.innerHTML = '';
   try {
-    const res = await fetch('/api/forge', {
+    const res = await fetch('${apiBase}/forge', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -236,36 +244,80 @@ function sendJson(res, status, payload) {
 }
 
 /**
- * The server. `runCreate` is injected, so the HTTP layer cannot invent a second
- * creation path and the tests can drive it without spawning anything.
+ * The request handler, mountable.
+ *
+ * `basePath` is where the caller serves the forge: '' when the forge owns its
+ * own port, '/forge' when the TUI gateway mounts it. It decides BOTH the routes
+ * and the page's own API base, so a mounted forge and a standalone one are this
+ * one handler with a prefix — never a second copy of the pipeline.
+ *
+ * `authorize` is the door, injectable so the mounting server keeps its own:
+ * the gateway passes its initData check (its token set is `TUI_BOT_TOKEN_<id>`,
+ * not the registry's `<id>_BOT_TOKEN`). It returns { ok, status, reason, via }.
+ *
+ * Returns `false` when the path is not the forge's, so a mounting server can
+ * fall through to its own routes.
  */
-export function createForgeServer({ env = process.env, registry = {}, runCreate, buildRegistryView = null, allowLocal = true, log = () => {} } = {}) {
-  if (typeof runCreate !== 'function') throw new Error('createForgeServer needs a runCreate(input, meta) function');
+export function createForgeHandler({
+  env = process.env,
+  registry = {},
+  runCreate,
+  buildRegistryView = null,
+  allowLocal = true,
+  log = () => {},
+  basePath = '',
+  requireStateAuth = false,
+  authorize = authorizeForge,
+} = {}) {
+  if (typeof runCreate !== 'function') throw new Error('createForgeHandler needs a runCreate(input, meta) function');
+  const pagePaths = basePath ? [basePath, `${basePath}/`, `${basePath}/index.html`] : ['/', '/index.html'];
+  const apiBase = `${basePath}/api`;
+  const statePath = `${apiBase}/state`;
+  const forgePath = `${apiBase}/forge`;
 
-  const server = http.createServer(async (req, res) => {
+  return async function handleForgeRequest(req, res) {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     try {
-      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      // The page is public: it holds no secret, and the create below still
+      // needs a door. A cold Mini App WebView has no initData in the URL.
+      if (req.method === 'GET' && pagePaths.includes(url.pathname)) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-        return res.end(forgePageHtml());
+        res.end(forgePageHtml({ apiBase }));
+        return true;
       }
 
-      if (req.method === 'GET' && url.pathname === '/api/state') {
+      if (req.method === 'GET' && url.pathname === statePath) {
+        if (requireStateAuth) {
+          const auth = authorize({
+            initData: String(req.headers[FORGE_INIT_HEADER] || url.searchParams.get('initData') || ''),
+            remoteAddress: req.socket?.remoteAddress || '',
+            registry,
+            env,
+            allowLocal,
+          });
+          if (!auth.ok) {
+            log(`forge state refused (${auth.reason})`);
+            sendJson(res, auth.status || 401, { ok: false, reason: auth.reason });
+            return true;
+          }
+        }
         const view = buildRegistryView ? buildRegistryView() : { master: registry.master || '', bots: (registry.bots || []).map((b) => b.id) };
         const { userbotState } = await import('./tg-userbot.mjs');
         const userbot = await userbotState(env);
-        return sendJson(res, 200, { ok: true, ...view, userbot: { configured: userbot.configured, reason: userbot.reason, hostCommands: userbot.hostCommands } });
+        sendJson(res, 200, { ok: true, ...view, userbot: { configured: userbot.configured, reason: userbot.reason, hostCommands: userbot.hostCommands } });
+        return true;
       }
 
-      if (req.method === 'POST' && url.pathname === '/api/forge') {
+      if (req.method === 'POST' && url.pathname === forgePath) {
         const raw = await readBody(req);
         let input = {};
         try {
           input = raw ? JSON.parse(raw) : {};
         } catch {
-          return sendJson(res, 400, { ok: false, reason: 'body must be JSON' });
+          sendJson(res, 400, { ok: false, reason: 'body must be JSON' });
+          return true;
         }
-        const auth = authorizeForge({
+        const auth = authorize({
           initData: String(req.headers[FORGE_INIT_HEADER] || url.searchParams.get('initData') || ''),
           remoteAddress: req.socket?.remoteAddress || '',
           registry,
@@ -274,18 +326,40 @@ export function createForgeServer({ env = process.env, registry = {}, runCreate,
         });
         if (!auth.ok) {
           log(`forge refused (${auth.via ? 'initData' : 'no door'}): ${auth.reason}`);
-          return sendJson(res, auth.status || 401, { ok: false, reason: auth.reason });
+          sendJson(res, auth.status || 401, { ok: false, reason: auth.reason });
+          return true;
         }
         const result = await runCreate(input, { via: auth.via });
-        return sendJson(res, result.ok ? 200 : 422, result);
+        sendJson(res, result.ok ? 200 : 422, result);
+        return true;
       }
 
-      return sendJson(res, 404, { ok: false, reason: `no route for ${req.method} ${url.pathname}` });
+      return false;
     } catch (err) {
       log(`forge error: ${err.message}`);
-      return sendJson(res, 500, { ok: false, reason: err.message });
+      if (!res.headersSent) sendJson(res, 500, { ok: false, reason: err.message });
+      return true;
     }
-  });
+  };
+}
 
-  return server;
+/**
+ * The server. `runCreate` is injected, so the HTTP layer cannot invent a second
+ * creation path and the tests can drive it without spawning anything.
+ */
+export function createForgeServer(options = {}) {
+  const handle = createForgeHandler(options);
+  const log = options.log || (() => {});
+  return http.createServer((req, res) => {
+    handle(req, res)
+      .then((handled) => {
+        if (handled || res.headersSent) return;
+        const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
+        sendJson(res, 404, { ok: false, reason: `no route for ${req.method} ${pathname}` });
+      })
+      .catch((err) => {
+        log(`forge error: ${err.message}`);
+        if (!res.headersSent) sendJson(res, 500, { ok: false, reason: err.message });
+      });
+  });
 }
