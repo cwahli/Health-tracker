@@ -3745,13 +3745,6 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
     const activeRole = getChatRole(chatId);
     const isExternalTurn = activeProject.type === 'external';
     const effectiveWorkspace = isExternalTurn ? activeProject.workspace : config.agent.workspace;
-    // The session this chat owns in the workspace THIS turn runs in. Null means
-    // "start one here", which is the correct answer after a project switch and
-    // also when the stored row belongs to another project.
-    turnSessionId = sessionForWorkspace(sessions, chatId, effectiveWorkspace)
-      || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
-        ? workSession.opencodeSessionId
-        : undefined);
     // An external folder's child is built from a list, so it never holds the
     // website's git or deploy credentials. Project 1 keeps inheriting them.
     const turnEnvMode = isExternalTurn ? 'project' : 'inherit';
@@ -3819,6 +3812,17 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
         // view reconcile is best-effort — the run continues on the observer log
       }
     }
+    // The session this chat owns in the workspace THIS turn runs in. Null means
+    // "start one here", which is the correct answer after a project switch and
+    // also when the stored row belongs to another project. Computed here, after
+    // the work session is resolved and its view settled — reading it earlier put
+    // this assignment in the `workSession` temporal dead zone and every agent
+    // turn died with "Cannot access 'workSession' before initialization".
+    turnSessionId = sessionForWorkspace(sessions, chatId, effectiveWorkspace)
+      || (workSession?.viewMode === 'tui' && workSession.opencodeSessionId
+        ? workSession.opencodeSessionId
+        : undefined);
+
     // Only when a tx view is NOT live: with one, the session comes from the
     // work-session row instead. The id is workspace-scoped now, so a chat that
     // switched project passes nothing here rather than the previous project's

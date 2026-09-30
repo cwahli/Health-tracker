@@ -298,6 +298,20 @@ grep -q 'has-session -t "$TMUX_NAME"' "$ATTACH" \
   && { echo "  PASS  the reap verifies the kill before new-session -A"; PASS=$((PASS + 1)); } \
   || { echo "  FAIL  the reap does not verify the kill before new-session -A"; FAIL=$((FAIL + 1)); }
 
+# The bot's turn path must compute its workspace-scoped session id only after
+# the work session exists. #365 (2026-09-30) assigned it above the `let
+# workSession`, so every plain message on every bot died with "Cannot access
+# 'workSession' before initialization" while every command kept working — only
+# a live turn found it. This pins the order.
+BOT="$HERE/bot-host.mjs"
+ws_line=$(grep -n 'let workSession = resolveSession(' "$BOT" | head -1 | cut -d: -f1)
+ts_line=$(grep -n 'turnSessionId = sessionForWorkspace(' "$BOT" | head -1 | cut -d: -f1)
+if [ -n "$ws_line" ] && [ -n "$ts_line" ] && [ "$ws_line" -lt "$ts_line" ]; then
+  echo "  PASS  the turn session id is computed after the work session exists"; PASS=$((PASS + 1));
+else
+  echo "  FAIL  the turn session id is computed after the work session exists (workSession@${ws_line:-missing}, turnSessionId@${ts_line:-missing})"; FAIL=$((FAIL + 1));
+fi
+
 rm -rf "$LEASE_FIX" "$ROOT" "$LANE"
 echo
 echo "$PASS pass, $FAIL fail"
