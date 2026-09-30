@@ -340,6 +340,25 @@ jobs:
       # screen for 20s. Same class as the two row sets.
       - name: Bug board truth sensor (dispositions + cache invalidation)
         run: node scripts/assert-bug-board-truth.mjs
+      # Meal QA loop (plan/MEAL_QA_LOOP.md). Four ratchets, all offline.
+      # resolve: saved meals stay reachable — the three provenance tiers and the
+      #   no-overclaim guard on photo_only edit-history observability.
+      # ticket:  a comparison FAIL still becomes exactly one card (V-29), with a
+      #   mechanical criteria and idempotent idem-keys.
+      # loop:    the driver stays bounded, per-card capped, author != verifier.
+      # assist:  refuses to invent nutrients rather than emit false findings.
+      - name: Meal audit loop gates (resolve, ticket, loop, assist)
+        run: |
+          node scripts/assert-meal-audit-resolve.mjs
+          node scripts/assert-meal-audit-ticket.mjs
+          node scripts/assert-meal-audit-loop.mjs
+          node scripts/assert-meal-audit-assist.mjs
+
+      # The audit-only nutrient route the meal-audit agent reads from. Pins that it
+      # serves active rows only, returns per-100g values unscaled, clamps its limit,
+      # and reaches no user data.
+      - name: Audit food-nutrients route contract
+        run: npx vitest run server_audit_food_nutrients.test.ts
 
       # capability: structural checks on every row, then the V-30.5 ticket-scoped
       # strict (the 5 foreign partials stay owned by BOT-11, never marked done).
