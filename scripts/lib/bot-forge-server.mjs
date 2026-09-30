@@ -121,12 +121,15 @@ export function forgePageHtml({ apiBase = '/api' } = {}) {
     <label for="name">Bot name</label>
     <input id="name" name="name" placeholder="VM3 Bot" autocomplete="off" required>
     <label for="token">Bot token</label>
-    <input id="token" name="token" placeholder="123456789:AA…" autocomplete="off">
+    <input id="token" name="token" placeholder="Leave empty for 1-click, or paste the full token" autocomplete="off">
     <p class="lede" id="tokenHint">Leave the token empty to let the userbot ask @BotFather. If that is not configured,
       open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a>, send <code>/newbot</code>,
       and paste the token here.</p>
     <button id="submit" type="submit">Create bot</button>
   </form>
+
+  <ol class="steps" id="steps"></ol>
+  <div class="note" id="note">Checking this host…</div>
 
   <h2>Finish a row that exists</h2>
   <p class="lede" id="attachLede">A row with no working token yet is listed here.</p>
@@ -137,9 +140,6 @@ export function forgePageHtml({ apiBase = '/api' } = {}) {
     <input id="attachToken" name="attachToken" placeholder="123456789:AA…" autocomplete="off">
     <button id="attachSubmit" type="submit">Attach token</button>
   </form>
-
-  <ol class="steps" id="steps"></ol>
-  <div class="note" id="note">Checking this host…</div>
 
 <script>
 const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
@@ -167,6 +167,21 @@ function renderSteps(steps) {
 function say(text, isError) {
   noteEl.textContent = text;
   noteEl.className = isError ? 'note err' : 'note';
+}
+
+function showNote(text, isError) {
+  say(text, isError);
+  try { if (noteEl.scrollIntoView) noteEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+}
+
+// Same shape check as the server (bot-forge-core validateToken): <bot id>:<secret>.
+// A placeholder paste must fail HERE, next to the button — not as a receipt
+// below the fold where a tap looks like it did nothing.
+function tokenShapeError(token) {
+  const value = String(token || '').trim();
+  if (!value) return '';
+  if (/^\\d{5,12}:[A-Za-z0-9_-]{30,50}$/.test(value)) return '';
+  return 'that does not look like a bot token. @BotFather gives one line shaped like 123456789:AA… (30-50 characters after the colon); a name, a truncated paste and a username all fail this check on purpose. Leave it empty for 1-click, or paste the full line.';
 }
 
 function botLabel(bot) {
@@ -205,9 +220,6 @@ async function loadState() {
       : 'userbot not configured: ' + ((state.userbot && state.userbot.reason) || 'unknown') +
         '\\nThe paste path below works without it.';
     say('master: ' + state.master + '\\nbots: ' + list + '\\n' + userbot);
-    if (state.userbot && !state.userbot.configured) {
-      el('tokenHint').textContent = state.userbot.reason;
-    }
   } catch (err) {
     say('could not read forge state: ' + err.message, true);
   }
@@ -215,7 +227,7 @@ async function loadState() {
 
 async function post(input) {
   stepsEl.innerHTML = '';
-  say((input.mode === 'attach' ? 'attaching a token to ' : 'creating ') + (input.id || input.name) + '…');
+  showNote((input.mode === 'attach' ? 'attaching a token to ' : 'creating ') + (input.id || input.name) + '…');
   try {
     const res = await fetch('${apiBase}/forge', {
       method: 'POST',
@@ -228,14 +240,14 @@ async function post(input) {
     const body = await res.json();
     if (Array.isArray(body.steps)) renderSteps(body.steps);
     if (res.ok === false || body.ok === false) {
-      say((body.reason || 'the forge stopped') + (body.hostCommands && body.hostCommands.length ? '\\n\\n' + body.hostCommands.join('\\n') : ''), true);
+      showNote((body.reason || 'the forge stopped') + (body.hostCommands && body.hostCommands.length ? '\\n\\n' + body.hostCommands.join('\\n') : ''), true);
       return false;
     }
     const bot = body.bot || {};
-    say((bot.attached ? 'attached the token to ' : 'created ') + (bot.id || input.id) + '. It replies in Telegram once the host finishes enabling it.', false);
+    showNote((bot.attached ? 'attached the token to ' : 'created ') + (bot.id || input.id) + '. It replies in Telegram once the host finishes enabling it.', false);
     return true;
   } catch (err) {
-    say('request failed: ' + err.message, true);
+    showNote('request failed: ' + err.message, true);
     return false;
   }
 }
@@ -244,6 +256,8 @@ el('forge').addEventListener('submit', async (event) => {
   event.preventDefault();
   const name = String(el('name').value || '').trim();
   if (!name) return;
+  const bad = tokenShapeError(el('token').value);
+  if (bad) { showNote(bad, true); return; }
   el('submit').disabled = true;
   if (await post({ name, token: String(el('token').value || '').trim() })) el('token').value = '';
   el('submit').disabled = false;
@@ -255,6 +269,8 @@ el('attach').addEventListener('submit', async (event) => {
   const id = String(el('existing').value || '').trim();
   const token = String(el('attachToken').value || '').trim();
   if (!id || !token) return;
+  const bad = tokenShapeError(token);
+  if (bad) { showNote(bad, true); return; }
   el('attachSubmit').disabled = true;
   if (await post({ mode: 'attach', id, token })) el('attachToken').value = '';
   el('attachSubmit').disabled = false;
