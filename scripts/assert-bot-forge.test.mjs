@@ -371,6 +371,11 @@ test('the user unit is a transform of the repo system unit, one source', () => {
   assert.match(unit.text, /WorkingDirectory=\/srv\/bot-host/);
   assert.equal(unit.environmentFile, '/srv/config/%i.env');
   assert.match(unit.text, /EnvironmentFile=-\/srv\/config\/%i\.env/);
+  // Only the directory moves: each line keeps its basename, so the shared
+  // common.env survives next to the per-bot %i.env. Rewriting both lines to
+  // %i.env dropped the fleet-wide env file from the user unit.
+  assert.match(unit.text, /EnvironmentFile=-\/srv\/config\/common\.env/);
+  assert.equal((unit.text.match(/^EnvironmentFile=/gm) || []).length, 2, 'exactly the two env files the system unit declares');
 });
 
 test('the master token file is upserted in place and keeps its other lines', () => {
@@ -641,10 +646,11 @@ test('the page offers the attach path and posts it as a mode', async () => {
 
 // ------------------------------------------------------- the HTTP surface
 
-async function startForge(runCreate, { allowLocal }) {
+async function startForge(runCreate, { allowLocal, registryPath = '' }) {
   const server = (await import('./lib/bot-forge-server.mjs')).createForgeServer({
     env: {},
     registry: registryFixture(),
+    registryPath,
     allowLocal,
     runCreate,
   });
@@ -666,6 +672,40 @@ test('the Mini App backend serves the page and the fleet state', async () => {
     assert.equal(state.master, 'vm');
     assert.equal(state.userbot.configured, false, 'no session on a dev box: the page must say so');
     assert.ok(state.userbot.hostCommands.length > 0, 'the operator must be told what to run');
+  } finally {
+    server.close();
+  }
+});
+
+test('state re-reads the registry file, so a bot created after start appears without a restart', async () => {
+  const dir = scratch();
+  const registryPath = path.join(dir, 'registry.json');
+  fs.writeFileSync(registryPath, JSON.stringify(registryFixture(), null, 2));
+  const { server, base } = await startForge(async () => ({ ok: true, steps: [] }), { allowLocal: true, registryPath });
+  try {
+    const before = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(before.bots.map((b) => b.id), ['vm', 'vm2']);
+
+    // The live defect: the gateway started at 20:27, a bot was created at
+    // 20:37, and the dropdown never listed it. The row lands in the file while
+    // the handler is already serving, and the SAME handler must serve it now.
+    const grown = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    grown.bots.push({ id: 'vm3', name: 'VM3 Bot', runtime: 'bot-host', enabled: true, telegram: { tokenEnv: 'VM3_BOT_TOKEN' } });
+    fs.writeFileSync(registryPath, JSON.stringify(grown, null, 2));
+
+    const after = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(after.bots.map((b) => b.id), ['vm', 'vm2', 'vm3']);
+    assert.equal(after.bots[2].name, 'VM3 Bot');
+    assert.equal(after.bots[2].tokenEnv, 'VM3_BOT_TOKEN');
+
+    // A file mid-write must not blank the page: a read or parse error falls
+    // back to the object the handler was constructed with.
+    fs.writeFileSync(registryPath, '{ not json');
+    const corrupt = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(corrupt.bots.map((b) => b.id), ['vm', 'vm2']);
+    fs.rmSync(registryPath);
+    const missing = await (await fetch(`${base}/api/state`)).json();
+    assert.deepEqual(missing.bots.map((b) => b.id), ['vm', 'vm2']);
   } finally {
     server.close();
   }

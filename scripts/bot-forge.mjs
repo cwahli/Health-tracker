@@ -130,8 +130,13 @@ export function renderUserUnit({ systemUnitText, botHostRoot = DEFAULT_BOT_HOST_
       if (/^EnvironmentFile=/.test(line)) {
         // The system unit relies on a fixed absolute config dir; the user-scope
         // copy states the one this forge actually wrote, so the check below is
-        // about a real file rather than a hope.
-        return line.replace(/(^EnvironmentFile=-?).*/, `$1${configDir}/%i.env`);
+        // about a real file rather than a hope. Only the directory moves: the
+        // basename decides WHICH env file the line is (the shared `common.env`
+        // must survive next to the per-bot `%i.env`), so rewriting every line
+        // to `%i.env` would drop the fleet-wide file from the user unit.
+        const [, flag = '', file = ''] = line.match(/^EnvironmentFile=(-?)(.*)$/) || [];
+        const basename = file.split('/').pop();
+        return basename ? `EnvironmentFile=${flag}${configDir}/${basename}` : line;
       }
       return line;
     });

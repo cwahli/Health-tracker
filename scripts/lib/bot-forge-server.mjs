@@ -23,6 +23,7 @@
  * one place and the transport cannot add a second creation path.
  */
 
+import fs from 'node:fs';
 import http from 'node:http';
 
 import { PIPELINE_STEPS } from './bot-forge-core.mjs';
@@ -350,12 +351,19 @@ function sendJson(res, status, payload) {
  * the gateway passes its initData check (its token set is `TUI_BOT_TOKEN_<id>`,
  * not the registry's `<id>_BOT_TOKEN`). It returns { ok, status, reason, via }.
  *
+ * `registryPath` is where the registry file lives. When given, a state request
+ * re-reads it instead of serving the object parsed at construction: the forge
+ * itself writes new rows to that file, so a gateway started before the last
+ * create must still list it. The passed `registry` object stays the fallback
+ * for an unreadable or mid-write file.
+ *
  * Returns `false` when the path is not the forge's, so a mounting server can
  * fall through to its own routes.
  */
 export function createForgeHandler({
   env = process.env,
   registry = {},
+  registryPath = '',
   runCreate,
   buildRegistryView = null,
   allowLocal = true,
@@ -370,6 +378,19 @@ export function createForgeHandler({
   const statePath = `${apiBase}/state`;
   const forgePath = `${apiBase}/forge`;
 
+  // The registry file is written by the create pipeline, so the state view
+  // must be the file as of the request, not as of gateway start. The parsed
+  // object passed at construction is the fallback: a read or parse error
+  // (file mid-write) degrades to the startup snapshot, never to a blank page.
+  const readStateRegistry = () => {
+    if (!registryPath) return registry;
+    try {
+      return JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    } catch {
+      return registry;
+    }
+  };
+
   return async function handleForgeRequest(req, res) {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     try {
@@ -382,11 +403,12 @@ export function createForgeHandler({
       }
 
       if (req.method === 'GET' && url.pathname === statePath) {
+        const stateRegistry = readStateRegistry();
         if (requireStateAuth) {
           const auth = authorize({
             initData: String(req.headers[FORGE_INIT_HEADER] || url.searchParams.get('initData') || ''),
             remoteAddress: req.socket?.remoteAddress || '',
-            registry,
+            registry: stateRegistry,
             env,
             allowLocal,
           });
@@ -402,8 +424,8 @@ export function createForgeHandler({
         const view = buildRegistryView
           ? buildRegistryView()
           : {
-              master: registry.master || '',
-              bots: (registry.bots || []).map((b) => ({
+              master: stateRegistry.master || '',
+              bots: (stateRegistry.bots || []).map((b) => ({
                 id: b.id,
                 name: b.name || b.id,
                 enabled: b.enabled !== false,
