@@ -297,21 +297,6 @@ jobs:
       - name: Token sync gate (assert-sync-tokens)
         run: node scripts/assert-sync-tokens.test.mjs
 
-      # The Personal Health Coach project's data loop. Two things have to stay
-      # true or the loop is worse than no loop: the app's database is only ever
-      # read — the D1 reader refuses anything but a SELECT *before* a request is
-      # made, and the sensor proves that against a fetch which counts its calls —
-      # and the fix list actually closes: the sensor drives a fixture from broken
-      # to fixed and asserts every item flips. It also pins what the commands
-      # depend on (the project alias grammar, cross-checked against the standalone
-      # router's copy, and the command surface each bot class publishes), so the
-      # gate covers the wiring, not just the parsing.
-      - name: External health gate (assert-external-health)
-        run: |
-          node scripts/assert-external-health.test.mjs
-          node scripts/assert-project-registry-parity.mjs
-          node scripts/assert-command-scope.mjs
-
       # The merge gate that protects this branch. `auto-merge` used to merge PRs
       # whose required checks had FAILED (#340 raced ahead of CI; #346 landed with
       # `tsc + named gates` red in both runs). The sensor drives the decision

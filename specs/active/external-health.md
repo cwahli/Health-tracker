@@ -16,7 +16,7 @@ allowed_files:
   - scripts/assert-project-registry-parity.mjs
   - tools/telegram-provider-router/src/project-registry.mjs
   - bots/capabilities.json
-  - .github/workflows/ci.yml
+  - package.json
   - projects/external-health/**
   - specs/active/external-health.md
 frozen_files:
@@ -95,9 +95,13 @@ read-only guarantee a gate instead of a promise.
 3. `scripts/lib/health/{d1,values,sheet,reconcile}.mjs` + `scripts/health-runner.mjs`:
    the read-only D1 snapshot, the Brief-folder ingest, the diff, and the fix list
    as **checks** (H-1…H-8) whose state is answered per item.
-4. `scripts/assert-external-health.test.mjs` (109 checks) and a CI step that runs
-   it together with the project-alias parity and command-scope gates — which were
-   declared in `bots/capabilities.json` but run by nothing.
+4. `scripts/assert-external-health.test.mjs` (109 checks) wired as
+   `npm run gate:external-health` and chained into `npm run test:prepush`, so the
+   sensor runs inside the required `tsc + named gates` check. It grew a dedicated
+   step in `.github/workflows/ci.yml` first; that hunk was withdrawn because
+   `#396` also changes that file and the rule is one file, one owner — the prepush
+   route needs no shared file, and the alias-parity and command-scope gates the
+   step also ran are already steps in `ci.yml`.
 
 ## Out of scope, deliberately
 
