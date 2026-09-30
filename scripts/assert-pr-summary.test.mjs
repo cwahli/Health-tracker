@@ -10,6 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -93,6 +94,17 @@ for (const next of [
   check('missing file fails', nofile.code === 1, `exit ${nofile.code}`);
   const barefile = run(good('- x\n\nNext: TUI_TG_AUTH_TRAIL.md'));
   check('existing file without section passes', barefile.code === 0, `exit ${barefile.code}: ${barefile.out.slice(0, 200)}`);
+}
+
+// 7. Bot sync exemption + push-to-main wiring (manual-merge backstop).
+{
+  const sync = run('[queue-sync] refresh WORK_QUEUE.md\n\nGenerated.\n');
+  check('queue-sync commit passes without handover', sync.code === 0, `exit ${sync.code}: ${sync.out.slice(0, 200)}`);
+  const notSync = run('[queue-sync ] refresh (trailing space is not the marker)\n');
+  check('near-miss marker still judged', notSync.code === 1, `exit ${notSync.code}`);
+  const ci = readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  check('ci judges the landed message on push-to-main', ci.includes('Landed message keeps the handover'));
+  check('landed check runs the contract binary', ci.includes('node scripts/assert-pr-summary.mjs'));
 }
 
 console.log('');

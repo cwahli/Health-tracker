@@ -10,6 +10,13 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const body = String(process.env.PR_BODY || '');
+// Generated sync commits carry no handover by design ([queue-sync] is the
+// only writer, and its content IS the queue). Judging them would fail every
+// sync, so they pass here and are pinned below.
+if (/^\[queue-sync\]/.test(body.trim())) {
+  console.log('assert-pr-summary: queue-sync commit, no handover required');
+  process.exit(0);
+}
 const fail = (m) => { console.error(`assert-pr-summary: ${m}`); process.exit(1); };
 const ok = (m) => console.log(`assert-pr-summary: ${m}`);
 
