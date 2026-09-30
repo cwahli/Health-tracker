@@ -75,9 +75,20 @@ export function usedNumbers(rows: NumberRow[], reserve: number[] = []): Set<numb
  * Numbers for cards that have none yet. Pure and deterministic: given the same
  * rows it returns the same assignment, which is what makes a concurrent second
  * caller converge on the SAME number instead of two different ones.
+ *
+ * `retired` is the floor that makes "never reused" true. Without it this
+ * function is `max(numbers present) + 1`, so deleting the highest-numbered card
+ * drops the max and the number is reissued to the next card — measured on
+ * 2026-09-30, when #18 came back four minutes after its card was deleted and
+ * silently re-pointed every citation at a different defect. The docstring
+ * promised a guarantee the code did not keep; `retired` is what keeps it.
  */
-export function planAssignments<T extends NumberRow>(rows: T[], reserve: number[] = []): Array<{ id: string; to: number }> {
-  const used = usedNumbers(rows, reserve);
+export function planAssignments<T extends NumberRow>(
+  rows: T[],
+  reserve: number[] = [],
+  retired: number[] = [],
+): Array<{ id: string; to: number }> {
+  const used = usedNumbers(rows, [...reserve, ...retired]);
   let next = Math.max(0, ...used) + 1;
   const out: Array<{ id: string; to: number }> = [];
   for (const r of byCreation(rows.filter((x) => publicNOf(x) === 0))) {
@@ -111,7 +122,7 @@ export function hasDuplicateNumbers(rows: NumberRow[]): boolean {
  * keeps it, the rest take the next free integers. Idempotent — running it on the
  * output of itself yields zero moves.
  */
-export function planRenumber<T extends NumberRow>(rows: T[]): RenumberPlan {
+export function planRenumber<T extends NumberRow>(rows: T[], retired: number[] = []): RenumberPlan {
   const dups = duplicateNumbers(rows);
   const moves: Array<{ id: string; from: number; to: number }> = [];
   if (dups.size === 0) {
@@ -119,7 +130,9 @@ export function planRenumber<T extends NumberRow>(rows: T[]): RenumberPlan {
   }
   // Every number ever held stays retired, so a repair can never hand a freed
   // number to a new card and re-point a citation.
-  const used = usedNumbers(rows);
+  // A repair must not hand out a retired number either — the two floors are the
+  // same promise: once a number has been issued, it is that card's for good.
+  const used = usedNumbers(rows, retired);
   let next = Math.max(0, ...used) + 1;
   const ordered = byCreation(rows);
   for (const n of [...dups.keys()].sort((a, b) => a - b)) {

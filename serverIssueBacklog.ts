@@ -14,7 +14,8 @@ import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import { normalizeChainKey } from './serverBrandMenu.js';
 import { hydrateWorkItem, lastCommit, publicId } from './src/utils/bugWorkItem';
-import { claimPublicNumbers, loadIssueTags } from './serverBugNumbers.js';
+import { publicNOf } from './src/utils/bugNumberParity';
+import { claimPublicNumbers, loadIssueTags, retireTicketNumber, retireTicketNumbers } from './serverBugNumbers.js';
 import { bugState } from './src/utils/bugTicketState';
 import { bugReportShotFields, bugShotContentType, bugShotExt, bugShotKey, parseDataUrl } from './src/utils/bugSnapshot';
 import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
@@ -1365,6 +1366,11 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       const tagIds = (doneTags || []).map((t: any) => t.id);
 
       if (tagIds.length > 0) {
+        // Retire the numbers BEFORE the rows go. Order matters: if the delete
+        // lands first there is a window in which the highest number is free and
+        // the next card created takes it. That is how #18 came back to a
+        // different defect on 2026-09-30.
+        await retireTicketNumbers((doneTags || []) as any[], 'purge-done');
         // Remove links first to ensure clean cascade
         const placeholders = tagIds.map(() => '?').join(', ');
         await d1Query(`DELETE FROM issue_tag_links WHERE tag_id IN (${placeholders})`, tagIds);
@@ -1373,7 +1379,7 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       }
 
       overviewCache = null;
-      res.json({ success: true, count: tagIds.length, deleted_ids: tagIds });
+      res.json({ success: true, count: tagIds.length, deleted_ids: tagIds, retired_numbers: true });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'purge done failed' });
     }
@@ -1392,6 +1398,10 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
       if (!existing) return res.status(404).json({ error: 'tag not found' });
       const id = existing.id;
 
+      // Retire before delete, for the same reason as purge-done: a number that
+      // has been issued is that card's for good, and the moment its row is gone
+      // nothing else in the store remembers it existed.
+      await retireTicketNumber(publicNOf(existing as any), 'card deleted');
       await d1Query(`DELETE FROM issue_tag_links WHERE tag_id = ?`, [id]);
       const del = await d1Query(`DELETE FROM issue_tags WHERE id = ?`, [id]);
       if (!del.success) return res.status(500).json({ error: del.error });

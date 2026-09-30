@@ -90,6 +90,57 @@ export async function loadIssueTags(limit = 1000): Promise<{ ok: boolean; rows: 
   return { ok: true, rows: (res.results || []).map(normalizeTagRow) };
 }
 
+/**
+ * Numbers whose card was deleted. They stay in the "used" set forever, so the
+ * floor for a new card is max(live, retired) + 1 rather than max(live) + 1.
+ *
+ * Without this, deleting the highest-numbered card drops the maximum and the
+ * number is reissued to the next card created — measured 2026-09-30: #18 was
+ * issued to a scratch card, the card was deleted, and #18 came back four
+ * minutes later to a real meal-audit defect, silently re-pointing every
+ * citation at it. bugNumberParity.ts promised numbers are never reused; this
+ * table is what makes the promise true.
+ *
+ * A read failure returns [] instead of throwing: a missing floor means a
+ * duplicate number, which is recoverable, and a 500 on every board read is not.
+ */
+export async function loadRetiredNumbers(): Promise<number[]> {
+  const res = await d1Query<any>(`SELECT public_n FROM retired_ticket_numbers`);
+  if (!res.success) {
+    console.warn(`${LOG} retired numbers unreadable, using live rows only:`, res.error);
+    return [];
+  }
+  return (res.results || []).map((r: any) => Number(r.public_n || 0)).filter((n: number) => n > 0);
+}
+
+/**
+ * Record that `publicN` will never be issued again. Called BEFORE the card is
+ * deleted, so there is no window in which the number is free to be reused.
+ */
+export async function retireTicketNumber(publicN: number, reason = 'card deleted'): Promise<boolean> {
+  const n = Number(publicN || 0);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  const res = await d1Query(`INSERT OR IGNORE INTO retired_ticket_numbers (public_n, reason) VALUES (?, ?)`, [
+    n,
+    String(reason).slice(0, 200),
+  ]);
+  if (!res.success) {
+    console.warn(`${LOG} could not retire #${n}:`, res.error);
+    return false;
+  }
+  return true;
+}
+
+/** Retire the numbers of cards that are about to be deleted. */
+export async function retireTicketNumbers(rows: NumberRow[], reason = 'card deleted'): Promise<number[]> {
+  const done: number[] = [];
+  for (const r of rows || []) {
+    const n = publicNOf(r);
+    if (n > 0 && (await retireTicketNumber(n, reason))) done.push(n);
+  }
+  return done;
+}
+
 /** A row is unnumbered when the column is absent, unparseable, or zero. */
 const UNNUMBERED_GUARD = `(work_item IS NULL OR work_item = '' OR json_extract(work_item, '$.public_n') IS NULL OR json_extract(work_item, '$.public_n') = 0)`;
 
@@ -152,13 +203,16 @@ export async function claimPublicNumbers({ dryRun = false, maxRounds = 4 } = {})
   const repaired: RenumberPlan['moves'] = [];
   let rounds = 0;
   let rows: NumberRow[] = [];
+  // Read once per pass. Cheap, and it is the difference between a number that
+  // can never come back and one that comes back with the next new card.
+  const retired = await loadRetiredNumbers();
 
   for (; rounds < maxRounds; rounds += 1) {
     const loaded = await loadIssueTags();
     if (!loaded.ok) return { ok: false, claimed, lost, repaired, rounds, duplicatesRemaining: -1, error: loaded.error };
     rows = loaded.rows as NumberRow[];
 
-    const dupPlan = planRenumber(rows);
+    const dupPlan = planRenumber(rows, retired);
     if (dupPlan.moves.length > 0) {
       if (dryRun) {
         repaired.push(...dupPlan.moves);
@@ -170,7 +224,7 @@ export async function claimPublicNumbers({ dryRun = false, maxRounds = 4 } = {})
       continue; // re-read before deciding anything else
     }
 
-    const plan = planAssignments(rows);
+    const plan = planAssignments(rows, [], retired);
     if (plan.length === 0) {
       return {
         ok: true,
