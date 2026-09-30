@@ -2001,6 +2001,52 @@ async function resumePacketText(rawArg) {
   return `Current ticket packet — #${id}\n\n${packet}\n\n/resume ${id} reprints this packet.`;
 }
 
+/**
+ * Deterministic /bugs body: the live card list, read from the store in the
+ * command handler — never composed by the model.
+ *
+ * Why this exists (measured 2026-09-30): the ticket bot answered "what's the
+ * list" with 4 cards from its own chat history while the store held 15,
+ * because the read is a tool call the model may skip and a stale session may
+ * never re-issue. The /bugs reply is code, so its number cannot be bypassed:
+ * it quotes the live read's `count` and `generated_at`, then one line per
+ * card in public_n order. A stale session can be wrong about phrasing, but
+ * not about this number.
+ */
+export function formatBugsListText(parsed) {
+  const rows = Array.isArray(parsed?.rows) ? parsed.rows : null;
+  if (!rows) {
+    const err = String(parsed?.error || '').slice(0, 160);
+    return `Bug store unreachable (bug API down or not local to this host). /bugs needs the store — retry later.${err ? ` ${err}` : ''}`;
+  }
+  const count = Number(parsed?.count ?? rows.length);
+  const at = String(parsed?.generated_at || '').trim();
+  const head = `🐛 *Bug queue* — ${count} card${count === 1 ? '' : 's'}${at ? ` (live read ${at})` : ''}.`;
+  if (!rows.length) return `${head}\nThe queue is empty — no tickets on the store.`;
+  const sorted = [...rows].sort((a, b) => Number(a?.public_n ?? 0) - Number(b?.public_n ?? 0));
+  // Telegram caps a message at 4096 chars; ~40 cards fit, the rest live behind
+  // the board button in the same message.
+  const MAX_ROWS = 40;
+  const lines = sorted.slice(0, MAX_ROWS).map((r) => {
+    const n = r?.public_n ?? '?';
+    const title = String(r?.title || '(untitled)').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const st = [r?.state, r?.queue].filter(Boolean).join('/');
+    return `#${n} ${title}${st ? ` (${st})` : ''}`;
+  });
+  if (sorted.length > MAX_ROWS) lines.push(`… +${sorted.length - MAX_ROWS} more (open the board for the full list).`);
+  return `${head}\n${lines.join('\n')}`;
+}
+
+async function bugsListText() {
+  let parsed;
+  try {
+    parsed = JSON.parse(await runBugctl(['list', '--json']));
+  } catch (e) {
+    return `Bug store unreachable (bug API down or not local to this host). /bugs needs the store — retry later. ${String(e?.message || '').slice(0, 120)}`;
+  }
+  return formatBugsListText(parsed);
+}
+
 async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
   const eff = effective(config, prefs, chatId);
 
@@ -2602,9 +2648,14 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const boardUrl = `${bugsGatewayUrl}/bugs/?bot=${config.id}`;
       const moved = lastBugsUrl && lastBugsUrl !== boardUrl;
       lastBugsUrl = boardUrl;
+      // The card list below is read live from the store by this handler, not
+      // composed by the model — so its count is the same number the board
+      // shows, even for a stale session that would otherwise answer from chat
+      // history.
+      const liveList = await bugsListText();
       await api.sendMessage(chatId, [
         moved ? '⚠️ *The tunnel was reconnected*, so any earlier /bugs button is dead — use this one.' : null,
-        '🐛 *Bug queue* — the same board as the Health Tracker site (Ready now, Stuck, Bugs open), auto-refreshing.',
+        liveList,
         'What changes here lands in the same list the site shows.',
       ].filter(Boolean).join('\n'), {
         reply_markup: { inline_keyboard: [[{ text: '🐛 Open bug board', web_app: { url: boardUrl } }]] },
