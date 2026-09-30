@@ -320,11 +320,12 @@ jobs:
       #   a mechanical criteria and idempotent idem-keys.
       # loop:    the iteration driver must stay bounded, per-card capped, and
       #   author != verifier.
-      - name: Meal audit loop gates (resolve, ticket, loop)
+      - name: Meal audit loop gates (resolve, ticket, loop, assist)
         run: |
           node scripts/assert-meal-audit-resolve.mjs
           node scripts/assert-meal-audit-ticket.mjs
           node scripts/assert-meal-audit-loop.mjs
+          node scripts/assert-meal-audit-assist.mjs
 
       # capability: structural checks on every row, then the V-30.5 ticket-scoped
       # strict (the 5 foreign partials stay owned by BOT-11, never marked done).
