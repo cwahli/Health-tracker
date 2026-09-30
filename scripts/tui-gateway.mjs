@@ -780,9 +780,10 @@ export function createGateway({ env = process.env, log = () => {}, forge = null 
  */
 async function loadForgeRoute({ env, log }) {
   try {
-    const [forgeMod, serverMod] = await Promise.all([
+    const [forgeMod, serverMod, userbotMod] = await Promise.all([
       import('./bot-forge.mjs'),
       import('./lib/bot-forge-server.mjs'),
+      import('./lib/tg-userbot.mjs'),
     ]);
     const paths = forgeMod.resolvePaths({ env });
     const registry = JSON.parse(fs.readFileSync(paths.registryPath, 'utf8'));
@@ -798,7 +799,7 @@ async function loadForgeRoute({ env, log }) {
       log,
       runCreate: (input) => forgeMod.runForge(
         { ...input, paths, apiBase: forgeMod.DEFAULT_API_BASE },
-        { env },
+        { env, createBot: userbotMod.createBot },
       ),
     });
   } catch (err) {
