@@ -49,6 +49,11 @@ export const OPEN_PR = {
   number: 7,
   state: 'open',
   draft: false,
+  title: 'fix: green head',
+  // Carries a `## Left` section on purpose: the driver must pass the PR body
+  // through as the squash message (see auto-merge.mjs), and the default E2E
+  // below pins that shape — a body without Left would make the pin vacuous.
+  body: '## Summary\n\nGreen head.\n\n## Status\n\nDone.\n\n## Left\n\nNothing left.\n',
   base: { ref: 'main' },
   head: { sha: HEAD_SHA },
 };

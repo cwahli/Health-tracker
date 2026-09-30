@@ -31,6 +31,7 @@ import {
   MAIN_SHA,
   MAIN_VERIFICATION_NAME,
   MERGE_SHA,
+  OPEN_PR,
   mainRun,
   runDriver,
   startFakeGitHub,
@@ -391,7 +392,13 @@ test('E2E: a green head merges exactly once, and the branch is deleted', async (
     const res = await runDriver(fake.port);
     assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
     assert.equal(fake.calls.merge.length, 1, 'exactly one merge call');
-    assert.deepEqual(fake.calls.merge[0], { merge_method: 'squash' });
+    // The squash commit is the durable record the next agent reads: the merge
+    // must carry the PR title+body so `## Left` survives in `git log`.
+    assert.deepEqual(fake.calls.merge[0], {
+      merge_method: 'squash',
+      commit_title: OPEN_PR.title,
+      commit_message: OPEN_PR.body,
+    });
     assert.equal(fake.calls.deleted.length, 1);
     assert.match(res.stdout, /merge/);
     assert.equal(fake.calls.comments.length, 1, 'the merge result is posted on the PR');
@@ -400,6 +407,60 @@ test('E2E: a green head merges exactly once, and the branch is deleted', async (
       ['all'],
       'every poll asks for all check runs, never the collapsing `latest` default',
     );
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: the squash message is the PR body, so ## Left survives in git log', async () => {
+  // Measured 2026-09-30: 0 of 16 squash commits preserved `## Left`, because the
+  // merge call sent no commit_message and GitHub minted the body from the
+  // branch's commit list. The PR body is the only place Left lives, so the
+  // driver must pass it through verbatim.
+  const body = [
+    '## Summary',
+    '',
+    'Does the thing.',
+    '',
+    '## Status',
+    '',
+    'Done.',
+    '',
+    '## Left',
+    '',
+    '- the exact next step',
+    '',
+    'Author: Test Model 1.0 (high) VM',
+    '',
+  ].join('\n');
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, title: 'feat: the thing', body }],
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'exactly one merge call');
+    assert.equal(fake.calls.merge[0].commit_title, 'feat: the thing');
+    assert.equal(fake.calls.merge[0].commit_message, body, 'THE ASSERTION: the full PR body, including ## Left, becomes the squash message');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('E2E: an empty PR body mints no blank squash message', async () => {
+  // Auto-PR bodies carry only a trailer; sending an empty commit_message would
+  // mint a blank squash body. Omit it and let GitHub default instead.
+  const fake = await startFakeGitHub({
+    checkPlans: [green()],
+    prs: [{ ...OPEN_PR, title: 'fix: auto', body: '' }],
+  });
+  try {
+    const res = await runDriver(fake.port);
+    assert.equal(res.code, 0, `driver exited 0 (stderr: ${res.stderr})`);
+    assert.equal(fake.calls.merge.length, 1, 'exactly one merge call');
+    assert.equal(fake.calls.merge[0].commit_title, 'fix: auto');
+    assert.ok(!('commit_message' in fake.calls.merge[0]), 'no blank commit_message sent');
   } finally {
     await fake.close();
   }
