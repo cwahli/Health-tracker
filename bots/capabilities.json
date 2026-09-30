@@ -39,7 +39,7 @@
         "grok_tg": true,
         "collab": true
       },
-      "notes": "bot-host family publishes the canonical BOT_COMMANDS from scripts/lib/commands.mjs. The Grok TG router is a SEPARATE product (it owns /switch, which bot-host lacks) and keeps its own popup list at tools/telegram-provider-router/src/index.js; the per-command grok_tg verdicts in `commands` are the contract between the two, enforced by scripts/assert-command-scope.mjs. /tui is bot-specific (ui-tui row): it needs the bot-host session/chatId model plus a phone tunnel, so the router cannot serve it. Do not add a command to either list without a verdict here."
+      "notes": "bot-host family publishes the canonical BOT_COMMANDS from scripts/lib/commands.mjs. The Grok TG router is a SEPARATE product (it owns /switch, which bot-host lacks) and keeps its own popup list at tools/telegram-provider-router/src/index.js; the per-command grok_tg verdicts in `commands` are the contract between the two, enforced by scripts/assert-command-scope.mjs. /tui is served by both (ui-tui row): the terminal is a gateway service, not a bot-host feature, so the router hands out the same Mini App button and the gateway does the initData HMAC with that bot's own token. Do not add a command to either list without a verdict here."
     },
     {
       "id": "chat-table",
@@ -199,9 +199,9 @@
         "council": false,
         "role": false,
         "location": false,
-    "tui": false,
-    "bugs": false,
-    "forge": false,
+        "tui": true,
+        "bugs": false,
+        "forge": false,
         "routerOnly": ["switch", "unlock"],
         "aliases": ["think"]
       }
@@ -209,23 +209,25 @@
     {
       "id": "ui-tui",
       "test": "T3",
-      "scope": "bot-specific",
+      "scope": "runtime-adapter",
       "status": "done",
-      "prove": "live smoke: /tui button opens a ttyd-backed terminal in the Telegram Mini App on a bot-host chat",
+      "prove": "live smoke: /tui button opens a ttyd-backed terminal in the Telegram Mini App; unit sensors node scripts/assert-tui-gateway.test.mjs and tools/telegram-provider-router/scripts/test-tui-miniapp.mjs",
       "expect": [
         "scripts/lib/opencode-tui.mjs",
         "scripts/tui-gateway.mjs",
-        "scripts/mobile/miniapp-shim.mjs"
+        "scripts/mobile/miniapp-shim.mjs",
+        "tools/telegram-provider-router/src/tui-miniapp.js",
+        "tools/telegram-provider-router/scripts/test-tui-miniapp.mjs"
       ],
       "skills": [],
       "classes": {
         "hermes": "adapter",
         "vps": true,
         "mobile": true,
-        "grok_tg": false,
+        "grok_tg": true,
         "collab": false
       },
-      "notes": "BOT-SPECIFIC, not a propagation gap. /tui is a Telegram Mini App that proxies to ttyd at /tui/ and is bound to the bot-host session/chatId model plus a phone tunnel (bot-host.mjs:1108-1119). The Grok TG computer bot has no session/chat model and no ttyd, so it cannot serve this command by construction; do not port it without first building those. grok_tg=false is deliberate and is enforced by the per-command verdict in the ui-commands row (scripts/assert-command-scope.mjs)."
+      "notes": "NOT bot-host-specific. The terminal is a gateway service (ttyd behind scripts/tui-gateway.mjs, initData-gated), so every bot that can send an inline web_app button can open it: bot-host resolves TUI_GATEWAY_URL and the router does the same from tools/telegram-provider-router/src/tui-miniapp.js. Each bot gets its own ttyd and its own route — the gateway reads TUI_ROUTE_<BOT>_PATH from the deployment env instead of hardcoding a third path, and derives the socket-token route from it so the two cannot drift. grok_tg=true here and in the per-command verdict is deliberate (scripts/assert-command-scope.mjs). What each side still owns: bot-host keeps the tmux pane lease (/tui off, /tui status); the router owns the chat->session record and leaves pane lifecycle to the gateway host, and says so in /tui off."
     },
     {
       "id": "ui-progress",
