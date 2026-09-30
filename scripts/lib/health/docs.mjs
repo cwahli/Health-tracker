@@ -79,6 +79,56 @@ export const SECTION_SOURCES = {
 
 export const isAnalysisSource = (source) => String(source || '').startsWith('analysis.');
 
+/** The keys the analysis pass owns: every `analysis.*` source, and nothing else. */
+export const ANALYSIS_SECTIONS = Object.values(SECTION_SOURCES).filter(isAnalysisSource);
+
+/**
+ * The analysis payload's shape, enforced before a single line is published.
+ *
+ * The payload is written by the analyst seat and read by the publisher, and it
+ * arrives holding *health claims*. Left unchecked it does not fail loudly — it
+ * fails quietly into the document: a section value that is an object stringifies
+ * to `[object Object]`, a number becomes a bare `42` reading as a measurement,
+ * and a nested array is spliced in raw. All three are health claims the reader
+ * cannot tell from a real one, which is the one thing this system exists to
+ * prevent.
+ *
+ * So the check is closed, not permissive:
+ *   - `sections` must be a plain object (an array or a string is not a map);
+ *   - every key must be a real `analysis.*` source — an unknown key is nearly
+ *     always a typo (`analysis.condition`), and ignoring it would render that
+ *     section as "awaiting the analysis pass", quietly withholding a section
+ *     the analyst believes they wrote;
+ *   - every value must be an array of strings. An empty array is legitimate and
+ *     renders as the awaiting placeholder; anything else is a malformed claim.
+ *
+ * Claim *wording* is not judged here. Striking a diagnosis or a dose is the
+ * safety reviewer's seat, and a blocklist that guessed would block honest prose
+ * ("what is not settled by the literature") as surely as it blocked "you have".
+ */
+export function validateAnalysisSections(sections) {
+  if (sections === undefined || sections === null) return { ok: true, sections: {} };
+  if (typeof sections !== 'object' || Array.isArray(sections)) {
+    return { ok: false, error: `"sections" must be an object of analysis keys, got ${Array.isArray(sections) ? 'an array' : typeof sections}` };
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(sections)) {
+    if (!ANALYSIS_SECTIONS.includes(key)) {
+      return { ok: false, error: `unknown analysis key "${key}" — expected one of ${ANALYSIS_SECTIONS.join(', ')}` };
+    }
+    if (!Array.isArray(value)) {
+      return { ok: false, error: `analysis key "${key}" must be an array of lines, got ${value === null ? 'null' : typeof value}` };
+    }
+    for (let i = 0; i < value.length; i += 1) {
+      if (typeof value[i] !== 'string') {
+        return { ok: false, error: `analysis key "${key}" line ${i + 1} must be a string, got ${value[i] === null ? 'null' : typeof value[i]}` };
+      }
+    }
+    out[key] = value;
+  }
+  return { ok: true, sections: out };
+}
+
 /**
  * Which sections a template declares, in order.
  *
@@ -249,7 +299,14 @@ export function renderSection({ heading, source, artifact, gate, analysis = {}, 
   if (isAnalysisSource(source)) {
     if (!gate.allowed) return { heading, refused: true, body: [refusalText(gate)] };
     const text = analysis?.[source];
-    const body = Array.isArray(text) ? text : String(text || '').split('\n').filter((l) => l.trim() !== '');
+    // Defence in depth: `loadAnalysisFile` already refuses a malformed payload,
+    // but a caller that renders straight from an unvalidated object must not be
+    // able to publish `[object Object]` either. Refuse, never coerce.
+    let body;
+    if (Array.isArray(text)) body = text;
+    else if (typeof text === 'string') body = text.split('\n').filter((l) => l.trim() !== '');
+    else if (text === undefined || text === null) body = [];
+    else return { heading, refused: true, body: [`_Malformed analysis payload for this section (${typeof text}) — nothing was published._`] };
     return {
       heading,
       refused: false,

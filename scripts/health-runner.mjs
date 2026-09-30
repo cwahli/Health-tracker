@@ -37,6 +37,7 @@ import {
   DOC_SPECS, SECTION_SOURCES, DOCS_FILE, REFRESH_FILE, REFRESH_LOG,
   gateFromArtifact, sectionPlan, planPublish, publishDocs, googleDocsStore,
   loadDocsRegistry, applyReceipts, adoptFromListing,
+  validateAnalysisSections, ANALYSIS_SECTIONS,
 } from './lib/health/docs.mjs';
 import { foldersFromEnv } from './lib/google-store.mjs';
 
@@ -238,15 +239,28 @@ export function loadHealthTemplates({ projectId = DEFAULT_PROJECT, readFile = (f
   return { templates, missing, dir };
 }
 
-/** The analysis payload the analysis pass leaves behind, or the one named by --analysis. */
+/**
+ * The analysis payload the analysis pass leaves behind, or the one named by
+ * --analysis.
+ *
+ * Parsing is not enough: a payload can be valid JSON and still be a malformed
+ * claim (an object where a list of lines belongs), and it is about to be
+ * published into a document a person reads as advice. `validateAnalysisSections`
+ * refuses those before the plan is built, so the run stops at `stage: 'analysis'`
+ * having written nothing — the same fail-closed shape as a template that will
+ * not render.
+ */
 export function loadAnalysisFile(file, { readFile = (f) => fs.readFileSync(f, 'utf8') } = {}) {
   if (!file) return { ok: true, sections: {}, file: '' };
+  let parsed;
   try {
-    const parsed = JSON.parse(readFile(file, 'utf8'));
-    return { ok: true, sections: parsed?.sections || {}, file, at: parsed?.at || '' };
+    parsed = JSON.parse(readFile(file, 'utf8'));
   } catch (err) {
     return { ok: false, error: `analysis file does not read: ${err.message}`, file };
   }
+  const checked = validateAnalysisSections(parsed?.sections);
+  if (!checked.ok) return { ok: false, error: `analysis payload refused: ${checked.error}`, file };
+  return { ok: true, sections: checked.sections, file, at: parsed?.at || '' };
 }
 
 /**
@@ -422,7 +436,7 @@ export function runHealthAnalyze({ projectId = DEFAULT_PROJECT, env = process.en
       paths,
     };
   }
-  const sections = Object.entries(SECTION_SOURCES).filter(([, source]) => String(source).startsWith('analysis.')).map(([heading, source]) => ({ heading, source }));
+  const sections = Object.entries(SECTION_SOURCES).filter(([, source]) => ANALYSIS_SECTIONS.includes(source)).map(([heading, source]) => ({ heading, source }));
   return {
     ok: true,
     gate,
