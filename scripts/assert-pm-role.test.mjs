@@ -41,6 +41,7 @@ import {
   readSpecDir,
   renderFleet,
   specItem,
+  worktreeFor,
 } from './lib/pm-fleet.mjs';
 import {
   RUNGS,
@@ -333,6 +334,28 @@ test('a row is the declared column layout, and dynamic text cannot break Markdow
   assert.equal(row[SHEET_COLUMNS.indexOf('rung')], 'retry');
   assert.equal(row[SHEET_COLUMNS.indexOf('attempts')], '1');
   assert.equal(mdSafe('a_b*c`d[e]'), 'abcde');
+});
+
+test('a heartbeat note rides the projection into the sheet row', () => {
+  assert.equal(worktreeFor('agent/f-13'), '~/dev/f-13');
+  assert.equal(worktreeFor('bot-host-vm'), '', 'a free-form branch implies no worktree, never a guessed path');
+  assert.equal(worktreeFor(''), '');
+  const lanes = laneItems([{ at: new Date(Date.now() - 4 * HOUR).toISOString(), surface: 'f-13', outcome: 'unresolved' }]);
+  const beats = { 'agent-f-13': { pid: process.pid, branch: 'agent/f-13', updatedAt: new Date().toISOString(), note: 'probing Vite preview' } };
+  const fleet = projectFleet({ lanes, beats, now: Date.now() });
+  const item = fleet.items[0];
+  assert.equal(item.branch, 'agent/f-13');
+  assert.equal(item.note, 'probing Vite preview');
+  assert.equal(item.worktree, '~/dev/f-13');
+  const row = sheetRow(item, { at: 'T', rung: '', attempts: 0 });
+  assert.equal(row.length, SHEET_COLUMNS.length);
+  assert.equal(row[SHEET_COLUMNS.indexOf('agent_branch')], 'agent/f-13');
+  assert.equal(row[SHEET_COLUMNS.indexOf('agent_note')], 'probing Vite preview');
+  assert.equal(row[SHEET_COLUMNS.indexOf('worktree')], '~/dev/f-13');
+  assert.equal(row[SHEET_COLUMNS.indexOf('live')], 'live');
+  const quiet = sheetRow({ key: 'k', kind: 'card', id: '#1', state: 'new' }, { at: 'T' });
+  assert.equal(quiet[SHEET_COLUMNS.indexOf('agent_branch')], '', 'no heartbeat means blank agent cells, never "dead"');
+  assert.equal(quiet[SHEET_COLUMNS.indexOf('live')], '');
 });
 
 test('the sheet is found by id, and an unset id is named, not guessed', () => {
