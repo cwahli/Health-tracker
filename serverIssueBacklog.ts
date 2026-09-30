@@ -13,7 +13,8 @@ export const DEFAULT_ISSUE_TYPE = 'general_bug';
 import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import { normalizeChainKey } from './serverBrandMenu.js';
-import { assignMissingPublicNs, hydrateWorkItem, lastCommit, publicId } from './src/utils/bugWorkItem';
+import { hydrateWorkItem, lastCommit, publicId } from './src/utils/bugWorkItem';
+import { claimPublicNumbers, loadIssueTags } from './serverBugNumbers.js';
 import { bugState } from './src/utils/bugTicketState';
 import { bugReportShotFields, bugShotContentType, bugShotExt, bugShotKey, parseDataUrl } from './src/utils/bugSnapshot';
 import { isD1Configured, d1Query, safeJsonParse } from './server_d1.js';
@@ -531,16 +532,24 @@ export async function findIssueTag(param: string): Promise<any | null> {
   return null;
 }
 
+/**
+ * The board's row set. Now the SAME loader `/api/bugs/list` uses
+ * (serverBugNumbers.loadIssueTags): all statuses, one column list, one order.
+ *
+ * It used to be its own query — `status IN ('to_fix','in_progress','fixed')`
+ * with no `updated_at` column — so any card outside that list was counted by
+ * `bugctl list` and invisible here, and the board's own "last actioned" order
+ * and done-this-week count disagreed with the canonical list. Two answers to
+ * "how many bug tickets are there" is the bug this removes; the row set is
+ * deliberately NOT narrowed by status anymore.
+ */
 async function loadBugTagsWithLinks() {
   let tags: any[] = [];
   let links: any[] = [];
   try {
-    const tRes = await d1Query(
-      "SELECT id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at, work_item FROM issue_tags WHERE status IN ('to_fix', 'in_progress', 'fixed') ORDER BY created_at DESC LIMIT 200"
-    );
-    if (!tRes.success) return { tags, links };
-    const tagRows = tRes.results || [];
-    tags = (tagRows || []).map(normIssueTag);
+    const loaded = await loadIssueTags();
+    if (!loaded.ok) return { tags, links };
+    tags = loaded.rows;
     if (tags.length > 0) {
       const placeholders = tags.map(() => '?').join(', ');
       const lRes = await d1Query(`SELECT tag_id, issue_id FROM issue_tag_links WHERE tag_id IN (${placeholders})`, tags.map((t: any) => t.id));
@@ -615,14 +624,27 @@ export function registerIssueBacklogRoutes(app: Express, deps: IssueBacklogDeps 
         return { ...t, linked_issue_ids: linkedIds, linked_issues: linkedIssues, linked_count: linkedIds.length };
       });
 
-      const numbered = assignMissingPublicNs(bugTags);
-      for (const row of numbered) {
-        const hit = bugTags.find((t: any) => t.id === row.id);
-        if (hit) hit.work_item = row.item;
-        try {
-          await d1Query('UPDATE issue_tags SET work_item = ? WHERE id = ?', [JSON.stringify(row.item), row.id]);
-        } catch {
-          /* numbers still returned this request */
+      // One numbering pass, shared with the canonical list, instead of a second
+      // private assign-then-write loop. The old loop wrote the whole work_item
+      // blob back with a number derived from a snapshot another request could
+      // have moved underneath it, so two overlapping reads minted the same #n
+      // on two cards (measured: #8, #10, #11 and #12 each sat on two cards).
+      // The shared pass writes only still-unnumbered cards, with the unnumbered
+      // guard in the WHERE clause, and re-reads until the numbering is unique.
+      const numbering = await claimPublicNumbers();
+      if (!numbering.ok) {
+        console.warn('[BugTracker Overview] numbering pass failed:', numbering.error);
+      } else if (numbering.duplicatesRemaining > 0) {
+        console.warn('[BugTracker Overview] duplicate ticket numbers remain after the numbering pass');
+      } else if (numbering.repaired.length || numbering.claimed.length) {
+        // Reflect freshly written numbers in THIS response too, so the board
+        // never renders a number the store has just changed.
+        const fresh = await loadIssueTags();
+        if (fresh.ok) {
+          bugTags.forEach((t: any, i: number) => {
+            const again = fresh.rows.find((r: any) => r.id === t.id);
+            if (again) bugTags[i] = { ...t, work_item: again.work_item };
+          });
         }
       }
 

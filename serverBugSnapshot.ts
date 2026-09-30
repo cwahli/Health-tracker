@@ -31,11 +31,11 @@ import {
 import { domainPackForAgent, buildOverviewMarkdown } from './src/utils/bugDomainPacks';
 import { stripHeavyImages } from './src/utils/debugPayload';
 import { attachReportScreenshot, findIssueTag, normalizeTagKey, normIssueTag } from './serverIssueBacklog.js';
+import { claimPublicNumbers, loadIssueTags } from './serverBugNumbers.js';
 import {
   appendEvidenceCommit,
   applySnapRemaining,
   applyAttempt,
-  assignMissingPublicNs,
   assignPublicN,
   buildNow,
   buildStartPayload,
@@ -125,12 +125,36 @@ async function refreshTapeRemaining(item: ReturnType<typeof hydrateWorkItem>) {
   }
 }
 
+/**
+ * Give every card in `tags` a ticket number, through the ONE guarded pass.
+ *
+ * This used to be its own assign-then-write loop over a caller-supplied
+ * snapshot: it derived numbers from rows it had already read, then wrote the
+ * whole work_item blob back per row. Two overlapping requests therefore chose
+ * the same number for two different cards and the later write silently won
+ * (measured 2026-09-30: #8, #10, #11 and #12 each ended up on two cards, all
+ * from one inbox migration run twice).
+ *
+ * Now the numbering is claimed with the unnumbered guard in the WHERE clause and
+ * re-read until unique, so a concurrent caller's number is never overwritten.
+ * The caller's own row filter is untouched — this only supplies numbers, which
+ * is what all three callers wanted it for.
+ */
 async function persistMissingPublicNs(tags: any[]): Promise<any[]> {
-  const assigned = assignMissingPublicNs(tags);
-  for (const row of assigned) {
-    await persistWorkItem(row.id, row.item);
-    const hit = tags.find((t) => t.id === row.id);
-    if (hit) hit.work_item = row.item;
+  const report = await claimPublicNumbers();
+  if (!report.ok) {
+    console.warn(`${BUG_SNAPSHOT_LOG} numbering pass failed:`, report.error);
+    return tags;
+  }
+  if (report.repaired.length || report.claimed.length) {
+    const fresh = await loadIssueTags();
+    if (fresh.ok) {
+      const byId = new Map(fresh.rows.map((r: any) => [r.id, r]));
+      for (const t of tags) {
+        const again = byId.get(t.id);
+        if (again) t.work_item = again.work_item;
+      }
+    }
   }
   return tags;
 }
@@ -1173,15 +1197,14 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** GET /api/bugs/open — brief-only list for coding agents */
   app.get('/api/bugs/open', async (_req: Request, res: Response) => {
     try {
-      const { d1Query } = await import('./server_d1.js');
       // D-2: D1-only. Schema is expanded (title_key/category/resolution_note/
-      // whats_still_open present) so no column-fallback chain is needed.
-      const r = await d1Query<any>(
-        `SELECT id, created_at, title, title_key, category, status, resolution_note, whats_still_open, comments, resolved_at, work_item
-         FROM issue_tags WHERE status = 'to_fix' ORDER BY created_at DESC LIMIT 100`
-      );
-      if (!r.success) return res.status(500).json({ error: r.error });
-      const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
+      // whats_still_open present) so no column-fallback chain is needed. Same
+      // shared loader as the board and the list; this route then narrows to the
+      // open cards it is for.
+      const { d1Query } = await import('./server_d1.js');
+      const loaded = await loadIssueTags();
+      if (!loaded.ok) return res.status(500).json({ error: loaded.error });
+      const tags = (await persistMissingPublicNs(loaded.rows)).filter((t: any) => String(t.status || '') === 'to_fix');
 
       const tagIds = (tags || []).map((t: any) => t.id);
       let links: any[] = [];
@@ -1217,14 +1240,16 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
   /** GET /api/bugs/next — work bug (current). ?mode=next = next card. ?n=11 = that #. */
   app.get('/api/bugs/next', async (req: Request, res: Response) => {
     try {
-      const { d1Query } = await import('./server_d1.js');
       // A-f1 fix: do NOT pre-slice on created_at before the semantic sort.
-      // fetch a large window; pickQueueTag/sortReadyQueue applies occurrences → severity → oldest.
-      const r = await d1Query<any>(
-        `SELECT * FROM issue_tags WHERE status IN ('to_fix', 'in_progress') ORDER BY updated_at DESC LIMIT 1000`
-      );
-      if (!r.success) return res.status(500).json({ error: r.error });
-      const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
+      // fetch the whole open set; pickQueueTag/sortReadyQueue applies
+      // occurrences → severity → oldest. Shared loader + shared numbering, so
+      // `work 11` resolves to the same card the board shows as #11.
+      const loaded = await loadIssueTags();
+      if (!loaded.ok) return res.status(500).json({ error: loaded.error });
+      const tags = (await persistMissingPublicNs(loaded.rows)).filter((t: any) => {
+        const st = String(t.status || '');
+        return st === 'to_fix' || st === 'in_progress';
+      });
       const tag = pickQueueTag(tags, {
         mode: String(req.query?.mode || ''),
         n: req.query?.n as string | undefined,
@@ -1499,10 +1524,27 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
 
   app.get('/api/bugs/list', async (req: Request, res: Response) => {
     try {
-      const { d1Query } = await import('./server_d1.js');
-      const r = await d1Query<any>(`SELECT * FROM issue_tags ORDER BY updated_at DESC LIMIT 1000`);
-      if (!r.success) return res.status(500).json({ error: r.error });
-      const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
+      // The row set and the numbering are the SHARED ones (serverBugNumbers.ts),
+      // the same pass the board runs. This route used to read `SELECT *` with no
+      // status filter and number the cards itself, while the board read a
+      // narrower query and numbered them again: two different row sets and two
+      // racing numberers behind one "canonical list" (measured 2026-09-30: 14
+      // cards on the board, 10 citable numbers, #8/#10/#11/#12 each doubled).
+      const loaded = await loadIssueTags();
+      if (!loaded.ok) return res.status(500).json({ error: loaded.error });
+      const numbering = await claimPublicNumbers();
+      if (!numbering.ok) {
+        return res.status(500).json({ error: `numbering pass failed: ${numbering.error}` });
+      }
+      if (numbering.duplicatesRemaining > 0) {
+        return res.status(503).json({
+          error: 'duplicate ticket numbers remain; refusing to serve a list whose #n are ambiguous',
+          duplicates_remaining: numbering.duplicatesRemaining,
+        });
+      }
+      const fresh = await loadIssueTags();
+      if (!fresh.ok) return res.status(500).json({ error: fresh.error });
+      const tags = fresh.rows;
       const wantState = req.query.state ? String(req.query.state) : null;
       const wantAssignee = req.query.assignee ? String(req.query.assignee) : null;
       const wantSurface = req.query.surface ? String(req.query.surface) : null;
@@ -1562,12 +1604,14 @@ export function registerBugSnapshotRoutes(app: Express, deps: BugSnapshotDeps = 
    * Registered BEFORE /api/bugs/:tagId so "queue" is not captured as a tagId. */
   app.get('/api/bugs/queue', async (req: Request, res: Response) => {
     try {
-      const { d1Query } = await import('./server_d1.js');
-      const r = await d1Query<any>(
-        `SELECT * FROM issue_tags WHERE status IN ('to_fix', 'in_progress') ORDER BY updated_at DESC LIMIT 1000`
+      // Same loader as the board and the canonical list, narrowed to the OPEN
+      // queue. A queue endpoint narrowing by status is its job; the board and the
+      // list narrowing differently from each other was the bug.
+      const loaded = await loadIssueTags();
+      if (!loaded.ok) return res.status(500).json({ error: loaded.error });
+      const tags = (await persistMissingPublicNs(loaded.rows)).filter(
+        (t: any) => String(t.status || '') === 'to_fix' || String(t.status || '') === 'in_progress'
       );
-      if (!r.success) return res.status(500).json({ error: r.error });
-      const tags = await persistMissingPublicNs(((r.results || []) as any[]).map(normIssueTag));
       const wantState = req.query.state ? String(req.query.state) : null;
       const wantAssignee = req.query.assignee ? String(req.query.assignee) : null;
       const wantSurface = req.query.surface ? String(req.query.surface) : null;

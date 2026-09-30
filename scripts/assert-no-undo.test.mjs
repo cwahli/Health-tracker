@@ -210,6 +210,55 @@ console.log('assert-no-undo:');
   check('behind-branch passes on main-side additions', r.code === 0, `exit ${r.code}: ${r.out.slice(0, 300)}`);
 }
 
+// 9c. CI judges a MERGE commit (refs/pull/N/merge) against the base sha the PR
+//      was opened with, and main moves on between the two. `merge-base base
+//      merge` is then `base` itself, so the diff spans every main-side commit
+//      made since the branch forked and another agent's work reads as this
+//      branch's deletions. Measured on PR #391: 11 false flags on
+//      scripts/pm-current.mjs and bot-forge-server.mjs, files that branch had
+//      never touched. The branch side of a merge is its LAST parent.
+// 9d. And the true positive must survive that fix — a gate that only stops
+//      false-flagging is worthless. Both cases run through the same shape:
+//      base sha -> main moves -> branch works -> merge.
+function mergeRefFixture({ branchEdit }) {
+  const dir = scratchRepo();
+  commit(dir, { 'a.txt': 'keep\n' }, 'base');
+  // Two files, so main's later commit and the branch's edit touch DIFFERENT ones
+  // and the fixture merge cannot conflict for reasons unrelated to the gate.
+  commit(
+    dir,
+    { 'theirs.txt': 'AGENT TWO UNIQUE LINE 55\nAGENT TWO SECOND LINE 56\n' },
+    'agent two lands work\n\nAuthor: Other Model 1.0 (high) VM\n',
+  );
+  const base = git(dir, 'rev-parse', 'main'); // the sha the PR was opened with
+  git(dir, 'checkout', '-q', '-b', 'mine');
+  commit(dir, { 'mine.txt': 'MY OWN DISTINCTIVE WORK LINE 3\n' }, 'my work');
+  // The true positive: the branch erases one of agent two's landed lines.
+  if (branchEdit) commit(dir, { 'theirs.txt': 'AGENT TWO SECOND LINE 56\n' }, 'I drop one of their lines');
+  // main moves on, exactly as it does between a PR opening and its CI run.
+  git(dir, 'checkout', '-q', 'main');
+  commit(dir, { 'other.txt': 'MAIN SIDE ADDITION 99\n' }, 'another agent lands something');
+  git(dir, 'merge', '-q', '--no-ff', '-m', 'PR merge', 'mine');
+  return { dir, base, merge: git(dir, 'rev-parse', 'HEAD') };
+}
+
+{
+  const { dir, base, merge } = mergeRefFixture({ branchEdit: false });
+  const r = runCLI(dir, '--range', `${base}..${merge}`, '--landed-ref', 'main');
+  check(
+    'a merge commit does not flag another agent\'s post-fork commits',
+    r.code === 0,
+    `exit ${r.code}: ${r.out.slice(0, 300)}`,
+  );
+}
+
+{
+  const { dir, base, merge } = mergeRefFixture({ branchEdit: true });
+  const r = runCLI(dir, '--range', `${base}..${merge}`, '--landed-ref', 'main');
+  check('a real undo through that same merge commit still fails', r.code === 1, `exit ${r.code}: ${r.out.slice(0, 200)}`);
+  check('and it still names the owning commit', /Other Model/.test(r.out), r.out.slice(0, 300));
+}
+
 // 10. Declaration parsing: units.
 {
   const d = parseDeclarations('Reverts: abc1234 — reason\nRESURRECTS: ignored\nResurrects: ./docs/x.md\nReverts: 9f8e7d6c5b4a\n');
