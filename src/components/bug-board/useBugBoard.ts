@@ -1123,6 +1123,18 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
   // Top ready tag for "Next bug" label
   const topReadyTag = sortReadyQueue(bugTags.filter((t) => hydrateWorkItem(t).queue === 'ready'))[0];
   const topReadyPubId = topReadyTag ? publicId(hydrateWorkItem(topReadyTag), topReadyTag.id) : null;
+
+  // Snapshot identity for the header (packet bug-board-parity, Node 2):
+  // card count + short hash of the overview fingerprint. Derives from
+  // `data` only, so it advances exactly when the board re-renders — two
+  // surfaces showing the same identity show the same cards.
+  const snapshotIdentity = useMemo(() => {
+    if (!data) return null;
+    const key = overviewPayloadKey(data);
+    let h = 5381;
+    for (let i = 0; i < key.length; i++) h = ((h << 5) + h + key.charCodeAt(i)) >>> 0;
+    return `${(data.bugTags || []).length}#${h.toString(16).padStart(8, '0')}`;
+  }, [data]);
   return {
     loading,
     setLoading,
@@ -1240,5 +1252,6 @@ export function useBugBoard({ isOpen, language }: { isOpen: boolean; language?: 
     selectedReports,
     topReadyTag,
     topReadyPubId,
+    snapshotIdentity,
   };
 }
