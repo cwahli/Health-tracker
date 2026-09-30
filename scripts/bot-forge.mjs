@@ -27,6 +27,7 @@
  *   node scripts/bot-forge.mjs --create --name="VM3 Bot" --token=123456789:AA…
  *   node scripts/bot-forge.mjs --create --name="VM3 Bot"          # userbot path
  *   node scripts/bot-forge.mjs --create --name="VM3 Bot" --dry-run
+ *   node scripts/bot-forge.mjs --attach=pm --token=123456789:AA…  # finish an existing row
  *   node scripts/bot-forge.mjs --serve [--port=8787]              # the Mini App
  *   node scripts/bot-forge.mjs --state                            # what this host can do
  *   node scripts/bot-forge.mjs userbot-login                      # the one-time login
@@ -192,6 +193,9 @@ export async function runForge(input = {}, io = {}) {
 
   const name = String(input.name ?? '').trim();
   const tokenSource = String(input.token ?? '').trim() ? 'paste' : 'userbot';
+  // One way to say it, from both callers: the CLI computes `mode` from --attach,
+  // the Mini App posts it in the body.
+  const mode = input.mode ? String(input.mode) : 'create';
   const paths = input.paths || resolvePaths({ env });
   const apiBase = input.apiBase || DEFAULT_API_BASE;
   const steps = [];
@@ -211,6 +215,7 @@ export async function runForge(input = {}, io = {}) {
   // 1. plan — the cheap refusal, before anything is written.
   const planned = planForge({
     registry,
+    mode,
     name,
     id: input.id || '',
     token: input.token || '',
@@ -223,10 +228,11 @@ export async function runForge(input = {}, io = {}) {
 
   if (dryRun) {
     record(step('token', 'skipped', 'dry run'));
+    if (plan.attached) record(step('registry', 'done', `${plan.id} is already in the registry (attach)`));
     return {
       ok: true,
       dryRun: true,
-      bot: { id: plan.id, name: plan.name, tokenEnv: plan.tokenEnv },
+      bot: { id: plan.id, name: plan.name, tokenEnv: plan.tokenEnv, attached: Boolean(plan.attached) },
       plan,
       steps,
       hostCommands,
@@ -263,21 +269,29 @@ export async function runForge(input = {}, io = {}) {
   const conflict = tokenOwnershipConflict(masterTokens, { token, tokenEnv: plan.tokenEnv });
   if (conflict) return refuse('plan', conflict);
 
-  // 3. registry — the thin row, through the one writer, which re-checks the
-  //    contract (a row that would drift from the master is refused there).
-  const addBotArgs = [
-    path.join(paths.repoRoot, 'scripts', 'add-bot.mjs'),
-    `--id=${plan.id}`,
-    `--name=${plan.name}`,
-    `--registry=${paths.registryPath}`,
-    `--token-env=${plan.tokenEnv}`,
-    `--playwright-output-dir=/tmp/bot-host-shots-${plan.id}`,
-  ];
-  const rowRun = spawn(process.execPath, addBotArgs, { cwd: paths.repoRoot, encoding: 'utf8' });
-  if (rowRun.status !== 0) {
-    return refuse('registry', `scripts/add-bot.mjs refused: ${String(rowRun.stderr || rowRun.stdout || '').trim().slice(0, 400)}`);
+  // 3. registry — create writes the thin row through the one writer, which
+  //    re-checks the contract (a row that would drift from the master is refused
+  //    there). Attach keeps the row it found: the row was never the missing
+  //    surface, the token was, and rewriting it would restate what the fleet
+  //    already owns. `planForge` proved the row exists, so this step is done
+  //    either way — a receipt that said "skipped" would misreport the run.
+  if (plan.attached) {
+    record(step('registry', 'done', `${plan.id} is already in the registry and is kept as it is (attach writes no row)`));
+  } else {
+    const addBotArgs = [
+      path.join(paths.repoRoot, 'scripts', 'add-bot.mjs'),
+      `--id=${plan.id}`,
+      `--name=${plan.name}`,
+      `--registry=${paths.registryPath}`,
+      `--token-env=${plan.tokenEnv}`,
+      `--playwright-output-dir=/tmp/bot-host-shots-${plan.id}`,
+    ];
+    const rowRun = spawn(process.execPath, addBotArgs, { cwd: paths.repoRoot, encoding: 'utf8' });
+    if (rowRun.status !== 0) {
+      return refuse('registry', `scripts/add-bot.mjs refused: ${String(rowRun.stderr || rowRun.stdout || '').trim().slice(0, 400)}`);
+    }
+    record(step('registry', 'done', `thin row for ${plan.id} written (inherits ${plan.masterId})`));
   }
-  record(step('registry', 'done', `thin row for ${plan.id} written (inherits ${plan.masterId})`));
 
   // 4. master token line.
   const wrote = upsertMasterToken(paths.tokensPath, plan.tokenEnv, token);
@@ -366,7 +380,7 @@ export async function runForge(input = {}, io = {}) {
   if (enableRun.status !== 0) {
     return refuse('enable', `add-bot.mjs --enable refused: ${String(enableRun.stderr || enableRun.stdout || '').trim().slice(0, 300)}`);
   }
-  record(step('enable', 'done', `${plan.id} enabled in the registry`));
+  record(step('enable', 'done', plan.attached && plan.wasEnabled ? `${plan.id} was already enabled (token rotated)` : `${plan.id} enabled in the registry`));
 
   return {
     ok: true,
@@ -378,6 +392,7 @@ export async function runForge(input = {}, io = {}) {
       telegramBotId,
       tokenSource,
       masterId: plan.masterId,
+      attached: Boolean(plan.attached),
     },
     steps,
     hostCommands,
@@ -427,6 +442,7 @@ function printHelp() {
 
   node scripts/bot-forge.mjs --create --name="VM3 Bot" --token=123456789:AA…
   node scripts/bot-forge.mjs --create --name="VM3 Bot"           # userbot mints it
+  node scripts/bot-forge.mjs --attach=pm --token=123456789:AA…   # finish a row that exists
   node scripts/bot-forge.mjs --create --name="VM3 Bot" --dry-run
   node scripts/bot-forge.mjs --serve [--port=8787] [--allow-local]
   node scripts/bot-forge.mjs --state
@@ -504,7 +520,9 @@ async function main() {
     return;
   }
 
-  if (!args.create) {
+  const attachId = typeof args.attach === 'string' ? args.attach : '';
+  const mode = attachId || args.attach === true || args.mode === 'attach' ? 'attach' : 'create';
+  if (!args.create && mode !== 'attach') {
     printHelp();
     process.exitCode = 2;
     return;
@@ -514,8 +532,9 @@ async function main() {
   const { createBot } = await import('./lib/tg-userbot.mjs');
   const result = await runForge(
     {
+      mode,
       name: args.name || '',
-      id: args.id || '',
+      id: attachId || args.id || '',
       token: args.token || '',
       username: args.username || '',
       tokenEnv: args.tokenEnv || (args.id ? tokenEnvFor(args.id) : ''),
@@ -543,7 +562,12 @@ async function main() {
     const plan = result.plan || { masterId: result.bot?.masterId || '' };
     console.log('');
     if (result.dryRun) {
-      console.log(`dry run: would create ${result.bot.id} (${result.bot.tokenEnv}) as a clone of "${result.plan.masterId}". Nothing was written.`);
+      console.log(result.bot.attached
+        ? `dry run: would attach a token to ${result.bot.id} (${result.bot.tokenEnv}) and keep its row. Nothing was written.`
+        : `dry run: would create ${result.bot.id} (${result.bot.tokenEnv}) as a clone of "${result.plan.masterId}". Nothing was written.`);
+    } else if (result.ok && result.bot.attached) {
+      console.log(`attached the token to ${result.bot.id} (@${result.bot.username || 'unknown'}) — its registry row was already there and was left alone.`);
+      console.log('Its token answered getMe and its command menu is published. Send it /help in Telegram.');
     } else if (result.ok) {
       console.log(`created ${result.bot.id} (@${result.bot.username || 'unknown'}) — a thin clone of "${plan.masterId}" in the registry.`);
       console.log('Its token answered getMe and its command menu is published. Send it /help in Telegram.');
