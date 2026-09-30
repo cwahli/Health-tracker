@@ -33,6 +33,7 @@ export const BOT_COMMANDS = [
   { command: 'project', description: 'View or switch project (e.g. /project external 1)' },
   { command: 'council', description: 'Run multi-agent council (/council run or /council status)' },
   { command: 'role', description: 'Switch active agent role (/role legal, /role sim, etc.)' },
+  { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
 ];
 
@@ -304,6 +305,7 @@ export function helpText(config, { model, agent, variant } = {}) {
     '/project [name]   view or switch project (/project external 1)',
     '/council [stage]  run council stage (audit, defense, finalize, run)',
     '/role [name]      switch role within project (/role legal, /role sim)',
+    '/health [sub]     health coach data loop: verify · ingest · status',
     '/location [name]  show or switch compute location / quota pool',
     '/help             this message',
   ].join('\n');
