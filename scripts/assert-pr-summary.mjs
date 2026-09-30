@@ -59,4 +59,15 @@ for (const name of heads) {
 if (missing) {
   fail('add non-empty ## Summary, ## Status and ## Left sections to the PR body.');
 }
+// The handover pointer: `git log` is what the next agent reads, and free
+// prose does not tell them WHERE to continue. One machine-readable line in
+// ## Left names the continuation — a trail section, a roadmap row, a branch,
+// or a follow-up PR. Presence only; the prose around it stays free.
+// Same-line anchor: `\s*` would reach across a blank line into the trailer,
+// accepting a bare `Next:` the skeleton leaves unfilled (proven by sensor).
+const leftText = (sections.left || []).join('\n');
+if (!/^Next:[ \t]*\S+/m.test(leftText)) {
+  fail('## Left must name the continuation with one line: "Next: <trail-file#section | plan/ROADMAP.md#row | agent/<branch> | #<pr>>" (e.g. "Next: TUI_TG_AUTH_TRAIL.md#current-blocker").');
+}
+ok('## Left names the continuation (Next:)');
 ok('body contract satisfied');
