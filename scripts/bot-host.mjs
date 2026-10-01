@@ -2958,6 +2958,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
             '• `/role pm take` — Take the Project Manager seat (fleet, ladder, sheet, nudges)',
             '• `/role pm` — Fleet projection · `/role pm status` — read-only plus adopted role',
             '• `/role pm run` — One PM cycle: project, nudge, record · `/role pm sheet` — record rows now',
+            '• `/role pm table` — Progress as a real table (rollup fence + sortable grid, per the telegram-tables skill)',
             '• `/role check <name>` — Inspect role mandate & instructions',
             '• `/role add <id> <name> : <instructions>` — Add a new dynamic role',
             '• `/role remove <id>` — Delete a role · `/role reset` — back to general mode',

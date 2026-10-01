@@ -55,6 +55,16 @@ import {
   rungMessage,
 } from './lib/pm-ladder.mjs';
 import {
+  ITEM_COLUMNS,
+  buildFleetTableHtml,
+  fenceTable,
+  fleetTableModel,
+  itemRows,
+  renderFleetTableCaption,
+  renderRollupTable,
+  rollupRows,
+} from './lib/pm-table.mjs';
+import {
   PM_TAB,
   SHEET_COLUMNS,
   flushSheet,
@@ -68,6 +78,7 @@ import {
   spoolFleetRows,
 } from './lib/pm-sheet.mjs';
 import { adoptedRoleLine, deliverNudge, pmHelpText, renderCycle, runCycle, runPmCommand, runStatus } from './lib/pm-run.mjs';
+import { checkRoleDetails } from './lib/project-registry.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BOT_HOST = path.join(ROOT, 'scripts', 'bot-host.mjs');
@@ -817,4 +828,117 @@ test('E2E: bare `/role` explains the whole surface, including the PM seat', asyn
     home.cleanup();
     await fake.close();
   }
+});
+
+// ---------------------------------------------------------------------------
+// The table path: `show the progress so far as a table` must come back as a
+// table Telegram can actually render. The seat hand-wrote pipe tables (live
+// 2026-10-01 on vm3), which arrive unaligned on every client.
+// ---------------------------------------------------------------------------
+
+const TABLE_FLEET = {
+  counts: { total: 3, specs: 1, cards: 1, lanes: 1, stalled: 1 },
+  items: [
+    { id: 'PM-1', kind: 'spec', state: 'locked', title: 'pm role', goal: 'role pm on VM bot', stallReason: null, branch: '', live: null },
+    { id: '#901', kind: 'card', state: 'in_fix', title: 'Fix the thing', stallReason: 'queueblocked', branch: 'agent/f-13', live: true },
+    { id: 'lane:vm', kind: 'lane', state: 'unresolved', title: 'vm lane', stallReason: 'dispatch failed', branch: 'agent/x', live: false },
+  ],
+};
+
+test('the narrow path pads every column to the same width', () => {
+  const { fenced, wide } = fenceTable(['a', 'b'], [['x', 'y'], ['longer', 'z']]);
+  assert.equal(wide, false);
+  const lines = fenced.split('\n');
+  assert.equal(lines[0], '```text');
+  assert.equal(lines[lines.length - 1], '```');
+  const widths = lines.slice(1, -1).map((l) => l.length);
+  assert.equal(widths[1], widths[2], `rows align: ${JSON.stringify(lines)}`);
+});
+
+test('a table the skill says is wide is refused by the fence, not squeezed', () => {
+  // 6 columns of real fleet data is the wide case; a fence would never align it.
+  const { wide } = fenceTable(ITEM_COLUMNS, itemRows(TABLE_FLEET));
+  assert.equal(wide, true, 'the per-item table takes the HTML path');
+  const narrow = fenceTable(['stream', 'count'], rollupRows(TABLE_FLEET));
+  assert.equal(narrow.wide, false, 'the rollup fits a phone fence');
+});
+
+test('the rollup answers the rollup and never invents a count', () => {
+  const text = renderRollupTable(TABLE_FLEET);
+  assert.match(text, /stream\s+count\s+status/);
+  assert.match(text, /packets\s+1\s+1 locked/);
+  assert.match(text, /total\s+3\s+1 stalled/);
+  assert.ok(!text.includes('|'), 'no raw pipes — the skill forbids them outside the builder');
+});
+
+test('a live agent is named, a stale one is marked, an unlinked one is blank', () => {
+  const rows = itemRows(TABLE_FLEET);
+  const agent = ITEM_COLUMNS.indexOf('agent');
+  assert.equal(rows[0][agent], '', 'no heartbeat means blank, never "dead"');
+  assert.match(rows[1][agent], /agent\/f-13 \(live\)/);
+  assert.match(rows[2][agent], /agent\/x \(stale\)/);
+});
+
+test('the wide model carries every column and a goal, not an id', () => {
+  const model = fleetTableModel(TABLE_FLEET, {
+    sources: { specsOk: true, specsDir: '/x/specs', tickets: 'canonical', ticketsCount: 2, ledgerRows: 1, beats: 1 },
+    tmux: { ok: true, sessions: [{ name: 'VM-tui-vm3', attached: true }] },
+  });
+  const items = model.tables.find((t) => t.heading.startsWith('Items'));
+  assert.deepEqual(items.columns, ITEM_COLUMNS);
+  for (const row of items.rows) assert.equal(row.length, ITEM_COLUMNS.length, 'every row matches its columns, or the builder throws');
+  assert.match(items.rows[0][ITEM_COLUMNS.indexOf('goal')], /role pm on VM bot/);
+  assert.ok(model.notes.some((n) => /VM-tui-vm3/.test(n)), 'tmux is in the notes');
+});
+
+test('dropped columns are declared, never dropped quietly', () => {
+  const model = fleetTableModel(TABLE_FLEET, { droppedColumns: ['worktree'] });
+  assert.ok(model.notes.some((n) => /columns dropped to fit: worktree/.test(n)));
+});
+
+test('the build writes a real HTML grid and names its renderer', () => {
+  const home = makeFleetHome();
+  const dir = path.join(home.home, 'tables');
+  try {
+    const model = fleetTableModel(TABLE_FLEET, {});
+    const out = buildFleetTableHtml(model, { outDir: dir, label: 'sensor' });
+    assert.ok(fs.existsSync(out.jsonPath), 'the model is on disk, so the build is inspectable');
+    assert.ok(fs.existsSync(out.htmlPath));
+    const html = fs.readFileSync(out.htmlPath, 'utf8');
+    assert.match(html, /<table/i, 'a grid, not a markdown pipe table');
+    assert.match(html, /PM-1/, 'the fleet is in the grid');
+    assert.ok(out.renderer, 'the renderer is always named, fallback included');
+    const caption = renderFleetTableCaption({ htmlPath: out.htmlPath, renderer: out.renderer, itemCount: 3 });
+    assert.match(caption, new RegExp(`MEDIA:${out.htmlPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('`/role pm table` returns a fence AND a MEDIA file, never hand-written pipes', async () => {
+  const home = makeFleetHome();
+  try {
+    const sources = {
+      specs: [], bugs: bugItems(ticketRows()),
+      lanes: laneItems([{ at: new Date(Date.now() - 4 * HOUR).toISOString(), surface: 'vm', outcome: 'escalated' }]),
+      beats: {}, sources: { specsDir: home.specsDir, specsOk: true, specsReason: '', ledger: home.ledger, ledgerRows: 1, heartbeatDir: home.beats, beats: 0, tickets: 'api', ticketsError: '', ticketsCount: 2 },
+    };
+    const res = await runPmCommand({ sub: 'table', botId: 'vm', env: {}, home: home.home, reader: () => sources });
+    assert.equal(res.ok, true);
+    assert.match(res.text, /Fleet rollup/);
+    assert.match(res.text, /```text/);
+    assert.match(res.text, /MEDIA:\//, 'the wide table ships as a file the send path extracts');
+    const body = res.text.replace(/MEDIA:.*$/m, '').replace(/```text[\s\S]*?```/g, '');
+    assert.ok(!/^\s*\|/m.test(body), 'no raw pipe rows in the prose either');
+    assert.match(pmHelpText(), /\/role pm table/);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('the PM mandate points at the table skill', async () => {
+  const details = checkRoleDetails('health-tracker', 'pm');
+  assert.match(details.instructions, /telegram-tables/, 'the seat is told which skill, not just "use tables"');
+  assert.match(details.instructions, /build-table\.py/);
+  assert.match(details.instructions, /Never emit raw `\| col \|` rows|raw `\| col \|`/);
 });
