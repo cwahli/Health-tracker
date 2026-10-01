@@ -2954,7 +2954,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
             '*How roles work:*',
             `• This chat runs as: ${listedRole ? `*${listedRole}*` : '_general mode_'} (also on \`/status\` as \`role:\`)`,
             '• `/role accountant` — Rewire this bot into a role (bot restarts); `/role general` — back to a thin clone',
-            '• `/role <name>` — Assume a persona; later turns run under its mandate',
+            '• `/role <name>` — Assume a role; later turns run under its mandate',
             '• `/role pm take` — Take the Project Manager seat (fleet, ladder, sheet, nudges)',
             '• `/role pm` — Fleet projection · `/role pm status` — read-only plus adopted role',
             '• `/role pm run` — One PM cycle: project, nudge, record · `/role pm sheet` — record rows now',
