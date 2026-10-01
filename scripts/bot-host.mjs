@@ -158,6 +158,10 @@ import { runFullCouncil, runCouncilStage, getCouncilStatus } from './council-run
 // the chat's active project: the command names its own project, so a verify can
 // be run from any chat, and the reply says which one it read.
 import { runHealthVerify, runHealthIngest, runHealthRefresh, runHealthAnalyze, getHealthStatus, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText } from './health-runner.mjs';
+// "Can a seat actually run?" — the readiness check reads the context a seat
+// would be handed plus this host's credentials, and reports what is missing
+// instead of letting a turn start on an empty context.
+import { checkHealthReadiness, formatReadinessText } from './lib/health/readiness.mjs';
 
 const HOME = os.homedir();
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -2778,7 +2782,12 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         return;
       }
       const sub = (cmd.args || '').trim().toLowerCase();
-      if (sub === 'audit' || sub === 'defense' || sub === 'finalize') {
+      // Any token that is not `run` is a stage for this project: the runner
+      // resolves it against the project's own seats (by id, alias or number) or
+      // refuses with the list. It used to accept only the three case
+      // checkpoints and answer anything else by running the **whole** council —
+      // the one thing a stage command must never do silently.
+      if (sub && sub !== 'run' && sub !== 'status') {
         if (running.get(chatId)) {
           await api.sendMessage(chatId, 'A task is already running. Please wait for it to finish first.');
           return;
@@ -2808,7 +2817,7 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         );
         try {
           const res = await runFullCouncil(activeProj.id);
-          const reply = `✅ *Council Review Completed!*\n• *Workspace:* \`${res.workspace}\`\n• *Artifacts Generated:* 6 phases\n• *Executive Deliverables:* Ready in Google Drive mirror.\n\nType \`/role builder\` to inspect the final talking points or \`/status\` to review.`;
+          const reply = `✅ *Council Review Completed!*\n• *Workspace:* \`${res.workspace}\`\n• *Seats run:* ${res.phases.length}\n• *Deliverables:* ${res.deliverables.map((d) => `\`${path.basename(d)}\``).join(' · ')}\n\nType \`/council status\` to see which stages have run.`;
           await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
         } catch (err) {
           await api.sendMessage(chatId, `❌ Council run failed: ${err.message}`);
@@ -2817,8 +2826,15 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       }
 
       const status = getCouncilStatus(activeProj.id);
-      const phasesText = (status.phases || []).map((p) => `• ${p.title}: ${p.completed ? '✅ Done' : '⏳ Pending'}`).join('\n');
-      const reply = `🏛️ *[Council Status — ${status.name}]*\n• *Workspace:* \`${status.workspace}\`\n• *Google Drive:* \`${status.gdriveFolder}\`\n• *Evidence Ledger:* ${status.hasEvidenceLedger ? '✅ Attached' : '⚠️ Missing'}\n\n*Review Phases:*\n${phasesText}\n\n*Staged Checkpoints (Human-in-the-Loop):*\n• \`/council audit\` — Phase 1: Audit facts & flag missing receipts\n• \`/council defense\` — Phases 2 & 3: Defense arguments & Manager simulation\n• \`/council finalize\` — Phases 4-6: Legal review, arbitrator ruling & final dossier\n• \`/council run\` — Unattended full pipeline`;
+      const phasesText = (status.phases || []).map((p) => `• ${p.index}. ${p.title}: ${p.completed ? '✅ Done' : '⏳ Pending'}`).join('\n');
+      // The case councils keep their three checkpoints; every other project is
+      // told its own stages, because those are the tokens that resolve.
+      const stageHelp = status.pipeline === 'case'
+        ? '*Staged Checkpoints (Human-in-the-Loop):*\n• \`/council audit\` — Phase 1: Audit facts & flag missing receipts\n• \`/council defense\` — Phases 2 & 3: Defense arguments & Manager simulation\n• \`/council finalize\` — Phases 4-6: Legal review, arbitrator ruling & final dossier\n• \`/council run\` — Unattended full pipeline'
+        : `*Stages:*\n• \`/council <stage>\` — one seat, by id, alias or number (1-${status.phases.length})\n• \`/council all\` — every seat, in order\n• \`/council run\` — every seat, unattended`;
+      const ledger = status.pipeline === 'case' ? `\n• *Evidence Ledger:* ${status.hasEvidenceLedger ? '✅ Attached' : '⚠️ Missing'}` : '';
+      const ready = status.deliverablesReady ? `✅ ${status.deliverables.length} deliverable(s)` : `⏳ ${status.deliverables.length} expected`;
+      const reply = `🏛️ *[Council Status — ${status.name}]*\n• *Workspace:* \`${status.workspace}\`\n• *Google Drive:* \`${status.gdriveFolder}\`${ledger}\n• *Deliverables:* ${ready}\n\n*Review Phases:*\n${phasesText}\n\n${stageHelp}`;
       await api.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
       return;
     }
@@ -2997,6 +3013,13 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
         // reported as a plain refusal (no crash path, no markdown parse risk).
         const res = runHealthAnalyze({ projectId });
         await api.sendMessage(chatId, formatAnalyzeText(res), res.ok ? { parse_mode: 'Markdown' } : undefined);
+        return;
+      }
+      if (sub === 'readiness') {
+        // Read-only and cheap: no running-guard, because this answers a question
+        // about the host rather than starting work in the workspace.
+        const res = checkHealthReadiness({ projectId });
+        await api.sendMessage(chatId, formatReadinessText(res), { parse_mode: 'Markdown' });
         return;
       }
       // Anything else (including no argument) is the status answer.
