@@ -67,6 +67,22 @@ export function isoDate(raw) {
   return mm ? `${m[3]}-${mm}-${m[1]}` : '';
 }
 
+/**
+ * The unit that trails a sheet result.
+ *
+ * Only the value is removed. `23.49 kg/m2` keeps `kg/m2`, and
+ * `80 mL/min/1.73m2` keeps the factor in the unit. A global strip of every
+ * number turns both into `kg/m` and `mL/min/m`. An AUDIT-C `3 /12` drops the
+ * scale, so the score stays unitless. Blood pressure is the composite: both
+ * numbers are the value, and `mmHg` is the unit.
+ */
+export function unitFromResult(resultRaw, { composite = false } = {}) {
+  const raw = String(resultRaw ?? '').trim();
+  if (!raw) return '';
+  if (composite) return raw.replace(/^-?\d+(?:\.\d+)?\s*\/\s*-?\d+(?:\.\d+)?/, '').trim();
+  return raw.replace(/^-?\d+(?:\.\d+)?(?:\s*\/\s*\d+)?/, '').trim();
+}
+
 /** A leading number, or null. Units are whatever trails it. */
 export function parseNumber(raw) {
   const m = String(raw ?? '').trim().match(/^-?\d+(?:\.\d+)?/);
@@ -220,9 +236,7 @@ export function sheetRecord(fields) {
   if (!map.skip && !map.unknown) {
     if (map.qual) rec.value = extractQual(rec.comment, rec.test.toLowerCase().includes('negative') ? 'NEGATIVE' : '');
     else rec.value = normalizeSheetValue(rec.resultRaw, { composite: map.composite === true });
-    // `100 umol/L` -> `umol/L`; `109 / 53 mmHg` -> `mmHg`. The separator only
-    // goes when it is holding two numbers together, so a unit's own slash stays.
-    rec.unit = String(rec.resultRaw).replace(/-?\d+(?:\.\d+)?(?:\s*\/\s*-?\d+(?:\.\d+)?)?/g, '').trim();
+    rec.unit = unitFromResult(rec.resultRaw, { composite: map.composite === true });
   }
   return rec;
 }

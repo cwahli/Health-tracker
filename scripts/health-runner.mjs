@@ -95,6 +95,48 @@ export function healthPaths(projectId = DEFAULT_PROJECT, { env = process.env } =
 
 const shortStamp = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
 
+function sheetFact(verdict) {
+  return {
+    key: verdict.key,
+    label: markerLabel(verdict.key),
+    date: verdict.date,
+    value: verdict.value,
+    unit: verdict.unit || '',
+  };
+}
+
+/** Sheet rows the app did not match on the same date. */
+function conflictRows(report) {
+  const dates = verdictsOf(report, 'DATE_MISMATCH').map((verdict) => ({
+    ...sheetFact(verdict),
+    kind: 'date',
+    appDate: verdict.appDate,
+    appValue: verdict.appValue,
+    offDays: verdict.offDays,
+  }));
+  const values = verdictsOf(report, 'VALUE_MISMATCH').map((verdict) => ({
+    ...sheetFact(verdict),
+    kind: 'value',
+    appValue: verdict.appValue,
+  }));
+  return [...values, ...dates];
+}
+
+/** Newest valued sheet row for each marker. */
+function latestSheetRows(report) {
+  const rows = [];
+  for (const [key, bucket] of Object.entries(report?.byKey || {})) {
+    const valued = (bucket.sheet || [])
+      .filter((row) => !row.gap && row.value !== null && row.value !== '')
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const last = valued[valued.length - 1];
+    if (!last) continue;
+    rows.push({ key, label: markerLabel(key), date: last.date, value: last.value, unit: last.unit || '' });
+  }
+  rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.label.localeCompare(b.label)));
+  return rows;
+}
+
 /**
  * Read the app, read the sheet, diff, evaluate.
  *
@@ -197,6 +239,10 @@ export async function runHealthVerify({
     missing: verdictsOf(report, 'MISSING').map((v) => ({ key: v.key, label: markerLabel(v.key), date: v.date, value: v.value, unit: v.unit, appNearest: v.appNearest })),
     appOnly: unreviewedAppRows(report).map((v) => ({ key: v.key, label: markerLabel(v.key), date: v.date, value: v.appValue, sourceDates: v.sourceDates })),
     gaps: verdictsOf(report, 'GAP').map((v) => ({ date: v.date, test: v.test })),
+    // A date or value clash is neither a match nor a missing row. Without this
+    // list the snapshot hides the sheet value the app filed on the wrong day.
+    conflicts: conflictRows(report),
+    latest: latestSheetRows(report),
   };
 
   try {
@@ -1169,6 +1215,21 @@ export function renderFixListMarkdown(artifact) {
     for (const a of artifact.appOnly) {
       p(`- ${a.date}: ${a.label} ${JSON.stringify(a.value)}${a.sourceDates?.length ? ` — the sheet has that value on ${a.sourceDates.join(', ')}` : ''}`);
     }
+    p();
+  }
+  if (artifact.conflicts?.length) {
+    p('## Disagreements');
+    p();
+    for (const row of artifact.conflicts) {
+      if (row.kind === 'date') p(`- ${row.label} ${row.value}${row.unit ? ` ${row.unit}` : ''} is on the sheet at ${row.date}; the app has ${JSON.stringify(row.appValue)} on ${row.appDate}`);
+      else p(`- ${row.label} on ${row.date}: app ${JSON.stringify(row.appValue)} vs sheet ${JSON.stringify(row.value)}`);
+    }
+    p();
+  }
+  if (artifact.latest?.length) {
+    p('## Latest on the sheet');
+    p();
+    for (const row of artifact.latest) p(`- ${row.date}: ${row.label} ${row.value}${row.unit ? ` ${row.unit}` : ''}`);
     p();
   }
   if (artifact.gaps.length) {
