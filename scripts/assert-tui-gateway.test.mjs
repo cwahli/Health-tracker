@@ -395,18 +395,22 @@ console.log('assert-tui-gateway:');
       (screen.style.transform || '') === '');
   }
 
-  // 12a6. Touch drag -> the app's own scroll keys. Everything pinned here
-  //       was measured against the installed opencode by firing exact bytes and
-  //       diffing the pane, REPEATS INCLUDED (fire 4, count how many land):
-  //         alt+ArrowUp / alt+ArrowDown  1 line    but only 1 of 4 applies
-  //         ctrl+alt+y (documented       1 line    xterm never sends it at all
-  //           line UP)
-  //         ctrl+alt+e                  1 line    4 of 4 apply, any rate
-  //         ctrl+alt+u / d              half page 4 of 4 at 300ms
-  //         SGR wheel (ESC[65/66)       none      app ignores wheel
-  //       So down is 1 line per step (unpaced) and up is a half page per step
-  //       paced to 300ms. Choosing a key that fires once is what made an
-  //       earlier version look like it was not scrolling at all.
+  // 12a6. Touch drag -> transcript scroll keys both lanes honour. The terminal
+  //       is per-lane (opencode OR cline, scripts/lib/tui-surface.mjs) and the
+  //       two lanes scroll on different modified keys:
+  //         opencode: messages_page_up = PageUp / ctrl+alt+b,
+  //                   messages_page_down = PageDown / ctrl+alt+f
+  //                   (docs: https://opencode.ai/docs/nb/keybinds/)
+  //         cline:    messages_page_up = PageUp / ctrl+meta+b,
+  //                   messages_page_down = PageDown / ctrl+meta+f,
+  //                   half page = ctrl+meta+u / ctrl+meta+d
+  //                   (TRANSCRIPT_KEYBINDS in
+  //                   sdk/apps/cli/src/tui/hooks/transcript-keybinds.ts)
+  //       So the bridge sends BARE PageUp / PageDown: the one binding both
+  //       lanes share. A ctrl+alt bridge scrolls opencode and is dead on a
+  //       cline lane (cline wants meta, not alt) — the "scrolls on VM2, dead
+  //       on VM" shape. Both directions are paced: a page key jumps a full
+  //       page, so an unpaced burst would skip screens per touchmove.
   {
     const handlers = {}; const keys = [];
     let mounted = false;
@@ -463,45 +467,45 @@ console.log('assert-tui-gateway:');
     check('a small nudge does not scroll', keys.length === t0);
     check('a nudge is not taken off the page', prevented === 0);
 
-    // Down: one line per step, no rate limit. step() = 700/24 = 29px.
+    // Down: one page key per eighth of the screen. pagePx() = 700/8 = 88px,
+    // so a 300px upward drag crosses ~3 steps (paced: at most one key per
+    // 300ms window, so the first touchmove fires once).
     reset();
     let b = keys.length;
     drag(600, 300, 6);
-    const downKeys = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 69);
-    check('an upward drag scrolls later, one line at a time',
-      downKeys.length >= 8 && downKeys.length <= 12);
-    check('down steps are not rate limited (all 4-of-4 keys used)',
-      downKeys.length > 4);
-    check('down keys carry ctrl+alt (xterm needs both for the ESC prefix)',
-      downKeys.every((k) => k.ctrlKey === true && k.altKey === true));
+    const downKeys = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 34);
+    check('an upward drag scrolls later, as PageDown',
+      downKeys.length >= 1 && downKeys.length <= 3);
+    check('page keys carry no modifiers (both lanes bind the bare key)',
+      downKeys.every((k) => k.ctrlKey === false && k.altKey === false && k.metaKey === false));
+    check('page keys name the key both lanes bind',
+      downKeys.every((k) => k.key === 'PageDown' && k.code === 'PageDown'));
     check('a key is released as well as pressed',
-      keys.slice(b).some((k) => k.type === 'keyup' && k.keyCode === 69));
+      keys.slice(b).some((k) => k.type === 'keyup' && k.keyCode === 34));
     check('the drag is taken off the page once scrolling', prevented >= 1);
 
-    // Up: paced to the cooldown. Same distance, so without pacing it would be
-    // a burst; the app drops those, so at most one may escape per window.
+    // Up: same pacing. Same distance, so without pacing it would be
+    // a burst; page keys jump a full page, so at most one may escape.
     reset();
     b = keys.length;
     drag(300, 600, 6);
-    const upBurst = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 85).length;
+    const upBurst = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 33).length;
     check('a burst of up steps is paced to the cooldown', upBurst <= 1);
-    check('no page-key nudge is ever sent',
-      keys.slice(b).every((k) => k.keyCode !== 66 && k.keyCode !== 33));
 
     // After the cooldown, up scrolls again.
     reset();
     b = keys.length;
     drag(300, 600, 6);
     check('up scrolls again once the cooldown has passed',
-      keys.slice(b).some((k) => k.type === 'keydown' && k.keyCode === 85 && k.altKey));
+      keys.slice(b).some((k) => k.type === 'keydown' && k.keyCode === 33 && k.altKey === false));
 
     // A long down drag is capped per touchmove, not throttled overall.
     b = keys.length;
     reset();
     handlers.touchstart({ touches: [{ clientY: 700 }] });
     handlers.touchmove({ touches: [{ clientY: 0 }], preventDefault() { prevented += 1; } });
-    const jump = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 69).length;
-    check('one touchmove never fires more than six lines', jump <= 6 && jump >= 1);
+    const jump = keys.slice(b).filter((k) => k.type === 'keydown' && k.keyCode === 34).length;
+    check('one touchmove never fires more than three pages', jump <= 3 && jump >= 1);
 
     // Multi-touch is left alone so pinch-zoom survives.
     reset();
@@ -516,8 +520,8 @@ console.log('assert-tui-gateway:');
     handlers.touchstart({ touches: [{ clientY: 600 }] });
     handlers.touchmove({ touches: [{ clientY: 560 }], preventDefault() { prevented += 1; } });
     handlers.touchend({});
-    check('a flick adds momentum, capped at ten steps',
-      keys.slice(b).filter((k) => k.type === 'keydown').length <= 10);
+    check('a flick adds momentum, capped at six steps',
+      keys.slice(b).filter((k) => k.type === 'keydown').length <= 6);
   }
 
   // 12a5. TEMP-DEBUG: the geometry readout rides on the landing redirect only
