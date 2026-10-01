@@ -27,6 +27,13 @@
  * Deliberately NOT part of the sweep: the governed writer is append-only, and
  * this tab is overwrite (clear + update). Run it on the VM after a sweep:
  *   node scripts/pm-current.mjs --id=vm
+ *
+ * Governed identity only: `loadHostEnv` / `identityFromEnv` / `accessToken`
+ * from `./lib/google-store.mjs`. Never convert an OAuth bundle to a /tmp ADC
+ * file or read the tab back through a second `gws` client — the writer logs
+ * the exact `currentReadRange()` to read, and `--print-markdown` renders the
+ * same rows as markdown tables with no Google call at all:
+ *   node scripts/pm-current.mjs --id=vm --print-markdown
  */
 
 import { execFileSync as nodeExecFileSync } from 'node:child_process';
@@ -69,6 +76,81 @@ export const CURRENT_COLUMNS = [
   'last_activity',
   'built_at',
 ];
+
+/** 0-based column index → A1 letters (0 → A, 19 → T, 26 → AA). */
+export function colLetter(index) {
+  let n = Number(index);
+  if (!Number.isFinite(n) || n < 0) return 'A';
+  n = Math.floor(n);
+  let out = '';
+  do {
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return out;
+}
+
+/**
+ * Exact A1 range for the `current` tab given a row count (header + rows).
+ * The tab is always CURRENT_COLUMNS wide, so 20 columns × (rows + 1).
+ * Bots must read this range verbatim — never guess `T57` vs `T56`.
+ */
+export function currentReadRange(rowCount) {
+  const rows = Math.max(0, Number(rowCount) || 0);
+  const lastCol = colLetter(CURRENT_COLUMNS.length - 1);
+  return `${CURRENT_TAB}!A1:${lastCol}${rows + 1}`;
+}
+
+/** One markdown cell: no pipes, no newlines — same 240-char cap as the sheet. */
+export function escapeMarkdownCell(v) {
+  return String(v ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\|/g, '\\|').slice(0, 240);
+}
+
+/**
+ * Markdown table (`| a | b |` + separator). The chat renderer — not `text`
+ * blocks — so the table skill pastes this output verbatim.
+ */
+export function markdownTable(headers, rows) {
+  const head = (Array.isArray(headers) ? headers : []).map(escapeMarkdownCell);
+  const body = (Array.isArray(rows) ? rows : []).map((r) =>
+    (Array.isArray(r) ? r : []).map(escapeMarkdownCell),
+  );
+  const lines = [
+    `| ${head.join(' | ')} |`,
+    `| ${head.map(() => '---').join(' | ')} |`,
+    ...body.map((cells) => `| ${cells.join(' | ')} |`),
+  ];
+  return lines.join('\n');
+}
+
+/** Fleet at a glance, computed from built rows — never hand-counted. */
+export function summarizeFleet(builtRows) {
+  const rows = Array.isArray(builtRows) ? builtRows : [];
+  const byKind = (kind) => rows.filter((r) => r?.item?.kind === kind);
+  const countState = (list, state) => list.filter((r) => String(r?.item?.state) === state).length;
+  const packets = byKind('spec');
+  const cards = byKind('card');
+  const lanes = byKind('lane');
+  const live = rows.filter((r) => r?.values?.[CURRENT_COLUMNS.indexOf('agent_live')] === 'live').length;
+  const stale = rows.filter((r) => r?.values?.[CURRENT_COLUMNS.indexOf('agent_live')] === 'stale').length;
+  const blocked = rows.filter((r) => r?.values?.[CURRENT_COLUMNS.indexOf('blocked')] === 'yes').length;
+  return {
+    packets: packets.length,
+    packetsDraft: countState(packets, 'draft'),
+    packetsLocked: countState(packets, 'locked'),
+    cards: cards.length,
+    cardsNew: countState(cards, 'new'),
+    cardsPacked: countState(cards, 'packed'),
+    cardsInFix: countState(cards, 'in_fix'),
+    cardsDone: countState(cards, 'done'),
+    lanes: lanes.length,
+    lanesUnresolved: countState(lanes, 'unresolved'),
+    total: rows.length,
+    live,
+    stale,
+    blocked,
+  };
+}
 
 /** First 10 words plus an ellipsis when longer. Summaries stay scannable. */
 export function tenWords(text) {
@@ -322,17 +404,11 @@ function arg(name, fallback = '') {
 async function main() {
   const { loadHostEnv, identityFromEnv, accessToken, getSheet } = await import('./lib/google-store.mjs');
   const botId = arg('id', 'vm');
+  const printMarkdown = arg('print-markdown', '') || arg('format', '') === 'markdown';
   const home = os.homedir();
   const now = new Date().toISOString();
 
   const { env } = loadHostEnv(botId);
-  const who = identityFromEnv(env);
-  if (!who.ok) throw new Error(`no Google identity: ${who.reason}`);
-  const t = await accessToken(who);
-  if (!t.ok) throw new Error(`token grant failed: ${t.error}`);
-  const token = t.token;
-  const sid = String(env.GOOGLE_PM_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
-  if (!sid) throw new Error('GOOGLE_PM_SHEET_ID is not set');
 
   const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
   const paths = pmPaths(env, { root, home });
@@ -387,9 +463,33 @@ async function main() {
     };
   });
 
-  const meta = await getSheet(sid, token);
-  if (!meta.ok) throw new Error(`cannot read sheet: ${meta.error}`);
-  const hasTab = (meta.sheet.sheets || []).some((s) => s.properties?.title === CURRENT_TAB);
+  if (printMarkdown) {
+    const range = currentReadRange(rows.length);
+    const sum = summarizeFleet(rows);
+    console.log(`read: ${range}`);
+    console.log(`fleet: ${sum.packets} packets (${sum.packetsLocked} locked, ${sum.packetsDraft} draft) · ${sum.cards} cards (${sum.cardsPacked} packed, ${sum.cardsNew} new, ${sum.cardsInFix} in_fix, ${sum.cardsDone} done) · ${sum.lanes} lanes · live: ${sum.live} · stale: ${sum.stale} · blocked: ${sum.blocked} · total: ${sum.total}`);
+    for (const kind of ['spec', 'card', 'lane']) {
+      const group = rows.filter((r) => r?.item?.kind === kind);
+      if (!group.length) continue;
+      const headers = ['id', 'state', 'owner', 'author', 'github', 'tree', 'agent_live', 'attempts', 'goal', 'todo'];
+      const body = group.map((r) => headers.map((h) => r.values[CURRENT_COLUMNS.indexOf(h)] || ''));
+      console.log(`\n## ${kind}s (${group.length})`);
+      console.log(markdownTable(headers, body));
+    }
+    return;
+  }
+
+  const who = identityFromEnv(env);
+  if (!who.ok) throw new Error(`no Google identity: ${who.reason}`);
+  const t = await accessToken(who);
+  if (!t.ok) throw new Error(`token grant failed: ${t.error}`);
+  const token = t.token;
+  const sid = String(env.GOOGLE_PM_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+  if (!sid) throw new Error('GOOGLE_PM_SHEET_ID is not set');
+
+  const metaRes = await getSheet(sid, token);
+  if (!metaRes.ok) throw new Error(`cannot read sheet: ${metaRes.error}`);
+  const hasTab = (metaRes.sheet.sheets || []).some((s) => s.properties?.title === CURRENT_TAB);
   const api = 'https://sheets.googleapis.com/v4/spreadsheets';
   const headers = { 'User-Agent': USER_AGENT, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   if (!hasTab) {
@@ -405,7 +505,7 @@ async function main() {
   });
   if (!put.ok) throw new Error(`cannot write ${CURRENT_TAB}: ${(await put.text()).slice(0, 200)}`);
   const done = await put.json().catch(() => ({}));
-  console.log(`current: ${rows.length} row(s) + header written (${done?.updatedCells ?? '?'} cells).`);
+  console.log(`current: ${rows.length} row(s) + header written (${done?.updatedCells ?? '?'} cells). read: ${currentReadRange(rows.length)}`);
   for (const r of rows) {
     console.log(`• ${r.item.id} [${r.item.kind}/${r.item.state}] author=${r.values[CURRENT_COLUMNS.indexOf('author')] || '-'} github=${r.values[CURRENT_COLUMNS.indexOf('github')] || '-'} tree=${r.values[CURRENT_COLUMNS.indexOf('tree')] || '-'}`);
   }
