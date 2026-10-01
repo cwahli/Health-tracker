@@ -255,6 +255,28 @@ const pipelineDoc = read('plan/BUG_TICKET_PIPELINE.md');
 const sec52 = (pipelineDoc.split('### 5.2')[1] || '').split('\n### ')[0] || '';
 check('boundary documented in BUG_TICKET_PIPELINE §5.2', /packer-only boundary/i.test(sec52) && /does \*\*not\*\* duplicate `looksBundled`/.test(sec52));
 
+// `block` writes two fields; `unblock` must clear both. bugState() re-derives
+// `queue_blocked` from the legacy `queue` field whenever there is no explicit
+// blocked_reason, so clearing only the reason left the card blocked. It reported
+// unblocked and then refused every dispatch with "blocked_reason=queue_blocked",
+// and card #19 needed both fields cleared by hand to move again.
+{
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'bugctl.mjs'), 'utf8');
+  const body = (name) => {
+    const at = src.indexOf(`case '${name}':`);
+    if (at < 0) return '';
+    const end = src.indexOf('\n    }', at);
+    return src.slice(at, end < 0 ? at + 1200 : end);
+  };
+  const block = body('block');
+  const unblock = body('unblock');
+  check('block sets queue as well as blocked_reason', /queue:\s*'blocked'/.test(block),
+    'if block stops writing queue, unblock has nothing extra to clear');
+  check('unblock clears queue, not only blocked_reason',
+    /blocked_reason:\s*null/.test(unblock) && /queue:\s*'ready'/.test(unblock),
+    'clearing only blocked_reason leaves the card blocked via the legacy queue field');
+}
+
 console.log(`\n${pass} pass, ${fail} fail`);
 if (fail) process.exit(1);
 process.exit(0);

@@ -71,7 +71,12 @@ export function buildFallbackItemsBreakdown(args: FallbackBreakdownArgs): any[] 
       dbId: bestMatch ? bestMatch.id : null,
       labelNutrientsPerServing: labelNutrients,
       warnings: evaluateNutrientWarnings(labelNutrients),
-      foodType: 'unknown'
+      foodType: 'unknown',
+      // The scout's own box, carried because this row is rebuilt from the scout
+      // item rather than taken from the agent — omit it and the box is lost for
+      // good. Null when the scout supplied none, deliberately: a fabricated
+      // full-frame box would be worse than an absent one.
+      boundingBox2D: Array.isArray(item.boundingBox2D) ? item.boundingBox2D : null
     };
   });
   onLog(`[Fallback] Built itemsBreakdown from Vision Scout output (LLM truncated)`);

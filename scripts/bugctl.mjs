@@ -410,9 +410,20 @@ async function main() {
     case 'unblock': {
       const id = resolveId(args);
       if (!id) fail('--id required', args);
+      // `block` sets BOTH blocked_reason and queue:'blocked', so unblocking only
+      // the reason left the card blocked: bugState() re-derives `queue_blocked`
+      // from the legacy queue field whenever there is no explicit
+      // blocked_reason. The result was a card that reported unblocked and then
+      // refused every dispatch with "blocked_reason=queue_blocked" — which is
+      // how card #19 needed two fields cleared by hand. Clearing both is the
+      // actual inverse of what `block` did.
       const r = await withFallback({ op: 'unblock', id }, args, () =>
         api('PATCH', `/api/bugs/${encodeURIComponent(id)}`, {
           blocked_reason: null,
+          // 'ready' is what the projection falls back to for every other case, and
+          // what the card carried before it was blocked. Without this the state
+          // stays blocked no matter what the caller asked for.
+          queue: 'ready',
           reset_burns: args['reset-burns'] === true || args['reset-burns'] === 'true',
         })
       );

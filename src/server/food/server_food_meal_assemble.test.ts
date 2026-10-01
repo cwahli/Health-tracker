@@ -37,6 +37,19 @@ describe('F-8.10 shard 6 — fallback breakdown', () => {
     expect(logs.some((m) => m.includes('LLM truncated'))).toBe(true);
   });
 
+  it('carries the scout item\'s own boundingBox2D onto the rebuilt row', () => {
+    // The row is rebuilt from the scout item, not taken from the agent, so an
+    // omitted field here loses the box for good. Null when the scout had none —
+    // a fabricated full-frame box would be worse than an absent one.
+    const box = [250, 100, 955, 990];
+    const mk = (item: any) => buildFallbackItemsBreakdown({
+      visionScoutItems: [{ keyword: 'oats', estimatedWeightGrams: 60, ...item }],
+      databaseMatchesArray: [], quarantinedIdsSet: new Set(), onLog: () => {},
+    });
+    expect(mk({ boundingBox2D: box })![0].boundingBox2D).toEqual(box);
+    expect(mk({})![0].boundingBox2D).toBeNull();
+  });
+
   it('returns null without scout items and never invents a label source', () => {
     const logs: string[] = [];
     expect(buildFallbackItemsBreakdown({

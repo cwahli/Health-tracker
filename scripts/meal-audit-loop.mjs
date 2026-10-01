@@ -521,6 +521,32 @@ const CORE_NUTRIENT_KEYS = [
  * Micronutrients are NOT required: the catalog is thin and a missing vitamin is
  * normal. Only the core keys are, because only they are scored.
  */
+/**
+ * Capture the app's own ledger for this meal, so compare has an actual to score.
+ *
+ * Nothing produced one before. `qa-runner.mjs` has no actual-capture, so a sweep
+ * reached runComparison with `actualPath` unset and stopped at NO_ACTUAL — the
+ * last mile of compare could only be walked by hand, which is exactly what an
+ * unattended sweep cannot do. The meal id is right here, and
+ * meal-audit-capture-actual.mjs turns it into the payload from the live store.
+ *
+ * Best effort by design: a meal with no debug payload simply has no actual yet,
+ * and that must read as NO_ACTUAL rather than as a hard failure.
+ */
+export function captureActualForMeal(mealId, { apiBase = null, outDir = null } = {}) {
+  if (!mealId) return { ok: false, reason: 'no meal id' };
+  const out = outDir
+    ? path.join(outDir, `actual_${mealId}.json`)
+    : path.join(REPO_ROOT, 'qa-evidence', `actual_${mealId}.json`);
+  const args = [`--meal-id=${mealId}`, `--out=${out}`];
+  if (apiBase) args.push(`--api-base=${apiBase}`);
+  const r = runNode('meal-audit-capture-actual.mjs', args, { timeout: 120000 });
+  if (r.status !== 0 || !fs.existsSync(out)) {
+    return { ok: false, reason: (r.stderr || r.stdout || `exit ${r.status}`).trim().split('\n').pop() || 'capture produced nothing' };
+  }
+  return { ok: true, path: out };
+}
+
 export function auditIsDispatchable(bundleDir) {
   if (!bundleDir) return { ok: false, reason: 'no bundle to judge' };
   const payload = path.join(bundleDir, 'audit_payload.json');
@@ -630,7 +656,16 @@ async function main() {
     console.error(`[Loop] ${meal.mealId} -> ${bundle.note}`);
 
     // --- compare (or, in dry-run, read whatever comparison exists)
-    const cmp = runComparison(bundle.bundleDir, { actualPath: o.actual, skip: o.dryRun });
+    // An explicit --actual wins. Otherwise capture the app's own ledger for this
+    // meal, which is what lets an unattended sweep reach a real verdict instead of
+    // stopping at NO_ACTUAL on every meal.
+    let actualPath = o.actual || null;
+    if (!actualPath && !o.dryRun) {
+      const cap = captureActualForMeal(meal.mealId, { apiBase: process.env.API_BASE_URL || null });
+      rec.stages.captureActual = cap.ok ? { path: cap.path } : { skipped: true, reason: cap.reason };
+      if (cap.ok) actualPath = cap.path;
+    }
+    const cmp = runComparison(bundle.bundleDir, { actualPath, skip: o.dryRun });
     rec.stages.compare = { verdict: cmp.verdict, skipped: !!cmp.skipped, failures: (cmp.failures || []).length, error: cmp.error || null };
 
     if (cmp.verdict === 'PASS') {
