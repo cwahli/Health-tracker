@@ -204,13 +204,8 @@
         "tui": true,
         "bugs": false,
         "forge": false,
-        "routerOnly": [
-          "switch",
-          "unlock"
-        ],
-        "aliases": [
-          "think"
-        ]
+        "routerOnly": ["switch", "unlock"],
+        "aliases": ["think"]
       }
     },
     {
