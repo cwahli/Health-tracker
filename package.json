@@ -44,7 +44,8 @@
     "golden:promote": "node scripts/golden-promote.mjs",
     "golden:loop": "node scripts/golden-loop.mjs",
     "prebuild:web": "node scripts/write-git-version.mjs",
-    "gate:command-parity": "node scripts/assert-command-parity.mjs"
+    "gate:command-parity": "node scripts/assert-command-parity.mjs",
+    "gate:bot-roles": "node scripts/assert-bot-roles.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1105.0",

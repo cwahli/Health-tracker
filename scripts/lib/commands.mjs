@@ -93,7 +93,7 @@ export const HELP_USAGE = {
   tx: { args: '[on|off|status|debug]', text: 'shared work view for this chat' },
   project: { args: '[name]', text: 'view or switch project (/project external 1)' },
   council: { args: '[stage]', text: 'run council stage (audit, defense, finalize, run)' },
-  role: { args: '[name]', text: 'switch role within project (/role legal, /role sim)' },
+  role: { args: '[name]', text: 'switch bot role (/role accountant) or project persona (/role legal)' },
   health: { args: '[sub]', text: 'health coach data loop: verify · ingest · refresh · analyze · status' },
   tax: { args: '[sub]', text: 'Chiwah LTD tax: snapshot · sweep · status · deadlines · saving · doc' },
   location: { args: '[name]', text: 'show or switch compute location / quota pool' },

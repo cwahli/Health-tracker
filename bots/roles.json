@@ -1,0 +1,34 @@
+{
+  "_comment": "Bot-identity roles assignable via `/role <name>` in a bot's direct chat. Each role patches the bot's own registry row (workspace, skills, model) and restarts it. Patch keys are bounded by ROLE_PATCH_KEYS in scripts/lib/bot-roles.mjs — a role that touches anything else is refused, so a role can never fork fleet policy. Skill paths resolve relative to the role workspace.",
+  "roles": {
+    "accountant": {
+      "label": "Tax Accountant",
+      "blurb": "Chiwah LTD maker + sweep: chiwah-tax workspace, tax-sweep procedure, default model",
+      "set": {
+        "notes": "Role: Tax Accountant (assigned via /role accountant). Chiwah LTD maker + sweep runner; workspace chiwah-tax (separate repo; never Health-tracker).",
+        "agent.workspace": "/home/ubuntu/chiwah-tax",
+        "agent.skills": [".agents/skills/tax-sweep"]
+      },
+      "clear": ["agent.model"]
+    },
+    "verifier": {
+      "label": "Tax Verifier",
+      "blurb": "Chiwah LTD checker: chiwah-tax workspace, tax-verify procedure, independent model",
+      "set": {
+        "notes": "Role: Tax Verifier (assigned via /role verifier). Read-only checker; files findings, fixes nothing. Different provider from the maker by structural requirement.",
+        "agent.workspace": "/home/ubuntu/chiwah-tax",
+        "agent.skills": [".agents/skills/tax-verify"],
+        "agent.model": "opencode/muse-spark-1.3-contributor"
+      },
+      "clear": []
+    },
+    "general": {
+      "label": "General",
+      "blurb": "Back to a thin clone of the master: no role workspace, skills, or model",
+      "set": {
+        "notes": "Role: general (assigned via /role general). Thin clone of the master; no per-role overrides."
+      },
+      "clear": ["agent.workspace", "agent.skills", "agent.model"]
+    }
+  }
+}

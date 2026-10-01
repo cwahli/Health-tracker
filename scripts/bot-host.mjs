@@ -106,6 +106,15 @@ import { ensureTurnLog, makeSends, writerFor } from './lib/google-writer.mjs';
 import { scoreLabelFor, benchmarkLabel, walkTierRank, tierForModel } from './lib/free-catalogs.mjs';
 import { loadRegistry, getBot, resolveToken, resolveRegistryPath, normalizeConfig } from './lib/registry.mjs';
 import {
+  loadRoles,
+  resolveRole,
+  applyRoleToRow,
+  describeRoleChange,
+  validateRoleShape,
+  validateRoleTarget,
+  defaultCatalogPath,
+} from './lib/bot-roles.mjs';
+import {
   parseCommand,
   resolveCommandName,
   isAddressedToUs,
@@ -2002,7 +2011,58 @@ async function resumePacketText(rawArg) {
   return `Current ticket packet — #${id}\n\n${packet}\n\n/resume ${id} reprints this packet.`;
 }
 
-async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd }) {
+/**
+ * Restart this bot's own unit so a registry change (e.g. a new `/role`) takes
+ * effect. The fleet runs units in two scopes — user scope for forge-created
+ * bots, system scope for the older ones — so the owning scope is detected, not
+ * assumed. The caller sends its reply first: on success this process dies to
+ * SIGTERM mid-restart and nothing after runs; on failure the bot is still
+ * alive and the caller sends the manual command as a follow-up.
+ * Returns { ok, scope?, manual?, skipped? }.
+ */
+async function restartOwnUnit(botId) {
+  // Test seam: the simulate E2E proves the registry write without rebooting
+  // the test box. Production never sets this (a role without a restart is a
+  // row the running process ignores).
+  if (process.env.BOT_ROLE_NO_RESTART === '1') {
+    return { ok: true, skipped: true };
+  }
+  const unit = `bot-host@${botId}`;
+  try {
+    const { stdout } = await execFileP('systemctl', ['--user', 'show', '-p', 'LoadState', unit]);
+    if (String(stdout || '').includes('loaded')) {
+      await execFileP('systemctl', ['--user', 'restart', `${unit}.service`]);
+      return { ok: true, scope: 'user' };
+    }
+  } catch {
+    // Not a user-scope unit — fall through to the system scope attempt.
+  }
+  try {
+    await execFileP('sudo', ['-n', 'systemctl', 'restart', `${unit}.service`]);
+    return { ok: true, scope: 'system' };
+  } catch (err) {
+    return { ok: false, manual: `systemctl --user restart ${unit}  (or: sudo systemctl restart ${unit}) — ${String(err?.message || err).slice(0, 160)}` };
+  }
+}
+
+/** Registry file this process serves (honours --registry / OPENCODE_BOT_REGISTRY). */
+let ACTIVE_REGISTRY_PATH = null;
+
+function registryFileInUse() {
+  if (ACTIVE_REGISTRY_PATH) return ACTIVE_REGISTRY_PATH;
+  try {
+    return resolveRegistryPath(null, REPO_ROOT);
+  } catch {
+    return path.join(REPO_ROOT, 'bots', 'registry.json');
+  }
+}
+
+/** Role catalog lives next to the registry in use, so fixtures stay hermetic. */
+function rolesFileInUse() {
+  return path.join(path.dirname(registryFileInUse()), 'roles.json');
+}
+
+async function handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId = 0, kind = 'direct' }) {
   const eff = effective(config, prefs, chatId);
 
   // Deep links (`t.me/<bot>?start=<payload>`) arrive as `/start <payload>`.
@@ -2788,13 +2848,93 @@ async function handleCommand({ api, config, sessions, prefs, caches, running, la
       const activeProj = getChatProject(chatId);
       const currentRoles = getProjectRoles(activeProj.id);
       if (!cmd.args) {
+        // Bot-identity roles (this bot's registry row) live above the
+        // per-chat project personas: `/role accountant` rewires the bot and
+        // restarts it, while the names below only change this chat's persona.
+        let botRoles = [];
+        try {
+          const catalog = loadRoles(rolesFileInUse());
+          botRoles = Object.entries(catalog).map(([id, r]) => `• \`/role ${id}\` — *${r.label}* — ${r.blurb}`);
+        } catch {
+          botRoles = ['• (role catalog unreadable — bot-identity roles unavailable)'];
+        }
         const rolesList = (currentRoles || []).map((r) => `• \`/role ${r.id.split('_')[0]}\` — *${r.name}*`).join('\n');
         await api.sendMessage(
           chatId,
-          `👥 *[Active Project Roles — ${activeProj.name}]*\n\n${rolesList || '• None declared.'}\n\n• \`/role check <name>\` — Inspect role mandate & instructions\n• \`/role add <id> <name> : <instructions>\` — Add a new dynamic role\n• \`/role remove <id>\` — Delete a role\n• \`/role reset\` — Return to general collaborative mode`,
+          `🎭 *[Bot Identity Roles]*\n\n${botRoles.join('\n')}\n\n👥 *[Project Personas — ${activeProj.name}]*\n\n${rolesList || '• None declared.'}\n\n• \`/role check <name>\` — Inspect role mandate & instructions\n• \`/role add <id> <name> : <instructions>\` — Add a new dynamic persona\n• \`/role remove <id>\` — Delete a persona\n• \`/role reset\` — Return to general collaborative mode`,
           { parse_mode: 'Markdown' }
         );
         return;
+      }
+      // A bot-identity role rewires THIS BOT (registry row + restart), so it
+      // outranks project personas and is only assignable in the bot's direct
+      // chat by an allowlisted user. Anything else falls through to the
+      // per-chat persona logic below, unchanged.
+      if (!cmd.args.includes(' ')) {
+        let botRole = null;
+        try {
+          botRole = resolveRole(loadRoles(rolesFileInUse()), cmd.args);
+        } catch {
+          botRole = null;
+        }
+        if (botRole) {
+          if (kind !== 'direct') {
+            await api.sendMessage(chatId, '🎭 Bot-identity roles are assigned in the bot\u2019s direct chat — a role rewires the whole bot, not just this group.');
+            return;
+          }
+          if (!config.telegram?.allowedUserIds?.includes(Number(userId))) {
+            await api.sendMessage(chatId, '🎭 Only an allowlisted user can assign a bot-identity role.');
+            return;
+          }
+          const shapeFailures = validateRoleShape(botRole.id, botRole);
+          if (shapeFailures.length) {
+            await api.sendMessage(chatId, `🎭 Role "${botRole.id}" is misconfigured:\n- ${shapeFailures.join('\n- ')}`);
+            return;
+          }
+          const target = validateRoleTarget(botRole);
+          if (!target.ok) {
+            await api.sendMessage(chatId, `🎭 Cannot assign *${botRole.label}* here: ${target.reason}.`);
+            return;
+          }
+          const registryPath = registryFileInUse();
+          let registry;
+          try {
+            // Raw rows, NOT the inheritance-merged view: writing a merged row
+            // back would materialize every inherited leaf into this bot and
+            // silently de-thin the clone. The role patch touches only its own
+            // leaves; everything else stays inherited.
+            registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+            if (!registry || !Array.isArray(registry.bots)) throw new Error('no "bots" array');
+          } catch (err) {
+            await api.sendMessage(chatId, `🎭 Cannot read the registry: ${String(err?.message || err).slice(0, 200)}`);
+            return;
+          }
+          const row = (registry.bots || []).find((b) => b.id === config.id);
+          if (!row) {
+            await api.sendMessage(chatId, `🎭 This bot ("${config.id}") has no registry row, so there is nothing to assign the role to.`);
+            return;
+          }
+          const changes = describeRoleChange(row, botRole, config.id);
+          const next = applyRoleToRow(row, botRole, config.id);
+          Object.keys(row).forEach((k) => delete row[k]);
+          Object.assign(row, next);
+          try {
+            fs.writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+          } catch (err) {
+            await api.sendMessage(chatId, `🎭 Role computed but the registry write failed: ${String(err?.message || err).slice(0, 200)} — nothing changed.`);
+            return;
+          }
+          await api.sendMessage(
+            chatId,
+            `🎭 *Role assigned: ${botRole.label}.*\n${changes.join('\n')}\n\nRestarting into the role now — I will be back in a few seconds.`,
+            { parse_mode: 'Markdown' }
+          );
+          const restarted = await restartOwnUnit(config.id);
+          if (!restarted.ok) {
+            await api.sendMessage(chatId, `⚠️ Role is written but the automatic restart failed. Restart me with:\n\`${restarted.manual}\``);
+          }
+          return;
+        }
       }
       if (cmd.args === 'reset') {
         resetChatRole(chatId);
@@ -3652,7 +3792,7 @@ async function handleMessage({ api, config, throttle, sessions, prefs, caches, r
 
   const cmd = text ? parseCommand(text) : null;
   if (cmd) {
-    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd });
+    await handleCommand({ api, config, sessions, prefs, caches, running, lastUsage, totals, health, bootedAt, chatId, cmd, userId, kind: chatKind(message) });
     return;
   }
 
@@ -4505,6 +4645,10 @@ async function simulate(config, args) {
     bootedAt: Date.now(),
     chatId: 'sim',
     cmd,
+    // Simulate is the local operator at the terminal: no Telegram sender, so
+    // act as the first allowlisted user (the operator seat) explicitly.
+    userId: Number(config.telegram?.allowedUserIds?.[0] || 0),
+    kind: 'direct',
   });
 }
 
@@ -4555,6 +4699,7 @@ async function main() {
   }
 
   const registryPath = resolveRegistryPath(args.registry, REPO_ROOT);
+  ACTIVE_REGISTRY_PATH = registryPath;
   const registry = loadRegistry(registryPath);
   // BOT-17 lane contract enforced at startup: a registry that names an
   // agent/model/process as a bot must never boot a poller. Fail loud.

@@ -44,6 +44,11 @@ import {
   helpText,
   toTelegramCommands,
 } from './lib/commands.mjs';
+import {
+  ROLE_PATCH_KEYS,
+  loadRoles,
+  validateRoleShape,
+} from './lib/bot-roles.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REMOVED = ['abort', 'watch'];
@@ -137,6 +142,21 @@ const failures = (() => {
   }
   if (!hostSrc.includes('deleteMyCommands')) {
     extra.push({ kind: 'scope-reconcile-missing', command: '', detail: 'bot-host.mjs no longer calls deleteMyCommands on boot — narrow-scope shadowing is unrepaired.' });
+  }
+  // Bot-identity roles (/role accountant): every role structurally valid and
+  // patch-bounded, so adding a role can never fork fleet policy.
+  try {
+    const catalog = loadRoles(path.join(ROOT, 'bots', 'roles.json'));
+    for (const [id, role] of Object.entries(catalog)) {
+      for (const failure of validateRoleShape(id, role)) {
+        extra.push({ kind: 'bad-role', command: '', detail: failure });
+      }
+    }
+    if (!catalog.accountant || !catalog.verifier || !catalog.general) {
+      extra.push({ kind: 'bad-role', command: '', detail: 'roles.json must define accountant, verifier, and general.' });
+    }
+  } catch (err) {
+    extra.push({ kind: 'bad-role', command: '', detail: `roles.json unreadable: ${String(err?.message || err).slice(0, 200)}` });
   }
   return [...extra, ...audit({
     canonical: [...COMMAND_NAMES],
