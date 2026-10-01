@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { DOCS_FILE, gateFromArtifact, loadDocsRegistry, validateAnalysisSections } from './docs.mjs';
+import { RESEARCH_LOG } from './research.mjs';
 
 export const VERIFY_FILE = 'health-verify.json';
 export const FIX_LIST_FILE = 'health-fix-list.md';
@@ -56,6 +57,7 @@ export const CONTEXT_BUDGET = {
   analysis: 12000,
   docs: 1500,
   refresh: 1500,
+  research: 3000,
   sources: 2500,
 };
 
@@ -74,6 +76,10 @@ export const CONTEXT_CANDIDATES = [
   { key: 'analysis', label: 'The analysis payload under review', rel: `result/${ANALYSIS_FILE}` },
   { key: 'docs', label: 'The published documents registry', rel: `result/${DOCS_FILE}` },
   { key: 'refresh', label: 'The last refresh receipt', rel: `result/${REFRESH_FILE}` },
+  // The literature lane's ledger: every url it fetched, with the hash of what
+  // came back. The Research Lead cites from here, and the publisher checks the
+  // citations against the same file — so the seat and the gate read one source.
+  { key: 'research', label: 'The recorded research hits (the only citable links)', rel: `result/${RESEARCH_LOG}` },
   { key: 'sources', label: 'The banked sources', rel: 'sources/' },
 ];
 
@@ -145,6 +151,28 @@ export function digestVerify(artifact) {
   if (count(s.unmapped)) L.push(`unmapped sheet test names (invisible to every count above): ${s.unmapped.map((u) => `${u.test} (${u.count})`).join(', ')}`);
   if (count(a.structural)) L.push(`structural findings: ${a.structural.length}`);
   if (a.clusters && Object.keys(a.clusters).length) L.push(`rows filed under the wrong date: ${Object.keys(a.clusters).length}`);
+  return L.join('\n');
+}
+
+/**
+ * The research log as a citable list — fetched urls with their receipts, and
+ * the ones that were tried and refused so "we looked" is visible too.
+ */
+export function digestResearch(log) {
+  const hits = Object.values(log?.hits || {});
+  const fetched = hits.filter((h) => h.ok === true);
+  const refused = hits.filter((h) => h.ok !== true);
+  const L = [];
+  L.push(`recorded: ${hits.length} url(s) · fetched ${fetched.length} · refused ${refused.length}`);
+  const queries = log?.queries || [];
+  if (queries.length) {
+    L.push(`queries run: ${queries.slice(-3).map((q) => `"${q.query}" via ${q.provider}${q.fetched != null ? ` (${q.fetched} fetched)` : ''}`).join('; ')}`);
+  }
+  for (const h of fetched.sort((a, b) => String(b.fetchedAt || '').localeCompare(String(a.fetchedAt || ''))).slice(0, 20)) {
+    L.push(`  ok ${h.url} · ${h.title || '(no title)'} · fetched ${h.fetchedAt || '?'} · ${h.bytes ?? '?'} bytes · sha ${String(h.sha256 || '').slice(0, 12)}`);
+  }
+  for (const h of refused) L.push(`  refused ${h.url} — ${h.error || 'fetch failed'} (not citable)`);
+  L.push('Cite only a url listed as ok here; the publisher refuses a link this log does not hold.');
   return L.join('\n');
 }
 
@@ -294,6 +322,20 @@ export function buildHealthContext(workspace, { now = new Date() } = {}) {
     }
   } else {
     miss('refresh', `result/${REFRESH_FILE}`, 'not present — the four documents have never been published from this workspace');
+  }
+
+  // --- the research log: the citable links, and the ones that were refused.
+  const researchPath = path.join(ws, 'result', RESEARCH_LOG);
+  if (fs.existsSync(researchPath)) {
+    let log = null;
+    try {
+      log = JSON.parse(fs.readFileSync(researchPath, 'utf8'));
+    } catch (err) {
+      miss('research', `result/${RESEARCH_LOG}`, `unreadable: ${err.message}`);
+    }
+    if (log) add('research', 'The recorded research hits (the only citable links)', `result/${RESEARCH_LOG}`, log.updatedAt, digestResearch(log));
+  } else {
+    miss('research', `result/${RESEARCH_LOG}`, 'not present — the literature lane has not run here, so no link can be cited in document 4 yet');
   }
 
   // --- the banked sources: the sheet dumps and doc exports the data came from.

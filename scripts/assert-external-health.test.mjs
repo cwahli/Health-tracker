@@ -7,8 +7,9 @@ import { assertReadOnlySql, parseEnvFile, loadD1Config, createD1Reader, resolveP
 import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, sheetRecord, MARKER_LABELS } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesEqual, FIX_LIST } from './lib/health/reconcile.mjs';
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
-import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, DOCTOR_FILE, DOCTOR_ARTIFACT } from './health-runner.mjs';
-import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
+import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, DOCTOR_FILE, DOCTOR_ARTIFACT } from './health-runner.mjs';
+import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, staleRefusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
+import { searchAvailability, webSearch, fetchHit, validateInsightCitations, citationRefusalText, loadResearchLog, CITATION_SOURCES } from './lib/health/research.mjs';
 import { buildHealthContext, renderContextBlock, clipToBudget, CONTEXT_CANDIDATES, CONTEXT_BUDGET } from './lib/health/context.mjs';
 import { readWorkspaceContext, contextProviderFor, runCouncilStage, getCouncilStatus, getCouncilPhases, resolveCouncilStage, isCaseProject, LEGACY_CHECKPOINTS } from './council-runner.mjs';
 import { validateDoctorReport } from './lib/health/doctor.mjs';
@@ -374,9 +375,21 @@ const fixtureArtifact = (state = 'open') => ({
 });
 
 const ANALYSIS_MARKER = 'HBA1C-TREND-CLAIM-MARKER';
-const analysisPayload = () => Object.fromEntries(
-  Object.values(SECTION_SOURCES).filter((s) => s.startsWith('analysis.')).map((s) => [s, [`- ${ANALYSIS_MARKER}: HbA1c 39 (2026-03-04) → 40 (2026-06-05), +1 mmol/mol.`]]),
+/** The one link the fixtures fetch and record; `cite` puts it on the doc-4 lines. */
+const CITATION = 'https://example.test/khor-2024';
+const analysisPayload = ({ cite = '' } = {}) => Object.fromEntries(
+  Object.values(SECTION_SOURCES)
+    .filter((s) => s.startsWith('analysis.'))
+    .map((s) => [s, [`- ${ANALYSIS_MARKER}: HbA1c 39 (2026-03-04) → 40 (2026-06-05), +1 mmol/mol.${cite && CITATION_SOURCES.includes(s) ? ` Cited: Khor 2024, 2024, ${cite}` : ''}`]]),
 );
+
+/** A fetch log in the shape `/health research` writes: one receipt per url. */
+function researchLog({ fetched = [], refused = [] } = {}) {
+  const hits = {};
+  for (const url of fetched) hits[url] = { url, ok: true, status: 200, bytes: 4096, sha256: 'b'.repeat(64), fetchedAt: '2026-10-01T07:00:00.000Z', title: 'Khor 2024', query: 'HbA1c', snippet: '' };
+  for (const url of refused) hits[url] = { url, ok: false, status: 403, bytes: 0, sha256: '', fetchedAt: '2026-10-01T07:00:00.000Z', error: 'HTTP 403' };
+  return { version: 1, updatedAt: '2026-10-01T07:00:00.000Z', queries: [], hits };
+}
 
 /** A fake store: records every call, so create/update/skip is judged on what was asked. */
 function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix = 'doc_' } = {}) {
@@ -620,7 +633,10 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   const closedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-refresh-closed-'));
   fs.cpSync(path.join(dir, 'sources'), path.join(closedDir, 'sources'), { recursive: true });
   fs.mkdirSync(path.join(closedDir, 'result'), { recursive: true });
-  fs.writeFileSync(path.join(closedDir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+  // The citation the analysis carries has to be in the lane's own log: the
+  // publisher checks the rendered lines against `result/health-research.json`.
+  fs.writeFileSync(path.join(closedDir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload({ cite: CITATION }) }));
+  fs.writeFileSync(path.join(closedDir, 'result', 'health-research.json'), JSON.stringify(researchLog({ fetched: [CITATION] })));
   const closedRun = await runHealthRefresh({
     workspace: closedDir,
     env,
@@ -637,6 +653,37 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     const closedText = closedStore.files[closedRun.registry.docs.conditions.id];
     check('the published bytes carry the analysis payload', closedText.includes(ANALYSIS_MARKER), closedText.slice(0, 200));
     check('the published bytes carry no refusal', !/Not published while the data gate is open/.test(closedText), 'refusal text left in a closed-gate document');
+    eq('every citation in document 4 rests on a hit the lane recorded', closedRun.artifact.citationRefusals, []);
+    eq('the run reports the citable links the log holds', closedRun.artifact.citedLinks, 1);
+    const closedInsights = closedRun.plan.items.find((i) => i.key === 'insights').text;
+    check('document 4 publishes the recorded link', closedInsights.includes(CITATION), closedInsights.slice(0, 300));
+    check('the other three documents never carry it', closedRun.plan.items.filter((i) => i.key !== 'insights').every((i) => !i.text.includes(CITATION)));
+  }
+
+  // The rule the lane exists for: the same closed gate and the same analysis,
+  // but no fetch log — so document 4 carries the refusal instead of the links,
+  // and the three documents that are not the cited digest are untouched.
+  const uncitedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-refresh-uncited-'));
+  fs.cpSync(path.join(dir, 'sources'), path.join(uncitedDir, 'sources'), { recursive: true });
+  fs.mkdirSync(path.join(uncitedDir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(uncitedDir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload({ cite: CITATION }) }));
+  const uncitedRun = await runHealthRefresh({
+    workspace: uncitedDir,
+    env,
+    fetchImpl: makeFetch({ age: 43, height: 163, weight: 62, dateOfBirth: '1983-06-15' }, fullFixture),
+    now: new Date('2026-10-01T09:00:00Z'),
+    token: 't',
+    store: fakeStore(),
+    templates: readTemplates(),
+  });
+  check('a cited claim with no fetch log refuses rather than publishing', uncitedRun.ok === true, uncitedRun.error || '');
+  if (uncitedRun.ok) {
+    eq('the four document-4 sections are refused as unverified', uncitedRun.artifact.citationRefusals.map((c) => `${c.heading}=${c.reason}`), ['For this profile=unverified', 'By marker=unverified', 'Contradictory or unsettled evidence=unverified', 'What is not settled by the literature=unverified']);
+    const uncitedInsights = uncitedRun.plan.items.find((i) => i.key === 'insights').text;
+    check('the refusal sentence is what document 4 carries', uncitedInsights.includes('an unverified link is not a link'), uncitedInsights.slice(0, 400));
+    check('no uncited claim reaches document 4', !uncitedInsights.includes(ANALYSIS_MARKER), uncitedInsights.slice(0, 400));
+    check('documents 1\u20133 are unaffected by the citation contract', uncitedRun.plan.items.filter((i) => i.key !== 'insights').every((i) => i.citationRefused.length === 0), 'the contract leaked past document 4');
+    check('and an analysis section still publishes outside document 4', uncitedRun.plan.items.find((i) => i.key === 'conditions').text.includes(ANALYSIS_MARKER));
   }
 
   // A malformed payload is the same shape of failure as a template that will not
@@ -800,9 +847,10 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
   const analysis = ctx.sections.find((s) => s.key === 'analysis')?.text || '';
   check('the analysis payload is shown with its shape verdict', /shape: accepted — 11 analysis section\(s\)/.test(analysis) && analysis.includes(ANALYSIS_MARKER), analysis.slice(0, 200));
-  eq('every artifact that is missing is named', ctx.absent.map((a) => a.key).sort(), ['docs', 'refresh']);
+  eq('every artifact that is missing is named', ctx.absent.map((a) => a.key).sort(), ['docs', 'refresh', 'research']);
   const block = renderContextBlock(ctx);
   check('the rendered block names the absent artifacts as findings', /not present: result\/health-docs\.json/.test(block) && /not present: result\/health-refresh\.json/.test(block), block.slice(-400));
+  check('and the missing literature log says no link may be cited yet', /no link can be cited in document 4 yet/.test(block), block.slice(-500));
   check('the rendered block carries every section with its path and date', ctx.sections.every((s) => block.includes(`### ${s.label} — ${s.path}${s.date ? ` (${s.date})` : ''}`)), block.split('\n').filter((l) => l.startsWith('### ')).join(' | '));
 
   // A malformed payload is the object under review, so it is shown AND flagged.
@@ -973,11 +1021,19 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   check('the missing env var finding says where to put it', /HEALTH_DOCS_FOLDER/.test(JSON.stringify(bare.checks)) && /HEALTH_ENV_FILE/.test(JSON.stringify(bare.checks)), JSON.stringify(bare.checks.map((c) => c.key)));
   const contextCheck = bare.checks.find((c) => c.key === 'context');
   eq('the context check reports the bytes a seat would see', [contextCheck.level, contextCheck.title.includes('bytes')], ['ok', true]);
+  // The literature lane's credential: a finding that names the variables, never a
+  // blocker — the other seats run without it; document 4 is what stays uncited.
+  const searchCheck = bare.checks.find((c) => c.key === 'search');
+  eq('no search credential is a finding, not a blocker', [searchCheck.level, bare.blockers.includes('search')], ['finding', false]);
+  check('the search finding carries the variables verbatim', /BRAVE_SEARCH_API_KEY/.test(searchCheck.detail) && /TAVILY_API_KEY/.test(searchCheck.detail) && /common\.env/.test(searchCheck.detail), searchCheck.detail);
+  check('and says the lane refuses instead of recording an empty result', /never records an empty result/.test(searchCheck.detail), searchCheck.detail);
+  eq('one search key of either Brave name turns it into an ok', [checkHealthReadiness({ paths, env: { BRAVE_API_KEY: 'x' }, now }).checks.find((c) => c.key === 'search').level, checkHealthReadiness({ paths, env: { BRAVE_SEARCH_API_KEY: 'x' }, now }).checks.find((c) => c.key === 'search').level], ['ok', 'ok']);
   check('the readiness reply is renderable', formatReadinessText(bare).includes('Not ready for bots'), formatReadinessText(bare).slice(0, 120));
 
   const withKey = checkHealthReadiness({ paths, env: { GEMINI_API_KEY: 'x', HEALTH_DOCS_FOLDER: 'folder', HEALTH_ENV_FILE: '/tmp/.env' }, now });
   eq('with a credential and host config it is ready', [withKey.ready, withKey.exit, withKey.blockers], [true, 0, []]);
   check('ready still reports the findings it has', withKey.findings.includes('verify') && withKey.findings.includes('analysis'), JSON.stringify(withKey.findings));
+  check('a host with no search credential is still ready — a finding, not a blocker', withKey.findings.includes('search'), JSON.stringify(withKey.findings));
   check('the ready reply says so', /Ready for bots/.test(formatReadinessText(withKey)));
 
   // A stale artifact is a finding that says how old; a fresh one is fine.
@@ -1241,6 +1297,206 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   } finally {
     health.workspace = originalWs;
   }
+  for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 14. the literature lane
+{
+  console.log('\n  — the literature lane —');
+  const scratch = [];
+  const templates = readTemplates();
+  const lanePaths = (dir) => ({ workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') });
+  const logPath = (dir) => path.join(dir, 'result', 'health-research.json');
+  const PAGE = '<title>D and strength</title><p>body</p>';
+  const pageFetch = async () => ({ ok: true, status: 200, text: async () => PAGE });
+  const stubSearch = (hits) => async ({ query }) => ({ ok: true, provider: 'brave', query, hits, attempts: [] });
+  const CLEARED_SEARCH = { BRAVE_SEARCH_API_KEY: '', BRAVE_API_KEY: '', TAVILY_API_KEY: '', GOOGLE_SEARCH_API_KEY: '', GOOGLE_SEARCH_CX: '' };
+  const treeOf = (dir) => {
+    const out = {};
+    const walk = (rel) => {
+      for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+        const r = rel === '.' ? e.name : path.join(rel, e.name);
+        if (e.isDirectory()) walk(r);
+        else out[r] = contentHash(fs.readFileSync(path.join(dir, r), 'utf8'));
+      }
+    };
+    walk('.');
+    return out;
+  };
+
+  // The contract's scope is the document-4 template's own analysis sections, so
+  // a template edit that adds a section cannot quietly fall out of the contract.
+  eq('every document-4 analysis section is under the citation contract', sectionPlan(templates.insights).filter((s) => (s.source || '').startsWith('analysis.')).map((s) => s.source), CITATION_SOURCES);
+
+  // Who can search at all: every declared provider reports its own variables, so
+  // a missing credential is a named finding rather than an empty result.
+  const none = searchAvailability({});
+  check('a host with no search credential reports the chain as unusable', none.ok === false && none.ready.length === 0);
+  eq('and names every variable that would fix it, in declared order', none.missing, ['BRAVE_SEARCH_API_KEY', 'BRAVE_API_KEY', 'TAVILY_API_KEY', 'GOOGLE_SEARCH_API_KEY', 'GOOGLE_SEARCH_CX']);
+  check('one Brave key under either name is enough', searchAvailability({ BRAVE_API_KEY: 'k' }).ready.includes('brave') && searchAvailability({ BRAVE_SEARCH_API_KEY: 'k' }).ok === true);
+  check('a provider that needs two variables is not ready on one', searchAvailability({ GOOGLE_SEARCH_API_KEY: 'k' }).ready.includes('google-cse') === false);
+
+  // The provider chain: a provider that fails falls through, and a provider that
+  // answered nothing is a failure rather than a silent empty result.
+  const chainFetch = async (url) => {
+    if (String(url).includes('brave')) return { ok: false, status: 429, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => ({ results: [{ title: 'Vitamin D and strength', url: 'https://example.test/d-2024', description: 's' }] }) };
+  };
+  const chained = await webSearch({ query: 'vitamin D and strength', env: { BRAVE_SEARCH_API_KEY: 'b', TAVILY_API_KEY: 't' }, fetchImpl: chainFetch });
+  check('a provider that fails falls through to the next declared one', chained.ok === true && chained.provider === 'tavily' && chained.hits.length === 1, JSON.stringify(chained).slice(0, 200));
+  eq('and the failed attempt is reported, not hidden', chained.attempts, [{ provider: 'brave', error: 'HTTP 429' }]);
+  const nothing = await webSearch({ query: 'q', env: { BRAVE_SEARCH_API_KEY: 'b' }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ results: [] }) }) });
+  check('a provider that answered nothing is a failure, not an empty result', nothing.ok === false && nothing.reason === 'failed' && /no results/.test(nothing.error), nothing.error);
+  const noCred = await webSearch({ query: 'q', env: {} });
+  check('no credential is refused before any request is made', noCred.ok === false && noCred.reason === 'no-credential' && /BRAVE_SEARCH_API_KEY/.test(noCred.error));
+
+  // fetchHit: the receipt a citation rests on.
+  const kept = await fetchHit({ url: 'https://example.test/d-2024', title: '', query: 'vitamin D and strength' }, { fetchImpl: pageFetch, now: new Date('2026-10-01T07:00:00Z') });
+  check('a fetched hit is recorded with its status, size, title and hash', kept.ok === true && kept.status === 200 && kept.bytes === Buffer.byteLength(PAGE) && /^[0-9a-f]{64}$/.test(kept.sha256) && kept.title === 'D and strength' && kept.fetchedAt === '2026-10-01T07:00:00.000Z', JSON.stringify(kept).slice(0, 200));
+  const gone = await fetchHit({ url: 'https://example.test/gone' }, { fetchImpl: async () => ({ ok: false, status: 404, text: async () => '' }) });
+  check('a 404 is a refusal, not a citation', gone.ok === false && gone.status === 404 && gone.sha256 === '', JSON.stringify(gone).slice(0, 160));
+  const blank = await fetchHit({ url: 'https://example.test/blank' }, { fetchImpl: async () => ({ ok: true, status: 200, text: async () => '' }) });
+  check('an empty body is a refusal too — there is nothing to hash', blank.ok === false && /empty body/.test(blank.error), blank.error);
+  const notHttp = await fetchHit({ url: 'javascript:alert(1)' }, { fetchImpl: async () => { throw new Error('the network was called for a non-http url'); } });
+  check('a non-http url never reaches the network', notHttp.ok === false && notHttp.status === 0, JSON.stringify(notHttp));
+
+  // The document-4 citation contract, on literal lines.
+  const liveLog = researchLog({ fetched: [CITATION], refused: ['https://example.test/refused-2024'] });
+  check('a line with a fetched, dated link passes', validateInsightCitations([`- HbA1c 40 — Khor 2024, 2024, ${CITATION}`], { log: liveLog }).ok === true);
+  const uncitedLine = validateInsightCitations(['- HbA1c is rising across 2025.'], { log: liveLog });
+  check('a line with no link is refused as uncited', uncitedLine.ok === false && uncitedLine.reason === 'uncited', JSON.stringify(uncitedLine).slice(0, 200));
+  const unverifiedLine = validateInsightCitations(['- HbA1c 40 — Khor 2024, 2024, https://example.test/never-fetched'], { log: liveLog });
+  check('a link the lane never fetched is refused as unverified', unverifiedLine.ok === false && unverifiedLine.reason === 'unverified' && unverifiedLine.unverified.includes('https://example.test/never-fetched'));
+  check('a link the lane fetched and refused is not citable either', validateInsightCitations(['- HbA1c 40 — Khor 2024, 2024, https://example.test/refused-2024'], { log: liveLog }).reason === 'unverified');
+  check('with no log at all, every link is unverifiable', validateInsightCitations([`- HbA1c 40 — Khor 2024, 2024, ${CITATION}`], { log: null }).reason === 'unverified');
+  check('a cited line with no year is refused as undated', validateInsightCitations([`- HbA1c 40 — see ${CITATION}`], { log: liveLog }).reason === 'undated');
+  check('a year inside the url is not the citation\u2019s own year', validateInsightCitations([`- HbA1c 40 — the study at ${CITATION}`], { log: liveLog }).reason === 'undated');
+  check('an empty section is the honest state, not a refusal', validateInsightCitations([], { log: liveLog }).ok === true);
+  check('the refusal says an unverified link is not a link', /unverified link is not a link/.test(citationRefusalText(unverifiedLine)));
+
+  // The lane itself: a refusal records nothing, a success writes the log.
+  const laneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-research-lane-'));
+  scratch.push(laneDir);
+  const refusedRun = await runHealthResearch({ paths: lanePaths(laneDir), env: {}, queries: ['vitamin D and strength'] });
+  check('the lane refuses when no provider can run', refusedRun.ok === false && refusedRun.stage === 'credential', JSON.stringify(refusedRun).slice(0, 200));
+  check('the refusal names the file the credential belongs in', /~\/\.config\/bot-host\/common\.env/.test(refusedRun.error), refusedRun.error);
+  eq('and records nothing at all', fs.readdirSync(laneDir), []);
+  check('the reply says nothing was searched and nothing recorded', /Nothing was searched and nothing was recorded/.test(formatResearchText(refusedRun)), formatResearchText(refusedRun).slice(0, 200));
+  check('a lane run with no query refuses too', (await runHealthResearch({ paths: lanePaths(laneDir), env: { BRAVE_API_KEY: 'k' } })).stage === 'query');
+
+  // The credential may sit in the file readiness names, not in the process env.
+  const laneEnvFile = path.join(laneDir, 'common.env');
+  fs.writeFileSync(laneEnvFile, 'BRAVE_API_KEY=from-the-file\n');
+  const laneRun = await runHealthResearch({
+    paths: lanePaths(laneDir),
+    env: {},
+    envFile: laneEnvFile,
+    queries: ['vitamin D and strength'],
+    search: stubSearch([{ title: 'Vitamin D and strength', url: 'https://example.test/d-2024', snippet: 's' }]),
+    fetchImpl: pageFetch,
+    now: new Date('2026-10-01T07:00:00Z'),
+  });
+  check('the lane runs on the credential in the file readiness names', laneRun.ok === true && laneRun.artifact.fetched === 1, laneRun.error || '');
+  const laneLog = JSON.parse(fs.readFileSync(logPath(laneDir), 'utf8'));
+  check('the log records the hit with the same hash fetchHit computed', laneLog.hits['https://example.test/d-2024'].sha256 === kept.sha256 && laneLog.hits['https://example.test/d-2024'].firstFetchedAt === '2026-10-01T07:00:00.000Z', JSON.stringify(laneLog.hits['https://example.test/d-2024']).slice(0, 200));
+  eq('the log keeps the query that produced it', laneLog.queries.map((q) => q.query), ['vitamin D and strength']);
+  check('the artifact names the provider and the file it wrote', laneRun.artifact.provider === 'brave' && laneRun.artifact.file === logPath(laneDir));
+
+  // A re-run is the union of the runs: a hit that now refuses is recorded as
+  // refused, and the citable hit keeps its first receipt.
+  const rerun = await runHealthResearch({
+    paths: lanePaths(laneDir),
+    env: {},
+    envFile: laneEnvFile,
+    queries: ['vitamin D and strength'],
+    search: stubSearch([{ title: 'Vitamin D and strength', url: 'https://example.test/d-2024', snippet: 's' }, { title: 'Gone', url: 'https://example.test/gone', snippet: '' }]),
+    fetchImpl: async (url) => (String(url).includes('gone') ? { ok: false, status: 500, text: async () => '' } : pageFetch(url)),
+    now: new Date('2026-11-02T07:00:00Z'),
+  });
+  const laneLog2 = JSON.parse(fs.readFileSync(logPath(laneDir), 'utf8'));
+  check('a hit that refused on the re-run is in the log, marked not citable', laneLog2.hits['https://example.test/gone'].ok === false);
+  check('the citable hit keeps its first receipt and gains a newer fetch', laneLog2.hits['https://example.test/d-2024'].firstFetchedAt === '2026-10-01T07:00:00.000Z' && laneLog2.hits['https://example.test/d-2024'].fetchedAt === '2026-11-02T07:00:00.000Z', JSON.stringify(laneLog2.hits['https://example.test/d-2024']).slice(0, 200));
+  check('the artifact reports what was fetched and what refused', rerun.artifact.fetched === 1 && rerun.artifact.refusedHits.length === 1 && rerun.artifact.recorded === 2, JSON.stringify({ fetched: rerun.artifact.fetched, refused: rerun.artifact.refusedHits.length }));
+  check('and the reply says which of the two cannot be cited', /not citable/.test(formatResearchText(rerun)), formatResearchText(rerun).slice(0, 300));
+
+  // A query no provider could answer is a refusal with nothing written.
+  const deadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-research-dead-'));
+  scratch.push(deadDir);
+  const dead = await runHealthResearch({ paths: lanePaths(deadDir), env: { BRAVE_API_KEY: 'k' }, queries: ['q'], search: async ({ query }) => ({ ok: false, reason: 'failed', error: 'every declared provider refused the query', query, hits: [], attempts: [] }) });
+  check('a query no provider could answer is a refusal, not an empty log', dead.ok === false && dead.stage === 'search', JSON.stringify(dead).slice(0, 200));
+  eq('and it wrote nothing', fs.readdirSync(deadDir), []);
+
+  // The publisher's own clock: a snapshot past the renewal window may not carry
+  // a claim about now, and the header says which of the two reasons withheld it.
+  const freshArtifact = fixtureArtifact('closed');
+  const atNow = new Date(freshArtifact.at);
+  const freshGate = gateFromArtifact(freshArtifact, { now: new Date(atNow.getTime() + 5 * 86400000) });
+  check('a snapshot inside the renewal window is current', freshGate.stale === false && freshGate.ageDays === 5 && freshGate.analysisAllowed === true, JSON.stringify(freshGate).slice(0, 200));
+  const staleArtifact = { ...fixtureArtifact('closed'), at: new Date(atNow.getTime() - (STALE_AFTER_DAYS + 30) * 86400000).toISOString() };
+  const staleGate = gateFromArtifact(staleArtifact, { now: atNow });
+  check('a snapshot past the renewal window is stale', staleGate.stale === true && staleGate.ageDays === STALE_AFTER_DAYS + 30 && staleGate.allowed === true && staleGate.analysisAllowed === false, JSON.stringify(staleGate).slice(0, 200));
+  const staleDoc = renderDoc({ spec: DOC_SPECS[1], templateText: templates.conditions, artifact: staleArtifact, analysis: analysisPayload({ cite: CITATION }), registry: {}, now: atNow });
+  check('a stale document says STALE in its header and names the window', /STALE SNAPSHOT/.test(staleDoc.text) && /renewal window 31/.test(staleDoc.text), staleDoc.text.split('\n').slice(0, 4).join(' | '));
+  check('every analysis section carries the stale refusal', staleDoc.refused.length === 4 && staleDoc.text.includes(staleRefusalText(staleGate)), JSON.stringify(staleDoc.refused));
+  check('and no analysis line reaches a stale document', !staleDoc.text.includes(ANALYSIS_MARKER), 'the analysis leaked into a stale snapshot');
+  eq('a stale run is a draft, not an analysis', planPublish({ artifact: staleArtifact, analysis: analysisPayload({ cite: CITATION }), templates, registry: {}, now: atNow }).mode, 'draft');
+  check('an undated artifact cannot claim to be current', gateFromArtifact({ fixList: { items: [] } }, { now: atNow }).stale === true);
+  check('without a clock the gate does not invent an age', gateFromArtifact(staleArtifact).stale === false && gateFromArtifact(staleArtifact).ageDays === null);
+
+  // The contract is document 4 only: the same uncited payload is refused there
+  // and published everywhere else.
+  const uncitedDoc = renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: analysisPayload(), registry: {}, now: atNow });
+  eq('document 4 refuses a payload whose lines carry no link', [uncitedDoc.refused.length, uncitedDoc.citationRefused.map((c) => c.reason)], [4, ['uncited', 'uncited', 'uncited', 'uncited']]);
+  check('and the published bytes carry the contract\u2019s own sentence', uncitedDoc.text.includes('unverified link is not a link'));
+  check('no uncited claim reaches document 4', !uncitedDoc.text.includes(ANALYSIS_MARKER));
+  eq('documents 1\u20133 are not subject to the citation contract', renderDoc({ spec: DOC_SPECS[1], templateText: templates.conditions, artifact: freshArtifact, analysis: analysisPayload(), registry: {}, now: atNow }).citationRefused, []);
+  const citedDoc = renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: analysisPayload({ cite: CITATION }), citations: liveLog, registry: {}, now: atNow });
+  check('the same document publishes when the log holds the link', citedDoc.refused.length === 0 && citedDoc.text.includes(CITATION), JSON.stringify(citedDoc.refused));
+  check('a link the log never recorded is still refused', renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: analysisPayload({ cite: 'https://example.test/elsewhere' }), citations: liveLog, registry: {}, now: atNow }).citationRefused.every((c) => c.reason === 'unverified'));
+
+  // The real command surface: the CLI door exits 3 with the stage in its JSON.
+  const laneCliEnv = { ...process.env, HEALTH_WORKSPACE: laneDir, ...CLEARED_SEARCH, GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '' };
+  let laneCode = 0;
+  let laneOut = '';
+  try {
+    laneOut = execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'health-runner.mjs'), '--research', '--query=vitamin D and strength', '--json'], { env: laneCliEnv, encoding: 'utf8' });
+  } catch (err) {
+    laneCode = err.status;
+    laneOut = err.stdout || '';
+  }
+  eq('the CLI exits 3 when no provider can run', laneCode, 3);
+  eq('and its JSON names the stage that refused', JSON.parse(laneOut || '{}').stage, 'credential');
+
+  // The real workspace, copied: the lane runs there, a seat's pack lists the
+  // links it may cite, and every byte of the user's own folder is unchanged.
+  const REAL = KNOWN_PROJECTS['external-health'].workspace;
+  if (fs.existsSync(REAL)) {
+    const before = treeOf(REAL);
+    const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'health-research-live-'));
+    scratch.push(copy);
+    fs.cpSync(REAL, copy, { recursive: true });
+    const LIVE_LINK = 'https://example.test/hba1c-cvd-2025';
+    const live = await runHealthResearch({
+      paths: lanePaths(copy),
+      env: { BRAVE_API_KEY: 'seam' },
+      queries: ['HbA1c and cardiovascular risk'],
+      search: stubSearch([{ title: 'HbA1c and CVD', url: LIVE_LINK, snippet: 's' }, { title: 'Gone', url: 'https://example.test/gone', snippet: '' }]),
+      fetchImpl: async (url) => (String(url).includes('gone') ? { ok: false, status: 500, text: async () => '' } : { ok: true, status: 200, text: async () => '<title>HbA1c and CVD</title>body' }),
+      now: atNow,
+    });
+    check('the lane runs against a copy of the real workspace', live.ok === true && live.artifact.fetched === 1 && live.artifact.refusedHits.length === 1, live.error || '');
+    eq('and the user\u2019s own folder is byte-identical afterwards', treeOf(REAL), before);
+    const liveCtx = buildHealthContext(copy);
+    const researchSection = liveCtx.sections.find((s) => s.key === 'research');
+    check('the pack a seat is handed lists the recorded link', Boolean(researchSection) && researchSection.text.includes(LIVE_LINK), (researchSection?.text || '').slice(0, 300));
+    check('and marks the refused hit as not citable', /\(not citable\)/.test(researchSection?.text || ''), 'a refused hit was presented as citable');
+    check('the pack states the citation rule', /Cite only a url listed as ok/.test(researchSection?.text || ''));
+    const copyLog = loadResearchLog(logPath(copy));
+    check('the copy\u2019s own log accepts a citation of what it fetched', validateInsightCitations([`- HbA1c and CVD risk — Author 2025, 2025, ${LIVE_LINK}`], { log: copyLog }).ok === true);
+    check('and still refuses a link it never fetched', validateInsightCitations(['- HbA1c and CVD risk — Author 2025, 2025, https://example.test/elsewhere'], { log: copyLog }).reason === 'unverified');
+    check('document 4 publishes the live link and refuses the foreign one', renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: { 'analysis.by_marker': [`- HbA1c and CVD risk — Author 2025, 2025, ${LIVE_LINK}`] }, citations: copyLog, registry: {}, now: atNow }).refused.length === 0);
+  }
+
   for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
 }
 

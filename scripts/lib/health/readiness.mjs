@@ -34,10 +34,11 @@ import path from 'node:path';
 import { KNOWN_PROJECTS } from '../project-registry.mjs';
 import { geminiKeyIn } from '../agent-gemini.mjs';
 import { ANALYSIS_FILE, BRIEF_FILES, VERIFY_FILE, buildHealthContext } from './context.mjs';
-import { DOCS_FILE, loadDocsRegistry } from './docs.mjs';
+import { DOCS_FILE, STALE_AFTER_DAYS, loadDocsRegistry } from './docs.mjs';
+import { searchAvailability } from './research.mjs';
 
-/** The renewal window the charter names, plus a day of slack. */
-export const STALE_AFTER_DAYS = 31;
+/** The publisher's renewal window, re-exported so the self-check and the writer cannot drift. */
+export { STALE_AFTER_DAYS };
 
 export const CONTEXT_ENV_FILE = '~/.config/bot-host/common.env';
 
@@ -196,6 +197,14 @@ export function checkHealthReadiness({
   checks.push(key
     ? line('model', 'ok', 'A model credential is present on this host', 'Gemini lane only: the council runs single-shot with no tools or search grounding.')
     : line('model', 'blocker', 'No model credential on this host', `Set GEMINI_API_KEY in ${CONTEXT_ENV_FILE} (all bots on a host) or the phone's ~/.config/opencode-bot/<id>.env. /freemodel works without it; a seat turn does not.`));
+
+  // The literature lane's half: search reach is a *finding*, not a blocker —
+  // every other seat still runs without it. What it must never be is silent:
+  // the lane refuses by name rather than recording an empty result.
+  const search = searchAvailability(env);
+  checks.push(search.ok
+    ? line('search', 'ok', `${search.ready.length} search provider credential(s) present: ${search.ready.join(', ')}`, 'The literature lane can fetch and record hits; only a recorded hit may be cited in document 4.')
+    : line('search', 'finding', 'No search credential on this host', `Set one of ${search.missing.join(', ')} in ${CONTEXT_ENV_FILE} — the research lane refuses at stage 'credential' and never records an empty result, so document 4 stays uncited until then.`));
 
   checks.push(...hostEnvLines(env));
   checks.push(...roleDriftLines(project, workspace));
