@@ -12,13 +12,18 @@ import assert from 'node:assert/strict';
 
 import {
   CURRENT_COLUMNS,
+  colLetter,
+  currentReadRange,
   currentRow,
+  escapeMarkdownCell,
   goalFor,
   linkedTree,
+  markdownTable,
   matchPr,
   prAuthor,
   specAuthor,
   specFileFor,
+  summarizeFleet,
   tenWords,
   todoFor,
 } from './pm-current.mjs';
@@ -173,4 +178,49 @@ test('a body without a trailer falls back to the newest commit trailer', () => {
     return cmd.includes('pr view') ? 'no trailer' : 'work\nmore work\n';
   };
   assert.equal(prAuthor(2, { exec: none }), '', 'no trailer anywhere stays blank');
+});
+
+test('the read range is exact — header + rows, never a guessed T57', () => {
+  assert.equal(colLetter(0), 'A');
+  assert.equal(colLetter(19), 'T', '20 columns ends at T');
+  assert.equal(colLetter(26), 'AA');
+  assert.equal(CURRENT_COLUMNS.length, 20);
+  assert.equal(currentReadRange(0), 'current!A1:T1');
+  assert.equal(currentReadRange(1), 'current!A1:T2');
+  assert.equal(currentReadRange(55), 'current!A1:T56', '55 rows + header = 56, not T57');
+});
+
+test('markdown tables render pipes, never text blocks', () => {
+  assert.equal(escapeMarkdownCell('a|b'), 'a\\|b');
+  const out = markdownTable(['id', 'state'], [['#8', 'new'], ['#9', 'a|b']]);
+  assert.ok(out.startsWith('| id | state |'), 'pipe header');
+  assert.ok(out.includes('| --- | --- |'), 'separator row');
+  assert.ok(out.includes('#8'), 'rows present');
+  assert.ok(out.includes('a\\|b'), 'pipes escaped');
+});
+
+test('fleet summary is computed, never hand-counted', () => {
+  const at = (agent_live, blocked = 'no') => {
+    const values = new Array(CURRENT_COLUMNS.length).fill('');
+    values[CURRENT_COLUMNS.indexOf('agent_live')] = agent_live;
+    values[CURRENT_COLUMNS.indexOf('blocked')] = blocked;
+    return values;
+  };
+  const built = [
+    { item: { kind: 'spec', state: 'locked' }, values: at('') },
+    { item: { kind: 'spec', state: 'draft' }, values: at('') },
+    { item: { kind: 'card', state: 'packed' }, values: at('stale', 'yes') },
+    { item: { kind: 'card', state: 'new' }, values: at('live') },
+    { item: { kind: 'lane', state: 'unresolved' }, values: at('') },
+  ];
+  const sum = summarizeFleet(built);
+  assert.equal(sum.packets, 2);
+  assert.equal(sum.packetsLocked, 1);
+  assert.equal(sum.packetsDraft, 1);
+  assert.equal(sum.cards, 2);
+  assert.equal(sum.lanes, 1);
+  assert.equal(sum.total, 5);
+  assert.equal(sum.live, 1);
+  assert.equal(sum.stale, 1);
+  assert.equal(sum.blocked, 1);
 });
