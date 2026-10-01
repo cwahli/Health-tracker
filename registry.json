@@ -7,7 +7,7 @@
       "runtime": "tg-provider-router",
       "enabled": true,
       "path": "tools/telegram-provider-router",
-      "notes": "Unified Telegram long-poller → OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
+      "notes": "Unified Telegram long-poller \u2192 OpenCode/Cline/TokenHarbor/Cloudflare/Freebuff. See tools/telegram-provider-router/README.md. Live box: ~/.config/telegram-opencode/router/",
       "telegram": {
         "tokenEnv": "TELEGRAM_BOT_TOKEN",
         "onePollerOnly": true
@@ -93,13 +93,14 @@
       "name": "VM2 Bot",
       "runtime": "bot-host",
       "enabled": true,
-      "extends": "vm",
-      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
       "telegram": {
         "tokenEnv": "VM2_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm2"
+        "playwrightOutputDir": "/tmp/bot-host-shots-vm2",
+        "model": "opencode/muse-spark-1.3-contributor-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free"
       }
     },
     {
@@ -243,13 +244,36 @@
       "name": "OpenCode Bot",
       "runtime": "bot-host",
       "enabled": true,
-      "extends": "vm",
-      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
       "telegram": {
-        "tokenEnv": "OPENCODE_BOT_TOKEN"
+        "tokenEnv": "OPENCODE_BOT_TOKEN",
+        "allowedUserIds": [
+          6218257274
+        ]
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-opencode"
+        "kind": "opencode",
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free",
+        "defaultAgent": "build",
+        "workspace": "/home/ubuntu/src/Health-tracker",
+        "timeoutMs": 900000,
+        "thinking": true,
+        "allowExternalDirectory": true,
+        "playwrightOutputDir": "/tmp/bot-host-shots-opencode",
+        "sharedSkills": [
+          ".agents/skills",
+          "/home/ubuntu/bot-host/scripts/skills/common"
+        ]
+      },
+      "progress": {
+        "mode": "concise",
+        "editIntervalMs": 2500,
+        "maxEdits": 40,
+        "maxChars": 220
+      },
+      "session": {
+        "mode": "per-chat"
       }
     },
     {
@@ -257,75 +281,36 @@
       "name": "Android Bot",
       "runtime": "bot-host",
       "enabled": true,
-      "extends": "vm",
-      "notes": "Clone of the vm master: agent/progress/session are inherited, only the screenshot dir is per-bot. Add a bot with scripts/add-bot.mjs; do not restate the inherited block.",
       "telegram": {
-        "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN"
-      },
-      "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-android"
-      }
-    },
-    {
-      "id": "pm",
-      "name": "PM Bot",
-      "runtime": "bot-host",
-      "enabled": false,
-      "extends": "vm",
-      "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
-      "telegram": {
-        "tokenEnv": "PM_BOT_TOKEN"
-      }
-    },
-    {
-      "id": "vm3",
-      "name": "Vm3 bot",
-      "runtime": "bot-host",
-      "enabled": true,
-      "extends": "vm",
-      "notes": "Thin clone of the registry master (scripts/add-bot.mjs): agent/progress/session are inherited. Add a per-bot difference only by allowlisting the key in scripts/assert-bot-clone.mjs.",
-      "telegram": {
-        "tokenEnv": "VM3_BOT_TOKEN"
-      },
-      "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-vm3"
-      }
-    },
-    {
-      "id": "tax_accountant",
-      "name": "Tax Accountant",
-      "runtime": "bot-host",
-      "enabled": false,
-      "extends": "vm",
-      "notes": "Tax maker + sweep runner (chiwah-tax/docs/BOT_PLAN.md). Workspace chiwah-tax (separate repo; never Health-tracker). Desk function folded in. C1/C2 override recorded in BOT_PLAN §1.",
-      "telegram": {
-        "tokenEnv": "TAX_ACCOUNTANT_BOT_TOKEN"
-      },
-      "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-tax-accountant",
-        "workspace": "/home/ubuntu/chiwah-tax",
-        "skills": [
-          ".agents/skills/tax-sweep"
+        "tokenEnv": "ANDROID_OPENCODE_BOT_TOKEN",
+        "allowedUserIds": [
+          6218257274
         ]
-      }
-    },
-    {
-      "id": "tax_verifier",
-      "name": "Tax Verifier",
-      "runtime": "bot-host",
-      "enabled": false,
-      "extends": "vm",
-      "notes": "Tax checker (chiwah-tax/docs/BOT_PLAN.md). Read-only: no write credentials; files findings, fixes nothing. Different model from maker (see agent.model allowlist justification).",
-      "telegram": {
-        "tokenEnv": "TAX_VERIFIER_BOT_TOKEN"
       },
       "agent": {
-        "playwrightOutputDir": "/tmp/bot-host-shots-tax-verifier",
-        "workspace": "/home/ubuntu/chiwah-tax",
-        "skills": [
-          ".agents/skills/tax-verify"
-        ],
-        "model": "opencode/muse-spark-1.3-contributor"
+        "kind": "opencode",
+        "model": "opencode/nemotron-3.5-lightning-free",
+        "variant": null,
+        "smallModel": "opencode/space-bunny-free",
+        "defaultAgent": "build",
+        "workspace": "/home/ubuntu/src/Health-tracker",
+        "timeoutMs": 900000,
+        "thinking": true,
+        "allowExternalDirectory": true,
+        "playwrightOutputDir": "/tmp/bot-host-shots-android",
+        "sharedSkills": [
+          ".agents/skills",
+          "/home/ubuntu/bot-host/scripts/skills/common"
+        ]
+      },
+      "progress": {
+        "mode": "concise",
+        "editIntervalMs": 2500,
+        "maxEdits": 40,
+        "maxChars": 220
+      },
+      "session": {
+        "mode": "per-chat"
       }
     }
   ]

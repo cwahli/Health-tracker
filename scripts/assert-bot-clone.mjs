@@ -81,6 +81,12 @@ export const PER_BOT_KEYS = new Set([
   'agent.clineBin',
   // The documented way to add a skill: additive onto the inherited list.
   'agent.skills',
+  // Verification independence is structural: BOT_GROUP.md (chiwah-tax) requires
+  // the checker on a different provider from the maker (correlated blind spots
+  // otherwise). A model split is not fleet policy drift — it is the one
+  // per-bot difference the accuracy architecture cannot function without.
+  // Any other use of this key to fork model policy fleet-wide stays forbidden.
+  'agent.model',
 ]);
 
 /**

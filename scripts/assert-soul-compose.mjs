@@ -106,7 +106,7 @@ for (const marker of ['SOUL_EOF', 'QA_MEAL_EOF', 'ORCH_SOUL_EOF', 'BUG_TICKET_ME
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'soul_gate_'));
 try {
   const written = writeSouls({ home: tmpHome, dir: BOTS });
-  check('writeSouls writes 7 souls', written.length === 7, `${written.length}`);
+  check(`writeSouls writes ${PROFILES.length} souls`, written.length === PROFILES.length, `${written.length}`);
   let identical = true;
   for (const p of PROFILES) {
     const target = p === 'default'

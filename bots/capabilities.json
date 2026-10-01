@@ -198,7 +198,8 @@
         "project": true,
         "council": false,
         "role": false,
-  "health": false,
+        "health": false,
+        "tax": false,
         "location": false,
         "tui": true,
         "bugs": false,
@@ -228,7 +229,7 @@
         "grok_tg": true,
         "collab": false
       },
-      "notes": "NOT bot-host-specific. The terminal is a gateway service (ttyd behind scripts/tui-gateway.mjs, initData-gated), so every bot that can send an inline web_app button can open it: bot-host resolves TUI_GATEWAY_URL and the router does the same from tools/telegram-provider-router/src/tui-miniapp.js. Each bot gets its own ttyd and its own route — the gateway reads TUI_ROUTE_<BOT>_PATH from the deployment env instead of hardcoding a third path, and derives the socket-token route from it so the two cannot drift. grok_tg=true here and in the per-command verdict is deliberate (scripts/assert-command-scope.mjs). What each side still owns: bot-host keeps the tmux pane lease (/tui off, /tui status); the router owns the chat->session record and leaves pane lifecycle to the gateway host, and says so in /tui off."
+      "notes": "NOT bot-host-specific. The terminal is a gateway service (ttyd behind scripts/tui-gateway.mjs, initData-gated), so every bot that can send an inline web_app button can open it: bot-host resolves TUI_GATEWAY_URL and the router does the same from tools/telegram-provider-router/src/tui-miniapp.js. Each bot gets its own ttyd and its own route \u2014 the gateway reads TUI_ROUTE_<BOT>_PATH from the deployment env instead of hardcoding a third path, and derives the socket-token route from it so the two cannot drift. grok_tg=true here and in the per-command verdict is deliberate (scripts/assert-command-scope.mjs). What each side still owns: bot-host keeps the tmux pane lease (/tui off, /tui status); the router owns the chat->session record and leaves pane lifecycle to the gateway host, and says so in /tui off."
     },
     {
       "id": "ui-progress",

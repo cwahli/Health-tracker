@@ -34,11 +34,70 @@ export const BOT_COMMANDS = [
   { command: 'council', description: 'Run a council stage by name or number (/council <stage>, /council all, /council status)' },
   { command: 'role', description: 'Switch active agent role (/role legal, /role sim, etc.)' },
   { command: 'health', description: 'Personal Health Coach: /health status | verify | ingest | refresh | analyze | readiness | research "<what to look up>" | doctor' },
+  { command: 'tax', description: 'Chiwah LTD tax: /tax snapshot | sweep | status | deadlines | saving | doc' },
   { command: 'location', description: 'Show or switch active compute location / pool' },
 ];
 
 /** Names handled by bot-host.mjs handleCommand (kept in sync). */
 export const COMMAND_NAMES = BOT_COMMANDS.map((c) => c.command);
+
+/**
+ * Handled-but-unpublished commands. These have a `case` in handleCommand and
+ * stay reachable by typing, but are deliberately NOT in BOT_COMMANDS (no menu
+ * popup entry). Each needs a reason — an undocumented hidden command is how
+ * dead surface accumulates. The parity gate (assert-command-parity.mjs)
+ * enforces: every handled command is either published or listed here.
+ */
+export const HIDDEN_COMMANDS = {
+  store: 'ops: store queue status/flush is a background concern, typed on demand',
+  setup: 'ops: provider readiness gaps, surfaced via /allowance and typed to fix',
+};
+
+/**
+ * Per-command help usage. BOT_COMMANDS owns the menu popup (via
+ * toTelegramCommands); this map owns the `/help` arguments line. helpText()
+ * below renders one line per BOT_COMMANDS entry, so adding a command there
+ * automatically adds it to /help — no second list to remember. `args` is the
+ * argument shape, `text` the one-line blurb, `extra` optional continuation
+ * lines (used by /tui subcommands). A missing entry falls back to the menu
+ * description so a new command is visible immediately; the parity gate fails
+ * until a proper usage line is written.
+ */
+export const HELP_USAGE = {
+  start: { args: '', text: 'start the bot and show help' },
+  help: { args: '', text: 'show available commands' },
+  status: { args: '', text: 'show session, model, agent, workspace, usage' },
+  new: { args: '', text: 'start a fresh session' },
+  compact: { args: '', text: 'summarize session and start fresh' },
+  model: { args: '[name]', text: 'pick a model (or set it directly)' },
+  models: { args: '', text: 'list available models' },
+  free: { args: '', text: 'list free models only' },
+  freemodel: { args: '', text: "list free models available on this host" },
+  allowance: { args: '[table]', text: 'shared free-lane allowance (same ledger as router)' },
+  agent: { args: '[name]', text: 'pick an agent' },
+  build: { args: '', text: 'switch to the build agent' },
+  plan: { args: '', text: 'switch to the plan agent' },
+  thinking: { args: '[level]', text: 'pick the thinking level (variant)' },
+  tui: {
+    args: '', text: 'open this conversation in a real terminal (Mini App button)',
+    extra: [
+      '/tui status      name the open pane, who is attached, how long it has been up',
+      '/tui off         close that pane (add force to close it mid-turn)',
+    ],
+  },
+  bugs: { args: '', text: 'open the shared bug board (Mini App button)' },
+  forge: { args: '', text: 'create a new bot in one click (Mini App forge)' },
+  debug: { args: '', text: 'show the active work-session debug view' },
+  handoff: { args: '', text: 'checkpoint this work session for continuation' },
+  resume: { args: '[n]', text: 'print the current bug-ticket packet (n = card #)' },
+  tx: { args: '[on|off|status|debug]', text: 'shared work view for this chat' },
+  project: { args: '[name]', text: 'view or switch project (/project external 1)' },
+  council: { args: '[stage]', text: 'run a council stage by name or number (all | run | status)' },
+  role: { args: '[name]', text: 'switch bot role (/role accountant) or project persona (/role legal)' },
+  health: { args: '[sub]', text: 'health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status' },
+  tax: { args: '[sub]', text: 'Chiwah LTD tax: snapshot · sweep · status · deadlines · saving · doc' },
+  location: { args: '[name]', text: 'show or switch compute location / quota pool' },
+};
 
 /** Payload for Telegram `setMyCommands` (strips nothing — already valid). */
 export function toTelegramCommands() {
@@ -640,6 +699,20 @@ export function decodeCallback(data) {
 }
 
 export function helpText(config, { model, agent, variant } = {}) {
+  // Single source of truth: one line per BOT_COMMANDS entry, in menu order.
+  // A new command added to BOT_COMMANDS appears here automatically; HELP_USAGE
+  // supplies the argument shape and blurb, falling back to the menu
+  // description so nothing renders blank before its usage line is written.
+  const heads = BOT_COMMANDS.map((c) => {
+    const usage = HELP_USAGE[c.command];
+    return `/${c.command}${usage?.args ? ` ${usage.args}` : ''}`;
+  });
+  const width = Math.max(...heads.map((h) => h.length));
+  const lines = BOT_COMMANDS.flatMap((c, i) => {
+    const usage = HELP_USAGE[c.command];
+    const main = `${heads[i].padEnd(width, ' ')} ${(usage?.text || c.description).trim()}`;
+    return usage?.extra?.length ? [main, ...usage.extra] : [main];
+  });
   return [
     config.name,
     `model: ${model || config.agent.model}`,
@@ -649,36 +722,7 @@ export function helpText(config, { model, agent, variant } = {}) {
     'Send any message to run opencode.',
     '',
     'Commands:',
-    '/start            start the bot and show help',
-    '/help             show available commands',
-    '/status           show session, model, agent, workspace, usage',
-    '/new              start a fresh session',
-    '/compact          summarize session and start fresh',
-    '/model [name]     pick a model (or set it directly)',
-    '/models           list available models',
-    '/freemodel        list free models available on this host',
-    '/allowance [table] shared free-lane allowance (same ledger as router)',
-    '/agent [name]     pick an agent',
-    '/build            switch to the build agent',
-    '/plan             switch to the plan agent',
-    '/thinking [level] pick the thinking level (variant)',
-    '/new              start a fresh session',
-    '/status           show session, model, agent, workspace, usage',
-    '/debug            show the active work-session debug view',
-    '/handoff          checkpoint this work session for continuation',
-    '/resume [n]       print the current bug-ticket packet (n = card #)',
-    '/tx [on|off|status|debug] shared work view for this chat',
-    '/tui             open this conversation in a real terminal (Mini App button)',
-    '/tui status      name the open pane, who is attached, how long it has been up',
-    '/tui off         close that pane (add force to close it mid-turn)',
-    '/bugs             open the shared bug board (Mini App button)',
-    '/forge            create a new bot in one click (Mini App forge)',
-    '/project [name]   view or switch project (/project external 1)',
-    '/council [stage]  run a council stage (this project\u2019s seats, by name or number; all | run)',
-    '/role [name]      switch role within project (/role legal, /role sim)',
-    '/health [sub]     health coach: verify · ingest · refresh · analyze · readiness · research · doctor · status',
-    '/location [name]  show or switch compute location / quota pool',
-    '/help             this message',
+    ...lines,
   ].join('\n');
 }
 
