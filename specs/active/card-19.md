@@ -1,15 +1,12 @@
 ---
 id: card-19
-status: active
+status: locked
 class: DISH_DROP
 skill: food-calc
 edit_mode: patch
 allowed_files:
-  - server_food_analyze_run_scout_compose.ts
-  - server_food_analyze_run_scout.ts
-  - server_food_analyze_run_finalize.ts
-  - server_food_analyze_run.ts
-  - src/utils/__tests__/scoutToLedgerDishDrop.test.ts
+  - src/server/food/scoutGeometry.ts
+  - src/server/food/scoutGeometry.test.ts
 frozen_files:
   - src/App.tsx
   - src/components/LogChat.tsx
@@ -18,22 +15,26 @@ frozen_files:
   - AGENTS.md
   - scripts/assert-f10-pr1.mjs
 gate:
-  - npx vitest run src/utils/__tests__/scoutToLedgerDishDrop.test.ts
+  - npx vitest run src/server/food/scoutGeometry.test.ts
   - node scripts/assert-spec-diff.mjs card-19
 ---
 
 # card-19 — every scout dish must get its own ledger entry, with its own box
 
 ## Goal
-`pendingFoodLog.itemsBreakdown` must contain one entry per dish in
-`result.rawScout.dishes`, each keeping that dish's own `boundingBox2D` and weight.
+Every entry in a composite dish's `components` must carry its own
+`boundingBox2D`, so a component's box survives clustering and can still be told
+apart downstream.
 
 ## Understanding (what this bug is NOT) — V-30.4 anti-patch field
-- Mechanism: the scout-to-ledger assembly collapses N scout dishes into a single
-  composite ledger entry whose title is the dishes joined by "with", so only one
-  `itemsBreakdown` row survives and its box is synthesised rather than the scout's.
-  **Confirm the exact site before patching** — locate where `rawScout.dishes` is
-  reduced to one item; do not assume `scout_compose.ts` is it.
+- Mechanism: `clusterSpatialCompositeDishes` in `src/server/food/scoutGeometry.ts`
+  merges co-located scout dishes into one composite `primary` and builds a
+  `compositeComponents` array alongside it. Both `compositeComponents.push({...})`
+  sites construct each component from `c`/`it` but never copy `boundingBox2D`, so
+  a component's own box is destroyed at clustering time. `primary.boundingBox2D`
+  is then set to the UNION of the cluster, which is correct for the composite — but
+  by the time anything reaches `itemsBreakdown` the union is the only box left, and
+  no component box survives.
 - Not this: writing the second dish back into the *title* string, or padding
   `itemsBreakdown` with a row carrying no `boundingBox2D`. A composite label that
   is not backed by ledger rows still loses the box and the weight, and it would
@@ -43,11 +44,15 @@ gate:
 - Evidence — verified against the live debug payload for
   `job_1790784359089_kvt6r0c0g`:
   - `result.rawScout.dishes` = **2**
-    - `[0]` "Sainsbury Oat and Fruit", 220 g, `foods[0].boundingBox2D = [450,235,888,792]`
+    - `[0]` "Sainsbury Oat and Fruit", 220 g, `boundingBox2D = [250,100,955,990]`
     - `[1]` "Green Grapes", 100 g, `boundingBox2D = [390,110,875,880]`
   - `result.pendingFoodLog.itemsBreakdown` = **1**
     - "Sainsbury Oat and Fruit **with Green Grapes**",
-      `boundingBox2D = [250,100,955,990]` — which matches **neither** scout box
+      `boundingBox2D = [250,100,955,990]`
+  - `[250,100,955,990]` is exactly the **union** of the two dish boxes, so the
+    composite's own box is correct and must not change. The loss is that the
+    `compositeSiblings` entry for "Green Grapes" carries no `boundingBox2D` at
+    all, so nothing downstream can say which part of that union was the grapes.
 - Repro:
   ```
   curl -s https://pub-2ae421ce82904986ae87c8bc27552cff.r2.dev/debug/Pqc9RG33GRdELpXvkqI4EJhHyQ53/job_1790784359089_kvt6r0c0g.json \
@@ -71,12 +76,18 @@ gate:
   post-hoc repair step after `itemsBreakdown` is built.
 
 ## Two-sided fixture (prove structure, not symptom)
-- Broken input → correct output: a scout payload with 2 dishes (distinct boxes
-  and weights) yields 2 `itemsBreakdown` rows, each carrying **its own** box,
-  with row `i.boundingBox2D` equal to `rawScout.dishes[i].boundingBox2D`.
-- Adjacent input → unchanged: a scout payload with 1 dish still yields exactly 1
-  row, byte-identical to today's output — the fix must not perturb the
-  single-dish path.
+- Broken input → correct output: two co-located scout dishes cluster into one
+  composite whose two `compositeSiblings` entries each keep their OWN
+  `boundingBox2D` — oats `[250,100,955,990]`, grapes `[390,110,875,880]` — while
+  the composite's own box stays the union. Covers BOTH `compositeComponents.push`
+  sites: a plain dish, and a parent that already carries sub-components (whose
+  components inherit the parent's box, the only honest annotation available).
+- Adjacent input → unchanged: a single dish is returned as the same object it
+  went in as, with no `compositeSiblings` invented. Clustering returns early for
+  `<= 1` item, so a fix that touched that path would start fabricating components
+  on ordinary single-dish meals.
+- Assertions live in `src/server/food/scoutGeometry.test.ts`, which already covers
+  `clusterSpatialCompositeDishes`. No new test file (L16).
 
 ## In scope
 - The reduction from `rawScout.dishes` to `itemsBreakdown`.
