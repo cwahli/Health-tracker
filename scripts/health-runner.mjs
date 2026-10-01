@@ -47,7 +47,7 @@ import { loadD1Config, discoverAccountId, createD1Reader, QUERIES, resolveProfil
 import { newestSourceFile, readBankedSheet, ingestBriefFolder, briefCredential } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, verdictsOf, unreviewedAppRows, markerLabel } from './lib/health/reconcile.mjs';
 import {
-  DOC_SPECS, SECTION_SOURCES, DOCS_FILE, REFRESH_FILE, REFRESH_LOG,
+  DOC_SPECS, SECTION_SOURCES, DOCS_FILE, REFRESH_FILE, REFRESH_LOG, DOCTOR_ARTIFACT,
   gateFromArtifact, sectionPlan, planPublish, publishDocs, googleDocsStore,
   loadDocsRegistry, applyReceipts, adoptFromListing,
   validateAnalysisSections, ANALYSIS_SECTIONS, STALE_AFTER_DAYS,
@@ -66,9 +66,15 @@ import { executeRoleTurn } from './council-runner.mjs';
 export const DEFAULT_PROJECT = 'external-health';
 export const VERIFY_FILE = 'health-verify.json';
 export const FIX_LIST_FILE = 'health-fix-list.md';
-/** The Doctor's own output, and the machine-readable copy of its verdicts. */
+/** The Doctor's own output. */
 export const DOCTOR_FILE = 'doctor-report.md';
-export const DOCTOR_ARTIFACT = 'health-doctor.json';
+/**
+ * The Doctor's receipt (`health-doctor.json`) is named in the publisher's module
+ * now — `/health refresh` reads it and `/health readiness` reports on it — so the
+ * name is one constant, not two literals that can drift. Re-exported from here
+ * because this module's callers (and the sensor) already read it from here.
+ */
+export { DOCTOR_ARTIFACT };
 /** The one payload the four documents are published from (payload + receipt). */
 export const ANALYSIS_FILE = 'health-analysis.json';
 /** The literature lane's ledger: every fetched url, and every one that refused. */
@@ -366,6 +372,21 @@ export async function runHealthRefresh({
   // then belongs to the section, and the document says so.
   const citations = citationLog ?? loadResearchLog(path.join(paths.result, RESEARCH_LOG));
 
+  // The Doctor's receipt is evidence about the payload, and the publisher reads
+  // it the way it reads the gate: any STRIKE withholds every analysis section,
+  // naming the struck claims. The review not having run is a boundary (nothing
+  // changes); a receipt that exists but cannot be read is not "no strike" — it
+  // is a review that cannot be shown to be clean, so it blocks the same way.
+  const doctorFile = path.join(paths.result, DOCTOR_ARTIFACT);
+  let doctor = null;
+  if (fs.existsSync(doctorFile)) {
+    try {
+      doctor = JSON.parse(fs.readFileSync(doctorFile, 'utf8'));
+    } catch (err) {
+      doctor = { unreadable: `the receipt does not parse: ${err.message}` };
+    }
+  }
+
   const plan = planPublish({
     artifact: verify.artifact,
     analysis: loadedAnalysis.sections,
@@ -373,6 +394,7 @@ export async function runHealthRefresh({
     registry,
     now,
     citations,
+    doctor,
     only,
     force,
   });
@@ -802,6 +824,10 @@ export function renderRefreshLog(artifact) {
   L.push(`Generated ${a.at}${a.dryRun ? ' (dry run — nothing written to Drive)' : ''}.`);
   L.push(`Folder \`${a.folderId}\` · mode **${a.mode}** · gate ${a.gate.allowed ? 'closed' : `open (${a.gate.open.join(', ')})`}.`);
   L.push(`Created ${a.counts.created} · updated ${a.counts.updated} · skipped ${a.counts.skipped} · failed ${a.counts.failed}.`);
+  if (a.gate?.doctor?.read) L.push(`Doctor's review: ${a.gate.doctor.counts.reviewed} claim(s) — ${a.gate.doctor.counts.pass} PASS · ${a.gate.doctor.counts.strike} STRIKE · ${a.gate.doctor.counts.unproven} UNPROVEN${a.gate.doctor.at ? ` (${a.gate.doctor.at})` : ''}.`);
+  if (a.gate?.doctor?.blocked) L.push(a.gate.doctor.unreadable
+    ? `Analysis withheld: the Doctor's receipt does not read (${a.gate.doctor.unreadable}).`
+    : `Analysis withheld: the Doctor's report strikes ${a.gate.doctor.strikes.length} claim(s) — the analyst rewrites, the Doctor re-checks, then refresh again.`);
   if (a.refused.length) L.push(`Analysis sections withheld: ${a.refused.length} (§${a.refused.join('; §')}).`);
   L.push('');
   L.push('| Document | Action | Doc id | Analysis sections |');
@@ -820,17 +846,21 @@ export function formatRefreshText(result) {
   const a = result.artifact;
   const lines = [];
   lines.push(`🩺 *Health refresh — ${escapeMd(a.projectId)}*`);
-  lines.push(a.gate.allowed
-    ? `✅ data gate closed — publishing the analysis`
-    : `⚠ data gate open (${a.gate.open.length}: ${a.gate.open.join(', ')}) — drafts published, analysis withheld`);
+  const dr = a.gate?.doctor || {};
+  lines.push(dr.blocked
+    ? `⚠ the Doctor's report blocks the analysis (${dr.unreadable ? 'the receipt does not read' : `${dr.strikes.length} STRIKE(s)`}) — drafts published, analysis withheld`
+    : a.gate.allowed
+      ? `✅ data gate closed — publishing the analysis`
+      : `⚠ data gate open (${a.gate.open.length}: ${a.gate.open.join(', ')}) — drafts published, analysis withheld`);
   lines.push(`• folder \`${a.folderId}\``);
   lines.push(`• created ${a.counts.created} · updated ${a.counts.updated} · skipped ${a.counts.skipped} · failed ${a.counts.failed}${a.dryRun ? ' _(dry run)_' : ''}`);
   for (const r of a.receipts) {
     const mark = r.action === 'failed' ? '❌' : r.action === 'skip' ? '➖' : r.action === 'update' || r.action === 'recreate' ? '♻️' : '🆕';
     lines.push(`${mark} ${escapeMd(r.title)} — ${r.action}${r.docId ? ` \`${r.docId}\`` : ''}`);
   }
-  // Three different reasons a section can be withheld, and the reply must not
-  // confuse them: an open gate, a stale snapshot, an uncitable citation.
+  // Four different reasons a section can be withheld now, and the reply must not
+  // confuse them: an open gate, a stale snapshot, the Doctor's strike, an
+  // uncitable citation.
   if (a.refused.length && !a.gate.allowed) {
     lines.push('');
     lines.push(`*Withheld while the gate is open:* ${a.refused.map((h) => escapeMd(h)).join('; ')}`);
@@ -839,6 +869,12 @@ export function formatRefreshText(result) {
     lines.push('');
     lines.push(`*Withheld on a stale snapshot:* ${a.refused.map((h) => escapeMd(h)).join('; ')}`);
     lines.push(`The verify artifact is past the ${STALE_AFTER_DAYS}-day renewal window — run \`/health verify\`, then \`/health refresh\`.`);
+  } else if (a.refused.length && a.gate?.doctor?.blocked) {
+    lines.push('');
+    lines.push(a.gate.doctor.unreadable
+      ? `*Withheld — the Doctor's receipt does not read:* ${escapeMd(a.gate.doctor.unreadable)}`
+      : `*Withheld — the Doctor's report strikes ${a.gate.doctor.strikes.length} claim(s):* ${a.gate.doctor.strikes.map((s) => escapeMd(`${s.title || s.claim || `claim ${s.index}`}${s.item ? ` (${s.item})` : ''}`)).join('; ')}`);
+    lines.push('A struck claim is rewritten by the analyst (`/health analyze`), re-checked by the Doctor (`/health doctor`), and only then published — the documents update in place.');
   }
   if (a.citationRefusals?.length) {
     lines.push('');

@@ -10,7 +10,7 @@ import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesE
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
 import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, RESEARCH_LOG, DOCTOR_FILE, DOCTOR_ARTIFACT, ANALYSIS_FILE, extractAnalysisPayload } from './health-runner.mjs';
 import { loadSearchFixture, recordedFetch, vendorCalls, providerOf, FIXTURE_FILE } from './fixtures/search-providers.mjs';
-import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, staleRefusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
+import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, doctorReview, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, staleRefusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
 import { searchAvailability, webSearch, fetchHit, validateInsightCitations, citationRefusalText, loadResearchLog, CITATION_SOURCES, SEARCH_PROVIDERS, MAX_HITS_PER_QUERY } from './lib/health/research.mjs';
 import { buildHealthContext, renderContextBlock, clipToBudget, CONTEXT_CANDIDATES, CONTEXT_BUDGET } from './lib/health/context.mjs';
 import { readWorkspaceContext, contextProviderFor, runCouncilStage, getCouncilStatus, getCouncilPhases, resolveCouncilStage, isCaseProject, LEGACY_CHECKPOINTS } from './council-runner.mjs';
@@ -1887,6 +1887,214 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
   eq('and the CLI refusal wrote nothing', Object.keys(tree(cliDir)).sort(), ['BRIEF.md', 'result/health-verify.json']);
 
   for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ------------------------------- 18. the Doctor's strike gates publishing
+{
+  console.log("\n  — the Doctor's strike gates publishing —");
+  // The Doctor's report used to be an artifact: a STRIKE changed nothing about
+  // what /health refresh published. It is now the publisher's third refusal,
+  // next to the gate and the clock: while the receipt carries a strike, every
+  // analysis section is withheld with the struck claims named, and the data
+  // sections still publish as a draft. This section drives that through the
+  // publisher and the runner with no credential and no network, then closes the
+  // loop with the receipt the Doctor's own writer produces.
+  const closed = fixtureArtifact('closed');
+  const templates = readTemplates();
+  const payload = analysisPayload({ cite: CITATION });
+  const citations = researchLog({ fetched: [CITATION] });
+  const now = new Date('2026-10-01T11:00:00Z');
+  const claim = (index, status, title = `claim ${index}`) => ({ index, title, claim: `${title} — the sentence under review`, status, item: status === 'UNPROVEN' ? 'H-4' : '', receipt: 'HbA1c 40 (2026-06-05)' });
+  const receipt = (claims) => ({
+    at: '2026-10-01T10:00:00Z',
+    coverage: { reviewed: claims.length, seen: 'analysis.conditions', notSeen: 'none', gate: 'CLOSED', payload: '2026-10-01T08:00:00Z', raw: `Coverage: ${claims.length} claim(s) reviewed` },
+    counts: { pass: claims.filter((c) => c.status === 'PASS').length, strike: claims.filter((c) => c.status === 'STRIKE').length, unproven: claims.filter((c) => c.status === 'UNPROVEN').length },
+    claims,
+  });
+  const struck = receipt([claim(1, 'PASS', 'HbA1c trend'), claim(2, 'STRIKE', 'A date that belongs to another panel'), claim(3, 'UNPROVEN', 'LDL')]);
+  const clean = receipt([claim(1, 'PASS', 'HbA1c trend'), claim(2, 'UNPROVEN', 'LDL')]);
+
+  // The review reader on its own: three states, three different answers.
+  const absentReview = doctorReview(null);
+  check('an absent receipt is not a strike and does not block', absentReview.read === false && absentReview.blocked === false, JSON.stringify(absentReview));
+  const reviewed = doctorReview(struck);
+  eq('a struck receipt is read with its counts', [reviewed.read, reviewed.blocked, reviewed.counts.reviewed, reviewed.counts.pass, reviewed.counts.strike, reviewed.counts.unproven], [true, true, 3, 1, 1, 1]);
+  eq('and it names the struck claim', reviewed.strikes.map((s) => [s.index, s.title]), [[2, 'A date that belongs to another panel']]);
+  check('UNPROVEN alone is not a veto', doctorReview(clean).blocked === false, JSON.stringify(doctorReview(clean)));
+  const brokenReview = doctorReview({ unreadable: 'the receipt does not parse: x' });
+  check('a receipt that cannot be read blocks, by name', brokenReview.blocked === true && brokenReview.unreadable === 'the receipt does not parse: x', JSON.stringify(brokenReview));
+  check('a receipt with no claims list is unreadable, not absent', doctorReview({}).blocked === true && /claims list/.test(doctorReview({}).unreadable), JSON.stringify(doctorReview({})));
+  check('a receipt that is not an object is unreadable too', doctorReview([]).blocked === true, JSON.stringify(doctorReview([])));
+
+  // The publisher, pure: mode, refusals, banner, provenance.
+  const noDoctor = planPublish({ artifact: closed, analysis: payload, templates, registry: {}, now, citations });
+  eq('with no receipt the publisher is unchanged from before this gate existed', noDoctor.mode, 'analysis');
+  const withStrike = planPublish({ artifact: closed, analysis: payload, templates, registry: {}, now, citations, doctor: struck });
+  eq('a strike turns the publish into a draft', withStrike.mode, 'draft');
+  eq('and the plan carries the review it read', [withStrike.gate.doctor.blocked, withStrike.gate.doctor.strikes.length], [true, 1]);
+  const conditions = withStrike.items.find((i) => i.key === 'conditions');
+  check('the analysis section is withheld with the struck claim named', conditions.refused.length > 0 && conditions.text.includes("the Doctor's report carries 1 STRIKE(s): claim 2 (A date that belongs to another panel)"), conditions.text.slice(0, 400));
+  check('the refusal points at the repair loop', /analyst rewrites it/.test(conditions.text) && /health doctor/.test(conditions.text), conditions.text.slice(0, 400));
+  check('no analysis claim reaches the draft', !conditions.text.includes(ANALYSIS_MARKER));
+  const snapshot = withStrike.items.find((i) => i.key === 'snapshot');
+  eq('the data document still publishes, as a draft, with no section refused', [snapshot.action, snapshot.refused.length], ['create', 0]);
+  check('its header carries the strike banner', snapshot.text.includes("⚠ **DRAFT — the Doctor's report carries 1 STRIKE(s): claim 2 (A date that belongs to another panel).**"), snapshot.text.slice(0, 300));
+  check('and it does not claim the gate alone made the analysis current', !snapshot.text.includes('Data gate closed'), 'the closed-gate line stayed with a strike on the receipt');
+  check('the provenance records the review', snapshot.text.includes("| Doctor's review | 3 claim(s): 1 PASS · 1 STRIKE · 1 UNPROVEN (reviewed 2026-10-01 10:00) |"), snapshot.text.split('\n').filter((l) => l.includes("Doctor's review")).join(' | '));
+  const insightsStruck = withStrike.items.find((i) => i.key === 'insights');
+  check('document 4 is withheld by the review before the citation contract runs', insightsStruck.refused.length > 0 && insightsStruck.citationRefused.length === 0, JSON.stringify({ refused: insightsStruck.refused.length, citation: insightsStruck.citationRefused }));
+
+  const cleanPlan = planPublish({ artifact: closed, analysis: payload, templates, registry: {}, now, citations, doctor: clean });
+  eq('a receipt with no strike publishes exactly as before', cleanPlan.mode, 'analysis');
+  check('and the section carries its claim', cleanPlan.items.find((i) => i.key === 'conditions').text.includes(ANALYSIS_MARKER));
+  check('the review is on record in the drafts', cleanPlan.items.find((i) => i.key === 'snapshot').text.includes("| Doctor's review | 2 claim(s): 1 PASS · 0 STRIKE · 1 UNPROVEN"), 'the review row is missing');
+
+  const unreadablePlan = planPublish({ artifact: closed, analysis: payload, templates, registry: {}, now, citations, doctor: { unreadable: 'the receipt does not parse: Unexpected token' } });
+  eq('an unreadable receipt blocks the publish too', unreadablePlan.mode, 'draft');
+  check('and the refusal says which failure it is', unreadablePlan.items.find((i) => i.key === 'conditions').text.includes('cannot be read'), unreadablePlan.items.find((i) => i.key === 'conditions').text.slice(0, 300));
+
+  // Precedence: the gate and the clock are the more fundamental refusals, and
+  // the section text must say the reason the publisher acted on.
+  const openStruck = planPublish({ artifact: fixtureArtifact('open'), analysis: payload, templates, registry: {}, now, citations, doctor: struck });
+  check('with the gate open the gate refusal is the one that shows', openStruck.items.find((i) => i.key === 'conditions').text.includes('Not published while the data gate is open'), openStruck.items.find((i) => i.key === 'conditions').text.slice(0, 300));
+  const staleStruck = planPublish({ artifact: { ...closed, at: '2026-08-15T09:00:00.000Z' }, analysis: payload, templates, registry: {}, now, citations, doctor: struck });
+  check('on a stale snapshot the staleness refusal is the one that shows', staleStruck.items.find((i) => i.key === 'conditions').text.includes('Not published on a stale snapshot'), staleStruck.items.find((i) => i.key === 'conditions').text.slice(0, 300));
+
+  // End to end through /health refresh: a real workspace with the verify
+  // fixture, the payload, the fetch log — and a Doctor's receipt.
+  const cleanup = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-gate-'));
+  cleanup.push(dir);
+  fs.mkdirSync(path.join(dir, 'sources'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'sources', 'sheet_2026-09-30.json'), JSON.stringify({
+    source: { title: 'Medical Test Results - Chiwah', fetchedAt: '2026-09-30T18:33:28.031Z' },
+    data: { 'Medical Test Results - Chiwah': sheetRows.map((r) => [`"${r.dateRaw}","${r.test}","${r.resultRaw}","${r.range}","${r.comment}"`]) },
+  }));
+  fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: payload }));
+  fs.writeFileSync(path.join(dir, 'result', 'health-research.json'), JSON.stringify(citations));
+  const doctorFile = path.join(dir, 'result', DOCTOR_ARTIFACT);
+  fs.writeFileSync(doctorFile, JSON.stringify(struck));
+  const env = { CLOUDFLARE_API_TOKEN: 'tok', CLOUDFLARE_D1_DATABASE_ID: 'dbb', HEALTH_PROFILE_UID: 'real', HEALTH_DOCS_FOLDER: 'folder1' };
+  const rows = () => [
+    { id: 'row_ok', firebase_uid: 'real', date: '2026-06-05', biomarkers: JSON.stringify({ hba1c: 40, creatinine: 100, hemoglobin: 166 }), note: '' },
+    { id: 'row_lipids', firebase_uid: 'real', date: '2025-06-25', biomarkers: JSON.stringify({ total_cholesterol: 5.7 }), note: '' },
+    { id: 'row_w', firebase_uid: 'real', date: '2024-10-23', biomarkers: JSON.stringify({ weight: 62 }), note: '' },
+    { id: 'row_bp', firebase_uid: 'real', date: '2024-03-27', biomarkers: JSON.stringify({ blood_pressure: '109 / 53 mmHg' }), note: '' },
+  ];
+  const fetchImpl = async (url, init = {}) => {
+    const json = (body) => ({ ok: true, status: 200, json: async () => body });
+    if (String(url).includes('/accounts?per_page=1')) return json({ success: true, result: [{ id: 'acct' }] });
+    const body = JSON.parse(init.body || '{}');
+    if (/from biomarker_logs group by firebase_uid/.test(body.sql)) return json({ success: true, result: [{ results: [{ firebase_uid: 'real', rows: rows().length }] }] });
+    if (/from profiles/.test(body.sql)) return json({ success: true, result: [{ results: [{ id: 'p', firebase_uid: 'real', data: JSON.stringify({ profile: { age: 43, height: 163, weight: 62, dateOfBirth: '1983-06-15' } }) }] }] });
+    if (/from biomarker_logs/.test(body.sql)) return json({ success: true, result: [{ results: rows() }] });
+    return json({ success: false, errors: [{ message: `unexpected sql: ${body.sql}` }] });
+  };
+  const store = fakeStore();
+  const run = () => runHealthRefresh({ workspace: dir, env, fetchImpl, now, token: 't', store, templates });
+
+  const blocked = await run();
+  check('refresh runs end to end with a strike on the receipt', blocked.ok === true, blocked.error || '');
+  if (blocked.ok) {
+    eq('a struck payload publishes as a draft', blocked.artifact.mode, 'draft');
+    eq('the receipt is on the artifact, with the struck claim', [blocked.artifact.gate.doctor.strikes.length, blocked.artifact.gate.doctor.counts?.reviewed], [1, 3]);
+    eq('every analysis section is withheld', blocked.artifact.refused.length, ANALYSIS_SECTIONS.length);
+    const conditionsText = blocked.plan.items.find((i) => i.key === 'conditions').text;
+    check('the published draft names the struck claim', /claim 2 \(A date that belongs to another panel\)/.test(conditionsText), conditionsText.slice(0, 400));
+    check('and carries no analysis claim', !conditionsText.includes(ANALYSIS_MARKER));
+    const reply = formatRefreshText(blocked);
+    check('the reply says the Doctor blocks the publish', /the Doctor's report blocks the analysis/.test(reply), reply.slice(0, 240));
+    check('the reply names the struck claim, not just a count', /A date that belongs to another panel/.test(reply), reply.slice(0, 500));
+    check('the reply does not claim the gate closed the publish', !/data gate closed/.test(reply), reply.slice(0, 240));
+    const log = fs.readFileSync(path.join(dir, 'result', 'health-refresh.md'), 'utf8');
+    check('the run log records the review and the withholding', /Doctor's review: 3 claim\(s\)/.test(log) && /Analysis withheld: the Doctor's report strikes 1 claim/.test(log), log.slice(0, 400));
+  }
+
+  // The boundary this gate draws: a review that has not run changes nothing.
+  fs.rmSync(doctorFile);
+  const unreviewed = await run();
+  check('with no receipt the same workspace publishes the analysis', unreviewed.ok === true && unreviewed.artifact.mode === 'analysis', JSON.stringify(unreviewed).slice(0, 200));
+  if (unreviewed.ok) check('and the sections carry their claims again', unreviewed.plan.items.find((i) => i.key === 'conditions').text.includes(ANALYSIS_MARKER));
+
+  // A receipt that cannot be read is not "no strike".
+  fs.writeFileSync(doctorFile, '{ not json');
+  const corrupt = await run();
+  check('an unreadable receipt blocks the publish', corrupt.ok === true && corrupt.artifact.mode === 'draft', JSON.stringify(corrupt).slice(0, 200));
+  if (corrupt.ok) {
+    check('and the refusal names the parse failure', corrupt.plan.items.find((i) => i.key === 'conditions').text.includes('cannot be read'), corrupt.plan.items.find((i) => i.key === 'conditions').text.slice(0, 300));
+    check('the reply separates it from a strike', /the receipt does not read/.test(formatRefreshText(corrupt)), formatRefreshText(corrupt).slice(0, 300));
+  }
+
+  // The repair loop: a re-checked receipt with no strike publishes again.
+  fs.writeFileSync(doctorFile, JSON.stringify(clean));
+  const cleared = await run();
+  check('a strike-free receipt publishes again', cleared.ok === true && cleared.artifact.mode === 'analysis', JSON.stringify(cleared).slice(0, 200));
+  if (cleared.ok) {
+    check('and the review is recorded in the drafts', cleared.plan.items.find((i) => i.key === 'snapshot').text.includes("| Doctor's review | 2 claim(s): 1 PASS · 0 STRIKE · 1 UNPROVEN"), 'the review row is missing');
+    const readyClean = checkHealthReadiness({ projectId: 'external-health', paths: { workspace: dir, result: path.join(dir, 'result') }, now });
+    const cleanCheck = readyClean.checks.find((c) => c.key === 'doctor');
+    check('readiness reports a strike-free review as ok', cleanCheck?.level === 'ok' && /no strikes/.test(cleanCheck.title), JSON.stringify(cleanCheck));
+  }
+
+  // A strike blocks the publish, not the repair: the analyst must still be able
+  // to rewrite the struck claim, or the loop would deadlock.
+  const repairDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-repair-'));
+  cleanup.push(repairDir);
+  fs.mkdirSync(path.join(repairDir, 'result'), { recursive: true });
+  fs.mkdirSync(path.join(repairDir, 'sources'), { recursive: true });
+  fs.writeFileSync(path.join(repairDir, 'BRIEF.md'), '# Brief\n');
+  fs.writeFileSync(path.join(repairDir, 'result', 'health-verify.json'), JSON.stringify(fixtureArtifact('closed')));
+  fs.writeFileSync(path.join(repairDir, 'result', DOCTOR_ARTIFACT), JSON.stringify(struck));
+  const repairPaths = { workspace: repairDir, sources: path.join(repairDir, 'sources'), result: path.join(repairDir, 'result') };
+  const repaired = await runHealthAnalyze({
+    paths: repairPaths,
+    env: {},
+    runGemini: async () => ({ finalText: JSON.stringify({ sections: payload }), code: 0, lastError: null }),
+    now,
+  });
+  check('the analyst can still rewrite while a strike is on the receipt', repaired.ok === true && fs.existsSync(path.join(repairDir, 'result', ANALYSIS_FILE)), JSON.stringify(repaired).slice(0, 240));
+
+  // The loop closes: the receipt the Doctor's own writer produces is the receipt
+  // the publisher reads — one reader, one meaning of a strike.
+  const reportText = [
+    "# Doctor's report — 2026-10-01",
+    '',
+    'Coverage: 1 claim(s) reviewed · sections seen: analysis.conditions',
+    'Not seen: none',
+    'Gate: CLOSED',
+    'Payload: 2026-10-01T11:00:00.000Z',
+    '',
+    '## 1. HbA1c trend',
+    'Claim: "HbA1c rose from 39 to 40 across two panels."',
+    'Receipt: HbA1c 40 (2026-06-05)',
+    'Status: STRIKE',
+    'Changes: the two values do not come from the same panel.',
+    'Recommendation: re-test',
+    'Who: user',
+  ].join('\n');
+  const doctorRun = await runHealthDoctor({
+    paths: repairPaths,
+    runGemini: async () => ({ finalText: reportText, code: 0, lastError: null }),
+    now,
+  });
+  check('the Doctor writes a receipt over that payload', doctorRun.ok === true, doctorRun.error || '');
+  if (doctorRun.ok) {
+    const written = doctorReview(doctorRun.artifact);
+    check('and the publisher reads exactly that receipt: blocked, by claim', written.blocked === true && written.strikes[0]?.title === 'HbA1c trend', JSON.stringify(written).slice(0, 300));
+    check('the report is on disk with the strike', fs.readFileSync(path.join(repairDir, 'result', DOCTOR_FILE), 'utf8').includes('Status: STRIKE'));
+    const readyStruck = checkHealthReadiness({ projectId: 'external-health', paths: repairPaths, now });
+    const struckCheck = readyStruck.checks.find((c) => c.key === 'doctor');
+    check('readiness reports the strike as a finding', struckCheck?.level === 'finding' && /strikes 1 claim/.test(struckCheck.title), JSON.stringify(struckCheck));
+  }
+
+  const noneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-doctor-none-'));
+  cleanup.push(noneDir);
+  const readyNone = checkHealthReadiness({ projectId: 'external-health', paths: { workspace: noneDir, result: path.join(noneDir, 'result') }, now });
+  const noneCheck = readyNone.checks.find((c) => c.key === 'doctor');
+  check('readiness names a missing review instead of staying silent', noneCheck?.level === 'finding' && /No doctor report/.test(noneCheck.title), JSON.stringify(noneCheck));
+
+  for (const d of cleanup) fs.rmSync(d, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} pass, ${failed} fail\n`);
