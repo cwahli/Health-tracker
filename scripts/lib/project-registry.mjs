@@ -847,8 +847,20 @@ export function composeExternalPrompt({ chatId, prompt, activeProject = null, ac
 
   if (rolePrompt) {
     header.push(`\n[ACTIVE ROLE: ${roleId}]\n${rolePrompt.trim()}`);
+  } else if (project.id === 'external-health') {
+    header.push(`\n[COUNCIL CONSOLIDATED MODE: You represent the full Multi-Agent Health Council: Data Steward (data gate & integrity), Health Analyst (biomarkers & risk trends), Lifestyle & Nutrition Specialist (diet & habits), Test Planner (gaps & renewal windows), Research Lead (literature receipts), Safety Reviewer & Doctor (clinical audit & caveats). Synthesize all perspectives into one cohesive, consolidated assessment with clear immediate priorities.]`);
   } else {
     header.push(`\n[COUNCIL MODE: You represent the full Multi-Agent Council. Coordinate between Legal, Accuracy, Case Review, Manager Red-Team, and Arbitrator to build the best case.]`);
+  }
+
+  if (project.id === 'external-health') {
+    const dashPath = path.join(project.workspace, 'result', 'HEALTH_DASHBOARD.md');
+    if (fs.existsSync(dashPath)) {
+      try {
+        const dash = fs.readFileSync(dashPath, 'utf8');
+        header.push(`\n[HEALTH DASHBOARD & CURRENT STATE]\n${dash.trim()}`);
+      } catch { /* ignore read failure */ }
+    }
   }
 
   header.push('\n[USER REQUEST / EVIDENCE]');

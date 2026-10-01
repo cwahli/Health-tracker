@@ -116,18 +116,389 @@ export function mentionsUs(message, username) {
   return false;
 }
 
-  export function isAddressedToUs(message, self) {
-    if (chatKind(message) !== 'group') return true;
-    const username = String(self?.username || '').replace(/^@/, '').toLowerCase();
-    const id = Number(self?.id) || 0;
-    const suffix = commandSuffix(message?.text || message?.caption || '');
-    // A command suffixed for a *different* bot is explicitly not ours, even if our
-    // name also appears somewhere in the text.
-    if (suffix) return username ? suffix === username : true;
-    if (username && mentionsUs(message, username)) return true;
-    if (id && Number(message?.reply_to_message?.from?.id) === id) return true;
-    return false;
+export const KNOWN_COUNCIL_ROLES = {
+  data_steward: {
+    id: 'data_steward',
+    name: 'Data Steward',
+    aliases: ['data steward', 'data_steward', 'datasteward', 'steward', 'data'],
+  },
+  health_analyst: {
+    id: 'health_analyst',
+    name: 'Health Analyst',
+    aliases: ['health analyst', 'health_analyst', 'healthanalyst', 'analyst'],
+  },
+  test_planner: {
+    id: 'test_planner',
+    name: 'Test Planner',
+    aliases: ['test planner', 'test_planner', 'testplanner', 'planner', 'test plan', 'tests'],
+  },
+  research_lead: {
+    id: 'research_lead',
+    name: 'Research Lead',
+    aliases: ['research lead', 'research_lead', 'researchlead', 'research', 'literature'],
+  },
+  safety_reviewer: {
+    id: 'safety_reviewer',
+    name: 'Safety Reviewer',
+    aliases: ['safety reviewer', 'safety_reviewer', 'safetyreviewer', 'safety', 'guardrail', 'guardrails'],
+  },
+  doctor: {
+    id: 'doctor',
+    name: 'Doctor',
+    aliases: ['doctor', 'dr', 'doc', 'audit', 'auditor'],
+  },
+  lifestyle: {
+    id: 'health_analyst',
+    name: 'Lifestyle & Nutrition Specialist',
+    aliases: ['lifestyle', 'nutrition', 'diet', 'nutritionist', 'dietitian'],
+  },
+  all: {
+    id: 'all',
+    name: 'Full Council',
+    aliases: ['all', 'council', 'team', 'everyone', 'consolidated', 'orchestrator'],
+  },
+};
+
+export function extractAllRoleMentions(text) {
+  const raw = String(text ?? '').trim();
+  if (!raw) {
+    return { roles: [], cleanText: '', isAll: false, hasMultiple: false };
   }
+
+  const rawMatches = [];
+  for (const [, def] of Object.entries(KNOWN_COUNCIL_ROLES)) {
+    const sorted = [...def.aliases].sort((a, b) => b.length - a.length);
+    for (const alias of sorted) {
+      const escaped = alias.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&').replace(/\s+/g, '[_\\s]+');
+      const re = new RegExp(`(^|\\s)@(${escaped})([:;,\\s]|$)`, 'gi');
+      let m;
+      while ((m = re.exec(raw)) !== null) {
+        const prefixLen = m[1].length;
+        const matchedAlias = m[2];
+        const suffixPunct = m[3].match(/^[:;,]/) ? m[3][0] : '';
+        const startIndex = m.index + prefixLen;
+        const endIndex = startIndex + 1 + matchedAlias.length + suffixPunct.length;
+        rawMatches.push({
+          startIndex,
+          endIndex,
+          roleId: def.id,
+          roleName: def.name,
+          matched: `@${matchedAlias}`,
+          isAll: def.id === 'all',
+        });
+      }
+    }
+  }
+
+  // Sort by start index ascending, and by length descending
+  rawMatches.sort((a, b) => {
+    if (a.startIndex !== b.startIndex) return a.startIndex - b.startIndex;
+    return (b.endIndex - b.startIndex) - (a.endIndex - a.startIndex);
+  });
+
+  // Filter overlapping matches
+  const nonOverlapping = [];
+  let lastEnd = -1;
+  for (const item of rawMatches) {
+    if (item.startIndex >= lastEnd) {
+      nonOverlapping.push(item);
+      lastEnd = item.endIndex;
+    }
+  }
+
+  // Build clean text by excluding the matched spans
+  let cleanText = '';
+  let cursor = 0;
+  for (const span of nonOverlapping) {
+    cleanText += raw.slice(cursor, span.startIndex);
+    cursor = span.endIndex;
+  }
+  cleanText += raw.slice(cursor);
+  cleanText = cleanText
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;:]+|[\s,;:]+$/g, '')
+    .replace(/^(?:and\s+|,\s*)+/i, '')
+    .trim();
+
+  // Deduplicate roles preserving first appearance
+  const seenRoles = new Set();
+  const uniqueRoles = [];
+  for (const item of nonOverlapping) {
+    if (!seenRoles.has(item.roleId)) {
+      seenRoles.add(item.roleId);
+      uniqueRoles.push({
+        roleId: item.roleId,
+        roleName: item.roleName,
+        matched: item.matched,
+        isAll: item.isAll,
+      });
+    }
+  }
+
+  return {
+    roles: uniqueRoles,
+    cleanText,
+    isAll: uniqueRoles.some((r) => r.isAll),
+    hasMultiple: uniqueRoles.length > 1,
+  };
+}
+
+export function extractRoleMention(text) {
+  const all = extractAllRoleMentions(text);
+  if (!all.roles.length) return null;
+  const allRole = all.roles.find((r) => r.isAll);
+  const primary = allRole || all.roles[0];
+  return {
+    roleId: primary.roleId,
+    roleName: primary.roleName,
+    matched: primary.matched,
+    cleanText: all.cleanText,
+    isAll: primary.isAll,
+  };
+}
+
+export const ACTIVE_THREAD_WINDOW_MS = 120_000; // 2 minutes
+
+const activeThreads = new Map();
+
+export function recordActiveThread(chatId, info = {}) {
+  if (!chatId) return;
+  const key = String(chatId);
+  activeThreads.set(key, {
+    roleId: info.roleId || null,
+    botId: info.botId != null ? String(info.botId) : null,
+    isCouncil: Boolean(info.isCouncil),
+    jointRoles: Array.isArray(info.jointRoles) ? [...info.jointRoles] : [],
+    lastActivityMs: Number(info.timestamp) || Date.now(),
+  });
+}
+
+export function getActiveThread(chatId, opts = {}) {
+  if (!chatId) return null;
+  const key = String(chatId);
+  const entry = activeThreads.get(key);
+  if (!entry) return null;
+  const now = Number(opts.now) || Date.now();
+  const windowMs = Number(opts.windowMs) || ACTIVE_THREAD_WINDOW_MS;
+  if (now - entry.lastActivityMs > windowMs) {
+    activeThreads.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+export function clearActiveThread(chatId) {
+  if (!chatId) return;
+  activeThreads.delete(String(chatId));
+}
+
+export function clearAllActiveThreads() {
+  activeThreads.clear();
+}
+
+export function resolveGroupAddressing(message, self, opts = {}) {
+  const rawText = String(message?.text || message?.caption || '').trim();
+  const username = String(self?.username || '').replace(/^@/, '').toLowerCase();
+  const id = Number(self?.id) || 0;
+  const myRole = String(opts.role || self?.role || '').toLowerCase();
+  const myName = String(opts.name || self?.name || '').toLowerCase();
+  const isMaster = Boolean(opts.isMaster || self?.isMaster || self?.id === 'vm');
+  const now = Number(opts.now) || Date.now();
+  const chatId = message?.chat?.id;
+
+  // Direct chat:
+  if (chatKind(message) !== 'group') {
+    const extracted = extractAllRoleMentions(rawText);
+    const roleId = extracted.roles.length ? extracted.roles[0].roleId : null;
+    return {
+      addressed: true,
+      roleId: roleId !== 'all' ? roleId : null,
+      isBroadcast: extracted.isAll,
+      cleanText: extracted.roles.length ? extracted.cleanText : rawText,
+      jointRoles: extracted.roles.map((r) => r.roleId),
+      turnOrder: 0,
+      delayMs: 0,
+    };
+  }
+
+  // 1. Suffix check: /command@bot
+  const suffix = commandSuffix(rawText);
+  if (suffix) {
+    const isOurs = username ? suffix === username : true;
+    return {
+      addressed: isOurs,
+      roleId: isOurs ? (myRole || null) : null,
+      isBroadcast: false,
+      cleanText: rawText,
+      jointRoles: [],
+      turnOrder: 0,
+      delayMs: 0,
+    };
+  }
+
+  // 2. Explicit role mentions (@test planner, @doctor, @all, @analyst @doctor)
+  // Law of Explicit Beats Ambient: Explicit mentions have highest priority over replies and ambient threads.
+  const extracted = extractAllRoleMentions(rawText);
+  if (extracted.roles.length > 0) {
+    if (extracted.isAll) {
+      return {
+        addressed: isMaster,
+        roleId: null,
+        isBroadcast: true,
+        cleanText: extracted.cleanText,
+        jointRoles: ['all'],
+        turnOrder: 0,
+        delayMs: 0,
+      };
+    }
+
+    const matchedIndex = extracted.roles.findIndex((r) => {
+      const rId = r.roleId;
+      const rName = r.roleName.toLowerCase();
+      return (myRole && myRole === rId) ||
+        (myName && myName.includes(rName)) ||
+        (username && username.includes(rId.replace(/_/g, ''))) ||
+        (isMaster && opts.hasDedicatedRoleBots === false);
+    });
+
+    if (matchedIndex !== -1) {
+      const matchedRole = extracted.roles[matchedIndex];
+      const turnOrder = matchedIndex;
+      const delayMs = matchedIndex * 2500;
+      return {
+        addressed: true,
+        roleId: matchedRole.roleId,
+        isBroadcast: false,
+        cleanText: extracted.cleanText,
+        jointRoles: extracted.roles.map((r) => r.roleId),
+        turnOrder,
+        delayMs,
+      };
+    } else {
+      return {
+        addressed: false,
+        roleId: null,
+        isBroadcast: false,
+        cleanText: extracted.cleanText,
+        jointRoles: extracted.roles.map((r) => r.roleId),
+        turnOrder: 0,
+        delayMs: 0,
+      };
+    }
+  }
+
+  // 3. Direct @username mention check
+  if (username && mentionsUs(message, username)) {
+    return {
+      addressed: true,
+      roleId: myRole || null,
+      isBroadcast: false,
+      cleanText: rawText,
+      jointRoles: [],
+      turnOrder: 0,
+      delayMs: 0,
+    };
+  }
+
+  // If another bot is explicitly @mentioned by username in entities, this message is for them, not us
+  if (message?.entities) {
+    for (const e of message.entities) {
+      if (e?.type === 'mention') {
+        const mention = rawText.slice(e.offset, e.offset + e.length).replace(/^@/, '').toLowerCase();
+        if (username && mention !== username) {
+          return { addressed: false, roleId: null, isBroadcast: false, cleanText: rawText, jointRoles: [], turnOrder: 0, delayMs: 0 };
+        }
+      }
+    }
+  }
+
+  // 4. Reply to our message
+  if (id && Number(message?.reply_to_message?.from?.id) === id) {
+    return {
+      addressed: true,
+      roleId: myRole || null,
+      isBroadcast: false,
+      cleanText: rawText,
+      jointRoles: [],
+      turnOrder: 0,
+      delayMs: 0,
+    };
+  }
+
+  // If reply to another bot/user
+  if (message?.reply_to_message?.from?.id && Number(message.reply_to_message.from.id) !== id) {
+    return {
+      addressed: false,
+      roleId: null,
+      isBroadcast: false,
+      cleanText: rawText,
+      jointRoles: [],
+      turnOrder: 0,
+      delayMs: 0,
+    };
+  }
+
+  // 5. Active Thread Follow-Up (Within TTL window, continuous dialogue without re-tagging)
+  if (opts.useActiveThread !== false && chatId) {
+    const thread = getActiveThread(chatId, { now, windowMs: opts.windowMs });
+    if (thread) {
+      if (thread.isCouncil) {
+        if (isMaster) {
+          return {
+            addressed: true,
+            roleId: null,
+            isBroadcast: true,
+            isContinuous: true,
+            cleanText: rawText,
+            jointRoles: ['all'],
+            turnOrder: 0,
+            delayMs: 0,
+          };
+        } else {
+          return { addressed: false, roleId: null, isBroadcast: false, cleanText: rawText, jointRoles: [], turnOrder: 0, delayMs: 0 };
+        }
+      } else {
+        const botMatchesThread = (thread.roleId && myRole && myRole === thread.roleId) ||
+          (thread.botId && (String(id) === String(thread.botId) || username === String(thread.botId).toLowerCase())) ||
+          (isMaster && opts.hasDedicatedRoleBots === false && (!thread.botId || String(thread.botId) === String(id)));
+        if (botMatchesThread) {
+          return {
+            addressed: true,
+            roleId: thread.roleId || myRole || null,
+            isBroadcast: false,
+            isContinuous: true,
+            cleanText: rawText,
+            jointRoles: thread.roleId ? [thread.roleId] : [],
+            turnOrder: 0,
+            delayMs: 0,
+          };
+        } else {
+          return { addressed: false, roleId: null, isBroadcast: false, cleanText: rawText, jointRoles: [], turnOrder: 0, delayMs: 0 };
+        }
+      }
+    }
+  }
+
+  // 6. Bare message with no @mention in a group (Scenario 2 broadcast):
+  // When allowGroupBroadcast is true on master, master takes it to provide consolidated answer.
+  if (isMaster && Boolean(opts.allowGroupBroadcast)) {
+    return {
+      addressed: true,
+      roleId: null,
+      isBroadcast: true,
+      cleanText: rawText,
+      jointRoles: ['all'],
+      turnOrder: 0,
+      delayMs: 0,
+    };
+  }
+
+  return { addressed: false, roleId: null, isBroadcast: false, cleanText: rawText, jointRoles: [], turnOrder: 0, delayMs: 0 };
+}
+
+export function isAddressedToUs(message, self, opts = {}) {
+  return resolveGroupAddressing(message, self, opts).addressed;
+}
 
 export function parseAgentList(text) {
   const seen = new Set();
