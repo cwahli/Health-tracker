@@ -123,6 +123,9 @@ export const KNOWN_PROJECTS = {
     allowGit: false,
     gdriveFolder: 'External-Personal-Health-Coach',
     description: 'Four living health documents built from verified lab data and managed from Telegram',
+    // Its workspace is a data workspace: the case/ reader finds BRIEF.md and
+    // nothing else, so the seat context comes from lib/health/context.mjs.
+    contextProvider: 'health',
     roles: HEALTH_PROJECT_ROLES,
   },
   'health-tracker': {

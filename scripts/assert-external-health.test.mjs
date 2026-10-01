@@ -9,6 +9,8 @@ import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesE
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
 import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile } from './health-runner.mjs';
 import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
+import { buildHealthContext, renderContextBlock, clipToBudget, CONTEXT_CANDIDATES, CONTEXT_BUDGET } from './lib/health/context.mjs';
+import { readWorkspaceContext, contextProviderFor } from './council-runner.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -277,6 +279,7 @@ const brokenRows = [
   eq('its template dir is committed', path.relative(ROOT, project?.templateDir || ''), 'projects/external-health');
   check('its workspace is the brief project folder', /projects\/external-health-coach$/.test(project?.workspace || ''), project?.workspace);
   eq('its Drive folder is named', project?.gdriveFolder, 'External-Personal-Health-Coach');
+  eq('it declares its seat context provider', project?.contextProvider, 'health');
 
   for (const alias of ['health', 'health coach', 'personal health', 'external health', 'external-health', 'coach']) {
     eq(`/project ${alias} resolves`, resolveProjectId(alias), 'external-health');
@@ -557,6 +560,27 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     eq('refresh publishes four drafts while the gate is open', [first.artifact.mode, first.artifact.counts.created, first.artifact.counts.updated], ['draft', 4, 0]);
     check('refresh reports the withheld analysis sections', first.artifact.refused.length > 0, JSON.stringify(first.artifact.refused));
     check('refresh writes its artifacts', ['health-refresh.json', 'health-refresh.md', 'health-docs.json'].every((f) => fs.existsSync(path.join(dir, 'result', f))));
+
+    // The seat context pack, read from the workspace the real run just wrote:
+    // the reader must find what the writer wrote, in the same paths. The brief
+    // is the user's, so it is not written by any command — the pack refuses
+    // without it, which section 10 pins; here it stands in for the real folder.
+    fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nThe four living documents, renewed monthly.\n');
+    const ctx = buildHealthContext(dir);
+    check('the context pack accepts a workspace a real run produced', ctx.ok === true, ctx.refuses.join('; '));
+    const verifySection = ctx.sections.find((s) => s.key === 'verify')?.text || '';
+    check('the context pack reads the verify artifact the run wrote', Boolean(verifySection) && !ctx.absent.some((a) => a.key === 'verify'), ctx.sections.map((s) => s.key).join(','));
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'result', 'health-verify.json'), 'utf8'));
+    const openIds = (onDisk.fixList?.items || []).filter((i) => i.state === 'open').map((i) => i.id);
+    check('the pack states the gate the artifact states', openIds.length
+      ? verifySection.includes(`data gate: OPEN (${openIds.length}: ${openIds.join(', ')})`)
+      : verifySection.includes('data gate: CLOSED'), verifySection.split('\n')[1]);
+    check('the context pack sees the fix list the run wrote', ctx.sections.some((s) => s.key === 'fix_list'));
+    check('the context pack sees the banked sources', ctx.sections.some((s) => s.key === 'sources') && ctx.sections.find((s) => s.key === 'sources').text.includes('sheet_2026-09-30.json'));
+    check('the pack names the analysis payload as absent', ctx.absent.some((a) => a.key === 'analysis'), JSON.stringify(ctx.absent.map((a) => a.key)));
+    const ctxBlock = renderContextBlock(ctx);
+    check('the rendered block carries the not-present line', /not present: result\/health-analysis\.json/.test(ctxBlock), ctxBlock.slice(-300));
+    check('the rendered block names the sheet it was built from', ctxBlock.includes('sheet (the source of truth): sheet_2026-09-30.json'), ctxBlock.slice(0, 600));
     const registry = loadDocsRegistry(path.join(dir, 'result', 'health-docs.json'));
     eq('the registry on disk names the four documents', Object.keys(registry.docs).sort(), ['conditions', 'insights', 'snapshot', 'test_plan']);
     const text = store.files[registry.docs.conditions.id];
@@ -712,6 +736,104 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     check('the entry point names the payload file', /health-analysis\.json$/.test(ready.ready.analysisFile), ready.ready.analysisFile);
     check('the ready reply names the payload', /Data gate closed/.test(formatAnalyzeText(ready)), formatAnalyzeText(ready).slice(0, 120));
   }
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------- 10. the seat context pack
+{
+  // Refusals first: a workspace with no brief must not seat a turn at all.
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'health-bare-'));
+  const refused = buildHealthContext(bare);
+  check('a workspace with no brief is refused', refused.ok === false && /no brief or charter/.test(refused.refuses.join(' ')), JSON.stringify(refused.refuses));
+  check('a refused pack renders nothing into the prompt', renderContextBlock(refused) === '', renderContextBlock(refused).slice(0, 80));
+  eq('a refused pack still accounts for every source', [refused.sections.length, refused.absent.length], [0, CONTEXT_CANDIDATES.length]);
+  const noSuch = buildHealthContext(path.join(bare, 'nope'));
+  check('a workspace that does not exist is refused', noSuch.ok === false && /is not a directory/.test(noSuch.refuses.join(' ')), JSON.stringify(noSuch.refuses));
+  fs.rmSync(bare, { recursive: true, force: true });
+
+  // The budget is bytes, not code units: a multi-byte arrow must never be sliced in half.
+  const arrows = '→'.repeat(10);
+  const clipped = clipToBudget(arrows, 5);
+  eq('a byte budget keeps whole characters', [Buffer.byteLength(clipped.text.split('\n')[0]), clipped.truncatedBytes], [3, 27]);
+  check('the truncation marker names the withheld bytes', /\[truncated: 27 bytes withheld\]/.test(clipped.text), clipped.text);
+  const untouched = clipToBudget('short', 5);
+  eq('a section inside its budget is not marked', [untouched.text, untouched.truncatedBytes], ['short', 0]);
+
+  // A full workspace: every candidate is either a section or an explicit absence.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-context-'));
+  fs.mkdirSync(path.join(dir, 'result'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'sources'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'BRIEF.md'), '# Brief\n\nThe four documents, renewed monthly.\n');
+  fs.writeFileSync(path.join(dir, 'sources', 'sheet_2026-09-30.json'), JSON.stringify({ data: {} }));
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+  fs.writeFileSync(path.join(dir, 'result', 'health-fix-list.md'), '# Data fix list\n\n- [ ] **H-1 — mis-filed rows**\n');
+  fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: analysisPayload() }));
+
+  const ctx = buildHealthContext(dir);
+  check('the pack accepts a workspace with a brief', ctx.ok === true, ctx.refuses.join('; '));
+  {
+    const keys = [...ctx.sections.map((s) => s.key), ...ctx.absent.map((a) => a.key)];
+    const candidates = CONTEXT_CANDIDATES.map((c) => c.key);
+    eq('every candidate is a section or an absence, exactly once', keys.slice().sort(), candidates.slice().sort());
+    eq('no candidate is dropped', new Set(keys).size, candidates.length);
+  }
+  const brief = ctx.sections.find((s) => s.key === 'brief');
+  check('the brief is read from its file', brief?.path === 'BRIEF.md' && brief.text.includes('renewed monthly'), JSON.stringify(brief).slice(0, 160));
+  const verify = ctx.sections.find((s) => s.key === 'verify')?.text || '';
+  check('the verify digest states the open gate', /data gate: OPEN \(8: H-1, H-2/.test(verify), verify.split('\n')[1]);
+  check('the verify digest lists every open item by id', Object.keys(FIX_TITLES).every((id) => verify.includes(id)), verify.slice(0, 300));
+  check('the verify digest names the newest sheet date', verify.includes('newest 2026-06-09'), verify);
+  check('the verify digest carries the coverage counts', /coverage: 2 exact matches/.test(verify), verify);
+  // An artifact with no summary block is reported as such, not as a zero.
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify(fixtureArtifact('open')));
+  check('an artifact with no summary block says so', /coverage: the artifact carries no summary block/.test(buildHealthContext(dir).sections.find((s) => s.key === 'verify')?.text || ''), 'the digest invented coverage numbers');
+  fs.writeFileSync(path.join(dir, 'result', 'health-verify.json'), JSON.stringify({ ...fixtureArtifact('open'), summary: { match: 2, missing: 1, appOnlyUnreviewed: 1, gap: 1 } }));
+  const analysis = ctx.sections.find((s) => s.key === 'analysis')?.text || '';
+  check('the analysis payload is shown with its shape verdict', /shape: accepted — 11 analysis section\(s\)/.test(analysis) && analysis.includes(ANALYSIS_MARKER), analysis.slice(0, 200));
+  eq('every artifact that is missing is named', ctx.absent.map((a) => a.key).sort(), ['docs', 'refresh']);
+  const block = renderContextBlock(ctx);
+  check('the rendered block names the absent artifacts as findings', /not present: result\/health-docs\.json/.test(block) && /not present: result\/health-refresh\.json/.test(block), block.slice(-400));
+  check('the rendered block carries every section with its path and date', ctx.sections.every((s) => block.includes(`### ${s.label} — ${s.path}${s.date ? ` (${s.date})` : ''}`)), block.split('\n').filter((l) => l.startsWith('### ')).join(' | '));
+
+  // A malformed payload is the object under review, so it is shown AND flagged.
+  fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), JSON.stringify({ at: '2026-10-01T08:00:00Z', sections: { 'analysis.conditions': { marker: 'LDL' } } }));
+  const bad = buildHealthContext(dir).sections.find((s) => s.key === 'analysis')?.text || '';
+  check('a refused payload is flagged and still visible', /shape: REFUSED —/.test(bad) && bad.includes('"marker":"LDL"'), bad.slice(0, 300));
+  fs.writeFileSync(path.join(dir, 'result', 'health-analysis.json'), '{ not json');
+  const unparseable = buildHealthContext(dir).sections.find((s) => s.key === 'analysis')?.text || '';
+  check('an unparseable payload is flagged, not dropped', /shape: REFUSED — does not parse/.test(unparseable), unparseable.slice(0, 200));
+
+  // Truncation is declared, with the size of what was withheld.
+  const big = `- [ ] **H-9 — a very long item**\n${'x'.repeat(CONTEXT_BUDGET.fix_list * 2)}\n`;
+  fs.writeFileSync(path.join(dir, 'result', 'health-fix-list.md'), big);
+  const fixSection = buildHealthContext(dir).sections.find((s) => s.key === 'fix_list');
+  eq('an over-budget section reports the bytes it withheld', fixSection?.truncatedBytes, Buffer.byteLength(big) - CONTEXT_BUDGET.fix_list);
+  check('the over-budget section says so inline', /\[truncated: \d+ bytes withheld\]/.test(fixSection?.text || ''), (fixSection?.text || '').slice(-80));
+
+  // The council path: the health project is served by the provider, and the
+  // case/ projects keep exactly the reader they had.
+  const seat = readWorkspaceContext(dir, { projectId: 'external-health' });
+  eq('the council reader uses the health provider', seat.provider, 'health');
+  check('the council text is the rendered pack', seat.text === renderContextBlock(seat.context) && seat.text.includes('## Workspace context'), seat.text.slice(0, 120));
+  const refusedSeat = readWorkspaceContext(fs.mkdtempSync(path.join(os.tmpdir(), 'health-none-')), { projectId: 'external-health' });
+  check('a refused workspace refuses the council turn', refusedSeat.ok === false && refusedSeat.text === '' && refusedSeat.refuses.length > 0, JSON.stringify(refusedSeat.refuses));
+  eq('the provider is declared per project, not guessed from the path', contextProviderFor(KNOWN_PROJECTS['external-health'].workspace), 'health');
+
+  const caseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-case-'));
+  fs.mkdirSync(path.join(caseDir, 'case'), { recursive: true });
+  fs.mkdirSync(path.join(caseDir, 'working'), { recursive: true });
+  fs.writeFileSync(path.join(caseDir, '01_Case_Facts.md'), 'AAA');
+  fs.writeFileSync(path.join(caseDir, 'notes.txt'), 'not markdown, not context');
+  fs.writeFileSync(path.join(caseDir, 'case', '02_Ledger.md'), 'BBB');
+  fs.writeFileSync(path.join(caseDir, 'working', 'A_Talking_Points.md'), 'C'.repeat(1200));
+  const legacy = readWorkspaceContext(caseDir, { projectId: 'external-1' });
+  eq('a case/ project keeps the legacy reader', legacy.provider, 'legacy');
+  eq('the legacy reader keeps its file map', Object.keys(legacy.context).sort(), ['01_Case_Facts.md', 'case/02_Ledger.md', 'working/A_Talking_Points.md']);
+  check('the legacy text keeps its ### File: shape', /^### File: 01_Case_Facts\.md\nAAA\.\.\.\n/.test(legacy.text), legacy.text.slice(0, 80));
+  check('the legacy text still slices at 1000 characters', legacy.text.includes(`${'C'.repeat(1000)}...`), legacy.text.slice(-40));
+  check('the legacy reader ignores non-markdown files', !legacy.text.includes('not markdown'), legacy.text.slice(0, 200));
+  eq('a legacy project is never served health context', contextProviderFor(caseDir), '');
+  fs.rmSync(caseDir, { recursive: true, force: true });
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
