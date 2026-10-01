@@ -611,7 +611,7 @@ if [ "$PRINT_PLAN" = "1" ]; then
     echo "plan_gates=${TICKET_GATES:-none}"
   fi
   if [ "$REQUESTED_TOOL" = "opencode" ] || [ "$REQUESTED_TOOL" = "auto" ]; then
-    echo "opencode_argv=opencode run --auto --dir ${REPO_DIR} -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>"
+    echo "opencode_argv=(cd ${CODER_DIR:-$REPO_DIR} && opencode run --auto -m $(opencode_model_id "$PREFERRED_MODEL") <prompt>)"
   fi
   exit 0
 fi
@@ -1315,8 +1315,15 @@ run_opencode_agent() {
   local model_id
   model_id=$(opencode_model_id "$model")
   snapshot_workspace
-  echo "[Dispatcher] opencode run --auto --dir ${CODER_DIR} -m ${model_id}"
-  ( cd "$CODER_DIR" && run_with_timeout "$duration" "$OPENCODE_BIN" run --auto --dir "$CODER_DIR" -m "$model_id" "$prompt" 2>&1 | tee "$log_file" ) || true
+  echo "[Dispatcher] opencode run --auto -m ${model_id}  (cwd ${CODER_DIR})"
+  # No --dir: `opencode run` has no directory flag. It resolves the project from
+  # its working directory, so the `cd` below is what scopes the coder to its own
+  # worktree. Passing --dir made the CLI exit with "Unrecognized flag: --dir"
+  # before the agent ever started, so every opencode dispatch on this box failed
+  # at launch. The dispatcher then reported "No code changes produced by
+  # opencode", which reads like a lazy agent rather than a broken invocation —
+  # and the tool allowance was recorded as a failure against the wrong cause.
+  ( cd "$CODER_DIR" && run_with_timeout "$duration" "$OPENCODE_BIN" run --auto -m "$model_id" "$prompt" 2>&1 | tee "$log_file" ) || true
   # Refresh claimed files with what this attempt actually touched (prompt may
   # not have named them all).
   if [ -f "$FILE_LOCKS_CLI" ]; then
