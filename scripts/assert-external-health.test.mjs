@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +8,8 @@ import { assertReadOnlySql, parseEnvFile, loadD1Config, createD1Reader, resolveP
 import { parseCsvLine, isoDate, mapSheetTest, parseSheetCsv, parseSheetDump, sheetRecord, MARKER_LABELS } from './lib/health/sheet.mjs';
 import { extractAppState, reconcile, evaluateFixList, unreviewedAppRows, valuesEqual, FIX_LIST } from './lib/health/reconcile.mjs';
 import { KNOWN_PROJECTS, resolveProjectId, resolveRoleId, getProjectRoles, getRoleInstructions, getProjectSoul, seedProjectWorkspace } from './lib/project-registry.mjs';
-import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, DOCTOR_FILE, DOCTOR_ARTIFACT } from './health-runner.mjs';
+import { runHealthVerify, runHealthRefresh, runHealthAnalyze, getHealthStatus, renderFixListMarkdown, formatVerifyText, formatStatusText, formatRefreshText, formatAnalyzeText, healthPaths, docsFolder, loadHealthTemplates, loadAnalysisFile, runHealthDoctor, formatDoctorText, runHealthResearch, formatResearchText, RESEARCH_LOG, DOCTOR_FILE, DOCTOR_ARTIFACT } from './health-runner.mjs';
+import { loadSearchFixture, recordedFetch, vendorCalls, providerOf, FIXTURE_FILE } from './fixtures/search-providers.mjs';
 import { DOC_SPECS, SECTION_SOURCES, gateFromArtifact, sectionPlan, unknownSections, renderDoc, renderSection, refusalText, staleRefusalText, contentHash, planPublish, publishDocs, applyReceipts, loadDocsRegistry, adoptFromListing, exportDocText, readDocText, googleDocsStore, validateAnalysisSections, ANALYSIS_SECTIONS } from './lib/health/docs.mjs';
 import { searchAvailability, webSearch, fetchHit, validateInsightCitations, citationRefusalText, loadResearchLog, CITATION_SOURCES } from './lib/health/research.mjs';
 import { buildHealthContext, renderContextBlock, clipToBudget, CONTEXT_CANDIDATES, CONTEXT_BUDGET } from './lib/health/context.mjs';
@@ -1496,6 +1498,180 @@ function fakeStore({ missing = new Set(), listing = [], preloaded = {}, idPrefix
     check('and still refuses a link it never fetched', validateInsightCitations(['- HbA1c and CVD risk — Author 2025, 2025, https://example.test/elsewhere'], { log: copyLog }).reason === 'unverified');
     check('document 4 publishes the live link and refuses the foreign one', renderDoc({ spec: DOC_SPECS[3], templateText: templates.insights, artifact: freshArtifact, analysis: { 'analysis.by_marker': [`- HbA1c and CVD risk — Author 2025, 2025, ${LIVE_LINK}`] }, citations: copyLog, registry: {}, now: atNow }).refused.length === 0);
   }
+
+  for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 15. the vendor contracts
+{
+  console.log('\n  — the vendor contracts —');
+  // The three search APIs are vendor contracts: endpoint, method, where the
+  // credential goes, which response field carries a hit. This section drives the
+  // lane's real entry point against recorded responses for each of them — the
+  // documented envelope and the answers a real API gives when it says no.
+  const scratch = [];
+  const spec = loadSearchFixture(FIXTURE_FILE);
+  const SHIM_FILE = path.join(ROOT, 'scripts', 'fixtures', 'search-provider-shim.mjs');
+  const lanePaths = (dir) => ({ workspace: dir, sources: path.join(dir, 'sources'), result: path.join(dir, 'result') });
+  const laneDir = (tag) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `health-vendor-${tag}-`));
+    scratch.push(dir);
+    return dir;
+  };
+  const readLog = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'result', RESEARCH_LOG), 'utf8'));
+  const CLEARED_SEARCH = { BRAVE_SEARCH_API_KEY: '', BRAVE_API_KEY: '', TAVILY_API_KEY: '', GOOGLE_SEARCH_API_KEY: '', GOOGLE_SEARCH_CX: '' };
+  const laneRun = async (dir, env, cases = {}) => {
+    const calls = [];
+    const res = await runHealthResearch({
+      paths: lanePaths(dir),
+      env,
+      queries: [spec.query],
+      fetchImpl: recordedFetch(spec, { cases, onCall: (c) => calls.push(c) }),
+    });
+    return { res, calls };
+  };
+  const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+  const pageOf = (url) => spec.pages.find((p) => p.url === url);
+
+  // 1. Each provider, alone: the request it must send, and the field its hits
+  //    actually live in. A wrong endpoint, a credential in the wrong place, or a
+  //    renamed field all show up here rather than on the user's host.
+  for (const provider of spec.providers) {
+    const dir = laneDir(provider.id);
+    const { res, calls } = await laneRun(dir, provider.env);
+    check(`[${provider.id}] the lane answers on this provider alone`, res.ok === true && res.artifact.provider === provider.id, res.error || '');
+    const sent = vendorCalls(calls, spec)[0] || {};
+    eq(`[${provider.id}] the request is the recorded contract, url and all`, { method: sent.method, url: sent.url, body: String(sent.body) }, { method: provider.request.method, url: provider.request.url, body: provider.request.body });
+    check(`[${provider.id}] the credential goes where the vendor documents it`, Object.entries(provider.request.headers).every(([name, value]) => String(sent.headers?.[name] || '').includes(value)), JSON.stringify(sent.headers));
+    check(`[${provider.id}] no credential travels in the request body`, Object.values(provider.env).every((v) => !String(sent.body).includes(v)) && !/"api_key"/.test(String(sent.body)), String(sent.body));
+    eq(`[${provider.id}] one request went out, and only to this provider`, vendorCalls(calls, spec).map((c) => providerOf(c, spec)), [provider.id]);
+
+    const log = readLog(dir);
+    const kept = provider.expectedHits[0];
+    const gone = provider.expectedHits[1];
+    eq(`[${provider.id}] the documented field becomes the hit's title`, log.hits[kept.url]?.title, kept.title);
+    eq(`[${provider.id}] the documented field becomes the snippet`, log.hits[kept.url]?.snippet, kept.snippet);
+    check(`[${provider.id}] the recorded page is what was hashed`, log.hits[kept.url]?.bytes === Buffer.byteLength(pageOf(kept.url).raw) && log.hits[kept.url]?.sha256 === sha256(pageOf(kept.url).raw), JSON.stringify({ bytes: log.hits[kept.url]?.bytes }));
+    check(`[${provider.id}] the second hit was fetched too and refused as a 404`, log.hits[gone.url]?.ok === false && /404/.test(log.hits[gone.url]?.error || ''), JSON.stringify(log.hits[gone.url]));
+    eq(`[${provider.id}] the query record counts what came back and what survived`, [log.queries.at(-1).provider, log.queries.at(-1).returned, log.queries.at(-1).fetched, log.queries.at(-1).refused], [provider.id, 2, 1, 1]);
+    eq(`[${provider.id}] the artifact counts the same`, [res.artifact.provider, res.artifact.fetched, res.artifact.refusedHits.length], [provider.id, 1, 1]);
+  }
+
+  // 2. Every way a provider can say no, and the fall-through that must follow: a
+  //    real API answers with a non-200, a bot check served as 200 HTML, a quietly
+  //    renamed field, or an empty result set — none of them may end the search.
+  const ATTEMPT = {
+    http: (p) => p.expectedHttpError,
+    html: () => 'the provider answered with a body that is not JSON (a bot check, or a redirect)',
+    wrongShape: () => 'the provider answered with a body that is not the documented shape',
+    zero: () => 'the provider answered with no results',
+    offline: (p) => p.offline.throws,
+  };
+  const chainCases = [
+    ['http', 0, 1],
+    ['html', 0, 1],
+    ['wrongShape', 0, 1],
+    ['zero', 0, 1],
+    ['offline', 0, 1],
+    ['http', 1, 2],
+    ['html', 1, 2],
+    ['zero', 1, 2],
+    ['offline', 1, 2],
+    ['wrongShape', 2, null],
+  ];
+  for (const [caseName, firstIndex, secondIndex] of chainCases) {
+    const first = spec.providers[firstIndex];
+    const second = secondIndex === null ? null : spec.providers[secondIndex];
+    const dir = laneDir(`${first.id}-${caseName}`);
+    const { res, calls } = await laneRun(dir, { ...first.env, ...(second?.env || {}) }, { [first.id]: caseName });
+    const named = `${first.id}: ${ATTEMPT[caseName](first)}`;
+    if (second) {
+      eq(`[${first.id} ${caseName}] the chain falls through to the next declared provider`, [res.ok, res.artifact.provider], [true, second.id]);
+      eq(`[${first.id} ${caseName}] and a request went out to each of them, in order`, vendorCalls(calls, spec).map((c) => providerOf(c, spec)), [first.id, second.id]);
+      eq(`[${first.id} ${caseName}] the hits are the second provider's, parsed from its own field`, readLog(dir).hits[second.expectedHits[0].url]?.title, second.expectedHits[0].title);
+      eq(`[${first.id} ${caseName}] the attempt is recorded against the provider that made it, in the vendor's terms`, readLog(dir).queries.at(-1).attempts.map((a) => `${a.provider}: ${a.error}`), [named]);
+    } else {
+      check(`[${first.id} ${caseName}] the lane refuses when the last provider cannot answer`, res.ok === false && res.stage === 'search', JSON.stringify({ stage: res.stage }).slice(0, 120));
+      check(`[${first.id} ${caseName}] and the refusal names the provider and the reason`, String(res.error).includes(named), res.error);
+      eq(`[${first.id} ${caseName}] and writes nothing at all`, fs.readdirSync(dir), []);
+    }
+  }
+
+  // 3. The whole chain: two failures, then the provider that answers — and every
+  //    failed attempt still visible, in order, next to the query it belongs to.
+  const deepDir = laneDir('deep-chain');
+  const { res: deep, calls: deepCalls } = await laneRun(deepDir, { ...spec.providers[0].env, ...spec.providers[1].env, ...spec.providers[2].env }, { brave: 'html', tavily: 'http' });
+  check('the chain walks past two failures to the provider that answers', deep.ok === true && deep.artifact.provider === 'google-cse', deep.error || '');
+  eq('a request went to each provider in the declared order', vendorCalls(deepCalls, spec).map((c) => providerOf(c, spec)), ['brave', 'tavily', 'google-cse']);
+  eq('both failures are recorded, named, in the order they happened', readLog(deepDir).queries.at(-1).attempts.map((a) => `${a.provider}: ${a.error}`), [
+    'brave: the provider answered with a body that is not JSON (a bot check, or a redirect)',
+    'tavily: HTTP 401',
+  ]);
+
+  // 3b. And the chain stops where it should: with every provider ready, the first
+  //     one that answers ends the search — a working lane does not spend the other
+  //     two vendors' quota.
+  const stopDir = laneDir('stops-early');
+  const { res: stopped, calls: stopCalls } = await laneRun(stopDir, { ...spec.providers[0].env, ...spec.providers[1].env, ...spec.providers[2].env }, {});
+  check('with every provider ready the first one answers', stopped.ok === true && stopped.artifact.provider === 'brave', stopped.error || '');
+  eq('and no request goes to the providers behind it', vendorCalls(stopCalls, spec).map((c) => providerOf(c, spec)), ['brave']);
+
+  // 4. The refusal a user reads: the vendor's terms, never the parser's — a raw
+  //    JavaScript internal or a fragment of the page is not an answer.
+  for (const provider of spec.providers) {
+    const offlineDir = laneDir(`${provider.id}-naked`);
+    const { res: naked } = await laneRun(offlineDir, provider.env, { [provider.id]: 'offline' });
+    check(`[${provider.id}] a host with no egress refuses rather than reporting nothing found`, naked.ok === false && naked.stage === 'search' && String(naked.error).includes(provider.offline.throws.slice(0, 20)), JSON.stringify(naked).slice(0, 160));
+    const dir = laneDir(`${provider.id}-dead`);
+    const { res } = await laneRun(dir, provider.env, { [provider.id]: 'wrongShape' });
+    check(`[${provider.id}] the lane refuses when its only provider cannot answer`, res.ok === false && res.stage === 'search', JSON.stringify(res).slice(0, 160));
+    eq(`[${provider.id}] and that refusal wrote nothing`, fs.readdirSync(dir), []);
+    const text = formatResearchText(res);
+    check(`[${provider.id}] the refusal names the provider and the reason`, text.includes(provider.id) && /not the documented shape/.test(text), text.slice(0, 200));
+    check(`[${provider.id}] no parser internal and no page content reaches the reply`, !/TypeError|is not a function|Unexpected token|doctype|Enable JavaScript/i.test(text), text.slice(0, 200));
+  }
+
+  // 5. The command surface, in its own process. `--import` swaps the global fetch
+  //    for the recording, so the CLI — the same code path `/health research` runs —
+  //    is driven for real: no module call, no credential, no network.
+  const cliDir = laneDir('cli');
+  const callsFile = path.join(cliDir, 'calls.jsonl');
+  const cliEnv = {
+    ...process.env,
+    HEALTH_WORKSPACE: cliDir,
+    HEALTH_ENV_FILE: '',
+    ...CLEARED_SEARCH,
+    ...spec.providers[0].env,
+    SEARCH_FIXTURE: FIXTURE_FILE,
+    SEARCH_CALLS: callsFile,
+    SEARCH_CASES: '{}',
+    GEMINI_API_KEY: '', GOOGLE_API_KEY: '', API_KEY: '', GEMINI_API_KEYS: '',
+  };
+  const runCli = (env, query) => {
+    let code = 0;
+    let out = '';
+    try {
+      out = execFileSync(process.execPath, ['--import', SHIM_FILE, path.join(ROOT, 'scripts', 'health-runner.mjs'), '--research', `--query=${query}`, '--json'], { env, encoding: 'utf8' });
+    } catch (err) {
+      code = err.status;
+      out = err.stdout || '';
+    }
+    return { code, json: JSON.parse(out || '{}') };
+  };
+  const cli = runCli(cliEnv, spec.query);
+  eq('the CLI runs the lane against the recorded vendor and exits 0', [cli.code, cli.json.provider, cli.json.fetched, cli.json.refusedHits.length], [0, 'brave', 1, 1]);
+  const cliCalls = fs.readFileSync(callsFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const cliSent = vendorCalls(cliCalls, spec)[0] || {};
+  eq('the request the command sent is the pinned contract', { method: cliSent.method, url: cliSent.url }, { method: spec.providers[0].request.method, url: spec.providers[0].request.url });
+  check('and the credential header it sent is the vendor\u2019s', String(cliSent.headers?.['X-Subscription-Token'] || '').includes(spec.providers[0].env.BRAVE_SEARCH_API_KEY), JSON.stringify(cliSent.headers));
+  eq('the log the command wrote holds the vendor field as the hit title', readLog(cliDir).hits[spec.providers[0].expectedHits[0].url]?.title, spec.providers[0].expectedHits[0].title);
+
+  const barrenDir = laneDir('cli-nocred');
+  const callsBefore = fs.readFileSync(callsFile, 'utf8');
+  const barren = runCli({ ...cliEnv, HEALTH_WORKSPACE: barrenDir, ...CLEARED_SEARCH }, spec.query);
+  eq('with no search credential the same command refuses and exits 3', [barren.code, barren.json.stage], [3, 'credential']);
+  eq('and that refusal records nothing at all', fs.readdirSync(barrenDir), []);
+  eq('and made no request to any vendor', fs.readFileSync(callsFile, 'utf8') === callsBefore, true);
 
   for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
 }
